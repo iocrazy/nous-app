@@ -119,3 +119,20 @@ it('video kind has a resolution pill and an Adaptive aspect option', () => {
   fireEvent.click(screen.getByText('Adaptive'));
   expect(onChange).toHaveBeenCalledWith({ aspect: 'auto' });
 });
+
+// ── picker labels (2026-09-05) ───────────────────────────────────────────────
+// The picker used to say "GPT Image 2 (Local) · local": the server twin is
+// hidden whenever the local one can run (see visible_generation_rows), so
+// "local" is not a distinction the user needs twice — or at all.
+import { modelLabel } from './GenFooterControls';
+
+describe('modelLabel', () => {
+  it('drops the "(Local)" tag and never appends "· local"', () => {
+    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image 2 (Local)', is_local: true })).toBe('GPT Image 2');
+    expect(modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', is_local: true })).toBe('Dreamina');
+  });
+  it('leaves other names alone and falls back to the row name', () => {
+    expect(modelLabel({ name: 'codex-image', display_name: 'GPT Image 2 (Codex)', is_local: false })).toBe('GPT Image 2 (Codex)');
+    expect(modelLabel({ name: 'x-row' })).toBe('x-row');
+  });
+});

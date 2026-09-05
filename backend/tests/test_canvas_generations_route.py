@@ -40,6 +40,20 @@ def _override_auth():
 
 
 @pytest.fixture(autouse=True)
+def _no_readiness_filter(monkeypatch):
+    """The picker now offers only what can generate right now (2026-09-05,
+    local_readiness). These tests are about the endpoints' projection, not
+    that rule, so make the filter the identity here;
+    test_generation_picker_readiness covers the rule itself."""
+    from app.services.generation import local_readiness as lr
+
+    monkeypatch.setattr(lr, "apply_readiness", lambda rows, _ready: rows)
+    monkeypatch.setattr(
+        lr, "local_engine_readiness", AsyncMock(return_value=lr.LocalReadiness())
+    )
+
+
+@pytest.fixture(autouse=True)
 def _bypass_gating(monkeypatch):
     async def _fake_gate(canvas_id: str, auth) -> str:
         return FAKE_PROJECT_ID

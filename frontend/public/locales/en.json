@@ -1037,6 +1037,13 @@
       "memory": "Memory"
     },
     "localCli": {
+      "model": "Codex model",
+      "modelHint": "The model gpt-image-2-skill orchestrates with (--model). Catalog default unless you pick one here; a model OpenAI stops accepting for ChatGPT accounts fails with HTTP 400.",
+      "modelDefault": "Catalog default",
+      "modelCustom": "Custom…",
+      "modelCustomPlaceholder": "e.g. gpt-6-astra",
+      "modelSaved": "Saved",
+      "errPreferences": "Could not load or save the Codex model preference.",
       "codexTitle": "GPT CLI (codex)",
       "codexDesc": "Run canvas generations on your own machine with your own codex login. Your credentials never leave your computer — nous only sends the job. Also usable as an agent model (Codex (Local)) — plain text only. Text jobs run in codex's read-only sandbox — it cannot write files, but it can read files on your machine. Do not feed untrusted text to an agent bound to Codex (Local).",
       "notPaired": "Not paired",

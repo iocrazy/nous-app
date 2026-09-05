@@ -21,12 +21,12 @@ export function CanvasGenResultBody({ task }: { task: UnifiedTask }) {
     result_url?: string;
     canvas_id?: string;
     kind?: string;
-    index?: number;
-    count?: number;
   };
 
   return (
-    <div className="space-y-3">
+    // The prompt and item counter moved to the modal-level TaskDescriptionBlock
+    // (above the outcome); this body is the OUTCOME only.
+    <div className="p-4 space-y-3">
       {meta.result_url ? (
         meta.kind === 'video' ? (
           <video
@@ -48,17 +48,6 @@ export function CanvasGenResultBody({ task }: { task: UnifiedTask }) {
             : task.status === 'failed' || task.status === 'cancelled'
               ? 'No image was produced.'
               : 'Result appears here when the generation finishes'}
-        </div>
-      )}
-      {task.subtitle && (
-        <div className="text-xs text-ink-400">
-          <span className="font-semibold text-ink-300">Prompt · </span>
-          {task.subtitle}
-        </div>
-      )}
-      {typeof meta.index === 'number' && typeof meta.count === 'number' && meta.count > 1 && (
-        <div className="text-[11px] text-ink-500">
-          Item {meta.index} / {meta.count}
         </div>
       )}
       {meta.canvas_id && (

@@ -43,6 +43,21 @@ async def _fake_auth() -> AuthContext:
 
 
 @pytest.fixture(autouse=True)
+def _no_readiness_filter(monkeypatch):
+    """The picker offers only what can generate right now (2026-09-05,
+    local_readiness) — a rule with its own suite
+    (test_generation_picker_readiness). These tests are about the caps
+    projection, so the filter is the identity here; without this the fixture
+    catalog's local rows vanish because no daemon is online in a unit test."""
+    from app.services.generation import local_readiness as lr
+
+    monkeypatch.setattr(lr, "apply_readiness", lambda rows, _ready: rows)
+    monkeypatch.setattr(
+        lr, "local_engine_readiness", AsyncMock(return_value=lr.LocalReadiness())
+    )
+
+
+@pytest.fixture(autouse=True)
 def _override_auth():
     app.dependency_overrides[get_auth] = _fake_auth
     yield

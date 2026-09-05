@@ -1037,6 +1037,13 @@
       "memory": "记忆"
     },
     "localCli": {
+      "model": "Codex 模型",
+      "modelHint": "gpt-image-2-skill 用来编排出图的模型（--model）。不选则用目录默认；OpenAI 对 ChatGPT 账号停止支持的模型会直接 HTTP 400。",
+      "modelDefault": "目录默认",
+      "modelCustom": "自定义…",
+      "modelCustomPlaceholder": "例如 gpt-6-astra",
+      "modelSaved": "已保存",
+      "errPreferences": "无法读取或保存 Codex 模型设置。",
       "codexTitle": "GPT CLI (codex)",
       "codexDesc": "在你自己的电脑上用自己的 codex 登录态跑画布生成。凭证不出本机——nous 只负责派任务。也可作为 agent 模型（Codex (Local)）使用——仅纯文本。文本任务运行在 codex 的只读沙箱中——不能写文件，但可以读取你电脑上的文件。请勿把不可信文本喂给绑定了 Codex (Local) 的 agent。",
       "notPaired": "未配对",

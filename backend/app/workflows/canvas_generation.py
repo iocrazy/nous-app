@@ -73,7 +73,15 @@ async def _local_engine(
                     str(row.get("actual_provider") or "").lower()
                 )
                 if engine:
-                    return engine, str(row.get("actual_model") or "")
+                    actual = str(row.get("actual_model") or "")
+                    # The user's own choice of Codex orchestrator model beats
+                    # the catalog default (Settings → Local CLI). Codex only:
+                    # dreamina has no such knob.
+                    if engine == "codex" and user_id:
+                        from app.services.codex.preferences import get_codex_model
+
+                        actual = (await get_codex_model(str(user_id))) or actual
+                    return engine, actual
                 return None
     except Exception:
         return None

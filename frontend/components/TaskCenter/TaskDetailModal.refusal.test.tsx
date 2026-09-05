@@ -141,3 +141,39 @@ describe('TaskDetailModal — refusal presentation', () => {
     expect(screen.getByText(/no image was produced/i)).toBeInTheDocument();
   });
 });
+
+// ── reading order: what was asked → what happened → what came out ───────────
+// User feedback 2026-09-05: the modal led with the error and buried the
+// prompt at the bottom, flush against the edge. A task detail reads top-down
+// as "the task" (prompt, which item of how many), then its outcome (error, or
+// the image), then actions.
+describe('TaskDetailModal — reading order', () => {
+  it('puts the task description above the error block', () => {
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
+    const desc = screen.getByTestId('task-description');
+    const err = screen.getByTestId('task-error-message');
+    // DOCUMENT_POSITION_FOLLOWING (4): err comes after desc in the DOM.
+    expect(desc.compareDocumentPosition(err) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(desc.textContent).toContain('年轻美丽的女子');
+  });
+
+  it('labels the description and shows which item of how many', () => {
+    render(
+      <TaskDetailModal
+        task={refusedGen({ metadata: { kind: 'image', index: 1, count: 2, failure: { code: 'content_refused', detail: MODEL_WORDS } } } as Partial<UnifiedTask>)}
+        onClose={vi.fn()} onOpenResource={vi.fn()}
+      />,
+    );
+    const desc = screen.getByTestId('task-description');
+    expect(desc.textContent).toMatch(/Prompt/);
+    expect(desc.textContent).toMatch(/Item 1 \/ 2/);
+    // …and only once: the body no longer repeats the prompt at the bottom.
+    expect(screen.getAllByText(/年轻美丽的女子/)).toHaveLength(1);
+  });
+
+  it('is inset from the modal edge like every other block', () => {
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
+    const desc = screen.getByTestId('task-description');
+    expect(desc.className).toMatch(/\bpx-4\b/);
+  });
+});

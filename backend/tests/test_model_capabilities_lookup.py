@@ -174,6 +174,14 @@ async def test_the_router_helper_delegates_rather_than_re_deriving(monkeypatch):
 
     _catalog(monkeypatch)
     _gate(monkeypatch, disabled=frozenset({"ark-t2i"}))
+    # The router additionally applies the picker's "offer" rule (local engine
+    # must be online, failed probes hide) on top of authorization. That layer
+    # has its own suite (test_generation_picker_readiness.py); here it would
+    # only drop codex-local-image because no daemon is online in a unit test,
+    # which says nothing about delegation — so it is switched off.
+    import app.services.generation.local_readiness as lr
+
+    monkeypatch.setattr(lr, "apply_readiness", lambda rows, ready: rows)
 
     from_router = await canvases_router._visible_generation_rows(USER)
     from_service = await visible_generation_rows(USER)
