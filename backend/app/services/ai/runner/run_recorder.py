@@ -962,32 +962,50 @@ class RunEventWriter:
             "last_retry": view.get("retry"),
         }
 
+    def mirror_stmt(self):
+        """The UPDATE that writes every mirror key — a pure builder so its bind
+        shapes can be asserted (pg dialect) and round-tripped against a real
+        database in a rolled-back transaction."""
+        from sqlalchemy import ARRAY, Text, bindparam, cast, func, update
+        from sqlalchemy.dialects.postgresql import JSONB, array
+
+        from app.models.agents import AgentRuns
+
+        expr = func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB))
+        for key, value in self.mirror_keys().items():
+            # Bind the Python value ONCE through the JSONB type. Passing
+            # ``json.dumps(value)`` into ``cast(…, JSONB)`` double-encodes:
+            # the JSONB bind processor serialises the *string* again and
+            # PG stores a jsonb STRING — every phase-2 mirror row landed
+            # that way (jsonb_typeof = 'string', 2026-09-05 真栈验收).
+            expr = func.jsonb_set(
+                expr,
+                cast(array([key]), ARRAY(Text)),
+                bindparam(None, _jsonable(value), type_=JSONB),
+                True,
+            )
+        return (
+            update(AgentRuns)
+            .where(AgentRuns.id == self.run_id)
+            .values(metadata_json=expr)
+        )
+
     async def _mirror(self) -> None:
         try:
-            from sqlalchemy import ARRAY, Text, cast, func, update
-            from sqlalchemy.dialects.postgresql import JSONB, array
-
             from app.db.session import write_scope
-            from app.models.agents import AgentRuns
 
-            expr = func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB))
-            for key, value in self.mirror_keys().items():
-                expr = func.jsonb_set(
-                    expr,
-                    cast(array([key]), ARRAY(Text)),
-                    cast(json.dumps(value, ensure_ascii=False, default=str), JSONB),
-                    True,
-                )
             async with write_scope() as session:
-                await session.execute(
-                    update(AgentRuns)
-                    .where(AgentRuns.id == self.run_id)
-                    .values(metadata_json=expr)
-                )
+                await session.execute(self.mirror_stmt())
         except Exception as err:  # noqa: BLE001
             logger.warning(
                 f"[RunEventWriter] view mirror failed (run={self.run_id}): {err}"
             )
+
+
+def _jsonable(value: Any) -> Any:
+    """Round-trip through json so non-JSON scalars (Decimal, datetime) become
+    JSON-safe before the JSONB bind processor serialises the value once."""
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _legacy_todos(view: dict[str, Any]) -> Optional[dict[str, Any]]:

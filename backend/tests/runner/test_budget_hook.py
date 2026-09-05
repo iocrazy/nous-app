@@ -140,3 +140,41 @@ async def test_default_loader_reads_issue_budget_and_prior_spend(monkeypatch):
 
     monkeypatch.setattr(issues_mod, "issue_repository", _NoBudget())
     assert await bh.load_issue_budget(rec) is None
+
+
+@pytest.mark.asyncio
+async def test_zero_budget_is_a_real_budget_any_spend_is_over(monkeypatch):
+    rec = _Rec()
+    hook = _hook(budget=0)
+    await _step(hook, rec, 1, 0.0)  # nothing spent yet → silent
+    await _step(hook, rec, 2, 0.01)
+    assert [e[1]["action"] for e in rec.events] == ["halt"]
+    assert rec.events[0][1]["pct"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_default_loader_keeps_a_zero_budget(monkeypatch):
+    from app.services.ai.runner import budget_hook as bh
+
+    class _Issues:
+        async def get_by_id(self, issue_id):
+            return {"id": issue_id, "budget_cents": 0}
+
+    class _Runs:
+        async def spent_cents_for_issue(self, **kw):
+            return 0.0
+
+    async def resolve(**_):
+        return [("issue", 7)]
+
+    import app.repositories.agent_runs_repository as runs_mod
+    import app.repositories.issue_repository as issues_mod
+    import app.services.ai.runner.inbox as inbox_mod
+
+    monkeypatch.setattr(issues_mod, "issue_repository", _Issues())
+    monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
+    monkeypatch.setattr(inbox_mod, "resolve_targets", resolve)
+    rec = _Rec(run_id=42)
+    rec.issue_id = 7
+    rec.conversation_id = None
+    assert await bh.load_issue_budget(rec) == (0, 0.0)
