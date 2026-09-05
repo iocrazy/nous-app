@@ -4,8 +4,15 @@ import { ActiveTaskCard } from './ActiveTaskCard';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => k }),
+  useTranslation: () => ({
+    t: (k: string, arg?: unknown) => (arg && typeof arg === 'object' ? `${k}:${Object.values(arg as Record<string, unknown>).join(',')}` : k),
+  }),
 }));
+const deliverSteer = vi.fn();
+vi.mock('../../services/agentInboxService', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../services/agentInboxService')>();
+  return { ...mod, deliverSteer: (...args: unknown[]) => deliverSteer(...args) };
+});
 
 afterEach(cleanup);
 
@@ -96,5 +103,47 @@ describe('ActiveTaskCard — agent step progress (harness phase 2)', () => {
     expect(later.container.querySelector('[data-testid="retry-progress"]')!.textContent).toBe(
       'Retried 2/4',
     );
+  });
+});
+
+
+describe('ActiveTaskCard — cockpit line + steer (harness P4 T11)', () => {
+  const view = { v: 1, phase: 'running', step: { done: 3, total: 7, label: 'Drafting' }, current: { turn: 1, step: 4, model: 'm' }, retry: null, context: { used_pct: 62, window: 128000 }, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: { pct: 82, state: 'warn', spent_cents: 82 }, revision: 5 };
+
+  it('reads turn/step, context and budget through the selectors', () => {
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', view } }));
+    const line = container.querySelector('[data-testid="agent-cockpit"]')!;
+    expect(line.textContent).toContain('turn 1 · step 4');
+    expect(line.textContent).toContain('ctx 62%');
+    expect(container.querySelector('[data-testid="agent-budget"]')!.textContent).toBe('topbar.budgetUsed:82');
+    // todo progress still comes view-first
+    expect(container.querySelector('[data-testid="todo-progress"]')!.textContent).toBe('3/7 · Drafting');
+  });
+
+  it('draws no cockpit line for an old row without view', () => {
+    const { container } = renderCard(runningAgentTask());
+    expect(container.querySelector('[data-testid="agent-cockpit"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-steer"]')).toBeNull(); // no target either
+  });
+
+  it('steer posts to the issue when the run serves one, else the conversation; never for a finished run', async () => {
+    deliverSteer.mockResolvedValue({ id: '1' });
+    const { fireEvent, waitFor } = await import('@testing-library/react');
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_issue_id: '48', agent_conversation_id: '9' } }));
+    fireEvent.click(container.querySelector('[data-testid="agent-steer-open"]')!);
+    const input = container.querySelector('[data-testid="agent-steer-input"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'colder' } });
+    fireEvent.submit(input.closest('form')!);
+    await waitFor(() => expect(deliverSteer).toHaveBeenCalledWith('issue', '48', 'colder'));
+    await waitFor(() => expect(container.textContent).toContain('topbar.steerSent'));
+    cleanup();
+    const conv = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_conversation_id: '9' } }));
+    fireEvent.click(conv.container.querySelector('[data-testid="agent-steer-open"]')!);
+    fireEvent.change(conv.container.querySelector('[data-testid="agent-steer-input"]')!, { target: { value: 'x' } });
+    fireEvent.submit(conv.container.querySelector('form')!);
+    await waitFor(() => expect(deliverSteer).toHaveBeenLastCalledWith('conversation', '9', 'x'));
+    cleanup();
+    const done = renderCard(runningAgentTask({ status: 'completed', metadata: { agent_conversation_id: '9' } }));
+    expect(done.container.querySelector('[data-testid="agent-steer"]')).toBeNull();
   });
 });

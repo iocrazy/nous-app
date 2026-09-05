@@ -72,7 +72,7 @@ export function statusVisual(status: TaskStatus | undefined): StatusVisual {
 
 // ─── Group by ───────────────────────────────────────────
 
-export type GroupBy = 'none' | 'status' | 'type' | 'flow' | 'date' | 'agent';
+export type GroupBy = 'none' | 'status' | 'type' | 'flow' | 'date' | 'agent' | 'target';
 
 const STATUS_ORDER: TaskStatus[] = ['processing', 'pending', 'failed', 'lost', 'completed', 'cancelled'];
 
@@ -95,6 +95,25 @@ function dateBucket(iso: string | undefined): string {
 }
 
 const DATE_ORDER = ['Today', 'Yesterday', 'This week', 'This month', 'Older', 'No date'];
+
+/**
+ * The durable thing a task was FOR (harness P4 T11): the issue it served, else
+ * the conversation, else the flow / batch it ran in, else standalone. History
+ * folded this way reads as "what happened to MH-48", not as forty rows of
+ * runs — the same key the inbox and issue.rollup use.
+ */
+export function targetGroup(t: UnifiedTask): { key: string; label: string } {
+  const md = (t.metadata ?? {}) as Record<string, unknown>;
+  const issueId = md.agent_issue_id ?? md.issue_id;
+  if (issueId != null && issueId !== '') return { key: `issue:${issueId}`, label: `Issue ${String(issueId)}` };
+  const convId = md.agent_conversation_id ?? md.conversation_id;
+  if (convId != null && convId !== '') return { key: `conversation:${convId}`, label: `Conversation ${String(convId).slice(-6)}` };
+  const flowId = t.flow_id ?? (md.flow_id as string | undefined);
+  if (flowId) return { key: `flow:${flowId}`, label: `Flow ${flowId.slice(0, 8)}` };
+  const batchId = md.batch_id as string | undefined;
+  if (batchId) return { key: `batch:${batchId}`, label: `Batch ${batchId.slice(0, 8)}` };
+  return { key: '__standalone__', label: 'Standalone' };
+}
 
 export function groupTasks(tasks: UnifiedTask[], by: GroupBy): TaskGroup[] {
   // 'none' = no grouping; render a single bucket so callers don't have
@@ -132,6 +151,9 @@ export function groupTasks(tasks: UnifiedTask[], by: GroupBy): TaskGroup[] {
       const agentId = (t.metadata as Record<string, unknown> | undefined)?.['agent_id'] as string | undefined;
       const key = agentId ?? '__no_agent__';
       const label = agentId ? `Agent ${agentId.slice(0, 8)}` : 'No agent';
+      ensure(key, label).tasks.push(t);
+    } else if (by === 'target') {
+      const { key, label } = targetGroup(t);
       ensure(key, label).tasks.push(t);
     }
   }

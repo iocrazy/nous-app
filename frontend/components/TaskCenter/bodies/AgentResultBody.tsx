@@ -1,7 +1,10 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
+import { TrajectoryRenderer } from '../../agentActivity/TrajectoryRenderer';
+import { useRunToolActivity } from '../../agentActivity/useRunToolActivity';
 import type { AgentTodoSnapshot } from '../agentRunPresentation';
+import { selectRunView, stepProgress } from '../runView';
 
 export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
@@ -16,6 +19,12 @@ export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   };
   const total = (m.agent_prompt_tokens ?? 0) + (m.agent_completion_tokens ?? 0);
   const todos = Array.isArray(m.todos?.todos) ? m.todos!.todos : [];
+  // view-first (mig 453 fold), legacy todo counts as the transition fallback
+  const step = stepProgress(selectRunView(task.metadata as Record<string, unknown>));
+  const counts = step ? { completed: step.done, total: step.total } : m.todos?.counts;
+  // The run's trajectory — same renderer as the issue timeline and the chat's
+  // Trajectory tab. task.id IS the agent_runs id for an agent task.
+  const { events } = useRunToolActivity(task.id, task.status === 'processing');
 
   return (
     <div className="p-4 space-y-3">
@@ -26,9 +35,9 @@ export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
         <div data-testid="agent-todo-list">
           <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">
             {t('topbar.agentSteps', 'Steps')}
-            {m.todos?.counts && (
+            {counts && (
               <span className="ml-1 tabular-nums normal-case tracking-normal">
-                {m.todos.counts.completed}/{m.todos.counts.total}
+                {counts.completed}/{counts.total}
               </span>
             )}
           </div>
@@ -58,6 +67,15 @@ export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <div data-testid="agent-trajectory">
+          <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">{t('topbar.agentTrajectory', 'Trajectory')}</div>
+          <div className="rounded border border-ink-800 bg-ink-950/40 p-1">
+            <TrajectoryRenderer events={events} isRunning={task.status === 'processing'} hideWhenEmpty={false} />
+          </div>
         </div>
       )}
 

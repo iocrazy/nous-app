@@ -4,7 +4,11 @@ import { AgentResultBody } from './AgentResultBody';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
+  useTranslation: () => ({ t: (_k: string, d?: unknown) => (typeof d === 'string' ? d : _k) }),
+}));
+const activity = { events: [] as unknown[], denials: [], activities: [], nodes: [], loaded: true };
+vi.mock('../../agentActivity/useRunToolActivity', () => ({
+  useRunToolActivity: () => activity,
 }));
 
 afterEach(cleanup);
@@ -49,5 +53,28 @@ describe('AgentResultBody — todo list (harness phase 2)', () => {
   it('renders no list block when the run never kept one', () => {
     const { container } = render(<AgentResultBody task={task({ agent_output: 'done' })} />);
     expect(container.querySelector('[data-testid="agent-todo-list"]')).toBeNull();
+  });
+});
+
+
+describe('AgentResultBody — view-first counts + trajectory (harness P4 T11)', () => {
+  it('prefers view.step counts over the legacy todo counts and draws the run trajectory', () => {
+    activity.events = [
+      { seq: 1, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '', turn: 1, step: 1 },
+      { seq: 2, event_type: 'tool_call', payload: { tool: 'ReadScene', iteration: 1 }, created_at: '' },
+      { seq: 3, event_type: 'step_end', payload: { turn: 1, step: 1 }, created_at: '', turn: 1, step: 1 },
+    ];
+    const { container } = render(
+      <AgentResultBody
+        task={task({
+          view: { v: 1, phase: 'ended', step: { done: 5, total: 6, label: null }, current: null, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: { reason: 'completed' }, inbox_pending: 0, budget: null, revision: 3 },
+          todos: { todos: [{ id: 1, content: 'a', status: 'completed', active_form: null }], counts: { total: 1, completed: 1, in_progress: 0 } },
+        })}
+      />,
+    );
+    expect(container.querySelector('[data-testid="agent-todo-list"]')!.textContent).toContain('5/6');
+    expect(container.querySelector('[data-testid="agent-trajectory"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-testid="traj-step"]')).toHaveLength(1);
+    activity.events = [];
   });
 });
