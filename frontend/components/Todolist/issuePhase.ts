@@ -35,6 +35,24 @@ export const PHASE_FALLBACK: Record<IssuePhase, string> = {
 
 const FINISHED = new Set(['done', 'cancelled']);
 
+/**
+ * Is an agent turn live on this issue — the ONE list-level answer, shared by
+ * the phase, the row chip, the live filter/count and the detail header.
+ *
+ * `dbos_workflow_id` is written at dispatch and never cleared, so on its own it
+ * only says "was dispatched once". The lifecycle (`issue_lifecycle.py`) moves
+ * the issue to `in_progress` when the turn starts and to `in_review` /
+ * `needs_followup` when it ends, so a workflow id on any other status is
+ * history, not liveness. Reading it as "not done yet" produced the
+ * `running · 860h` rows on month-old probe issues (2026-09-05) — the server
+ * rollup (`/issues/{id}/progress`) already said `idle` for the same rows;
+ * this keeps the list, which has no per-row rollup, on the same rule.
+ */
+export function isIssueLive(issue: UiIssue): boolean {
+  const raw = (issue.raw ?? {}) as Record<string, unknown>;
+  return !!raw.dbos_workflow_id && issue.status === 'in_progress';
+}
+
 export function issuePhase(issue: UiIssue): IssuePhase {
   const raw = (issue.raw ?? {}) as Record<string, unknown>;
   const state = (raw.execution_state as Record<string, unknown> | null) ?? null;
@@ -45,7 +63,7 @@ export function issuePhase(issue: UiIssue): IssuePhase {
   ) {
     return 'waiting_input';
   }
-  if (raw.dbos_workflow_id && !FINISHED.has(issue.status)) return 'running';
+  if (isIssueLive(issue)) return 'running';
   if (issue.status === 'blocked') return 'blocked';
   if (FINISHED.has(issue.status)) return 'done';
   return 'idle';

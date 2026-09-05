@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PHASE_ORDER, QUICK_PHASES, issuePhase } from './issuePhase';
+import { PHASE_ORDER, QUICK_PHASES, isIssueLive, issuePhase } from './issuePhase';
 import type { UiIssue } from './types';
 
 function issue(status: string, raw: Record<string, unknown> = {}): UiIssue {
@@ -17,10 +17,20 @@ describe('issuePhase — same priority as the server rollup', () => {
     // an empty_output stall at the same status is NOT a question
     expect(issuePhase(issue('needs_followup', { execution_state: { agent_outcome: 'empty_output' } }))).toBe('idle');
   });
-  it('running needs a live workflow on a non-terminal status', () => {
+  it('running needs a workflow id AND the in_progress status', () => {
     expect(issuePhase(issue('in_progress', { dbos_workflow_id: 'wf' }))).toBe('running');
     expect(issuePhase(issue('done', { dbos_workflow_id: 'wf' }))).toBe('done');
     expect(issuePhase(issue('in_progress', {}))).toBe('idle');
+    // The id is never cleared: once the lifecycle moved the issue on, it is
+    // history (the `running · 860h` probe rows of 2026-09-05).
+    expect(issuePhase(issue('in_review', { dbos_workflow_id: 'wf' }))).toBe('idle');
+    expect(issuePhase(issue('needs_followup', { dbos_workflow_id: 'wf' }))).toBe('idle');
+    expect(issuePhase(issue('todo', { dbos_workflow_id: 'wf' }))).toBe('idle');
+  });
+  it('isIssueLive is the shared predicate', () => {
+    expect(isIssueLive(issue('in_progress', { dbos_workflow_id: 'wf' }))).toBe(true);
+    expect(isIssueLive(issue('in_review', { dbos_workflow_id: 'wf' }))).toBe(false);
+    expect(isIssueLive(issue('in_progress', {}))).toBe(false);
   });
   it('blocked, done, idle', () => {
     expect(issuePhase(issue('blocked'))).toBe('blocked');

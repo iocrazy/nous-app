@@ -68,7 +68,7 @@ import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
 import { runningChipLabel, needsReplyChip } from './issueChips';
 import { buildAttentionItems } from './attentionItems';
-import { PHASE_FALLBACK, PHASE_LABEL_KEY, PHASE_ORDER, PHASE_TONE, QUICK_PHASES, issuePhase, type IssuePhase } from './issuePhase';
+import { PHASE_FALLBACK, PHASE_LABEL_KEY, PHASE_ORDER, PHASE_TONE, QUICK_PHASES, isIssueLive, issuePhase, type IssuePhase } from './issuePhase';
 import {
   AttentionStrip,
   loadAttentionCollapsed,
@@ -213,12 +213,12 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   // is null (renders nothing) until then.
   const due = dueBucket(readDueDate(issue.raw));
   const { t } = useTranslation();
-  // An agent is actively working this issue: dispatched to a DBOS workflow and
-  // not yet in a terminal state. Surfaces as an amber pulse (data already on
-  // the row — no extra fetch). A1: the chip now also carries which turn it is
-  // on and how long it has been going — "running" says an agent is assigned,
-  // a moving number says it is actually getting somewhere.
-  const isLive = !!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled';
+  // An agent is actively working this issue (see isIssueLive for the rule).
+  // Surfaces as a pulse from data already on the row — no extra fetch. A1: the
+  // chip also carries which turn it is on and how long it has been going —
+  // "running" says an agent is assigned, a moving number says it is actually
+  // getting somewhere.
+  const isLive = isIssueLive(issue);
   const now = useTickingNow(isLive);
   const runningLabel = runningChipLabel(issue, now);
   const needsReply = needsReplyChip(issue);
@@ -344,10 +344,7 @@ function applyFilters(issues: UiIssue[], filters: IssueFilters, currentUserId: s
       if (!match && i.raw.created_by_agent_id && filters.creatorsAgents.has(i.raw.created_by_agent_id)) match = true;
       if (!match) return false;
     }
-    if (filters.liveRunsOnly) {
-      const live = !!i.raw.dbos_workflow_id && i.status !== 'done' && i.status !== 'cancelled';
-      if (!live) return false;
-    }
+    if (filters.liveRunsOnly && !isIssueLive(i)) return false;
     if (filters.hideRoutine && i.raw.origin_kind === 'routine') return false;
     return true;
   });
@@ -666,7 +663,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
 
   // Live (agent-running) count for the project context bar.
   const liveCount = useMemo(
-    () => filtered.reduce((n, i) => (i.raw.dbos_workflow_id && i.status !== 'done' && i.status !== 'cancelled' ? n + 1 : n), 0),
+    () => filtered.reduce((n, i) => (isIssueLive(i) ? n + 1 : n), 0),
     [filtered],
   );
 
