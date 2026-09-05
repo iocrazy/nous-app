@@ -51,6 +51,9 @@ from uuid import UUID
 
 from loguru import logger
 
+from app.services.ai.runner.run_projection import apply as apply_projection
+from app.services.ai.runner.run_projection import empty_views
+
 
 class AgentPausedError(Exception):
     """Raised by RunRecorder.start() when the agent has paused_reason set.
@@ -134,6 +137,9 @@ class RunRecorder:
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
     _event_seq: int = field(default=0, init=False)
+    _event_writer: Optional["RunEventWriter"] = field(
+        default=None, init=False, repr=False
+    )
     # Background task that keeps heartbeat_at fresh for the whole turn (not
     # just between iterations) so the liveness reaper can't false-kill a
     # healthy run stuck in one long LLM/tool call. Started on a successful
@@ -350,6 +356,10 @@ class RunRecorder:
             tier_str = getattr(tier, "value", None) or str(tier or "")
         except Exception:  # noqa: BLE001 — never break a run over telemetry
             return
+        used = getattr(stats, "tokens_before", None)
+        window = getattr(stats, "window", None)
+        if isinstance(used, int) and isinstance(window, int) and window > 0:
+            self.measure_context(used, window)
         if not tier_str or saved <= 0:
             return
         # metadata.compaction.{tier_str}_count + total_tokens_saved
@@ -388,115 +398,61 @@ class RunRecorder:
         if output_summary is not None:
             self._output_summary = _truncate(output_summary, 500)
 
-    async def record_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Append one transcript event (mig 285, paperclip port P3).
+    async def record_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        turn: Optional[int] = None,
+        step: Optional[int] = None,
+    ) -> None:
+        """Append one transcript event and refresh the folded views.
 
-        AgentRunner calls this as the run executes (user message → tool
-        calls → assistant output); the Runs detail pane renders the stream
-        as the Transcript section. Best-effort like every other telemetry
-        write — a failed insert never breaks the run. Payload string values
-        are truncated so a huge tool result can't bloat the table.
+        Everything goes through ``RunEventWriter`` — the same write path the
+        sweeper uses for the runs it closes after the fact — so there is one
+        insert, one fold, one mirror. Best-effort: a failed write never
+        breaks the run. ``turn`` / ``step`` are the mig-453 coordinates.
         """
         if self.run_id is None:
             return
-        self._event_seq += 1
-        try:
-            from sqlalchemy import text
+        await self._writer().append(event_type, payload, turn=turn, step=step)
+        self._event_seq = self._writer().seq
 
-            from app.db.session import write_scope
-
-            # agent_run_transcript_events (mig 397). Mig 285 tried to reuse
-            # the `agent_run_events` name, but that table is the mig-155
-            # cost-audit log (still written by cost_auditor) and the
-            # IF NOT EXISTS no-oped — these inserts failed silently until
-            # the transcript stream got its own table.
-            async with write_scope() as session:
-                await session.execute(
-                    text(
-                        "INSERT INTO agent_run_transcript_events "
-                        "(run_id, seq, event_type, payload) VALUES "
-                        "(:run_id, :seq, :event_type, CAST(:payload AS jsonb))"
-                    ),
-                    {
-                        "run_id": int(self.run_id),
-                        "seq": self._event_seq,
-                        "event_type": event_type,
-                        "payload": json.dumps(
-                            _truncate_payload(payload, self.EVENT_VALUE_MAX_CHARS)
-                        ),
-                    },
-                )
-        except Exception as err:
-            logger.warning(
-                f"[RunRecorder] record_event failed "
-                f"(run={self.run_id} seq={self._event_seq}): {err}"
+    def _writer(self) -> "RunEventWriter":
+        if self._event_writer is None:
+            self._event_writer = RunEventWriter(
+                int(self.run_id),
+                seq_start=self._event_seq,
+                value_max_chars=self.EVENT_VALUE_MAX_CHARS,
             )
+        return self._event_writer
 
-        if event_type == "todo_write":
-            await self._mirror_todos(payload)
-        elif event_type == "turn_end":
-            await self._mirror_metadata_key("turn_end_reason", payload.get("reason"))
-        elif event_type == "llm_retry":
-            # Only what the Task Center card renders ("Retry 2/4 · waiting
-            # 3.2s"); the failure text stays in the event, not on the row.
-            from datetime import datetime, timezone
+    @property
+    def views(self) -> dict[str, Any]:
+        """Current folded views (``view`` / ``cost``) for this run."""
+        return self._writer().views if self.run_id is not None else empty_views()
 
-            await self._mirror_metadata_key(
-                "last_retry",
-                {
-                    **{
-                        k: payload.get(k)
-                        for k in ("attempt", "max_retries", "delay_ms", "model")
-                    },
-                    # The card decides "still waiting" vs "retried" from
-                    # at + delay_ms against its own clock.
-                    "at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-
-    async def _mirror_todos(self, payload: dict[str, Any]) -> None:
-        """Mirror the todo snapshot into agent_runs.metadata_json.todos."""
-        await self._mirror_metadata_key("todos", payload)
-
-    async def _mirror_metadata_key(self, key: str, value: Any) -> None:
-        """Set one top-level key of agent_runs.metadata_json.
-
-        The transcript event is the truth; this is a cache for the Task
-        Center, which already receives the agent_runs row over Realtime.
-        Best-effort: a failed mirror never touches the event or the run.
-        ``key`` is a code literal, never user input (it lands in a jsonb path).
-        """
+    def measure_context(self, used: int, window: int) -> None:
+        """Feed the context gauge from a local measurement (no event row):
+        green/yellow compaction tiers emit nothing, yet the gauge must move."""
         if self.run_id is None:
             return
-        try:
-            import json as _json
+        self._writer().fold_local("context_measured", {"used": used, "window": window})
 
-            from sqlalchemy import ARRAY, Text, cast, func, update
-            from sqlalchemy.dialects.postgresql import JSONB, array
-
-            from app.db.session import write_scope
-            from app.models.agents import AgentRuns
-
-            async with write_scope() as session:
-                await session.execute(
-                    update(AgentRuns)
-                    .where(AgentRuns.id == int(self.run_id))
-                    .values(
-                        metadata_json=func.jsonb_set(
-                            func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB)),
-                            # jsonb_set wants text[]; a bare string binds as
-                            # varchar and PG finds no matching function (seen
-                            # live 2026-08-27 — the mock boundary hid it).
-                            cast(array([key]), ARRAY(Text)),
-                            cast(_json.dumps(value, ensure_ascii=False), JSONB),
-                            True,
-                        )
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                f"[RunRecorder] todo mirror failed (run={self.run_id}): {exc!r}"
-            )
+    def cost_of(self, prompt: int, completion: int, cached: int = 0) -> Optional[float]:
+        """Cents for one call at this run's rates; None when rates are unknown."""
+        if self._prompt_rate is None or self._completion_rate is None:
+            return None
+        cached_rate = (
+            self._cached_rate if self._cached_rate is not None else self._prompt_rate
+        )
+        billable = max(0, prompt - cached)
+        return round(
+            billable / 1000.0 * self._prompt_rate
+            + cached / 1000.0 * cached_rate
+            + completion / 1000.0 * self._completion_rate,
+            6,
+        )
 
     async def heartbeat(self) -> None:
         """Refresh heartbeat_at if >=15s since last write.
@@ -917,3 +873,132 @@ def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]
             except Exception:  # noqa: BLE001 — telemetry only
                 out[k] = _truncate(repr(v), max_chars)
     return out
+
+
+class RunEventWriter:
+    """The one write path onto a run's transcript + its folded views.
+
+    ``append`` = insert the event row (ORM, mig-453 coordinates) → fold it
+    into ``views`` → mirror the whole ``view`` / ``cost`` values into
+    ``agent_runs.metadata_json``. Used by ``RunRecorder`` for live runs and
+    by the sweeper for runs it closes after the fact (``turn_end
+    interrupted``) — so there is exactly one way an event reaches storage.
+
+    The mirror is skipped when a fold returned the same object (nothing
+    changed). Legacy keys ``todos`` / ``turn_end_reason`` / ``last_retry``
+    are still written from the view during the phase-1 transition; Task 7
+    removes them once the frontend reads ``view``.
+    """
+
+    def __init__(self, run_id: int, *, seq_start: int = 0, value_max_chars: int = 4000):
+        self.run_id = int(run_id)
+        self.seq = seq_start
+        self.value_max_chars = value_max_chars
+        self.views: dict[str, Any] = empty_views()
+        self._pending_mirror = False
+
+    async def append(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        turn: Optional[int] = None,
+        step: Optional[int] = None,
+    ) -> int:
+        self.seq += 1
+        seq = self.seq
+        try:
+            from sqlalchemy import insert
+
+            from app.db.session import write_scope
+            from app.models import AgentRunTranscriptEvents
+
+            async with write_scope() as session:
+                await session.execute(
+                    insert(AgentRunTranscriptEvents).values(
+                        run_id=self.run_id,
+                        seq=seq,
+                        event_type=event_type,
+                        payload=_truncate_payload(payload, self.value_max_chars),
+                        turn=turn,
+                        step=step,
+                    )
+                )
+        except Exception as err:  # noqa: BLE001 — telemetry never fails a run
+            logger.warning(
+                f"[RunEventWriter] insert failed (run={self.run_id} seq={seq} "
+                f"type={event_type}): {err}"
+            )
+        await self._fold_and_mirror(event_type, payload, seq)
+        return seq
+
+    def fold_local(self, kind: str, payload: dict[str, Any]) -> None:
+        """Fold a local measurement (no event row). Mirrored with the next
+        append so a gauge tick never costs its own UPDATE."""
+        nxt = apply_projection(self.views, kind, payload)
+        if nxt is not self.views:
+            self.views = nxt
+            self._pending_mirror = True
+
+    async def _fold_and_mirror(
+        self, event_type: str, payload: dict[str, Any], seq: int
+    ) -> None:
+        nxt = apply_projection(self.views, event_type, payload, seq=seq)
+        if nxt is self.views and not self._pending_mirror:
+            return
+        self.views = nxt
+        self._pending_mirror = False
+        await self._mirror()
+
+    def mirror_keys(self) -> dict[str, Any]:
+        """Whole values written into metadata_json — one place to read them."""
+        view, cost = self.views["view"], self.views["cost"]
+        return {
+            "view": view,
+            "cost": cost,
+            # transition-only legacy keys (Task 7 removes)
+            "todos": _legacy_todos(view),
+            "turn_end_reason": (view.get("ended") or {}).get("reason"),
+            "last_retry": view.get("retry"),
+        }
+
+    async def _mirror(self) -> None:
+        try:
+            from sqlalchemy import ARRAY, Text, cast, func, update
+            from sqlalchemy.dialects.postgresql import JSONB, array
+
+            from app.db.session import write_scope
+            from app.models.agents import AgentRuns
+
+            expr = func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB))
+            for key, value in self.mirror_keys().items():
+                expr = func.jsonb_set(
+                    expr,
+                    cast(array([key]), ARRAY(Text)),
+                    cast(json.dumps(value, ensure_ascii=False, default=str), JSONB),
+                    True,
+                )
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self.run_id)
+                    .values(metadata_json=expr)
+                )
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                f"[RunEventWriter] view mirror failed (run={self.run_id}): {err}"
+            )
+
+
+def _legacy_todos(view: dict[str, Any]) -> Optional[dict[str, Any]]:
+    step = view.get("step")
+    if not step:
+        return None
+    return {
+        "todos": [],
+        "counts": {
+            "total": step["total"],
+            "completed": step["done"],
+            "in_progress": 1 if step.get("label") else 0,
+        },
+    }

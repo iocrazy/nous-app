@@ -1,0 +1,140 @@
+"""Seam B: one log, whole-value views, pure folds.
+
+Two properties carry the weight: an unknown event returns the SAME object
+(the writer skips the mirror), and replaying the whole log equals the
+incrementally folded state (what phase-2 scrubbing relies on)."""
+
+import pytest
+
+from app.services.ai.runner import run_projection as rp
+
+pytestmark = pytest.mark.unit
+
+
+def test_unknown_event_returns_the_same_object():
+    v = rp.empty_views()
+    assert rp.apply(v, "no_such_event", {"x": 1}) is v
+
+
+def test_apply_never_mutates_its_input():
+    v = rp.empty_views()
+    rp.apply(v, "todo_write", {"todos": [], "counts": {"total": 3, "completed": 1}})
+    assert v["view"]["step"] is None
+
+
+def test_todo_snapshot_becomes_step_with_active_label():
+    v = rp.apply(
+        rp.empty_views(),
+        "todo_write",
+        {
+            "todos": [
+                {
+                    "id": 2,
+                    "content": "step B",
+                    "status": "in_progress",
+                    "active_form": "doing B",
+                }
+            ],
+            "counts": {"total": 7, "completed": 3, "in_progress": 1},
+        },
+        seq=5,
+    )
+    assert v["view"]["step"] == {"done": 3, "total": 7, "label": "doing B"}
+    assert v["view"]["revision"] == 5
+
+
+def test_malformed_counts_are_ignored_not_nan():
+    v = rp.empty_views()
+    assert rp.apply(v, "todo_write", {"todos": [], "counts": {"total": "7"}}) is v
+
+
+def test_step_end_accumulates_cost_per_step_and_model():
+    v = rp.empty_views()
+    v = rp.apply(v, "step_start", {"turn": 1, "step": 1, "model": "m"})
+    assert v["view"]["current"] == {"turn": 1, "step": 1, "model": "m"}
+    v = rp.apply(
+        v,
+        "step_end",
+        {
+            "turn": 1,
+            "step": 1,
+            "model": "m",
+            "cost_cents": 0.4,
+            "usage": {"prompt": 100, "completion": 20},
+        },
+    )
+    v = rp.apply(
+        v,
+        "step_end",
+        {"turn": 1, "step": 2, "model": "m", "cost_cents": 0.2, "usage": {}},
+    )
+    assert v["cost"]["spent_cents"] == 0.6
+    assert v["cost"]["by_model"] == {"m": 0.6}
+    assert [s["step"] for s in v["cost"]["by_step"]] == [1, 2]
+
+
+def test_compaction_bracket_moves_phase_and_context():
+    v = rp.apply(
+        rp.empty_views(),
+        "compaction_start",
+        {"tier": "orange", "tokens_before": 850, "window": 1000},
+    )
+    assert v["view"]["phase"] == "compacting" and v["view"]["context"]["used_pct"] == 85
+    v = rp.apply(v, "compaction_end", {"tokens_after": 400})
+    assert v["view"]["phase"] == "running" and v["view"]["context"]["used_pct"] == 40
+
+
+def test_local_context_measurement_updates_gauge_without_an_event_type_in_the_whitelist():
+    v = rp.apply(rp.empty_views(), "context_measured", {"used": 620, "window": 1000})
+    assert v["view"]["context"] == {"used_pct": 62, "window": 1000}
+
+
+def test_turn_end_sets_ended_and_phase():
+    v = rp.apply(
+        rp.empty_views(), "turn_end", {"reason": "max_iterations", "tool_calls": 9}
+    )
+    assert v["view"]["ended"] == {"reason": "max_iterations"}
+    assert v["view"]["phase"] == "ended"
+    assert (
+        rp.apply(rp.empty_views(), "turn_end", {"reason": "paused"})["view"]["phase"]
+        == "paused"
+    )
+
+
+def test_budget_check_marks_view_and_cost():
+    v = rp.apply(
+        rp.empty_views(),
+        "budget_check",
+        {"pct": 82.4, "action": "warn", "budget_cents": 200},
+    )
+    assert v["view"]["budget"] == {"pct": 82, "state": "warn"}
+    assert v["cost"]["budget_cents"] == 200 and v["cost"]["pct"] == 82
+
+
+def test_replay_equals_incremental_fold():
+    log = [
+        ("user", {}),
+        ("step_start", {"turn": 1, "step": 1, "model": "m"}),
+        ("todo_write", {"todos": [], "counts": {"total": 4, "completed": 0}}),
+        ("llm_retry", {"attempt": 1, "max_retries": 3}),
+        ("step_end", {"turn": 1, "step": 1, "model": "m", "cost_cents": 0.3}),
+        ("inbox_claimed", {"kind": "steer", "turn": 1, "step": 2}),
+        ("turn_end", {"reason": "completed"}),
+    ]
+    incremental = rp.empty_views()
+    for i, (t, p) in enumerate(log):
+        incremental = rp.apply(incremental, t, p, seq=i + 1)
+    assert rp.replay(log) == incremental
+    assert incremental["view"]["revision"] == 7
+
+
+def test_every_registered_fold_is_enumerable_and_covers_the_new_event_types():
+    assert {
+        "step_start",
+        "step_end",
+        "inbox_claimed",
+        "budget_check",
+        "todo_write",
+        "llm_retry",
+        "turn_end",
+    } <= set(rp.registered_types())

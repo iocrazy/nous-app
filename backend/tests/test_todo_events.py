@@ -194,8 +194,12 @@ async def test_runner_hands_its_recorder_to_the_skill_tool_for_the_turn():
 @pytest.mark.asyncio
 async def test_todo_write_mirrors_into_metadata_json(monkeypatch):
     """The Task Center reads agent_runs over Realtime, not transcript
-    events — without the mirror the snapshot is durable but invisible."""
+    events — without the mirror the snapshot is durable but invisible.
+    Phase 4: the whole ``view`` is mirrored (plus the legacy ``todos`` key
+    until the frontend reads ``view``), by the one writer."""
     from contextlib import asynccontextmanager
+
+    from sqlalchemy.dialects import postgresql
 
     from app.services.ai.runner import run_recorder as rr
 
@@ -203,7 +207,8 @@ async def test_todo_write_mirrors_into_metadata_json(monkeypatch):
 
     class _Session:
         async def execute(self, stmt, *a, **k):
-            executed.append(str(stmt))
+            c = stmt.compile(dialect=postgresql.dialect())
+            executed.append((str(c), dict(getattr(c, "params", {}))))
 
     @asynccontextmanager
     async def _ws():
@@ -214,16 +219,38 @@ async def test_todo_write_mirrors_into_metadata_json(monkeypatch):
     monkeypatch.setattr(dbs, "write_scope", _ws)
     rec = rr.RunRecorder.__new__(rr.RunRecorder)
     rec.run_id = 42
-    await rec._mirror_todos(
-        {"todos": [], "counts": {"total": 0, "completed": 0, "in_progress": 0}}
+    rec._event_seq = 0
+    rec._event_writer = None
+    await rec.record_event(
+        "todo_write",
+        {
+            "todos": [
+                {"content": "a", "status": "completed"},
+                {"content": "b", "status": "in_progress"},
+            ],
+            "counts": {"total": 2, "completed": 1, "in_progress": 1},
+        },
     )
-    assert len(executed) == 1
-    assert "jsonb_set" in executed[0] and "agent_runs" in executed[0]
+    inserts = [
+        (s, p)
+        for s, p in executed
+        if "agent_run_transcript_events" in s and "INSERT" in s
+    ]
+    mirrors = [(s, p) for s, p in executed if "jsonb_set" in s]
+    assert len(inserts) == 1 and len(mirrors) == 1, executed
+    sql, params = mirrors[0]
+    assert "agent_runs" in sql and "AS TEXT[]" in sql
+    assert {"view", "cost", "todos"} <= set(params.values())
+    view_blob = next(
+        v for v in params.values() if isinstance(v, str) and '"phase"' in v
+    )
+    assert '"done": 1' in view_blob and '"total": 2' in view_blob
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_mirror_failure_is_contained(monkeypatch):
+    """A dead DB must not fail the turn: insert and mirror both swallow."""
     from contextlib import asynccontextmanager
 
     from app.services.ai.runner import run_recorder as rr
@@ -236,6 +263,10 @@ async def test_mirror_failure_is_contained(monkeypatch):
     import app.db.session as dbs
 
     monkeypatch.setattr(dbs, "write_scope", _boom)
-    rec = rr.RunRecorder.__new__(rr.RunRecorder)
-    rec.run_id = 42
-    await rec._mirror_todos({"todos": [], "counts": {}})  # must not raise
+    writer = rr.RunEventWriter(42)
+    seq = await writer.append(
+        "todo_write",
+        {"todos": [], "counts": {"total": 1, "completed": 0, "in_progress": 0}},
+    )  # must not raise
+    assert seq == 1
+    assert writer.views["view"]["step"] == {"done": 0, "total": 1, "label": None}

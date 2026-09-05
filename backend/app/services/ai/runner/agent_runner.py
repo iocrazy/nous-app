@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.empty_response import diagnose_empty_response
+from app.services.ai.runner.events import emit as emit_event
 from app.services.ai.runner.reasoning import (
     ReasoningStreamFilter,
     model_uses_reasoning,
@@ -576,10 +577,7 @@ class AgentRunner:
         # Streaming runs skip the final 'assistant' event — the chat layer
         # persists the full message itself; tool_call events below are the
         # part the Transcript adds over chat history.
-        if recorder is not None and hasattr(recorder, "record_event"):
-            await recorder.record_event(
-                "user", {"content": _last_user_text(user_messages)}
-            )
+        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
 
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
@@ -633,6 +631,9 @@ class AgentRunner:
             reason_filter = ReasoningStreamFilter(
                 enabled=model_uses_reasoning(getattr(composed, "model", ""))
             )
+            _t0 = await self._step_started(
+                recorder, composed, iteration, is_stream=True
+            )
             try:
                 async for chunk in stream_method(composed, messages):
                     if abort is not None and abort.is_aborted():
@@ -681,6 +682,9 @@ class AgentRunner:
                                 ),
                             )
                         break
+                await self._step_ended(
+                    recorder, composed, iteration, _t0, final_usage, final_finish
+                )
             except StreamingNotSupported:
                 resp = await self.adapter.call(composed, messages)
                 msg = resp["choices"][0]["message"]
@@ -942,16 +946,16 @@ class AgentRunner:
                 )
 
                 # P3 transcript (mig 285): mirror of run_turn's tool event.
-                if recorder is not None and hasattr(recorder, "record_event"):
-                    await recorder.record_event(
-                        "tool_call",
-                        {
-                            "tool": tool_name,
-                            "args": args,
-                            "result": result,
-                            "iteration": iteration,
-                        },
-                    )
+                await emit_event(
+                    recorder,
+                    "tool_call",
+                    {
+                        "tool": tool_name,
+                        "args": args,
+                        "result": result,
+                        "iteration": iteration,
+                    },
+                )
 
                 # ── PostToolUse chain (mirrors run_turn) ────────────────────
                 # Fires CostAuditor + MemoryHarvester side-effects, which the
@@ -1004,6 +1008,65 @@ class AgentRunner:
             finish_reason="length",
             usage={"warning": "max_stream_iterations_exceeded"},
             tool_call_trace=tool_call_trace,
+        )
+
+    async def _step_started(
+        self, recorder, composed, step: int, *, is_stream: bool
+    ) -> float:
+        """step_start bracket (mig 453): one per LLM call, both paths.
+        Returns the monotonic start so ``_step_ended`` can stamp duration."""
+        import time as _time
+
+        await emit_event(
+            recorder,
+            "step_start",
+            {
+                "turn": 1,
+                "step": step,
+                "model": getattr(composed, "model", None),
+                "is_stream": is_stream,
+            },
+            turn=1,
+            step=step,
+        )
+        return _time.monotonic()
+
+    async def _step_ended(
+        self, recorder, composed, step: int, t0: float, usage, finish_reason
+    ) -> None:
+        """step_end bracket: usage + cost at this run's rates + duration.
+        ``run.cost`` folds from these — the only place per-call cost is born."""
+        import time as _time
+
+        usage = usage or {}
+        prompt = int(usage.get("prompt_tokens") or 0)
+        completion = int(usage.get("completion_tokens") or 0)
+        try:
+            from app.services.ai.runner.usage_cached import extract_cached_input_tokens
+
+            cached = int(extract_cached_input_tokens(usage) or 0)
+        except Exception:  # noqa: BLE001
+            cached = 0
+        cost = None
+        if recorder is not None and hasattr(recorder, "cost_of"):
+            try:
+                cost = recorder.cost_of(prompt, completion, cached)
+            except Exception:  # noqa: BLE001
+                cost = None
+        await emit_event(
+            recorder,
+            "step_end",
+            {
+                "turn": 1,
+                "step": step,
+                "model": getattr(composed, "model", None),
+                "usage": {"prompt": prompt, "completion": completion, "cached": cached},
+                "cost_cents": cost,
+                "duration_ms": int((_time.monotonic() - t0) * 1000),
+                "finish_reason": finish_reason,
+            },
+            turn=1,
+            step=step,
         )
 
     async def _dispatch_finish_issue(self, args: dict) -> dict:
@@ -1330,10 +1393,7 @@ class AgentRunner:
 
         # P3 transcript (mig 285): open the event stream with the user turn.
         # Best-effort — record_event never raises.
-        if recorder is not None and hasattr(recorder, "record_event"):
-            await recorder.record_event(
-                "user", {"content": _last_user_text(user_messages)}
-            )
+        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
 
         # Wave G (G3): per-run loop guard. Detects "same (tool, args)
         # called >= N times in last M calls" and warns the LLM mid-run
@@ -1422,6 +1482,9 @@ class AgentRunner:
             if _step_ctx.injected:
                 messages.extend(_step_ctx.injected)
 
+            _t0 = await self._step_started(
+                recorder, composed, iteration, is_stream=False
+            )
             # Wave G (G4): per-call output budget. Compute a max_tokens
             # cap based on remaining window. If smaller than what
             # composed declared, build a copy with the tighter cap so
@@ -1476,6 +1539,14 @@ class AgentRunner:
             else:
                 resp = await self.adapter.call(composed_for_call, messages)
 
+            await self._step_ended(
+                recorder,
+                composed,
+                iteration,
+                _t0,
+                resp.get("usage"),
+                (resp.get("choices") or [{}])[0].get("finish_reason"),
+            )
             if recorder is not None:
                 usage = resp.get("usage") or {}
                 from app.services.ai.runner.usage_cached import (
@@ -1498,8 +1569,8 @@ class AgentRunner:
                 # caller (chat + summarize/translate/caption/… services) gets
                 # only the answer; no-op for non-thinking models. raw stays full.
                 content = strip_reasoning(msg.get("content") or "")
+                await emit_event(recorder, "assistant", {"content": content})
                 if recorder is not None and hasattr(recorder, "record_event"):
-                    await recorder.record_event("assistant", {"content": content})
                     # A turn that ends with neither text nor a tool call
                     # leaves the user with nothing, and today leaves US with
                     # nothing either: 22% of `doubao-seed-2-0-lite-260428`
@@ -1512,16 +1583,11 @@ class AgentRunner:
                     # help or just buy more of the same.
                     diagnosis = diagnose_empty_response(resp)
                     if diagnosis is not None:
-                        try:
-                            await recorder.record_event(
-                                "error", {"kind": "empty_response", **diagnosis}
-                            )
-                        except Exception as diag_exc:
-                            # Evidence is never worth losing the turn over.
-                            logger.warning(
-                                f"[AgentRunner] empty-response diagnosis "
-                                f"could not be recorded: {diag_exc!r}"
-                            )
+                        # Evidence is never worth losing the turn over —
+                        # emit_event swallows and logs.
+                        await emit_event(
+                            recorder, "error", {"kind": "empty_response", **diagnosis}
+                        )
                 return {
                     "content": content,
                     "raw": resp,
@@ -1736,16 +1802,16 @@ class AgentRunner:
                 # P3 transcript (mig 285): one event per executed tool call
                 # (args + result in one payload — the Nice renderer shows it
                 # as a folded card). record_event truncates long values.
-                if recorder is not None and hasattr(recorder, "record_event"):
-                    await recorder.record_event(
-                        "tool_call",
-                        {
-                            "tool": tool_name,
-                            "args": args,
-                            "result": result,
-                            "iteration": iteration,
-                        },
-                    )
+                await emit_event(
+                    recorder,
+                    "tool_call",
+                    {
+                        "tool": tool_name,
+                        "args": args,
+                        "result": result,
+                        "iteration": iteration,
+                    },
+                )
 
                 # Wave G (G3): observe for loop detection. Args
                 # canonicalized to a stable string (sorted keys).
@@ -1861,7 +1927,8 @@ class AgentRunner:
                 ):
                     # 同一 turn 同一工具只落第一条,防模型重试刷屏(spec §5)。
                     self._denied_tools_this_turn.add(tool_name)
-                    await recorder.record_event(
+                    await emit_event(
+                        recorder,
                         "capability_denied",
                         {"tool": tool_name, "reason": hook_result.abort_reason or ""},
                     )

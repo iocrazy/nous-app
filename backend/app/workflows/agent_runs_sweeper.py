@@ -75,14 +75,20 @@ def _agent_pause_stmt(agent_id, paused_reason):
 
 @DBOS.step()
 async def mark_heartbeat_lost_step() -> int:
-    """Flip running rows whose heartbeat is older than 2 minutes."""
+    """Flip running rows whose heartbeat is older than 2 minutes, then close
+    each flipped run's transcript with ``turn_end{reason:interrupted}`` so
+    the event log stays replay-complete (spec §2 primitive ①). A run whose
+    transcript already carries a turn_end is left alone."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
+    from app.services.ai.runner.interrupted_turn import close_interrupted_runs
 
     runs_repo = get_agent_runs_repository()
     stale_before = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
         seconds=HEARTBEAT_STALENESS_SECONDS
     )
-    return await runs_repo.mark_heartbeat_lost(stale_before=stale_before)
+    run_ids = await runs_repo.mark_heartbeat_lost_ids(stale_before=stale_before)
+    await close_interrupted_runs(run_ids)
+    return len(run_ids)
 
 
 @DBOS.step()

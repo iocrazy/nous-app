@@ -79,9 +79,14 @@ async def test_the_observer_writes_an_llm_retry_event():
     rec = _Recorder()
     obs = make_retry_observer(rec)
     await obs({"attempt": 2, "max_retries": 3, "delay_ms": 3200})
-    assert rec.events == [
-        ("llm_retry", {"attempt": 2, "max_retries": 3, "delay_ms": 3200})
-    ]
+    assert len(rec.events) == 1
+    kind, payload = rec.events[0]
+    assert kind == "llm_retry"
+    # the observer stamps the clock so the card can age the wait; the fold
+    # copies it and never reads the clock itself (replay stays deterministic)
+    at = payload.pop("at")
+    assert at.startswith("20") and "+00:00" in at
+    assert payload == {"attempt": 2, "max_retries": 3, "delay_ms": 3200}
 
 
 @pytest.mark.unit

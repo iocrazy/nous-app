@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from loguru import logger
+from app.services.ai.runner.events import emit
 
 TODO_EVENT_TYPE = "todo_write"
 
@@ -42,20 +42,8 @@ def todo_snapshot(todo_list: Any) -> dict[str, Any]:
 
 
 async def emit_todo_snapshot(recorder: Any, todo_list: Any) -> None:
-    """Append a ``todo_write`` event for the list's current state.
-
-    ``recorder`` may be None (paths that never had one) — then nothing is
-    recorded and the todo tool works exactly as before.
-    """
-    if recorder is None or todo_list is None:
-        return
-    record = getattr(recorder, "record_event", None)
-    if record is None:
-        return
-    try:
-        await record(TODO_EVENT_TYPE, todo_snapshot(todo_list))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"[todo_events] snapshot not recorded: {exc!r}")
+    """Whole-list snapshot event, through the single event entry."""
+    await emit(recorder, TODO_EVENT_TYPE, todo_snapshot(todo_list))
 
 
 __all__ = ["TODO_EVENT_TYPE", "emit_todo_snapshot", "todo_snapshot"]

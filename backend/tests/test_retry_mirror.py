@@ -38,6 +38,7 @@ async def test_llm_retry_mirrors_last_retry(monkeypatch):
             "delay_ms": 3200,
             "policy_key": "k",
             "failure": "x" * 300,
+            "at": "2026-09-05T00:00:00+00:00",  # stamped by make_retry_observer
         },
     )
     mirrors = [(s, p) for s, p in executed if "jsonb_set" in s]
