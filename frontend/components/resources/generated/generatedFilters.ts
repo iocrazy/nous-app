@@ -30,6 +30,16 @@ export const SOURCE_OPTIONS = [
   { kind: 'shot_video', labelKey: 'generated.source.shot_video', fallback: 'Storyboard Video' },
   { kind: 'agent_run', labelKey: 'generated.source.agent_run', fallback: 'Agent' },
   { kind: 'chat_upload', labelKey: 'generated.source.chat_upload', fallback: 'Chat Upload' },
+  // A My Uploads file registered by "As Asset" (P6). It is a real
+  // `origin_kind` the backend writes (`generated_inbox_service`'s
+  // `LIBRARY_UPLOAD_ORIGIN`), and it was the only one missing here — so those
+  // rows showed a source label on the card that the Source chip could not
+  // narrow to, which reads as a filter that quietly does nothing.
+  {
+    kind: 'library_upload',
+    labelKey: 'generated.source.library_upload',
+    fallback: 'Library Upload',
+  },
 ] as const;
 
 const SOURCE_KINDS: readonly string[] = SOURCE_OPTIONS.map((o) => o.kind);

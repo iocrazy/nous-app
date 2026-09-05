@@ -2032,6 +2032,7 @@
       "shot_video": "Storyboard Video",
       "agent_run": "Agent",
       "chat_upload": "Chat Upload",
+      "library_upload": "Library Upload",
       "intermediate": "Intermediate Inputs"
     },
     "type": {

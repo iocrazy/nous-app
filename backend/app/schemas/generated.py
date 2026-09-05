@@ -33,14 +33,22 @@ TITLE_MAX_CHARS = 80
 _SENTENCE_ENDS = (".", "。", "\n")
 
 
+def _cap(text: str) -> str:
+    """Hard cap at :data:`TITLE_MAX_CHARS`, ``…`` included in the count."""
+    return text if len(text) <= TITLE_MAX_CHARS else text[: TITLE_MAX_CHARS - 1] + "…"
+
+
 def derive_title(
     prompt: Optional[str],
     media_kind: str,
     model: Optional[str],
     provider: Optional[str],
     origin_kind: str,
+    *,
+    filename: Optional[str] = None,
 ) -> str:
-    """Card title: the prompt's first sentence, else a descriptive fallback.
+    """Card title: the prompt's first sentence, else the file's name, else a
+    descriptive fallback.
 
     Cut at the first ``.``/``。``/newline (delimiter excluded), then hard-capped
     at :data:`TITLE_MAX_CHARS` *including* the appended ``…`` — the return value
@@ -49,6 +57,16 @@ def derive_title(
     A prompt that yields an empty first sentence (blank, whitespace, or leading
     delimiter) falls back rather than returning ``""``: an empty title renders
     as a blank card, which is indistinguishable from a broken row.
+
+    ``filename`` is a SEPARATE source on purpose, and it is used **verbatim**
+    (capped, never cut). It exists because a registered My Uploads row has no
+    prompt at all, and routing a file's name through the prompt argument would
+    put it through the sentence cut above: ``interview.v2.mp3`` would be
+    truncated at its first dot and titled ``interview``, and a dotfile would cut
+    to nothing and silently take the fallback. A file's name is not prose and
+    has no sentences — the two sources are different kinds of text, so they get
+    different handling. The prompt still wins when both are present; nothing
+    that has a real prompt should be re-titled after a file.
     """
     text = (prompt or "").strip()
     if text:
@@ -56,11 +74,12 @@ def derive_title(
         if cuts:
             text = text[: min(cuts)]
         text = text.strip()
-    if not text:
-        return f"{media_kind} · {model or provider or origin_kind}"
-    if len(text) > TITLE_MAX_CHARS:
-        text = text[: TITLE_MAX_CHARS - 1] + "…"
-    return text
+    if text:
+        return _cap(text)
+    name = (filename or "").strip()
+    if name:
+        return _cap(name)
+    return f"{media_kind} · {model or provider or origin_kind}"
 
 
 class GeneratedSource(BaseModel):

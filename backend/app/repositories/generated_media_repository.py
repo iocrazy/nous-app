@@ -574,6 +574,7 @@ class GeneratedMediaRepository:
         media_kind: str,
         conversation_id: Optional[int],
         origin_kind: str = "chat_upload",
+        params: Optional[dict] = None,
     ) -> dict:
         """Register an EXISTING resource into the Generated inbox. Returns the row.
 
@@ -610,6 +611,11 @@ class GeneratedMediaRepository:
         fix, but it cannot be added blind: legacy promotes may already have
         left duplicates in production, which would make ``CREATE INDEX`` fail
         under CI auto-apply. Tracked as a follow-up, not done here.
+
+        ``params`` is the row's internal metadata (it never reaches the wire —
+        ``GeneratedItem`` drops it). ``save_resource_as_asset`` uses it to carry
+        the name the card should be titled after; the other two callers pass
+        nothing and get ``{}``, exactly as before.
         """
         async with read_scope() as session:
             existing = (
@@ -638,7 +644,7 @@ class GeneratedMediaRepository:
                             ),
                             promoted_resource_id=int(resource_id),
                             review_state="saved",
-                            params={},
+                            params=dict(params or {}),
                         )
                     )
                 )
