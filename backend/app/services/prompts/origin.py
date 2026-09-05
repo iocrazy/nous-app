@@ -19,7 +19,9 @@ PROMPT_TEXT_KEYS: frozenset[str] = frozenset(
     {"gen_prompt", "gen_prompt_zh", "slide_prompts"}
 )
 
-_BLANK_TEXT = {"", "[]", '""', "null", "{}"}
+#: Sentinel strings that mean "there is no prompt text here" — JSON nulls and
+#: empty containers that reached a text column as literal text.
+BLANK_TEXT = {"", "[]", '""', "null", "{}"}
 
 
 def stamp_origin(patch: Dict[str, Any], origin: str) -> Dict[str, Any]:
@@ -33,8 +35,18 @@ def stamp_origin(patch: Dict[str, Any], origin: str) -> Dict[str, Any]:
     return patch
 
 
+def is_blank_text(value: Any) -> bool:
+    """True when ``value`` carries no prompt text.
+
+    The one owner of that contract: this same set decides both whether a row
+    *has* prompt text (:func:`derive_origin` here) and whether an entry *shows*
+    prompt text (``entries._text``), so the two cannot drift apart.
+    """
+    return not isinstance(value, str) or value.strip() in BLANK_TEXT
+
+
 def _nonblank(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() not in _BLANK_TEXT
+    return not is_blank_text(value)
 
 
 def _nonempty_object(value: Any) -> bool:

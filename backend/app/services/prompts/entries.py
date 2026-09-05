@@ -10,14 +10,14 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from .origin import is_blank_text
+
 _THUMB_CAP = 3
-_BLANK = {"", "[]", '""', "null", "{}"}
 
 
 def _text(value: Any) -> Optional[str]:
-    if isinstance(value, str) and value.strip() not in _BLANK:
-        return value
-    return None
+    """Blank sentinels render as missing; ``origin.is_blank_text`` owns the rule."""
+    return None if is_blank_text(value) else value
 
 
 def _iso(value: Any) -> str:

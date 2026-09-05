@@ -1,6 +1,11 @@
 import pytest
 
-from app.services.prompts.origin import PROMPT_ORIGINS, derive_origin, stamp_origin
+from app.services.prompts.origin import (
+    PROMPT_ORIGINS,
+    derive_origin,
+    is_blank_text,
+    stamp_origin,
+)
 
 
 def test_origins_are_the_three_the_check_allows():
@@ -53,3 +58,20 @@ def test_stamp_refuses_unknown_origin():
 )
 def test_derive_origin_backfill_rule(row, expected):
     assert derive_origin(row) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "blank"),
+    [
+        ("", True),
+        ("  ", True),
+        ("[]", True),
+        ('""', True),
+        ("null", True),
+        ("{}", True),
+        ("a", False),
+        ("null pointer", False),
+    ],
+)
+def test_is_blank_text_sentinels(value, blank):
+    assert is_blank_text(value) is blank

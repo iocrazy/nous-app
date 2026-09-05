@@ -1,4 +1,9 @@
+import inspect
+
+import pytest
+
 from app.schemas.prompts import PromptEntry
+from app.services.prompts import entries as entries_module
 from app.services.prompts.entries import (
     entry_from_asset,
     entry_from_resource,
@@ -136,3 +141,22 @@ def test_sort_puts_captioned_last_then_recent_first():
     c = {"origin": None, "updated_at": "2026-09-05T00:00:00+00:00", "key": "c"}
     d = {"origin": "typed", "updated_at": "2026-09-04T00:00:00+00:00", "key": "d"}
     assert [x["key"] for x in sort_entries([a, b, c, d])] == ["d", "a", "b", "c"]
+
+
+BLANK_SENTINELS = ["", "  ", "[]", '""', "null", "{}"]
+
+
+@pytest.mark.parametrize("value", BLANK_SENTINELS)
+def test_blank_sentinels_render_as_missing(value):
+    assert entry_from_resource({**IMAGE, "gen_prompt": value})["positive_en"] is None
+    assert (
+        entry_from_asset({**ASSET, "prompt_positive": value}, example_resource_ids=[])[
+            "positive_en"
+        ]
+        is None
+    )
+
+
+def test_entries_does_not_keep_its_own_blank_set():
+    """One owner: origin.BLANK_TEXT. A local copy here could drift unnoticed."""
+    assert "_BLANK =" not in inspect.getsource(entries_module)
