@@ -3850,6 +3850,16 @@
       "failed": "无法开始处理该素材",
       "statusUnknown": "无法确认该素材的处理状态 —— 已直接发送，未新增处理",
       "pendingAudio": "该素材的音轨仍在抽取中 —— 抽取完成后请再试一次"
+    },
+    "steerPlaceholder": "给运行中的 agent 插一句——下一步前读到…",
+    "steerSent": "已送达运行中的 agent——下一步前读到",
+    "steerEnded": "会话已不在运行——请作为新消息发送",
+    "view": {
+      "chat": "对话",
+      "trajectory": "轨迹",
+      "run": "运行",
+      "noRuns": "这个会话还没有 agent 运行",
+      "noTrajectory": "这次运行没有记录到步骤"
     }
   },
   "mcp": {

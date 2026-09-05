@@ -42,6 +42,9 @@ import {
 } from './agentActivity/QuickActions';
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
+import { ChatTrajectoryView } from './chat/ChatTrajectoryView';
+import { chatRunId } from './chat/chatMessageMeta';
+import { deliverSteer, InboxTargetEndedError } from '../services/agentInboxService';
 import { TypingIndicator } from './chat/TypingIndicator';
 import {
   AttachmentFailureBanner,
@@ -126,14 +129,6 @@ function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
   );
 }
 
-/** Persisted assistant message metadata_json.run_id (BIGINT snowflake, kept
- *  as a string end-to-end — see the file-wide 2^53 precision caveat). */
-function extractRunId(msg: AIChatMessage): string | null {
-  const meta = msg.metadata_json;
-  if (!meta || typeof meta !== 'object') return null;
-  const raw = (meta as Record<string, unknown>).run_id;
-  return typeof raw === 'string' && raw ? raw : null;
-}
 
 /**
  * Extract the Plan Mode paused-for-approval state (Phase 4.5). Backend
@@ -340,6 +335,8 @@ export function AIChatPanel({
 
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  // T10: Chat (bubbles) | Trajectory (runs, step by step) over the same messages.
+  const [viewMode, setViewMode] = useState<'chat' | 'trajectory'>('chat');
   // O3: plan-mode toggle. 'auto' = normal execute; 'prompt_user' = LLM
   // emits a plan first; 'dry_run' = plan without ever executing.
   // Persisted in localStorage so the user's choice survives reloads.
@@ -1155,6 +1152,44 @@ export function AIChatPanel({
     chatEditorRef.current?.chain().focus('end').insertContent(prompt).run();
   }, []);
 
+  // T10 (harness P4 §1-③): while a turn is streaming the composer stays
+  // open — a message now is a STEER, delivered to the conversation's inbox
+  // and read by the running agent before its next step. Never a second
+  // turn queued behind this one.
+  const steerMode = sending && !!activeSessionId && !!effectiveAgentSlug;
+  const handleSteer = useCallback(
+    async (rawText: string) => {
+      if (!activeSessionId) return;
+      const text = rawText.trim();
+      if (!text) return;
+      const tempId = `tmp-steer-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          session_id: activeSessionId,
+          role: 'user' as const,
+          content: text,
+          created_at: new Date().toISOString(),
+          metadata_json: { inbox_steer: true },
+        } as AIChatMessage,
+      ]);
+      try {
+        await deliverSteer('conversation', activeSessionId, text);
+        addToast(t('chat.steerSent', 'Sent to the running agent — picked up before its next step'), 'success');
+      } catch (err) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        if (err instanceof InboxTargetEndedError) {
+          addToast(t('chat.steerEnded', 'The conversation is no longer running — send it as a new message'), 'error');
+          return;
+        }
+        console.error('[AIChatPanel] steer failed:', err);
+        addToast(`Steer failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      }
+    },
+    [activeSessionId, addToast, t],
+  );
+
   const hasMessages = messages.length > 0 || sending;
 
   return (
@@ -1312,6 +1347,28 @@ export function AIChatPanel({
           <EmptyState onSuggest={handleSuggest} />
         ) : (
           <>
+            {/* T10: Chat | Trajectory over the same messages (no refetch on flip). */}
+            <div className="flex justify-end mb-2">
+              <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden text-[10px]" data-testid="chat-view-toggle">
+                {(['chat', 'trajectory'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setViewMode(m)}
+                    aria-pressed={viewMode === m}
+                    className={`px-2 py-0.5 transition ${
+                      viewMode === m ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'
+                    }`}
+                  >
+                    {m === 'chat' ? t('chat.view.chat', 'Chat') : t('chat.view.trajectory', 'Trajectory')}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {viewMode === 'trajectory' ? (
+              <ChatTrajectoryView messages={messages} isRunning={sending} />
+            ) : (
+            <>
             {messages.map((msg) => (
               <MessageBubble
                 key={msg.id}
@@ -1332,7 +1389,7 @@ export function AIChatPanel({
                     ? extractAwaitingApproval(msg)
                     : undefined
                 }
-                runId={msg.role === 'assistant' ? extractRunId(msg) : undefined}
+                runId={msg.role === 'assistant' ? chatRunId(msg) : undefined}
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)
@@ -1354,6 +1411,8 @@ export function AIChatPanel({
                   <TypingIndicator show />
                 </div>
               </div>
+            )}
+            </>
             )}
           </>
         )}
@@ -1473,15 +1532,17 @@ export function AIChatPanel({
           )}
           <div className="flex-1 min-w-0">
             <ChatInput
-              onSend={handleSend}
+              onSend={steerMode ? (text) => void handleSteer(text) : handleSend}
               onPaste={composerOnPaste}
-              disabled={sending || !activeSessionId || !effectiveAgentSlug}
+              disabled={(sending && !steerMode) || !activeSessionId || !effectiveAgentSlug}
               placeholder={
                 !effectiveAgentSlug
                   ? t('chat.placeholderNoAgent', 'Select an agent to start')
                   : !activeSessionId
                     ? t('chat.placeholderNoSession', 'Create a session first')
-                    : t('chat.placeholder', 'Type a message...')
+                    : steerMode
+                      ? t('chat.steerPlaceholder', 'Steer the running agent — read before its next step…')
+                      : t('chat.placeholder', 'Type a message...')
               }
               onMentionRequest={handleMentionRequest}
               onMentionKey={handleMentionKey}
