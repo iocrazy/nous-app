@@ -3850,6 +3850,16 @@
       "failed": "Could not start processing this asset",
       "statusUnknown": "Could not check this asset's processing state — sent without new processing",
       "pendingAudio": "Audio is still being extracted from this asset — try again once that finishes"
+    },
+    "steerPlaceholder": "Steer the running agent — read before its next step…",
+    "steerSent": "Sent to the running agent — picked up before its next step",
+    "steerEnded": "The conversation is no longer running — send it as a new message",
+    "view": {
+      "chat": "Chat",
+      "trajectory": "Trajectory",
+      "run": "Run",
+      "noRuns": "No agent runs in this conversation yet",
+      "noTrajectory": "No recorded steps for this run"
     }
   },
   "mcp": {
