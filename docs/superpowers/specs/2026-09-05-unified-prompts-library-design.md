@@ -75,6 +75,7 @@ PromptEntry {
   - `resources_crud_router.update_resource`（用户 PATCH，含 `ResourcePromptSection` 的正向 / 逐张编辑）→ `typed`。`prompt_origin` **不进** `ResourceUpdate` 请求体，服务端在 `update_data` 含任一提示词键时自己写。
   - `upload_postprocess`（PNG 元数据）、`backfill_resource_gen_params`、`promote_generated_media_service`（画布生成落库）→ `extracted`。
   - `caption_asset`、`caption_slide` → `captioned`。
+- `resources_ai_router.translate_gen_prompt`（翻译另一侧语言）**不改** `prompt_origin`：翻译只是把已有文字换一种语言呈现，出处仍是原写入方（裁决 R3）。
 - **回填** `backfill_resource_prompt_origin`（DBOS，`dry_run=True` 默认，`run_user_id`，注册进 `_BACKFILLS`）：对 `prompt_origin IS NULL AND has_prompt_expr()` 的行：`gen_params` 非空对象 → extracted；否则 `gen_prompt_json` 非空 → captioned；否则 `slide_prompts` 非空 → captioned（后端唯一写入方是 caption_slide）；否则 → typed。
 - 读模型对 `prompt_origin IS NULL` 的行返回 `null`，前端按 captioned 排序、不显示来源标签。回填跑完后生产应为 0 行 null。
 
