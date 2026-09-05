@@ -178,6 +178,66 @@ describe('SendToCanvasModal', () => {
     expect(options.state.promptInsert).not.toHaveProperty('ratio');
   });
 
+  // ─── Ruling R11: not every prompt has a picture behind it ────────────
+  //
+  // The payload used to hardcode `assetId: resource.id` + a cover derived
+  // from it. Templates live in `assets`, so that id went into
+  // /api/v1/resources/{id}/cover and resolved to nothing; album slides
+  // passed the album's id, so the node showed the album.
+
+  it('omits assetId and coverUrl entirely for a text-only insert', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Project One', team_id: 't1' }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board One' }]);
+
+    render(
+      <SendToCanvasModal
+        resource={null}
+        filename="Golden hour"
+        positive="warm rim light"
+        negative={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Project One'));
+    fireEvent.click(await screen.findByText('Board One'));
+
+    const [, options] = navigate.mock.calls[0] as [string, { state: { promptInsert: Record<string, unknown> } }];
+    expect(options.state.promptInsert).not.toHaveProperty('assetId');
+    expect(options.state.promptInsert).not.toHaveProperty('coverUrl');
+    expect(options.state.promptInsert).toMatchObject({ filename: 'Golden hour', positive: 'warm rim light' });
+  });
+
+  it('carries an explicit coverUrl instead of deriving one from the resource id', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Project One', team_id: 't1' }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board One' }]);
+
+    render(
+      <SendToCanvasModal
+        resource={{ id: 'album7', filename: '002.jpg' }}
+        coverUrl="https://api.test/api/v1/media/9/slides/002.jpg"
+        positive="winking"
+        negative={null}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Project One'));
+    fireEvent.click(await screen.findByText('Board One'));
+
+    expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', {
+      state: {
+        promptInsert: {
+          assetId: 'album7',
+          filename: '002.jpg',
+          positive: 'winking',
+          negative: undefined,
+          coverUrl: 'https://api.test/api/v1/media/9/slides/002.jpg',
+        },
+      },
+    });
+  });
+
   it('calls onClose on backdrop click', async () => {
     fetchProjects.mockResolvedValue([]);
     const onClose = vi.fn();

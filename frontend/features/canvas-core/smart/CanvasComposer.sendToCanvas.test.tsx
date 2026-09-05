@@ -148,6 +148,55 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
+  // Ruling R11(b): a prompt template has no picture of its own. The payload
+  // then carries no assetId, and importing/derivng a cover from one would put
+  // a tile that resolves to nothing on the board.
+  it('inserts the prompt node alone when the payload carries no assetId', async () => {
+    locationState = {
+      promptInsert: {
+        filename: 'Golden hour',
+        positive: 'warm rim light',
+        negative: 'flare',
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(1));
+    const { nodes, connections, selection } = useCanvasCoreStore.getState();
+    const promptNode = nodes[0] as Record<string, unknown>;
+    expect(promptNode.type).toBe('prompt');
+    expect((promptNode.data as Record<string, unknown>).body).toBe('warm rim light');
+    expect((promptNode.data as Record<string, unknown>).negative_body).toBe('flare');
+    expect(mockImportResource).not.toHaveBeenCalled();
+    expect(connections).toHaveLength(0);
+    expect(selection).toEqual([promptNode.id]);
+    expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', { replace: true });
+  });
+
+  it('prefers the payload coverUrl over the id-derived one when the import fails', async () => {
+    mockImportResource.mockRejectedValueOnce(new Error('no mint'));
+    locationState = {
+      promptInsert: {
+        assetId: 'album7',
+        filename: '002.jpg',
+        positive: 'winking',
+        coverUrl: 'https://api.test/slides/002.jpg',
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    const mediaNode = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as Record<string, unknown>).type === 'media') as Record<string, unknown>;
+    const items = (mediaNode.data as { items: Array<{ url: string }> }).items;
+    expect(items[0].url).toBe('https://api.test/slides/002.jpg');
+  });
+
   it('does nothing when there is no pending promptInsert', () => {
     locationState = null;
     useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });

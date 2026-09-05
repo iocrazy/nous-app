@@ -7,6 +7,8 @@ vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test'
 vi.mock('../../../contexts/ResourcesContext', () => ({ useResourcesContext: () => ({ scopeId: '9000', resPath: (p: string) => p, refreshAssetCounts: vi.fn() }) }));
 vi.mock('../SendToCanvasModal', () => ({ SendToCanvasModal: (p: { positive: string }) => <div data-testid="send-modal">{p.positive}</div> }));
 vi.mock('../../prompts/SaveAsTemplateDialog', () => ({ SaveAsTemplateDialog: () => <div data-testid="save-dialog" /> }));
+const fetchProjects = vi.fn();
+vi.mock('../../../services/projectsService', () => ({ fetchProjects: (...a: unknown[]) => fetchProjects(...a) }));
 const fetchPrompts = vi.fn();
 vi.mock('../../../services/promptsService', async (orig) => ({ ...(await orig<typeof import('../../../services/promptsService')>()), fetchPrompts: (...a: unknown[]) => fetchPrompts(...a) }));
 
@@ -25,7 +27,10 @@ function mount() {
 }
 
 describe('PromptsShelf', () => {
-  beforeEach(() => { fetchPrompts.mockReset(); fetchPrompts.mockResolvedValue(page); });
+  beforeEach(() => {
+    fetchPrompts.mockReset(); fetchPrompts.mockResolvedValue(page);
+    fetchProjects.mockReset(); fetchProjects.mockResolvedValue([{ id: '77', name: 'Orchard Film', team_id: null }]);
+  });
 
   it('renders text-first cards with form and origin counts', async () => {
     mount();
@@ -70,5 +75,57 @@ describe('PromptsShelf', () => {
     fetchPrompts.mockResolvedValueOnce({ items: [], total: 0, by_form: { template: 0, image: 0, album: 0 }, by_origin: { typed: 0, extracted: 0, captioned: 0 } });
     mount();
     expect(await screen.findByText(/No prompts yet/)).toBeInTheDocument();
+  });
+
+  // Ruling R6: `total` describes the whole unfiltered segment, so a filter that
+  // matched nothing in a segment that HAS prompts must say so — telling that
+  // user "no prompts yet" would send them making one they already have.
+  it('filtered result of zero shows No prompts match, not the empty copy', async () => {
+    fetchPrompts.mockResolvedValue({ items: [], total: 3, by_form: { template: 0, image: 2, album: 1 }, by_origin: { typed: 0, extracted: 1, captioned: 2 } });
+    render(<MemoryRouter initialEntries={['/resources/assets/prompt?form=album']}><PromptsShelf /></MemoryRouter>);
+    expect(await screen.findByText('No prompts match these filters')).toBeInTheDocument();
+    expect(screen.queryByText(/No prompts yet/)).toBeNull();
+  });
+
+  // Ruling R12: the URL is the shelf's state, so a query it cannot round-trip
+  // is a query the user cannot type. Trimming on serialize ate every space.
+  it('the search box accepts a trailing space', async () => {
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    const box = screen.getByLabelText('Search prompts');
+    fireEvent.change(box, { target: { value: 'a ' } });
+    expect(box).toHaveValue('a ');
+  });
+
+  // Ruling R13: `project=` was parsed and forwarded but had no control.
+  it('the project selector switches the segment and refetches', async () => {
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    const select = await screen.findByLabelText('Project');
+    expect(screen.getByRole('option', { name: 'All projects' })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: '77' } });
+    await waitFor(() => expect(fetchPrompts).toHaveBeenLastCalledWith('9000', expect.objectContaining({ segment: 'project', projectId: '77' })));
+  });
+
+  it('a project list that fails to load leaves the shelf usable', async () => {
+    fetchProjects.mockRejectedValueOnce(new Error('nope'));
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    expect(await screen.findByLabelText('Project')).toBeInTheDocument();
+  });
+
+  // Ruling R14: no pagination this PR, so the cap has to be visible — a page
+  // that silently stops at 200 next to an "All 640" chip is a lie by omission.
+  it('says so when the page is capped at 200', async () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ ...image, key: `image:${i}` }));
+    fetchPrompts.mockResolvedValue({ items: many, total: 640, by_form: { template: 0, image: 640, album: 0 }, by_origin: { typed: 0, extracted: 640, captioned: 0 } });
+    mount();
+    expect(await screen.findByText(/Showing the first 200/)).toBeInTheDocument();
+  });
+
+  it('says nothing about a cap on a short page', async () => {
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    expect(screen.queryByText(/Showing the first 200/)).toBeNull();
   });
 });

@@ -33,7 +33,11 @@ export function serializePromptFilters(f: PromptFilters): URLSearchParams {
   if (f.origin) sp.set('origin', f.origin);
   if (f.projectId) sp.set('project', f.projectId);
   if (f.sort !== 'recent') sp.set('sort', f.sort);
-  if (f.q.trim()) sp.set('q', f.q.trim());
+  // Written untrimmed (ruling R12). The input is controlled by the value
+  // parsed back out of the URL, so trimming here meant the box could never
+  // hold a space: typing "a " round-tripped to "a" before the next
+  // keystroke. Only the decision to write the key at all uses trim().
+  if (f.q.trim()) sp.set('q', f.q);
   return sp;
 }
 

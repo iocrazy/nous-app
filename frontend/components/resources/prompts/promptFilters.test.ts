@@ -10,6 +10,15 @@ describe('promptFilters', () => {
     const sp = serializePromptFilters({ form: null, origin: 'typed', projectId: null, sort: 'recent', q: '' });
     expect(sp.toString()).toBe('origin=typed');
   });
+  it('keeps a space the user typed instead of trimming it back out (ruling R12)', () => {
+    const sp = serializePromptFilters({ form: null, origin: null, projectId: null, sort: 'recent', q: 'a ' });
+    expect(sp.toString()).toBe('q=a+');
+    expect(parsePromptFilters(sp).q).toBe('a ');
+  });
+  it('omits an all-whitespace query', () => {
+    const sp = serializePromptFilters({ form: null, origin: null, projectId: null, sort: 'recent', q: '   ' });
+    expect(sp.toString()).toBe('');
+  });
   it('sorts by title when asked and keeps server order otherwise', () => {
     const a = { title: 'b' } as never, b = { title: 'A' } as never;
     expect(sortEntries([a, b], 'title')).toEqual([b, a]);

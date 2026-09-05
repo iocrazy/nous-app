@@ -29,10 +29,24 @@ import { listCanvases } from '../../features/canvas-core/services/canvasService'
 import type { Canvas } from '../../features/canvas-core/types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { fetchProjects } from '../../services/projectsService';
-import type { Project, Resource } from '../../types';
+import type { Project } from '../../types';
 
 export interface SendToCanvasModalProps {
-  resource: Resource;
+  /** The picture that accompanies the prompt, or `null` for a TEXT-ONLY
+   *  insert (ruling R11). Deliberately structural rather than `Resource`:
+   *  the id travels into `/api/v1/resources/{id}/…` on the canvas side, so
+   *  only something that really is a resource row may be passed here. A
+   *  prompt template lives in `assets` and has no such row — it sends
+   *  `null` and the canvas builds the prompt node alone. Existing callers
+   *  pass a full `Resource`, which satisfies this narrower shape. */
+  resource: { id: string; filename: string } | null;
+  /** Name carried in the payload. Defaults to the resource's filename;
+   *  supply it for a text-only insert, which has no resource to name it. */
+  filename?: string;
+  /** Picture to show on the canvas when the durable import cannot be minted.
+   *  Defaults to the resource's cover. An album slide passes its own slide
+   *  URL here, because the album's cover is a different picture. */
+  coverUrl?: string;
   /** Prompt text for whichever lang side is currently active in PromptSection. */
   positive: string;
   /** May be empty/absent — canvas insert omits the negative field then. */
@@ -51,7 +65,7 @@ export interface SendToCanvasModalProps {
 }
 
 export function SendToCanvasModal({
-  resource, positive, negative, onClose, autoRun, ratio,
+  resource, filename, coverUrl, positive, negative, onClose, autoRun, ratio,
 }: SendToCanvasModalProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -93,11 +107,14 @@ export function SendToCanvasModal({
     navigate(target, {
       state: {
         promptInsert: {
-          assetId: resource.id,
-          filename: resource.filename,
+          // Both keys are absent, not empty, for a text-only insert: the
+          // consumer branches on `assetId` being there at all, and an empty
+          // string would send it importing nothing.
+          ...(resource ? { assetId: resource.id } : {}),
+          filename: filename ?? resource?.filename ?? '',
           positive,
           negative: negative || undefined,
-          coverUrl: getResourceCoverUrl(resource.id),
+          ...(resource ? { coverUrl: coverUrl ?? getResourceCoverUrl(resource.id) } : {}),
           ...(autoRun ? { autoRun: true as const, ratio } : {}),
         },
       },

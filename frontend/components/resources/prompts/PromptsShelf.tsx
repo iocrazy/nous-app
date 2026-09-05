@@ -8,8 +8,9 @@ import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
-import { fetchPrompts, promptText, type PromptEntry, type PromptForm, type PromptLang, type PromptOrigin, type PromptPage, type PromptSlide } from '../../../services/promptsService';
-import type { Resource } from '../../../types';
+import { fetchPrompts, promptText, thumbSrc, type PromptEntry, type PromptForm, type PromptLang, type PromptOrigin, type PromptPage, type PromptSlide } from '../../../services/promptsService';
+import { fetchProjects } from '../../../services/projectsService';
+import type { Project } from '../../../types';
 import { SendToCanvasModal } from '../SendToCanvasModal';
 import { SaveAsTemplateDialog } from '../../prompts/SaveAsTemplateDialog';
 import { PromptAlbumCard } from './PromptAlbumCard';
@@ -21,6 +22,15 @@ const FORM_LABEL: Record<PromptForm, [string, string]> = {
   image: ['prompts.shelf.formImages', 'Images'],
   album: ['prompts.shelf.formAlbums', 'Albums'],
 };
+/** One page, no pagination this PR (ruling R14). The shelf says so on screen
+ *  when it hits the cap rather than letting a short grid sit under a much
+ *  larger "All N" count.
+ *
+ *  Must not exceed the router's own ceiling (`limit: int = Query(60, ge=1,
+ *  le=200)` in `prompts_router.py`) — a larger number is a 422, and a smaller
+ *  one would make the notice below fire late. */
+const PAGE_LIMIT = 200;
+
 const ORIGIN_LABEL: Record<PromptOrigin, [string, string]> = {
   typed: ['prompts.origin.typed', 'Typed'],
   extracted: ['prompts.origin.extracted', 'Extracted'],
@@ -39,19 +49,40 @@ function Seg({ on, label, count, onClick }: { on: boolean; label: string; count?
 
 export const PromptsShelf: React.FC = () => {
   const { t } = useTranslation();
-  const { scopeId, resPath, refreshAssetCounts } = useResourcesContext();
+  const { scopeId, teamId, resPath, refreshAssetCounts } = useResourcesContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<PromptFilters>(() => parsePromptFilters(searchParams), [searchParams]);
   const setFilters = useCallback((patch: Partial<PromptFilters>) => setSearchParams(serializePromptFilters({ ...filters, ...patch }), { replace: true }), [filters, setSearchParams]);
 
+  const [projects, setProjects] = useState<Project[]>([]);
   const [page, setPage] = useState<PromptPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [tick, setTick] = useState(0);
+  const [debouncedQ, setDebouncedQ] = useState(filters.q);
   const [lang] = useState<PromptLang>('en');
   const [send, setSend] = useState<{ entry: PromptEntry; slide?: PromptSlide } | null>(null);
   const [save, setSave] = useState<{ entry: PromptEntry; slideNames?: string[] } | null>(null);
+
+  // The options for the project filter (ruling R13). Loaded once per mount;
+  // a failure leaves the control usable so an active project filter can still
+  // be cleared.
+  useEffect(() => {
+    let alive = true;
+    fetchProjects(teamId ? { teamId } : undefined)
+      .then((rows) => { if (alive) setProjects(rows); })
+      .catch((err) => console.error('[PromptsShelf] project list unavailable:', err));
+    return () => { alive = false; };
+  }, [teamId]);
+
+  // Typing is debounced, everything else is not (ruling R12). A chip click is
+  // one deliberate act and should answer at once; a search box that fired per
+  // keystroke sent one request per letter.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQ(filters.q), 300);
+    return () => clearTimeout(id);
+  }, [filters.q]);
 
   useEffect(() => {
     if (!scopeId) return;
@@ -63,14 +94,14 @@ export const PromptsShelf: React.FC = () => {
       projectId: filters.projectId,
       form: filters.form,
       origin: filters.origin,
-      q: filters.q,
-      limit: 200,
+      q: debouncedQ,
+      limit: PAGE_LIMIT,
     })
       .then((p) => { if (!cancelled) setPage(p); })
       .catch((err) => { console.error('[PromptsShelf] load failed:', err); if (!cancelled) setLoadError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [scopeId, filters.projectId, filters.form, filters.origin, filters.q, tick]);
+  }, [scopeId, filters.projectId, filters.form, filters.origin, debouncedQ, tick]);
 
   const items = useMemo(() => sortEntries(page?.items ?? [], filters.sort), [page, filters.sort]);
   // Ruling R6: `total` describes the WHOLE unfiltered segment, so it — not the
@@ -78,12 +109,20 @@ export const PromptsShelf: React.FC = () => {
   // matched nothing in a segment that holds nothing is still "no prompts yet";
   // telling that user to loosen filters would send them looking for rows that
   // do not exist.
-  const filtered = !!(filters.form || filters.origin || filters.q.trim()) && (page?.total ?? 0) > 0;
+  const filtered = !!(filters.form || filters.origin || debouncedQ.trim()) && (page?.total ?? 0) > 0;
 
   const onOpen = (entry: PromptEntry) =>
     navigate(resPath(entry.source.store === 'assets' ? `/resources/assets/item/${entry.source.id}` : `/resources/file/${entry.source.id}`));
 
   const sendText = send ? promptText(send.slide ?? send.entry, lang) : null;
+  // Ruling R11: only a `resources` row may travel to the canvas as an id — it
+  // is fetched back through /api/v1/resources/{id}/…. A template lives in
+  // `assets`, so it sends its text alone. An album slide rides on the album's
+  // resource id but carries its OWN picture, which is not the album cover.
+  const sendResource = send && send.entry.source.store !== 'assets'
+    ? { id: send.entry.source.id, filename: send.slide?.name ?? send.entry.title }
+    : null;
+  const sendCoverUrl = send?.slide?.url ? thumbSrc(send.slide.url) : undefined;
 
   return (
     <div className="flex h-full flex-col gap-2.5 p-4" data-testid="prompts-shelf">
@@ -100,6 +139,11 @@ export const PromptsShelf: React.FC = () => {
             <Seg key={o} on={filters.origin === o} label={t(ORIGIN_LABEL[o][0], ORIGIN_LABEL[o][1])} count={page?.by_origin[o]} onClick={() => setFilters({ origin: filters.origin === o ? null : o })} />
           ))}
         </div>
+        <select aria-label={t('prompts.shelf.project', 'Project')} value={filters.projectId ?? ''}
+          onChange={(e) => setFilters({ projectId: e.target.value || null })} className="rounded-lg border border-line bg-card px-2 py-0.5 text-[11px] text-content">
+          <option value="">{t('prompts.shelf.allProjects', 'All projects')}</option>
+          {projects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+        </select>
         <input aria-label={t('prompts.shelf.search', 'Search prompts')} placeholder={t('prompts.shelf.search', 'Search prompts')} value={filters.q}
           onChange={(e) => setFilters({ q: e.target.value })} className="rounded-lg border border-line bg-card px-2 py-0.5 text-[11px] text-content outline-none" />
         <select aria-label={t('prompts.shelf.sort', 'Sort')} value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value as PromptFilters['sort'] })} className="rounded-lg border border-line bg-card px-2 py-0.5 text-[11px] text-content">
@@ -124,18 +168,25 @@ export const PromptsShelf: React.FC = () => {
             : t('prompts.shelf.emptyNone', 'No prompts yet — upload a picture that carries generation metadata, run a caption, or save one from a canvas.')}
         </p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">
-          {items.map((entry) =>
-            entry.form === 'album'
-              ? <PromptAlbumCard key={entry.key} entry={entry} lang={lang} onSend={(e, s) => setSend({ entry: e, slide: s })} onSaveAsTemplate={(e, names) => setSave({ entry: e, slideNames: names })} onOpen={onOpen} />
-              : <PromptCard key={entry.key} entry={entry} lang={lang} onSend={(e) => setSend({ entry: e })} onSaveAsTemplate={(e) => setSave({ entry: e })} onOpen={onOpen} />,
+        <>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">
+            {items.map((entry) =>
+              entry.form === 'album'
+                ? <PromptAlbumCard key={entry.key} entry={entry} lang={lang} onSend={(e, s) => setSend({ entry: e, slide: s })} onSaveAsTemplate={(e, names) => setSave({ entry: e, slideNames: names })} onOpen={onOpen} />
+                : <PromptCard key={entry.key} entry={entry} lang={lang} onSend={(e) => setSend({ entry: e })} onSaveAsTemplate={(e) => setSave({ entry: e })} onOpen={onOpen} />,
+            )}
+          </div>
+          {(page?.items.length ?? 0) >= PAGE_LIMIT && (
+            <p className="py-2 text-[11px] text-content-3">{t('prompts.shelf.capped', 'Showing the first 200 — narrow with search or filters')}</p>
           )}
-        </div>
+        </>
       )}
 
       {send && sendText && (
         <SendToCanvasModal
-          resource={{ id: send.entry.source.id, filename: send.entry.title } as unknown as Resource}
+          resource={sendResource}
+          filename={send.slide?.name ?? send.entry.title}
+          coverUrl={sendCoverUrl}
           positive={sendText.positive}
           negative={sendText.negative}
           onClose={() => setSend(null)}

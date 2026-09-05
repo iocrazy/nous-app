@@ -2048,6 +2048,8 @@
       "formImages": "单图",
       "formAlbums": "图集",
       "anyOrigin": "任意来源",
+      "project": "项目",
+      "allProjects": "全部项目",
       "search": "搜索提示词",
       "sort": "排序",
       "sortRecent": "最近更新",
@@ -2056,6 +2058,7 @@
       "loadFailed": "提示词加载失败",
       "emptyFiltered": "没有符合筛选的提示词",
       "emptyNone": "还没有提示词 — 上传带生成元数据的图片、跑一次打标，或从画布保存一条。",
+      "capped": "只显示前 200 条 — 用搜索或筛选缩小范围",
       "enOnly": "仅 EN",
       "zhOnly": "仅中文",
       "captionedNote": "没有参数 — 这段文字描述了图片，不是生成它的提示词",
@@ -2068,7 +2071,6 @@
       "collapse": "收起",
       "noPromptOnSlide": "这张没有提示词",
       "send": "送出",
-      "sendAllWithText": "把有文字的全部送到画布",
       "openAlbum": "打开图集"
     }
   },

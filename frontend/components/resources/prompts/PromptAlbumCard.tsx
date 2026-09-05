@@ -49,7 +49,9 @@ export function PromptAlbumCard({ entry, lang, onSend, onSaveAsTemplate, onOpen 
         </div>
       )}
       <div className="mt-2 flex items-center gap-1.5 border-t border-dashed border-line pt-2">
-        <button type="button" className="rounded-md border border-line px-2 py-0.5 text-[10.5px]" disabled={withText.length === 0} onClick={() => withText.forEach((s) => onSend(entry, s))}>{t('prompts.shelf.sendAllWithText', 'Send all with text to canvas')}</button>
+        {/* No "send all" button (ruling R10): the canvas insert channel carries
+            ONE node per navigation, so a bulk control could only ever deliver
+            the last slide. Per-slide Send above covers the need honestly. */}
         <button type="button" className="rounded-md border border-line px-2 py-0.5 text-[10.5px]" onClick={() => onSaveAsTemplate(entry, withText.map((s) => s.name))}>{t('prompts.shelf.saveAsTemplateEllipsis', 'Save as template…')}</button>
         <button type="button" className="rounded-md px-2 py-0.5 text-[10.5px] text-content-3" onClick={() => onOpen(entry)}>{t('prompts.shelf.openAlbum', 'Open album')}</button>
         <span className="flex-1" />

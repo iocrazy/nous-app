@@ -192,3 +192,4 @@ PromptEntry {
 - **图集存模板的 examples**：只能挂图集资源本身（slide 不是 `resources` 行），模板缩略图因此来自 slides 端点而非 `asset_files`。
 - **"This project" 对图片的定义**是「被该项目任一画布引用过」（`canvas_resource_refs`），不是「传到该项目的库里」——后者在 `libraries.scope_type='project'` 上，但上传路径今天不一定写它。两种定义并存时以画布引用为准，因为它回答的是「这个项目用过这段提示词吗」。
 - **贴身 composer** 不接目标机制（§3.6）。
+- 图集「全部送出」本期不提供：`promptInsert` 通道一次导航只插一个节点，逐张 Send 覆盖需求（裁决 R10）。
