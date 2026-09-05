@@ -123,7 +123,8 @@ async def test_form_origin_query_filters_apply_after_counting():
     )
     assert [e["key"] for e in page["items"]] == ["image:10"]
     # counts describe the UNFILTERED segment so the chips can show what a filter would reveal
-    assert page["total"] == 1 and page["by_form"]["template"] == 1
+    # total is the unfiltered segment, like by_form — the page narrows only items (ruling R6)
+    assert page["total"] == 3 and page["by_form"]["template"] == 1
 
 
 @pytest.mark.asyncio

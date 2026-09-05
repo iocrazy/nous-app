@@ -97,6 +97,12 @@ class PromptCatalogService:
         limit: int,
         offset: int,
     ) -> Dict[str, Any]:
+        """One page of a segment.
+
+        All three counters — ``total``, ``by_form``, ``by_origin`` — describe the
+        WHOLE segment; only ``items`` is narrowed by form / origin / q and then
+        paginated (ruling R6).
+        """
         entries = await self._segment(scope_id, segment, project_id)
         by_form = {f: sum(1 for e in entries if e["form"] == f) for f in FORMS}
         by_origin = {o: sum(1 for e in entries if e["origin"] == o) for o in ORIGINS}
@@ -107,14 +113,13 @@ class PromptCatalogService:
             and (origin is None or e["origin"] == origin)
             and matches_query(e, q or "")
         ]
-        # ``total`` counts the NARROWED set — it is what the page slice is a
-        # slice of, so a client that paginates on it asks for pages that exist.
-        # ``by_form`` / ``by_origin`` above are the segment's unfiltered tallies:
-        # the chips answer "what would this filter reveal", which a narrowed
-        # count cannot (every chip but the active one would read 0).
+        # ``total`` is the segment, not the page: the shelf's "All N" chip and
+        # the "truly empty vs. no match" decision both read it that way, and a
+        # narrowed count would make an empty result indistinguishable from an
+        # empty library (ruling R6).
         return {
             "items": narrowed[offset : offset + limit],
-            "total": len(narrowed),
+            "total": len(entries),
             "by_form": by_form,
             "by_origin": by_origin,
         }
