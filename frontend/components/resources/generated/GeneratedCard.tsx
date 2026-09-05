@@ -15,6 +15,7 @@ import {
   generatedMediaCoverUrl,
   generatedMediaStreamUrl,
 } from '../../../services/generatedMediaService';
+import { mediaFormatLabel, placeholderFor } from '../mediaKindPlaceholder';
 import { SelectionCheck } from '../SelectionCheck';
 
 export interface GeneratedCardProps {
@@ -109,6 +110,10 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
 
   const pill = STATE_PILL[item.review_state];
   const isVideo = item.media_kind === 'video';
+  // `audio` and `file` rows have no frame to show. Before this they fell to
+  // the `<img>` below and rendered as a broken image — an audio file saved
+  // through "As Asset" (P6) looked like a failed generation.
+  const placeholder = placeholderFor(item.media_kind);
   const coverUrl = generatedMediaCoverUrl(item.id);
 
   const created = new Date(item.created_at);
@@ -131,7 +136,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     'generated.action.saveHint',
     'Turn this into a regular file in My Uploads',
   );
-  const assetLabel = t('generated.action.saveAsAsset', 'Add To Asset');
+  const assetLabel = t('generated.action.saveAsAsset', 'As Asset');
   const assetHint = t(
     'generated.action.saveAsAssetHint',
     "Attach it to an asset card's slot (character, location, …)",
@@ -193,6 +198,22 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
               className="h-full w-full object-cover"
               aria-hidden="true"
             />
+          ) : placeholder ? (
+            // No player: pressing the tile opens the lightbox, which is where
+            // an audio player belongs when one arrives. The badge is the mime
+            // subtype — the wire carries no filename and no duration, and the
+            // title line under the tile is the row's name.
+            <span
+              data-testid="generated-card-placeholder"
+              data-media-kind={item.media_kind}
+              className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-content-4"
+            >
+              <placeholder.Icon size={28} aria-hidden="true" />
+              <span className="max-w-full truncate px-2 text-[10px] font-medium uppercase tracking-wide">
+                {mediaFormatLabel(item.mime) ??
+                  t(placeholder.labelKey, placeholder.fallback)}
+              </span>
+            </span>
           ) : (
             <img src={coverUrl} alt="" className="h-full w-full object-cover" />
           )}

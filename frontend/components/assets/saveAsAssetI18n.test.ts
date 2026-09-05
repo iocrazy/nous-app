@@ -92,6 +92,27 @@ describe('As Asset i18n', () => {
     expect(at(en, 'resources.saveAsAssetSource')).toBe('My Uploads');
   });
 
+  // One action, three doors: the My Uploads context menu, the Generated
+  // inbox card/batch/lightbox, and a canvas Output node. They drifted into
+  // "As Asset" / "Add To Asset" / "As Asset…" in en and, worse, into three
+  // different NOUNS in zh (存为资产 / 归入资产 / 存为素材) — 素材 and 资产 are
+  // different things in this product, so a zh reader could not tell the three
+  // entries opened the same dialog. Pinning the equality, not the literal, is
+  // what makes a future rename move all four together or fail here.
+  it.each(['en', 'zh'] as const)('every entry into this dialog is labelled the same in %s', (lang) => {
+    const tree = lang === 'en' ? en : zh;
+    const labels = [
+      'resources.saveAsAsset',
+      'generated.action.saveAsAsset',
+      'canvas.asAsset.action',
+      // The dialog those three open. A heading that says something else is
+      // the same inconsistency one screen later.
+      'saveAsAsset.title',
+    ].map((key) => at(tree, key));
+    expect(new Set(labels).size).toBe(1);
+    expect(labels[0]).toBe(lang === 'en' ? 'As Asset' : '存为资产');
+  });
+
   it('the zh strings are actually translated, not the English copied over', () => {
     for (const key of MENU_KEYS) expect(at(zh, key)).not.toBe(at(en, key));
     for (const code of RESOURCE_SAVE_AS_ASSET_ERROR_CODES) {

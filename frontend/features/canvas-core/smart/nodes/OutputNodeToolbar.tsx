@@ -46,7 +46,7 @@ export interface OutputNodeToolbarProps {
   onRerun?: () => void;
   rerunning?: boolean;
   /**
-   * "As Asset…" (P4 Task 6) — promote this output into the asset library.
+   * "As Asset" (P4 Task 6) — promote this output into the asset library.
    *
    * ALWAYS RENDERED WHEN SUPPLIED, EVEN WHEN IT CANNOT RUN. An output whose
    * image predates the `GeneratedImageRef.id` field has no `generated_media`
@@ -177,7 +177,7 @@ export function OutputNodeToolbar({
       )}
       {onAsAsset && (
         <ToolbarButton
-          label={t('canvas.asAsset.action', 'As Asset…')}
+          label={t('canvas.asAsset.action', 'As Asset')}
           onClick={onAsAsset}
           disabled={readOnly || asAssetDisabled}
           // Both disabled paths say WHY. `asAssetDisabled` covers "not an

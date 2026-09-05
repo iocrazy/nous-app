@@ -19,6 +19,7 @@ import { useToast } from '../../Toast';
 import { cleanupGenerated, GeneratedApiError } from '../../../services/generatedService';
 import type { CleanupResult, GeneratedItem } from '../../../services/generatedService';
 import { generatedMediaCoverUrl } from '../../../services/generatedMediaService';
+import { placeholderFor } from '../mediaKindPlaceholder';
 
 /** How many of `sample` we show. The backend may send more; a preview is a
  *  reassurance, not a gallery. */
@@ -175,15 +176,32 @@ export const CleanupDialog: React.FC<CleanupDialogProps> = ({ scopeId, onClose, 
               })}
             </p>
             <div className="grid grid-cols-6 gap-1.5">
-              {sample.map((entry) => (
-                <img
-                  key={entry.id}
-                  data-testid="cleanup-sample"
-                  src={generatedMediaCoverUrl(entry.id)}
-                  alt={entry.title}
-                  className="aspect-square w-full rounded-md border border-line object-cover"
-                />
-              ))}
+              {sample.map((entry) => {
+                // Same rule as the grid card: an `audio` or `file` row has no
+                // frame, and a `/cover` request for one draws a broken-image
+                // icon. A preview whose job is "look at what is about to be
+                // deleted" must not show damage that is not there.
+                const placeholder = placeholderFor(entry.media_kind);
+                return placeholder ? (
+                  <span
+                    key={entry.id}
+                    data-testid="cleanup-sample"
+                    data-media-kind={entry.media_kind}
+                    title={entry.title}
+                    className="flex aspect-square w-full items-center justify-center rounded-md border border-line text-content-4"
+                  >
+                    <placeholder.Icon size={18} aria-hidden="true" />
+                  </span>
+                ) : (
+                  <img
+                    key={entry.id}
+                    data-testid="cleanup-sample"
+                    src={generatedMediaCoverUrl(entry.id)}
+                    alt={entry.title}
+                    className="aspect-square w-full rounded-md border border-line object-cover"
+                  />
+                );
+              })}
             </div>
             {/* `truncated` means one pass scanned a bounded window: `count` is
                 "matched in this pass", not "matched ever". Staying silent here

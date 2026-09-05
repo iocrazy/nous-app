@@ -17,7 +17,7 @@ import {
 const NOW = new Date('2026-08-29T12:00:00.000Z');
 
 describe('SOURCE_OPTIONS', () => {
-  it('lists the six origin kinds the backend emits, each with an i18n key', () => {
+  it('lists the seven origin kinds the backend emits, each with an i18n key', () => {
     expect(SOURCE_OPTIONS.map((o) => o.kind)).toEqual([
       'canvas_run',
       'canvas_upload',
@@ -25,6 +25,7 @@ describe('SOURCE_OPTIONS', () => {
       'shot_video',
       'agent_run',
       'chat_upload',
+      'library_upload',
     ]);
     expect(SOURCE_OPTIONS.map((o) => o.labelKey)).toEqual([
       'generated.source.canvas_run',
@@ -33,7 +34,29 @@ describe('SOURCE_OPTIONS', () => {
       'generated.source.shot_video',
       'generated.source.agent_run',
       'generated.source.chat_upload',
+      'generated.source.library_upload',
     ]);
+  });
+});
+
+describe('library_upload is a filterable origin, not just a card label', () => {
+  // The rows "As Asset" mints from My Uploads carry this kind. It was the one
+  // origin the backend writes that the chip did not offer, so the card showed
+  // a source the filter could not select — and a hand-edited URL asking for it
+  // was dropped as unknown, which looks exactly like "no rows match".
+  it('survives the URL round trip', () => {
+    expect(parseFilters(new URLSearchParams('origin_kind=library_upload')).originKinds).toEqual(
+      ['library_upload'],
+    );
+  });
+
+  it('reaches the router as a list option', () => {
+    expect(
+      listOptionsFor(
+        { ...defaultGeneratedFilters(), originKinds: ['library_upload'] },
+        NOW,
+      ),
+    ).toEqual({ state: 'unreviewed', originKinds: ['library_upload'] });
   });
 });
 
@@ -74,6 +97,14 @@ describe('parseFilters', () => {
   it('treats blank strings as absent', () => {
     const sp = new URLSearchParams('project_id=&model=&origin_kind=');
     expect(parseFilters(sp)).toEqual(defaultGeneratedFilters());
+  });
+
+  // Both are real wire values: `audio` is what P6's My Uploads → As Asset
+  // mints, `file` is a chat upload that is neither image nor video. Before
+  // they were accepted here, a shared `?media_kind=audio` link silently
+  // dropped the filter and showed everything.
+  it.each(['audio', 'file'] as const)('accepts media_kind=%s from the URL', (kind) => {
+    expect(parseFilters(new URLSearchParams(`media_kind=${kind}`)).mediaKind).toBe(kind);
   });
 });
 

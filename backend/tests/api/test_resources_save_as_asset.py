@@ -159,6 +159,7 @@ class FakeGenRepo:
             file_path=kw["file_path"],
             origin_kind=kw["origin_kind"],
             conversation_id=kw["conversation_id"],
+            params=dict(kw.get("params") or {}),
             promoted_resource_id=str(kw["resource_id"]),
             review_state="saved",
         )
@@ -337,6 +338,76 @@ async def test_the_minted_row_carries_the_resources_own_file_and_owner(app):
     assert kw["media_kind"] == "image"
     assert kw["conversation_id"] is None
     assert kw["scope_id"] == int(SCOPE)
+
+
+@pytest.mark.asyncio
+async def test_the_minted_row_is_titled_after_the_file(app):
+    """A registered resource has no generation prompt, so ``derive_title``
+    used to fall through to ``f"{media_kind} · {origin_kind}"`` — an mp3 saved
+    through "As Asset" read **audio · library_upload**, naming neither the file
+    nor anything the user wrote. The file's own stem is the title source.
+
+    Asserted on the RESPONSE's derived title, not only on the mint kwarg: the
+    kwarg alone would pass even if ``derive_title`` ignored the new source."""
+    r = await _post(app)
+    assert r.status_code == 201, r.text
+    assert app.state.repo.inserts[0]["params"] == {"source_filename": "harbour"}
+    assert r.json()["data"]["generation"]["title"] == "harbour"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("song.mp3", "song"),
+        # Only the LAST suffix goes: guessing at double extensions would eat
+        # a real part of the name. The dot that SURVIVES is the reason the name
+        # travels in ``params`` and not in ``prompt`` — ``derive_title`` cuts a
+        # prompt at its first ``.``, so this row would have been titled
+        # "stems" through that route.
+        ("stems.tar.gz", "stems.tar"),
+        # A leading-dot name is all name and no extension. Through ``prompt``
+        # it would have cut to nothing and taken the fallback.
+        (".gitignore", ".gitignore"),
+        # No dot at all.
+        ("masterlist", "masterlist"),
+        # Dots inside the stem are the common real case, not an edge one.
+        ("interview.v2.mp3", "interview.v2"),
+    ],
+)
+async def test_the_extension_is_stripped_but_the_name_is_not(
+    monkeypatch, filename, expected
+):
+    application = build_app(
+        monkeypatch,
+        resources=FakeResources(
+            [make_resource(filename=filename, mime_type="audio/mpeg")]
+        ),
+    )
+    r = await _post(application)
+    assert r.status_code == 201, r.text
+    assert application.state.repo.inserts[0]["params"] == {"source_filename": expected}
+    assert r.json()["data"]["generation"]["title"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["", "   ", None])
+async def test_a_nameless_resource_keeps_the_descriptive_fallback(
+    monkeypatch, filename
+):
+    """No key at all, never an empty one: with nothing to name the row after,
+    ``derive_title`` should reach its descriptive fallback rather than title
+    the card the empty string, which renders as a blank card."""
+    application = build_app(
+        monkeypatch,
+        resources=FakeResources(
+            [make_resource(filename=filename, mime_type="audio/mpeg")]
+        ),
+    )
+    r = await _post(application)
+    assert r.status_code == 201, r.text
+    assert application.state.repo.inserts[0]["params"] == {}
+    assert r.json()["data"]["generation"]["title"] == "audio · library_upload"
 
 
 @pytest.mark.asyncio

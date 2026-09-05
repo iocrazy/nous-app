@@ -23,7 +23,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, FileAudio, Film, Image as ImageIcon, Loader2, Plus } from 'lucide-react';
+import { Check, Film, Image as ImageIcon, Loader2, Plus } from 'lucide-react';
 
 import { UiModal } from '../ui/primitives';
 import { useToast } from '../Toast';
@@ -41,8 +41,12 @@ import {
 } from '../../services/generatedService';
 import type { GeneratedItem, SaveAsAssetBody } from '../../services/generatedService';
 import { generatedMediaCoverUrl } from '../../services/generatedMediaService';
+import { NON_VISUAL_MEDIA, placeholderFor } from '../resources/mediaKindPlaceholder';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ASSET_TYPES, UNSORTED, slotsFor, type AssetType } from './assetSlots';
+
+/** The one audio icon. Aliased so the fallback below reads as an icon. */
+const AudioIcon = NON_VISUAL_MEDIA.audio.Icon;
 
 /** Keystrokes settle before the search fires. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -267,8 +271,11 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
         // The resource's own cover endpoint, NOT a generated-media one: this
         // file may have no inbox row at all until the server mints one.
         coverUrl: getResourceCoverUrl(resource.id),
+        // Same shared icon the inbox card will draw for this very file once
+        // the server mints its row — the two views must not disagree about
+        // what an audio file looks like.
         coverFallbackIcon: isAudioish(resource) ? (
-          <FileAudio size={28} aria-hidden="true" />
+          <AudioIcon size={28} aria-hidden="true" />
         ) : (
           <ImageIcon size={28} aria-hidden="true" />
         ),
@@ -298,14 +305,19 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
       key: `generated:${itemsKey}`,
       title: head.title,
       coverUrl: generatedMediaCoverUrl(head.id),
-      coverFallbackIcon:
-        head.media_kind === 'video' ? (
-          <Film size={28} aria-hidden="true" />
-        ) : head.media_kind === 'audio' ? (
-          <FileAudio size={28} aria-hidden="true" />
+      // The non-visual kinds take their icon from the shared map, so the repo
+      // shows ONE audio icon rather than this file's own `FileAudio` beside
+      // the inbox card's `AudioLines` for the very same row. `file` had no
+      // branch at all and fell to the picture icon.
+      coverFallbackIcon: (() => {
+        if (head.media_kind === 'video') return <Film size={28} aria-hidden="true" />;
+        const placeholder = placeholderFor(head.media_kind);
+        return placeholder ? (
+          <placeholder.Icon size={28} aria-hidden="true" />
         ) : (
           <ImageIcon size={28} aria-hidden="true" />
-        ),
+        );
+      })(),
       metaLine: [head.model, when].filter(Boolean).join(' · '),
       sourceLabel: head.source.label,
       defaultName: head.title,
@@ -686,7 +698,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   return (
     <UiModal
       isOpen
-      title={t('saveAsAsset.title', 'Add To Asset')}
+      title={t('saveAsAsset.title', 'As Asset')}
       onClose={onClose}
       widthClassName="w-[680px]"
       footer={

@@ -239,3 +239,60 @@ class TestDeriveTitle:
         assert derive_title("  hello world  . tail", "image", None, None, "x") == (
             "hello world"
         )
+
+    # ── the filename source (registered My Uploads rows) ───────────────────
+
+    def test_filename_is_used_when_there_is_no_prompt(self):
+        assert (
+            derive_title(
+                None, "audio", None, None, "library_upload", filename="harbour"
+            )
+            == "harbour"
+        )
+
+    def test_filename_is_used_verbatim_and_never_cut_at_a_dot(self):
+        """The whole reason a filename is its OWN argument. Routed through
+        ``prompt`` this would be titled "interview" — the sentence cut is right
+        for prose and wrong for a file name."""
+        assert (
+            derive_title(
+                None, "audio", None, None, "library_upload", filename="interview.v2"
+            )
+            == "interview.v2"
+        )
+        assert (
+            derive_title(
+                None, "file", None, None, "library_upload", filename=".gitignore"
+            )
+            == ".gitignore"
+        )
+
+    def test_a_prompt_outranks_a_filename(self):
+        """Nothing that has a real prompt gets re-titled after a file."""
+        assert (
+            derive_title(
+                "A harbour at dusk. more",
+                "image",
+                None,
+                None,
+                "canvas_run",
+                filename="IMG_0042",
+            )
+            == "A harbour at dusk"
+        )
+
+    def test_a_blank_filename_still_reaches_the_fallback(self):
+        for blank in (None, "", "   "):
+            assert (
+                derive_title(
+                    None, "audio", None, None, "library_upload", filename=blank
+                )
+                == "audio · library_upload"
+            )
+
+    def test_a_long_filename_obeys_the_same_cap(self):
+        title = derive_title(
+            None, "file", None, None, "library_upload", filename="n" * 200
+        )
+        assert len(title) == 80
+        assert title.endswith("…")

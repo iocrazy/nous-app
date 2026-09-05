@@ -265,7 +265,11 @@ describe('SaveAsAssetDialog — resource variant prefill', () => {
     // lucide renders its name onto the svg, which is the only handle a test
     // has on WHICH icon was chosen. An audio file drawn as a picture frame is
     // a small lie, and the icon is the whole content of this placeholder.
-    expect(fallback.querySelector('svg')?.getAttribute('class')).toContain('file-audio');
+    //
+    // `audio-lines`, not this file's former `file-audio`: the icon now comes
+    // from `mediaKindPlaceholder`, so the SAME file gets the SAME icon here
+    // and on the inbox card the server is about to mint for it.
+    expect(fallback.querySelector('svg')?.getAttribute('class')).toContain('audio-lines');
   });
 
   it('a fresh cover is trusted again after the dialog reopens on another file', async () => {

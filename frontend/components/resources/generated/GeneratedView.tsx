@@ -40,6 +40,10 @@ import type {
 } from '../../../services/generatedService';
 import { GeneratedCard } from './GeneratedCard';
 import { CleanupDialog } from './CleanupDialog';
+import {
+  isNonVisualMediaKind,
+  type NonVisualMediaKind,
+} from '../mediaKindPlaceholder';
 import { PinLightbox } from '../assets/sheet/PinLightbox';
 import {
   generatedMediaFileUrl,
@@ -77,6 +81,19 @@ const SINCE_LABELS: Record<(typeof SINCE_PRESETS)[number], { key: string; fallba
 const MEDIA_KIND_LABELS: Record<(typeof MEDIA_KINDS)[number], { key: string; fallback: string }> = {
   image: { key: 'generated.type.image', fallback: 'Image' },
   video: { key: 'generated.type.video', fallback: 'Video' },
+  audio: { key: 'generated.type.audio', fallback: 'Audio' },
+  file: { key: 'generated.type.file', fallback: 'File' },
+};
+
+/** `media_kind` → what the lightbox should draw. Unknown kinds stay on the
+ *  image path, matching the backend's own default for an unrecognised mime.
+ *  The non-visual half comes from `isNonVisualMediaKind`, not from a second
+ *  copy of that list. */
+const lightboxKindFor = (
+  kind: string | undefined,
+): 'image' | 'video' | NonVisualMediaKind => {
+  if (kind === 'video') return 'video';
+  return isNonVisualMediaKind(kind) ? kind : 'image';
 };
 
 const MENU_ITEM =
@@ -644,7 +661,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             className={btn}
           >
             <PackagePlus size={13} aria-hidden="true" />
-            {t('generated.action.saveAsAsset', 'Add To Asset')}
+            {t('generated.action.saveAsAsset', 'As Asset')}
           </button>
         )}
         {item.review_state === 'unreviewed' &&
@@ -1065,7 +1082,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             onClick={() => openSaveAsAsset(selectedItems)}
             className="rounded-lg border border-accent bg-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
           >
-            {t('generated.action.saveAsAsset', 'Add To Asset')}
+            {t('generated.action.saveAsAsset', 'As Asset')}
           </button>
           {confirmingBatchDelete && deletableSelection ? (
             <button
@@ -1129,7 +1146,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
               ? generatedMediaStreamUrl(id)
               : generatedMediaFileUrl(id)
           }
-          kindFor={(id) => (itemsById.get(id)?.media_kind === 'video' ? 'video' : 'image')}
+          kindFor={(id) => lightboxKindFor(itemsById.get(id)?.media_kind)}
           metadataFor={(id) => renderLightboxMeta(itemsById.get(id))}
           actionsFor={(id) => renderLightboxActions(itemsById.get(id))}
         />

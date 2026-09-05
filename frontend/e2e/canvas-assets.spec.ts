@@ -5,7 +5,7 @@
 //   1. Insert an asset card from the node bar, wire it to a prompt, run — and
 //      the dispatched request carries the asset's REFERENCE URLS and its
 //      prompt text, not just the words the user typed.
-//   2. An output's "As Asset…" opens the library dialog already pointing at the
+//   2. An output's "As Asset" opens the library dialog already pointing at the
 //      asset the picture came from.
 //   3. A pre-P3 `character` card resolves to an asset card ON LOAD, in place.
 //   4. …and one the server cannot map says `Unmigrated` instead of guessing.
@@ -271,7 +271,7 @@ async function routeCanvasApi(
     return route.fallback();
   });
 
-  // ── /api/v1/generated/{id} — the row behind "As Asset…" ────────────────
+  // ── /api/v1/generated/{id} — the row behind "As Asset" ────────────────
   await page.route(`**/api/v1/generated/${GENERATION_ID}*`, (route) =>
     route.fulfill({ json: { success: true, data: GENERATED_ITEM } }),
   );
@@ -501,7 +501,7 @@ test('an asset card wired into a prompt puts its references and its prompt into 
   await page.screenshot({ path: 'e2e-artifacts/canvas-assets-run.png', fullPage: true });
 });
 
-// ─── 2. Output → As Asset… ───────────────────────────────────────────────────
+// ─── 2. Output → As Asset ───────────────────────────────────────────────────
 
 test('As Asset opens the library dialog on the asset the picture came from', async ({
   page,
@@ -519,7 +519,7 @@ test('As Asset opens the library dialog on the asset the picture came from', asy
       preview_url: PNG,
       crop_region: null,
       // `id` is the `generated_media` row — the field both import endpoints
-      // have always sent and which "As Asset…" resolves the row through.
+      // have always sent and which "As Asset" resolves the row through.
       images: [{ url: PNG, kind: 'image', name: 'one.png', id: GENERATION_ID }],
     },
   };
@@ -533,7 +533,7 @@ test('As Asset opens the library dialog on the asset the picture came from', asy
   const toolbar = node.getByTestId('output-node-toolbar');
   await expect(toolbar).toBeVisible();
 
-  const asAsset = toolbar.getByRole('button', { name: 'As Asset…' });
+  const asAsset = toolbar.getByRole('button', { name: 'As Asset' });
   await expect(asAsset).toBeEnabled();
   await asAsset.click();
 

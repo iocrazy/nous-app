@@ -48,6 +48,7 @@ from ``scope_id``, which for ``generated_media`` IS the team id.
 from __future__ import annotations
 
 import datetime
+from pathlib import PurePosixPath
 from typing import Any, Optional
 
 from app.db.session import unit_of_work
@@ -88,6 +89,13 @@ _CLEANUP_SAMPLE = 12
 # An origin_kind that is NULL/blank in the database would render as an empty
 # card label ("" reads as a broken card, not as "we don't know").
 _UNKNOWN_ORIGIN = "unknown"
+# ``params`` key holding the name a registered My Uploads row should be titled
+# after. In ``params`` and not in ``prompt``: the row has no prompt, and
+# ``derive_title`` treats a prompt as prose (it cuts at the first ``.``), which
+# would truncate ``interview.v2.mp3`` to ``interview``. ``params`` never
+# reaches the wire — ``GeneratedItem`` drops it — so this is internal
+# provenance, not a new public field.
+SOURCE_FILENAME_KEY = "source_filename"
 # The media kinds a LIBRARY resource may seed an asset file with, in the order
 # the refusal detail lists them. Both are ``mime`` top-level types AND the
 # ``generated_media.media_kind`` value written for them, which is why one tuple
@@ -96,6 +104,32 @@ _UNKNOWN_ORIGIN = "unknown"
 # visual reference, ``audio``'s ``primary``/``variants`` take an audio file,
 # and nothing in ``app/services/assets/slots.py`` takes a video or a document.
 ACCEPTED_ASSET_FILE_KINDS = ("image", "audio")
+
+
+def _title_source_from_filename(filename: Any) -> Optional[str]:
+    """A resource's filename, without its extension, as a card title source.
+
+    A registered My Uploads row has no generation prompt, so before this
+    ``derive_title`` fell all the way through to
+    ``f"{media_kind} · {origin_kind}"`` and an mp3 a user saved through "As
+    Asset" read **audio · library_upload** in the inbox — a label that names
+    neither the file nor anything the user typed.
+
+    Only the LAST suffix goes, and only when it leaves something behind:
+    ``song.mp3`` → ``song``, ``archive.tar.gz`` → ``archive.tar`` (guessing at
+    double extensions would eat real name parts), ``.gitignore`` → ``.gitignore``
+    (a leading-dot name is all name, no extension).
+
+    Returns ``None`` — not ``""`` — when there is no usable name, so the caller
+    writes no ``params`` key at all rather than an empty one; ``derive_title``
+    then still reaches its descriptive fallback, which is the right answer when
+    there is nothing to name the row after.
+    """
+    name = str(filename or "").strip()
+    if not name:
+        return None
+    stem = PurePosixPath(name).stem.strip()
+    return stem or None
 
 
 def _build_item(
@@ -119,6 +153,7 @@ def _build_item(
                 row.get("model"),
                 row.get("provider"),
                 kind,
+                filename=(row.get("params") or {}).get(SOURCE_FILENAME_KEY),
             ),
         }
     ).model_dump()
@@ -515,6 +550,14 @@ class GeneratedInboxService:
             "media_kind": media_kind,
             "conversation_id": None,
             "origin_kind": LIBRARY_UPLOAD_ORIGIN,
+            # What the card is titled after. Without it ``derive_title`` has
+            # nothing to work with and the row reads "audio · library_upload",
+            # naming neither the file nor anything the user wrote.
+            "params": (
+                {SOURCE_FILENAME_KEY: stem}
+                if (stem := _title_source_from_filename(resource.get("filename")))
+                else {}
+            ),
         }
 
     async def save_resource_as_asset(
