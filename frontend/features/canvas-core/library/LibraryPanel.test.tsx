@@ -45,6 +45,7 @@ const fetchGenerated = vi.fn();
 const listGenerationCapabilities = vi.fn();
 const placeLibraryItems = vi.fn();
 const addReferences = vi.fn();
+const importResourceAsCanvasMedia = vi.fn();
 
 vi.mock('../../../services/resourceSearchService', () => ({
   searchResources: (...a: unknown[]) => searchResources(...a),
@@ -69,10 +70,18 @@ vi.mock('./addReferences', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   addReferences: (...a: unknown[]) => addReferences(...a),
 }));
+// The mention path does NOT go through the mocked `addReferences` — it resolves
+// each picked row through the real `resolveReferenceRefs`, which mints a durable
+// url for an upload. Left unmocked it would reach the network from a unit test.
+vi.mock('../smart/mediaImport', () => ({
+  importResourceAsCanvasMedia: (...a: unknown[]) => importResourceAsCanvasMedia(...a),
+}));
 
+import { MAX_REFERENCE_IMAGES } from '../smart/refOrder';
 import { _resetModelCapabilitiesCache } from '../smart/nodes/useModelCapabilities';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { LibraryPanel } from './LibraryPanel';
+import { registerMentionHandle } from './mentionHandles';
 import { PREVIEW_DELAY_MS } from './LibraryPreviewCard';
 import { useLibraryStore } from './libraryStore';
 
@@ -88,6 +97,21 @@ const UPLOAD_ROW = {
   scope: { type: 'team' as const, id: SCOPE },
   updated_at: '2026-09-01T10:11:12Z',
   thumbnail_url: '/api/v1/resources/655000000000000001/cover',
+  transcript_status: null,
+  summary_status: null,
+};
+
+/** A second row, so a case can select TWO and assert the plural the app ships.
+ *  Same wire shape — string id, relative `thumbnail_url`. */
+const SECOND_UPLOAD_ROW = {
+  id: '655000000000000002',
+  name: 'harbour-dawn.png',
+  kind: 'image' as const,
+  mime: 'image/png',
+  size: 1,
+  scope: { type: 'team' as const, id: SCOPE },
+  updated_at: '2026-09-01T10:11:13Z',
+  thumbnail_url: '/api/v1/resources/655000000000000002/cover',
   transcript_status: null,
   summary_status: null,
 };
@@ -143,6 +167,39 @@ function promptNode(manualRefs: Array<{ url: string; kind: string }> = []) {
   };
 }
 
+/** A prompt card with NO `gen` — the legacy/Text kind. A text run sends
+ *  `body` only (`runner.backend.ts`), so a reference added here would be
+ *  dropped without a word; the panel offers MENTIONS instead. */
+function textPromptNode() {
+  return {
+    id: 'p1',
+    type: 'prompt',
+    position: { x: 0, y: 0 },
+    data: {
+      body: 'Harbour at dusk',
+      provider_slug: '',
+      agent_id: null,
+      run_status: 'idle',
+      resource_refs: [],
+      gen: null,
+    },
+  };
+}
+
+/** Stand in for the node's body editor. The real one is registered by
+ *  `PromptNodeView`; the panel only ever sees it through the registry. */
+const insertImage = vi.fn();
+const insertAsset = vi.fn();
+const handleUndos: Array<() => void> = [];
+function armMentionHandle(nodeId = 'p1') {
+  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset }));
+}
+function releaseHandles() {
+  while (handleUndos.length > 0) handleUndos.pop()?.();
+  insertImage.mockReset();
+  insertAsset.mockReset();
+}
+
 function renderPanel() {
   return render(
     <MemoryRouter initialEntries={[`/team/${SCOPE}/canvas/900000000000000001`]}>
@@ -188,11 +245,16 @@ beforeEach(() => {
     nodeIds: ['media-1'], inserted: 1, skipped: 0, failed: [],
   });
   addReferences.mockReset().mockResolvedValue({ added: 1, skipped: 0, clamped: 0, failed: [] });
+  importResourceAsCanvasMedia
+    .mockReset()
+    .mockResolvedValue({ url: '/api/v1/generated-media/gm-1/file', kind: 'image' });
+  releaseHandles();
 });
 
 afterEach(() => {
   HTMLElement.prototype.getBoundingClientRect = realRect;
   cleanup();
+  releaseHandles();
   useCanvasCoreStore.getState().reset();
 });
 
@@ -243,6 +305,123 @@ describe('LibraryPanel', () => {
     expect(screen.getByTestId('library-segment-assets').getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(screen.getByTestId('library-segment-generated'));
     expect(useLibraryStore.getState().mediaStore).toBe('generated');
+  });
+
+  it('the Files segment offers four source chips, All pressed', async () => {
+    // The shelf lists every source_type in the scope — Douyin downloads,
+    // uploads, derived cover frames, saved generations. It was labelled
+    // "Uploads", which named a quarter of what it showed.
+    await openOnUploads();
+    for (const v of ['all', 'upload', 'web', 'generated']) {
+      expect(screen.getByTestId(`library-source-${v}`)).toBeTruthy();
+    }
+    expect(
+      screen.getByTestId('library-source-all').getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('a source chip reaches the wire, not just the button state', async () => {
+    await openOnUploads();
+    searchResources.mockClear();
+    fireEvent.click(screen.getByTestId('library-source-web'));
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('web');
+    // Generated folds `derived` in: a cover frame cut from a video is neither
+    // uploaded nor downloaded, and its own chip would name an internal
+    // source_type nobody chose.
+    searchResources.mockClear();
+    fireEvent.click(screen.getByTestId('library-source-generated'));
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('generated,derived');
+  });
+
+  it('the source row belongs to Files alone, and resets on the way back', async () => {
+    await openOnUploads();
+    fireEvent.click(screen.getByTestId('library-source-web'));
+    fireEvent.click(screen.getByTestId('library-segment-generated'));
+    expect(screen.queryByTestId('library-source-all')).toBeNull();
+    fireEvent.click(screen.getByTestId('library-segment-uploads'));
+    expect(
+      screen.getByTestId('library-source-all').getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      screen.getByTestId('library-source-web').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('the Assets shelf opens narrowed to the library, and says so', async () => {
+    await openOnAssets();
+    const toggle = screen.getByTestId('library-in-library-toggle');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(searchAssets).toHaveBeenCalledWith(
+      SCOPE,
+      expect.objectContaining({ library: 'in' }),
+    );
+  });
+
+  it('releasing the toggle re-queries wide, not just repaints the pill', async () => {
+    await openOnAssets();
+    searchAssets.mockClear();
+    fireEvent.click(screen.getByTestId('library-in-library-toggle'));
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    expect(searchAssets.mock.calls[0][1].library).toBe('all');
+    expect(
+      screen.getByTestId('library-in-library-toggle').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('an empty narrowed Assets shelf names the pill, not "you own nothing"', async () => {
+    // The generic empty copy is a dead end here: the shelf is empty BECAUSE of
+    // a pill three rows up, and nothing on screen connected the two. The
+    // pointed copy is the only thing that makes the state recoverable.
+    searchAssets.mockResolvedValue([]);
+    listAssets.mockResolvedValue([]);
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets' });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('library-empty')).toBeTruthy());
+    const empty = screen.getByTestId('library-empty').textContent ?? '';
+    expect(empty).toContain('turn off In Library Only');
+    expect(empty).not.toBe('Nothing Here Yet');
+  });
+
+  it('the WIDE Assets shelf keeps the plain empty copy — nothing to turn off', async () => {
+    searchAssets.mockResolvedValue([]);
+    listAssets.mockResolvedValue([]);
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets' });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('library-empty')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('library-in-library-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('library-empty').textContent).toBe('Nothing Here Yet'),
+    );
+  });
+
+  it('an empty FILES shelf keeps the plain copy — the pill is not its control', async () => {
+    // The hint names a control the Files shelf does not draw, so offering it
+    // there would send the user looking for a pill that is not on screen.
+    searchResources.mockResolvedValue({
+      results: [],
+      counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads' });
+    });
+    renderPanel();
+    await waitFor(() =>
+      expect(screen.getByTestId('library-empty').textContent).toBe('Nothing Here Yet'),
+    );
+  });
+
+  it('the toggle belongs to Assets alone', async () => {
+    await openOnUploads();
+    expect(screen.queryByTestId('library-in-library-toggle')).toBeNull();
+    fireEvent.click(screen.getByTestId('library-segment-generated'));
+    expect(screen.queryByTestId('library-in-library-toggle')).toBeNull();
   });
 
   it('names the node it is aiming at, and says what will happen to it', async () => {
@@ -561,5 +740,207 @@ describe('LibraryPanel', () => {
     await openOnUploads();
     fireEvent.click(screen.getByTestId('library-select-all'));
     expect(useLibraryStore.getState().selection).toEqual([`uploads:${UPLOAD_ROW.id}`]);
+  });
+});
+
+// ── A Text-kind target commits MENTIONS, not references ─────────────────────
+//
+// The header's Open Library button (follow-up Task 3) can aim the panel at a
+// prompt of ANY kind, and a text run sends `body` alone — `manual_refs` on a
+// text node is dropped by the runner with nothing said. So when the aim is a
+// text prompt the primary action writes chips into the body instead, which is
+// the same result the `⌥`-drop already produces.
+
+describe('LibraryPanel aimed at a Text-kind prompt', () => {
+  const TEXT_TARGET = { nodeId: 'p1', kind: 'prompt' as const, title: 'Harbour at dusk' };
+
+  it('offers Insert Mentions where a gen node offers Add References', async () => {
+    // TWO rows, so the asserted string is the SHIPPED plural. At count 1
+    // i18next resolves `insertMentions_one` — "Insert 1 Mention" — while the
+    // stub `t` here renders the `defaultValue`, which is the _other_ form. The
+    // one-row assertion therefore pinned a string the app never paints.
+    searchResources.mockResolvedValue({
+      results: [UPLOAD_ROW, SECOND_UPLOAD_ROW],
+      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    act(() => {
+      useLibraryStore.getState().openPanel({
+        page: 'media', mediaStore: 'uploads', target: TEXT_TARGET,
+      });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(2));
+    fireEvent.click(screen.getByTestId('library-select-all'));
+    expect(screen.getByTestId('library-primary').textContent).toContain('Insert 2 Mentions');
+  });
+
+  it('a gen node still offers Add References — the split is on `gen`, not on the panel', async () => {
+    // Two rows for the same reason as the mention case above: the shipped
+    // singular is `addReferences_one` — "Add 1 Reference" — and the stub `t`
+    // would render the plural `defaultValue` at count 1.
+    searchResources.mockResolvedValue({
+      results: [UPLOAD_ROW, SECOND_UPLOAD_ROW],
+      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
+    seedNodes([promptNode()]);
+    armMentionHandle();
+    act(() => {
+      useLibraryStore.getState().openPanel({
+        page: 'media', mediaStore: 'uploads', target: TEXT_TARGET,
+      });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(2));
+    fireEvent.click(screen.getByTestId('library-select-all'));
+    expect(screen.getByTestId('library-primary').textContent).toContain('Add 2 References');
+  });
+
+  it('inserting writes a chip through the node handle, and never a reference', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(insertImage).toHaveBeenCalledTimes(1));
+    // `consumeMention: false` is load-bearing: the default deletes back to the
+    // last `@` within 80 characters of the caret, which is the `@` picker's
+    // contract and destroys text on a path that has no pending query.
+    expect(insertImage.mock.calls[0][1]).toEqual({ consumeMention: false });
+    expect(insertImage.mock.calls[0][0]).toMatchObject({
+      url: '/api/v1/generated-media/gm-1/file',
+      alias: UPLOAD_ROW.name,
+    });
+    expect(addReferences).not.toHaveBeenCalled();
+    // A commit that worked clears the pick, exactly as the reference path does
+    // — otherwise a second click silently inserts the same chip again.
+    await waitFor(() => expect(useLibraryStore.getState().selection).toEqual([]));
+  });
+
+  it('the target BAR says mentions too — not references over a mention button', async () => {
+    // The bar is the line the user reads first. Left on "Adding references to
+    // Harbour at dusk" over a button that inserts chips, it is the same class
+    // of lie as a silent no-op: it describes an outcome the panel will not
+    // produce. Both sites derive it from `isMentionTarget`.
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    const bar = screen.getByTestId('library-target').textContent ?? '';
+    expect(bar).toContain('Inserting mentions into Harbour at dusk');
+    expect(bar).not.toContain('Adding references');
+  });
+
+  it('an Image-kind target keeps the reference wording in that same bar', async () => {
+    seedNodes([promptNode()]);
+    await openOnUploads(TEXT_TARGET);
+    const bar = screen.getByTestId('library-target').textContent ?? '';
+    expect(bar).toContain('Adding references to Harbour at dusk');
+    expect(bar).not.toContain('Inserting mentions');
+  });
+
+  it('says the consequence in the text prompt is chips, not reference images', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    const line = screen.getByTestId('library-consequence').textContent ?? '';
+    expect(line).toContain('Inserting mentions into Harbour at dusk');
+    expect(line).toContain('not reference images');
+  });
+
+  it('with no editor registered it refuses OUT LOUD rather than doing nothing', async () => {
+    // The card can be unmounted — the surface culls off-viewport nodes — and
+    // an insert into an editor that is not there must not be a silent no-op.
+    seedNodes([textPromptNode()]);
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    expect(String(addToast.mock.calls[0][0])).toContain('Open the prompt node');
+    expect(String(addToast.mock.calls[0][1])).toBe('error');
+    expect(insertImage).not.toHaveBeenCalled();
+    // The pick survives a refusal — clearing it would look like success.
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('a mention that fails is reported in the mention vocabulary', async () => {
+    importResourceAsCanvasMedia.mockRejectedValue(new Error('mint down'));
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    expect(String(addToast.mock.calls[0][0])).toContain('could not be inserted as a mention');
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('an inserter that throws reaches the TOAST, not a cleared pick', async () => {
+    // `PromptNodeView` registers wrappers that throw when the body editor has
+    // gone. Before that, they optional-chained the null away and returned
+    // `undefined` — so the run counted a chip, the panel reported success and
+    // cleared the pick, and the body was untouched. The whole point of the
+    // throw is that this end of the path can speak.
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    insertImage.mockImplementation(() => {
+      throw new Error('prompt body editor is not mounted');
+    });
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    // Non-vacuous: the row DID resolve to a durable ref and the inserter WAS
+    // reached. Without this the case would also pass if the refusal had
+    // happened earlier, for a reason that has nothing to do with the editor.
+    expect(insertImage).toHaveBeenCalled();
+    expect(String(addToast.mock.calls[0][0])).toContain('could not be inserted as a mention');
+    expect(String(addToast.mock.calls[0][1])).toBe('error');
+    // The pick survives, so there is something to retry from.
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('double-clicking one row inserts that row alone', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.doubleClick(screen.getAllByTestId('library-cell')[0]);
+    await waitFor(() => expect(insertImage).toHaveBeenCalledTimes(1));
+    expect(addReferences).not.toHaveBeenCalled();
+  });
+
+  it('drops the reference file count — a mention is not a reference send', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    // The footer's "N files" describes what the model receives as references.
+    // On a text prompt that number is zero by construction, and printing it
+    // would claim a send that never happens.
+    const footer = screen.getByTestId('library-footer-count').textContent ?? '';
+    expect(footer).toContain('1 selected');
+    expect(footer).not.toContain('file');
+  });
+
+  it('leftover manual_refs on a switched-to-Text node do not raise a quota note', async () => {
+    // Switching a card from Image to Text keeps whatever `manual_refs` it had.
+    // Those are dead weight a text run ignores, so a "20 / 20 references used"
+    // note over a mention shelf would be a true number about the wrong thing —
+    // and the ceiling it enforces would disable an action that spends none of
+    // that quota. Filled to `MAX_REFERENCE_IMAGES` on purpose: below it the
+    // case passes whether or not the mention branch is exempt.
+    const node = textPromptNode();
+    (node.data as Record<string, unknown>).manual_refs = Array.from(
+      { length: MAX_REFERENCE_IMAGES },
+      (_, i) => ({ url: `/api/v1/resources/${i + 1}/cover`, kind: 'image' }),
+    );
+    seedNodes([node]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    expect(screen.queryByTestId('library-note')).toBeNull();
+    expect((screen.getByTestId('library-primary') as HTMLButtonElement).disabled).toBe(false);
   });
 });

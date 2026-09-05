@@ -73,20 +73,23 @@ const COMMENT_OPENER = /^\/[*/]/;
  *  true. */
 const T_DEFAULT = /\bt\(\s*'[^']*'\s*,\s*'([^']*)'/g;
 
-/** The LABEL-TUPLE form — `['canvas.library.scopeAllLibrary', 'All Library']`
- *  in a lookup table, resolved later as `t(key, english)`.
+/** The LABEL-TUPLE form — `['canvas.library.storeUploads', 'Files']` in a
+ *  lookup table, resolved later as `t(key, english)`.
  *
  *  This is a THIRD blind spot, and the panel opened it. `canvas.library.*`
  *  keys must be single-quoted literals for `libraryI18n.test.ts` to see them,
  *  so a component with a chip row per store keeps its keys in a const map —
  *  which moves the English default out of `t()`'s literal form and straight
  *  past `T_DEFAULT` above. Every segment, scope and kind chip in the panel is
- *  written this way, and `All Library` is one of them: without this pattern,
- *  naming a second thing Library from a lookup table leaves the suite green.
+ *  written this way, so naming a second thing Library from a lookup table
+ *  would otherwise leave the suite green.
  *
- *  Scanned across the whole tree it matches 37 pairs, of which exactly one
- *  carries the word — so it costs nothing and the `HAS_LIBRARY` filter below
- *  does the rest. */
+ *  NO label tuple carries the word today — `All Library` did until the review
+ *  wave renamed it `Whole Workspace` (it collided with the in-library pill
+ *  sitting in the same chip row). That is why the canary case below asserts
+ *  the pattern still MATCHES PAIRS rather than matches offenders: a guard
+ *  verified only by the thing it currently catches goes silent the day that
+ *  thing is fixed, and this one has to survive the next chip map. */
 const LABEL_TUPLE = /\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g;
 
 const HAS_LIBRARY = /\blibrary\b/i;
@@ -126,9 +129,15 @@ const ALLOWED_DEFAULTS = new Set([
   'Could not load the asset library',
   // OutputNodeView: this image has no generated-media record to save from.
   'This image has no library record to save',
-  // The panel's asset-scope chip: the whole media library, as opposed to
-  // just what this project links. Names THE library, not a choice of one.
-  'All Library',
+  // The panel's Assets empty state, when the in-library pill is what emptied
+  // it. Names THE library and the pill that narrows it — the pointed copy is
+  // the only thing that makes that state recoverable.
+  'No Library Members Here · turn off In Library Only to see everything',
+  // Every prompt card's fixed header button, which opens THE panel. It is
+  // deliberately not "Open Media Library" or "Open Assets": one library per
+  // canvas is the whole point of this guard, so the bare word is the correct
+  // name here rather than a disambiguation that would imply a second one.
+  'Open Library',
 ]);
 
 /** All three patterns, over one file. */
@@ -172,7 +181,7 @@ describe('the word Library on the canvas', () => {
     // Without this, a typo in LABEL_TUPLE would silently stop scanning the
     // const maps every chip row in the panel is built from.
     const pairs = tsFiles(ROOT).flatMap((f) => [
-      ...fs.readFileSync(f, 'utf8').matchAll(/\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g),
+      ...fs.readFileSync(f, 'utf8').matchAll(LABEL_TUPLE),
     ]);
     expect(pairs.length).toBeGreaterThan(20);
   });

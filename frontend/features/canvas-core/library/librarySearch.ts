@@ -47,7 +47,61 @@ export interface LibraryItem {
 }
 
 export type GeneratedScope = 'this-canvas' | 'today' | 'all';
+
+/** The Files shelf's source chips.
+ *
+ *  The shelf was called "Uploads" and listed every file in the scope: Douyin
+ *  downloads (`web`), real uploads, cover frames cut from a video (`derived`)
+ *  and saved generations. Renaming it "Files" makes the label honest; these
+ *  chips are what makes the old promise reachable. */
+export type UploadSource = 'all' | 'upload' | 'web' | 'generated';
+
+/** Wire csv per chip. `generated` folds `derived` in: cover frames cut from a
+ *  video are neither uploaded nor downloaded, and a fourth chip for them would
+ *  name an internal source_type nobody chose. */
+export const UPLOAD_SOURCE_CSV: Record<UploadSource, string> = {
+  all: '',
+  upload: 'upload',
+  web: 'web',
+  generated: 'generated,derived',
+};
+
+export const UPLOAD_SOURCES: readonly UploadSource[] = [
+  'all',
+  'upload',
+  'web',
+  'generated',
+];
+
+/** `[i18n key, English default]` per chip, in the order above.
+ *
+ *  Lives HERE, beside `UPLOAD_SOURCES` and `UPLOAD_SOURCE_CSV`, because the
+ *  panel's Files shelf and the `@` picker's Files tab draw the same four chips
+ *  over the same wire values — two local copies is how the same chip acquires
+ *  two names, which is exactly the drift the "Files" rename existed to end.
+ *
+ *  `generated` reads "Saved Generations", not "Generated": the Generated
+ *  SEGMENT is the `generated_media` inbox, while this chip is
+ *  `resources.source_type IN ('generated','derived')` — a different
+ *  population. One word for both would say the two shelves answer alike.
+ *
+ *  Single-quoted key literals on purpose: `libraryI18n.test.ts` scans for
+ *  exactly that shape, and a key built by template literal is invisible to it. */
+export const SOURCE_LABEL: Record<UploadSource, readonly [string, string]> = {
+  all: ['canvas.library.sourceAll', 'All'],
+  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
+  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
+  generated: ['canvas.library.sourceGenerated', 'Saved Generations'],
+};
+
 export type AssetScope = 'this-project' | 'all';
+
+/** Which side of `assets.in_library` the Assets shelf wants.
+ *
+ *  A narrower union than the service's `AssetLibraryFilter`: `out` — the
+ *  rows nobody has adopted — is a triage view, and this is a picker. The
+ *  shelf either answers "my library" or "everything this scope can see". */
+export type AssetsLibrary = 'in' | 'all';
 
 export interface LibrarySearchOptions {
   scopeId: string;
@@ -56,6 +110,15 @@ export interface LibrarySearchOptions {
   assetScope?: AssetScope;
   projectId?: string | null;
   uploadKinds?: string;
+  /** Already the wire csv (`UPLOAD_SOURCE_CSV[chip]`), not the chip name: the
+   *  fold from `generated` to `generated,derived` belongs next to the chip
+   *  table, not in every consumer. */
+  uploadSources?: string;
+  /** Defaults to `in` in `fetchLibraryAssets`. Undefined therefore means the
+   *  narrow shelf, not "server default" — the list branch's server default is
+   *  `in` and the search branch's is `all`, so sending the value explicitly is
+   *  what stops the two from answering differently. */
+  assetsLibrary?: AssetsLibrary;
   generatedScope?: GeneratedScope;
   canvasId?: string | null;
   limit?: number;
@@ -140,16 +203,20 @@ export async function fetchLibraryAssets(
 ): Promise<LibraryItem[]> {
   if (!opts.scopeId) throw new LibraryScopeError();
   const q = query.trim() || undefined;
-  // `library: 'all'` — EXPLICIT, and the explicitness is the point. The
-  // server's default is `in` (library members only), which hides script
-  // imports and every asset the P4 legacy-card migration created — exactly the
-  // population a canvas points at. The mention palette chooses the same.
+  // `in` by default — the shelf answers "my library", and a library member is
+  // one somebody ADDED (mig 449, user ruling reaffirmed 2026-09-05). Script
+  // imports and the rows the P4 legacy-card migration created were never
+  // added, so listing them would present as library members things that are
+  // not. The widen toggle is what keeps them reachable, and it is why this
+  // reads an option rather than a constant: both branches honour it, because
+  // "This Project" is the one a wired-up-in-one-place widen would miss.
+  const library = opts.assetsLibrary ?? 'in';
   if (opts.assetScope === 'this-project' && opts.projectId) {
     const rows = await listAssets(opts.scopeId, {
       q,
       type: opts.assetType ?? undefined,
       projectId: opts.projectId,
-      library: 'all',
+      library,
       limit: opts.limit ?? LIMIT,
     });
     return rows.map(assetToLibraryItem);
@@ -157,7 +224,7 @@ export async function fetchLibraryAssets(
   const rows = await searchAssets(opts.scopeId, {
     q,
     type: opts.assetType ?? undefined,
-    library: 'all',
+    library,
     limit: opts.limit ?? LIMIT,
   });
   return rows.map(assetToLibraryItem);
@@ -172,6 +239,7 @@ export async function fetchLibraryUploads(
   const resp = await searchResources({
     q: query.trim(),
     kinds: opts.uploadKinds ?? '',
+    sources: opts.uploadSources ?? '',
     limit: opts.limit ?? 50, // 50 is the backend's own ceiling for this route
     teamId: opts.scopeId,
     signal,
@@ -278,8 +346,8 @@ export function useLibrarySearch(
   const stores = opts.stores ?? LIBRARY_STORES;
   // One string per store holding exactly the options that store reads, so a
   // kind chip on Uploads does not re-fetch Assets.
-  const assetKey = `${opts.scopeId}|${opts.assetType ?? ''}|${opts.assetScope ?? 'all'}|${opts.projectId ?? ''}|${opts.limit ?? ''}`;
-  const uploadKey = `${opts.scopeId}|${opts.uploadKinds ?? ''}|${opts.limit ?? ''}`;
+  const assetKey = `${opts.scopeId}|${opts.assetType ?? ''}|${opts.assetScope ?? 'all'}|${opts.projectId ?? ''}|${opts.assetsLibrary ?? 'in'}|${opts.limit ?? ''}`;
+  const uploadKey = `${opts.scopeId}|${opts.uploadKinds ?? ''}|${opts.uploadSources ?? ''}|${opts.limit ?? ''}`;
   const generatedKey = `${opts.scopeId}|${opts.generatedScope ?? 'this-canvas'}|${opts.canvasId ?? ''}|${opts.limit ?? ''}`;
 
   const assets = useOneStore('assets', stores.includes('assets'), query, opts, assetKey);

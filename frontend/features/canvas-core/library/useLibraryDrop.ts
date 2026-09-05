@@ -152,8 +152,18 @@ export function useLibraryDrop(
   );
 }
 
+/** What a mention run did, for a caller that has follow-up work of its own.
+ *  The ECHO is already done by the time this is returned — this is not a
+ *  "you decide what to say" hand-off, it is "here is what happened". */
+export interface MentionRunOutcome {
+  /** Chips written into the document. */
+  mentioned: number;
+  /** Items that produced no chip. Each one was spoken. */
+  failed: number;
+}
+
 /**
- * Run an `⌥` mention drop on ONE prompt node and report it.
+ * Run a mention insert on ONE prompt node and report it.
  *
  * The sibling of `useLibraryDrop`, and here rather than in
  * `mentionLibraryItems.ts` for the reason that module is pure: the insert
@@ -161,16 +171,30 @@ export function useLibraryDrop(
  * toast. Keeping the two runners in one file is what stops the drop path and
  * the mention path from growing two different vocabularies for one failure —
  * the message goes through `describeDropOutcome`, key for key.
+ *
+ * TWO CALLERS, one gesture each: `PromptNodeView` runs it for the `⌥` drop
+ * (handle in hand, nothing to do afterwards), and `LibraryMediaPage` runs it
+ * for a Text-kind target's primary button (handle from `mentionHandles`, and
+ * it clears the pick when the run actually landed). The outcome is returned
+ * for the second one — a caller that clears its selection unconditionally
+ * would erase the pick a failure needs to leave standing.
  */
 export function useLibraryMention(
   scopeId: string,
   nodeId: string,
-): (items: readonly LibraryItem[], handle: MentionInserters | null) => Promise<void> {
+): (
+  items: readonly LibraryItem[],
+  handle: MentionInserters | null,
+) => Promise<MentionRunOutcome> {
   const { t } = useTranslation();
   const toast = useOptionalToast();
   return useCallback(
     async (items, handle) => {
-      if (!handle || items.length === 0) return;
+      // No handle is a REFUSAL, and it is the caller's to speak: the drop path
+      // cannot reach here without one (it holds its own editor ref), while the
+      // panel can — its target's card may be unmounted — and it says so with
+      // a message about opening the node, which no drop would ever need.
+      if (!handle || items.length === 0) return { mentioned: 0, failed: 0 };
       let failed: number;
       let mentioned = 0;
       try {
@@ -189,6 +213,7 @@ export function useLibraryMention(
         t,
       );
       if (message) toast?.addToast(message.text, message.tone);
+      return { mentioned, failed };
     },
     [scopeId, nodeId, t, toast],
   );

@@ -194,8 +194,26 @@ describe('when the Assets tab is active', () => {
     renderPicker(makeAssets({ active: true, fetch }));
     await screen.findAllByTestId('mention-asset-option');
     expect(fetch).toHaveBeenCalledWith(
-      expect.objectContaining({ library: 'all', limit: 24 }),
+      expect.objectContaining({ library: 'in', limit: 24 }),
       expect.any(AbortSignal),
+    );
+  });
+
+  it('offers the widen toggle, so the chat shelf is not a dead end', async () => {
+    // The chat picker had no toggle at all. Narrowing it to library members
+    // without one would make a script-imported asset unmentionable with
+    // nothing on screen explaining why it is missing.
+    const fetch = vi.fn(async () => [AVA]);
+    renderPicker(makeAssets({ active: true, fetch }));
+    await screen.findAllByTestId('mention-asset-option');
+    const toggle = screen.getByTestId('mention-library-toggle');
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(fetch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ library: 'all' }),
+        expect.any(AbortSignal),
+      ),
     );
   });
 });

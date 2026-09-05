@@ -115,7 +115,10 @@ export interface AssetGridLabels {
   preview: string;
   /** Lightbox header. */
   previewGroup: string;
-  /** Only read when `libraryToggle` is on. */
+  /** Only read when `libraryToggle` is on. Optional because the toggle is
+   *  optional; a host that turns the toggle ON and omits these gets the shared
+   *  `canvas.mention.*` wording rather than a blank span and an unlabelled
+   *  pill — see the render below. */
   libraryLabel?: string;
   inLibraryOnly?: string;
   /** Only read when `unavailable` is true. */
@@ -217,8 +220,21 @@ export interface AssetGridPickerProps<R extends AssetGridRow = AssetGridRow> {
   /** Render the search box. Off for chat, where the `@` text IS the query and
    *  a second box would be two places to type one thing. */
   searchBox?: boolean;
-  /** Render the "In Library Only" pill (canvas). */
+  /** Render the "In Library Only" pill. Both hosts show it: the grid opens
+   *  narrowed, so a host without the pill would be a shelf the user cannot
+   *  widen. */
   libraryToggle?: boolean;
+  /**
+   * Where the pill starts. `true` — library members only — and the default
+   * is the decision.
+   *
+   * A library member is one somebody ADDED (mig 449, user ruling reaffirmed
+   * 2026-09-05). Script imports and the rows the P4 legacy-card migration
+   * created were never added, so listing them would present as library
+   * members things that are not. `false` is for a host that means "everything
+   * this scope can see" and says so.
+   */
+  defaultInLibraryOnly?: boolean;
   /**
    * The grid cannot answer at all — the canvas's "opened without a workspace"
    * case. A distinct state from an error and from an empty result: nothing was
@@ -254,6 +270,7 @@ function AssetGridPickerInner<R extends AssetGridRow>(
     active = true,
     searchBox = true,
     libraryToggle = false,
+    defaultInLibraryOnly = true,
     unavailable = false,
     theme = 'canvas',
     limit = 60,
@@ -302,15 +319,14 @@ function AssetGridPickerInner<R extends AssetGridRow>(
 
   const [type, setType] = useState<AssetType | null>(null);
   /**
-   * `all` by default, and the default is the decision.
+   * Seeded from the host ONCE, on purpose.
    *
-   * The server's shelf default is `in` — library members only — which hides
-   * script imports and every asset the P4 legacy-card migration created.
-   * Those are exactly the assets a canvas points at and a writer names, so
-   * narrowing on the user's behalf would make an asset they can see be one
-   * they cannot mention. The toggle lets someone narrow on purpose.
+   * `useState` reads its argument on the first render only, so a host that
+   * flips `defaultInLibraryOnly` later does not yank the shelf out from under
+   * a user who has pressed the pill themselves. The default value, and why it
+   * is `true`, is documented on the prop.
    */
-  const [inLibraryOnly, setInLibraryOnly] = useState(false);
+  const [inLibraryOnly, setInLibraryOnly] = useState(defaultInLibraryOnly);
 
   const [rows, setRows] = useState<R[]>([]);
   const [loading, setLoading] = useState(false);
@@ -434,7 +450,15 @@ function AssetGridPickerInner<R extends AssetGridRow>(
               {/* One library per canvas — the route's team segment IS the
                   scope, so there is nothing to choose between and a select
                   with a single option would be a control that does nothing. */}
-              <span className={`shrink-0 ${c.barLabel}`}>{labels.libraryLabel}</span>
+              {/* Fallbacks, not `?? ''`. These two are optional in the type
+                  because the toggle is optional, so a host that turns the
+                  toggle on and forgets them would render a blank span and a
+                  pill with no words in it — a control the user cannot read is
+                  worse than one the host worded itself. The shared
+                  `canvas.mention.*` strings are what both hosts already say. */}
+              <span className={`shrink-0 ${c.barLabel}`}>
+                {labels.libraryLabel ?? t('canvas.mention.library', 'Library')}
+              </span>
               <button
                 type="button"
                 data-testid="mention-library-toggle"
@@ -442,7 +466,7 @@ function AssetGridPickerInner<R extends AssetGridRow>(
                 onClick={() => setInLibraryOnly((v) => !v)}
                 className={pill(inLibraryOnly)}
               >
-                {labels.inLibraryOnly}
+                {labels.inLibraryOnly ?? t('canvas.mention.inLibraryOnly', 'In Library Only')}
               </button>
             </>
           )}

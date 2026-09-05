@@ -31,6 +31,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { chipClass, type Label } from './libraryChrome';
 import { LibraryMediaPage } from './LibraryMediaPage';
 import { useLibraryStore, type LibraryPage } from './libraryStore';
+import { isMentionTarget } from './libraryTarget';
 
 const DRAWER_BREAKPOINT = 1100;
 
@@ -103,6 +104,10 @@ export function LibraryPanel(): React.ReactElement | null {
 
   const inTargetMode =
     !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
+  // Same predicate `LibraryMediaPage` picks its primary action from, imported
+  // rather than re-derived: a bar that says "Adding references" over a page
+  // whose button inserts chips would be the lie the user reads first.
+  const mentionMode = inTargetMode && isMentionTarget(targetData);
 
   return (
     <div
@@ -157,10 +162,15 @@ export function LibraryPanel(): React.ReactElement | null {
           className="flex items-center gap-1 bg-ok-soft px-2 py-1 text-[11px] text-ok"
         >
           <span className="min-w-0 flex-1 truncate">
-            {t('canvas.library.targetPrompt', {
-              title: target.title,
-              defaultValue: 'Adding references to {{title}}',
-            })}
+            {mentionMode
+              ? t('canvas.library.targetPromptMention', {
+                  title: target.title,
+                  defaultValue: 'Inserting mentions into {{title}}',
+                })
+              : t('canvas.library.targetPrompt', {
+                  title: target.title,
+                  defaultValue: 'Adding references to {{title}}',
+                })}
           </span>
           <button
             type="button"

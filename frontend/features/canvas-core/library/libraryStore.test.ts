@@ -128,6 +128,99 @@ describe('libraryStore', () => {
     expect(canvasSelection()).toEqual(['p2']);
   });
 
+  it('the Files source chip resets when the segment changes', () => {
+    // Same reason `kind` resets: the chips are per-segment. A source left
+    // pressed from Files would survive a trip to Generated invisibly (that
+    // segment draws no source row) and then narrow the shelf on the way back
+    // with nothing on screen saying why.
+    const s = () => useLibraryStore.getState();
+    s().setUploadSource('web');
+    expect(s().uploadSource).toBe('web');
+    s().setMediaStore('generated');
+    expect(s().uploadSource).toBe('all');
+  });
+
+  it('the source chip is NOT persisted — only page / store / width are', () => {
+    // A restored "Downloaded" would open the shelf tomorrow already filtered,
+    // with the chip the only clue, on a panel the user last used for uploads.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'uploads' });
+    s().setUploadSource('web');
+    const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
+    expect(saved.uploadSource).toBeUndefined();
+    expect(saved).toEqual({ page: 'media', mediaStore: 'uploads', width: 340 });
+  });
+
+  it('the Assets shelf starts narrowed to the library', () => {
+    // The user's ruling: library membership is something somebody DID. The
+    // shelf's job is to show what they added, and the pill is the way out.
+    expect(useLibraryStore.getState().assetsInLibraryOnly).toBe(true);
+  });
+
+  it('the in-library toggle is NOT persisted — only page / store / width are', () => {
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setAssetsInLibraryOnly(false);
+    const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
+    expect(saved.assetsInLibraryOnly).toBeUndefined();
+    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 340 });
+  });
+
+  it('widening the Assets shelf drops the selection with it', () => {
+    // Same reason the scope setters clear it: the keys resolve against rows
+    // the next query may not return, so a kept selection would be counted by
+    // the footer and dropped at send time.
+    const s = () => useLibraryStore.getState();
+    s().setSelection(['assets:727145299382534300']);
+    s().setAssetsInLibraryOnly(false);
+    expect(s().selection).toEqual([]);
+  });
+
+  it('choosing a source drops the selection with it', () => {
+    // Keys resolve against rows the next query may not return, so a kept
+    // selection would be counted by the footer and dropped at send time.
+    const s = () => useLibraryStore.getState();
+    s().setSelection(['uploads:655000000000000001']);
+    s().setUploadSource('upload');
+    expect(s().selection).toEqual([]);
+  });
+
+  it('openPanel naming a DIFFERENT segment drops the kind chip with it', () => {
+    // A programmatic switch is a switch. The prompt card's Open Library button
+    // forces `uploads`, so a `character` chip chosen on Assets would arrive on
+    // the Files shelf, narrow it to nothing, and draw no chip saying why —
+    // `KIND_LABEL.uploads` has no `character` entry to press.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setKind('character');
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().kind).toBeNull();
+  });
+
+  it('openPanel on the SAME segment keeps the kind chip — nothing changed', () => {
+    // The `L` shortcut and the target-arming path both re-open on whatever
+    // segment is showing. Resetting there would clear a chip the user can see
+    // and just chose, with the shelf underneath unchanged.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'uploads' });
+    s().setKind('image');
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().kind).toBe('image');
+    s().openPanel();
+    expect(s().kind).toBe('image');
+  });
+
+  it('the in-library pill survives a programmatic switch — it is not in-segment', () => {
+    // Kept on purpose, unlike `kind`: the pill sits in the Assets scope row
+    // and is drawn `aria-pressed` whenever that row is on screen, so nobody
+    // is narrowed by a control they cannot see.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setAssetsInLibraryOnly(false);
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().assetsInLibraryOnly).toBe(false);
+  });
+
   it('a corrupt stored value is ignored, not thrown on', () => {
     localStorage.setItem(LIBRARY_STORAGE_KEY, '{not json');
     expect(() => useLibraryStore.getState().setWidth(360)).not.toThrow();

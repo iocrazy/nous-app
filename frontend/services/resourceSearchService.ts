@@ -6,6 +6,9 @@ const API = import.meta.env.VITE_API_URL || '';
 export async function searchResources(params: {
   q: string;
   kinds: string;
+  /** csv over `resources.source_type` — `upload,web,generated,derived`.
+   *  Empty means NO filter and is omitted from the query string entirely. */
+  sources?: string;
   limit?: number;
   teamId?: string;
   signal?: AbortSignal;
@@ -14,6 +17,7 @@ export async function searchResources(params: {
   const u = new URL(`${API}/api/v1/resources/search`, window.location.origin);
   u.searchParams.set('q', params.q);
   if (params.kinds) u.searchParams.set('kinds', params.kinds);
+  if (params.sources) u.searchParams.set('sources', params.sources);
   if (params.limit) u.searchParams.set('limit', String(params.limit));
   if (params.teamId) u.searchParams.set('team_id', params.teamId);
   const res = await fetch(u.toString(), { headers, signal: params.signal });

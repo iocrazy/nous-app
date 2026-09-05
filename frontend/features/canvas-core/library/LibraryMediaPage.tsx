@@ -10,7 +10,14 @@
 // target it resolved, so there is still exactly one place that decides whether
 // a target is live.
 //
-// TARGET MODE carries the deleted add-reference popover's contract intact:
+// TARGET MODE HAS TWO SHAPES, and the target's own kind picks between them.
+// An Image/Video prompt takes REFERENCES. A Text prompt takes MENTION CHIPS —
+// `runner.backend.ts` sends `body` alone for a text run, so a `manual_refs`
+// entry written there would be dropped at dispatch with nothing said, and the
+// panel would have looked like it worked. The chips are the same ones the
+// `⌥`-drop writes, through the same helper and the same message ladder.
+//
+// The reference half carries the deleted add-reference popover's contract intact:
 // the ceiling comes from the target node's own model, it is handed DOWN to
 // `addReferences` (one asset expands to several refs, so slicing the pick list
 // would bound picks rather than refs), and every outcome — failed,
@@ -34,6 +41,9 @@ import { writeLibraryDrag } from './dropLibraryItems';
 import { LibraryGrid, type LibraryKindChip } from './LibraryGrid';
 import {
   useLibrarySearch,
+  SOURCE_LABEL,
+  UPLOAD_SOURCE_CSV,
+  UPLOAD_SOURCES,
   type AssetScope,
   type GeneratedScope,
   type LibraryItem,
@@ -42,8 +52,11 @@ import {
 import { LibraryPreviewCard } from './LibraryPreviewCard';
 import { libraryKey, selectedItems } from './librarySelection';
 import { useLibraryStore, type LibraryTarget } from './libraryStore';
+import { isMentionTarget } from './libraryTarget';
 import { chipClass, type Label } from './libraryChrome';
+import { getMentionHandle } from './mentionHandles';
 import { placeLibraryItems } from './placeLibraryItems';
+import { useLibraryMention } from './useLibraryDrop';
 
 const SEGMENTS: readonly LibraryStore[] = ['assets', 'uploads', 'generated'];
 
@@ -54,13 +67,23 @@ const SEGMENTS: readonly LibraryStore[] = ['assets', 'uploads', 'generated'];
 // actually asks for and still pass.
 const STORE_LABEL: Record<LibraryStore, Label> = {
   assets: ['canvas.library.storeAssets', 'Assets'],
-  uploads: ['canvas.library.storeUploads', 'Uploads'],
+  // "Files", not "Uploads". This shelf reads `GET /resources/search`, which
+  // returns every source_type in the scope — Douyin downloads, real uploads,
+  // cover frames cut from a video, saved generations. The old label named a
+  // quarter of what it showed. The STORE KEY stays `uploads` (it is persisted
+  // in every user's localStorage); only the word changes, and the source chips
+  // below are what make the narrower reading reachable.
+  uploads: ['canvas.library.storeUploads', 'Files'],
   generated: ['canvas.library.storeGenerated', 'Generated'],
 };
 
+/** The Assets shelf's scope chips. "Whole Workspace", not "All Library": the
+ *  in-library pill sits in this same row, so two controls both saying Library
+ *  read as two settings for one thing. They are orthogonal — this one picks
+ *  WHICH assets are in play, the pill picks which SLICE of them. */
 const ASSET_SCOPE_LABEL: Record<AssetScope, Label> = {
   'this-project': ['canvas.library.scopeThisProject', 'This Project'],
-  all: ['canvas.library.scopeAllLibrary', 'All Library'],
+  all: ['canvas.library.scopeAllLibrary', 'Whole Workspace'],
 };
 
 const GENERATED_SCOPE_LABEL: Record<GeneratedScope, Label> = {
@@ -115,6 +138,8 @@ export function LibraryMediaPage({
   const mediaStore = useLibraryStore((s) => s.mediaStore);
   const query = useLibraryStore((s) => s.query);
   const kind = useLibraryStore((s) => s.kind);
+  const uploadSource = useLibraryStore((s) => s.uploadSource);
+  const assetsInLibraryOnly = useLibraryStore((s) => s.assetsInLibraryOnly);
   const assetScope = useLibraryStore((s) => s.assetScope);
   const generatedScope = useLibraryStore((s) => s.generatedScope);
   const selection = useLibraryStore((s) => s.selection);
@@ -126,7 +151,10 @@ export function LibraryMediaPage({
   // the anchor rect belongs to a cell that is about to stop existing, and a
   // card left pinned to it would describe the wrong item at the wrong place.
   const [hover, setHover] = useState<{ item: LibraryItem; rect: DOMRect } | null>(null);
-  useEffect(() => setHover(null), [mediaStore, kind, assetScope, generatedScope, query]);
+  useEffect(
+    () => setHover(null),
+    [mediaStore, kind, uploadSource, assetsInLibraryOnly, assetScope, generatedScope, query],
+  );
 
   const model = targetData?.gen?.model ?? null;
   const caps = useModelCapabilities(model);
@@ -137,7 +165,15 @@ export function LibraryMediaPage({
   const used = ((targetData?.manual_refs ?? []) as GeneratedImageRef[]).length;
   const inTargetMode =
     !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
-  const atLimit = inTargetMode && used >= max;
+  // `gen` absent IS the Text kind — the predicate is shared with the panel's
+  // target bar (`libraryTarget.ts`) so the bar and the button cannot describe
+  // one aim in two vocabularies.
+  const mentionMode = inTargetMode && isMentionTarget(targetData);
+  // NOT applied in mention mode. A card switched from Image to Text keeps the
+  // `manual_refs` it had, and a text run ignores every one of them — so the
+  // quota would be a true number about the wrong thing, and worse, it would
+  // disable an action that spends none of it.
+  const atLimit = inTargetMode && !mentionMode && used >= max;
 
   // "This Project" needs a project. `fetchLibraryAssets` falls through to the
   // scope-wide search when there is none, so a project-less canvas showed the
@@ -157,6 +193,15 @@ export function LibraryMediaPage({
     assetScope: effectiveAssetScope,
     projectId,
     uploadKinds: mediaStore === 'uploads' ? (kind ?? '') : '',
+    // Guarded on the segment for the same reason `uploadKinds` is: the store
+    // resets the chip on a segment switch, but reading it unguarded would
+    // still put it in the uploads cache key from another segment.
+    uploadSources: mediaStore === 'uploads' ? UPLOAD_SOURCE_CSV[uploadSource] : '',
+    // Unguarded by segment, unlike `uploadSources`: this knob survives a
+    // segment switch (see the store), so reading it here is reading the value
+    // the Assets shelf will really use — and it has to reach `assetKey`, or
+    // the pill would flip and the shelf would never re-ask.
+    assetsLibrary: assetsInLibraryOnly ? 'in' : 'all',
     generatedScope,
     canvasId,
   });
@@ -298,6 +343,59 @@ export function LibraryMediaPage({
     [atLimit, busy, max, readOnly, scopeId, setSelection, t, target, toast],
   );
 
+  // ── Insert as mentions (a Text-kind target) ─────────────────────────────
+  // Same runner and same message ladder as the `⌥`-drop, so the two ways to
+  // put a chip in a body cannot describe one outcome in two vocabularies.
+  const runMention = useLibraryMention(scopeId, target?.nodeId ?? '');
+  const doInsertMentions = useCallback(
+    (picked: LibraryItem[]) => {
+      if (readOnly || busy || !target || picked.length === 0) return;
+      // The editor handle lives in the node's render, and the surface culls
+      // off-viewport cards — so a target aimed at a minute ago can genuinely
+      // have no editor right now. That is a REFUSAL to speak, not a reason to
+      // return quietly: the pick would sit there looking committed.
+      const handle = getMentionHandle(target.nodeId);
+      if (!handle) {
+        toast?.addToast(
+          t('canvas.library.mentionNoEditor', 'Open the prompt node before inserting mentions'),
+          'error',
+        );
+        return;
+      }
+      setBusy(true);
+      void runMention(picked, handle)
+        .then((r) => {
+          // Only a run that actually landed clears the pick — the reference
+          // path's rule, for its reason: a cleared selection after a failure
+          // is indistinguishable from success.
+          //
+          // ANY failure leaves the WHOLE pick standing, successes included, so
+          // the user has something to retry from — and a retry then re-inserts
+          // the rows that already worked, because the mention path has no
+          // "already mentioned" skip the way `addReferences` has a duplicate
+          // check. Duplicate chips are visible and removable; a pick that
+          // silently emptied itself after a partial failure would leave the
+          // user with no way to reach the rows that did not land.
+          if (r.failed === 0 && r.mentioned > 0) setSelection([]);
+        })
+        // `runMention` speaks every known outcome itself and swallows its own
+        // throws, so this is the guard against a future one — an unhandled
+        // rejection here would leave `busy` stuck and look like a hang.
+        .catch((err: unknown) => {
+          console.error('[LibraryMediaPage] insert mentions failed:', err);
+          toast?.addToast(
+            t('canvas.library.mentionFailed', {
+              count: picked.length,
+              defaultValue: '{{count}} could not be inserted as a mention',
+            }),
+            'error',
+          );
+        })
+        .finally(() => setBusy(false));
+    },
+    [busy, readOnly, runMention, setSelection, t, target, toast],
+  );
+
   const kinds: LibraryKindChip[] | undefined =
     mediaStore === 'generated'
       ? undefined
@@ -319,6 +417,15 @@ export function LibraryMediaPage({
 
   const consequence = readOnly
     ? t('canvas.library.readOnlyConsequence', 'Browse only · this canvas is read-only')
+    : mentionMode
+    ? // Says what the pick BECOMES and why it is not the other thing. Landing
+      // on a text prompt from the same button that adds references elsewhere,
+      // "chips, not reference images" is the difference a user cannot see.
+      t('canvas.library.mentionTargetConsequence', {
+        title: target.title,
+        defaultValue:
+          'Inserting mentions into {{title}} · a text prompt reads chips, not reference images',
+      })
     : inTargetMode
     ? t('canvas.library.targetConsequence', {
         title: target.title,
@@ -337,10 +444,31 @@ export function LibraryMediaPage({
   // the detail rows say how many files it carries, and this is a footer, not
   // a fetch. `null` hides the count rather than printing "1 file" over a send
   // of four — the hover preview is where a per-asset answer already lives.
+  //
+  // Mention mode is `null` too, and not because the number is unknowable: it
+  // is ZERO by construction. A text run sends no reference files at all, so
+  // printing "1 file" beside a mention would claim a send that never happens.
   const fileCount =
-    inTargetMode && !chosen.some((i) => i.store === 'assets')
+    inTargetMode && !mentionMode && !chosen.some((i) => i.store === 'assets')
       ? Math.max(0, Math.min(chosen.length, max - used))
       : null;
+
+  // An Assets shelf narrowed to the library and returning nothing reads as
+  // "you own nothing" — the generic empty copy names no cause and offers no
+  // way out, while the pill three rows up is the entire explanation. Only this
+  // exact combination gets the pointed copy; a wide shelf that is genuinely
+  // empty keeps the plain one, because there is nothing to turn off.
+  const emptyLabel =
+    mediaStore === 'assets' &&
+    assetsInLibraryOnly &&
+    items.length === 0 &&
+    !current.loading &&
+    current.error === null
+      ? t(
+          'canvas.library.emptyLibraryOnly',
+          'No Library Members Here · turn off In Library Only to see everything',
+        )
+      : t('canvas.library.empty', 'Nothing Here Yet');
 
   const placeAction = {
     label: t('canvas.library.place', 'Place on Canvas'),
@@ -355,6 +483,18 @@ export function LibraryMediaPage({
     disabled: busy || atLimit,
     onClick: doAddRefs,
   };
+  const mentionAction = {
+    label: t('canvas.library.insertMentions', {
+      count: chosen.length,
+      defaultValue: 'Insert {{count}} Mentions',
+    }),
+    // No `atLimit`: the reference ceiling does not apply to chips in a body.
+    disabled: busy,
+    onClick: doInsertMentions,
+  };
+  /** What target mode COMMITS, decided in one place so the button, the double
+   *  click and the grid's Enter fallback cannot disagree about it. */
+  const targetAction = mentionMode ? mentionAction : referenceAction;
 
   return (
     // CAPTURE, and on a wrapper rather than on the shelf itself. A `scroll`
@@ -398,6 +538,23 @@ export function LibraryMediaPage({
         </button>
       </div>
 
+      {mediaStore === 'uploads' && (
+        <div className="flex flex-wrap gap-1 border-b border-canvas-line px-2 py-1.5">
+          {UPLOAD_SOURCES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              data-testid={`library-source-${value}`}
+              aria-pressed={uploadSource === value}
+              onClick={() => useLibraryStore.getState().setUploadSource(value)}
+              className={chipClass(uploadSource === value)}
+            >
+              {t(SOURCE_LABEL[value][0], SOURCE_LABEL[value][1])}
+            </button>
+          ))}
+        </div>
+      )}
+
       {scopeChips.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-canvas-line px-2 py-1.5">
           {scopeChips.map(([value, [key, english]]) => {
@@ -425,6 +582,26 @@ export function LibraryMediaPage({
               </button>
             );
           })}
+          {mediaStore === 'assets' && (
+            // In the SCOPE row rather than beside the segments: "which assets"
+            // and "which slice of them" are the same question, and the two
+            // scope chips are the other half of the answer this pill gives.
+            <button
+              type="button"
+              data-testid="library-in-library-toggle"
+              aria-pressed={assetsInLibraryOnly}
+              onClick={() =>
+                useLibraryStore.getState().setAssetsInLibraryOnly(!assetsInLibraryOnly)
+              }
+              className={chipClass(assetsInLibraryOnly)}
+            >
+              {/* `canvas.mention.*`, not a second `canvas.library.*` copy: the
+                  `@` picker's pill (`PromptMentionPicker`) already owns this
+                  string, and two keys for one label is how the panel and the
+                  picker end up saying different things about the same filter. */}
+              {t('canvas.mention.inLibraryOnly', 'In Library Only')}
+            </button>
+          )}
         </div>
       )}
 
@@ -453,9 +630,11 @@ export function LibraryMediaPage({
               })
             : null
         }
-        primaryAction={readOnly ? undefined : inTargetMode ? referenceAction : placeAction}
+        primaryAction={readOnly ? undefined : inTargetMode ? targetAction : placeAction}
         secondaryAction={!readOnly && inTargetMode ? placeAction : undefined}
-        onItemActivate={(item) => (inTargetMode ? doAddRefs([item]) : doPlace([item]))}
+        onItemActivate={(item) =>
+          inTargetMode ? targetAction.onClick([item]) : doPlace([item])
+        }
         onItemDragStart={
           // A viewer gets no drag at all: every landing a drop resolves into
           // writes, and `draggable` is set from this prop being present, so
@@ -478,7 +657,7 @@ export function LibraryMediaPage({
               }
         }
         onItemHover={(item, rect) => setHover(item && rect ? { item, rect } : null)}
-        emptyLabel={t('canvas.library.empty', 'Nothing Here Yet')}
+        emptyLabel={emptyLabel}
         targetRowHeight={96}
       />
 

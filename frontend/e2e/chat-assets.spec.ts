@@ -362,7 +362,10 @@ test('@ → Assets tab lists what the membership-wide search returned', async ({
     .poll(() => state.searches.find((line) => line.includes('q=sang')) ?? null)
     .not.toBeNull();
   const search = state.searches.find((line) => line.includes('q=sang')) as string;
-  expect(search).toContain('library=all');
+  // `in`, not `all`: the shelf answers "my library", and a library member is
+  // one somebody ADDED (mig 449). The grid's own pill is what widens it back
+  // over script imports and migrated legacy cards.
+  expect(search).toContain('library=in');
   // No `scope_id` on ANY of them: a chat window outlives any one workspace
   // route, so the server authorizes by membership instead (ruling B/G). A
   // picker that sent one would be answering a question it does not own.

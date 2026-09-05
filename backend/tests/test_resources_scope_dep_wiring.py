@@ -69,6 +69,7 @@ def test_search_endpoint_establishes_user_scope(client, monkeypatch):
         kinds: Optional[list] = None,
         limit: int = 20,
         scope_team_id: Optional[str] = None,
+        sources: Optional[list] = None,
     ) -> list:
         captured["rows_scope"] = current_scope()
         return []
@@ -79,6 +80,7 @@ def test_search_endpoint_establishes_user_scope(client, monkeypatch):
         user_id: str,
         q: str = "",
         scope_team_id: Optional[str] = None,
+        sources: Optional[list] = None,
     ) -> dict:
         # The tab badges are a SECOND repo read on this endpoint. It touches
         # the same table, so it has to run under the same ambient scope —

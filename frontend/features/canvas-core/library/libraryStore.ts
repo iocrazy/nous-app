@@ -14,7 +14,12 @@
 import { create } from 'zustand';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import type { AssetScope, GeneratedScope, LibraryStore } from './librarySearch';
+import type {
+  AssetScope,
+  GeneratedScope,
+  LibraryStore,
+  UploadSource,
+} from './librarySearch';
 import type { LibraryItemKey } from './librarySelection';
 
 // Composed, not written out as one literal, and that is deliberate. The
@@ -49,9 +54,26 @@ export interface LibraryTarget {
   title: string;
 }
 
-/** Only the three durable knobs. `query`, `selection` and `target` are
- *  deliberately NOT persisted: a restored target points at a node id from
- *  whatever canvas was open last time, which is worse than no target. */
+/** Only the three durable knobs. Everything else is NON-DURABLE — `query`,
+ *  `selection`, `target`, and the three filters — and non-durable is not one
+ *  lifetime:
+ *
+ *  - `kind` and `uploadSource` are IN-SEGMENT: `setMediaStore` resets them,
+ *    because both rows belong to one shelf and a chip left pressed would
+ *    narrow a shelf that does not draw the control saying why.
+ *  - `assetsInLibraryOnly` is KEPT ACROSS A SEGMENT SWITCH. It lives in the
+ *    Assets scope row beside `assetScope`, which is kept for the same reason:
+ *    the pill is drawn `aria-pressed` whenever that row is on screen, so a
+ *    returning user is never narrowed by a control they cannot see.
+ *
+ *  None of the three is persisted: a restored target points at a node id from
+ *  whatever canvas was open last time, which is worse than no target, and a
+ *  restored source chip opens the Files shelf already narrowed with nothing on
+ *  screen explaining why.
+ *
+ *  `mediaStore` keeps its stored value `'uploads'`. The SEGMENT is labelled
+ *  "Files" now, but the key is on disk in every user's browser and renaming it
+ *  would silently reset everyone's panel to Assets. */
 interface Persisted {
   page: LibraryPage;
   mediaStore: LibraryStore;
@@ -92,6 +114,23 @@ export interface LibraryPanelState extends Persisted {
   open: boolean;
   query: string;
   kind: string | null;
+  /** Which source the Files shelf is narrowed to. Per-segment, like `kind`. */
+  uploadSource: UploadSource;
+  /**
+   * Is the Assets shelf narrowed to library members? `true` at rest.
+   *
+   * A library member is one somebody ADDED (mig 449, user ruling reaffirmed
+   * 2026-09-05). Script imports and the rows the P4 legacy-card migration
+   * created were never added, so a shelf that listed them would present as
+   * library members things that are not.
+   *
+   * Kept across a segment switch, unlike `uploadSource` and `kind`: it sits
+   * in the Assets scope row next to `assetScope`, which is also kept, and the
+   * pill is drawn `aria-pressed` whenever that row is on screen — so a
+   * returning user is never narrowed by a control they cannot see. Not
+   * persisted, so a new session starts narrow.
+   */
+  assetsInLibraryOnly: boolean;
   assetScope: AssetScope;
   generatedScope: GeneratedScope;
   selection: LibraryItemKey[];
@@ -110,6 +149,8 @@ export interface LibraryPanelState extends Persisted {
   setMediaStore(store: LibraryStore): void;
   setQuery(q: string): void;
   setKind(kind: string | null): void;
+  setUploadSource(source: UploadSource): void;
+  setAssetsInLibraryOnly(only: boolean): void;
   setAssetScope(scope: AssetScope): void;
   setGeneratedScope(scope: GeneratedScope): void;
   setSelection(keys: LibraryItemKey[]): void;
@@ -149,6 +190,8 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     open: false,
     query: '',
     kind: null,
+    uploadSource: 'all',
+    assetsInLibraryOnly: true,
     assetScope: 'all',
     generatedScope: 'this-canvas',
     selection: [],
@@ -156,14 +199,29 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     focusNonce: 0,
 
     openPanel(opts = {}) {
-      set((s) => ({
-        open: true,
-        page: opts.page ?? s.page,
-        mediaStore: opts.mediaStore ?? s.mediaStore,
-        target: opts.target !== undefined ? opts.target : s.target,
-        selection: [],
-        focusNonce: opts.focusSearch ? s.focusNonce + 1 : s.focusNonce,
-      }));
+      set((s) => {
+        // A PROGRAMMATIC segment switch is a segment switch. `setMediaStore`
+        // drops the kind chip because it belongs to the shelf being left, and
+        // the same is true when the caller names a different `mediaStore`
+        // here — the header's Open Library button forces `uploads`, so a
+        // `character` chip chosen on Assets would otherwise arrive on the
+        // Files shelf, narrow it to nothing, and draw no chip saying so
+        // (`KIND_LABEL.uploads` has no `character` entry).
+        //
+        // `uploadSource` needs no equivalent: `LibraryMediaPage` reads it only
+        // on `uploads`, and `assetsInLibraryOnly` is KEPT here on purpose —
+        // see the Persisted doc above.
+        const switching = opts.mediaStore !== undefined && opts.mediaStore !== s.mediaStore;
+        return {
+          open: true,
+          page: opts.page ?? s.page,
+          mediaStore: opts.mediaStore ?? s.mediaStore,
+          kind: switching ? null : s.kind,
+          target: opts.target !== undefined ? opts.target : s.target,
+          selection: [],
+          focusNonce: opts.focusSearch ? s.focusNonce + 1 : s.focusNonce,
+        };
+      });
       // Spec §3.1: the aimed-at node is SELECTED and highlighted while the
       // panel points at it. The panel sits on the right and the target bar
       // names the node, but with a dozen cards on the board a name is not a
@@ -191,8 +249,11 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     setMediaStore(mediaStore) {
       // Keys are `store:id`, so a key kept across this switch resolves against
       // nothing in the new segment: it would be counted by the footer and then
-      // silently dropped at send time. The kind chips are per-store too.
-      set({ mediaStore, selection: [], kind: null });
+      // silently dropped at send time. The kind chips and the Files source
+      // chips are per-store too — a source left pressed here would survive a
+      // trip to Generated (which draws no source row) and narrow the shelf on
+      // the way back with nothing on screen saying why.
+      set({ mediaStore, selection: [], kind: null, uploadSource: 'all' });
       persist();
     },
     setQuery(query) {
@@ -200,6 +261,15 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     },
     setKind(kind) {
       set({ kind });
+    },
+    // Selection cleared for the same reason the scope setters clear it: the
+    // keys resolve against rows the narrowed query may not return, so a kept
+    // selection is counted by the footer and dropped at send time.
+    setUploadSource(uploadSource) {
+      set({ uploadSource, selection: [] });
+    },
+    setAssetsInLibraryOnly(assetsInLibraryOnly) {
+      set({ assetsInLibraryOnly, selection: [] });
     },
     setAssetScope(assetScope) {
       set({ assetScope, selection: [] });

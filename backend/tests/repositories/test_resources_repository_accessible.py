@@ -179,3 +179,53 @@ async def test_returns_row_dicts(monkeypatch):
             "scope_type": "personal",
         }
     ]
+
+
+async def test_sources_becomes_a_source_type_predicate(monkeypatch):
+    """The Files shelf's source chips reach the WHERE clause, not just the kwarg.
+
+    The route tests one door down can only prove the argument was forwarded.
+    What decides whether "Downloaded" shows downloads is the compiled SQL, so
+    that is what this reads.
+    """
+    repo = ResourcesRepository()
+    session = _capture(monkeypatch)
+
+    await repo.list_accessible_for_user(
+        user_id="user-1", sources=["generated", "derived"]
+    )
+
+    sql = session.captured_sql.lower()
+    assert "source_type in ('generated', 'derived')" in sql
+
+
+async def test_no_sources_adds_no_source_type_predicate(monkeypatch):
+    """Absent means EVERY source, so the column must not appear at all.
+
+    An empty list reaching ``in_([])`` compiles to a false predicate — the
+    shelf would go blank under the chip that promises "All".
+    """
+    repo = ResourcesRepository()
+    session = _capture(monkeypatch)
+
+    await repo.list_accessible_for_user(user_id="user-1", sources=[])
+
+    assert "source_type" not in session.captured_sql.lower()
+
+
+async def test_counts_carry_the_same_source_predicate(monkeypatch):
+    """Badges and grid narrow together, or the badge describes another set."""
+    repo = ResourcesRepository()
+    session = _capture(monkeypatch)
+
+    await repo.count_accessible_by_kind_for_user(user_id="user-1", sources=["web"])
+
+    sql = session.captured_sql.lower()
+    assert "source_type in ('web')" in sql
+    # In the WHERE, not the HAVING: a post-aggregate filter would count rows
+    # the chip excludes and then hide the group. Asserted by POSITION rather
+    # than by ``"having" not in sql`` — the repository emits no HAVING at all,
+    # so that form passed on any string whatsoever, including one where the
+    # predicate had moved after the aggregate. This one can fail.
+    assert "group by" in sql, "the counts query must still aggregate"
+    assert sql.index("source_type in ('web')") < sql.index("group by")

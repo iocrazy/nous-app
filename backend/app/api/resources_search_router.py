@@ -1,7 +1,8 @@
 """GET /resources/search — picker backend for chat @-reference.
 
 Returns paginated resources the caller can read (own personal + team-shared)
-with optional ``q`` (filename substring) and ``kinds`` (csv) filters.
+with optional ``q`` (filename substring), ``kinds`` (csv) and ``sources``
+(csv over ``source_type``) filters.
 """
 
 from __future__ import annotations
@@ -64,6 +65,9 @@ async def search_resources(
     auth: AuthDep,
     q: str = Query("", max_length=128),
     kinds: Optional[str] = Query(None, description="csv of video,image,doc,audio,pdf"),
+    sources: Optional[str] = Query(
+        None, description="csv of upload,web,generated,derived"
+    ),
     team_id: Optional[str] = Query(None, description="narrow to this team + personal"),
     limit: int = Query(20, ge=1, le=50),
 ) -> dict:
@@ -76,6 +80,19 @@ async def search_resources(
             if k.strip() in {"video", "image", "doc", "audio", "pdf"}
         ]
 
+    # Same parse as ``kinds``, against the four values the DB CHECK admits
+    # (migration 363). Unknown values are DROPPED rather than passed through:
+    # ``source_type.in_([..., "bogus"])`` would look filtered while narrowing
+    # nothing. An all-unknown list collapses to None below — no filter — so a
+    # junk query string shows everything rather than an empty shelf.
+    sources_list: list[str] = []
+    if sources:
+        sources_list = [
+            src.strip()
+            for src in sources.split(",")
+            if src.strip() in {"upload", "web", "generated", "derived"}
+        ]
+
     # Treat empty-string team_id (e.g. `?team_id=`) as absent → global search.
     scope_team_id = team_id or None
 
@@ -84,6 +101,7 @@ async def search_resources(
         user_id=str(auth.user_id),
         q=q,
         kinds=kinds_list or None,
+        sources=sources_list or None,
         limit=limit,
         scope_team_id=scope_team_id,
     )
@@ -92,9 +110,16 @@ async def search_resources(
     # deliberately not from ``rows``. ``rows`` is one tab's slice, cut off at
     # ``limit``; tallying it made every badge describe the page instead of the
     # library (open the Video tab and Image read 0; "All" never passed 50).
+    #
+    # ``sources`` DOES reach the counts, unlike ``kinds``. The distinction is
+    # the axis each control sits on: the kind tabs are the thing the badges
+    # describe (a Video badge counted under a Video filter always reads its own
+    # page size), while the source chips are a filter ACROSS all of them — a
+    # badge that ignored the chip would promise 40 files over a shelf of 3.
     counts = await repo.count_accessible_by_kind_for_user(
         user_id=str(auth.user_id),
         q=q,
+        sources=sources_list or None,
         scope_team_id=scope_team_id,
     )
 
