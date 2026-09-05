@@ -331,11 +331,7 @@ export function GenFooterControls({
             {models.map((m) => (
               <PopRow
                 key={m.name}
-                label={
-                  m.is_local
-                    ? `${m.display_name || m.name} · local`
-                    : m.display_name || m.name
-                }
+                label={modelLabel(m)}
                 active={gen.model === m.name}
                 onClick={() => pick({ model: m.name })}
               />
