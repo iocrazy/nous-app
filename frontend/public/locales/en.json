@@ -2039,7 +2039,8 @@
       "groupNew": "Or type a new group",
       "examples": "Examples · {{count}} of {{total}} ticked",
       "positive": "Positive",
-      "negative": "Negative"
+      "negative": "Negative",
+      "exampleTile": "Example {{index}}"
     }
   },
   "generated": {

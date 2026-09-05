@@ -2039,7 +2039,8 @@
       "groupNew": "或输入新分组",
       "examples": "示例图 · 已选 {{count}} / {{total}}",
       "positive": "正向",
-      "negative": "负向"
+      "negative": "负向",
+      "exampleTile": "示例图 {{index}}"
     }
   },
   "generated": {

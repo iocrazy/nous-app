@@ -1,6 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, d?: unknown) => (typeof d === 'string' ? d : (d as { defaultValue?: string })?.defaultValue ?? _k) }) }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_k: string, d?: unknown) => {
+      const text = typeof d === 'string' ? d : (d as { defaultValue?: string })?.defaultValue ?? _k;
+      if (typeof d !== 'object' || d === null) return text;
+      const opts = d as Record<string, unknown>;
+      return text.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (name in opts ? String(opts[name]) : m));
+    },
+  }),
+}));
 vi.mock('../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 import { TemplateForm, type TemplateFormValue } from './TemplateForm';
 
@@ -18,6 +27,7 @@ describe('TemplateForm', () => {
   it('ticks and unticks examples', () => {
     const onChange = vi.fn();
     render(<TemplateForm value={value} onChange={onChange} examples={[{ id: '1', url: null }, { id: '2', url: null }]} groups={[]} />);
+    expect(screen.getByRole('button', { name: 'Example 2' })).toBe(screen.getByTestId('template-example-2'));
     fireEvent.click(screen.getByTestId('template-example-2'));
     expect(onChange).toHaveBeenLastCalledWith({ ...value, exampleIds: ['1', '2'] });
     fireEvent.click(screen.getByTestId('template-example-1'));

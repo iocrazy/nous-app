@@ -52,10 +52,12 @@ export function TemplateForm({
         <div>
           <span className={LABEL}>{t('prompts.templateForm.examples', { count: value.exampleIds.length, total: examples.length, defaultValue: 'Examples · {{count}} of {{total}} ticked' })}</span>
           <div className="flex flex-wrap gap-1.5">
-            {examples.map((ex) => {
+            {examples.map((ex, i) => {
               const on = value.exampleIds.includes(ex.id);
               return (
-                <button key={ex.id} type="button" data-testid={`template-example-${ex.id}`} aria-pressed={on} disabled={disabled} onClick={() => toggle(ex.id)}
+                <button key={ex.id} type="button" data-testid={`template-example-${ex.id}`}
+                  aria-label={t('prompts.templateForm.exampleTile', { index: i + 1, defaultValue: 'Example {{index}}' })}
+                  aria-pressed={on} disabled={disabled} onClick={() => toggle(ex.id)}
                   className={`h-14 w-14 overflow-hidden rounded-lg border ${on ? 'border-accent ring-2 ring-accent' : 'border-line opacity-50'}`}>
                   {ex.url ? <img src={thumbSrc(ex.url)} alt="" className="h-full w-full object-cover" /> : <span className="block h-full w-full bg-island-2" />}
                 </button>
