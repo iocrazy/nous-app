@@ -222,6 +222,10 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
             patch[field] = patch[field].value
     if "hidden_at" in patch and patch["hidden_at"] is not None:
         patch["hidden_at"] = patch["hidden_at"].isoformat()
+    # harness p4 §1-⑤: ``clear_budget`` is the only way to write NULL through
+    # an exclude_none payload; it wins over a budget_cents sent alongside.
+    if patch.pop("clear_budget", None):
+        patch["budget_cents"] = None
 
     if not patch:
         return Issue.model_validate(_normalise_uuid_strs(existing))

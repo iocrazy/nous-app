@@ -94,6 +94,11 @@ class IssueUpdate(BaseModel):
     team_id: Optional[int] = None
     billing_code: Optional[str] = None
     hidden_at: Optional[datetime] = None  # for soft-delete
+    # harness p4 §1-⑤: NULL = unlimited; 0 is allowed (spend nothing more).
+    # Optional-with-None cannot express "clear the budget" through
+    # exclude_none — clearing goes through ``clear_budget``.
+    budget_cents: Optional[int] = Field(default=None, ge=0)
+    clear_budget: Optional[bool] = None
 
     @model_validator(mode="after")
     def assignee_xor(self) -> "IssueUpdate":
@@ -127,6 +132,8 @@ class Issue(IssueBase):
     ai_session_id: Optional[str] = None
     execution_locked_at: Optional[datetime] = None
     execution_state: Optional[dict[str, Any]] = None
+    paused_at: Optional[datetime] = None
+    budget_cents: Optional[int] = None
     request_depth: int = 0
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

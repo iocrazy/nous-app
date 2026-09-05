@@ -705,6 +705,38 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] running_root_run_id failed: {e}")
             return None
 
+    async def spent_cents_for_issue(
+        self,
+        *,
+        issue_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
+        exclude_run_id: Optional[int] = None,
+    ) -> float:
+        """Sum of ``cost_cents`` over the issue's runs (by issue_id or its
+        session conversation), optionally excluding the live run whose spend
+        the caller tracks itself. Root runs only — children roll up through
+        their parent's step costs."""
+        keys = []
+        if issue_id is not None:
+            keys.append(AgentRuns.issue_id == int(issue_id))
+        if conversation_id is not None:
+            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        if not keys:
+            return 0.0
+        stmt = (
+            select(func.coalesce(func.sum(AgentRuns.cost_cents), 0))
+            .where(or_(*keys))
+            .where(AgentRuns.parent_run_id.is_(None))
+        )
+        if exclude_run_id is not None:
+            stmt = stmt.where(AgentRuns.id != int(exclude_run_id))
+        try:
+            async with read_scope() as session:
+                return float((await session.execute(stmt)).scalar_one() or 0)
+        except Exception as e:
+            logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
+            return 0.0
+
     # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------

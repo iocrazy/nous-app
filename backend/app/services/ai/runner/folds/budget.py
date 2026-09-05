@@ -9,6 +9,9 @@ def fold_budget(views, payload):
     views["view"]["budget"] = {
         "pct": round(pct),
         "state": "over" if action == "halt" else "warn",
+        # issue-level spend (earlier runs + this one) — cost.spent_cents is
+        # this run only
+        "spent_cents": payload.get("spent_cents"),
     }
     budget = payload.get("budget_cents")
     if isinstance(budget, int):

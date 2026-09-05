@@ -429,6 +429,7 @@ async def build_agent_runner_stack(
 
     # Seam A: the step-boundary chain, registered here so the order is
     # visible in one place. Later tasks append pause / inbox / budget hooks.
+    from app.services.ai.runner.budget_hook import BudgetGateHook
     from app.services.ai.runner.inbox_hook import InboxClaimHook
     from app.services.ai.runner.step_hooks import (
         CancelHook,
@@ -436,9 +437,11 @@ async def build_agent_runner_stack(
         StepHookChain,
     )
 
-    # heartbeat → cancel → inbox: a cancelled run must not claim a steer it
-    # will never read.
-    step_hooks = StepHookChain([HeartbeatHook(), CancelHook(), InboxClaimHook()])
+    # heartbeat → cancel → inbox → budget: a cancelled run must not claim a
+    # steer it will never read; the budget is checked on the spend so far.
+    step_hooks = StepHookChain(
+        [HeartbeatHook(), CancelHook(), InboxClaimHook(), BudgetGateHook()]
+    )
 
     runner = AgentRunner(
         adapter=fallback_chain,
