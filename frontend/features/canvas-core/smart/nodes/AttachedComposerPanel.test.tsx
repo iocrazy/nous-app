@@ -18,6 +18,7 @@ vi.mock('./useGenerationModels', () => ({
   ],
 }));
 
+import { useLibraryStore } from '../../library/libraryStore';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import type { CanvasNode } from '../../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
@@ -119,6 +120,16 @@ describe('AttachedComposerPanel', () => {
       data: { gen?: { kind: string } };
     };
     expect(prompt.data.gen?.kind).toBe('video');
+  });
+
+  it('the bookshelf opens the Library panel on Prompts with no target', () => {
+    seed();
+    const openPanel = vi.spyOn(useLibraryStore.getState(), 'openPanel');
+    render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A]} pinned />);
+    fireEvent.click(screen.getByTestId('composer-library'));
+    expect(openPanel).toHaveBeenCalledWith({ page: 'prompts' });
+    expect(screen.queryByTestId('asset-prompt-picker')).toBeNull();
+    openPanel.mockRestore();
   });
 
   it('read-only renders nothing', () => {

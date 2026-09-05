@@ -15,6 +15,7 @@ import {
   createPromptNode,
   createShotNode,
 } from '../smart/factories';
+import { useLibraryStore } from '../library/libraryStore';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 
 // ---- Public types --------------------------------------------------------
@@ -138,6 +139,16 @@ export function buildCanvasCommands(): Command[] {
         void useCanvasCoreStore.getState().flushSave();
       },
       enabled: writable,
+    },
+    {
+      id: 'library-add',
+      title: 'Add from library…',
+      hint: 'L',
+      run() {
+        // The panel remembers its page; a read action, so it stays enabled in
+        // a read-only session (the panel itself withholds every write there).
+        useLibraryStore.getState().openPanel();
+      },
     },
   ];
 

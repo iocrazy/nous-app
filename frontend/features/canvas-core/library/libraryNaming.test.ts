@@ -22,6 +22,14 @@ const ROOT = path.resolve(__dirname, '..');
 const ALLOWED = new Set([
   path.join(ROOT, 'library', 'LibraryPanel.tsx'),
   path.join(ROOT, 'ui', 'TopNodeBar.tsx'),
+  // ⌘K row naming the one Library the canvas has.
+  //
+  // Documents consent, and buys nothing today: a command's `title:` is a bare
+  // object property, which no pattern below reaches (USER_TEXT wants a JSX
+  // attribute or text position, the other two want a t() / tuple literal). It
+  // is here so the day a pattern DOES reach command titles, this row reads as
+  // an allowed name rather than a new offender.
+  path.join(ROOT, 'palette', 'commands.ts'),
 ]);
 
 function tsFiles(dir: string): string[] {

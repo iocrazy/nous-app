@@ -12,10 +12,10 @@ import { Image as ImageIcon, Library, Play, Video } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useLibraryStore } from '../../library/libraryStore';
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
 import { rerunPrompt } from '../regenerate';
-import { AssetPromptPicker } from './AssetPromptPicker';
 import { MentionImageGrid } from './MentionImageGrid';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import type { PromptImageRef } from './promptImageRefs';
@@ -49,7 +49,6 @@ export function AttachedComposerPanel({
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [videoMode, setVideoMode] = useState<'multimodal' | 'frames' | undefined>(undefined);
   const [engine, setEngine] = useState('');
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
@@ -230,26 +229,18 @@ export function AttachedComposerPanel({
           />
         )}
       </div>
-      {!libraryOpen ? (
-        <button
-          type="button"
-          data-testid="composer-library"
-          aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
-          onClick={() => setLibraryOpen(true)}
-          className="nodrag absolute right-3 top-16 flex h-6 w-6 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
-        >
-          <Library size={12} />
-        </button>
-      ) : (
-        <AssetPromptPicker
-          onPick={(asset, lang) => {
-            const text = lang === 'zh' ? asset.gen_prompt_zh : asset.gen_prompt;
-            if (text) setBody(text);
-            setLibraryOpen(false);
-          }}
-          onClose={() => setLibraryOpen(false)}
-        />
-      )}
+      {/* No target: the composer is not a prompt NODE yet — Run is what mints
+          one — so there is nothing for the panel's target bar to aim at. It
+          opens on Prompts and the user copies from there. */}
+      <button
+        type="button"
+        data-testid="composer-library"
+        aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
+        onClick={() => useLibraryStore.getState().openPanel({ page: 'prompts' })}
+        className="nodrag absolute right-3 top-16 flex h-6 w-6 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
+      >
+        <Library size={12} />
+      </button>
 
       <div className="flex min-w-0 items-center gap-1">
         <GenFooterControls

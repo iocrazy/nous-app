@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { NodeDeleteButton } from './NodeDeleteButton';
 import { ImagePlus, Images, Library, Play, Split, Square, Zap } from 'lucide-react';
 
-import type { CanvasConnection, CanvasNode } from '../../types';
 import type { DroppedRef, GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
@@ -51,11 +50,8 @@ import { primarySlotFileIds } from '../assetFiles';
 import { promptStripEntries } from '../promptStrip';
 import { ASSET_TYPE_ICON } from '../../../../components/resources/assets/assetTypeMeta';
 import { GenFooterControls } from './GenFooterControls';
-import { AssetPromptPicker } from './AssetPromptPicker';
-import { buildPromptAssetLoad } from '../loadPromptAsset';
-import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
-import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
+import { getResourceCoverUrl } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
@@ -65,6 +61,26 @@ const GRIP_PX = 18;
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
 import { CANVAS_PILL_TRIGGER } from './canvasPill';
+
+/**
+ * How the Library panel's target bar names a prompt card.
+ *
+ * The card's own heading is the literal "Prompt", so the body's first line is
+ * the only thing a user would recognise it by. Both doors onto the panel (the
+ * header's Open Library and the bookshelf) route through here, so a node can
+ * never be named one way on the Media page and another on Prompts.
+ */
+function promptPanelTarget(
+  nodeId: string,
+  body: string | undefined,
+  fallback: string,
+): { nodeId: string; kind: 'prompt'; title: string } {
+  return {
+    nodeId,
+    kind: 'prompt',
+    title: (body ?? '').split('\n')[0].slice(0, 40) || fallback,
+  };
+}
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -161,10 +177,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Agent picker (CC3) — writes the pre-plumbed agent_id channel; the run
   // injects the agent's IDENTITY/SOUL server-side.
   const agents = useAgents();
-
-  // Library picker (Phase 2 asset library) — pulls a saved prompt + its
-  // cover into this node, wiring a fresh media node upstream of it.
-  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Smart nodes keep the tone's border colour but drop the whole-card
   // animate-pulse — the status badge's dot carries the motion (P1-5).
@@ -309,10 +321,16 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // header's fixed one (every kind), and the two reference affordances that
   // exist on gen kinds only.
   const openLibraryForNode = useCallback(() => {
-    const title = (body ?? '').split('\n')[0].slice(0, 40) || 'Prompt';
-    const target = { nodeId: id, kind: 'prompt' as const, title };
+    const target = promptPanelTarget(id, body, t('canvas.library.untitledPrompt', 'Prompt'));
     useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads', focusSearch: true, target });
-  }, [id, body]);
+  }, [id, body, t]);
+  // The bookshelf: the SAME target, a different page. Prompt templates used to
+  // be an in-card picker of their own; they are a page of the one panel now, so
+  // both doors name this node identically in the target bar.
+  const openPromptsForNode = useCallback(() => {
+    const target = promptPanelTarget(id, body, t('canvas.library.untitledPrompt', 'Prompt'));
+    useLibraryStore.getState().openPanel({ page: 'prompts', focusSearch: true, target });
+  }, [id, body, t]);
   // Publish this card's inserters so the PANEL can write chips into the body.
   // The panel knows only the node id — the editor handle lives in this render.
   //
@@ -487,67 +505,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     [mention, scopeId],
   );
 
-  // ── Library picker handler ───────────────────────────────────────────────
-  // Applies the pure-function result: patch this node's body/negative_body,
-  // append the new media node, and wire it in as a source connection.
-  const handlePickAsset = useCallback(
-    async (asset: PromptAsset, lang: 'en' | 'zh') => {
-      // Close the picker FIRST: the mint await below leaves an interactive
-      // window — with the picker still open, rapid clicks on rows would fire
-      // concurrent handlePickAsset runs (duplicate POSTs + duplicate node
-      // pairs). Unmounting the rows up front removes the window entirely.
-      setLibraryOpen(false);
-      // Mint the durable URL BEFORE reading getState() below — the await
-      // here is the only async gap in this handler, so grabbing the store
-      // snapshot after it (not before) ensures we build on top of whatever
-      // other canvas mutations landed while the mint was in flight (M3).
-      let mediaUrl: string;
-      let mediaKind: 'image' | 'video';
-      try {
-        const imported = await importResourceAsCanvasMedia(asset.id);
-        mediaUrl = imported.url;
-        mediaKind = imported.kind;
-      } catch (err) {
-        console.error('[promptAsset] durable import failed, falling back to cover:', err);
-        mediaUrl = getResourceCoverUrl(asset.id); // visual-only fallback, no i2i
-        mediaKind = 'image'; // cover endpoint always serves an image
-      }
-
-      // Fresh reads at handler time, not render-time subscriptions — avoids
-      // inserting into a stale nodes/connections snapshot when other canvas
-      // mutations landed between this node's last render and the click (M3).
-      const { nodes, connections, setNodes, setConnections } = useCanvasCoreStore.getState();
-      const selfNode = nodes.find((n) => (n as unknown as { id: string }).id === id);
-      const promptNodePosition =
-        (selfNode as unknown as { position?: { x: number; y: number } } | undefined)?.position ??
-        { x: 0, y: 0 };
-      const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
-        asset,
-        lang,
-        promptNodeId: id,
-        promptNodePosition,
-        mediaUrl,
-        mediaKind,
-      });
-      // One atomic setNodes call — folding the self-patch into the same
-      // array write that appends mediaNode avoids the two-write race where
-      // patch()'s set(nodes-with-patch) gets clobbered by this handler's own
-      // stale `nodes` snapshot (the bug this replaced: patch() landed, then
-      // setNodes([...nodes, mediaNode]) overwrote it right back out).
-      const nextNodes = nodes.map((n) =>
-        (n as unknown as { id: string }).id === id
-          ? ({
-              ...n,
-              data: { ...(n as unknown as { data?: object }).data, ...promptPatch },
-            } as unknown as CanvasNode)
-          : n,
-      );
-      setNodes([...nextNodes, mediaNode as unknown as CanvasNode]);
-      setConnections([...connections, connection as unknown as CanvasConnection]);
-    },
-    [id],
-  );
-
   // ────────────────────────────────────────────────────────────────────────
 
   return (
@@ -631,7 +588,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           <button
             type="button"
             className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
-            onClick={() => setLibraryOpen(true)}
+            onClick={openPromptsForNode}
             aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
             data-testid="prompt-library-button"
             disabled={readOnly}
@@ -939,11 +896,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             query={mention.query}
             canvasId={canvasId}
           />
-        )}
-
-        {/* Fixed full-screen modal — no relative positioning needed. */}
-        {libraryOpen && (
-          <AssetPromptPicker onPick={handlePickAsset} onClose={() => setLibraryOpen(false)} />
         )}
 
         {negative_body !== undefined ? (
