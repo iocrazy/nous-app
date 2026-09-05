@@ -453,6 +453,30 @@ export function extractModelText(stderr) {
  *
  *  `spawnFailed` / `timedOut` are carried through untouched: those outrank
  *  anything the stream says, exactly as `classifyJobError` already orders them. */
+/** The skill's `error.detail` is where the useful sentence lives for an
+ *  upstream failure: for `http_error` it is the HTTP body (a string, itself
+ *  often JSON like `{"detail":"The 'gpt-5.4' model is not supported…"}`), for
+ *  `credential_missing` it is an object. `message` alone says "HTTP 400" —
+ *  which is what the user was shown on 2026-09-05 when OpenAI dropped
+ *  gpt-5.4 for ChatGPT-account Codex. Unwrap one level of JSON so the
+ *  sentence comes out; stringify anything else so it is never
+ *  "[object Object]". */
+export function skillDetailText(detail) {
+  if (detail == null || detail === '') return '';
+  if (typeof detail === 'string') {
+    try {
+      const inner = JSON.parse(detail);
+      if (inner && typeof inner === 'object') {
+        const pick = inner.detail ?? inner.message ?? inner.error?.message;
+        if (typeof pick === 'string' && pick) return pick;
+        return JSON.stringify(inner);
+      }
+    } catch { /* plain text */ }
+    return detail;
+  }
+  try { return JSON.stringify(detail); } catch { return String(detail); }
+}
+
 export function imageJobFailure(err) {
   const { modelText, plainStderr } = extractModelText(err?.stderr);
   let envelope = null;
@@ -461,10 +485,13 @@ export function imageJobFailure(err) {
   } catch { /* not the skill's envelope — fall back to the thrown message */ }
   const skillCode = String(envelope?.error?.code ?? '');
   const skillMessage = String(envelope?.error?.message ?? '');
+  const detailText = skillDetailText(envelope?.error?.detail).slice(0, MODEL_TEXT_MAX);
   const refused = REFUSAL_SKILL_CODES.has(skillCode)
     && !err?.spawnFailed && !err?.timedOut;
+  // The body rides in the message too: that is what the daemon log and the
+  // server's `error_msg` see, and "HTTP 400" on its own is not a diagnosis.
   const message = skillCode
-    ? `gpt-image-2-skill: ${skillCode}: ${skillMessage}`.slice(0, 280)
+    ? `gpt-image-2-skill: ${skillCode}: ${skillMessage}${detailText ? `: ${detailText}` : ''}`.slice(0, 400)
     : String(err?.message ?? 'gpt-image-2-skill failed').slice(0, 280);
   return Object.assign(new Error(message), {
     code: refused ? 'content_refused' : err?.code,
@@ -472,7 +499,9 @@ export function imageJobFailure(err) {
     timedOut: Boolean(err?.timedOut),
     exitCode: err?.exitCode ?? null,
     stderr: plainStderr,
-    detail: modelText,
+    // On a refusal the model's own words are the detail; otherwise the
+    // envelope's body is the most specific thing we have.
+    detail: refused && modelText ? modelText : (modelText || detailText),
   });
 }
 

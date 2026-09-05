@@ -29,6 +29,34 @@ ChatGPT 订阅额度。catalog 行 `codex-image`（`mediahub_models`，migration
   `/app/.codex`（CLI 会把刷新后的 access_token 写回 auth.json）。
 - 超时：`CODEX_CLI_TIMEOUT`（秒，默认 900，clamp 30–3600）。
 
+## 编排模型是目录里的 `actual_model`，不是 skill 的默认值（2026-09-05 血泪）
+
+Codex 出图走的是 Responses API：一个**编排模型**（LLM）决定是否调用 `image_generation` 工具，
+工具内的出图模型固定是 `gpt-image-2`。`gpt-image-2-skill` 的 `--model` 在 codex provider 上
+改的是**编排模型**（实测：`-m gpt-6-astra` 返回体 `request.model=gpt-6-astra`、
+`delegated_image_model=gpt-image-2`）。
+
+- 服务端路径：`mediahub_models.codex-image.actual_model` → `codex_cli.py` 的 `--model`
+- daemon 路径：`mediahub_models.codex-local-image.actual_model` → payload.model → daemon 的 `--model`
+- 两者都为空时 skill 用**写死**的默认 `gpt-5.4`（0.7.3 二进制里硬编码，无配置项、无环境变量可改）
+
+2026-09-05 OpenAI 收掉了 ChatGPT 账号走 Codex 时对 `gpt-5.4` 的支持（`HTTP 400: The 'gpt-5.4'
+model is not supported when using Codex with a ChatGPT account`），两条路径同时全挂、每个请求 1 秒
+即败。处置就是把两行 `actual_model` 改成账号当前被接受的模型（当时选 `gpt-6-astra`——codex CLI
+自己的默认；历史会话里 `gpt-5.6-sol` / `gpt-5.5` 也被接受）。**不需要发版、不需要升 daemon。**
+
+怎么查账号现在接受哪些编排模型（每次 1 秒、不出图不花钱）：
+
+```bash
+printf '{"model":"%s","input":"hi"}' gpt-6-astra > /tmp/b.json
+gpt-image-2-skill --json --provider codex request create --request-operation responses --body-file /tmp/b.json
+# 被接受 → 报 "Input must be a list"（进到了下一层校验）；不被接受 → "model is not supported"
+```
+
+⚠️ 别用 `config add-provider` 去试：它不校验 `--type`、会把任何东西写成默认 provider，而且它建出的
+`~/.codex/gpt-image-2-skill/config.json` 是 0600 —— 容器以 uid 1031 挂载读不了，服务端路径立刻
+`config_read_failed`。探针前那个文件本来不存在。
+
 ## 一次性安装 / 登录（宿主机）
 
 宿主机已有 codex CLI（linuxbrew）。若重装：

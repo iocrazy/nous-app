@@ -819,6 +819,24 @@ async def dispatch_canvas_generations(
     from app.workflows.canvas_generation import canvas_generation_workflow
 
     mgr = get_task_manager()
+    # "Generate 3 images" is ONE thing the user asked for, so it is one flow
+    # with three steps in the Task Center (task_flows + flow_id, migration
+    # 203 — the same grouping an agent run gets). Only when there is more
+    # than one: a one-step flow would render as a group card around a single
+    # row. Best-effort like every other create_flow caller — None means the
+    # tasks dispatch ungrouped, never that they don't dispatch.
+    flow_id: str | None = None
+    if count > 1:
+        flow_id = await mgr.create_flow(
+            auth.user_id,
+            name=f"Generate {payload.kind} ×{count}",
+            metadata={
+                "canvas_id": canvas_id,
+                "node_id": payload.node_id,
+                "kind": payload.kind,
+                "count": count,
+            },
+        )
     task_ids: list[str] = []
     for index in range(count):
         wf_id = str(uuid.uuid4())
@@ -828,6 +846,7 @@ async def dispatch_canvas_generations(
             title=f"Generate {payload.kind}",
             subtitle=payload.prompt[:80],
             dbos_workflow_id=wf_id,
+            flow_id=flow_id,
             metadata={
                 "canvas_id": canvas_id,
                 "node_id": payload.node_id,
@@ -852,7 +871,7 @@ async def dispatch_canvas_generations(
             workflow_id=wf_id,
         )
         task_ids.append(task_id)
-    return {"success": True, "task_ids": task_ids}
+    return {"success": True, "task_ids": task_ids, "flow_id": flow_id}
 
 
 # ============================================================

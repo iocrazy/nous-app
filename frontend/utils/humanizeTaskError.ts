@@ -45,6 +45,17 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     hint: 'Check the collection name, or file the post from the app.',
   },
   {
+    // The Codex backend rejected the ORCHESTRATOR model our catalog row names
+    // (`mediahub_models.actual_model` for codex-image / codex-local-image is
+    // the model gpt-image-2-skill passes as `--model`). 2026-09-05: OpenAI
+    // dropped gpt-5.4 for ChatGPT-account Codex and every canvas image run
+    // failed with "HTTP 400" until that row was repointed. Retrying cannot
+    // help; the row is what has to change.
+    test: /model.*is not supported when using codex|not supported when using codex with a chatgpt account/i,
+    message: 'The Codex model configured for this account is not accepted.',
+    hint: 'Point this catalog row at a model Codex currently accepts (Settings → AI → the row\'s model), then run again.',
+  },
+  {
     // The image model DECLINED the prompt on content grounds: it answered with
     // prose (why, plus a rewrite that would work) instead of calling the image
     // tool. Two raw shapes reach here and both must match:
