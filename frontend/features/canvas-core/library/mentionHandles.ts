@@ -28,6 +28,20 @@
 
 import type { MentionInserters } from './mentionLibraryItems';
 
+/**
+ * The one failure this registry can cause: a handle whose card is registered
+ * but whose body editor is not mounted right now (the surface culls off-viewport
+ * cards). `PromptNodeView`'s wrappers throw THIS, and `mentionLibraryItems`
+ * maps it to the `editor_gone` reason — any other throw from an inserter is a
+ * different defect and must not borrow that name.
+ */
+export class EditorGoneError extends Error {
+  constructor(message = 'prompt body editor is not mounted') {
+    super(message);
+    this.name = 'EditorGoneError';
+  }
+}
+
 const handles = new Map<string, MentionInserters>();
 
 /**

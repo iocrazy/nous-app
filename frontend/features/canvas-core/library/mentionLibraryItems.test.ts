@@ -20,6 +20,7 @@ vi.mock('../../../services/assetsService', async (importOriginal) => ({
   fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
 }));
 
+import { EditorGoneError } from './mentionHandles';
 import { mentionLibraryItems, type MentionInserters } from './mentionLibraryItems';
 import type { LibraryItem } from './librarySearch';
 
@@ -191,7 +192,7 @@ describe('mentionLibraryItems', () => {
     // one rejects the whole run and loses the items that DID land.
     const h = handle();
     h.insertImage.mockImplementation(() => {
-      throw new Error('prompt body editor is not mounted');
+      throw new EditorGoneError();
     });
     const r = await mentionLibraryItems([GENERATED], SCOPE, h.inserters);
 
@@ -204,16 +205,30 @@ describe('mentionLibraryItems', () => {
     // both must be REPORTED, or a retry silently omits one.
     const h = handle();
     h.insertAsset.mockImplementation(() => {
-      throw new Error('prompt body editor is not mounted');
+      throw new EditorGoneError();
     });
     h.insertImage.mockImplementation(() => {
-      throw new Error('prompt body editor is not mounted');
+      throw new EditorGoneError();
     });
     const r = await mentionLibraryItems([ASSET, GENERATED], SCOPE, h.inserters);
 
     expect(r.mentioned).toBe(0);
     expect(r.failed.map((f) => f.item)).toEqual([ASSET, GENERATED]);
     expect(r.failed.every((f) => f.reason === 'editor_gone')).toBe(true);
+  });
+
+  it('a throw that is NOT the registry\'s own error is `insert_failed`, never `editor_gone`', async () => {
+    // Only `EditorGoneError` means "the card is unmounted". Any other throw is
+    // an inserter defect; labelling it `editor_gone` would send a reader to
+    // check the viewport for a bug that lives in the editor.
+    const h = handle();
+    h.insertImage.mockImplementation(() => {
+      throw new TypeError('boom');
+    });
+    const r = await mentionLibraryItems([GENERATED], SCOPE, h.inserters);
+
+    expect(r.mentioned).toBe(0);
+    expect(r.failed).toEqual([{ item: GENERATED, reason: 'insert_failed' }]);
   });
 
   it('a failed asset detail fetch still mentions — the chip works without it', async () => {

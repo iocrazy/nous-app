@@ -181,7 +181,7 @@ describe('the word Library on the canvas', () => {
     // Without this, a typo in LABEL_TUPLE would silently stop scanning the
     // const maps every chip row in the panel is built from.
     const pairs = tsFiles(ROOT).flatMap((f) => [
-      ...fs.readFileSync(f, 'utf8').matchAll(/\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g),
+      ...fs.readFileSync(f, 'utf8').matchAll(LABEL_TUPLE),
     ]);
     expect(pairs.length).toBeGreaterThan(20);
   });

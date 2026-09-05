@@ -778,11 +778,25 @@ describe('LibraryPanel aimed at a Text-kind prompt', () => {
   });
 
   it('a gen node still offers Add References — the split is on `gen`, not on the panel', async () => {
+    // Two rows for the same reason as the mention case above: the shipped
+    // singular is `addReferences_one` — "Add 1 Reference" — and the stub `t`
+    // would render the plural `defaultValue` at count 1.
+    searchResources.mockResolvedValue({
+      results: [UPLOAD_ROW, SECOND_UPLOAD_ROW],
+      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
     seedNodes([promptNode()]);
     armMentionHandle();
-    await openOnUploads(TEXT_TARGET);
-    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
-    expect(screen.getByTestId('library-primary').textContent).toContain('Add 1 References');
+    act(() => {
+      useLibraryStore.getState().openPanel({
+        page: 'media', mediaStore: 'uploads', target: TEXT_TARGET,
+      });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(2));
+    fireEvent.click(screen.getByTestId('library-select-all'));
+    expect(screen.getByTestId('library-primary').textContent).toContain('Add 2 References');
   });
 
   it('inserting writes a chip through the node handle, and never a reference', async () => {

@@ -37,7 +37,7 @@ import { addReferences } from '../../library/addReferences';
 import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
 import { useLibraryDrop, useLibraryMention } from '../../library/useLibraryDrop';
 import { useLibraryStore } from '../../library/libraryStore';
-import { registerMentionHandle } from '../../library/mentionHandles';
+import { EditorGoneError, registerMentionHandle } from '../../library/mentionHandles';
 import type { PromptImageRef } from './promptImageRefs';
 import {
   PromptMentionPicker,
@@ -336,12 +336,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       registerMentionHandle(id, {
         insertImage: (image, opts) => {
           const editor = bodyEditorRef.current;
-          if (!editor) throw new Error('prompt body editor is not mounted');
+          if (!editor) throw new EditorGoneError();
           editor.insertImage(image, opts);
         },
         insertAsset: (asset, opts) => {
           const editor = bodyEditorRef.current;
-          if (!editor) throw new Error('prompt body editor is not mounted');
+          if (!editor) throw new EditorGoneError();
           editor.insertAsset(asset, opts);
         },
       }),

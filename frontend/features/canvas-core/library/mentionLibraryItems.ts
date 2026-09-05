@@ -37,6 +37,7 @@ import {
   type AddReferenceFailure,
 } from './addReferences';
 import type { LibraryItem } from './librarySearch';
+import { EditorGoneError } from './mentionHandles';
 
 /** Exactly the two inserters this needs, so the helper can be pinned without
  *  an editor. `PromptBodyEditorHandle` satisfies it structurally. */
@@ -64,7 +65,7 @@ const AT_CARET = { consumeMention: false } as const;
  * time — so a card culled off-viewport between the aim and the commit answers
  * with a live-looking handle whose inserts throw.
  */
-export type MentionFailure = AddReferenceFailure | 'editor_gone';
+export type MentionFailure = AddReferenceFailure | 'editor_gone' | 'insert_failed';
 
 export interface MentionLibraryResult {
   /** Chips actually written into the document. An asset contributes one; an
@@ -83,15 +84,18 @@ export interface MentionLibraryResult {
  * the whole run and lose the items that DID land; catching it per item is what
  * makes "two inserted, one failed" representable.
  *
- * Returns whether the chip landed, so the caller's counter reads as one thing.
+ * Returns `null` when the chip landed, else the typed reason. Only the
+ * registry's own `EditorGoneError` is `editor_gone`; any other throw is an
+ * inserter defect and is reported as `insert_failed` so the two cannot be
+ * confused in a log or a toast.
  */
-function tryInsert(run: () => void, label: string): boolean {
+function tryInsert(run: () => void, label: string): MentionFailure | null {
   try {
     run();
-    return true;
+    return null;
   } catch (err) {
     console.error(`[mentionLibraryItems] ${label} threw:`, err);
-    return false;
+    return err instanceof EditorGoneError ? 'editor_gone' : 'insert_failed';
   }
 }
 
@@ -121,7 +125,7 @@ export async function mentionLibraryItems(
       } catch (err) {
         console.error('[mentionLibraryItems] asset detail fetch failed:', err);
       }
-      const landed = tryInsert(
+      const failure = tryInsert(
         () =>
           handle.insertAsset({
             asset_id: item.id,
@@ -135,8 +139,8 @@ export async function mentionLibraryItems(
           }, AT_CARET),
         'insertAsset',
       );
-      if (landed) out.mentioned += 1;
-      else out.failed.push({ item, reason: 'editor_gone' });
+      if (failure === null) out.mentioned += 1;
+      else out.failed.push({ item, reason: failure });
       continue;
     }
     // uploads / generated — an image chip IS a reference, so it resolves
@@ -155,16 +159,16 @@ export async function mentionLibraryItems(
     // One refusal is enough to disqualify the ITEM: an asset-backed upload can
     // resolve to several refs, and reporting the same item once per failed ref
     // would inflate the count the caller says out loud.
-    let refused = false;
+    let refused: MentionFailure | null = null;
     for (const ref of refs) {
-      const landed = tryInsert(
+      const failure = tryInsert(
         () => handle.insertImage({ url: ref.url, alias: item.title, kind: ref.kind }, AT_CARET),
         'insertImage',
       );
-      if (landed) out.mentioned += 1;
-      else refused = true;
+      if (failure === null) out.mentioned += 1;
+      else refused = refused ?? failure;
     }
-    if (refused) out.failed.push({ item, reason: 'editor_gone' });
+    if (refused !== null) out.failed.push({ item, reason: refused });
   }
   return out;
 }
