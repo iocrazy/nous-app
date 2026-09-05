@@ -24,15 +24,18 @@ const task = (metadata: Record<string, unknown>, extra: Partial<UnifiedTask> = {
   }) as unknown as UnifiedTask;
 
 describe('CanvasGenResultBody', () => {
-  it('renders an image result with prompt and canvas jump', () => {
+  it('renders an image result with the canvas jump — the prompt is NOT repeated here', () => {
+    // Reading order in the modal is description → error → result; the prompt
+    // and "Item i / n" live in TaskDescriptionBlock above every body, so the
+    // body only shows the result. Repeating them here put the prompt twice.
     render(
       <CanvasGenResultBody
         task={task({ result_url: '/gm/1/cover', canvas_id: '9', kind: 'image', index: 2, count: 4 })}
       />,
     );
     expect(screen.getByRole('img')).toHaveProperty('src', expect.stringContaining('/gm/1/cover') as never);
-    expect(screen.getByText(/a lighthouse at dawn/)).toBeTruthy();
-    expect(screen.getByText('Item 2 / 4')).toBeTruthy();
+    expect(screen.queryByText(/a lighthouse at dawn/)).toBeNull();
+    expect(screen.queryByText('Item 2 / 4')).toBeNull();
     expect((screen.getByText('Open Canvas') as HTMLAnchorElement).href).toContain('/canvas/9');
   });
 

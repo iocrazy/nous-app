@@ -33,7 +33,31 @@ export const codexDaemonService = {
   async revokeDevice(deviceId: string): Promise<void> {
     await apiFetch(`/api/v1/codex-daemon/devices/${deviceId}`, { method: 'DELETE' });
   },
+
+  /** The orchestrator model gpt-image-2-skill runs with (``--model``).
+   *  ``codex_model: null`` means "use the catalog row's default". */
+  async getPreferences(): Promise<CodexPreferences> {
+    const res = await apiFetch('/api/v1/codex-daemon/preferences');
+    const body = (await res.json()) as { data?: CodexPreferences };
+    return body.data ?? { codex_model: null, options: [] };
+  },
+
+  async savePreferences(patch: { codex_model: string | null }): Promise<CodexPreferences> {
+    const res = await apiFetch('/api/v1/codex-daemon/preferences', {
+      method: 'PUT',
+      json: patch,
+    });
+    if (!res.ok) throw new Error(`preferences save failed: HTTP ${res.status}`);
+    const body = (await res.json()) as { data?: CodexPreferences };
+    return body.data ?? { codex_model: patch.codex_model, options: [] };
+  },
 };
+
+export interface CodexPreferences {
+  codex_model: string | null;
+  /** Known-good orchestrator names the server offers; a custom one is allowed too. */
+  options: string[];
+}
 
 /** A device counts as online when its heartbeat is younger than 90s
  *  (the server's own timeout — keep the two in step). */

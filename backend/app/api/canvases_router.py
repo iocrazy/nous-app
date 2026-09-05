@@ -240,11 +240,24 @@ async def _visible_generation_rows(
     rule, one more caller. This thin wrapper stays because both routes below
     and their tests name it.
     """
+    from app.services.generation.local_readiness import (
+        apply_readiness,
+        local_engine_readiness,
+    )
     from app.services.generation.model_capabilities import visible_generation_rows
 
-    return await visible_generation_rows(
-        user_id, include_actual_provider=include_actual_provider
-    )
+    # What to OFFER, not what the user may use: the picker lists only rows
+    # that can generate right now (a local engine needs the user's daemon
+    # online and ready; a ready local twin hides its server twin; a failed
+    # probe hides). Authorization stays in visible_generation_rows so the
+    # dispatch path still answers "daemon offline" as a typed refusal rather
+    # than "no such model". actual_provider is fetched for the filter and
+    # stripped again unless asked for — the public projection does not widen.
+    rows = await visible_generation_rows(user_id, include_actual_provider=True)
+    rows = apply_readiness(rows, await local_engine_readiness(user_id))
+    if include_actual_provider:
+        return rows
+    return [{k: v for k, v in r.items() if k != "actual_provider"} for r in rows]
 
 
 @router.get("/canvases/generation-models")

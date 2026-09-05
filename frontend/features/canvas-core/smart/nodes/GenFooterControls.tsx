@@ -30,6 +30,15 @@ export interface FooterModel {
   is_local?: boolean;
 }
 
+/** What the picker calls a catalog row. The "(Local)" tag and the old
+ *  "· local" suffix are gone on purpose: the server twin is hidden whenever
+ *  the local one can run (see visible_generation_rows), so "local" is not a
+ *  distinction the user needs — one engine, one entry, one name. */
+export function modelLabel(m: { name: string; display_name?: string; is_local?: boolean }): string {
+  const base = m.display_name || m.name;
+  return base.replace(/\s*\((Local|本地)\)\s*$/i, '').trim() || m.name;
+}
+
 export interface GenFooterControlsProps {
   gen: PromptGenSettings;
   models: FooterModel[];
@@ -191,10 +200,8 @@ export function GenFooterControls({
     caps !== null &&
     ratioValue !== 'auto' &&
     !offeredRatios.some((o) => o.value === ratioValue);
-  const modelLabel =
-    models.find((m) => m.name === gen.model)?.display_name ||
-    gen.model ||
-    'Default';
+  const found = models.find((m) => m.name === gen.model);
+  const selectedModelLabel = found ? modelLabel(found) : gen.model || 'Default';
   const qualityLabel =
     QUALITIES.find((q) => q.value === (gen.quality ?? undefined))?.label ??
     'Auto';
@@ -216,7 +223,7 @@ export function GenFooterControls({
         className="min-w-0 flex-1"
       >
         <Sparkles size={11} />
-        <span className="truncate">{modelLabel}</span>
+        <span className="truncate">{selectedModelLabel}</span>
       </Pill>
       <Pill
         testid="pill-size"

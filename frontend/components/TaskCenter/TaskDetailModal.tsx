@@ -72,6 +72,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           {/* Above the loading / fetch-error branches: a failed task's reason
               must not wait on (or be replaced by) a result fetch that is
               looking for output the task never produced. */}
+          {/* Reading order (2026-09-05): the task first — what was asked,
+              which item of how many — then what happened to it, then what
+              came out. Leading with the error and burying the prompt at the
+              bottom made every failure read like a stack dump. */}
+          <TaskDescriptionBlock task={task} />
           <TaskErrorBlock task={task} />
           {result.loading && (
             <div className="flex items-center justify-center py-12 text-ink-500">
@@ -113,6 +118,33 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
  * was looking at it. Hoisting it here also means a body added later cannot
  * silently reintroduce the gap.
  */
+/** The task as the user submitted it: its subtitle (for a canvas
+ *  generation that IS the prompt) and, for a fan-out, which item this is.
+ *  Sits above the outcome so the modal reads task → outcome → result. */
+const TaskDescriptionBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
+  const meta = (task.metadata ?? {}) as { index?: unknown; count?: unknown };
+  const text = (task.subtitle || '').trim();
+  const index = typeof meta.index === 'number' ? meta.index : null;
+  const count = typeof meta.count === 'number' ? meta.count : null;
+  if (!text && !(index && count && count > 1)) return null;
+  const label = task.task_type === 'canvas_gen' ? 'Prompt' : 'Task';
+  return (
+    <div data-testid="task-description" className="px-4 pt-4">
+      <div className="rounded-lg border border-ink-700/60 bg-ink-950/40 px-3 py-2">
+        <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">
+          {label}
+          {index && count && count > 1 ? (
+            <span className="ml-2 normal-case tracking-normal text-ink-500">Item {index} / {count}</span>
+          ) : null}
+        </div>
+        {text && (
+          <div className="text-xs leading-relaxed text-ink-200 whitespace-pre-wrap break-words">{text}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
   if (!task.error_msg) return null;
