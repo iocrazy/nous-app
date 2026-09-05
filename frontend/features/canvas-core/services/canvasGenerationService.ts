@@ -50,6 +50,12 @@ export interface GenerationTask {
      *  older task row. Reported SEPARATELY from `dropped_knobs` because a
      *  run can drop a knob, a reference, or both. */
     dropped_refs?: Array<{ url: string; reason: string }>;
+    /** Written by the workflow when a failure brought an explanation for
+     *  the user (2026-09-05): `detail` is the model's own words for a
+     *  content refusal — why, and the rewrite it offers. Chinese-safe here
+     *  (jsonb) where `error_msg` is not. Empty `detail` = the provider
+     *  could not say (e.g. a 0.4.0 daemon). */
+    failure?: { code?: string; detail?: string };
     [k: string]: unknown;
   };
 }

@@ -10,10 +10,17 @@
 import {
   dispatchGenerations,
   pollGeneration,
-  PollStopped,
-} from '../services/canvasGenerationService';
+  PollStopped, type GenerationTask } from '../services/canvasGenerationService';
 import type { AssetInputsResolver } from './assetInputs';
 import type { PromptCaller, RunnerResult } from './runner';
+
+/** `metadata.failure.detail` of a failed task, or undefined when there is
+ *  nothing to show. '' is treated as absent on purpose: rendering an empty
+ *  explanation panel would read as "the model said nothing". */
+function failureDetail(task: GenerationTask | undefined): string | undefined {
+  const d = task?.metadata?.failure?.detail;
+  return typeof d === 'string' && d.trim() ? d : undefined;
+}
 import type { DroppedRef } from './types';
 import { isAutoRatio, measureRatio } from './autoRatio';
 
@@ -365,6 +372,11 @@ export function withGenerationRunner(
         .filter((t) => t.phase === 'completed')
         .map((t) => ('metadata' in t ? t.metadata?.result_url : undefined))
         .filter((u): u is string => Boolean(u));
+      // The failing party's explanation, when it left one — the whole
+      // reason a refusal is worth surfacing (it names the offending words
+      // and offers a rewrite). Absent → undefined, never '' (see
+      // GenerationTask.metadata.failure).
+      const firstDetail = failureDetail(failed[0]);
       const firstError = failed[0]
         ? failed[0].error_msg || `generation ${failed[0].phase}`
         : recovers[0]
@@ -375,6 +387,7 @@ export function withGenerationRunner(
           ok: false,
           text: '',
           error: firstError ?? 'generation completed without results',
+          ...(firstDetail ? { detail: firstDetail } : {}),
           media_kind: gen.kind,
         };
       }

@@ -53,6 +53,10 @@ export interface RunnerResult {
   text: string;
   /** When ok=false. */
   error: string | null;
+  /** When ok=false and the failing party wrote something FOR the user — a
+   *  content refusal's "why" plus the rewrite the model offers. Prose to
+   *  show, never a signal to branch on; `error` stays the verdict. */
+  detail?: string;
   /** Generation runs (G4-F1): durable result URLs, one per generated item. */
   urls?: string[];
   /** Generation runs: 'image' | 'video'. */
@@ -69,6 +73,9 @@ export interface RunHandlers {
     run_started_at?: string | null;
     run_finished_at?: string | null;
     run_error?: string | null;
+    /** The failing party's own explanation for the user (a content
+     *  refusal's "why" and the rewrite it offers). Prose, not a signal. */
+    run_detail?: string | null;
   }): void;
   onResult?(promptId: string, result: RunnerResult): void;
   /** Defaults to `() => new Date().toISOString()`. Pinned by tests. */
@@ -136,6 +143,7 @@ export async function runSinglePrompt(
       // Partial fan-out failures (P0-2) succeed WITH a warning — keep the
       // note ("1 of 3 items failed: …") on the node instead of wiping it.
       run_error: result.error ?? null,
+      run_detail: result.detail ?? null,
     });
   } else if (result.stopped) {
     // Stop ≠ failure: the wait was abandoned, the node returns to idle
@@ -148,6 +156,7 @@ export async function runSinglePrompt(
     handlers.onStatusChange(ctx.promptId, 'failed', {
       run_finished_at: now(),
       run_error: result.error,
+      run_detail: result.detail ?? null,
     });
   }
 

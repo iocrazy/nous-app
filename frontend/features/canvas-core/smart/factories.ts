@@ -144,6 +144,7 @@ export function createPromptNode(
       run_started_at: data.run_started_at ?? null,
       run_finished_at: data.run_finished_at ?? null,
       run_error: data.run_error ?? null,
+      run_detail: data.run_detail ?? null,
       resource_refs: data.resource_refs ?? [],
       // Negative prompt (Phase 2 asset library) — only persisted when
       // provided (absent = hand-typed prompt with no negative text).

@@ -178,3 +178,19 @@ export function humanizeTaskError(raw?: string | null): HumanizedError {
   }
   return { message: unwrapped };
 }
+
+
+/**
+ * Split a failing party's explanation into display paragraphs. The model
+ * writes for a chat window — blank-line paragraphs and `**emphasis**` — and
+ * neither the Task Center modal nor a canvas node is a markdown surface:
+ * literal `**` around the rewrite it offers reads as noise. Shared so the
+ * two surfaces can never drift apart on this.
+ */
+export function explanationParagraphs(text: string): string[] {
+  return text
+    .replace(/\*\*/g, '')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}

@@ -208,6 +208,7 @@ async function resumePromptTasks(
   let landed = 0;
   let recovered = 0;
   let firstError: string | null = null;
+  let firstDetail: string | null = null;
   // Same read, same terminal point, same semantics as the live runner
   // (generationRunner). A resume is the OTHER way a generation reaches a
   // terminal phase, and reading `result_url` here while ignoring its
@@ -266,6 +267,8 @@ async function resumePromptTasks(
         } else {
           settleGenerationSlot(promptId, { failed: 1 });
           firstError ??= task.error_msg || `generation ${task.phase}`;
+          const d = task.metadata?.failure?.detail;
+          if (typeof d === 'string' && d.trim()) firstDetail ??= d;
         }
       } catch {
         if (!sameCanvas()) return;
@@ -283,11 +286,12 @@ async function resumePromptTasks(
   // deliberately does not set the flag, matching the runner).
   if (observedDropped) markDroppedKnobs(promptId, droppedUnion, refUnion);
   if (landed > 0) {
-    patch({ run_status: 'succeeded', run_error: firstError });
+    patch({ run_status: 'succeeded', run_error: firstError, run_detail: firstDetail });
   } else {
     patch({
       run_status: 'failed',
       run_error: recovered > 0 ? NOT_LOST_ERROR : firstError ?? NOT_LOST_ERROR,
+      run_detail: firstDetail,
     });
   }
 }

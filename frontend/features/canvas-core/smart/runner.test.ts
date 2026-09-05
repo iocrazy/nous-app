@@ -118,3 +118,14 @@ describe('runPrompts — sequence', () => {
     expect(results.every((r) => !r.result.ok)).toBe(true);
   });
 });
+
+describe('runner — failure detail reaches the node', () => {
+  it("hands result.detail to onStatusChange('failed') as run_detail", async () => {
+    const { statuses, handlers } = recordingHandlers();
+    const refusing = vi.fn(async () => ({ ok: false as const, text: '', error: 'declined', detail: '模型的话' }));
+    await runSinglePrompt(ctx('p1'), refusing, handlers);
+    const last = statuses[statuses.length - 1];
+    expect(last.status).toBe('failed');
+    expect(last.fields.run_detail).toBe('模型的话');
+  });
+});

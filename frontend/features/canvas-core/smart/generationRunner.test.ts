@@ -864,3 +864,30 @@ describe('withGenerationRunner — dropped references (asset-library P4)', () =>
     expect(refs[1]).toEqual([REF_A]);
   });
 });
+
+// ── the model's own words ride the result (2026-09-05) ───────────────────────
+// A content refusal lands `metadata.failure.detail` on the task row: why the
+// model declined and the rewrite it offers. Task Center shows it; the canvas
+// node — where the user actually is — showed only "declined". Carry it.
+describe('generationRunner — failure detail', () => {
+  it('returns metadata.failure.detail alongside the error', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'failed',
+      error_msg: 'RuntimeError: [content_refused] The image model declined this prompt…',
+      metadata: { failure: { code: 'content_refused', detail: '抱歉，无法按当前描述生成。可以改为黑色皮革挂脖连体短裤。' } },
+    });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
+    const result = await runner({ ...TEXT_CTX, gen: { kind: 'image', model: '', count: 1 } });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('黑色皮革挂脖连体短裤');
+  });
+
+  it('leaves detail undefined when the row carries none (0.4.0 daemon / other providers)', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({ phase: 'failed', error_msg: 'no credit', metadata: { failure: { code: 'job_failed', detail: '' } } });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
+    const result = await runner({ ...TEXT_CTX, gen: { kind: 'image', model: '', count: 1 } });
+    expect(result.detail).toBeUndefined();
+  });
+});
