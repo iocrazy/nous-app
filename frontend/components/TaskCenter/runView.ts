@@ -80,16 +80,31 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Rows written before the 2026-09-05 mirror fix hold `view` / `cost` as a
+ * jsonb STRING (double-encoded). Parse once so those rows still read. */
+function record(v: unknown): Record<string, unknown> | null {
+  if (isRecord(v)) return v;
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return isRecord(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** The folded view, or null when the row predates it / carries garbage. */
 export function selectRunView(meta: Meta): RunView | null {
-  const view = meta?.view;
-  if (!isRecord(view) || typeof view.v !== 'number' || typeof view.phase !== 'string') return null;
+  const view = record(meta?.view);
+  if (!view || typeof view.v !== 'number' || typeof view.phase !== 'string') return null;
   return view as unknown as RunView;
 }
 
 export function selectRunCost(meta: Meta): RunCost | null {
-  const cost = meta?.cost;
-  if (!isRecord(cost) || typeof cost.spent_cents !== 'number') return null;
+  const cost = record(meta?.cost);
+  if (!cost || typeof cost.spent_cents !== 'number') return null;
   return cost as unknown as RunCost;
 }
 

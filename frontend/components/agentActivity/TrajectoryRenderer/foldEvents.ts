@@ -114,6 +114,37 @@ export interface FoldOptions {
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+/**
+ * Nested payload fields arrive as JSON *strings*: the backend's
+ * `_truncate_payload` stringifies every nested dict/list before insert (so a
+ * huge tool result cannot sneak past the cap). `usage`, `counts`, `todos`,
+ * `result` all come this way on the real wire (2026-09-05 真栈验收) — read them
+ * through this, never as objects.
+ */
+const obj = (v: unknown): Record<string, unknown> | null => {
+  if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>;
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+const arr = (v: unknown): unknown[] => {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
 
 function emptySummary(): StepSummary {
@@ -229,8 +260,8 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       case 'tool_call': {
         const node = ensureStep(ev, num(p.iteration));
         const tool = str(p.tool) ?? 'tool';
-        const result = p.result;
-        const ok = !(typeof result === 'object' && result !== null && (result as Record<string, unknown>).ok === false);
+        const result = obj(p.result);
+        const ok = !(result !== null && result.ok === false);
         upsertLine(node, `tool:${ev.seq}`, () => ({
           type: 'tool',
           label: tool,
@@ -274,11 +305,11 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
 
       case 'todo_write': {
         const node = ensureStep(ev, null);
-        const counts = (p.counts ?? {}) as Record<string, unknown>;
+        const counts = obj(p.counts) ?? {};
         const done = num(counts.completed);
         const total = num(counts.total);
         if (done !== null && total !== null) node.summary.todo = { done, total };
-        const todos = Array.isArray(p.todos) ? (p.todos as Array<Record<string, unknown>>) : [];
+        const todos = arr(p.todos) as Array<Record<string, unknown>>;
         const active = todos.find((t) => t?.status === 'in_progress');
         upsertLine(node, 'todo', () => ({
           type: 'todo',

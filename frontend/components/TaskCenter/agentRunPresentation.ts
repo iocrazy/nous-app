@@ -1,4 +1,5 @@
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
+import { coerceRecord } from '../agentActivity/toolActivity';
 import { endedReason, retryState, selectRunView, stepProgress } from './runView';
 
 // agent_runs is the universal record for every agent turn (chat + issue +
@@ -125,7 +126,8 @@ export interface TodoProgress {
 export function todoProgress(metadata: Record<string, unknown> | null | undefined): TodoProgress | null {
   const fromView = stepProgress(selectRunView(metadata));
   if (fromView) return fromView;
-  const snap = metadata?.todos as Partial<AgentTodoSnapshot> | undefined;
+  // Phase-2 rows mirrored these as jsonb STRINGS (double-encoded) — coerce.
+  const snap = coerceRecord(metadata?.todos) as Partial<AgentTodoSnapshot> | null;
   const counts = snap?.counts;
   if (!snap || !counts || typeof counts.total !== 'number' || typeof counts.completed !== 'number') {
     return null;
@@ -156,9 +158,9 @@ export function retryProgress(
 ): RetryProgress | null {
   const fromView = retryState(selectRunView(metadata), now);
   if (fromView) return fromView;
-  const r = metadata?.last_retry as
+  const r = coerceRecord(metadata?.last_retry) as
     | { attempt?: unknown; max_retries?: unknown; delay_ms?: unknown; at?: unknown }
-    | undefined;
+    | null;
   if (!r || typeof r.attempt !== 'number' || typeof r.max_retries !== 'number') return null;
   const delayMs = typeof r.delay_ms === 'number' ? r.delay_ms : 0;
   const atMs = typeof r.at === 'string' ? Date.parse(r.at) : NaN;

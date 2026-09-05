@@ -52,3 +52,13 @@ describe('runView selectors', () => {
     expect(budgetState(v)).toBeNull(); // only warn/over colour the card
   });
 });
+
+
+describe('runView selectors — double-encoded rows (pre 2026-09-05 mirror fix)', () => {
+  it('parses a view / cost stored as a jsonb string', () => {
+    const meta = { view: JSON.stringify(view), cost: JSON.stringify({ spent_cents: 0.5, by_step: [], by_model: {}, budget_cents: null, pct: null }) };
+    expect(stepProgress(selectRunView(meta))).toEqual({ done: 3, total: 7, label: 'Drafting scene 3' });
+    expect(selectRunCost(meta)?.spent_cents).toBe(0.5);
+    expect(selectRunView({ view: '{not json' })).toBeNull();
+  });
+});
