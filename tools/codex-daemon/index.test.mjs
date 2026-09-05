@@ -946,3 +946,54 @@ test('buildImageArgs: asks for the event stream so a refusal can be explained', 
     'it is a global flag — it must precede the subcommand or the CLI rejects it',
   );
 });
+
+// ── the skill's `error.detail` is the HTTP body — it must reach the user ─────
+//
+// 2026-09-05: OpenAI stopped accepting `gpt-5.4` for ChatGPT-account Codex.
+// The skill reported `{"code":"http_error","message":"HTTP 400","detail":
+// "{\"detail\":\"The 'gpt-5.4' model is not supported when using Codex with a
+// ChatGPT account.\"}"}` — and the user saw "HTTP 400", because imageJobFailure
+// read only code+message. The sentence that says what is wrong was in `detail`.
+// Real envelope captured from gpt-image-2-skill 0.7.3.
+
+const SKILL_STDOUT_HTTP400 = JSON.stringify({
+  error: {
+    code: 'http_error',
+    detail: '{"detail":"The \'gpt-5.4\' model is not supported when using Codex with a ChatGPT account."}',
+    message: 'HTTP 400',
+  },
+  ok: false,
+}, null, 2);
+
+test('imageJobFailure: a string error.detail rides along as detail and in the message', () => {
+  const raw = Object.assign(new Error('gpt-image-2-skill exited 1'), {
+    stdout: SKILL_STDOUT_HTTP400, stderr: '', exitCode: 1, timedOut: false,
+  });
+  const err = imageJobFailure(raw);
+  assert.equal(classifyJobError(err), 'job_failed');            // not a refusal
+  assert.match(err.detail, /gpt-5\.4.*not supported/);
+  assert.match(err.message, /not supported when using Codex/, 'the body must not be dropped from what the log/server see');
+  assert.ok(err.message.length <= 400);
+});
+
+// `credential_missing` ships detail as an OBJECT ({credential, provider}).
+test('imageJobFailure: an object error.detail is stringified, never [object Object]', () => {
+  const raw = Object.assign(new Error('x'), {
+    stdout: JSON.stringify({ error: { code: 'credential_missing', message: 'Missing credential: access_token', detail: { credential: 'access_token', provider: 'codex-live' } }, ok: false }),
+    stderr: '', exitCode: 1, timedOut: false,
+  });
+  const err = imageJobFailure(raw);
+  assert.equal(err.message.includes('[object Object]'), false);
+  assert.match(err.detail, /access_token/);
+});
+
+// A refusal keeps the MODEL's words as detail even if the envelope also had a detail.
+test('imageJobFailure: on a refusal the model text wins over envelope detail', () => {
+  const raw = Object.assign(new Error('x'), {
+    stdout: JSON.stringify({ error: { code: 'missing_image_result', message: 'm', detail: 'envelope-detail' }, ok: false }),
+    stderr: REFUSAL_EVENT, exitCode: 1, timedOut: false,
+  });
+  const err = imageJobFailure(raw);
+  assert.equal(classifyJobError(err), 'content_refused');
+  assert.match(err.detail, /抱歉/);
+});

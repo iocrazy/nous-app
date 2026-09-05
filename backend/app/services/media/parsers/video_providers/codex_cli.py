@@ -278,6 +278,37 @@ class CodexCliProvider:
             logger.info("[codex-cli] {} stderr: {}", args[0], stderr[:2000])
         return proc.returncode, stdout, stderr
 
+    @staticmethod
+    def _detail_text(detail: object) -> str:
+        """The envelope's ``error.detail`` as one readable string.
+
+        For ``http_error`` it is the HTTP body — a string that is itself
+        usually JSON (``{"detail":"The 'gpt-5.4' model is not supported…"}``);
+        for ``credential_missing`` it is an object. ``message`` alone says
+        "HTTP 400", which is what the user saw on 2026-09-05 when OpenAI
+        dropped gpt-5.4 for ChatGPT-account Codex. Unwrap one level so the
+        sentence comes out; JSON-dump anything else so no Python repr leaks.
+        """
+        if detail is None or detail == "":
+            return ""
+        if isinstance(detail, str):
+            try:
+                inner = json.loads(detail)
+            except json.JSONDecodeError:
+                return detail
+            if isinstance(inner, dict):
+                pick = inner.get("detail") or inner.get("message")
+                if not pick and isinstance(inner.get("error"), dict):
+                    pick = inner["error"].get("message")
+                if isinstance(pick, str) and pick:
+                    return pick
+                return json.dumps(inner, ensure_ascii=False)
+            return detail
+        try:
+            return json.dumps(detail, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(detail)
+
     def _classify_error(self, payload: dict, stderr: str) -> CodexCliError:
         """Map an ``ok: false`` payload onto a structured error.
 
@@ -290,6 +321,10 @@ class CodexCliProvider:
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
         code = str(error.get("code", ""))
         message = str(error.get("message", "")) or "gpt-image-2-skill failed"
+        body = self._detail_text(error.get("detail"))[:MODEL_DETAIL_MAX]
+        if body:
+            # The body is the diagnosis; "HTTP 400" is only the symptom.
+            message = f"{message}: {body}"
         # The model answered, but not with an image: it declined and explained
         # instead. `missing_image_result` describes the pipeline's shape, not
         # what happened, and on its own it is unactionable — the explanation
@@ -309,17 +344,20 @@ class CodexCliProvider:
                 f"codex session is not usable ({code}): {message} — refresh the "
                 "mounted auth.json (see docs/runbook/codex-image.md)",
                 stderr=stderr[:500],
+                detail=body,
             )
         if any(n in needle_text for n in _QUOTA_NEEDLES):
             return CodexCliError(
                 "no_credit",
                 f"codex account quota exhausted ({code}): {message}",
                 stderr=stderr[:500],
+                detail=body,
             )
         return CodexCliError(
             "generation_failed",
             f"gpt-image-2-skill failed ({code}): {message}",
             stderr=stderr[:500],
+            detail=body,
         )
 
     # ------------------------------------------------------------- generation --

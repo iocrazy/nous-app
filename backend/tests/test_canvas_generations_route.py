@@ -63,14 +63,28 @@ def dispatch(monkeypatch):
         created.append(kwargs)
         return kwargs.get("dbos_workflow_id") or str(uuid4())
 
-    mgr = SimpleNamespace(create=AsyncMock(side_effect=_create))
+    # One flow per submission when count > 1 (2026-09-05): `create_flow`
+    # hands back the parent task_flows id that every child row links to.
+    flows: list[dict] = []
+    flow_id = "flow-" + str(uuid4())
+
+    async def _create_flow(user_id, name, *, metadata=None):
+        flows.append({"user_id": user_id, "name": name, "metadata": metadata})
+        return flow_id
+
+    mgr = SimpleNamespace(
+        create=AsyncMock(side_effect=_create),
+        create_flow=AsyncMock(side_effect=_create_flow),
+    )
     monkeypatch.setattr(canvases_router, "get_task_manager", lambda: mgr)
 
     started = AsyncMock(return_value={"ok": True})
     import app.services.infra.dbos_orchestrator as orch
 
     monkeypatch.setattr(orch, "start_workflow_routed", started)
-    return SimpleNamespace(mgr=mgr, started=started, created=created)
+    return SimpleNamespace(
+        mgr=mgr, started=started, created=created, flows=flows, flow_id=flow_id
+    )
 
 
 class TestPostGenerations:
@@ -347,3 +361,54 @@ class TestGenerationModelsFollowSettings:
 
         assert resp.status_code == 200
         assert [m["name"] for m in resp.json()["data"]] == ["jimeng-cli-image"]
+
+
+class TestGenerationsAreOneFlow:
+    """ "Generate 3 images" is ONE thing the user asked for. Before this, the
+    Task Center showed three unrelated "Generate image" rows for it, while an
+    agent run of five steps showed as one card with five dots — the grouping
+    the user pointed at on 2026-09-05. task_flows + flow_id already exist
+    (migration 203, FlowGroupCard); the dispatcher just never used them."""
+
+    @pytest.mark.asyncio
+    async def test_count_gt_one_links_every_task_to_one_flow(self, client, dispatch):
+        resp = await client.post(
+            "/api/v1/canvases/123/generations",
+            json={"node_id": "n1", "kind": "image", "prompt": "a cat", "count": 3},
+        )
+        assert resp.status_code == 200
+        assert dispatch.mgr.create_flow.await_count == 1
+        flow = dispatch.flows[0]
+        assert flow["user_id"] == FAKE_USER_ID
+        assert flow["name"]  # a human title, never blank
+        assert flow["metadata"]["canvas_id"] == "123"
+        assert flow["metadata"]["node_id"] == "n1"
+        assert flow["metadata"]["count"] == 3
+        assert [c.get("flow_id") for c in dispatch.created] == [dispatch.flow_id] * 3
+        assert resp.json()["flow_id"] == dispatch.flow_id
+
+    @pytest.mark.asyncio
+    async def test_a_single_image_stays_a_single_row(self, client, dispatch):
+        """A one-task flow would render as a group card wrapping one row —
+        noise, and not what "one submission = one task" means."""
+        resp = await client.post(
+            "/api/v1/canvases/123/generations",
+            json={"node_id": "n1", "kind": "image", "prompt": "a cat", "count": 1},
+        )
+        assert resp.status_code == 200
+        assert dispatch.mgr.create_flow.await_count == 0
+        assert dispatch.created[0].get("flow_id") is None
+        assert resp.json()["flow_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_flow_creation_failure_never_blocks_dispatch(self, client, dispatch):
+        """create_flow is best-effort (it returns None on failure). Grouping is
+        presentation; three ungrouped tasks beat zero tasks."""
+        dispatch.mgr.create_flow = AsyncMock(return_value=None)
+        resp = await client.post(
+            "/api/v1/canvases/123/generations",
+            json={"node_id": "n1", "kind": "image", "prompt": "a cat", "count": 3},
+        )
+        assert resp.status_code == 200
+        assert dispatch.started.await_count == 3
+        assert all(c.get("flow_id") is None for c in dispatch.created)

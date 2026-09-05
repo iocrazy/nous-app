@@ -87,3 +87,19 @@ describe('content refusal copy', () => {
     }
   });
 });
+
+// 2026-09-05: OpenAI dropped `gpt-5.4` for ChatGPT-account Codex. The stored
+// string once the daemon forwards the skill's HTTP body (see imageJobFailure).
+const MODEL_UNSUPPORTED =
+  "RuntimeError: job_failed: gpt-image-2-skill: http_error: HTTP 400: The 'gpt-5.4' model " +
+  'is not supported when using Codex with a ChatGPT account.';
+
+describe('codex orchestrator model rejected', () => {
+  it('names the cause and points at the model setting, not at retrying', () => {
+    const r = humanizeTaskError(MODEL_UNSUPPORTED);
+    expect(r.message).toMatch(/model.*(not supported|not accepted|rejected)/i);
+    expect(r.hint ?? '').toMatch(/Settings|model/i);
+    expect(r.hint ?? '').not.toMatch(/try again/i);
+    expect(r.message).not.toMatch(/see details/i);
+  });
+});

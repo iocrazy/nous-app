@@ -193,3 +193,56 @@ class TestRefusalIsExplained:
             await provider.generate_image(prompt="x", aspect="9:16")
 
         assert exc.value.code == "content_refused"
+
+
+# ── the envelope's `detail` is the HTTP body; "HTTP 400" alone is useless ──
+#
+# 2026-09-05: OpenAI stopped accepting `gpt-5.4` for ChatGPT-account Codex.
+# Real envelope from gpt-image-2-skill 0.7.3 — the sentence that says what is
+# wrong lives in `detail`, which `_classify_error` used to ignore.
+HTTP400_STDOUT = json.dumps(
+    {
+        "error": {
+            "code": "http_error",
+            "detail": '{"detail":"The \'gpt-5.4\' model is not supported when using Codex with a ChatGPT account."}',
+            "message": "HTTP 400",
+        },
+        "ok": False,
+    }
+).encode()
+
+
+class TestEnvelopeDetailSurfaces:
+    async def test_http_error_body_reaches_message_and_detail(self, monkeypatch):
+        install_fake_exec(
+            monkeypatch,
+            lambda argv: FakeProc(rc=1, stdout=HTTP400_STDOUT, stderr=b"", argv=argv),
+        )
+        provider = CodexCliProvider(bin_path="gpt-image-2-skill")
+        with pytest.raises(CodexCliError) as exc:
+            await provider.generate_image(
+                prompt="x", aspect="1:1", model_version="gpt-5.4"
+            )
+        assert exc.value.code == "generation_failed"
+        assert "not supported when using Codex" in exc.value.message
+        assert "gpt-5.4" in exc.value.detail
+
+    async def test_object_detail_is_stringified(self, monkeypatch):
+        body = json.dumps(
+            {
+                "error": {
+                    "code": "credential_missing",
+                    "message": "Missing credential: access_token",
+                    "detail": {"credential": "access_token", "provider": "codex-live"},
+                },
+                "ok": False,
+            }
+        ).encode()
+        install_fake_exec(
+            monkeypatch, lambda argv: FakeProc(rc=1, stdout=body, stderr=b"", argv=argv)
+        )
+        provider = CodexCliProvider(bin_path="gpt-image-2-skill")
+        with pytest.raises(CodexCliError) as exc:
+            await provider.generate_image(prompt="x", aspect="1:1")
+        assert "access_token" in exc.value.detail
+        assert "{'" not in exc.value.detail, "python repr leaked; use JSON"
