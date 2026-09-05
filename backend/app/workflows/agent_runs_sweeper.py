@@ -92,6 +92,47 @@ async def mark_heartbeat_lost_step() -> int:
 
 
 INBOX_ORPHAN_SECONDS = 24 * 3600
+RECONCILE_GRACE_SECONDS = 10 * 60
+
+
+@DBOS.step()
+async def reconcile_issue_execution_state_step() -> int:
+    """MH-1: an ``in_progress`` issue whose last run ended (any terminal
+    status) ≥10 min ago while ``execution_state.turn`` still says a turn is
+    on → merge ``agent_outcome="interrupted"`` (+ reason, reconciled_at) so
+    the decoration stops claiming a run that is gone. issue.rollup already
+    derives phase from the runs; this keeps the column honest for the
+    readers that still look at it. Returns how many issues were stamped."""
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+    from app.repositories.issue_repository import issue_repository
+    from app.services.issues.execution_state import merge_execution_state
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RECONCILE_GRACE_SECONDS)
+    stamped = 0
+    for issue in await issue_repository.list_in_progress_without_live_run():
+        session_id = issue.get("ai_session_id")
+        runs = await get_agent_runs_repository().list_for_issue(
+            issue_id=int(issue["id"]),
+            conversation_id=int(session_id) if session_id else None,
+            limit=1,
+        )
+        latest = runs[0] if runs else None
+        ended_at = (latest or {}).get("ended_at")
+        if latest is None or ended_at is None or ended_at > cutoff:
+            continue
+        await merge_execution_state(
+            int(issue["id"]),
+            {
+                "agent_outcome": "interrupted",
+                "outcome_reason": (
+                    f"run {latest['id']} ended ({latest.get('status')}) "
+                    "without a status transition"
+                ),
+                "reconciled_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        stamped += 1
+    return stamped
 
 
 @DBOS.step()
@@ -193,8 +234,10 @@ async def agent_runs_sweeper_workflow(
     heartbeat_lost = await mark_heartbeat_lost_step()
     transitions = await recompute_monthly_budgets_step()
     expired_inbox = await expire_orphan_inbox_step()
-    if heartbeat_lost or transitions or expired_inbox:
+    reconciled = await reconcile_issue_execution_state_step()
+    if heartbeat_lost or transitions or expired_inbox or reconciled:
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
-            f"budget_transitions={transitions} expired_inbox={expired_inbox}"
+            f"budget_transitions={transitions} expired_inbox={expired_inbox} "
+            f"reconciled_issues={reconciled}"
         )

@@ -382,6 +382,36 @@ class IssueRepository:
             ).all()
         return {str(r[0]): r[1] for r in rows}
 
+    async def list_in_progress_without_live_run(self) -> list[dict[str, Any]]:
+        """MH-1 reconciliation candidates: ``in_progress`` issues whose
+        ``execution_state`` still carries a turn marker while no run is
+        ``running`` on them (by issue_id or their session conversation) and
+        nothing is awaiting input. The sweeper stamps ``agent_outcome`` on
+        them so the decoration stops claiming a run that ended."""
+        from app.models import AgentRuns
+
+        live = (
+            select(AgentRuns.id)
+            .where(
+                AgentRuns.status == "running",
+                or_(
+                    AgentRuns.issue_id == Issues.id,
+                    AgentRuns.conversation_id == Issues.ai_session_id,
+                ),
+            )
+            .exists()
+        )
+        stmt = select(Issues).where(
+            Issues.status == "in_progress",
+            Issues.hidden_at.is_(None),
+            Issues.execution_state.has_key("turn"),
+            ~Issues.execution_state.has_key("awaiting_input"),
+            ~Issues.execution_state.has_key("agent_outcome"),
+            ~live,
+        )
+        async with read_scope() as session:
+            return [_row(r) for r in (await session.execute(stmt)).scalars().all()]
+
     async def list_children(
         self,
         parent_id: int,
