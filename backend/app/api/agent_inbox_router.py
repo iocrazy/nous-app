@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
@@ -122,6 +123,25 @@ def validate_content(kind: str, content: dict[str, Any]) -> None:
         )
 
 
+async def persist_conversation_steer(
+    conversation_id: int, user_id: str, body: str
+) -> None:
+    """Keep the steer on the conversation thread as a user message, the same
+    way an issue comment keeps its row when diverted (issue_messages_router).
+    The runner injects the inbox item into THIS turn; the row is what history
+    shows afterwards. Best-effort — the inbox row is the contract."""
+    from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+
+    try:
+        await ConversationsAiStore().append_user_message(
+            session_id=int(conversation_id), user_id=user_id, content=body
+        )
+    except Exception as err:  # noqa: BLE001
+        logger.warning(
+            f"[agent_inbox] steer row not persisted (conversation={conversation_id}): {err}"
+        )
+
+
 @router.post("", response_model=InboxItemOut, status_code=status.HTTP_201_CREATED)
 async def deliver(payload: InboxPost, auth: AuthDep) -> InboxItemOut:
     await assert_target_open(payload.target_kind, payload.target_id, auth)
@@ -133,6 +153,10 @@ async def deliver(payload: InboxPost, auth: AuthDep) -> InboxItemOut:
         kind=payload.kind,
         content=payload.content,
     )
+    if payload.target_kind == "conversation" and payload.kind == "steer":
+        await persist_conversation_steer(
+            payload.target_id, str(auth.user_id), str(payload.content.get("body", ""))
+        )
     return InboxItemOut.from_row(row)
 
 

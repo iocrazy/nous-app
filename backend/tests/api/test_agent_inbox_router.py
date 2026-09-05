@@ -158,3 +158,52 @@ def test_list_pending_passes_filter_and_lists_even_when_ended(repo, monkeypatch)
     assert resp.status_code == 200
     assert resp.json()[0]["claimed_run_id"] == "99"
     assert repo.list_for_target.await_args.kwargs["pending_only"] is False
+
+
+def test_conversation_steer_keeps_a_row_on_the_thread_issue_steer_does_not(
+    repo, monkeypatch
+):
+    """T10: the chat thread must show the steer after the turn (history reload);
+    the issue path already persists its comment row before diverting."""
+    repo.conversation_target.return_value = {
+        "id": 9,
+        "created_by": ME,
+        "archived_at": None,
+    }
+    persist = AsyncMock()
+    monkeypatch.setattr(r, "persist_conversation_steer", persist)
+    monkeypatch.setattr(r, "assert_issue_visible", AsyncMock(return_value=_issue()))
+    c = _client()
+    assert (
+        c.post(
+            "/api/v1/ai-library/inbox",
+            json={
+                "target_kind": "conversation",
+                "target_id": 9,
+                "content": {"body": "colder"},
+            },
+        ).status_code
+        == 201
+    )
+    persist.assert_awaited_once_with(9, ME, "colder")
+    persist.reset_mock()
+    assert (
+        c.post(
+            "/api/v1/ai-library/inbox",
+            json={"target_kind": "issue", "target_id": 7, "content": {"body": "hi"}},
+        ).status_code
+        == 201
+    )
+    persist.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_conversation_steer_swallows_store_failures(monkeypatch):
+    import app.services.ai.chat.conversations_ai_store as store_mod
+
+    class _Boom:
+        async def append_user_message(self, **kw):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(store_mod, "ConversationsAiStore", lambda: _Boom())
+    await r.persist_conversation_steer(9, ME, "x")  # must not raise
