@@ -21,6 +21,8 @@ on:
     paths:
       - 'deploy/gpu-server/supabase/**'
       - 'scripts/check-config-drift.sh'
+      - 'scripts/check-realtime-publication-drift.sh'
+      - 'supabase/migrations/452_realtime_publication_frontend_tables.sql'
       - '.github/workflows/config-drift.yml'
   schedule:
     # 每天 02:00 UTC（北京时间 10:00）。抓"改完拖了几天没同步"，
@@ -46,3 +48,12 @@ jobs:
 
       - name: Compare repo config against the live stack
         run: bash scripts/check-config-drift.sh
+
+      # 同族的第二个漂移：前端订阅的 realtime 表 vs 生产 supabase_realtime 发布。
+      # 2026-09-04 实证 agent_runs 等四张表在生产发布里缺失数周，任务中心从不实时更新，
+      # 而订阅一张未发布的表是静默的 —— 只有这样对一次才会有人知道。
+      - name: Self-test the realtime publication checker
+        run: bash scripts/check-realtime-publication-drift.selftest.sh
+
+      - name: Compare frontend realtime subscriptions against the live publication
+        run: bash scripts/check-realtime-publication-drift.sh
