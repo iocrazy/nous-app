@@ -17,7 +17,7 @@ import { useNodeDataPatch } from './useNodeDataPatch';
 import { startChainRun, useChainRunStore } from '../chainRun';
 import { splitPromptItems } from '../promptSplit';
 import { rerunPrompt } from '../regenerate';
-import { humanizeTaskError } from '../../../../utils/humanizeTaskError';
+import { explanationParagraphs, humanizeTaskError } from '../../../../utils/humanizeTaskError';
 import {
   useIsChainTail,
   useNodeInputUrls,
@@ -75,6 +75,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     agent_id = null,
     run_status,
     run_error,
+    run_detail = null,
     run_started_at = null,
     run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
@@ -1054,6 +1055,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               // technical string is still one hover away.
               <div className="mt-0.5 text-[10px] text-canvas-muted" title={run_error}>
                 {humanizeTaskError(run_error).message}
+              </div>
+            )}
+            {run_detail && (
+              // The failing party's own words — for a refusal, what the model
+              // objected to and the rewrite it offers. This is the actionable
+              // part, and the user is HERE, not in Task Center.
+              <div
+                data-testid="prompt-failure-detail"
+                className="mt-1.5 rounded border border-rose-400/30 bg-canvas-panel/60 px-2 py-1.5 max-h-40 overflow-y-auto"
+              >
+                {explanationParagraphs(run_detail).map((p, i) => (
+                  <p key={i} className="text-[10px] leading-relaxed text-canvas-text whitespace-pre-wrap break-words [&+p]:mt-1">
+                    {p}
+                  </p>
+                ))}
               </div>
             )}
             <button

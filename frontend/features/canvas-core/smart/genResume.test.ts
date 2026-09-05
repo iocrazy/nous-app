@@ -522,3 +522,18 @@ describe('requeryRecoverTask (P1-13)', () => {
     expect(slotData()?.gen_recover).toEqual(['t1']);
   });
 });
+
+describe('genResume — failure detail', () => {
+  it('lands metadata.failure.detail on the prompt as run_detail after a reload', async () => {
+    seed();
+    persistPendingGenTasks('p1', ['t1'], 'image');
+    pollGeneration.mockResolvedValue({
+      phase: 'failed',
+      error_msg: 'RuntimeError: [content_refused] …',
+      metadata: { failure: { code: 'content_refused', detail: '可以改为黑色皮革挂脖连体短裤。' } },
+    });
+    await resumePendingGenerations();
+    expect(promptData().run_status).toBe('failed');
+    expect(String(promptData().run_detail)).toContain('黑色皮革挂脖连体短裤');
+  });
+});

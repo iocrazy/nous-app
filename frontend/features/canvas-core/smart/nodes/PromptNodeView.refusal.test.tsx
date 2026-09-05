@@ -69,3 +69,36 @@ describe('PromptNodeView — failure copy', () => {
     expect(screen.getByTestId('prompt-failure-panel').textContent).toContain('no credit');
   });
 });
+
+// The model's explanation belongs on the node: the user is on the canvas, and
+// "declined" alone sends them to Task Center to find out what to change.
+describe('PromptNodeView — model explanation on the node', () => {
+  function renderWithDetail(run_detail: string | null) {
+    render(
+      <ReactFlowProvider>
+        <PromptNodeView
+          {...baseProps}
+          id="p1"
+          type="prompt"
+          data={{
+            body: 'x', provider_slug: '', agent_id: null, resource_refs: [],
+            run_status: 'failed', run_error: LEGACY, run_detail,
+          }}
+        />
+      </ReactFlowProvider>,
+    );
+  }
+
+  it("shows the model's words under the headline, without markdown asterisks", () => {
+    renderWithDetail('抱歉，无法生成。\n\n可以改为**黑色皮革挂脖连体短裤**搭配不透视长袜。');
+    const panel = screen.getByTestId('prompt-failure-panel');
+    expect(panel.textContent).toMatch(/declined this prompt/i);
+    expect(panel.textContent).toContain('黑色皮革挂脖连体短裤');
+    expect(panel.textContent).not.toContain('**');
+  });
+
+  it('renders nothing extra when there is no detail', () => {
+    renderWithDetail(null);
+    expect(screen.queryByTestId('prompt-failure-detail')).toBeNull();
+  });
+});

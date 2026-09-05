@@ -148,6 +148,11 @@ export interface PromptNodeData {
   run_started_at: string | null;
   run_finished_at: string | null;
   run_error: string | null;
+  /** The failing party's own explanation for the user — for a content
+   *  refusal, the model's "why" and the rewrite it offers. Optional so the
+   *  nodes_json already persisted (and every fixture) stays valid; absent
+   *  and null both mean "nothing to show". */
+  run_detail?: string | null;
   /**
    * Resources @-mentioned in the prompt body via the in-canvas picker.
    * Persisted with the node so the runner can forward them as context

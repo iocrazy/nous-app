@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
 import { taskErrorCopy } from '../../utils/taskErrorCopy';
+import { explanationParagraphs } from '../../utils/humanizeTaskError';
 import { useTaskResult } from './useTaskResult';
 import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
@@ -112,17 +113,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
  * was looking at it. Hoisting it here also means a body added later cannot
  * silently reintroduce the gap.
  */
-/** The model writes for a chat window: paragraphs and `**emphasis**`. Split
- *  on blank lines and drop the asterisks — a modal is not a markdown
- *  surface, and literal `**` around the rewrite it offers reads as noise. */
-function detailParagraphs(text: string): string[] {
-  return text
-    .replace(/\*\*/g, '')
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-}
-
 const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
   if (!task.error_msg) return null;
@@ -146,7 +136,7 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
           className="mt-2 rounded-lg border border-ink-700/60 bg-ink-950/60 px-3 py-2 max-h-56 overflow-y-auto"
         >
           <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">What the model said</div>
-          {detailParagraphs(detail).map((p, i) => (
+          {explanationParagraphs(detail).map((p, i) => (
             <p key={i} className="text-[12px] leading-relaxed text-ink-200 whitespace-pre-wrap break-words [&+p]:mt-1.5">
               {p}
             </p>

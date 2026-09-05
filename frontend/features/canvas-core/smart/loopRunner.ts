@@ -206,6 +206,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
   };
   let cursor = 0;
   let firstError: string | null = null;
+  let firstDetail: string | null = null;
   const limit = Math.max(1, opts.parallelLimit ?? DEFAULT_LOOP_PARALLEL_LIMIT);
   const workers = Array.from(
     { length: Math.min(limit, indexes.length) },
@@ -226,7 +227,9 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
           summary.completedRounds += 1;
         } else {
           summary.failed = true;
-          firstError = results.find((r) => !r.ok)?.error ?? 'loop round failed';
+          const bad = results.find((r) => !r.ok);
+          firstError = bad?.error ?? 'loop round failed';
+          firstDetail = bad?.detail ?? null;
         }
         opts.onRoundComplete?.(index, results);
       }
@@ -240,6 +243,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
       opts.handlers.onStatusChange(ctx.promptId, 'failed', {
         run_finished_at: finishedAt,
         run_error: firstError,
+        run_detail: firstDetail,
       });
     } else if (summary.stopped && summary.completedRounds === 0) {
       // Stopped before anything ran — a green "succeeded" would lie.
