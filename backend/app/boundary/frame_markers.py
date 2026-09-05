@@ -45,6 +45,8 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "available_workers",
         "agent_memory",
         "graph_facts",
+        # harness p4 §1-③: a claimed inbox item injected at a step boundary
+        "inbox_message",
         "pending_followups",
         "scene_elements",
         "user_context",

@@ -47,7 +47,9 @@ from loguru import logger
 
 from app.agent_framework import input_gate
 from app.core.deps import AuthDep
-from app.repositories.issue_repository import issue_repository
+from app.repositories.issue_repository import (  # noqa: F401 — tests patch get_by_id via this module path
+    issue_repository,
+)
 from app.schemas.issue_message import (
     CommentTriggerPreview,
     CommentTriggerPreviewRequest,
@@ -64,6 +66,7 @@ from app.services.issues.comment_trigger import (
 )
 from app.services.issues.issue_message_mapper import map_ai_message_to_issue_message
 from app.services.issues.issue_session import get_or_create_issue_session
+from app.services.issues.issue_visibility import assert_issue_visible
 from app.workflows.issue_lifecycle import respond_to_issue_reply
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
@@ -195,29 +198,9 @@ async def _try_wake_waiting_workflow(
 
 
 async def _assert_issue_visible(issue_id: int, auth) -> dict:
-    """Return the issue row if the caller can see it; 404 otherwise.
-
-    Mirrors issues_router._assert_visibility. We use service_role for
-    storage so RLS doesn't block the SELECT — re-enforce at app layer.
-    """
-    row = await issue_repository.get_by_id(issue_id)
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
-
-    user_id = str(auth.user_id)
-    if (
-        row.get("created_by_user_id") == user_id
-        or row.get("assignee_user_id") == user_id
-    ):
-        return row
-    # D6.1 team folding (用户立约: team 是铁边界): same-team members see the
-    # issue and its thread; other teams 404 (never leak existence).
-    team_id = row.get("team_id")
-    if team_id is not None and await issue_repository.is_team_member(
-        user_id, int(team_id)
-    ):
-        return row
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    """Shared rule (services/issues/issue_visibility) — kept as a local name
+    so the many call sites in this module read unchanged."""
+    return await assert_issue_visible(issue_id, auth)
 
 
 @router.get("/{issue_id}/messages", response_model=IssueMessageList)
@@ -414,6 +397,45 @@ def _resolve_owner(issue_row: dict) -> str:
     return str(owner_id)
 
 
+async def _divert_to_inbox_if_running(
+    issue_id: int,
+    session_id: str,
+    owner_id: str,
+    auth: AuthDep,
+    body: str,
+    attachments_payload: list | None,
+) -> Optional[str]:
+    """Enqueue the comment on the issue's inbox when a ROOT run is running on
+    it; return the inbox id, or None when nothing is running (caller falls
+    through to the wake path). The comment row is persisted first so a
+    failed enqueue never loses the human's words."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    running = await get_agent_runs_repository().running_root_run_id(
+        issue_id=issue_id, conversation_id=int(session_id)
+    )
+    if running is None:
+        return None
+    await ConversationsAiStore().append_user_message(
+        session_id=int(session_id),
+        user_id=owner_id,
+        content=body,
+        attachments=ConversationsAiStore.display_attachments(attachments_payload),
+    )
+    row = await get_agent_run_inbox_repository().enqueue(
+        target_kind="issue",
+        target_id=issue_id,
+        user_id=str(auth.user_id),
+        kind="steer",
+        content={"body": body, "attachments": attachments_payload or []},
+    )
+    logger.info(f"[issue_reply] issue {issue_id}: diverted to inbox (run {running})")
+    return str(row["id"])
+
+
 @router.post(
     "/{issue_id}/messages",
     response_model=IssueMessagePostResponse,
@@ -480,6 +502,23 @@ async def post_issue_message(
             raise HTTPException(500, "failed to save note")
         return IssueMessagePostResponse(
             comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+        )
+
+    # ── Inbox diversion (harness p4 §1-③) ────────────────────────────────
+    # A root run is mid-turn on this issue: the comment is a steer, claimed
+    # at its next step boundary, not a second turn queued behind the lock.
+    # The comment row is kept (same reducer as the note path) so the thread
+    # reads the same whether the run picked it up or not.
+    inbox_id = await _divert_to_inbox_if_running(
+        issue_id, session_id, owner_id, auth, payload.body, attachments_payload
+    )
+    if inbox_id is not None:
+        return IssueMessagePostResponse(
+            comment=_optimistic_comment(issue_id, payload.body, auth),
+            agent_run=None,
+            agent_dispatched=False,
+            diverted_to_inbox=True,
+            inbox_id=inbox_id,
         )
 
     # ── Wake path: waiting-workflow diversion first (spec 2026-07-30 §4) ──

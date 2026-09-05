@@ -140,3 +140,8 @@ class IssueMessagePostResponse(BaseModel):
     comment: IssueMessage
     agent_run: Optional[IssueMessage] = None
     agent_dispatched: bool = False
+    # harness p4 §1-③: a root run was mid-turn on this issue, so the comment
+    # went to its inbox (claimed at the next step boundary) instead of
+    # starting a new turn. The comment row is kept either way.
+    diverted_to_inbox: bool = False
+    inbox_id: Optional[str] = None

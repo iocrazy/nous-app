@@ -1,0 +1,202 @@
+"""agent_run_inbox — the one queue into a running agent (mig 453, spec §1-③).
+
+Not to be confused with ``inbox_repository`` (user notifications). Keyed by
+the durable target (``issue`` / ``conversation``); ``claimed_at IS NULL AND
+expired_at IS NULL`` is the queue. ``claim_stmt`` is a pure builder so its
+shape (SKIP LOCKED, the two NULL guards, RETURNING) can be asserted by
+compiling against the postgresql dialect — the mock boundary hid a wrong
+bind type once already (jsonb_set, 2026-08-27).
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from typing import Any, Optional, Sequence
+
+from loguru import logger
+from sqlalchemy import func, insert, select, tuple_, update
+
+from app.db.session import read_scope, write_scope
+from app.models import AgentRunInbox, ConversationAiMeta, Conversations
+
+Target = tuple[str, int]
+
+
+def _row(obj: Any) -> dict[str, Any]:
+    return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}
+
+
+def _pending():
+    return (AgentRunInbox.claimed_at.is_(None), AgentRunInbox.expired_at.is_(None))
+
+
+def claim_stmt(
+    targets: Sequence[Target], run_id: int, turn: int, step: int, now: dt.datetime
+):
+    """UPDATE … WHERE id IN (SELECT id … FOR UPDATE SKIP LOCKED) RETURNING *.
+
+    Two claimers racing for the same target get disjoint rows: the inner
+    SELECT locks what it returns and skips what a peer already holds.
+    """
+    locked = (
+        select(AgentRunInbox.id)
+        .where(
+            tuple_(AgentRunInbox.target_kind, AgentRunInbox.target_id).in_(
+                list(targets)
+            )
+        )
+        .where(*_pending())
+        .order_by(AgentRunInbox.created_at, AgentRunInbox.id)
+        .with_for_update(skip_locked=True)
+    )
+    return (
+        update(AgentRunInbox)
+        .where(AgentRunInbox.id.in_(locked))
+        .values(
+            claimed_at=now,
+            claimed_run_id=int(run_id),
+            claimed_turn=turn,
+            claimed_step=step,
+        )
+        .returning(AgentRunInbox)
+    )
+
+
+class AgentRunInboxRepository:
+    async def enqueue(
+        self,
+        *,
+        target_kind: str,
+        target_id: int,
+        user_id: str,
+        kind: str,
+        content: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with write_scope() as session:
+            row = (
+                await session.execute(
+                    insert(AgentRunInbox)
+                    .values(
+                        target_kind=target_kind,
+                        target_id=int(target_id),
+                        user_id=user_id,
+                        kind=kind,
+                        content=content,
+                    )
+                    .returning(AgentRunInbox)
+                )
+            ).scalar_one()
+            return _row(row)
+
+    async def claim(
+        self, *, targets: Sequence[Target], run_id: int, turn: int, step: int
+    ) -> list[dict[str, Any]]:
+        if not targets:
+            return []
+        now = dt.datetime.now(dt.timezone.utc)
+        async with write_scope() as session:
+            rows = (
+                (await session.execute(claim_stmt(targets, run_id, turn, step, now)))
+                .scalars()
+                .all()
+            )
+        return sorted((_row(r) for r in rows), key=lambda r: (r["created_at"], r["id"]))
+
+    async def list_for_target(
+        self, *, target_kind: str, target_id: int, pending_only: bool, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(AgentRunInbox)
+            .where(AgentRunInbox.target_kind == target_kind)
+            .where(AgentRunInbox.target_id == int(target_id))
+            .order_by(AgentRunInbox.created_at.desc(), AgentRunInbox.id.desc())
+            .limit(limit)
+        )
+        if pending_only:
+            stmt = stmt.where(*_pending())
+        async with read_scope() as session:
+            return [_row(r) for r in (await session.execute(stmt)).scalars().all()]
+
+    async def pending_count(self, *, target_kind: str, target_id: int) -> int:
+        async with read_scope() as session:
+            return int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(AgentRunInbox)
+                        .where(AgentRunInbox.target_kind == target_kind)
+                        .where(AgentRunInbox.target_id == int(target_id))
+                        .where(*_pending())
+                    )
+                ).scalar_one()
+            )
+
+    async def expire_stale(self, *, older_than: dt.datetime) -> int:
+        """Sweeper: a steer nobody claimed for a day is an orphan (its run
+        ended before the next step boundary). Marked, never deleted."""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AgentRunInbox)
+                    .where(*_pending())
+                    .where(AgentRunInbox.created_at < older_than)
+                    .values(expired_at=dt.datetime.now(dt.timezone.utc))
+                )
+                return result.rowcount or 0
+        except Exception as err:  # noqa: BLE001
+            logger.error(f"[agent_run_inbox] expire_stale failed: {err}")
+            return 0
+
+    # ── target lookups (the hook resolves its targets once per run) ──────
+
+    async def issue_id_for_conversation(self, conversation_id: int) -> Optional[int]:
+        """An issue's session is a conversation with ``context_type='issue'``;
+        a run on that conversation also serves the issue's inbox."""
+        async with read_scope() as session:
+            cid = (
+                await session.execute(
+                    select(ConversationAiMeta.context_id)
+                    .where(ConversationAiMeta.conversation_id == int(conversation_id))
+                    .where(ConversationAiMeta.context_type == "issue")
+                )
+            ).scalar_one_or_none()
+        try:
+            return int(cid) if cid is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    async def conversation_target(
+        self, conversation_id: int
+    ) -> Optional[dict[str, Any]]:
+        """``{id, created_by, archived_at}`` or None."""
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(
+                        Conversations.id,
+                        Conversations.created_by,
+                        Conversations.archived_at,
+                    ).where(Conversations.id == int(conversation_id))
+                )
+            ).first()
+        if row is None:
+            return None
+        return {"id": int(row[0]), "created_by": str(row[1]), "archived_at": row[2]}
+
+
+_repo: Optional[AgentRunInboxRepository] = None
+
+
+def get_agent_run_inbox_repository() -> AgentRunInboxRepository:
+    global _repo
+    if _repo is None:
+        _repo = AgentRunInboxRepository()
+    return _repo
+
+
+__all__ = [
+    "AgentRunInboxRepository",
+    "Target",
+    "claim_stmt",
+    "get_agent_run_inbox_repository",
+]
