@@ -89,3 +89,15 @@ describe('buildAttentionItems — 上游畸形数据不得掀翻整页', () => {
     expect(buildAttentionItems(undefined, [approval], undefined)).toHaveLength(1);
   });
 });
+
+
+describe('buildAttentionItems — paused issues (harness P4)', () => {
+  it('lists a paused issue as its own kind, linking to the issue, after the other three', () => {
+    const paused = { id: 4004, identifier: 'NOUS-8', title: 'Paused draft', status: 'in_progress', raw: { paused_at: '2026-09-05T00:00:00Z' } } as unknown as UiIssue;
+    const items = buildAttentionItems([needsInput], [approval], [inReview], [paused]);
+    expect(items.map((i) => i.type)).toEqual(['question', 'approval', 'review', 'paused']);
+    expect(items[3]).toMatchObject({ id: 'paused:4004', issueId: 4004, title: 'Paused draft', detail: 'NOUS-8' });
+    // the fourth source is optional — older callers keep working
+    expect(buildAttentionItems([], [], [])).toEqual([]);
+  });
+});

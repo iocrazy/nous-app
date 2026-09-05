@@ -68,6 +68,7 @@ import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
 import { runningChipLabel, needsReplyChip } from './issueChips';
 import { buildAttentionItems } from './attentionItems';
+import { PHASE_FALLBACK, PHASE_LABEL_KEY, PHASE_ORDER, PHASE_TONE, QUICK_PHASES, issuePhase, type IssuePhase } from './issuePhase';
 import {
   AttentionStrip,
   loadAttentionCollapsed,
@@ -93,9 +94,11 @@ import {
 export type IssueViewMode = 'list' | 'board';
 
 /** Team-scope grouping mode — status pipeline order, or project ⊃ issue tree. */
-export type IssueGroupMode = 'status' | 'project';
+export type IssueGroupMode = 'phase' | 'status' | 'project';
 
 interface IssueListViewProps {
+  /** Issue open in the split detail pane, if any — highlights its row. */
+  selectedIssueId?: number | null;
   issues: UiIssue[];
   loading: boolean;
   error: string | null;
@@ -194,13 +197,15 @@ interface IssueRowProps {
   teamId: string;
   visibleCols: Set<IssueColumnKey>;
   parentLookup: Map<number, UiIssue>;
+  /** Row highlighted as the one open in the split detail pane. */
+  selected?: boolean;
   /** In Group-by-Project mode the project is the header, so the row pill is redundant. */
   hideProjectPill?: boolean;
   /** Sub-issue done/total for this row, or undefined when it has no children. */
   subtaskCount?: SubtaskCount;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount }) => {
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount, selected = false }) => {
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
@@ -217,10 +222,17 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   const now = useTickingNow(isLive);
   const runningLabel = runningChipLabel(issue, now);
   const needsReply = needsReplyChip(issue);
+  const phase = issuePhase(issue);
+  // The one hover action that fits the phase: answer when it waits, steer when
+  // it runs. Both land on the detail page's composer — the row only names the
+  // verb so the list reads as "what can I do here" instead of "what is it".
+  const rowAction = phase === 'waiting_input' ? t('issues.action.reply', 'Reply') : phase === 'running' ? t('issues.action.steer', 'Steer') : null;
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
-      className="flex items-center gap-3 px-4 py-1.5 hover:bg-ink-800/30 transition group"
+      data-phase={phase}
+      aria-current={selected ? 'true' : undefined}
+      className={`flex items-center gap-3 px-4 py-1.5 hover:bg-ink-800/30 transition group ${selected ? 'bg-ink-800/40 ring-1 ring-inset ring-[var(--accent-border)]' : ''}`}
     >
       {visibleCols.has('status') && <IssueStatusIcon status={issue.status} size={15} />}
       <span className="w-4 flex justify-center" title={issue.priority}>
@@ -245,6 +257,14 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
           title={needsReply.question ?? undefined}
         >
           {t('issues.needsReplyChip', 'Needs your reply')}
+        </span>
+      )}
+      {rowAction && (
+        <span
+          data-testid="row-action"
+          className="hidden group-hover:inline-flex items-center px-1.5 py-0.5 rounded text-[11px] text-[var(--accent-text)] bg-[var(--accent-soft)] ring-1 ring-[var(--accent-border)] shrink-0"
+        >
+          {rowAction}
         </span>
       )}
       {visibleCols.has('parent') && parent && (
@@ -400,7 +420,8 @@ const IssuePipeline: React.FC<{
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject }) => {
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject, selectedIssueId = null }) => {
+  const { t } = useTranslation();
   const { teamId } = useParams<{ teamId: string }>();
   // Sub-issue done/total per parent, aggregated from the FULL unfiltered list so
   // display filters never undercount a parent's children (see issueFlow.ts).
@@ -411,7 +432,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<IssueSort>(DEFAULT_SORT);
-  const [groupMode, setGroupMode] = useState<IssueGroupMode>('status');
+  // Phase first (harness P4): the list answers "what needs me / what is
+  // moving" before "what column is it in". Status / Project stay selectable.
+  const [groupMode, setGroupMode] = useState<IssueGroupMode>('phase');
+  const [phaseFilter, setPhaseFilter] = useState<IssuePhase | null>(null);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
   const [groupNewProjectOpen, setGroupNewProjectOpen] = useState(false);
   const [groupNewProjectName, setGroupNewProjectName] = useState('');
@@ -419,8 +443,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const searchRef = useRef<HTMLInputElement>(null);
 
   const readOnly = scopeIsReadOnly(scope);
-  const showGroupToggle = scope.type === 'team';
-  const projectGrouped = showGroupToggle && groupMode === 'project';
+  const showProjectGroup = scope.type === 'team';
+  const projectGrouped = showProjectGroup && groupMode === 'project';
+  const phaseGrouped = groupMode === 'phase';
 
   // ── A1「等我的」横条 ────────────────────────────────────────────────
   // Questions come from the TaskManager feed (already polled app-wide);
@@ -519,6 +544,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       needsInputItems,
       approvals,
       scopedIssues.filter((i) => i.status === 'in_review'),
+      scopedIssues.filter((i) => issuePhase(i) === 'paused'),
     ),
     [needsInputItems, approvals, scopedIssues],
   );
@@ -556,12 +582,35 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    if (!q) return filteredByPanel;
-    return filteredByPanel.filter((i) => {
+    const byPhase = phaseFilter ? filteredByPanel.filter((i) => issuePhase(i) === phaseFilter) : filteredByPanel;
+    if (!q) return byPhase;
+    return byPhase.filter((i) => {
       const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [filteredByPanel, search]);
+  }, [filteredByPanel, search, phaseFilter]);
+
+  // Phase counts for the Quick chips — off the scoped list, so a chip's count
+  // never shrinks because of the filter it is about to apply.
+  const phaseCounts = useMemo(() => {
+    const counts: Record<IssuePhase, number> = { waiting_input: 0, running: 0, paused: 0, blocked: 0, idle: 0, done: 0 };
+    for (const i of scopedIssues) counts[issuePhase(i)] += 1;
+    return counts;
+  }, [scopedIssues]);
+
+  // Group: Phase — the default. Same priority as the server rollup.
+  const phaseGroups = useMemo(() => {
+    const map = new Map<IssuePhase, UiIssue[]>();
+    for (const i of filtered) {
+      const ph = issuePhase(i);
+      if (!map.has(ph)) map.set(ph, []);
+      map.get(ph)!.push(i);
+    }
+    return PHASE_ORDER.filter((ph) => map.has(ph)).map((ph) => ({
+      phase: ph,
+      items: map.get(ph)!.slice().sort((a, b) => compareIssues(a, b, sort)),
+    }));
+  }, [filtered, sort]);
 
   // For sort keys that are NOT status-related, keep the status grouping
   // but sort within each group. For 'workflow'/'status' keys, the
@@ -826,9 +875,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               <button
                 key={q}
                 type="button"
-                onClick={() => setQuick(q)}
+                onClick={() => { setPhaseFilter(null); setQuick(q); }}
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full transition ${
-                  matches
+                  matches && !phaseFilter
                     ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-[var(--accent-border)]'
                     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
@@ -837,30 +886,51 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               </button>
             );
           })}
+          {/* Phase chips (harness P4): the four a person acts on. Count off the
+              scoped list; click toggles the phase as the sole filter. */}
+          {QUICK_PHASES.map((ph) => {
+            const count = phaseCounts[ph];
+            const active = phaseFilter === ph;
+            return (
+              <button
+                key={ph}
+                type="button"
+                data-testid={`quick-phase-${ph}`}
+                onClick={() => setPhaseFilter(active ? null : ph)}
+                disabled={count === 0 && !active}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full transition disabled:opacity-40 ${
+                  active
+                    ? `ring-1 ${PHASE_TONE[ph]}`
+                    : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
+                }`}
+              >
+                {t(PHASE_LABEL_KEY[ph], PHASE_FALLBACK[ph])}
+                <span className="tabular-nums text-ink-500">{count}</span>
+              </button>
+            );
+          })}
         </div>
         <IssuePipeline issues={scopedIssues} activeStatus={pipelineActive} onPick={pickStatus} />
         <div className="ml-auto flex items-center gap-2 shrink-0">
-          {showGroupToggle && (
-            <div className="inline-flex items-center gap-1" title="Group issues by status or by project">
-              <span className="text-ink-600">Group:</span>
-              <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
-                {(['status', 'project'] as IssueGroupMode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setGroupMode(m)}
-                    className={`px-2 py-0.5 transition ${
-                      groupMode === m
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
-                        : 'text-ink-400 hover:text-ink-200'
-                    }`}
-                  >
-                    {m === 'status' ? 'Status' : 'Project'}
-                  </button>
-                ))}
-              </div>
+          <div className="inline-flex items-center gap-1" title="Group issues by phase, status or project" data-testid="group-toggle">
+            <span className="text-ink-600">Group:</span>
+            <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
+              {(showProjectGroup ? (['phase', 'status', 'project'] as IssueGroupMode[]) : (['phase', 'status'] as IssueGroupMode[])).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setGroupMode(m)}
+                  className={`px-2 py-0.5 transition ${
+                    groupMode === m
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                      : 'text-ink-400 hover:text-ink-200'
+                  }`}
+                >
+                  {m === 'phase' ? 'Phase' : m === 'status' ? 'Status' : 'Project'}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
           {filterCount > 0 && (
             <button
               type="button"
@@ -1019,6 +1089,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                             parentLookup={parentLookup}
                             hideProjectPill
                             subtaskCount={subtaskCounts.get(issue.id)}
+                            selected={selectedIssueId === issue.id}
                           />
                         ))}
                       </div>
@@ -1028,6 +1099,30 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               })
             )}
           </div>
+        ) : phaseGrouped && phaseGroups.length > 0 ? (
+          phaseGroups.map((g) => (
+            <div key={g.phase} data-testid="phase-group" data-phase={g.phase}>
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1 sticky top-0 z-[5] bg-ink-950 group/gh">
+                <span className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider ring-1 ${PHASE_TONE[g.phase]}`}>
+                  {g.phase === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />}
+                  {t(PHASE_LABEL_KEY[g.phase], PHASE_FALLBACK[g.phase])}
+                </span>
+                <span className="text-[12px] text-ink-500 tabular-nums">{g.items.length}</span>
+                <span className="flex-1 h-px bg-line ml-1" />
+              </div>
+              {g.items.map((issue) => (
+                <IssueRow
+                  key={issue.id}
+                  issue={issue}
+                  teamId={teamId ?? ''}
+                  visibleCols={visibleCols}
+                  parentLookup={parentLookup}
+                  subtaskCount={subtaskCounts.get(issue.id)}
+                  selected={selectedIssueId === issue.id}
+                />
+              ))}
+            </div>
+          ))
         ) : grouped.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-2 text-center">
             <span className="w-9 h-9 rounded-xl border border-dashed border-line-strong grid place-items-center text-ink-500">
@@ -1069,6 +1164,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                   visibleCols={visibleCols}
                   parentLookup={parentLookup}
                   subtaskCount={subtaskCounts.get(issue.id)}
+                  selected={selectedIssueId === issue.id}
                 />
               ))}
             </div>

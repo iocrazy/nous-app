@@ -1,5 +1,5 @@
 /**
- * Aggregate the three things that are actually blocked on the user (A1).
+ * Aggregate the things that are actually blocked on the user (A1 + harness P4).
  *
  * They each live somewhere else today: an agent's question sits in the Task
  * Center feed, a tool approval in the TopBar panel, and a finished-but-
@@ -13,7 +13,7 @@ import type { NeedsInputItem } from '../../services/issuesService';
 import type { AILibraryApprovalRequest } from '../../types';
 import type { UiIssue } from './types';
 
-export type AttentionType = 'question' | 'approval' | 'review';
+export type AttentionType = 'question' | 'approval' | 'review' | 'paused';
 
 export interface AttentionItem {
   type: AttentionType;
@@ -30,6 +30,9 @@ export function buildAttentionItems(
   needsInput: NeedsInputItem[] | null | undefined,
   approvals: AILibraryApprovalRequest[] | null | undefined,
   inReviewIssues: UiIssue[] | null | undefined,
+  /** harness P4: issues a person paused (`issues.paused_at`) — they wait for a
+   *  resume, which is on the person, not the agent. */
+  pausedIssues: UiIssue[] | null | undefined = [],
 ): AttentionItem[] {
   // Nullish-tolerant on purpose: this strip sits at the top of a whole page,
   // so one upstream feed returning a malformed body must degrade to "nothing
@@ -52,6 +55,13 @@ export function buildAttentionItems(
     ...(inReviewIssues ?? []).map((i): AttentionItem => ({
       type: 'review',
       id: `review:${i.id}`,
+      title: i.title,
+      detail: i.identifier ?? null,
+      issueId: i.id,
+    })),
+    ...(pausedIssues ?? []).map((i): AttentionItem => ({
+      type: 'paused',
+      id: `paused:${i.id}`,
       title: i.title,
       detail: i.identifier ?? null,
       issueId: i.id,
