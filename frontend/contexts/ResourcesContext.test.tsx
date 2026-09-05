@@ -84,6 +84,9 @@ vi.mock('../services/generatedService', () => ({
 vi.mock('../services/assetsService', () => ({
   fetchAssetCounts: vi.fn(),
 }));
+vi.mock('../services/promptsService', () => ({
+  fetchPromptCounts: vi.fn(),
+}));
 
 import {
   ResourcesProvider,
@@ -92,9 +95,11 @@ import {
 } from './ResourcesContext';
 import { fetchGeneratedCounts } from '../services/generatedService';
 import { fetchAssetCounts } from '../services/assetsService';
+import { fetchPromptCounts } from '../services/promptsService';
 
 const counts = vi.mocked(fetchGeneratedCounts);
 const assetCounts = vi.mocked(fetchAssetCounts);
+const promptCounts = vi.mocked(fetchPromptCounts);
 
 /** The server zero-fills, so every type is always present on the wire. */
 const ZERO_COUNTS = {
@@ -198,6 +203,10 @@ beforeEach(() => {
   counts.mockResolvedValue({ unreviewed: 12, saved: 3, in_assets: 1 });
   assetCounts.mockReset();
   assetCounts.mockResolvedValue({ ...ZERO_COUNTS, character: 4, location: 2 });
+  promptCounts.mockReset();
+  // Zero by default so every case written before the override still renders
+  // the exact same `assetCounts` JSON. The cases that care set their own.
+  promptCounts.mockResolvedValue({ mine: 0, project: null, system: 0 });
 });
 
 describe('ResourcesContext — generated count', () => {
@@ -386,6 +395,44 @@ describe('ResourcesContext — asset counts', () => {
     await waitFor(() => expect(screen.getByTestId('assetCounts').textContent).toBe('null'));
     expect(assetCounts).not.toHaveBeenCalled();
     expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  // The Prompts badge counts the UNIFIED catalog (templates + prompted
+  // pictures), which is a different number from the `prompt` asset rows
+  // `/assets/counts` knows about. The sidebar badge and the shelf tab both
+  // read `assetCounts`, so the override is what keeps them saying the same
+  // thing (ruling R15).
+  it('shows the unified prompt count, not the asset-row count', async () => {
+    promptCounts.mockResolvedValueOnce({ mine: 12, project: null, system: 3 });
+
+    renderAssetsAt('/team/42/resources/assets');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12'),
+    );
+    expect(promptCounts).toHaveBeenCalledWith('team-1');
+    // Only `prompt` is overridden — the other five keep the asset numbers.
+    expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4');
+    expect(screen.getByTestId('assetCounts').textContent).toContain('"location":2');
+  });
+
+  it('keeps the asset-row prompt count when the unified count fails', async () => {
+    // A badge that blanks (or drops to zero) on a failed SECOND request would
+    // claim an empty shelf on an answer we never got.
+    assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, prompt: 7 });
+    promptCounts.mockRejectedValueOnce(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderAssetsAt('/team/42/resources/assets');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":7'),
+    );
+    expect(spy).toHaveBeenCalledWith(
+      '[ResourcesContext] prompt counts failed:',
+      expect.any(Error),
+    );
     spy.mockRestore();
   });
 });
