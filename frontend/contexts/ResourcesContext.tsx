@@ -30,6 +30,7 @@ import {
 import { fetchLibraries } from '../services/libraryService';
 import { fetchGeneratedCounts } from '../services/generatedService';
 import { fetchAssetCounts, type AssetCounts } from '../services/assetsService';
+import { fetchPromptCounts } from '../services/promptsService';
 import { ASSET_TYPES, type AssetType } from '../components/assets/assetSlots';
 import { useKeysetPagination } from '../hooks/useKeysetPagination';
 import type { KeysetCursor } from '../services/pagination';
@@ -759,8 +760,18 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     if (!scopeId) return;
     let cancelled = false;
     fetchAssetCounts(scopeId)
-      .then((counts) => {
-        if (!cancelled) setAssetCounts(counts);
+      .then(async (counts) => {
+        // The Prompts tab lists the unified catalog (templates + prompted
+        // pictures), so its badge must count THAT — `/assets/counts` only
+        // knows the template rows. A failed prompt count keeps the asset
+        // number rather than blanking the badge.
+        let prompt = counts.prompt;
+        try {
+          prompt = (await fetchPromptCounts(scopeId)).mine;
+        } catch (err) {
+          console.error('[ResourcesContext] prompt counts failed:', err);
+        }
+        if (!cancelled) setAssetCounts({ ...counts, prompt });
       })
       .catch((err) => {
         console.error('[ResourcesContext] asset counts failed:', err);

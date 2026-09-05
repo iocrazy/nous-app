@@ -2072,6 +2072,14 @@
       "noPromptOnSlide": "这张没有提示词",
       "send": "送出",
       "openAlbum": "打开图集"
+    },
+    "save": {
+      "title": "存为模板",
+      "newTitle": "新建模板",
+      "submit": "保存到 Mine",
+      "saved": "已保存到 Mine",
+      "failed": "保存失败：{{code}}",
+      "filesStay": "图片留在原处"
     }
   },
   "generated": {

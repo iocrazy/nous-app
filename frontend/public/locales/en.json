@@ -2072,6 +2072,14 @@
       "noPromptOnSlide": "No prompt on this slide",
       "send": "Send",
       "openAlbum": "Open album"
+    },
+    "save": {
+      "title": "Save as Template",
+      "newTitle": "New Template",
+      "submit": "Save to Mine",
+      "saved": "Saved to Mine",
+      "failed": "Could not save: {{code}}",
+      "filesStay": "Pictures stay where they are"
     }
   },
   "generated": {
