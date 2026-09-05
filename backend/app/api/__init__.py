@@ -241,6 +241,9 @@ api_router.include_router(router=script_versions_router, tags=["Script Versions"
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 
 api_router.include_router(router=ai_library_router, tags=["AI Library"])
+from app.api.agent_inbox_router import router as agent_inbox_router  # noqa: E402
+
+api_router.include_router(router=agent_inbox_router, tags=["AI Library"])
 
 api_router.include_router(router=workforce_router, tags=["Workforce"])
 

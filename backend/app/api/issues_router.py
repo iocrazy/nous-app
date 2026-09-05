@@ -36,6 +36,7 @@ from app.schemas.issue import (
     NeedsInputItem,
     NeedsInputListResponse,
 )
+from app.services.issues.issue_visibility import is_issue_visible
 from app.services.modules.gate import require_module
 from app.workflows.issue_lifecycle import execute_issue
 
@@ -458,24 +459,7 @@ async def soft_delete_issue(issue_id: int, auth: AuthDep) -> None:
 
 
 async def _assert_visibility(row: dict, auth) -> None:
-    """App-layer visibility check. RLS does the same at the DB layer for
-    non-service-role callers, but since the repo uses service_role we
-    re-check here.
-
-    D6.1 (用户立约: team 是铁边界): visible = own OR assignee OR member of
-    the issue's team. Membership is checked server-side against
-    team_members — never inferred from client input. 404 (not 403) so we
-    don't leak existence across teams.
-    """
-    user_id = str(auth.user_id)
-    if (
-        row.get("created_by_user_id") == user_id
-        or row.get("assignee_user_id") == user_id
-    ):
-        return
-    team_id = row.get("team_id")
-    if team_id is not None and await issue_repository.is_team_member(
-        user_id, int(team_id)
-    ):
-        return
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    """Shared rule (services/issues/issue_visibility): own / assignee / team
+    member, else 404 so existence never leaks across teams."""
+    if not await is_issue_visible(row, str(auth.user_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")

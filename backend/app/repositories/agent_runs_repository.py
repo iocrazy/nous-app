@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import case, func, select, text, update
+from sqlalchemy import case, func, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -674,6 +674,36 @@ class AgentRunsRepository(AsyncpgRepository):
                 )
         except Exception as e:
             logger.error(f"[agent_runs] mark_empty_output failed (run={run_id}): {e}")
+
+    async def running_root_run_id(
+        self, *, issue_id: Optional[int] = None, conversation_id: Optional[int] = None
+    ) -> Optional[int]:
+        """The id of a ROOT run (parent_run_id IS NULL) currently running on
+        this issue or its session conversation, else None. ``issue_id`` is
+        backfilled after the turn, so the conversation is the live key."""
+        if issue_id is None and conversation_id is None:
+            return None
+        keys = []
+        if issue_id is not None:
+            keys.append(AgentRuns.issue_id == int(issue_id))
+        if conversation_id is not None:
+            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        try:
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(AgentRuns.id)
+                        .where(AgentRuns.status == "running")
+                        .where(AgentRuns.parent_run_id.is_(None))
+                        .where(or_(*keys))
+                        .order_by(AgentRuns.started_at.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+            return int(row) if row is not None else None
+        except Exception as e:
+            logger.error(f"[agent_runs] running_root_run_id failed: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # Sweeper helpers

@@ -91,6 +91,22 @@ async def mark_heartbeat_lost_step() -> int:
     return len(run_ids)
 
 
+INBOX_ORPHAN_SECONDS = 24 * 3600
+
+
+@DBOS.step()
+async def expire_orphan_inbox_step() -> int:
+    """Mark unclaimed agent_run_inbox items older than a day as expired
+    (spec §1-③: an item whose run ended before the next step boundary is an
+    orphan; it is never deleted, so the thread still shows it was sent)."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    older_than = datetime.now(timezone.utc) - timedelta(seconds=INBOX_ORPHAN_SECONDS)
+    return await get_agent_run_inbox_repository().expire_stale(older_than=older_than)
+
+
 @DBOS.step()
 async def recompute_monthly_budgets_step() -> int:
     """Sum this month's spend per agent, flip paused_reason='budget' on
@@ -176,8 +192,9 @@ async def agent_runs_sweeper_workflow(
     fires per cron tick across the cluster."""
     heartbeat_lost = await mark_heartbeat_lost_step()
     transitions = await recompute_monthly_budgets_step()
-    if heartbeat_lost or transitions:
+    expired_inbox = await expire_orphan_inbox_step()
+    if heartbeat_lost or transitions or expired_inbox:
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
-            f"budget_transitions={transitions}"
+            f"budget_transitions={transitions} expired_inbox={expired_inbox}"
         )

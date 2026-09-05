@@ -36,7 +36,11 @@ async def test_session_issue_dispatches_reply_workflow(monkeypatch):
     }
     monkeypatch.setattr(r, "_assert_issue_visible", AsyncMock(return_value=issue_row))
     monkeypatch.setattr(
-        r, "get_or_create_issue_session", AsyncMock(return_value="sess-5")
+        r,
+        "get_or_create_issue_session",
+        AsyncMock(
+            return_value="310819108761555"
+        ),  # session ids are Snowflake strings on the wire
     )
 
     started = {}

@@ -128,6 +128,7 @@ def test_every_frame_rendered_in_prompt_code_is_registered():
         root / "services" / "ai" / "prompts" / "prompt_composer.py",
         root / "services" / "storyboard" / "script" / "script_ai_service.py",
         root / "services" / "ai" / "chat" / "ai_library_chat_service.py",
+        root / "services" / "ai" / "runner" / "inbox.py",
     ]
     # Excluded on purpose, with the reason each is not a frame:
     #  - inner elements of a frame we already own (closing one of these does
