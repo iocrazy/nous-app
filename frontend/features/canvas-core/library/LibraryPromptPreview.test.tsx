@@ -1,0 +1,76 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+// The real `t` interpolates `{{name}}` / `{{count}}` from the options object,
+// so a mock that hands back the raw defaultValue would render "Insert slide
+// {{name}}" where the app renders a filename — a mock that disagrees with the
+// boundary it stands in for. Same shape as LibraryGrid.test.tsx next door.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, d?: unknown) =>
+      typeof d === 'string'
+        ? d
+        : ((d as { defaultValue?: string } | undefined)?.defaultValue ?? k).replace(
+            /\{\{(\w+)\}\}/g,
+            (_m: string, n: string) => String((d as Record<string, unknown> | undefined)?.[n] ?? ''),
+          ),
+  }),
+}));
+vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
+import { LibraryPromptPreview, activeSlide } from './LibraryPromptPreview';
+import type { PromptEntry } from '../../../services/promptsService';
+
+const image: PromptEntry = { key: 'image:10', form: 'image', origin: 'extracted', title: 'Bicycle', tags: [], positive_en: 'cheerful', positive_zh: null, negative_en: 'flare', negative_zh: null, params: { width: 1920, height: 1080, steps: 28 }, thumbs: [{ url: '/api/v1/resources/10/cover', kind: 'image' }], slides: null, source: { store: 'uploads', id: '10' }, updated_at: '' };
+const album: PromptEntry = { ...image, key: 'album:7', form: 'album', title: 'Harvest', params: null, slides: [
+  { name: '001.jpg', url: null, positive_en: null, positive_zh: null, negative_en: null, negative_zh: null },
+  { name: '002.jpg', url: '/api/v1/media/9/slides/002.jpg', positive_en: 'winking', positive_zh: '眨眼', negative_en: 'blur', negative_zh: null },
+  { name: '003.jpg', url: null, positive_en: 'leaning', positive_zh: null, negative_en: null, negative_zh: null },
+] };
+const noop = () => {};
+const props = { lang: 'en' as const, onLangChange: noop, slideName: null, onSlideChange: noop, canAct: true, actHint: '', onInsert: noop, onApplyAll: noop, onSaveAsTemplate: noop };
+
+describe('activeSlide', () => {
+  it('defaults to the first slide that has text', () => {
+    expect(activeSlide(album, null)?.name).toBe('002.jpg');
+    expect(activeSlide(album, '003.jpg')?.name).toBe('003.jpg');
+    expect(activeSlide(image, null)).toBeNull();
+  });
+});
+
+describe('LibraryPromptPreview', () => {
+  it('image: positive/negative/params blocks and the three actions', () => {
+    const onInsert = vi.fn(), onApplyAll = vi.fn(), onSave = vi.fn();
+    render(<LibraryPromptPreview {...props} entry={image} onInsert={onInsert} onApplyAll={onApplyAll} onSaveAsTemplate={onSave} />);
+    expect(screen.getByTestId('library-prompt-positive')).toHaveTextContent('cheerful');
+    expect(screen.getByTestId('library-prompt-negative')).toHaveTextContent('flare');
+    expect(screen.getByTestId('library-prompt-params')).toHaveTextContent('16:9');
+    fireEvent.click(screen.getByRole('button', { name: 'Insert positive' })); expect(onInsert).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' })); expect(onApplyAll).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save as template…' })); expect(onSave).toHaveBeenCalled();
+  });
+  it('album: slide rows replace the positive block; textless slides disabled; selected slide names the actions', () => {
+    const onSlideChange = vi.fn();
+    render(<LibraryPromptPreview {...props} entry={album} slideName="002.jpg" onSlideChange={onSlideChange} />);
+    const rows = screen.getAllByTestId('library-prompt-slide');
+    expect(rows).toHaveLength(3);
+    expect(rows[0].querySelector('button')).toBeDisabled();
+    expect(rows[1]).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('button', { name: 'Insert slide 002.jpg' })).toBeInTheDocument();
+    expect(screen.getByTestId('library-prompt-negative')).toHaveTextContent('blur');
+    fireEvent.click(rows[2]);
+    expect(onSlideChange).toHaveBeenCalledWith('003.jpg');
+  });
+  it('no target: actions disabled with the hint; template hides Save as template', () => {
+    render(<LibraryPromptPreview {...props} entry={{ ...image, form: 'template', origin: 'typed' }} canAct={false} actHint="Pick a prompt node first" />);
+    expect(screen.getByRole('button', { name: 'Insert positive' })).toBeDisabled();
+    expect(screen.getByText('Pick a prompt node first')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save as template…' })).toBeNull();
+  });
+  it('language toggle greys a missing side and shows the other with a note', () => {
+    const onLangChange = vi.fn();
+    render(<LibraryPromptPreview {...props} entry={image} lang="zh" onLangChange={onLangChange} />);
+    expect(screen.getByTestId('library-prompt-positive')).toHaveTextContent('cheerful');
+    expect(screen.getByText('EN only')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    expect(onLangChange).toHaveBeenCalledWith('en');
+  });
+});
