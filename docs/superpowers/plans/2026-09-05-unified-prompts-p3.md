@@ -54,7 +54,7 @@
 
 ## Phase A — data: origin column, writers, backfill, read model
 
-### Task A1: `resources.prompt_origin` column (migration + ORM)
+### Task 1 (A1): `resources.prompt_origin` column (migration + ORM)
 
 **Files:**
 - Create: `supabase/migrations/453_resources_prompt_origin.sql`
@@ -159,7 +159,7 @@ git add supabase/migrations/453_resources_prompt_origin.sql backend/app/models/m
 git commit -m "feat(db): resources.prompt_origin — who wrote the prompt text (mig 453)"
 ```
 
-### Task A2: origin helper + stamp every writer
+### Task 2 (A2): origin helper + stamp every writer
 
 **Files:**
 - Create: `backend/app/services/prompts/__init__.py` (empty), `backend/app/services/prompts/origin.py`
@@ -375,7 +375,7 @@ git add backend/app/services/prompts backend/tests/services/prompts backend/app/
 git commit -m "feat(prompts): stamp prompt_origin on every writer of prompt text"
 ```
 
-### Task A3: backfill workflow for existing rows
+### Task 3 (A3): backfill workflow for existing rows
 
 **Files:**
 - Create: `backend/app/workflows/backfill_resource_prompt_origin.py`
@@ -559,7 +559,7 @@ git add backend/app/workflows/backfill_resource_prompt_origin.py backend/app/api
 git commit -m "feat(prompts): admin backfill for resources.prompt_origin"
 ```
 
-### Task A4: PromptEntry schema + pure entry builders
+### Task 4 (A4): PromptEntry schema + pure entry builders
 
 **Files:**
 - Create: `backend/app/schemas/prompts.py`, `backend/app/services/prompts/entries.py`
@@ -924,7 +924,7 @@ git add backend/app/schemas/prompts.py backend/app/services/prompts/entries.py b
 git commit -m "feat(prompts): PromptEntry wire shape + pure builders for template/image/album"
 ```
 
-### Task A5: catalog repository (ORM statements)
+### Task 5 (A5): catalog repository (ORM statements)
 
 **Files:**
 - Create: `backend/app/repositories/prompt_catalog_repository.py`
@@ -1079,7 +1079,7 @@ git add backend/app/repositories/prompt_catalog_repository.py backend/tests/serv
 git commit -m "feat(prompts): catalog repository — prompted resources by scope/project, template example files"
 ```
 
-### Task A6: catalog service + `/prompts` router
+### Task 6 (A6): catalog service + `/prompts` router
 
 **Files:**
 - Create: `backend/app/services/prompts/catalog_service.py`, `backend/app/api/prompts_router.py`
@@ -1520,7 +1520,7 @@ git add backend/app/services/prompts/catalog_service.py backend/app/api/prompts_
 git commit -m "feat(api): GET /prompts + /prompts/counts — unified prompt catalog"
 ```
 
-### Task A7: Phase A real-stack acceptance (no code)
+### Task 7 (A7): Phase A real-stack acceptance (no code)
 
 - [ ] **Step 1: After merge + deploy, run the backfill dry-run** via the admin backfill endpoint (`POST /api/v1/admin/backfills/resource_prompt_origin` with `{"dry_run": true}` — check the exact path in `backend/app/api/admin/backfill_router.py`). Expected `by_origin` ≈ `{extracted: 7, captioned: 6, typed: 0}` (spec §1; captioned includes the album). Then run live and verify with the debug account's scope:
 
@@ -1535,7 +1535,7 @@ Expected: no `NULL` bucket.
 
 ## Phase B — resource library → Prompts page
 
-### Task B1: `promptsService.ts` (types, fetch, helpers, save-as-template)
+### Task 8 (B1): `promptsService.ts` (types, fetch, helpers, save-as-template)
 
 **Files:**
 - Create: `frontend/services/promptsService.ts`
@@ -1862,7 +1862,7 @@ git add frontend/services/promptsService.ts frontend/services/promptsService.tes
 git commit -m "feat(prompts): promptsService — catalog client, text/param helpers, save-as-template"
 ```
 
-### Task B2: shared prompt atoms (thumbs, tags, template form)
+### Task 9 (B2): shared prompt atoms (thumbs, tags, template form)
 
 **Files:**
 - Create: `frontend/components/prompts/PromptThumbs.tsx`, `frontend/components/prompts/PromptTags.tsx`, `frontend/components/prompts/TemplateForm.tsx`
@@ -2140,7 +2140,7 @@ git add frontend/components/prompts frontend/public/locales/en.json frontend/pub
 git commit -m "feat(prompts): shared thumbs / form+origin tags / template form"
 ```
 
-### Task B3: `PromptsShelf` — the resource library's Prompts page
+### Task 10 (B3): `PromptsShelf` — the resource library's Prompts page
 
 **Files:**
 - Create: `frontend/components/resources/prompts/promptFilters.ts`, `frontend/components/resources/prompts/PromptCard.tsx`, `frontend/components/resources/prompts/PromptAlbumCard.tsx`, `frontend/components/resources/prompts/PromptsShelf.tsx`
@@ -2651,7 +2651,7 @@ git add frontend/components/resources/prompts frontend/components/resources/asse
 git commit -m "feat(resources): Prompts shelf — unified prompts, text-first cards, album rows"
 ```
 
-### Task B4: `SaveAsTemplateDialog`, sidebar/tab counts, locale parity guard
+### Task 11 (B4): `SaveAsTemplateDialog`, sidebar/tab counts, locale parity guard
 
 **Files:**
 - Create (replace the B3 stub): `frontend/components/prompts/SaveAsTemplateDialog.tsx`
@@ -2889,7 +2889,7 @@ git add frontend/components/prompts frontend/contexts/ResourcesContext.tsx front
 git commit -m "feat(prompts): Save as Template dialog, unified prompt count in sidebar/tab, locale parity guard"
 ```
 
-### Task B5: Phase B real-stack acceptance (no code)
+### Task 12 (B5): Phase B real-stack acceptance (no code)
 
 - [ ] After deploy: `/resources/assets/prompt` shows the debug account's rows (not "Nothing here yet"); form/origin counts sum to `total`; expanding the album shows a disabled Send on the textless slide; a captioned card has no params row; `Save as template` on one image → new template row, sidebar Prompts count +1, `SELECT slot FROM asset_files WHERE asset_id=<new>` = `examples`. Then run `npm run e2e:prod`.
 
@@ -2897,7 +2897,7 @@ git commit -m "feat(prompts): Save as Template dialog, unified prompt count in s
 
 ## Phase C — canvas Library panel → Prompts page
 
-### Task C1: store state + `insertText` on the mention handle registry
+### Task 13 (C1): store state + `insertText` on the mention handle registry
 
 **Files:**
 - Modify: `frontend/features/canvas-core/library/libraryStore.ts` (Persisted + state + `setPage` width switch), `frontend/features/canvas-core/library/mentionLibraryItems.ts:44-47` (`MentionInserters`), `frontend/features/canvas-core/smart/nodes/PromptNodeView.tsx:334-348` (registration)
@@ -3004,7 +3004,7 @@ git add frontend/features/canvas-core/library/libraryStore.ts frontend/features/
 git commit -m "feat(canvas): library store prompt state + width per page; insertText on mention handles"
 ```
 
-### Task C2: pure prompt actions + catalog hook
+### Task 14 (C2): pure prompt actions + catalog hook
 
 **Files:**
 - Create: `frontend/features/canvas-core/library/promptActions.ts`, `frontend/features/canvas-core/library/usePromptCatalog.ts`
@@ -3236,7 +3236,7 @@ git add frontend/features/canvas-core/library/promptActions.ts frontend/features
 git commit -m "feat(canvas): prompt actions (append/apply-all/ratio preset/group chips) + catalog hook"
 ```
 
-### Task C3: `LibraryPromptList` + `LibraryPromptPreview`
+### Task 15 (C3): `LibraryPromptList` + `LibraryPromptPreview`
 
 **Files:**
 - Create: `frontend/features/canvas-core/library/LibraryPromptList.tsx`, `frontend/features/canvas-core/library/LibraryPromptPreview.tsx`
@@ -3597,7 +3597,7 @@ git add frontend/features/canvas-core/library/LibraryPromptList.tsx frontend/fea
 git commit -m "feat(canvas): Prompts page list + preview (per-slide albums, language toggle)"
 ```
 
-### Task C4: `LibraryPromptsPage` — wiring, four actions, confirm, forms, keyboard; mount in the panel
+### Task 16 (C4): `LibraryPromptsPage` — wiring, four actions, confirm, forms, keyboard; mount in the panel
 
 **Files:**
 - Create: `frontend/features/canvas-core/library/LibraryPromptsPage.tsx`
@@ -4025,7 +4025,7 @@ git add frontend/features/canvas-core/library/LibraryPromptsPage.tsx frontend/fe
 git commit -m "feat(canvas): Library Prompts page — insert / apply all / save current / new, per-slide albums, keyboard"
 ```
 
-### Task C5: entry points — node bookshelf, `⌘K`, attached composer
+### Task 17 (C5): entry points — node bookshelf, `⌘K`, attached composer
 
 **Files:**
 - Modify: `frontend/features/canvas-core/smart/nodes/PromptNodeView.tsx` (`libraryOpen` state :167, `:491`, bookshelf button :620-630, picker mount :937-939, imports :54-55, `handlePickAsset`), `frontend/features/canvas-core/palette/commands.ts:74+`, `frontend/features/canvas-core/smart/nodes/AttachedComposerPanel.tsx:18, 52, 236-252`, `frontend/features/canvas-core/library/libraryNaming.test.ts:22` (`ALLOWED` gains `palette/commands.ts`)
@@ -4131,7 +4131,7 @@ git add frontend/features/canvas-core/smart/nodes/PromptNodeView.tsx frontend/fe
 git commit -m "feat(canvas): bookshelf buttons and ⌘K open the Library Prompts page"
 ```
 
-### Task C6: delete the old picker and its data path; extend the removals guard
+### Task 18 (C6): delete the old picker and its data path; extend the removals guard
 
 **Files:**
 - Delete: `frontend/features/canvas-core/smart/nodes/AssetPromptPicker.tsx`, `…/AssetPromptPicker.test.tsx`, `frontend/features/canvas-core/smart/loadPromptAsset.ts`, `…/loadPromptAsset.test.ts`, `frontend/services/resourceService.promptAssets.test.ts`
@@ -4179,7 +4179,7 @@ git add -u frontend/services/resourceService.ts frontend/features/canvas-core/li
 git commit -m "chore(canvas): delete AssetPromptPicker / loadPromptAsset / fetchPromptAssets — the panel's Prompts page replaces them"
 ```
 
-### Task C7: docs + real-stack acceptance
+### Task 19 (C7): docs + real-stack acceptance
 
 **Files:**
 - Modify: `CLAUDE.md` (Asset Library section: one bullet), `docs/superpowers/plans/2026-09-03-canvas-library-panel-p1p2.md` (P3 pointer), memory is the controller's job
