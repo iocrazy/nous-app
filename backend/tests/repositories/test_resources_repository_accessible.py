@@ -223,5 +223,9 @@ async def test_counts_carry_the_same_source_predicate(monkeypatch):
     sql = session.captured_sql.lower()
     assert "source_type in ('web')" in sql
     # In the WHERE, not the HAVING: a post-aggregate filter would count rows
-    # the chip excludes and then hide the group.
-    assert "having" not in sql
+    # the chip excludes and then hide the group. Asserted by POSITION rather
+    # than by ``"having" not in sql`` — the repository emits no HAVING at all,
+    # so that form passed on any string whatsoever, including one where the
+    # predicate had moved after the aggregate. This one can fail.
+    assert "group by" in sql, "the counts query must still aggregate"
+    assert sql.index("source_type in ('web')") < sql.index("group by")

@@ -323,11 +323,27 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // would then be pointing at a detached handle with nothing to say so. The
   // deps are `[id]` alone for the same reason: re-registering on every render
   // would be churn, and there is nothing else to re-read.
+  //
+  // THEY THROW on a null ref rather than optional-chaining it away. `?.` here
+  // was a phantom success: the registry still answered with a handle, so the
+  // panel's "open the prompt node" refusal never fired, every insert returned
+  // `undefined`, and `mentionLibraryItems` counted a chip per call — the panel
+  // then reported "3 inserted", cleared the pick, and the body was untouched.
+  // A throw is a typed failure the run counts as `failed`, which is the whole
+  // point of the mention path returning a result at all.
   useEffect(
     () =>
       registerMentionHandle(id, {
-        insertImage: (image, opts) => bodyEditorRef.current?.insertImage(image, opts),
-        insertAsset: (asset, opts) => bodyEditorRef.current?.insertAsset(asset, opts),
+        insertImage: (image, opts) => {
+          const editor = bodyEditorRef.current;
+          if (!editor) throw new Error('prompt body editor is not mounted');
+          editor.insertImage(image, opts);
+        },
+        insertAsset: (asset, opts) => {
+          const editor = bodyEditorRef.current;
+          if (!editor) throw new Error('prompt body editor is not mounted');
+          editor.insertAsset(asset, opts);
+        },
       }),
     [id],
   );

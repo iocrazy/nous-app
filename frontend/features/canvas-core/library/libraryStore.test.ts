@@ -185,6 +185,42 @@ describe('libraryStore', () => {
     expect(s().selection).toEqual([]);
   });
 
+  it('openPanel naming a DIFFERENT segment drops the kind chip with it', () => {
+    // A programmatic switch is a switch. The prompt card's Open Library button
+    // forces `uploads`, so a `character` chip chosen on Assets would arrive on
+    // the Files shelf, narrow it to nothing, and draw no chip saying why —
+    // `KIND_LABEL.uploads` has no `character` entry to press.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setKind('character');
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().kind).toBeNull();
+  });
+
+  it('openPanel on the SAME segment keeps the kind chip — nothing changed', () => {
+    // The `L` shortcut and the target-arming path both re-open on whatever
+    // segment is showing. Resetting there would clear a chip the user can see
+    // and just chose, with the shelf underneath unchanged.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'uploads' });
+    s().setKind('image');
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().kind).toBe('image');
+    s().openPanel();
+    expect(s().kind).toBe('image');
+  });
+
+  it('the in-library pill survives a programmatic switch — it is not in-segment', () => {
+    // Kept on purpose, unlike `kind`: the pill sits in the Assets scope row
+    // and is drawn `aria-pressed` whenever that row is on screen, so nobody
+    // is narrowed by a control they cannot see.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setAssetsInLibraryOnly(false);
+    s().openPanel({ mediaStore: 'uploads' });
+    expect(s().assetsInLibraryOnly).toBe(false);
+  });
+
   it('a corrupt stored value is ignored, not thrown on', () => {
     localStorage.setItem(LIBRARY_STORAGE_KEY, '{not json');
     expect(() => useLibraryStore.getState().setWidth(360)).not.toThrow();

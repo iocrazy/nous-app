@@ -73,6 +73,27 @@ export const UPLOAD_SOURCES: readonly UploadSource[] = [
   'generated',
 ];
 
+/** `[i18n key, English default]` per chip, in the order above.
+ *
+ *  Lives HERE, beside `UPLOAD_SOURCES` and `UPLOAD_SOURCE_CSV`, because the
+ *  panel's Files shelf and the `@` picker's Files tab draw the same four chips
+ *  over the same wire values — two local copies is how the same chip acquires
+ *  two names, which is exactly the drift the "Files" rename existed to end.
+ *
+ *  `generated` reads "Saved Generations", not "Generated": the Generated
+ *  SEGMENT is the `generated_media` inbox, while this chip is
+ *  `resources.source_type IN ('generated','derived')` — a different
+ *  population. One word for both would say the two shelves answer alike.
+ *
+ *  Single-quoted key literals on purpose: `libraryI18n.test.ts` scans for
+ *  exactly that shape, and a key built by template literal is invisible to it. */
+export const SOURCE_LABEL: Record<UploadSource, readonly [string, string]> = {
+  all: ['canvas.library.sourceAll', 'All'],
+  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
+  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
+  generated: ['canvas.library.sourceGenerated', 'Saved Generations'],
+};
+
 export type AssetScope = 'this-project' | 'all';
 
 /** Which side of `assets.in_library` the Assets shelf wants.
@@ -94,8 +115,9 @@ export interface LibrarySearchOptions {
    *  table, not in every consumer. */
   uploadSources?: string;
   /** Defaults to `in` in `fetchLibraryAssets`. Undefined therefore means the
-   *  narrow shelf, not "server default" — the two agree today and the
-   *  explicit value is what keeps them agreeing. */
+   *  narrow shelf, not "server default" — the list branch's server default is
+   *  `in` and the search branch's is `all`, so sending the value explicitly is
+   *  what stops the two from answering differently. */
   assetsLibrary?: AssetsLibrary;
   generatedScope?: GeneratedScope;
   canvasId?: string | null;

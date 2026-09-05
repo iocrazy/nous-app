@@ -115,7 +115,10 @@ export interface AssetGridLabels {
   preview: string;
   /** Lightbox header. */
   previewGroup: string;
-  /** Only read when `libraryToggle` is on. */
+  /** Only read when `libraryToggle` is on. Optional because the toggle is
+   *  optional; a host that turns the toggle ON and omits these gets the shared
+   *  `canvas.mention.*` wording rather than a blank span and an unlabelled
+   *  pill — see the render below. */
   libraryLabel?: string;
   inLibraryOnly?: string;
   /** Only read when `unavailable` is true. */
@@ -447,7 +450,15 @@ function AssetGridPickerInner<R extends AssetGridRow>(
               {/* One library per canvas — the route's team segment IS the
                   scope, so there is nothing to choose between and a select
                   with a single option would be a control that does nothing. */}
-              <span className={`shrink-0 ${c.barLabel}`}>{labels.libraryLabel}</span>
+              {/* Fallbacks, not `?? ''`. These two are optional in the type
+                  because the toggle is optional, so a host that turns the
+                  toggle on and forgets them would render a blank span and a
+                  pill with no words in it — a control the user cannot read is
+                  worse than one the host worded itself. The shared
+                  `canvas.mention.*` strings are what both hosts already say. */}
+              <span className={`shrink-0 ${c.barLabel}`}>
+                {labels.libraryLabel ?? t('canvas.mention.library', 'Library')}
+              </span>
               <button
                 type="button"
                 data-testid="mention-library-toggle"
@@ -455,7 +466,7 @@ function AssetGridPickerInner<R extends AssetGridRow>(
                 onClick={() => setInLibraryOnly((v) => !v)}
                 className={pill(inLibraryOnly)}
               >
-                {labels.inLibraryOnly}
+                {labels.inLibraryOnly ?? t('canvas.mention.inLibraryOnly', 'In Library Only')}
               </button>
             </>
           )}

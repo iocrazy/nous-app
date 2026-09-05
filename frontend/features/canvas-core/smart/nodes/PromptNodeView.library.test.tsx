@@ -309,6 +309,33 @@ describe('PromptNodeView Open Library button', () => {
     expect(screen.getByTestId('prompt-body-editor').textContent).toContain('Harbour');
   });
 
+  it('a handle whose editor has gone THROWS — a silent no-op reads as success', () => {
+    // The surface culls off-viewport cards, so the panel can hold a handle
+    // whose editor unmounted between the aim and the commit. Optional-chaining
+    // that away (`bodyEditorRef.current?.insertImage(...)`) returned
+    // `undefined`, which `mentionLibraryItems` counted as a chip: the panel
+    // said "1 inserted", cleared the pick, and the body was untouched.
+    setNode();
+    const view = renderNode(BASE_DATA);
+    const handle = getMentionHandle('p1');
+    expect(handle).not.toBeNull();
+    // Unmount AFTER capturing it — the registry drops the entry, but the
+    // wrapper still closes over the ref, which is exactly what the panel holds.
+    view.unmount();
+    expect(() =>
+      handle?.insertImage(
+        { url: '/api/v1/generated-media/gm-9', alias: 'Harbour', kind: 'image' },
+        { consumeMention: false },
+      ),
+    ).toThrow(/not mounted/);
+    expect(() =>
+      handle?.insertAsset(
+        { asset_id: 'a1', name: 'Cole', asset_type: 'character', cover_file_id: null },
+        { consumeMention: false },
+      ),
+    ).toThrow(/not mounted/);
+  });
+
   it('a read-only canvas gets the button disabled rather than missing', () => {
     setNode();
     useCanvasCoreStore.setState({ readOnly: true });

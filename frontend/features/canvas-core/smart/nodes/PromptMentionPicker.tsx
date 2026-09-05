@@ -90,6 +90,7 @@ import type { AddReferencesResult } from '../../library/addReferences';
 import { LibraryGrid } from '../../library/LibraryGrid';
 import {
   useLibrarySearch,
+  SOURCE_LABEL,
   UPLOAD_SOURCE_CSV,
   UPLOAD_SOURCES,
   type LibraryItem,
@@ -174,16 +175,14 @@ const TAB_LABEL: Record<Tab, readonly [string, string]> = {
   generated: ['canvas.library.storeGenerated', 'Generated'],
 };
 
-/** The Files tab's source chips, in the panel's order. Local state rather than
- *  `libraryStore`: this popover is remounted on every open and is not the
- *  panel — sharing the knob would let a chip set here narrow the panel's shelf
- *  later, from a control the user cannot see. */
-const SOURCE_LABEL: Record<UploadSource, readonly [string, string]> = {
-  all: ['canvas.library.sourceAll', 'All'],
-  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
-  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
-  generated: ['canvas.library.sourceGenerated', 'Generated'],
-};
+// The Files tab's source chips are the PANEL's chips — `SOURCE_LABEL` is
+// imported from `librarySearch.ts` rather than re-declared here, so the same
+// four chips over the same wire values cannot acquire two sets of words.
+//
+// The chosen chip is still LOCAL STATE, and that half is deliberate: this
+// popover is remounted on every open and is not the panel, so sharing the knob
+// through `libraryStore` would let a chip set here narrow the panel's shelf
+// later, from a control the user cannot see. Shared vocabulary, separate state.
 
 export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
   function PromptMentionPicker(

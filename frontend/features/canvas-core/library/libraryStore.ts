@@ -54,12 +54,22 @@ export interface LibraryTarget {
   title: string;
 }
 
-/** Only the three durable knobs. `query`, `selection`, `target` and the
- *  in-segment filters (`kind`, `uploadSource`, `assetsInLibraryOnly`) are
- *  deliberately NOT persisted:
- *  a restored target points at a node id from whatever canvas was open last
- *  time, which is worse than no target, and a restored source chip opens the
- *  Files shelf already narrowed with nothing on screen explaining why.
+/** Only the three durable knobs. Everything else is NON-DURABLE — `query`,
+ *  `selection`, `target`, and the three filters — and non-durable is not one
+ *  lifetime:
+ *
+ *  - `kind` and `uploadSource` are IN-SEGMENT: `setMediaStore` resets them,
+ *    because both rows belong to one shelf and a chip left pressed would
+ *    narrow a shelf that does not draw the control saying why.
+ *  - `assetsInLibraryOnly` is KEPT ACROSS A SEGMENT SWITCH. It lives in the
+ *    Assets scope row beside `assetScope`, which is kept for the same reason:
+ *    the pill is drawn `aria-pressed` whenever that row is on screen, so a
+ *    returning user is never narrowed by a control they cannot see.
+ *
+ *  None of the three is persisted: a restored target points at a node id from
+ *  whatever canvas was open last time, which is worse than no target, and a
+ *  restored source chip opens the Files shelf already narrowed with nothing on
+ *  screen explaining why.
  *
  *  `mediaStore` keeps its stored value `'uploads'`. The SEGMENT is labelled
  *  "Files" now, but the key is on disk in every user's browser and renaming it
@@ -189,14 +199,29 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     focusNonce: 0,
 
     openPanel(opts = {}) {
-      set((s) => ({
-        open: true,
-        page: opts.page ?? s.page,
-        mediaStore: opts.mediaStore ?? s.mediaStore,
-        target: opts.target !== undefined ? opts.target : s.target,
-        selection: [],
-        focusNonce: opts.focusSearch ? s.focusNonce + 1 : s.focusNonce,
-      }));
+      set((s) => {
+        // A PROGRAMMATIC segment switch is a segment switch. `setMediaStore`
+        // drops the kind chip because it belongs to the shelf being left, and
+        // the same is true when the caller names a different `mediaStore`
+        // here — the header's Open Library button forces `uploads`, so a
+        // `character` chip chosen on Assets would otherwise arrive on the
+        // Files shelf, narrow it to nothing, and draw no chip saying so
+        // (`KIND_LABEL.uploads` has no `character` entry).
+        //
+        // `uploadSource` needs no equivalent: `LibraryMediaPage` reads it only
+        // on `uploads`, and `assetsInLibraryOnly` is KEPT here on purpose —
+        // see the Persisted doc above.
+        const switching = opts.mediaStore !== undefined && opts.mediaStore !== s.mediaStore;
+        return {
+          open: true,
+          page: opts.page ?? s.page,
+          mediaStore: opts.mediaStore ?? s.mediaStore,
+          kind: switching ? null : s.kind,
+          target: opts.target !== undefined ? opts.target : s.target,
+          selection: [],
+          focusNonce: opts.focusSearch ? s.focusNonce + 1 : s.focusNonce,
+        };
+      });
       // Spec §3.1: the aimed-at node is SELECTED and highlighted while the
       // panel points at it. The panel sits on the right and the target bar
       // names the node, but with a dozen cards on the board a name is not a

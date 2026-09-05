@@ -41,17 +41,18 @@ import { writeLibraryDrag } from './dropLibraryItems';
 import { LibraryGrid, type LibraryKindChip } from './LibraryGrid';
 import {
   useLibrarySearch,
+  SOURCE_LABEL,
   UPLOAD_SOURCE_CSV,
   UPLOAD_SOURCES,
   type AssetScope,
   type GeneratedScope,
   type LibraryItem,
   type LibraryStore,
-  type UploadSource,
 } from './librarySearch';
 import { LibraryPreviewCard } from './LibraryPreviewCard';
 import { libraryKey, selectedItems } from './librarySelection';
 import { useLibraryStore, type LibraryTarget } from './libraryStore';
+import { isMentionTarget } from './libraryTarget';
 import { chipClass, type Label } from './libraryChrome';
 import { getMentionHandle } from './mentionHandles';
 import { placeLibraryItems } from './placeLibraryItems';
@@ -76,18 +77,13 @@ const STORE_LABEL: Record<LibraryStore, Label> = {
   generated: ['canvas.library.storeGenerated', 'Generated'],
 };
 
-/** The Files shelf's source chips, in fixed order. `generated` folds
- *  `derived` in — see `UPLOAD_SOURCE_CSV`. */
-const SOURCE_LABEL: Record<UploadSource, Label> = {
-  all: ['canvas.library.sourceAll', 'All'],
-  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
-  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
-  generated: ['canvas.library.sourceGenerated', 'Generated'],
-};
-
+/** The Assets shelf's scope chips. "Whole Workspace", not "All Library": the
+ *  in-library pill sits in this same row, so two controls both saying Library
+ *  read as two settings for one thing. They are orthogonal — this one picks
+ *  WHICH assets are in play, the pill picks which SLICE of them. */
 const ASSET_SCOPE_LABEL: Record<AssetScope, Label> = {
   'this-project': ['canvas.library.scopeThisProject', 'This Project'],
-  all: ['canvas.library.scopeAllLibrary', 'All Library'],
+  all: ['canvas.library.scopeAllLibrary', 'Whole Workspace'],
 };
 
 const GENERATED_SCOPE_LABEL: Record<GeneratedScope, Label> = {
@@ -169,9 +165,10 @@ export function LibraryMediaPage({
   const used = ((targetData?.manual_refs ?? []) as GeneratedImageRef[]).length;
   const inTargetMode =
     !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
-  // `gen` absent IS the Text kind (see `PromptNodeData`) — the kind select
-  // writes `gen: null` for Text and a settings object for Image/Video.
-  const mentionMode = inTargetMode && !targetData?.gen;
+  // `gen` absent IS the Text kind — the predicate is shared with the panel's
+  // target bar (`libraryTarget.ts`) so the bar and the button cannot describe
+  // one aim in two vocabularies.
+  const mentionMode = inTargetMode && isMentionTarget(targetData);
   // NOT applied in mention mode. A card switched from Image to Text keeps the
   // `manual_refs` it had, and a text run ignores every one of them — so the
   // quota would be a true number about the wrong thing, and worse, it would
@@ -371,6 +368,14 @@ export function LibraryMediaPage({
           // Only a run that actually landed clears the pick — the reference
           // path's rule, for its reason: a cleared selection after a failure
           // is indistinguishable from success.
+          //
+          // ANY failure leaves the WHOLE pick standing, successes included, so
+          // the user has something to retry from — and a retry then re-inserts
+          // the rows that already worked, because the mention path has no
+          // "already mentioned" skip the way `addReferences` has a duplicate
+          // check. Duplicate chips are visible and removable; a pick that
+          // silently emptied itself after a partial failure would leave the
+          // user with no way to reach the rows that did not land.
           if (r.failed === 0 && r.mentioned > 0) setSelection([]);
         })
         // `runMention` speaks every known outcome itself and swallows its own
@@ -447,6 +452,23 @@ export function LibraryMediaPage({
     inTargetMode && !mentionMode && !chosen.some((i) => i.store === 'assets')
       ? Math.max(0, Math.min(chosen.length, max - used))
       : null;
+
+  // An Assets shelf narrowed to the library and returning nothing reads as
+  // "you own nothing" — the generic empty copy names no cause and offers no
+  // way out, while the pill three rows up is the entire explanation. Only this
+  // exact combination gets the pointed copy; a wide shelf that is genuinely
+  // empty keeps the plain one, because there is nothing to turn off.
+  const emptyLabel =
+    mediaStore === 'assets' &&
+    assetsInLibraryOnly &&
+    items.length === 0 &&
+    !current.loading &&
+    current.error === null
+      ? t(
+          'canvas.library.emptyLibraryOnly',
+          'No Library Members Here · turn off In Library Only to see everything',
+        )
+      : t('canvas.library.empty', 'Nothing Here Yet');
 
   const placeAction = {
     label: t('canvas.library.place', 'Place on Canvas'),
@@ -573,7 +595,11 @@ export function LibraryMediaPage({
               }
               className={chipClass(assetsInLibraryOnly)}
             >
-              {t('canvas.library.inLibraryOnly', 'In Library Only')}
+              {/* `canvas.mention.*`, not a second `canvas.library.*` copy: the
+                  `@` picker's pill (`PromptMentionPicker`) already owns this
+                  string, and two keys for one label is how the panel and the
+                  picker end up saying different things about the same filter. */}
+              {t('canvas.mention.inLibraryOnly', 'In Library Only')}
             </button>
           )}
         </div>
@@ -631,7 +657,7 @@ export function LibraryMediaPage({
               }
         }
         onItemHover={(item, rect) => setHover(item && rect ? { item, rect } : null)}
-        emptyLabel={t('canvas.library.empty', 'Nothing Here Yet')}
+        emptyLabel={emptyLabel}
         targetRowHeight={96}
       />
 

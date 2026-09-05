@@ -183,6 +183,39 @@ describe('mentionLibraryItems', () => {
     expect(r.failed.map((f) => f.reason)).toEqual(['not_an_image']);
   });
 
+  it('an inserter that THROWS is a failure, not a chip — the phantom-success guard', async () => {
+    // `PromptNodeView` registers wrappers that throw when the body editor is
+    // not mounted (the surface culls off-viewport cards). Counting the call
+    // anyway is what made the panel report "1 inserted", clear the pick, and
+    // leave the body untouched. The throw must not escape either: an escaping
+    // one rejects the whole run and loses the items that DID land.
+    const h = handle();
+    h.insertImage.mockImplementation(() => {
+      throw new Error('prompt body editor is not mounted');
+    });
+    const r = await mentionLibraryItems([GENERATED], SCOPE, h.inserters);
+
+    expect(r.mentioned).toBe(0);
+    expect(r.failed).toEqual([{ item: GENERATED, reason: 'editor_gone' }]);
+  });
+
+  it('a throwing inserter reports its own item and no other', async () => {
+    // Two items, one editor: the throw is not per-item, so both fail — and
+    // both must be REPORTED, or a retry silently omits one.
+    const h = handle();
+    h.insertAsset.mockImplementation(() => {
+      throw new Error('prompt body editor is not mounted');
+    });
+    h.insertImage.mockImplementation(() => {
+      throw new Error('prompt body editor is not mounted');
+    });
+    const r = await mentionLibraryItems([ASSET, GENERATED], SCOPE, h.inserters);
+
+    expect(r.mentioned).toBe(0);
+    expect(r.failed.map((f) => f.item)).toEqual([ASSET, GENERATED]);
+    expect(r.failed.every((f) => f.reason === 'editor_gone')).toBe(true);
+  });
+
   it('a failed asset detail fetch still mentions — the chip works without it', async () => {
     // `handleMentionAsset`'s rule, kept: the RUN re-fetches the bundle from
     // `asset_id`, so a missing cover costs a thumbnail, not the mention.

@@ -101,6 +101,21 @@ const UPLOAD_ROW = {
   summary_status: null,
 };
 
+/** A second row, so a case can select TWO and assert the plural the app ships.
+ *  Same wire shape — string id, relative `thumbnail_url`. */
+const SECOND_UPLOAD_ROW = {
+  id: '655000000000000002',
+  name: 'harbour-dawn.png',
+  kind: 'image' as const,
+  mime: 'image/png',
+  size: 1,
+  scope: { type: 'team' as const, id: SCOPE },
+  updated_at: '2026-09-01T10:11:13Z',
+  thumbnail_url: '/api/v1/resources/655000000000000002/cover',
+  transcript_status: null,
+  summary_status: null,
+};
+
 /** `GET /api/v1/assets/search` row — the real wire shape, string ids. */
 const ASSET_ROW = {
   id: '727145299382534300',
@@ -353,6 +368,53 @@ describe('LibraryPanel', () => {
     expect(
       screen.getByTestId('library-in-library-toggle').getAttribute('aria-pressed'),
     ).toBe('false');
+  });
+
+  it('an empty narrowed Assets shelf names the pill, not "you own nothing"', async () => {
+    // The generic empty copy is a dead end here: the shelf is empty BECAUSE of
+    // a pill three rows up, and nothing on screen connected the two. The
+    // pointed copy is the only thing that makes the state recoverable.
+    searchAssets.mockResolvedValue([]);
+    listAssets.mockResolvedValue([]);
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets' });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('library-empty')).toBeTruthy());
+    const empty = screen.getByTestId('library-empty').textContent ?? '';
+    expect(empty).toContain('turn off In Library Only');
+    expect(empty).not.toBe('Nothing Here Yet');
+  });
+
+  it('the WIDE Assets shelf keeps the plain empty copy — nothing to turn off', async () => {
+    searchAssets.mockResolvedValue([]);
+    listAssets.mockResolvedValue([]);
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets' });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId('library-empty')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('library-in-library-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('library-empty').textContent).toBe('Nothing Here Yet'),
+    );
+  });
+
+  it('an empty FILES shelf keeps the plain copy — the pill is not its control', async () => {
+    // The hint names a control the Files shelf does not draw, so offering it
+    // there would send the user looking for a pill that is not on screen.
+    searchResources.mockResolvedValue({
+      results: [],
+      counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
+    act(() => {
+      useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads' });
+    });
+    renderPanel();
+    await waitFor(() =>
+      expect(screen.getByTestId('library-empty').textContent).toBe('Nothing Here Yet'),
+    );
   });
 
   it('the toggle belongs to Assets alone', async () => {
@@ -693,11 +755,26 @@ describe('LibraryPanel aimed at a Text-kind prompt', () => {
   const TEXT_TARGET = { nodeId: 'p1', kind: 'prompt' as const, title: 'Harbour at dusk' };
 
   it('offers Insert Mentions where a gen node offers Add References', async () => {
+    // TWO rows, so the asserted string is the SHIPPED plural. At count 1
+    // i18next resolves `insertMentions_one` — "Insert 1 Mention" — while the
+    // stub `t` here renders the `defaultValue`, which is the _other_ form. The
+    // one-row assertion therefore pinned a string the app never paints.
+    searchResources.mockResolvedValue({
+      results: [UPLOAD_ROW, SECOND_UPLOAD_ROW],
+      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
     seedNodes([textPromptNode()]);
     armMentionHandle();
-    await openOnUploads(TEXT_TARGET);
-    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
-    expect(screen.getByTestId('library-primary').textContent).toContain('Insert 1 Mentions');
+    act(() => {
+      useLibraryStore.getState().openPanel({
+        page: 'media', mediaStore: 'uploads', target: TEXT_TARGET,
+      });
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(2));
+    fireEvent.click(screen.getByTestId('library-select-all'));
+    expect(screen.getByTestId('library-primary').textContent).toContain('Insert 2 Mentions');
   });
 
   it('a gen node still offers Add References — the split is on `gen`, not on the panel', async () => {
@@ -727,6 +804,27 @@ describe('LibraryPanel aimed at a Text-kind prompt', () => {
     // A commit that worked clears the pick, exactly as the reference path does
     // — otherwise a second click silently inserts the same chip again.
     await waitFor(() => expect(useLibraryStore.getState().selection).toEqual([]));
+  });
+
+  it('the target BAR says mentions too — not references over a mention button', async () => {
+    // The bar is the line the user reads first. Left on "Adding references to
+    // Harbour at dusk" over a button that inserts chips, it is the same class
+    // of lie as a silent no-op: it describes an outcome the panel will not
+    // produce. Both sites derive it from `isMentionTarget`.
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    const bar = screen.getByTestId('library-target').textContent ?? '';
+    expect(bar).toContain('Inserting mentions into Harbour at dusk');
+    expect(bar).not.toContain('Adding references');
+  });
+
+  it('an Image-kind target keeps the reference wording in that same bar', async () => {
+    seedNodes([promptNode()]);
+    await openOnUploads(TEXT_TARGET);
+    const bar = screen.getByTestId('library-target').textContent ?? '';
+    expect(bar).toContain('Adding references to Harbour at dusk');
+    expect(bar).not.toContain('Inserting mentions');
   });
 
   it('says the consequence in the text prompt is chips, not reference images', async () => {
@@ -762,6 +860,31 @@ describe('LibraryPanel aimed at a Text-kind prompt', () => {
     fireEvent.click(screen.getByTestId('library-primary'));
     await waitFor(() => expect(addToast).toHaveBeenCalled());
     expect(String(addToast.mock.calls[0][0])).toContain('could not be inserted as a mention');
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('an inserter that throws reaches the TOAST, not a cleared pick', async () => {
+    // `PromptNodeView` registers wrappers that throw when the body editor has
+    // gone. Before that, they optional-chained the null away and returned
+    // `undefined` — so the run counted a chip, the panel reported success and
+    // cleared the pick, and the body was untouched. The whole point of the
+    // throw is that this end of the path can speak.
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    insertImage.mockImplementation(() => {
+      throw new Error('prompt body editor is not mounted');
+    });
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    // Non-vacuous: the row DID resolve to a durable ref and the inserter WAS
+    // reached. Without this the case would also pass if the refusal had
+    // happened earlier, for a reason that has nothing to do with the editor.
+    expect(insertImage).toHaveBeenCalled();
+    expect(String(addToast.mock.calls[0][0])).toContain('could not be inserted as a mention');
+    expect(String(addToast.mock.calls[0][1])).toBe('error');
+    // The pick survives, so there is something to retry from.
     expect(useLibraryStore.getState().selection).toHaveLength(1);
   });
 

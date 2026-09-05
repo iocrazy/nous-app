@@ -55,12 +55,44 @@ export interface MentionInserters {
  */
 const AT_CARET = { consumeMention: false } as const;
 
+/**
+ * Why one item produced no chip.
+ *
+ * The resolver's three reasons plus one this path alone can hit: the target
+ * card's body editor is not mounted. The registry hands back a handle keyed by
+ * node id, and the wrappers `PromptNodeView` registers read their ref at CALL
+ * time — so a card culled off-viewport between the aim and the commit answers
+ * with a live-looking handle whose inserts throw.
+ */
+export type MentionFailure = AddReferenceFailure | 'editor_gone';
+
 export interface MentionLibraryResult {
   /** Chips actually written into the document. An asset contributes one; an
    *  image item contributes one per durable ref it resolved to. */
   mentioned: number;
   /** Typed, never silent — one entry per item that produced no chip. */
-  failed: Array<{ item: LibraryItem; reason: AddReferenceFailure }>;
+  failed: Array<{ item: LibraryItem; reason: MentionFailure }>;
+}
+
+/**
+ * An insert that THREW wrote nothing, so it must not be counted as a chip.
+ *
+ * The inserters are host callbacks — `PromptNodeView` registers wrappers that
+ * throw when the body editor is not mounted, precisely so this path reports a
+ * refusal rather than a phantom success. Letting the throw escape would reject
+ * the whole run and lose the items that DID land; catching it per item is what
+ * makes "two inserted, one failed" representable.
+ *
+ * Returns whether the chip landed, so the caller's counter reads as one thing.
+ */
+function tryInsert(run: () => void, label: string): boolean {
+  try {
+    run();
+    return true;
+  } catch (err) {
+    console.error(`[mentionLibraryItems] ${label} threw:`, err);
+    return false;
+  }
 }
 
 export async function mentionLibraryItems(
@@ -89,17 +121,22 @@ export async function mentionLibraryItems(
       } catch (err) {
         console.error('[mentionLibraryItems] asset detail fetch failed:', err);
       }
-      handle.insertAsset({
-        asset_id: item.id,
-        name: item.title,
-        // The library row's `kind` IS `asset_type` (`assetToLibraryItem`).
-        asset_type: item.kind as AssetType,
-        cover_file_id: cover,
-        // ABSENT means NOT ASKED — the strip renders that differently from an
-        // empty list, so a failed fetch must not become `[]` here.
-        ...(refIds ? { ref_resource_ids: refIds } : {}),
-      }, AT_CARET);
-      out.mentioned += 1;
+      const landed = tryInsert(
+        () =>
+          handle.insertAsset({
+            asset_id: item.id,
+            name: item.title,
+            // The library row's `kind` IS `asset_type` (`assetToLibraryItem`).
+            asset_type: item.kind as AssetType,
+            cover_file_id: cover,
+            // ABSENT means NOT ASKED — the strip renders that differently from
+            // an empty list, so a failed fetch must not become `[]` here.
+            ...(refIds ? { ref_resource_ids: refIds } : {}),
+          }, AT_CARET),
+        'insertAsset',
+      );
+      if (landed) out.mentioned += 1;
+      else out.failed.push({ item, reason: 'editor_gone' });
       continue;
     }
     // uploads / generated — an image chip IS a reference, so it resolves
@@ -115,10 +152,19 @@ export async function mentionLibraryItems(
       out.failed.push({ item, reason: referenceFailureReason(err) });
       continue;
     }
+    // One refusal is enough to disqualify the ITEM: an asset-backed upload can
+    // resolve to several refs, and reporting the same item once per failed ref
+    // would inflate the count the caller says out loud.
+    let refused = false;
     for (const ref of refs) {
-      handle.insertImage({ url: ref.url, alias: item.title, kind: ref.kind }, AT_CARET);
-      out.mentioned += 1;
+      const landed = tryInsert(
+        () => handle.insertImage({ url: ref.url, alias: item.title, kind: ref.kind }, AT_CARET),
+        'insertImage',
+      );
+      if (landed) out.mentioned += 1;
+      else refused = true;
     }
+    if (refused) out.failed.push({ item, reason: 'editor_gone' });
   }
   return out;
 }
