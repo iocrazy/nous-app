@@ -191,6 +191,51 @@ describe('CleanupDialog — preview contents', () => {
     );
   });
 
+  // Same gap the grid card had: a `/cover` request for an mp3 or a docx draws
+  // a broken-image icon, and in a delete preview that reads as "these rows are
+  // already damaged" — the opposite of the reassurance the preview exists for.
+  it('draws a placeholder, not an <img>, for a row with no preview', async () => {
+    cleanupGenerated.mockResolvedValueOnce(
+      dryRun({
+        count: 2,
+        sample: [
+          { ...sampleItem('727145299382534145'), media_kind: 'audio', mime: 'audio/mpeg' },
+          { ...sampleItem('727145299382534146'), media_kind: 'file', mime: 'application/pdf' },
+        ],
+      }),
+    );
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-testid="cleanup-sample"]').length).toBe(2),
+    );
+    const tiles = Array.from(document.querySelectorAll('[data-testid="cleanup-sample"]'));
+    expect(tiles.map((el) => el.getAttribute('data-media-kind'))).toEqual(['audio', 'file']);
+    expect(tiles[0].querySelector('.lucide-audio-lines')).toBeTruthy();
+    expect(tiles[1].querySelector('.lucide-file')).toBeTruthy();
+    expect(document.querySelectorAll('[data-testid="cleanup-sample"] img').length).toBe(0);
+    expect(document.querySelector('img[data-testid="cleanup-sample"]')).toBeNull();
+  });
+
+  it('still uses the cover thumbnail for an image or a video row', async () => {
+    cleanupGenerated.mockResolvedValueOnce(
+      dryRun({
+        count: 2,
+        sample: [
+          sampleItem('727145299382534145'),
+          { ...sampleItem('727145299382534146'), media_kind: 'video', mime: 'video/mp4' },
+        ],
+      }),
+    );
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('img[data-testid="cleanup-sample"]').length).toBe(2),
+    );
+  });
+
   it('says so when the pass was truncated', async () => {
     cleanupGenerated.mockResolvedValueOnce(dryRun({ count: 2000, truncated: true }));
     renderDialog();
