@@ -23,6 +23,7 @@ import { formatElapsed } from './formatElapsed';
 import { blocksFor, issueBlockContext } from './issueBlocks';
 import './blocks';
 import { useIssueProgress } from './useIssueProgress';
+import { isIssueLive } from './issuePhase';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
@@ -400,7 +401,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <span title={issue.priority}>
               <PriorityIcon priority={issue.priority} />
             </span>
-            {(agentLive || (!!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled')) && (
+            {(agentLive || isIssueLive(issue)) && (
               <AgentWorkingBadge startedAt={issue.raw.started_at} agentName={issue.assignee?.name} />
             )}
             <div className="ml-auto flex items-center gap-1">

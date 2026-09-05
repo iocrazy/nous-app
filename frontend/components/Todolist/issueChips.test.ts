@@ -53,6 +53,13 @@ describe('runningChipLabel', () => {
     expect(runningChipLabel(issue({}, 'cancelled'), NOW)).toBeNull();
   });
 
+  it('returns null once the lifecycle moved the issue past in_progress', () => {
+    // in_review / needs_followup keep the dispatch id but the turn is over —
+    // reading them as live is what showed `running · 860h` on month-old rows.
+    expect(runningChipLabel(issue({ started_at: '2026-08-01T00:00:00Z' }, 'in_review'), NOW)).toBeNull();
+    expect(runningChipLabel(issue({}, 'needs_followup'), NOW)).toBeNull();
+  });
+
   it('returns null when no workflow ever ran', () => {
     expect(runningChipLabel(issue({ dbos_workflow_id: null }), NOW)).toBeNull();
   });

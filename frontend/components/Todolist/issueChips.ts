@@ -10,9 +10,7 @@
 
 import type { UiIssue } from './types';
 import { formatElapsed } from './formatElapsed';
-
-/** Statuses where a lingering workflow id no longer means "working". */
-const FINISHED = ['done', 'cancelled'];
+import { isIssueLive } from './issuePhase';
 
 function execState(issue: UiIssue): Record<string, unknown> | null {
   return (issue.raw?.execution_state as Record<string, unknown> | null) ?? null;
@@ -28,8 +26,7 @@ function execState(issue: UiIssue): Record<string, unknown> | null {
  * the terminal set_status) and elapsed from `started_at`.
  */
 export function runningChipLabel(issue: UiIssue, now: Date): string | null {
-  const isLive = !!issue.raw?.dbos_workflow_id && !FINISHED.includes(issue.status);
-  if (!isLive) return null;
+  if (!isIssueLive(issue)) return null;
 
   const parts = ['running'];
   const turn = Number(execState(issue)?.turn);
