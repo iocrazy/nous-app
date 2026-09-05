@@ -38,6 +38,9 @@ from app.workflows.backfill_publish_task_team_ids import (
 from app.workflows.backfill_resource_gen_params import (
     backfill_resource_gen_params_workflow,
 )
+from app.workflows.backfill_resource_prompt_origin import (
+    backfill_resource_prompt_origin_workflow,
+)
 
 router = APIRouter()
 
@@ -51,6 +54,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     ),
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
+    "resource_prompt_origin": backfill_resource_prompt_origin_workflow,
     "canvas_upload_roles": backfill_canvas_upload_roles_workflow,
     "generated_inbox": backfill_generated_inbox,
 }
