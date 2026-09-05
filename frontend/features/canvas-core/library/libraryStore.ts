@@ -14,7 +14,12 @@
 import { create } from 'zustand';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import type { AssetScope, GeneratedScope, LibraryStore } from './librarySearch';
+import type {
+  AssetScope,
+  GeneratedScope,
+  LibraryStore,
+  UploadSource,
+} from './librarySearch';
 import type { LibraryItemKey } from './librarySelection';
 
 // Composed, not written out as one literal, and that is deliberate. The
@@ -49,9 +54,15 @@ export interface LibraryTarget {
   title: string;
 }
 
-/** Only the three durable knobs. `query`, `selection` and `target` are
- *  deliberately NOT persisted: a restored target points at a node id from
- *  whatever canvas was open last time, which is worse than no target. */
+/** Only the three durable knobs. `query`, `selection`, `target` and the two
+ *  in-segment filters (`kind`, `uploadSource`) are deliberately NOT persisted:
+ *  a restored target points at a node id from whatever canvas was open last
+ *  time, which is worse than no target, and a restored source chip opens the
+ *  Files shelf already narrowed with nothing on screen explaining why.
+ *
+ *  `mediaStore` keeps its stored value `'uploads'`. The SEGMENT is labelled
+ *  "Files" now, but the key is on disk in every user's browser and renaming it
+ *  would silently reset everyone's panel to Assets. */
 interface Persisted {
   page: LibraryPage;
   mediaStore: LibraryStore;
@@ -92,6 +103,8 @@ export interface LibraryPanelState extends Persisted {
   open: boolean;
   query: string;
   kind: string | null;
+  /** Which source the Files shelf is narrowed to. Per-segment, like `kind`. */
+  uploadSource: UploadSource;
   assetScope: AssetScope;
   generatedScope: GeneratedScope;
   selection: LibraryItemKey[];
@@ -110,6 +123,7 @@ export interface LibraryPanelState extends Persisted {
   setMediaStore(store: LibraryStore): void;
   setQuery(q: string): void;
   setKind(kind: string | null): void;
+  setUploadSource(source: UploadSource): void;
   setAssetScope(scope: AssetScope): void;
   setGeneratedScope(scope: GeneratedScope): void;
   setSelection(keys: LibraryItemKey[]): void;
@@ -149,6 +163,7 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     open: false,
     query: '',
     kind: null,
+    uploadSource: 'all',
     assetScope: 'all',
     generatedScope: 'this-canvas',
     selection: [],
@@ -191,8 +206,11 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     setMediaStore(mediaStore) {
       // Keys are `store:id`, so a key kept across this switch resolves against
       // nothing in the new segment: it would be counted by the footer and then
-      // silently dropped at send time. The kind chips are per-store too.
-      set({ mediaStore, selection: [], kind: null });
+      // silently dropped at send time. The kind chips and the Files source
+      // chips are per-store too — a source left pressed here would survive a
+      // trip to Generated (which draws no source row) and narrow the shelf on
+      // the way back with nothing on screen saying why.
+      set({ mediaStore, selection: [], kind: null, uploadSource: 'all' });
       persist();
     },
     setQuery(query) {
@@ -200,6 +218,12 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     },
     setKind(kind) {
       set({ kind });
+    },
+    // Selection cleared for the same reason the scope setters clear it: the
+    // keys resolve against rows the narrowed query may not return, so a kept
+    // selection is counted by the footer and dropped at send time.
+    setUploadSource(uploadSource) {
+      set({ uploadSource, selection: [] });
     },
     setAssetScope(assetScope) {
       set({ assetScope, selection: [] });

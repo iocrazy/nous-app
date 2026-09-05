@@ -34,10 +34,13 @@ import { writeLibraryDrag } from './dropLibraryItems';
 import { LibraryGrid, type LibraryKindChip } from './LibraryGrid';
 import {
   useLibrarySearch,
+  UPLOAD_SOURCE_CSV,
+  UPLOAD_SOURCES,
   type AssetScope,
   type GeneratedScope,
   type LibraryItem,
   type LibraryStore,
+  type UploadSource,
 } from './librarySearch';
 import { LibraryPreviewCard } from './LibraryPreviewCard';
 import { libraryKey, selectedItems } from './librarySelection';
@@ -54,8 +57,23 @@ const SEGMENTS: readonly LibraryStore[] = ['assets', 'uploads', 'generated'];
 // actually asks for and still pass.
 const STORE_LABEL: Record<LibraryStore, Label> = {
   assets: ['canvas.library.storeAssets', 'Assets'],
-  uploads: ['canvas.library.storeUploads', 'Uploads'],
+  // "Files", not "Uploads". This shelf reads `GET /resources/search`, which
+  // returns every source_type in the scope — Douyin downloads, real uploads,
+  // cover frames cut from a video, saved generations. The old label named a
+  // quarter of what it showed. The STORE KEY stays `uploads` (it is persisted
+  // in every user's localStorage); only the word changes, and the source chips
+  // below are what make the narrower reading reachable.
+  uploads: ['canvas.library.storeUploads', 'Files'],
   generated: ['canvas.library.storeGenerated', 'Generated'],
+};
+
+/** The Files shelf's source chips, in fixed order. `generated` folds
+ *  `derived` in — see `UPLOAD_SOURCE_CSV`. */
+const SOURCE_LABEL: Record<UploadSource, Label> = {
+  all: ['canvas.library.sourceAll', 'All'],
+  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
+  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
+  generated: ['canvas.library.sourceGenerated', 'Generated'],
 };
 
 const ASSET_SCOPE_LABEL: Record<AssetScope, Label> = {
@@ -115,6 +133,7 @@ export function LibraryMediaPage({
   const mediaStore = useLibraryStore((s) => s.mediaStore);
   const query = useLibraryStore((s) => s.query);
   const kind = useLibraryStore((s) => s.kind);
+  const uploadSource = useLibraryStore((s) => s.uploadSource);
   const assetScope = useLibraryStore((s) => s.assetScope);
   const generatedScope = useLibraryStore((s) => s.generatedScope);
   const selection = useLibraryStore((s) => s.selection);
@@ -126,7 +145,10 @@ export function LibraryMediaPage({
   // the anchor rect belongs to a cell that is about to stop existing, and a
   // card left pinned to it would describe the wrong item at the wrong place.
   const [hover, setHover] = useState<{ item: LibraryItem; rect: DOMRect } | null>(null);
-  useEffect(() => setHover(null), [mediaStore, kind, assetScope, generatedScope, query]);
+  useEffect(
+    () => setHover(null),
+    [mediaStore, kind, uploadSource, assetScope, generatedScope, query],
+  );
 
   const model = targetData?.gen?.model ?? null;
   const caps = useModelCapabilities(model);
@@ -157,6 +179,10 @@ export function LibraryMediaPage({
     assetScope: effectiveAssetScope,
     projectId,
     uploadKinds: mediaStore === 'uploads' ? (kind ?? '') : '',
+    // Guarded on the segment for the same reason `uploadKinds` is: the store
+    // resets the chip on a segment switch, but reading it unguarded would
+    // still put it in the uploads cache key from another segment.
+    uploadSources: mediaStore === 'uploads' ? UPLOAD_SOURCE_CSV[uploadSource] : '',
     generatedScope,
     canvasId,
   });
@@ -397,6 +423,23 @@ export function LibraryMediaPage({
           {t('canvas.library.selectAll', 'Select All')}
         </button>
       </div>
+
+      {mediaStore === 'uploads' && (
+        <div className="flex flex-wrap gap-1 border-b border-canvas-line px-2 py-1.5">
+          {UPLOAD_SOURCES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              data-testid={`library-source-${value}`}
+              aria-pressed={uploadSource === value}
+              onClick={() => useLibraryStore.getState().setUploadSource(value)}
+              className={chipClass(uploadSource === value)}
+            >
+              {t(SOURCE_LABEL[value][0], SOURCE_LABEL[value][1])}
+            </button>
+          ))}
+        </div>
+      )}
 
       {scopeChips.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-canvas-line px-2 py-1.5">

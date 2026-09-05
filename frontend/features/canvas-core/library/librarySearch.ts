@@ -47,6 +47,32 @@ export interface LibraryItem {
 }
 
 export type GeneratedScope = 'this-canvas' | 'today' | 'all';
+
+/** The Files shelf's source chips.
+ *
+ *  The shelf was called "Uploads" and listed every file in the scope: Douyin
+ *  downloads (`web`), real uploads, cover frames cut from a video (`derived`)
+ *  and saved generations. Renaming it "Files" makes the label honest; these
+ *  chips are what makes the old promise reachable. */
+export type UploadSource = 'all' | 'upload' | 'web' | 'generated';
+
+/** Wire csv per chip. `generated` folds `derived` in: cover frames cut from a
+ *  video are neither uploaded nor downloaded, and a fourth chip for them would
+ *  name an internal source_type nobody chose. */
+export const UPLOAD_SOURCE_CSV: Record<UploadSource, string> = {
+  all: '',
+  upload: 'upload',
+  web: 'web',
+  generated: 'generated,derived',
+};
+
+export const UPLOAD_SOURCES: readonly UploadSource[] = [
+  'all',
+  'upload',
+  'web',
+  'generated',
+];
+
 export type AssetScope = 'this-project' | 'all';
 
 export interface LibrarySearchOptions {
@@ -56,6 +82,10 @@ export interface LibrarySearchOptions {
   assetScope?: AssetScope;
   projectId?: string | null;
   uploadKinds?: string;
+  /** Already the wire csv (`UPLOAD_SOURCE_CSV[chip]`), not the chip name: the
+   *  fold from `generated` to `generated,derived` belongs next to the chip
+   *  table, not in every consumer. */
+  uploadSources?: string;
   generatedScope?: GeneratedScope;
   canvasId?: string | null;
   limit?: number;
@@ -172,6 +202,7 @@ export async function fetchLibraryUploads(
   const resp = await searchResources({
     q: query.trim(),
     kinds: opts.uploadKinds ?? '',
+    sources: opts.uploadSources ?? '',
     limit: opts.limit ?? 50, // 50 is the backend's own ceiling for this route
     teamId: opts.scopeId,
     signal,
@@ -279,7 +310,7 @@ export function useLibrarySearch(
   // One string per store holding exactly the options that store reads, so a
   // kind chip on Uploads does not re-fetch Assets.
   const assetKey = `${opts.scopeId}|${opts.assetType ?? ''}|${opts.assetScope ?? 'all'}|${opts.projectId ?? ''}|${opts.limit ?? ''}`;
-  const uploadKey = `${opts.scopeId}|${opts.uploadKinds ?? ''}|${opts.limit ?? ''}`;
+  const uploadKey = `${opts.scopeId}|${opts.uploadKinds ?? ''}|${opts.uploadSources ?? ''}|${opts.limit ?? ''}`;
   const generatedKey = `${opts.scopeId}|${opts.generatedScope ?? 'this-canvas'}|${opts.canvasId ?? ''}|${opts.limit ?? ''}`;
 
   const assets = useOneStore('assets', stores.includes('assets'), query, opts, assetKey);

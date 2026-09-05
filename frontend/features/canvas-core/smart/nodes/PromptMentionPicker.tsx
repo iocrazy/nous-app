@@ -88,7 +88,13 @@ import {
 } from '../../../../services/assetsService';
 import type { AddReferencesResult } from '../../library/addReferences';
 import { LibraryGrid } from '../../library/LibraryGrid';
-import { useLibrarySearch, type LibraryItem } from '../../library/librarySearch';
+import {
+  useLibrarySearch,
+  UPLOAD_SOURCE_CSV,
+  UPLOAD_SOURCES,
+  type LibraryItem,
+  type UploadSource,
+} from '../../library/librarySearch';
 import { libraryKey } from '../../library/librarySelection';
 import { mediaSrc } from '../mediaUrl';
 
@@ -161,8 +167,22 @@ export const MENTION_TABS: readonly Tab[] = ['input', 'assets', 'uploads', 'gene
 const TAB_LABEL: Record<Tab, readonly [string, string]> = {
   input: ['canvas.mention.tabInput', 'Input Images'],
   assets: ['canvas.mention.tabAssets', 'Assets'],
-  uploads: ['canvas.library.storeUploads', 'Uploads'],
+  // "Files": the shelf behind this tab returns every source_type in the scope
+  // (downloads, uploads, derived frames, saved generations), so "Uploads" named
+  // a quarter of what it listed. Same key, same shelf, same word as the panel.
+  uploads: ['canvas.library.storeUploads', 'Files'],
   generated: ['canvas.library.storeGenerated', 'Generated'],
+};
+
+/** The Files tab's source chips, in the panel's order. Local state rather than
+ *  `libraryStore`: this popover is remounted on every open and is not the
+ *  panel — sharing the knob would let a chip set here narrow the panel's shelf
+ *  later, from a control the user cannot see. */
+const SOURCE_LABEL: Record<UploadSource, readonly [string, string]> = {
+  all: ['canvas.library.sourceAll', 'All'],
+  upload: ['canvas.library.sourceUploaded', 'Uploaded'],
+  web: ['canvas.library.sourceDownloaded', 'Downloaded'],
+  generated: ['canvas.library.sourceGenerated', 'Generated'],
 };
 
 export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
@@ -199,6 +219,8 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
       setSearch(query);
     }
 
+    const [uploadSource, setUploadSource] = useState<UploadSource>('all');
+
     const [debounced, setDebounced] = useState(search);
     useEffect(() => {
       const timer = setTimeout(() => setDebounced(search), DEBOUNCE_MS);
@@ -217,6 +239,7 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
       scopeId,
       stores: canvasId ? ['uploads', 'generated'] : ['uploads'],
       uploadKinds: 'image',
+      uploadSources: UPLOAD_SOURCE_CSV[uploadSource],
       canvasId,
       generatedScope: 'this-canvas',
     });
@@ -517,6 +540,30 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
           limit={LIMIT}
           debounceMs={DEBOUNCE_MS}
         />
+
+        {tab === 'uploads' && (
+          <div className="flex flex-wrap items-center gap-1 border-b border-canvas-line/70 px-1.5 py-1">
+            {UPLOAD_SOURCES.map((value) => (
+              <button
+                key={value}
+                type="button"
+                data-testid="mention-source-chip"
+                data-source={value}
+                aria-pressed={uploadSource === value}
+                onClick={() => {
+                  setUploadSource(value);
+                  // The rows are about to be replaced wholesale, so a kept
+                  // cursor would leave Enter committing a row the user never
+                  // saw under the highlight.
+                  setRawActive(0);
+                }}
+                className={pillClass(uploadSource === value)}
+              >
+                {t(SOURCE_LABEL[value][0], SOURCE_LABEL[value][1])}
+              </button>
+            ))}
+          </div>
+        )}
 
         {(tab === 'uploads' || tab === 'generated') && (
           <LibraryGrid

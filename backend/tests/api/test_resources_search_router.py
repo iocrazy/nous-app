@@ -153,3 +153,109 @@ def test_search_empty_team_id_coerced_to_none():
         app.dependency_overrides.pop(get_auth, None)
 
     assert captured.get("scope_team_id") is None
+
+
+def test_search_forwards_sources_allowlisted():
+    """`sources` is parsed exactly like `kinds`: csv, allowlisted, junk dropped.
+
+    The shelf this feeds used to be called "Uploads" while listing every
+    source_type in the scope (web downloads, derived cover frames, generated
+    saves). The filter is what makes the four chips mean anything, so what is
+    pinned here is that an unknown value cannot ride through to the repo —
+    ``source_type.in_([... , "bogus"])`` would silently narrow nothing while
+    looking filtered.
+    """
+    captured = {}
+
+    async def _fake(self, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with patch(
+            "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+            new=_fake,
+        ):
+            r = client.get("/api/v1/resources/search?q=&sources=upload,web,bogus")
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("sources") == ["upload", "web"]
+
+
+def test_search_without_sources_passes_none():
+    """Absent (and all-junk) means NO filter, not an empty ``in_([])``.
+
+    An empty list reaching ``source_type.in_([])`` is a false predicate — the
+    shelf would go blank rather than showing everything, which is the opposite
+    of what "All" promises.
+    """
+    captured = {}
+
+    async def _fake(self, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with patch(
+            "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+            new=_fake,
+        ):
+            assert client.get("/api/v1/resources/search?q=story").status_code == 200
+            assert captured.get("sources") is None
+            assert (
+                client.get("/api/v1/resources/search?q=&sources=bogus").status_code
+                == 200
+            )
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("sources") is None
+
+
+def test_search_forwards_sources_to_the_counts_query_too():
+    """The badges must be filtered by the same chip as the rows.
+
+    A count taken over the whole visible set while the grid shows only one
+    source reads as "you have 40 files" over a shelf holding 3 — the exact
+    page-vs-library mismatch the counts aggregate was introduced to fix.
+    """
+    captured = {}
+
+    async def _fake_list(self, **kwargs):
+        return []
+
+    async def _fake_counts(self, **kwargs):
+        captured.update(kwargs)
+        return {"all": 0, "video": 0, "image": 0, "doc": 0, "audio": 0, "pdf": 0}
+
+    def _fake_auth() -> AuthContext:
+        return AuthContext(user_id="u", auth_type="jwt")
+
+    app.dependency_overrides[get_auth] = _fake_auth
+    try:
+        with (
+            patch(
+                "app.repositories.resources_repository.ResourcesRepository.list_accessible_for_user",
+                new=_fake_list,
+            ),
+            patch(
+                "app.repositories.resources_repository.ResourcesRepository.count_accessible_by_kind_for_user",
+                new=_fake_counts,
+            ),
+        ):
+            r = client.get("/api/v1/resources/search?q=&sources=generated,derived")
+            assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_auth, None)
+
+    assert captured.get("sources") == ["generated", "derived"]

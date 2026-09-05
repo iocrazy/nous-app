@@ -187,6 +187,42 @@ describe('PromptMentionPicker library groups', () => {
     );
   });
 
+  it('the Files group carries the same four source chips as the panel', async () => {
+    // One shelf under two entry points. The palette showing every source
+    // while the panel could narrow would be the same shelf answering two
+    // different questions depending on how it was opened.
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    const chips = screen.getAllByTestId('mention-source-chip');
+    expect(chips.map((c) => c.getAttribute('data-source'))).toEqual([
+      'all',
+      'upload',
+      'web',
+      'generated',
+    ]);
+    expect(chips[0].getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('picking Downloaded re-queries the Files group with sources=web', async () => {
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    searchResources.mockClear();
+    fireEvent.click(
+      screen.getAllByTestId('mention-source-chip').find(
+        (c) => c.getAttribute('data-source') === 'web',
+      ) as HTMLElement,
+    );
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('web');
+  });
+
+  it('the source chips belong to Files alone', () => {
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-generated'));
+    expect(screen.queryAllByTestId('mention-source-chip')).toHaveLength(0);
+  });
+
   it('the Generated group asks for THIS canvas, not the whole scope', async () => {
     renderPicker();
     fireEvent.click(screen.getByTestId('mention-tab-generated'));

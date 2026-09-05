@@ -2698,6 +2698,7 @@ class ResourcesRepository(AsyncpgRepository):
         user_id: str,
         q: str = "",
         kinds: list[str] | None = None,
+        sources: list[str] | None = None,
         limit: int = 20,
         cursor: str | None = None,
         scope_team_id: str | None = None,
@@ -2717,6 +2718,12 @@ class ResourcesRepository(AsyncpgRepository):
             kinds: optional list of canonical kinds — ``video``/``image``/
                 ``doc``/``audio``/``pdf``. Unknown values are silently ignored
                 (treated as wildcard), matching the picker UX intent.
+            sources: optional list of ``resources.source_type`` values —
+                ``upload``/``web``/``generated``/``derived`` (the four the DB
+                CHECK admits since migration 363). None or empty = no filter.
+                The ROUTER does the allowlisting; anything reaching here is
+                used verbatim, so a caller passing an unknown value gets zero
+                rows rather than a silent wildcard.
             limit: page size; capped at 50 (min 1).
             cursor: reserved for Phase 2 pagination — currently unused.
             scope_team_id: when provided, restricts results to this team
@@ -2801,6 +2808,12 @@ class ResourcesRepository(AsyncpgRepository):
         if kinds_list:
             stmt = stmt.where(_picker_kind_expr().in_(kinds_list))
 
+        # The source chips ("Uploaded" / "Downloaded" / "Generated") on the
+        # canvas Files shelf. Applied here AND in the counts aggregate below,
+        # so a badge cannot describe a wider set than the grid shows.
+        if sources:
+            stmt = stmt.where(Resources.source_type.in_(sources))
+
         stmt = stmt.order_by(Resources.updated_at.desc()).limit(capped_limit)
 
         scope_cm = (
@@ -2818,6 +2831,7 @@ class ResourcesRepository(AsyncpgRepository):
         *,
         user_id: str,
         q: str = "",
+        sources: list[str] | None = None,
         scope_team_id: str | None = None,
     ) -> dict[str, int]:
         """Per-kind totals for the @-reference picker's tab badges.
@@ -2836,6 +2850,16 @@ class ResourcesRepository(AsyncpgRepository):
         ``count(DISTINCT resources.id)``, not ``count(*)``: a resource with
         two ``resource_items`` rows (production has one such row today) is
         still ONE thing the user can reference.
+
+        Args:
+            user_id: caller's auth id (personal-owned + team-membership).
+            q: substring to ILIKE-match against ``filename``.
+            sources: optional ``resources.source_type`` allowlist — same values
+                and same "None = no filter" contract as
+                ``list_accessible_for_user``. Unlike ``kinds`` this one IS
+                honoured here: it is a filter across every kind, so a badge
+                that ignored it would count rows the grid is not showing.
+            scope_team_id: as in ``list_accessible_for_user``.
         """
         kind_expr = _picker_kind_expr()
         stmt = (
@@ -2852,6 +2876,9 @@ class ResourcesRepository(AsyncpgRepository):
             )
             .group_by(kind_expr)
         )
+
+        if sources:
+            stmt = stmt.where(Resources.source_type.in_(sources))
 
         scope_cm = (
             system_request_scope(reason="resources-search-team-membership-access")

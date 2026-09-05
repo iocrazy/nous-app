@@ -256,6 +256,49 @@ describe('useLibrarySearch', () => {
     expect(searchAssets).not.toHaveBeenCalled();
   });
 
+  it('the Files source chip reaches the wire as `sources`', async () => {
+    renderHook(() =>
+      useLibrarySearch('', { scopeId: SCOPE, uploadSources: 'web' }),
+    );
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources).toHaveBeenCalledWith(
+      expect.objectContaining({ sources: 'web' }),
+    );
+  });
+
+  it('no chip sends an empty `sources`, which the service then omits', async () => {
+    // Empty, not absent: `searchResources` is what decides whether the query
+    // string carries the parameter, and it drops an empty one. Sending
+    // `sources=` instead would hand the router a value it parses to [] —
+    // documented as "no filter" there, but one refactor away from an
+    // `in_([])` that blanks the shelf.
+    renderHook(() => useLibrarySearch('', { scopeId: SCOPE }));
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('');
+  });
+
+  it('changing the source chip re-queries uploads and leaves assets alone', async () => {
+    // The per-store cache key is what makes this true. Left out of
+    // `uploadKey`, the chip would flip `aria-pressed` and change nothing on
+    // screen — the effect would never re-run.
+    const { rerender } = renderHook(
+      ({ src }: { src: string }) =>
+        useLibrarySearch('', { scopeId: SCOPE, uploadSources: src }),
+      { initialProps: { src: '' } },
+    );
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(searchResources).toHaveBeenCalledTimes(1));
+    const assetCalls = searchAssets.mock.calls.length;
+
+    rerender({ src: 'generated,derived' });
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(searchResources).toHaveBeenCalledTimes(2));
+    expect(searchResources.mock.calls[1][0].sources).toBe('generated,derived');
+    expect(searchAssets.mock.calls.length).toBe(assetCalls);
+  });
+
   it('reload re-runs one store without touching the others', async () => {
     const { result } = renderHook(() => useLibrarySearch('', OPTS));
     await act(async () => { vi.advanceTimersByTime(300); });

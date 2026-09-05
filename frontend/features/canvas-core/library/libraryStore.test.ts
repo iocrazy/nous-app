@@ -128,6 +128,38 @@ describe('libraryStore', () => {
     expect(canvasSelection()).toEqual(['p2']);
   });
 
+  it('the Files source chip resets when the segment changes', () => {
+    // Same reason `kind` resets: the chips are per-segment. A source left
+    // pressed from Files would survive a trip to Generated invisibly (that
+    // segment draws no source row) and then narrow the shelf on the way back
+    // with nothing on screen saying why.
+    const s = () => useLibraryStore.getState();
+    s().setUploadSource('web');
+    expect(s().uploadSource).toBe('web');
+    s().setMediaStore('generated');
+    expect(s().uploadSource).toBe('all');
+  });
+
+  it('the source chip is NOT persisted — only page / store / width are', () => {
+    // A restored "Downloaded" would open the shelf tomorrow already filtered,
+    // with the chip the only clue, on a panel the user last used for uploads.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'uploads' });
+    s().setUploadSource('web');
+    const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
+    expect(saved.uploadSource).toBeUndefined();
+    expect(saved).toEqual({ page: 'media', mediaStore: 'uploads', width: 340 });
+  });
+
+  it('choosing a source drops the selection with it', () => {
+    // Keys resolve against rows the next query may not return, so a kept
+    // selection would be counted by the footer and dropped at send time.
+    const s = () => useLibraryStore.getState();
+    s().setSelection(['uploads:655000000000000001']);
+    s().setUploadSource('upload');
+    expect(s().selection).toEqual([]);
+  });
+
   it('a corrupt stored value is ignored, not thrown on', () => {
     localStorage.setItem(LIBRARY_STORAGE_KEY, '{not json');
     expect(() => useLibraryStore.getState().setWidth(360)).not.toThrow();

@@ -245,6 +245,48 @@ describe('LibraryPanel', () => {
     expect(useLibraryStore.getState().mediaStore).toBe('generated');
   });
 
+  it('the Files segment offers four source chips, All pressed', async () => {
+    // The shelf lists every source_type in the scope — Douyin downloads,
+    // uploads, derived cover frames, saved generations. It was labelled
+    // "Uploads", which named a quarter of what it showed.
+    await openOnUploads();
+    for (const v of ['all', 'upload', 'web', 'generated']) {
+      expect(screen.getByTestId(`library-source-${v}`)).toBeTruthy();
+    }
+    expect(
+      screen.getByTestId('library-source-all').getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('a source chip reaches the wire, not just the button state', async () => {
+    await openOnUploads();
+    searchResources.mockClear();
+    fireEvent.click(screen.getByTestId('library-source-web'));
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('web');
+    // Generated folds `derived` in: a cover frame cut from a video is neither
+    // uploaded nor downloaded, and its own chip would name an internal
+    // source_type nobody chose.
+    searchResources.mockClear();
+    fireEvent.click(screen.getByTestId('library-source-generated'));
+    await waitFor(() => expect(searchResources).toHaveBeenCalled());
+    expect(searchResources.mock.calls[0][0].sources).toBe('generated,derived');
+  });
+
+  it('the source row belongs to Files alone, and resets on the way back', async () => {
+    await openOnUploads();
+    fireEvent.click(screen.getByTestId('library-source-web'));
+    fireEvent.click(screen.getByTestId('library-segment-generated'));
+    expect(screen.queryByTestId('library-source-all')).toBeNull();
+    fireEvent.click(screen.getByTestId('library-segment-uploads'));
+    expect(
+      screen.getByTestId('library-source-all').getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      screen.getByTestId('library-source-web').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
   it('names the node it is aiming at, and says what will happen to it', async () => {
     seedNodes([promptNode()]);
     act(() => {
