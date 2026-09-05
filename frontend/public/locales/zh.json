@@ -2059,7 +2059,7 @@
     },
     "action": {
       "save": "保存到上传",
-      "saveAsAsset": "归入资产",
+      "saveAsAsset": "存为资产",
       "delete": "删除",
       "inMyUploads": "已在我的上传",
       "openAsset": "打开资产",
@@ -2115,7 +2115,7 @@
     }
   },
   "saveAsAsset": {
-    "title": "归入资产",
+    "title": "存为资产",
     "assetType": "资产类型",
     "attachToLabel": "关联到",
     "attachTo": "关联到 {{name}}",
@@ -3467,8 +3467,8 @@
       }
     },
     "asAsset": {
-      "action": "存为素材…",
-      "noScope": "请从工作区打开画布后再存为素材",
+      "action": "存为资产",
+      "noScope": "请从工作区打开画布后再存为资产",
       "noGeneration": "这张图没有可保存的素材库记录",
       "lookupFailed": "无法读取这次生成记录",
       "saved": "已存入 {{name}}"

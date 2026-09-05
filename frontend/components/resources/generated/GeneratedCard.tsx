@@ -136,7 +136,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     'generated.action.saveHint',
     'Turn this into a regular file in My Uploads',
   );
-  const assetLabel = t('generated.action.saveAsAsset', 'Add To Asset');
+  const assetLabel = t('generated.action.saveAsAsset', 'As Asset');
   const assetHint = t(
     'generated.action.saveAsAssetHint',
     "Attach it to an asset card's slot (character, location, …)",

@@ -11,7 +11,7 @@ import { OutputNodeView } from './OutputNodeView';
 
 vi.mock('../mediaEditBridge', () => ({
   ensureResourceId: vi.fn(() => Promise.resolve('777')),
-  // The node reads this too (P4 Task 6): "As Asset…" recovers the
+  // The node reads this too (P4 Task 6): "As Asset" recovers the
   // `generated_media` id from a durable url when the image ref carries none.
   // A partial mock of a module the component imports is a missing-export
   // crash, not a missing feature — so the stub has to grow with the module.

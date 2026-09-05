@@ -649,7 +649,7 @@ describe('failover reporting', () => {
 
 // ── one item by id (P4 Task 6) ──────────────────────────────────────────────
 //
-// The canvas's "As Asset…" reads the row behind an output image so
+// The canvas's "As Asset" reads the row behind an output image so
 // `SaveAsAssetDialog` gets a real `GeneratedItem` — including the
 // `source_asset_id` its prefill depends on, which the canvas node never held.
 // The body below is the SAME shape the list returns, because the router

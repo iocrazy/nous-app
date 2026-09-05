@@ -2059,7 +2059,7 @@
     },
     "action": {
       "save": "Save To Uploads",
-      "saveAsAsset": "Add To Asset",
+      "saveAsAsset": "As Asset",
       "delete": "Delete",
       "inMyUploads": "In My Uploads",
       "openAsset": "Open asset",
@@ -2115,7 +2115,7 @@
     }
   },
   "saveAsAsset": {
-    "title": "Add To Asset",
+    "title": "As Asset",
     "assetType": "Asset Type",
     "attachToLabel": "Attach To",
     "attachTo": "Attach to {{name}}",
@@ -3467,7 +3467,7 @@
       }
     },
     "asAsset": {
-      "action": "As Asset…",
+      "action": "As Asset",
       "noScope": "Open this canvas from a workspace to save assets",
       "noGeneration": "This image has no library record to save",
       "lookupFailed": "Could not read this generation",

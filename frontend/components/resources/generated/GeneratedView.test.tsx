@@ -457,11 +457,11 @@ describe('GeneratedView — batch bar', () => {
     expect(batchGenerated).not.toHaveBeenCalled();
   });
 
-  it('routes the batch "Add To Asset" into the dialog rather than the API', async () => {
+  it('routes the batch "As Asset" into the dialog rather than the API', async () => {
     renderView();
     const bar = await selectFirstTwo();
 
-    fireEvent.click(within(bar).getByRole('button', { name: 'Add To Asset' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'As Asset' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
     // The dialog owns the call; the view must not have fired one of its own.
@@ -542,7 +542,7 @@ describe('GeneratedView — single-card actions', () => {
     await screen.findByText('Prompt 0');
 
     const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Add To Asset' }));
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
     expect(dialogProps?.items.map((i) => i.id)).toEqual([ITEM_A.id]);
@@ -562,7 +562,7 @@ describe('GeneratedView — single-card actions', () => {
     await screen.findByText('Prompt 0');
 
     const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Add To Asset' }));
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset' }));
     await screen.findByTestId('save-as-asset-dialog');
 
     act(() => dialogDone!({
@@ -590,7 +590,7 @@ describe('GeneratedView — single-card actions', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Prompt 1' }));
     fireEvent.click(
       within(screen.getByTestId('generated-batch-bar')).getByRole('button', {
-        name: 'Add To Asset',
+        name: 'As Asset',
       }),
     );
     await screen.findByTestId('save-as-asset-dialog');
@@ -769,7 +769,7 @@ describe('GeneratedView — preview lightbox', () => {
 
     const panel = await screen.findByTestId('pin-lightbox-panel');
     expect(within(panel).getByRole('button', { name: /Save To Uploads/ })).toBeTruthy();
-    expect(within(panel).getByRole('button', { name: /Add To Asset/ })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: /As Asset/ })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: /^Delete/ })).toBeTruthy();
   });
 
@@ -834,7 +834,7 @@ describe('GeneratedView — preview lightbox', () => {
     // The point of degrading rather than hiding: the row is still triageable.
     const panel = await screen.findByTestId('pin-lightbox-panel');
     expect(within(panel).getByRole('button', { name: /Save To Uploads/ })).toBeTruthy();
-    expect(within(panel).getByRole('button', { name: /Add To Asset/ })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: /As Asset/ })).toBeTruthy();
   });
 
   it('opens a `file` row on the generic placeholder', async () => {

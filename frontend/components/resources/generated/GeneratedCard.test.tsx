@@ -116,7 +116,7 @@ describe('GeneratedCard — per-state affordances', () => {
     // Icon buttons: the accessible name is the ONLY thing naming them, so
     // this is not a formality — an icon without it is an unlabelled control.
     expect(screen.getByRole('button', { name: 'Save To Uploads' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'As Asset' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
   });
 
@@ -125,7 +125,7 @@ describe('GeneratedCard — per-state affordances', () => {
 
     expect(screen.getByText('Saved')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'In My Uploads' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'As Asset' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save To Uploads' })).toBeNull();
   });
@@ -136,7 +136,7 @@ describe('GeneratedCard — per-state affordances', () => {
     expect(screen.getByText('Asset')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open asset' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Save To Uploads' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Add To Asset' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'As Asset' })).toBeNull();
   });
 
   it('navigates to the asset ITEM route (P2) with the source asset id', () => {
@@ -173,7 +173,7 @@ describe('GeneratedCard — per-state affordances', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save To Uploads' }));
     expect(h.onSave).toHaveBeenCalledWith(UNREVIEWED);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add To Asset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'As Asset' }));
     expect(h.onSaveAsAsset).toHaveBeenCalledWith(UNREVIEWED);
   });
 });
@@ -333,7 +333,7 @@ describe('GeneratedCard — selection and thumbnail', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Save To Uploads' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'As Asset' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
     fireEvent.click(screen.getByRole('checkbox', { name: /Select/ }));
     expect(h.onToggleSelect).toHaveBeenCalledWith(UNREVIEWED.id);
@@ -408,8 +408,8 @@ describe('GeneratedCard — icon actions carry both a tooltip and a label', () =
     expect(
       screen.getByRole('button', { name: 'Save To Uploads' }).getAttribute('title'),
     ).toBe('Save To Uploads — Turn this into a regular file in My Uploads');
-    expect(screen.getByRole('button', { name: 'Add To Asset' }).getAttribute('title')).toBe(
-      "Add To Asset — Attach it to an asset card's slot (character, location, …)",
+    expect(screen.getByRole('button', { name: 'As Asset' }).getAttribute('title')).toBe(
+      "As Asset — Attach it to an asset card's slot (character, location, …)",
     );
   });
 

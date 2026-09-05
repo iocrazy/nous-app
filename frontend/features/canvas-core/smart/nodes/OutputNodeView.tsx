@@ -292,7 +292,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     preview_url || ((images?.[0] as { url?: string } | undefined)?.url ?? null);
   const canCrop = kind === 'image' && !!primaryImageUrl;
 
-  // ── "As Asset…" (P4 Task 6) ────────────────────────────────────────────
+  // ── "As Asset" (P4 Task 6) ────────────────────────────────────────────
   //
   // Promoting an output into the asset library needs the `generated_media`
   // ROW, not the picture: `SaveAsAssetDialog` takes `GeneratedItem`s, and its

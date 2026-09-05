@@ -221,7 +221,7 @@ test.describe('Generated inbox', () => {
     expect(state.requests.some((r) => r.startsWith('GET /api/v1/generated?'))).toBe(true);
   });
 
-  test('Add To Asset attaches to the suggested asset and the row moves to In Assets', async ({
+  test('As Asset attaches to the suggested asset and the row moves to In Assets', async ({
     page,
   }) => {
     await useEnglish(page);
@@ -231,7 +231,7 @@ test.describe('Generated inbox', () => {
     await page.goto(INBOX_URL);
     await expect(card(page, UNREVIEWED.id)).toBeVisible();
 
-    await card(page, UNREVIEWED.id).getByRole('button', { name: 'Add To Asset' }).click();
+    await card(page, UNREVIEWED.id).getByRole('button', { name: 'As Asset' }).click();
 
     const dialog = page.getByTestId('save-as-asset-dialog');
     await expect(dialog).toBeVisible();
@@ -377,7 +377,7 @@ test.describe('Generated inbox', () => {
 
     const panel = page.getByTestId('pin-lightbox-panel');
     await expect(panel.getByRole('button', { name: /Save To Uploads/ })).toBeVisible();
-    await expect(panel.getByRole('button', { name: /Add To Asset/ })).toBeVisible();
+    await expect(panel.getByRole('button', { name: /As Asset/ })).toBeVisible();
 
     // Escape still closes — the shared modal's contract survived the
     // extension, which is the whole reason it was extended rather than forked.

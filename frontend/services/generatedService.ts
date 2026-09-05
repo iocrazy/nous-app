@@ -266,7 +266,7 @@ export async function fetchGenerated(
 /**
  * ONE inbox card by id — the same wire shape {@link fetchGenerated} lists.
  *
- * The canvas's "As Asset…" is the caller: an output node holds a
+ * The canvas's "As Asset" is the caller: an output node holds a
  * `GeneratedImageRef` whose `id` IS the `generated_media` row, and
  * `SaveAsAssetDialog` takes {@link GeneratedItem} rows, not canvas node data.
  * Reading the row rather than synthesizing one is what makes the dialog's

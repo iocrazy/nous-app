@@ -1,6 +1,6 @@
 // features/canvas-core/smart/nodes/OutputNodeView.asAsset.test.tsx
 //
-// "As Asset…" on an output node (P4 Task 6): promote a generated picture into
+// "As Asset" on an output node (P4 Task 6): promote a generated picture into
 // the asset library.
 //
 // The `GeneratedItem` fixture is the wire shape `GET /generated/{id}` really
@@ -133,7 +133,7 @@ const imageOutput = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const asAsset = () => screen.getByRole('button', { name: 'As Asset…' });
+const asAsset = () => screen.getByRole('button', { name: 'As Asset' });
 
 beforeEach(() => {
   fetchGeneratedItem.mockReset().mockResolvedValue(GENERATED_ITEM);
@@ -147,7 +147,7 @@ afterEach(() => {
   useCanvasCoreStore.getState().reset();
 });
 
-describe('As Asset…', () => {
+describe('As Asset', () => {
   it('reads the generation row and hands the dialog that ONE item', async () => {
     renderOutput(imageOutput());
     fireEvent.click(asAsset());

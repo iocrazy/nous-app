@@ -651,7 +651,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             className={btn}
           >
             <PackagePlus size={13} aria-hidden="true" />
-            {t('generated.action.saveAsAsset', 'Add To Asset')}
+            {t('generated.action.saveAsAsset', 'As Asset')}
           </button>
         )}
         {item.review_state === 'unreviewed' &&
@@ -1072,7 +1072,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             onClick={() => openSaveAsAsset(selectedItems)}
             className="rounded-lg border border-accent bg-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
           >
-            {t('generated.action.saveAsAsset', 'Add To Asset')}
+            {t('generated.action.saveAsAsset', 'As Asset')}
           </button>
           {confirmingBatchDelete && deletableSelection ? (
             <button
