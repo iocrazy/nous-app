@@ -210,8 +210,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 ### 3.8 退役
 
 - `project_characters`、`project_lib_entities` → 迁到 `assets` 后 DROP（分两步：先 rename 成 `_legacy_*` 一个版本周期，再删）。
-  ✅ **rename 半程已完成（mig 447）**：生产迁移 2026-09-02 跑完并对账全中（8 assets + 8 refs，重跑 0/8/0，3 张实体画布挂上），两张表随即改名 `_legacy_project_characters` / `_legacy_project_lib_entities`；同一个 PR 删掉了 `/projects/{id}/characters*` 与 `/projects/{id}/lib/*` 全部端点、两个 repository 和两份 Pydantic schema（删除时前端零调用方，已复核）。**唯一剩下的读方**是迁移 workflow `backfill_assets_from_project_entities`（ORM 模型 `__tablename__` 已跟着改名），刻意保留以便窗口期内应急重跑；它与 `_BACKFILLS` 注册项一并在 P6 随 DROP 删除。
-  ⏳ **DROP 待做（P6）**：一个版本周期后执行。索引/约束/RLS policy 名仍是改名前的拼写（`ALTER TABLE ... RENAME` 只换 OID 指向不换名字），随 DROP 一起消失，刻意不单独改名。回滚 = 改回原名 + 还原两个 `__tablename__`，无数据变更。
+  ✅ **rename 半程已完成（mig 447）**：生产迁移 2026-09-02 跑完并对账全中（8 assets + 8 refs，重跑 0/8/0，3 张实体画布挂上），两张表随即改名 `_legacy_project_characters` / `_legacy_project_lib_entities`；同一个 PR 删掉了 `/projects/{id}/characters*` 与 `/projects/{id}/lib/*` 全部端点、两个 repository 和两份 Pydantic schema（删除时前端零调用方，已复核）。**当时唯一剩下的读方**是迁移 workflow `backfill_assets_from_project_entities`（ORM 模型 `__tablename__` 已跟着改名），刻意保留以便窗口期内应急重跑；它与 `_BACKFILLS` 注册项已随下面那条 DROP 一并删除。
+  ✅ **DROP 已完成（mig 451，P6，merged 2026-09-04）**：`DROP TABLE IF EXISTS` 两句，**不带 CASCADE**——索引/约束/RLS policy 全是这两张表自己拥有的（名字仍是改名前的拼写，`ALTER TABLE ... RENAME` 只换 OID 指向不换名字），随表消失；表外没有任何依赖（零入向 FK / view / trigger / sequence），写 CASCADE 只会静默吞掉将来挂上去的东西。同一个 commit 删掉迁移 workflow `backfill_assets_from_project_entities`、两个 ORM 模型、`_BACKFILLS` 注册项、三个测试文件与 `schema-drift.yml` 的那一步——schema-drift 门禁两向（有模型没表 / 有表没模型）天花板都是 0，拆成两个 PR 两边都不可能绿。⚠️ **不可逆**：`run-migration.yml` 没有任何备份钩子，恢复只能靠合并前人工 `pg_dump -t` 的那份（放仓库外）。`legacy_refs.py` 与 `GET /assets/resolve-legacy` 保留（读 `assets.attrs`，与这两张表无关）。
 - `canvas_resource_refs` 保留（文件级反查照旧）。
 - `temp_resource_sweeper` 的**调度早已停用**（cron 装饰器自 2026-06-13 起就是注释掉的，已在 merge base 核实）；P1 只移除了它那个 bundle 导入 —— 也就是说这**不是**一次对现存用户的行为改变。代码删除留 P6。
 - 智能文件夹"提示词库"是用户数据，不动；文档提示用 Assets → Prompts。

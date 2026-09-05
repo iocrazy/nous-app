@@ -8,9 +8,10 @@ where the classification is pinned:
 * deliberate → ``in_library=True``: ``create_asset`` (``POST /assets`` and the
   Generated inbox's Save-as-Asset), ``duplicate``.
 * a side effect of project work → ``in_library=False``: ``_import_one``
-  (一键导入). The migration workflow's ``_apply`` is the same class and is pinned
-  in ``tests/db/test_assets_migration_integration.py``, which is where that
-  code path actually runs.
+  (一键导入). The project-entity migration workflow's ``_apply`` used to be the
+  same class, pinned in ``tests/db/test_assets_migration_integration.py``; both
+  were deleted with mig 451's DROP of the two ``_legacy_*`` tables, so
+  ``_import_one`` is now the only member of that class.
 
 Two of these are worth spelling out because the obvious implementation gets
 them backwards:

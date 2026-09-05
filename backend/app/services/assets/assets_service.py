@@ -1868,9 +1868,9 @@ class AssetsService:
         (``link_project`` -> False), so it reports all ``skipped``/
         ``already_linked`` and creates nothing. Pinned by the router tests.
 
-        Does not touch the legacy project-local tables, which as of mig 447
-        are named ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
-        and have no reader left but the migration workflow (DROP is P6).
+        Does not touch the legacy project-local tables — mig 447 renamed
+        them ``_legacy_*`` and mig 451 DROPped them along with their last
+        reader, the migration workflow.
 
         **No cap on the name count, accepted deliberately.** The batch costs two
         round-trips per name (create + link), so a 300-name script is ~600

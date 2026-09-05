@@ -1109,8 +1109,8 @@ async def get_project_entities(
 # all-present) and the workspace pages now read
 # GET /{project_id}/assets in assets_router. The endpoints had zero
 # frontend callers at deletion; their two repositories and Pydantic
-# schemas went with them. The tables are renamed `_legacy_*` for one
-# release cycle (DROP is P6, spec §3.8).
+# schemas went with them. The tables themselves were renamed `_legacy_*`
+# for one release cycle and DROPped by mig 451 (P6, spec §3.8).
 #
 # GET /{project_id}/entities ABOVE IS NOT PART OF THAT — it derives the
 # cast from script scenes and never touched either table. It is what

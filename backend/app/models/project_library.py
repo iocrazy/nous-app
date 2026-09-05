@@ -1,31 +1,25 @@
 """Project authored-library ORM models (character canvas epic).
 
-  * ``ProjectCharacters``     — _legacy_project_characters   (mig 357,
-    renamed by mig 447)
-  * ``ProjectLibEntities``    — _legacy_project_lib_entities (mig 358;
-    locations + props in one table keyed by ``entity_type``; renamed by
-    mig 447)
   * ``ProjectStyleProfile``   — project_style_profile (Canvas+AI M8; one row
     per project)
-  * the workflow-template / project-stage-node families (unaffected)
+  * ``ProjectStages`` / ``ProjectStageHistory`` — the project stage board
+  * the workflow-template / project-stage-node families
 
-THE TWO ``_legacy_*`` MODELS ARE ON DEATH ROW. Their rows moved to ``assets``
-+ ``asset_project_refs`` when ``backfill_assets_from_project_entities`` ran in
-production (2026-09-02, reconciled all-present), and mig 447 renamed the
-tables for one release cycle before the P6 DROP (spec §3.8). The REST
-endpoints and the two repositories that used to read them are gone with that
-same PR; the ONLY surviving consumer is that migration workflow, kept
-importable so an emergency re-run stays possible inside the window. Do not
-write new code against them — new entity work goes to ``app/models/assets.py``.
-
-Their index / constraint / RLS-policy names still carry the pre-rename
-spelling: ``ALTER TABLE ... RENAME`` re-points OIDs, not names, and mig 447
-deliberately left them alone because they die with the table. The names
-declared below therefore must keep matching the live database — do not
-"tidy" them either.
+THE TWO ``_legacy_*`` MODELS ARE GONE (P6, mig 451). ``ProjectCharacters``
+(_legacy_project_characters, mig 357) and ``ProjectLibEntities``
+(_legacy_project_lib_entities, mig 358) were dropped together with their
+tables, their migration workflow and its ``_BACKFILLS`` entry, in the commit
+that carried mig 451 — one commit because the schema-drift gate refuses both
+"model without table" and "table without model" with a ceiling of zero. Their
+rows had already moved to ``assets`` + ``asset_project_refs`` when
+``backfill_assets_from_project_entities`` ran in production (2026-09-02,
+reconciled all-present). New entity work goes to ``app/models/assets.py``;
+provenance lookups for pre-P3 canvas cards go to
+``app/services/assets/legacy_refs.py``, which reads ``assets.attrs`` and
+never touched those tables.
 
 Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch).
-No scope mixin: ownership was scoped by an explicit ``project_id`` predicate
+No scope mixin: ownership is scoped by an explicit ``project_id`` predicate
 in every caller (service-role/RLS-bypass model), so the choke point stays
 inert.
 """
@@ -45,7 +39,6 @@ from sqlalchemy import (
     Index,
     Integer,
     PrimaryKeyConstraint,
-    String,
     Text,
     UniqueConstraint,
     Uuid,
@@ -157,66 +150,6 @@ class ProjectStyleProfile(Base):
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     updated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-
-
-class ProjectCharacters(Base):
-    """Authored character library rows for a project (mig 357).
-
-    RETIRED — table renamed to ``_legacy_project_characters`` by mig 447;
-    DROP is P6. Read only by ``backfill_assets_from_project_entities``.
-    """
-
-    __tablename__ = "_legacy_project_characters"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["project_id"],
-            ["public.projects.id"],
-            ondelete="CASCADE",
-            name="project_characters_project_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="project_characters_pkey"),
-        CheckConstraint(
-            "role_tag IN ('', 'lead', 'support', 'antagonist')",
-            name="project_characters_role_tag_check",
-        ),
-        CheckConstraint(
-            "source IN ('manual', 'script')",
-            name="project_characters_source_check",
-        ),
-        Index("uq_project_characters_project_name", "project_id", "name", unique=True),
-        Index("idx_project_characters_project", "project_id", "sort_order"),
-        {"schema": "public"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_snowflake_id()"),
-    )
-    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    role_tag: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''::text")
-    )
-    description: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''::text")
-    )
-    tags: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    portrait_url: Mapped[str | None] = mapped_column(Text)
-    source: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'manual'::text")
-    )
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
@@ -644,76 +577,3 @@ class ProjectStageNodeDeps(Base):
 
     node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     depends_on_node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-
-
-class ProjectLibEntities(Base):
-    """Generalized project library: locations + props keyed by entity_type
-    (mig 358).
-
-    RETIRED — table renamed to ``_legacy_project_lib_entities`` by mig 447;
-    DROP is P6. Read only by ``backfill_assets_from_project_entities``.
-    """
-
-    __tablename__ = "_legacy_project_lib_entities"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["project_id"],
-            ["public.projects.id"],
-            ondelete="CASCADE",
-            name="project_lib_entities_project_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="project_lib_entities_pkey"),
-        CheckConstraint(
-            "entity_type IN ('location', 'prop')",
-            name="project_lib_entities_entity_type_check",
-        ),
-        CheckConstraint(
-            "source IN ('manual', 'script')",
-            name="project_lib_entities_source_check",
-        ),
-        Index(
-            "uq_project_lib_entities_ptn",
-            "project_id",
-            "entity_type",
-            "name",
-            unique=True,
-        ),
-        Index(
-            "idx_project_lib_entities_project_type",
-            "project_id",
-            "entity_type",
-            "sort_order",
-        ),
-        {"schema": "public"},
-    )
-
-    id: Mapped[int] = mapped_column(
-        BigInteger,
-        primary_key=True,
-        server_default=text("generate_snowflake_id()"),
-    )
-    project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    badge_tag: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''::text")
-    )
-    description: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''::text")
-    )
-    tags: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    cover_url: Mapped[str | None] = mapped_column(Text)
-    source: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'manual'::text")
-    )
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )

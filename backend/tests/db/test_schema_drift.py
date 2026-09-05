@@ -80,10 +80,12 @@ _EXCLUDED_TABLES: frozenset[str] = frozenset(
 #
 # ⚠️ THIS REPO HAS TWO PREFIXES FOR "RENAMED, AWAITING DROP", and a grep for
 # retired tables has to try both: ``zzz_deprecated_*`` (migration 348, the
-# storyboard tree) and ``_legacy_*`` (migration 447, _legacy_project_characters
-# / _legacy_project_lib_entities — the prefix spec §3.8 prescribes and the one
-# new retirements should use). Neither family is exempted here: their models
-# map the post-rename names, so every gate checks them like any other table.
+# storyboard tree — still live) and ``_legacy_*`` (the prefix spec §3.8
+# prescribes and the one new retirements should use; migration 447 renamed
+# _legacy_project_characters / _legacy_project_lib_entities into it and
+# migration 451 DROPped them, so that family currently has no members).
+# Neither family is exempted here: a renamed table's model maps the
+# post-rename name, so every gate checks it like any other table.
 _ALLOWED_MISSING_TABLES: frozenset[str] = frozenset()
 
 # gate 2 — columns that exist LIVE but are missing from the model.

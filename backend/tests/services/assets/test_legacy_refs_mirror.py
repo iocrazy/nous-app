@@ -1,16 +1,24 @@
-"""``LEGACY_TABLE_BY_KIND`` must equal what the P3 migration actually wrote.
+"""``LEGACY_TABLE_BY_KIND`` must keep saying what production actually wrote.
 
-The read side (``GET /assets/resolve-legacy``) and the write side
-(``backfill_assets_from_project_entities``) hold the same three-entry
-vocabulary in two modules — the read side does not import the DBOS workflow.
-Two copies of a vocabulary is exactly the drift that would make a lookup answer
-"never migrated" for every row, silently, with no error anywhere.
+WHAT THIS FILE USED TO BE, AND WHY IT CHANGED. Until P6 it pinned two copies
+of one vocabulary equal: the read side (``legacy_refs.py``, behind
+``GET /assets/resolve-legacy``) against the write side
+(``backfill_assets_from_project_entities``). Mig 451 dropped the two legacy
+tables and that workflow went with them, so the comparison side no longer
+exists — but the vocabulary still has to be right, because the OTHER side of
+the equality never went away: it is the ``attrs.legacy_ids`` rows the
+2026-09-02 production run already persisted. Those strings are frozen in the
+database. This file is now what stops an edit here from drifting away from
+them.
 
-The labels also carry a trap of their own: mig 447 renamed the physical tables
-to ``_legacy_*``, and the labels deliberately did NOT follow, because the
-2026-09-02 production run had already written the old spelling into every
-``attrs.legacy_ids``. A well-meaning "fix" on either side is what this file
-exists to fail on.
+THE TRAP THESE ASSERTIONS EXIST FOR. The labels are provenance LABELS, not
+SQL identifiers — nothing resolves them to a table. Mig 447 renamed the
+physical tables to ``_legacy_*`` and mig 451 dropped them, and through both
+the labels deliberately kept the PRE-rename spelling. A well-meaning "the
+tables are called ``_legacy_*`` now" or "the tables are gone, clean this up"
+edit would not raise anything: every lookup would simply match no row, and a
+canvas card that WAS migrated would render as ``Unmigrated`` forever. That
+silence is the failure mode; these assertions are the noise.
 """
 
 from __future__ import annotations
@@ -20,22 +28,17 @@ from app.services.assets.legacy_refs import (
     LEGACY_TABLE_BY_KIND,
     legacy_table_for_kind,
 )
-from app.workflows.backfill_assets_from_project_entities import (
-    _ENTITY_KIND_TO_LEGACY_TABLE,
-    legacy_ref_for_entity,
-)
-
-
-def test_the_two_tables_are_the_same_mapping():
-    assert LEGACY_TABLE_BY_KIND == _ENTITY_KIND_TO_LEGACY_TABLE
 
 
 def test_the_labels_keep_the_pre_rename_spelling():
-    """The control for the test above: equal-but-both-renamed would still pass
-    it while matching nothing in the database."""
-    assert set(LEGACY_TABLE_BY_KIND.values()) == {
-        "project_characters",
-        "project_lib_entities",
+    """The literals below are the ones in production's ``attrs.legacy_ids``.
+
+    Written out rather than derived, so this test cannot agree with the module
+    by construction — it agrees with the database or it fails."""
+    assert LEGACY_TABLE_BY_KIND == {
+        "character": "project_characters",
+        "location": "project_lib_entities",
+        "prop": "project_lib_entities",
     }
     assert not any(v.startswith("_legacy") for v in LEGACY_TABLE_BY_KIND.values())
 
@@ -47,12 +50,16 @@ def test_location_and_prop_share_one_table():
     assert LEGACY_TABLE_BY_KIND["character"] != LEGACY_TABLE_BY_KIND["prop"]
 
 
-def test_lookup_agrees_with_the_writers_own_helper():
-    """Same question, asked through each side's public helper."""
+def test_legacy_kinds_is_exactly_the_mapping_keys():
+    """The router pattern and the service check both read ``LEGACY_KINDS``; a
+    kind that falls out of it stops being resolvable without any error."""
+    assert set(LEGACY_KINDS) == set(LEGACY_TABLE_BY_KIND)
+    assert set(LEGACY_KINDS) == {"character", "location", "prop"}
+
+
+def test_the_public_helper_answers_for_every_accepted_kind():
     for kind in LEGACY_KINDS:
-        ref = legacy_ref_for_entity(kind, "12")
-        assert ref is not None
-        assert ref == (legacy_table_for_kind(kind), 12)
+        assert legacy_table_for_kind(kind) == LEGACY_TABLE_BY_KIND[kind]
 
 
 def test_an_unknown_kind_maps_to_nothing_rather_than_guessing():

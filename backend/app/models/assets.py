@@ -1,9 +1,9 @@
 """Asset Library ORM models (mig 445) — spec 2026-08-28-asset-library-loadout-design §3.
 
-No scope mixin on purpose (same stance as ``ProjectCharacters``): every repo
-method carries an explicit ``scope_id`` predicate, so the choke point stays
-inert. Column shapes mirror the migration 1:1 — tests/db/test_schema_drift.py
-enforces it.
+No scope mixin on purpose (the stance the retired ``ProjectCharacters`` model
+took, dropped with its table in mig 451): every repo method carries an
+explicit ``scope_id`` predicate, so the choke point stays inert. Column shapes
+mirror the migration 1:1 — tests/db/test_schema_drift.py enforces it.
 
 ``assets.updated_at`` has no touch trigger (mig 445 deliberately ships none):
 every write path must set it explicitly.

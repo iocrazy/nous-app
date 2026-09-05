@@ -3,7 +3,8 @@
  *
  * A canvas saved before the asset library holds `character` / `location` /
  * `prop` nodes bound to `_legacy_project_characters` / `_legacy_project_lib_entities`
- * row ids (mig 447 renamed those tables; the DROP is P6). Those ids are NOT
+ * row ids (mig 447 renamed those tables, mig 451 DROPped them — the ids live
+ * on in saved canvas JSON and in `assets.attrs.legacy_ids`). Those ids are NOT
  * `assets.id` and nothing downstream may treat one as if it were — which is why
  * the mapping is a server question (`GET /assets/resolve-legacy`) and not a
  * guess made here.
