@@ -17,6 +17,7 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
+import { PromptsShelf } from '../prompts/PromptsShelf';
 import { AssetShelf } from './AssetShelf';
 import { AssetSheetPage } from './sheet/AssetSheetPage';
 
@@ -42,6 +43,13 @@ export const AssetsView: React.FC = () => {
   // another character's outfit.
   if (selectedAssetId) {
     return <AssetSheetPage key={selectedAssetId} assetId={selectedAssetId} />;
+  }
+
+  // Prompts are not an `assets` shelf: the catalog behind them unions prompt
+  // assets with prompted uploads and albums, so the type-shelf grid would show
+  // an empty page next to a non-zero badge. `PromptsShelf` owns that route.
+  if (selectedAssetType === 'prompt') {
+    return <PromptsShelf />;
   }
 
   return <AssetShelf assetType={selectedAssetType} />;
