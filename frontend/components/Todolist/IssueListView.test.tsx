@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
 // The strip's three sources: the TaskManager feed (app-wide provider, absent
@@ -50,7 +50,7 @@ function mkIssue(over: Partial<UiIssue> & Pick<UiIssue, 'id' | 'identifier' | 't
   } as UiIssue;
 }
 
-function renderList(issues: UiIssue[], viewMode: 'list' | 'board' = 'list') {
+function renderList(issues: UiIssue[], viewMode: 'list' | 'board' = 'list', selectedIssueId: number | null = null) {
   return render(
     <MemoryRouter initialEntries={['/team/8/todolist']}>
       <Routes>
@@ -67,6 +67,7 @@ function renderList(issues: UiIssue[], viewMode: 'list' | 'board' = 'list') {
               onRefresh={vi.fn()}
               agents={[]}
               scope={{ type: 'team', teamId: '8' }}
+              selectedIssueId={selectedIssueId}
             />
           }
         />
@@ -184,5 +185,54 @@ describe('IssueListView — 「等我的」横条跨视图', () => {
     const idle = () => mkIssue({ id: 21, identifier: 'MH-21', title: 'Plain', status: 'todo' });
     expect(renderList([idle()], 'list').container.querySelector('[data-testid="attention-strip"]')).toBeNull();
     expect(renderList([idle()], 'board').container.querySelector('[data-testid="attention-strip"]')).toBeNull();
+  });
+});
+
+
+describe('IssueListView — Phase 分组 / 阶段芯片 / 行动作 (harness P4 T9)', () => {
+  const running = () => mkIssue({ id: 30, identifier: 'MH-30', title: 'Running one', status: 'in_progress', raw: { dbos_workflow_id: 'wf-30', execution_state: { turn: 2 } } as never });
+  const waiting = () => mkIssue({ id: 31, identifier: 'MH-31', title: 'Waiting one', status: 'needs_followup', raw: { execution_state: { agent_outcome: 'needs_input', outcome_reason: 'A or B?' } } as never });
+  const paused = () => mkIssue({ id: 32, identifier: 'MH-32', title: 'Paused one', status: 'in_progress', raw: { paused_at: '2026-09-05T00:00:00Z' } as never });
+  const plain = () => mkIssue({ id: 33, identifier: 'MH-33', title: 'Plain one', status: 'todo' });
+
+  it('groups by phase by default, people-first order, and still offers Status / Project', () => {
+    const { container } = renderList([plain(), running(), waiting(), paused()]);
+    const groups = [...container.querySelectorAll('[data-testid="phase-group"]')].map((g) => g.getAttribute('data-phase'));
+    expect(groups).toEqual(['waiting_input', 'running', 'paused', 'idle']);
+    const toggle = container.querySelector('[data-testid="group-toggle"]')!;
+    expect(toggle.textContent).toMatch(/Phase/);
+    expect(toggle.textContent).toMatch(/Status/);
+    expect(toggle.textContent).toMatch(/Project/);
+    fireEvent.click(screen.getByText('Status'));
+    expect(container.querySelector('[data-testid="phase-group"]')).toBeNull();
+    expect(screen.getByText('Running one')).toBeTruthy();
+  });
+
+  it('quick phase chips carry counts, filter to one phase, and toggle off', () => {
+    const { container } = renderList([plain(), running(), waiting(), paused()]);
+    const chip = container.querySelector('[data-testid="quick-phase-running"]') as HTMLButtonElement;
+    expect(chip.textContent).toMatch(/1/);
+    expect((container.querySelector('[data-testid="quick-phase-blocked"]') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(chip);
+    expect(screen.queryByText('Plain one')).toBeNull();
+    expect(screen.getByText('Running one')).toBeTruthy();
+    fireEvent.click(chip);
+    expect(screen.getByText('Plain one')).toBeTruthy();
+  });
+
+  it('row action names the verb for the phase — Reply when waiting, Steer when running, nothing when idle', () => {
+    const { container } = renderList([plain(), running(), waiting()]);
+    const rows = [...container.querySelectorAll('a[data-phase]')];
+    const actionOf = (phase: string) => rows.find((r) => r.getAttribute('data-phase') === phase)?.querySelector('[data-testid="row-action"]')?.textContent ?? null;
+    expect(actionOf('waiting_input')).toBe('Reply');
+    expect(actionOf('running')).toBe('Steer');
+    expect(actionOf('idle')).toBeNull();
+  });
+
+  it('paused issues join the waiting-on-you strip and the selected row is marked', () => {
+    const { container } = renderList([paused(), plain()], 'list', 33);
+    expect(container.querySelector('[data-testid="attention-strip"]')?.textContent).toMatch(/Paused one/);
+    const selected = container.querySelector('a[aria-current="true"]');
+    expect(selected?.textContent).toMatch(/Plain one/);
   });
 });

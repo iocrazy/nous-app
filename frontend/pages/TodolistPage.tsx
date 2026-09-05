@@ -386,8 +386,30 @@ export function TodolistPage() {
         </div>
       );
     }
+    // Split view (harness P4 T9): on a wide screen the list stays visible and
+    // clickable beside the detail, with the open row highlighted; narrower
+    // screens keep the full-page detail. Same IssueListView instance, same
+    // props — only `selectedIssueId` differs.
     return (
-      <>
+      <div className="flex h-full min-h-0">
+        <div className="hidden xl:flex xl:flex-col w-[420px] shrink-0 border-r border-ink-800/80 min-h-0" data-testid="issues-split-list">
+          <IssueListView
+            issues={issues}
+            loading={issuesLoading}
+            error={issuesError}
+            viewMode="list"
+            onViewModeChange={setViewMode}
+            onNewIssue={() => setNewIssueOpen(true)}
+            onRefresh={() => { void refreshIssues(agentsById, projectsById); }}
+            agents={agents}
+            currentUserId={currentUserId ?? undefined}
+            scope={scope}
+            teamName={teamName ?? undefined}
+            onCreateProject={handleCreateProject}
+            selectedIssueId={selectedIssue.id}
+          />
+        </div>
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
         <IssueDetailView
           issue={selectedIssue}
           agents={agents}
@@ -417,7 +439,8 @@ export function TodolistPage() {
             onSubmit={handleCreate}
           />
         )}
-      </>
+        </div>
+      </div>
     );
   }
 

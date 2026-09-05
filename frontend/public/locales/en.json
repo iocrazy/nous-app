@@ -5469,7 +5469,21 @@
     "needsReplyChip": "Needs your reply",
     "waitingOnYou": "Waiting on you",
     "approve": "Approve",
-    "reject": "Reject"
+    "reject": "Reject",
+    "phase": {
+      "waiting_input": "Waiting on you",
+      "running": "Running",
+      "paused": "Paused",
+      "blocked": "Blocked",
+      "idle": "To do",
+      "done": "Done"
+    },
+    "action": {
+      "reply": "Reply",
+      "steer": "Steer"
+    },
+    "openFull": "Open full page",
+    "closeDetail": "Close"
   },
   "moduleDisabled": {
     "title": "Feature Unavailable",

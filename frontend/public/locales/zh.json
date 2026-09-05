@@ -5469,7 +5469,21 @@
     "needsReplyChip": "等你回复",
     "waitingOnYou": "等我的",
     "approve": "批准",
-    "reject": "拒绝"
+    "reject": "拒绝",
+    "phase": {
+      "waiting_input": "等我",
+      "running": "运行中",
+      "paused": "已暂停",
+      "blocked": "受阻",
+      "idle": "待办",
+      "done": "已完成"
+    },
+    "action": {
+      "reply": "回复",
+      "steer": "插一句"
+    },
+    "openFull": "全屏打开",
+    "closeDetail": "关闭"
   },
   "moduleDisabled": {
     "title": "功能不可用",
