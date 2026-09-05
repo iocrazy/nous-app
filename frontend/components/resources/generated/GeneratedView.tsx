@@ -77,7 +77,14 @@ const SINCE_LABELS: Record<(typeof SINCE_PRESETS)[number], { key: string; fallba
 const MEDIA_KIND_LABELS: Record<(typeof MEDIA_KINDS)[number], { key: string; fallback: string }> = {
   image: { key: 'generated.type.image', fallback: 'Image' },
   video: { key: 'generated.type.video', fallback: 'Video' },
+  audio: { key: 'generated.type.audio', fallback: 'Audio' },
+  file: { key: 'generated.type.file', fallback: 'File' },
 };
+
+/** `media_kind` → what the lightbox should draw. Unknown kinds stay on the
+ *  image path, matching the backend's own default for an unrecognised mime. */
+const lightboxKindFor = (kind: string | undefined): 'image' | 'video' | 'audio' | 'file' =>
+  kind === 'video' || kind === 'audio' || kind === 'file' ? kind : 'image';
 
 const MENU_ITEM =
   'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-content-2 hover:bg-island-2';
@@ -1129,7 +1136,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
               ? generatedMediaStreamUrl(id)
               : generatedMediaFileUrl(id)
           }
-          kindFor={(id) => (itemsById.get(id)?.media_kind === 'video' ? 'video' : 'image')}
+          kindFor={(id) => lightboxKindFor(itemsById.get(id)?.media_kind)}
           metadataFor={(id) => renderLightboxMeta(itemsById.get(id))}
           actionsFor={(id) => renderLightboxActions(itemsById.get(id))}
         />

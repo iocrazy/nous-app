@@ -75,6 +75,14 @@ describe('parseFilters', () => {
     const sp = new URLSearchParams('project_id=&model=&origin_kind=');
     expect(parseFilters(sp)).toEqual(defaultGeneratedFilters());
   });
+
+  // Both are real wire values: `audio` is what P6's My Uploads → As Asset
+  // mints, `file` is a chat upload that is neither image nor video. Before
+  // they were accepted here, a shared `?media_kind=audio` link silently
+  // dropped the filter and showed everything.
+  it.each(['audio', 'file'] as const)('accepts media_kind=%s from the URL', (kind) => {
+    expect(parseFilters(new URLSearchParams(`media_kind=${kind}`)).mediaKind).toBe(kind);
+  });
 });
 
 describe('serializeFilters', () => {

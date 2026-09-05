@@ -64,6 +64,34 @@ describe('PinLightbox — generic media', () => {
     expect(video.hasAttribute('controls')).toBe(true);
     expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
   });
+
+  // A kind with nothing to draw must not fall through to the <img>: pointing
+  // one at an mp3 renders a broken-image icon and calls it a preview.
+  it.each([
+    ['audio', 'lucide-audio-lines'],
+    ['file', 'lucide-file'],
+  ] as const)('places an icon, not an <img>, for a %s item', (kind, iconClass) => {
+    render(<PinLightbox {...base} kindFor={() => kind} />);
+    const placeholder = screen.getByTestId('pin-lightbox-placeholder');
+    expect(placeholder.getAttribute('data-media-kind')).toBe(kind);
+    expect(placeholder.querySelector(`.${iconClass}`)).toBeTruthy();
+    expect(placeholder.textContent).toBe('No Preview');
+    expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
+    expect(screen.queryByTestId('pin-lightbox-video')).toBeNull();
+  });
+
+  it('keeps navigating when the current item has no preview', () => {
+    const onIndexChange = vi.fn();
+    render(
+      <PinLightbox
+        {...base}
+        onIndexChange={onIndexChange}
+        kindFor={(id) => (id === 'r1' ? 'audio' : 'image')}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('pin-lightbox-next'));
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+  });
 });
 
 describe('PinLightbox — metadata and actions', () => {

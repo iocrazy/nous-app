@@ -264,6 +264,97 @@ describe('GeneratedCard — selection and thumbnail', () => {
     expect(video).toHaveProperty('muted', true);
     expect(video?.hasAttribute('autoplay')).toBe(false);
   });
+
+  // `audio` reaches the inbox from P6's My Uploads → As Asset, `file` from a
+  // chat upload that is neither image nor video. Both used to fall through to
+  // the `<img>` above and render a broken-image icon; the assertion that
+  // matters is therefore "no <img>", not just "an icon exists".
+  it('draws an audio placeholder — an icon and the format, never an <img>', () => {
+    const { container } = render(
+      <GeneratedCard
+        item={{ ...UNREVIEWED, media_kind: 'audio', mime: 'audio/mpeg' }}
+        selected={false}
+        teamId="t1"
+        {...handlers()}
+      />,
+    );
+
+    const placeholder = screen.getByTestId('generated-card-placeholder');
+    expect(placeholder.getAttribute('data-media-kind')).toBe('audio');
+    expect(placeholder.querySelector('.lucide-audio-lines')).toBeTruthy();
+    expect(placeholder.textContent).toBe('MPEG');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+    // The row's name still comes from the title line under the tile — the
+    // wire carries no filename of its own.
+    expect(screen.getByText('Prompt 0')).toBeTruthy();
+  });
+
+  it('draws a generic file placeholder for a `file` row', () => {
+    const { container } = render(
+      <GeneratedCard
+        item={{ ...UNREVIEWED, media_kind: 'file', mime: 'application/pdf' }}
+        selected={false}
+        teamId="t1"
+        {...handlers()}
+      />,
+    );
+
+    const placeholder = screen.getByTestId('generated-card-placeholder');
+    expect(placeholder.getAttribute('data-media-kind')).toBe('file');
+    expect(placeholder.querySelector('.lucide-file')).toBeTruthy();
+    expect(placeholder.textContent).toBe('PDF');
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('names the kind when the row carries no mime to badge', () => {
+    render(
+      <GeneratedCard
+        item={{ ...UNREVIEWED, media_kind: 'audio', mime: null }}
+        selected={false}
+        teamId="t1"
+        {...handlers()}
+      />,
+    );
+
+    expect(screen.getByTestId('generated-card-placeholder').textContent).toBe('Audio');
+  });
+
+  it('keeps every action a placeholder row is entitled to', () => {
+    const h = handlers();
+    render(
+      <GeneratedCard
+        item={{ ...UNREVIEWED, media_kind: 'audio', mime: 'audio/mpeg' }}
+        selected={false}
+        teamId="t1"
+        onOpen={vi.fn()}
+        {...h}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Save To Uploads' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select/ }));
+    expect(h.onToggleSelect).toHaveBeenCalledWith(UNREVIEWED.id);
+  });
+
+  // An unrecognised kind stays on the image path on purpose: the backend's own
+  // `media_kind_from_mime` defaults an unknown mime to `image`, so showing a
+  // file icon here would contradict what the writer decided.
+  it('leaves an unknown kind on the image path', () => {
+    const { container } = render(
+      <GeneratedCard
+        item={{ ...UNREVIEWED, media_kind: 'hologram' }}
+        selected={false}
+        teamId="t1"
+        {...handlers()}
+      />,
+    );
+
+    expect(container.querySelector('img')).toBeTruthy();
+    expect(screen.queryByTestId('generated-card-placeholder')).toBeNull();
+  });
 });
 
 

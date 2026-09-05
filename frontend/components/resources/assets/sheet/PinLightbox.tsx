@@ -19,7 +19,7 @@
 // original behaviour:
 //
 //   srcFor        how an id becomes a URL          (default: the resource file)
-//   kindFor       image or video                   (default: image)
+//   kindFor       image / video / audio / file      (default: image)
 //   metadataFor   a panel beside/below the media   (default: none)
 //   actionsFor    a row of buttons                 (default: none)
 //
@@ -36,6 +36,7 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 // `thumbnail_path > cover_image_path > original`, and a viewer opened to
 // inspect a pin at full screen would be showing a thumbnail.
 import { getResourceFileUrl } from '../../../../services/resourceService';
+import { placeholderFor } from '../../mediaKindPlaceholder';
 
 export interface PinLightboxProps {
   /** Ids, in the order the caller shows them. Resource ids by default; any
@@ -48,8 +49,12 @@ export interface PinLightboxProps {
   onClose: () => void;
   /** id → media URL. Defaults to the resource file route. */
   srcFor?: (id: string) => string;
-  /** Renders a `<video controls>` instead of an `<img>` for 'video'. */
-  kindFor?: (id: string) => 'image' | 'video';
+  /**
+   * What to render for an id. `video` gets a `<video controls>`; `audio` and
+   * `file` have nothing to display, so they get an icon placeholder instead
+   * of an `<img>` pointed at bytes no browser will draw. Default: `image`.
+   */
+  kindFor?: (id: string) => 'image' | 'video' | 'audio' | 'file';
   /** Details panel for the current item (source, model, date, state…). */
   metadataFor?: (id: string) => React.ReactNode;
   /** Action row for the current item, under the media. */
@@ -91,7 +96,9 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
 
   if (count === 0) return null;
   const current = resourceIds[Math.min(Math.max(index, 0), count - 1)];
-  const isVideo = kindFor?.(current) === 'video';
+  const kind = kindFor?.(current) ?? 'image';
+  const isVideo = kind === 'video';
+  const placeholder = placeholderFor(kind);
   const metadata = metadataFor?.(current);
   const actions = actionsFor?.(current);
 
@@ -147,6 +154,19 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
             data-resource-id={current}
             className="max-h-full max-w-full object-contain"
           />
+        ) : placeholder ? (
+          // No player here either (ruling B keeps that for its own ticket) —
+          // but the metadata panel and the action row below still render, so
+          // an audio row is fully triageable from the viewer.
+          <div
+            data-testid="pin-lightbox-placeholder"
+            data-resource-id={current}
+            data-media-kind={kind}
+            className="flex flex-col items-center gap-3 text-white/70"
+          >
+            <placeholder.Icon size={48} aria-hidden="true" />
+            <span className="text-[13px]">{t('common.noPreview', 'No Preview')}</span>
+          </div>
         ) : (
           <img
             src={srcFor(current)}

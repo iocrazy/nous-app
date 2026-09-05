@@ -50,9 +50,22 @@ export const INTERMEDIATE_OPTION = {
   fallback: 'Intermediate Inputs',
 } as const;
 
-/** The Type chip. `media_kind` is open-ended on the wire, but only these two
- *  are ever produced today and only these two get a filter button. */
-export const MEDIA_KINDS = ['image', 'video'] as const;
+/**
+ * The Type chip. `media_kind` is open-ended on the wire, but these four are
+ * the only values anything WRITES today, so these four get a filter button:
+ *
+ *   image / video  canvas + storyboard generations, chat uploads
+ *   file           a chat upload that is neither (`chat_upload.py`'s
+ *                  `media_kind_for_mime` folds every other mime here)
+ *   audio          a My Uploads audio file saved through "As Asset" — the
+ *                  P6 mint path (`generated_inbox_service.py`'s
+ *                  `ACCEPTED_ASSET_FILE_KINDS`) writes it
+ *
+ * Anything outside the list is still dropped when it arrives in the URL: a
+ * `media_kind` the backend has never written would ask the router for a
+ * filter that quietly matches nothing.
+ */
+export const MEDIA_KINDS = ['image', 'video', 'audio', 'file'] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
 /** Relative windows offered by the Date chip, resolved to an instant at call

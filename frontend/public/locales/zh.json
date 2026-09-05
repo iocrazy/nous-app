@@ -155,6 +155,7 @@
     "retry": "重试",
     "backToTop": "回到顶部",
     "close": "关闭",
+    "noPreview": "暂无预览",
     "create": "创建",
     "delete": "删除",
     "deleting": "删除中...",
@@ -2035,7 +2036,9 @@
     },
     "type": {
       "image": "图片",
-      "video": "视频"
+      "video": "视频",
+      "audio": "音频",
+      "file": "文件"
     },
     "since": {
       "24h": "最近 24 小时",
