@@ -199,7 +199,11 @@ describe('opening the Assets tab', () => {
     await openAssetsTab();
     expect(searchAssetsAccessible).toHaveBeenCalledWith(
       'av',
-      expect.objectContaining({ library: 'all', limit: 24 }),
+      // `in`, not `all`: the picker opens on library members — the assets
+      // somebody deliberately added (mig 449) — and the grid's own pill is
+      // what widens it. The panel passes the grid's choice through rather
+      // than deciding here.
+      expect.objectContaining({ library: 'in', limit: 24 }),
     );
   });
 

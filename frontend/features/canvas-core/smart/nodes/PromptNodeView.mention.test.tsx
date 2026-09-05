@@ -348,23 +348,23 @@ describe('PromptNodeView — the Assets tab', () => {
     expect(options[1].querySelector('svg')).not.toBeNull();
   });
 
-  it('asks for the whole library, not just its members', async () => {
+  it('asks for the library, not everything the scope can see', async () => {
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
     await typeBody('@');
     await screen.findAllByTestId('mention-asset-option');
 
-    // `library: 'all'` is the load-bearing argument: the SERVER default is
-    // 'in', which hides script imports and every asset the legacy-card
-    // migration created — exactly the population a canvas points at.
+    // `library: 'in'` is the load-bearing argument, and it is the user's
+    // ruling (mig 449): a library member is one somebody ADDED. Script
+    // imports and the rows the legacy-card migration created were not.
     expect(searchAssets).toHaveBeenCalledWith(
       SCOPE,
-      expect.objectContaining({ library: 'all' }),
+      expect.objectContaining({ library: 'in' }),
     );
   });
 
-  it('the @query seeds the search, and the In Library toggle narrows it', async () => {
+  it('the @query seeds the search, and the In Library toggle widens it', async () => {
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
@@ -372,7 +372,7 @@ describe('PromptNodeView — the Assets tab', () => {
     await waitFor(() =>
       expect(searchAssets).toHaveBeenCalledWith(
         SCOPE,
-        expect.objectContaining({ q: 'av', library: 'all' }),
+        expect.objectContaining({ q: 'av', library: 'in' }),
       ),
     );
 
@@ -382,7 +382,7 @@ describe('PromptNodeView — the Assets tab', () => {
     await waitFor(() =>
       expect(searchAssets).toHaveBeenCalledWith(
         SCOPE,
-        expect.objectContaining({ library: 'in' }),
+        expect.objectContaining({ library: 'all' }),
       ),
     );
   });

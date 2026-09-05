@@ -151,6 +151,31 @@ describe('libraryStore', () => {
     expect(saved).toEqual({ page: 'media', mediaStore: 'uploads', width: 340 });
   });
 
+  it('the Assets shelf starts narrowed to the library', () => {
+    // The user's ruling: library membership is something somebody DID. The
+    // shelf's job is to show what they added, and the pill is the way out.
+    expect(useLibraryStore.getState().assetsInLibraryOnly).toBe(true);
+  });
+
+  it('the in-library toggle is NOT persisted — only page / store / width are', () => {
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ mediaStore: 'assets' });
+    s().setAssetsInLibraryOnly(false);
+    const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
+    expect(saved.assetsInLibraryOnly).toBeUndefined();
+    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 340 });
+  });
+
+  it('widening the Assets shelf drops the selection with it', () => {
+    // Same reason the scope setters clear it: the keys resolve against rows
+    // the next query may not return, so a kept selection would be counted by
+    // the footer and dropped at send time.
+    const s = () => useLibraryStore.getState();
+    s().setSelection(['assets:727145299382534300']);
+    s().setAssetsInLibraryOnly(false);
+    expect(s().selection).toEqual([]);
+  });
+
   it('choosing a source drops the selection with it', () => {
     // Keys resolve against rows the next query may not return, so a kept
     // selection would be counted by the footer and dropped at send time.

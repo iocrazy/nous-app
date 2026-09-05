@@ -287,6 +287,34 @@ describe('LibraryPanel', () => {
     ).toBe('false');
   });
 
+  it('the Assets shelf opens narrowed to the library, and says so', async () => {
+    await openOnAssets();
+    const toggle = screen.getByTestId('library-in-library-toggle');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(searchAssets).toHaveBeenCalledWith(
+      SCOPE,
+      expect.objectContaining({ library: 'in' }),
+    );
+  });
+
+  it('releasing the toggle re-queries wide, not just repaints the pill', async () => {
+    await openOnAssets();
+    searchAssets.mockClear();
+    fireEvent.click(screen.getByTestId('library-in-library-toggle'));
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    expect(searchAssets.mock.calls[0][1].library).toBe('all');
+    expect(
+      screen.getByTestId('library-in-library-toggle').getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
+  it('the toggle belongs to Assets alone', async () => {
+    await openOnUploads();
+    expect(screen.queryByTestId('library-in-library-toggle')).toBeNull();
+    fireEvent.click(screen.getByTestId('library-segment-generated'));
+    expect(screen.queryByTestId('library-in-library-toggle')).toBeNull();
+  });
+
   it('names the node it is aiming at, and says what will happen to it', async () => {
     seedNodes([promptNode()]);
     act(() => {

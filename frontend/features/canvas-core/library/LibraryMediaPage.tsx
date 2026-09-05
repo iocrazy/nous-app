@@ -134,6 +134,7 @@ export function LibraryMediaPage({
   const query = useLibraryStore((s) => s.query);
   const kind = useLibraryStore((s) => s.kind);
   const uploadSource = useLibraryStore((s) => s.uploadSource);
+  const assetsInLibraryOnly = useLibraryStore((s) => s.assetsInLibraryOnly);
   const assetScope = useLibraryStore((s) => s.assetScope);
   const generatedScope = useLibraryStore((s) => s.generatedScope);
   const selection = useLibraryStore((s) => s.selection);
@@ -147,7 +148,7 @@ export function LibraryMediaPage({
   const [hover, setHover] = useState<{ item: LibraryItem; rect: DOMRect } | null>(null);
   useEffect(
     () => setHover(null),
-    [mediaStore, kind, uploadSource, assetScope, generatedScope, query],
+    [mediaStore, kind, uploadSource, assetsInLibraryOnly, assetScope, generatedScope, query],
   );
 
   const model = targetData?.gen?.model ?? null;
@@ -183,6 +184,11 @@ export function LibraryMediaPage({
     // resets the chip on a segment switch, but reading it unguarded would
     // still put it in the uploads cache key from another segment.
     uploadSources: mediaStore === 'uploads' ? UPLOAD_SOURCE_CSV[uploadSource] : '',
+    // Unguarded by segment, unlike `uploadSources`: this knob survives a
+    // segment switch (see the store), so reading it here is reading the value
+    // the Assets shelf will really use — and it has to reach `assetKey`, or
+    // the pill would flip and the shelf would never re-ask.
+    assetsLibrary: assetsInLibraryOnly ? 'in' : 'all',
     generatedScope,
     canvasId,
   });
@@ -468,6 +474,22 @@ export function LibraryMediaPage({
               </button>
             );
           })}
+          {mediaStore === 'assets' && (
+            // In the SCOPE row rather than beside the segments: "which assets"
+            // and "which slice of them" are the same question, and the two
+            // scope chips are the other half of the answer this pill gives.
+            <button
+              type="button"
+              data-testid="library-in-library-toggle"
+              aria-pressed={assetsInLibraryOnly}
+              onClick={() =>
+                useLibraryStore.getState().setAssetsInLibraryOnly(!assetsInLibraryOnly)
+              }
+              className={chipClass(assetsInLibraryOnly)}
+            >
+              {t('canvas.library.inLibraryOnly', 'In Library Only')}
+            </button>
+          )}
         </div>
       )}
 

@@ -153,7 +153,7 @@ describe('useLibrarySearch', () => {
     });
     expect(searchAssets).toHaveBeenCalledWith(SCOPE, expect.objectContaining({
       q: 'harbour',
-      library: 'all',
+      library: 'in',
     }));
     expect(searchResources).toHaveBeenCalledWith(
       expect.objectContaining({ q: 'harbour', teamId: SCOPE }),
@@ -251,9 +251,37 @@ describe('useLibrarySearch', () => {
     await waitFor(() => expect(listAssets).toHaveBeenCalled());
     expect(listAssets).toHaveBeenCalledWith(SCOPE, expect.objectContaining({
       projectId: '500000000000000001',
-      library: 'all',
+      library: 'in',
     }));
     expect(searchAssets).not.toHaveBeenCalled();
+  });
+
+  it('the widen toggle reaches BOTH asset branches, not just the search one', async () => {
+    // Two call sites answer "assets", and only one of them is exercised by
+    // the default shelf. A widen wired into the search branch alone would
+    // leave "This Project" narrowed while the pill reads released.
+    renderHook(() => useLibrarySearch('', { scopeId: SCOPE, assetsLibrary: 'all' }));
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    expect(searchAssets).toHaveBeenCalledWith(
+      SCOPE,
+      expect.objectContaining({ library: 'all' }),
+    );
+
+    renderHook(() =>
+      useLibrarySearch('', {
+        scopeId: SCOPE,
+        assetScope: 'this-project',
+        projectId: '500000000000000001',
+        assetsLibrary: 'all',
+      }),
+    );
+    await act(async () => { vi.advanceTimersByTime(300); });
+    await waitFor(() => expect(listAssets).toHaveBeenCalled());
+    expect(listAssets).toHaveBeenCalledWith(
+      SCOPE,
+      expect.objectContaining({ library: 'all' }),
+    );
   });
 
   it('the Files source chip reaches the wire as `sources`', async () => {

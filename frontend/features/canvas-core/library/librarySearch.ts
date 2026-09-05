@@ -75,6 +75,13 @@ export const UPLOAD_SOURCES: readonly UploadSource[] = [
 
 export type AssetScope = 'this-project' | 'all';
 
+/** Which side of `assets.in_library` the Assets shelf wants.
+ *
+ *  A narrower union than the service's `AssetLibraryFilter`: `out` — the
+ *  rows nobody has adopted — is a triage view, and this is a picker. The
+ *  shelf either answers "my library" or "everything this scope can see". */
+export type AssetsLibrary = 'in' | 'all';
+
 export interface LibrarySearchOptions {
   scopeId: string;
   stores?: readonly LibraryStore[];
@@ -86,6 +93,10 @@ export interface LibrarySearchOptions {
    *  fold from `generated` to `generated,derived` belongs next to the chip
    *  table, not in every consumer. */
   uploadSources?: string;
+  /** Defaults to `in` in `fetchLibraryAssets`. Undefined therefore means the
+   *  narrow shelf, not "server default" — the two agree today and the
+   *  explicit value is what keeps them agreeing. */
+  assetsLibrary?: AssetsLibrary;
   generatedScope?: GeneratedScope;
   canvasId?: string | null;
   limit?: number;
@@ -170,16 +181,20 @@ export async function fetchLibraryAssets(
 ): Promise<LibraryItem[]> {
   if (!opts.scopeId) throw new LibraryScopeError();
   const q = query.trim() || undefined;
-  // `library: 'all'` — EXPLICIT, and the explicitness is the point. The
-  // server's default is `in` (library members only), which hides script
-  // imports and every asset the P4 legacy-card migration created — exactly the
-  // population a canvas points at. The mention palette chooses the same.
+  // `in` by default — the shelf answers "my library", and a library member is
+  // one somebody ADDED (mig 449, user ruling reaffirmed 2026-09-05). Script
+  // imports and the rows the P4 legacy-card migration created were never
+  // added, so listing them would present as library members things that are
+  // not. The widen toggle is what keeps them reachable, and it is why this
+  // reads an option rather than a constant: both branches honour it, because
+  // "This Project" is the one a wired-up-in-one-place widen would miss.
+  const library = opts.assetsLibrary ?? 'in';
   if (opts.assetScope === 'this-project' && opts.projectId) {
     const rows = await listAssets(opts.scopeId, {
       q,
       type: opts.assetType ?? undefined,
       projectId: opts.projectId,
-      library: 'all',
+      library,
       limit: opts.limit ?? LIMIT,
     });
     return rows.map(assetToLibraryItem);
@@ -187,7 +202,7 @@ export async function fetchLibraryAssets(
   const rows = await searchAssets(opts.scopeId, {
     q,
     type: opts.assetType ?? undefined,
-    library: 'all',
+    library,
     limit: opts.limit ?? LIMIT,
   });
   return rows.map(assetToLibraryItem);
@@ -309,7 +324,7 @@ export function useLibrarySearch(
   const stores = opts.stores ?? LIBRARY_STORES;
   // One string per store holding exactly the options that store reads, so a
   // kind chip on Uploads does not re-fetch Assets.
-  const assetKey = `${opts.scopeId}|${opts.assetType ?? ''}|${opts.assetScope ?? 'all'}|${opts.projectId ?? ''}|${opts.limit ?? ''}`;
+  const assetKey = `${opts.scopeId}|${opts.assetType ?? ''}|${opts.assetScope ?? 'all'}|${opts.projectId ?? ''}|${opts.assetsLibrary ?? 'in'}|${opts.limit ?? ''}`;
   const uploadKey = `${opts.scopeId}|${opts.uploadKinds ?? ''}|${opts.uploadSources ?? ''}|${opts.limit ?? ''}`;
   const generatedKey = `${opts.scopeId}|${opts.generatedScope ?? 'this-canvas'}|${opts.canvasId ?? ''}|${opts.limit ?? ''}`;
 

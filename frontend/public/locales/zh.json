@@ -3286,6 +3286,7 @@
       "selectAll": "全选",
       "scopeThisProject": "本项目",
       "scopeAllLibrary": "整个素材库",
+      "inLibraryOnly": "仅已入库",
       "scopeThisCanvas": "本画布",
       "scopeToday": "今天",
       "scopeAll": "全部",
@@ -3691,7 +3692,9 @@
       "assetsError": "无法加载资产库",
       "assetsPreview": "预览",
       "assetsCount_one": "{{count}} 个资产",
-      "assetsCount_other": "{{count}} 个资产"
+      "assetsCount_other": "{{count}} 个资产",
+      "library": "库",
+      "inLibraryOnly": "仅已入库"
     },
     "sidebarTitle": "频道",
     "newChannel": "新建频道",

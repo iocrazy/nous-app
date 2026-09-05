@@ -83,6 +83,8 @@ const ASSET_LABELS = (t: (key: string, def?: string) => string) => ({
   error: t('chat.mentionPicker.assetsError', 'Could not load the asset library'),
   preview: t('chat.mentionPicker.assetsPreview', 'Preview'),
   previewGroup: t('chat.mentionPicker.assets', 'Assets'),
+  libraryLabel: t('chat.mentionPicker.library', 'Library'),
+  inLibraryOnly: t('chat.mentionPicker.inLibraryOnly', 'In Library Only'),
 });
 
 interface Props {
@@ -199,6 +201,12 @@ export function ResourcePickerSuggestion({
           onPick={assets.onSelect}
           onCountChange={assets.onCountChange}
           searchBox={false}
+          // The grid opens narrowed to library members, so the pill is the
+          // only way back to a script-imported or migrated asset. Without it
+          // the chat shelf would be a dead end: the asset the writer can see
+          // in the library UI would simply not be mentionable, and nothing on
+          // screen would say why.
+          libraryToggle
           theme="chat"
           limit={ASSET_SEARCH_LIMIT}
           debounceMs={ASSET_DEBOUNCE_MS}

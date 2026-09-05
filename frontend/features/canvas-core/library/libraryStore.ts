@@ -54,8 +54,9 @@ export interface LibraryTarget {
   title: string;
 }
 
-/** Only the three durable knobs. `query`, `selection`, `target` and the two
- *  in-segment filters (`kind`, `uploadSource`) are deliberately NOT persisted:
+/** Only the three durable knobs. `query`, `selection`, `target` and the
+ *  in-segment filters (`kind`, `uploadSource`, `assetsInLibraryOnly`) are
+ *  deliberately NOT persisted:
  *  a restored target points at a node id from whatever canvas was open last
  *  time, which is worse than no target, and a restored source chip opens the
  *  Files shelf already narrowed with nothing on screen explaining why.
@@ -105,6 +106,21 @@ export interface LibraryPanelState extends Persisted {
   kind: string | null;
   /** Which source the Files shelf is narrowed to. Per-segment, like `kind`. */
   uploadSource: UploadSource;
+  /**
+   * Is the Assets shelf narrowed to library members? `true` at rest.
+   *
+   * A library member is one somebody ADDED (mig 449, user ruling reaffirmed
+   * 2026-09-05). Script imports and the rows the P4 legacy-card migration
+   * created were never added, so a shelf that listed them would present as
+   * library members things that are not.
+   *
+   * Kept across a segment switch, unlike `uploadSource` and `kind`: it sits
+   * in the Assets scope row next to `assetScope`, which is also kept, and the
+   * pill is drawn `aria-pressed` whenever that row is on screen — so a
+   * returning user is never narrowed by a control they cannot see. Not
+   * persisted, so a new session starts narrow.
+   */
+  assetsInLibraryOnly: boolean;
   assetScope: AssetScope;
   generatedScope: GeneratedScope;
   selection: LibraryItemKey[];
@@ -124,6 +140,7 @@ export interface LibraryPanelState extends Persisted {
   setQuery(q: string): void;
   setKind(kind: string | null): void;
   setUploadSource(source: UploadSource): void;
+  setAssetsInLibraryOnly(only: boolean): void;
   setAssetScope(scope: AssetScope): void;
   setGeneratedScope(scope: GeneratedScope): void;
   setSelection(keys: LibraryItemKey[]): void;
@@ -164,6 +181,7 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     query: '',
     kind: null,
     uploadSource: 'all',
+    assetsInLibraryOnly: true,
     assetScope: 'all',
     generatedScope: 'this-canvas',
     selection: [],
@@ -224,6 +242,9 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     // selection is counted by the footer and dropped at send time.
     setUploadSource(uploadSource) {
       set({ uploadSource, selection: [] });
+    },
+    setAssetsInLibraryOnly(assetsInLibraryOnly) {
+      set({ assetsInLibraryOnly, selection: [] });
     },
     setAssetScope(assetScope) {
       set({ assetScope, selection: [] });

@@ -3286,6 +3286,7 @@
       "selectAll": "Select All",
       "scopeThisProject": "This Project",
       "scopeAllLibrary": "All Library",
+      "inLibraryOnly": "In Library Only",
       "scopeThisCanvas": "This Canvas",
       "scopeToday": "Today",
       "scopeAll": "All",
@@ -3691,7 +3692,9 @@
       "assetsError": "Could not load the asset library",
       "assetsPreview": "Preview",
       "assetsCount_one": "{{count}} asset",
-      "assetsCount_other": "{{count}} assets"
+      "assetsCount_other": "{{count}} assets",
+      "library": "Library",
+      "inLibraryOnly": "In Library Only"
     },
     "sidebarTitle": "Channels",
     "newChannel": "New channel",

@@ -179,7 +179,7 @@ describe('AssetGridPicker — what it asks for', () => {
     expect(fetchImpl.mock.calls[0][0]).toEqual({
       q: undefined,
       type: null,
-      library: 'all',
+      library: 'in',
       limit: 24,
     });
 
@@ -201,26 +201,45 @@ describe('AssetGridPicker — what it asks for', () => {
     );
   });
 
-  it('asks for the whole library, not just its members', async () => {
-    // The SERVER default is `in`, which hides script imports and everything
-    // the legacy-card migration created — exactly the assets a user names.
+  it('asks for the library only, and the toggle says so', async () => {
+    // User ruling (mig 449, reaffirmed 2026-09-05 on a real machine): an
+    // asset is a library member when somebody ADDED it. Script imports and
+    // the rows the P4 legacy-card migration created were never added, so a
+    // picker listing them presents as library members things that are not.
     const fetchImpl = spyFetch(() => [AVA]);
-    renderGrid(fetchImpl);
+    renderGrid(fetchImpl, { libraryToggle: true });
     await screen.findAllByTestId('mention-asset-option');
-    expect(fetchImpl.mock.calls[0][0].library).toBe('all');
+    expect(fetchImpl.mock.calls[0][0].library).toBe('in');
+    expect(screen.getByTestId('mention-library-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
-  it('narrows to the shelf only when the toggle is pressed', async () => {
+  it('widens to everything when the toggle is released', async () => {
+    // The widen is what keeps imports and migrated legacy cards reachable —
+    // narrowing by default is only defensible while there is a way out of it.
     const fetchImpl = vi.fn(async () => [AVA]);
     renderGrid(fetchImpl, { libraryToggle: true });
     await screen.findAllByTestId('mention-asset-option');
     fireEvent.click(screen.getByTestId('mention-library-toggle'));
     await waitFor(() =>
       expect(fetchImpl).toHaveBeenLastCalledWith(
-        expect.objectContaining({ library: 'in' }),
+        expect.objectContaining({ library: 'all' }),
         expect.anything(),
       ),
     );
+    expect(screen.getByTestId('mention-library-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('a host can open it wide, which is what the prop is for', async () => {
+    const fetchImpl = spyFetch(() => [AVA]);
+    renderGrid(fetchImpl, { libraryToggle: true, defaultInLibraryOnly: false });
+    await screen.findAllByTestId('mention-asset-option');
+    expect(fetchImpl.mock.calls[0][0].library).toBe('all');
   });
 
   it('filters by type when a chip is pressed', async () => {
