@@ -19,6 +19,7 @@ from dbos import DBOS
 from loguru import logger
 from sqlalchemy import select, update
 
+from app.db.scope import system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Resources
 from app.repositories.media_repository import has_prompt_expr
@@ -78,47 +79,58 @@ async def backfill_resource_prompt_origin_workflow(
     }
 
     try:
-        async with read_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(
-                            Resources.id,
-                            Resources.gen_prompt,
-                            Resources.gen_prompt_zh,
-                            Resources.gen_prompt_json,
-                            Resources.gen_params,
-                            Resources.slide_prompts,
-                        )
-                        .where(Resources.prompt_origin.is_(None), has_prompt_expr())
-                        .order_by(Resources.id)
-                        .limit(limit)
-                    )
-                )
-                .mappings()
-                .all()
+        # Resources mixes in UserScoped(creator_id): under
+        # SCOPE_ENFORCE_RESOURCES a scoped table touched with no ambient
+        # scope is fail-closed (UnscopedQueryError). A backfill is
+        # deliberately cross-user, so SYSTEM is the correct treatment —
+        # same entry-point pattern as thumbnail_workflow.
+        async with system_request_scope(
+            reason=(
+                "backfill resource_prompt_origin: system-wide labelling of "
+                "rows that predate mig 453"
             )
-        for row in rows:
-            result["scanned"] += 1
-            origin = plan_row(row)
-            if origin is None:
-                continue
-            result["by_origin"][origin] += 1
-            if dry_run:
-                result["would_fix"] += 1
-                continue
-            async with write_scope() as session:
-                await session.execute(
-                    update(Resources)
-                    .where(
-                        Resources.id == row["id"],
-                        Resources.prompt_origin.is_(None),
+        ):
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(
+                                Resources.id,
+                                Resources.gen_prompt,
+                                Resources.gen_prompt_zh,
+                                Resources.gen_prompt_json,
+                                Resources.gen_params,
+                                Resources.slide_prompts,
+                            )
+                            .where(Resources.prompt_origin.is_(None), has_prompt_expr())
+                            .order_by(Resources.id)
+                            .limit(limit)
+                        )
                     )
-                    .values(prompt_origin=origin)
+                    .mappings()
+                    .all()
                 )
-            result["fixed"] += 1
-            if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
-                result["fixed_ids"].append(str(row["id"]))
+            for row in rows:
+                result["scanned"] += 1
+                origin = plan_row(row)
+                if origin is None:
+                    continue
+                result["by_origin"][origin] += 1
+                if dry_run:
+                    result["would_fix"] += 1
+                    continue
+                async with write_scope() as session:
+                    await session.execute(
+                        update(Resources)
+                        .where(
+                            Resources.id == row["id"],
+                            Resources.prompt_origin.is_(None),
+                        )
+                        .values(prompt_origin=origin)
+                    )
+                result["fixed"] += 1
+                if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
+                    result["fixed_ids"].append(str(row["id"]))
     except Exception:
         try:
             await manager.patch_metadata(task_id, result)
