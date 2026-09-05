@@ -42,6 +42,16 @@
 # Every failure mode (Postgres won't boot, bootstrap fails, the baseline won't
 # apply, a migration errors, the watermark can't be parsed) is RED. Do not add
 # `continue-on-error`, `|| true`, or a conditional `exit 0` to any step here.
+#
+# THAT RULE APPLIES TO THE PYTEST STEPS TOO — and for a long time it did not.
+# `pytest` exits 0 when every test in a file skips, and every integration file
+# below skips itself (module-level or per-case) when INTEGRATION_DATABASE_URL
+# is unset. A bare `uv run pytest <file>` step therefore went GREEN while
+# asserting nothing: the same "manufactured impression of coverage" this
+# workflow replaced, one layer down. So EVERY integration step below runs
+# through .github/scripts/pytest-no-full-skip.sh, which fails the step when the
+# summary reports zero passing tests. Adding a new integration step here means
+# calling that script — never a bare `uv run pytest`.
 
 name: Schema Drift (models vs baseline + migrations)
 
@@ -86,6 +96,10 @@ on:
       - 'backend/app/services/canvas/canvas_service.py'
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
+      # The full-skip guard every integration step below runs through. A change
+      # to it changes what "green" means for all eight, so it has to re-run
+      # them — otherwise the guard could be weakened by a PR this job ignores.
+      - '.github/scripts/pytest-no-full-skip.sh'
   push:
     branches: [master]
     paths:
@@ -244,7 +258,7 @@ jobs:
           # Drift → the test fails → this step fails → the job is RED. That is
           # the entire point of the gate. Known, registered drift is handled by
           # the ratchet allowlists inside the test itself.
-          uv run pytest tests/db/test_schema_drift.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_schema_drift.py -v
 
       - name: Assert social_accounts' Realtime/RLS + credential grants (mig 417)
         working-directory: backend
@@ -257,7 +271,7 @@ jobs:
           # built. Named explicitly (not a directory glob) for the same reason
           # the step above is: a test file that silently stops being collected
           # is the failure mode this whole workflow exists to prevent.
-          uv run pytest tests/db/test_social_accounts_realtime_rls.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_social_accounts_realtime_rls.py -v
 
       - name: Assert the publish read-back schema + sweep SQL (mig 418)
         working-directory: backend
@@ -269,7 +283,7 @@ jobs:
           # array_agg subquery and a NULLS FIRST ordering both COMPILE happily
           # under SQLAlchemy and can still be rejected by the server. These
           # execute them for real against the schema this job just built.
-          uv run pytest tests/db/test_publish_readback_db.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_publish_readback_db.py -v
 
       - name: Assert the asset-library schema's RLS, partial indexes & CHECKs (mig 445/446)
         working-directory: backend
@@ -283,7 +297,7 @@ jobs:
           # CHECK bodies are all invisible to a model-vs-schema diff — drop the
           # predicate and the drift test still passes while a soft-deleted row
           # squats its name forever.
-          uv run pytest tests/migrations/test_445_asset_library_core.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/migrations/test_445_asset_library_core.py -v
 
       - name: Exercise the asset-library repositories against the built schema (mig 445/446)
         working-directory: backend
@@ -297,7 +311,7 @@ jobs:
           # UPDATE...RETURNING(Assets) yields an entity, that the partial unique
           # indexes free/hold names, that ON CONFLICT finds the real index, or
           # that a raise inside unit_of_work() rolls the whole batch back.
-          uv run pytest tests/db/test_assets_repository_integration.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_assets_repository_integration.py -v
 
       - name: Exercise the canvas→asset ref mirror against the built schema (mig 445)
         working-directory: backend
@@ -315,7 +329,7 @@ jobs:
           # COALESCE resolves a personal project through a real LEFT JOIN on
           # teams — a canvas invisible to its own owner would read as "this
           # asset is used nowhere".
-          uv run pytest tests/db/test_canvas_asset_refs_integration.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_canvas_asset_refs_integration.py -v
 
       - name: Exercise the project-library → assets migration (mig 445/446)
         working-directory: backend
@@ -330,7 +344,7 @@ jobs:
           # takes the `existing` branch on every row (a property of the partial
           # unique index, not of our Python), or that reconciliation agrees with
           # apply about adopting a same-name asset of ANY source.
-          uv run pytest tests/db/test_assets_migration_integration.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_assets_migration_integration.py -v
 
       - name: Exercise the chat-uploads folder adoption (mig 450)
         working-directory: backend
@@ -347,26 +361,4 @@ jobs:
           # The same step also runs the code-side adoption against the real
           # index, which is what proves the migration and `chat_upload.py`
           # agree instead of each minting a row.
-          #
-          # AND ASSERT THEY ACTUALLY RAN. This file skips itself at module
-          # level when INTEGRATION_DATABASE_URL is unset, and pytest exits 0
-          # when it skips everything — so the exit code alone cannot tell
-          # "18 passed" from "18 skipped". The DSN above is always set on this
-          # job, which means a full skip here is a broken job, not a valid
-          # outcome: going green while asserting nothing is exactly the
-          # "can't run → pass" path this workflow's header forbids.
-          #
-          # The bar is "something actually ran", NOT "nothing was skipped": a
-          # future `@pytest.mark.skipif` on one case (a PG-version-specific
-          # assertion, say) must not turn this red while the other 17 pass.
-          # The summary line is the signal; awk (not `grep -q`) so a non-match
-          # is a 0 count rather than a non-zero exit this step would otherwise
-          # have to launder with `|| true`, which this file forbids.
-          log="$(mktemp)"
-          uv run pytest tests/db/test_chat_uploads_folder_migration.py -v | tee "$log"
-          passed=$(awk '/[0-9]+ passed/ {n++} END {print n+0}' "$log")
-          echo "summary check: passed_lines=${passed}"
-          if [ "$passed" -eq 0 ]; then
-            echo "::error::mig 450 integration tests did not run (no 'passed' in the summary). A skipped file is not a green file — check INTEGRATION_DATABASE_URL and the Postgres service."
-            exit 1
-          fi
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_chat_uploads_folder_migration.py -v
