@@ -3441,7 +3441,8 @@
       "saveCurrent": "保存当前…",
       "newTemplate": "新建…",
       "promptsFooter_one": "{{count}} 条提示词 · {{pictures}} 条来自图片",
-      "promptsFooter_other": "{{count}} 条提示词 · {{pictures}} 条来自图片"
+      "promptsFooter_other": "{{count}} 条提示词 · {{pictures}} 条来自图片",
+      "untitledPrompt": "提示词"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",

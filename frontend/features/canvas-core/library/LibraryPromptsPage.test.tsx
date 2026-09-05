@@ -77,6 +77,63 @@ describe('LibraryPromptsPage', () => {
     await waitFor(() => expect(useCanvasCoreStore.getState().historyPast.length).toBe(before + 1));
   });
 
+  // The list stays clickable while the confirm is open, and the sheet's copy
+  // names only the NODE — so a sheet that applied "whatever is selected now"
+  // would silently write a different prompt than the one it asked about.
+  it('the confirm applies the entry it was opened for, not the row selected since', async () => {
+    const other: PromptEntry = { ...image, key: 'image:11', title: 'Second', positive_en: 'second', negative_en: 'second neg', params: { width: 1000, height: 1000 } };
+    fetchPrompts.mockResolvedValue({ ...page, items: [image, other], total: 2 });
+    mount({ body: 'old', gen: { kind: 'image', model: '', ratio: '3:2', count: 1 } });
+    const rows = await screen.findAllByTestId('library-prompt-row');
+    fireEvent.click(rows[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
+    fireEvent.click(rows[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+    const data = (useCanvasCoreStore.getState().nodes[0] as { data: PromptNodeData }).data;
+    expect(data.body).toBe('cheerful');
+    expect(data.negative_body).toBe('flare');
+    expect(data.gen?.ratio).toBe('16:9');
+  });
+
+  it('the confirm goes away when the target does, so Replace is never a dead button', async () => {
+    const { rerender } = mount({ body: 'old' });
+    fireEvent.click(await screen.findByTestId('library-prompt-row'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
+    expect(screen.getByTestId('library-prompt-confirm')).toBeInTheDocument();
+    rerender(<LibraryPromptsPage target={null} targetData={null} />);
+    expect(screen.queryByTestId('library-prompt-confirm')).toBeNull();
+  });
+
+  it('read-only says so, at both the consequence line and the preview hint, and withholds Save as template', async () => {
+    useCanvasCoreStore.setState({ nodes: [node({})] as never, projectId: null, readOnly: true } as never);
+    render(<LibraryPromptsPage target={target} targetData={useCanvasCoreStore.getState().nodes[0].data as PromptNodeData} />);
+    fireEvent.click(await screen.findByTestId('library-prompt-row'));
+    expect(screen.getByTestId('library-consequence')).toHaveTextContent('Browse only · this canvas is read-only');
+    expect(screen.getByTestId('library-prompt-preview')).toHaveTextContent('Browse only · this canvas is read-only');
+    expect(screen.queryByText('Pick a prompt node first')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save as template…' })).toBeDisabled();
+  });
+
+  it('Tab skips the project segment when the canvas has no project', async () => {
+    mount({});
+    const root = (await screen.findByTestId('library-prompt-row')).closest('[data-testid="library-prompts-page"]')!;
+    fireEvent.keyDown(root, { key: 'Tab' });
+    // 'project' would be sent with a null projectId and answered 422; its chip
+    // is disabled, so the user could not get back out of it either.
+    expect(useLibraryStore.getState().promptSegment).toBe('mine');
+  });
+
+  it('Tab reaches the project segment once the canvas has one', async () => {
+    useCanvasCoreStore.setState({ nodes: [node({})] as never, projectId: '7001', readOnly: false } as never);
+    render(<LibraryPromptsPage target={target} targetData={useCanvasCoreStore.getState().nodes[0].data as PromptNodeData} />);
+    const root = (await screen.findByTestId('library-prompt-row')).closest('[data-testid="library-prompts-page"]')!;
+    fireEvent.keyDown(root, { key: 'Tab' });
+    expect(useLibraryStore.getState().promptSegment).toBe('project');
+    // Drain the refetch the segment change starts, so it does not land after
+    // the test and warn about an update outside act().
+    await waitFor(() => expect(fetchPrompts).toHaveBeenCalledTimes(2));
+  });
+
   it('Apply all onto an empty body needs no confirmation', async () => {
     mount({ body: '' });
     fireEvent.click(await screen.findByTestId('library-prompt-row'));

@@ -33,6 +33,11 @@ export interface LibraryPromptPreviewProps {
   onInsert: (slideName?: string) => void;
   onApplyAll: (slideName?: string) => void;
   onSaveAsTemplate: () => void;
+  /** Whether "Save as template…" may be pressed. SEPARATE from `canAct`,
+   *  which is about the aimed NODE: promoting a picture to a template needs
+   *  no target at all, it needs write access. Optional and true at rest so a
+   *  caller that has no such gate keeps the button live. */
+  canSaveAsTemplate?: boolean;
 }
 
 export function activeSlide(entry: PromptEntry | null, slideName: string | null): PromptSlide | null {
@@ -131,7 +136,7 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
       <div className="flex items-center gap-1.5 border-t border-canvas-line px-2.5 py-2">
         <button type="button" className={`${BTN} bg-[var(--accent-text)] text-white`} disabled={!canInsert} onClick={() => p.onInsert(slide?.name)}>{insertLabel}</button>
         <button type="button" className={BTN} disabled={!canInsert} onClick={() => p.onApplyAll(slide?.name)}>{applyLabel}</button>
-        {entry.form !== 'template' && <button type="button" className={`${BTN} border-transparent`} onClick={p.onSaveAsTemplate}>{t('canvas.library.saveAsTemplate', 'Save as template…')}</button>}
+        {entry.form !== 'template' && <button type="button" className={`${BTN} border-transparent`} disabled={p.canSaveAsTemplate === false} onClick={p.onSaveAsTemplate}>{t('canvas.library.saveAsTemplate', 'Save as template…')}</button>}
         <span className="flex-1" />
         <span className="text-[10.5px] text-canvas-muted">{p.canAct ? '↵ · ⇧↵' : p.actHint}</span>
       </div>

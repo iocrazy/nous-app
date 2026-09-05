@@ -3441,7 +3441,8 @@
       "saveCurrent": "Save current…",
       "newTemplate": "New…",
       "promptsFooter_one": "{{count}} prompt · {{pictures}} from pictures",
-      "promptsFooter_other": "{{count}} prompts · {{pictures}} from pictures"
+      "promptsFooter_other": "{{count}} prompts · {{pictures}} from pictures",
+      "untitledPrompt": "Prompt"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
