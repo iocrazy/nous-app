@@ -112,6 +112,17 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
  * was looking at it. Hoisting it here also means a body added later cannot
  * silently reintroduce the gap.
  */
+/** The model writes for a chat window: paragraphs and `**emphasis**`. Split
+ *  on blank lines and drop the asterisks — a modal is not a markdown
+ *  surface, and literal `**` around the rewrite it offers reads as noise. */
+function detailParagraphs(text: string): string[] {
+  return text
+    .replace(/\*\*/g, '')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
   if (!task.error_msg) return null;
@@ -130,14 +141,23 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
           most useful thing on screen, not the technical overflow. Burying it
           under a collapsed disclosure is the 2026-09-04 bug. */}
       {detail && (
-        <pre
+        <div
           data-testid="task-error-detail"
-          className="mt-1.5 text-[11px] text-ink-300 whitespace-pre-wrap break-words bg-ink-950/60 border border-ink-700/60 rounded p-2 max-h-56 overflow-y-auto font-sans"
+          className="mt-2 rounded-lg border border-ink-700/60 bg-ink-950/60 px-3 py-2 max-h-56 overflow-y-auto"
         >
-          {detail}
-        </pre>
+          <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">What the model said</div>
+          {detailParagraphs(detail).map((p, i) => (
+            <p key={i} className="text-[12px] leading-relaxed text-ink-200 whitespace-pre-wrap break-words [&+p]:mt-1.5">
+              {p}
+            </p>
+          ))}
+        </div>
       )}
-      {showRaw && (
+      {/* The raw string is offered only when there is nothing better: with an
+          explanation on screen it would just repeat the headline in
+          exception dress, and a second "Details" affordance is the burial
+          this block exists to undo. */}
+      {showRaw && !detail && (
         <details className="mt-1">
           <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
             Details

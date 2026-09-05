@@ -11,7 +11,7 @@ import { useToast } from '../Toast';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { flowService } from '../../services/flowService';
 import { failureLabel } from '../../utils/taskFailure';
-import { type FlowItem, type PanelItem, flowDisplayTitle } from './flowGrouping';
+import { type FlowItem, type PanelItem, flowDisplayTitle, isFanOut } from './flowGrouping';
 import { ActiveTaskCard } from './ActiveTaskCard';
 import { TaskCenterRow } from './TaskCenterRow';
 
@@ -107,10 +107,12 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
 
   const title = useMemo(() => flowDisplayTitle(flow), [flow]);
 
+  // Follow the in-flight step only for a pipeline; a fan-out of identical
+  // siblings shows dots and waits for a click (see isFanOut).
   const expandedId =
     pinned === 'collapsed'
       ? null
-      : pinned ?? (flow.hasActive ? flow.current?.id ?? null : null);
+      : pinned ?? (flow.hasActive && !isFanOut(flow) ? flow.current?.id ?? null : null);
   const expandedStep = expandedId
     ? flow.steps.find((s) => s.id === expandedId) ?? null
     : null;
@@ -254,6 +256,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
                       />
                     )}
                     <button
+                      data-step-id={step.id}
                       onClick={() => toggleStep(step.id)}
                       data-testid="flow-step"
                       data-step-status={step.status}
@@ -292,7 +295,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
           Indented behind a vertical guide line so the sub-step visually
           belongs to the flow card above it. */}
       {expandedStep && (
-        <div className="ml-7 mr-2 mb-2 border-l-2 border-ink-700/70 bg-ink-900/30 rounded-r-lg">
+        <div data-testid="flow-expanded-step" className="ml-7 mr-2 mb-2 border-l-2 border-ink-700/70 bg-ink-900/30 rounded-r-lg">
           {expandedStep.status === 'processing' ? (
             <ActiveTaskCard task={expandedStep} now={now} onCancel={onCancel} />
           ) : (

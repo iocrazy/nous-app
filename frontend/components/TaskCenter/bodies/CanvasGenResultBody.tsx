@@ -45,7 +45,9 @@ export function CanvasGenResultBody({ task }: { task: UnifiedTask }) {
         <div className="rounded-lg border border-dashed border-ink-700 p-6 text-center text-xs text-ink-500">
           {task.status === 'completed'
             ? 'No result attached'
-            : 'Result appears here when the generation finishes'}
+            : task.status === 'failed' || task.status === 'cancelled'
+              ? 'No image was produced.'
+              : 'Result appears here when the generation finishes'}
         </div>
       )}
       {task.subtitle && (

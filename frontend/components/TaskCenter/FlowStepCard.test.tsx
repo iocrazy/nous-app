@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FlowStepCard } from './FlowStepCard';
 import { groupTasksByFlow, type FlowItem } from './flowGrouping';
@@ -123,5 +123,44 @@ describe('FlowStepCard — retried steps read as one step', () => {
     );
     expect(container.querySelectorAll('[data-testid="flow-step"]')).toHaveLength(4);
     expect(container.querySelectorAll('[data-testid="flow-step-attempts"]')).toHaveLength(0);
+  });
+});
+
+// ── fan-out flows do not auto-expand (2026-09-05) ────────────────────────────
+//
+// "Generate 3 images" is one flow of three IDENTICAL siblings. Following the
+// in-flight step (the rich live card a parse→download→transcribe pipeline
+// wants) drew a second "Generate image" row under the card, and the user read
+// it as a second task. A fan-out has nothing to follow step by step: dots only,
+// click a dot to open one.
+describe('FlowStepCard — fan-out flows', () => {
+  it('does not auto-expand a step for a homogeneous fan-out', () => {
+    renderFlow([
+      task({ task_type: 'canvas_gen', title: 'Generate image', status: 'processing', progress: 10, flow_id: 'f1' }),
+      task({ task_type: 'canvas_gen', title: 'Generate image', status: 'pending', progress: 0, flow_id: 'f1' }),
+    ]);
+    expect(screen.queryByTestId('flow-expanded-step')).toBeNull();
+    // Exactly one "Generate image" on screen: the flow title. A second one is
+    // the expanded child the user pointed at.
+    expect(screen.getAllByText('Generate image')).toHaveLength(1);
+  });
+
+  it('still follows the in-flight step of a pipeline (positive control)', () => {
+    renderFlow([
+      task({ task_type: 'parse', title: 'Parse https://x', subtitle: 'Some video', status: 'processing', progress: 40, flow_id: 'f2' }),
+      task({ task_type: 'download', title: 'Download Some video', status: 'pending', progress: 0, flow_id: 'f2' }),
+    ]);
+    expect(screen.getByTestId('flow-expanded-step')).toBeInTheDocument();
+  });
+
+  it('a pinned step still opens on a fan-out (click beats the default)', () => {
+    const { flow } = renderFlow([
+      task({ task_type: 'canvas_gen', title: 'Generate image', status: 'processing', progress: 10, flow_id: 'f3' }),
+      task({ task_type: 'canvas_gen', title: 'Generate image', status: 'pending', progress: 0, flow_id: 'f3' }),
+    ]);
+    const dots = screen.getAllByRole('button').filter((b) => b.getAttribute('data-step-id'));
+    expect(dots.length).toBe(flow.steps.length);
+    fireEvent.click(dots[1]);
+    expect(screen.getByTestId('flow-expanded-step')).toBeInTheDocument();
   });
 });
