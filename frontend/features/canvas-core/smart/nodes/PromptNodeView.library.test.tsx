@@ -184,6 +184,22 @@ describe('PromptNodeView Open Library button', () => {
     ).toThrow(/not mounted/);
   });
 
+  // The bookshelf is a BROWSE door, so it is ungated like its two siblings onto
+  // the same panel — the ⌘K row and the bare `L` shortcut. The Prompts page
+  // withholds every write in a read-only session and says so; a disabled button
+  // would instead put templates out of reach of a canvas you can only read.
+  it('the bookshelf still opens in a read-only session — the page withholds the writes', () => {
+    setNode();
+    useCanvasCoreStore.setState({ readOnly: true });
+    const openPanel = vi.spyOn(useLibraryStore.getState(), 'openPanel');
+    openPanel.mockClear();
+    renderNode(BASE_DATA);
+    const bookshelf = screen.getByTestId('prompt-library-button') as HTMLButtonElement;
+    expect(bookshelf.disabled).toBe(false);
+    fireEvent.click(bookshelf);
+    expect(openPanel).toHaveBeenCalledWith(expect.objectContaining({ page: 'prompts' }));
+  });
+
   it('a read-only canvas gets the button disabled rather than missing', () => {
     setNode();
     useCanvasCoreStore.setState({ readOnly: true });

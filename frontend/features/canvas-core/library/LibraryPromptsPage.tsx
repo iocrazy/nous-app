@@ -34,6 +34,7 @@ import { chipClass, type Label } from './libraryChrome';
 import { LibraryPromptList } from './LibraryPromptList';
 import { LibraryPromptPreview, activeSlide } from './LibraryPromptPreview';
 import { useLibraryStore, type LibraryTarget } from './libraryStore';
+import { titleFromBody } from './promptPanelTarget';
 import { EditorGoneError, getMentionHandle } from './mentionHandles';
 import { appendPositive, buildApplyAllPatch, groupChips } from './promptActions';
 import { usePromptCatalog } from './usePromptCatalog';
@@ -137,7 +138,7 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
     if (mode === 'promote' && entry) {
       setFormValue(initialTemplateValue(entry, undefined, lang));
     } else if (mode === 'current' && targetData) {
-      setFormValue({ title: ((targetData.body ?? '') as string).split('\n')[0].slice(0, 40) || t('canvas.library.untitledPrompt', 'Prompt'), group: '', positive: (targetData.body ?? '') as string, negative: (targetData.negative_body ?? '') as string, exampleIds: [] });
+      setFormValue({ title: titleFromBody(targetData.body as string | undefined, t('canvas.library.untitledPrompt', 'Prompt')), group: '', positive: (targetData.body ?? '') as string, negative: (targetData.negative_body ?? '') as string, exampleIds: [] });
     } else {
       setFormValue({ title: '', group: '', positive: '', negative: '', exampleIds: [] });
     }

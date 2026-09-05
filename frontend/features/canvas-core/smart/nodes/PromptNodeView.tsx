@@ -36,6 +36,7 @@ import { addReferences } from '../../library/addReferences';
 import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
 import { useLibraryDrop, useLibraryMention } from '../../library/useLibraryDrop';
 import { useLibraryStore } from '../../library/libraryStore';
+import { promptPanelTarget } from '../../library/promptPanelTarget';
 import { EditorGoneError, registerMentionHandle } from '../../library/mentionHandles';
 import type { PromptImageRef } from './promptImageRefs';
 import {
@@ -61,26 +62,6 @@ const GRIP_PX = 18;
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
 import { CANVAS_PILL_TRIGGER } from './canvasPill';
-
-/**
- * How the Library panel's target bar names a prompt card.
- *
- * The card's own heading is the literal "Prompt", so the body's first line is
- * the only thing a user would recognise it by. Both doors onto the panel (the
- * header's Open Library and the bookshelf) route through here, so a node can
- * never be named one way on the Media page and another on Prompts.
- */
-function promptPanelTarget(
-  nodeId: string,
-  body: string | undefined,
-  fallback: string,
-): { nodeId: string; kind: 'prompt'; title: string } {
-  return {
-    nodeId,
-    kind: 'prompt',
-    title: (body ?? '').split('\n')[0].slice(0, 40) || fallback,
-  };
-}
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
@@ -320,17 +301,22 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // entry would be dropped without a word. Three buttons open it — the
   // header's fixed one (every kind), and the two reference affordances that
   // exist on gen kinds only.
+  //
+  // The key+default pair is written ONCE: two callbacks each spelling out
+  // `t('canvas.library.untitledPrompt', 'Prompt')` can drift by one edit, and
+  // the two doors would then name the same card differently.
+  const untitledPrompt = t('canvas.library.untitledPrompt', 'Prompt');
   const openLibraryForNode = useCallback(() => {
-    const target = promptPanelTarget(id, body, t('canvas.library.untitledPrompt', 'Prompt'));
+    const target = promptPanelTarget(id, body, untitledPrompt);
     useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads', focusSearch: true, target });
-  }, [id, body, t]);
+  }, [id, body, untitledPrompt]);
   // The bookshelf: the SAME target, a different page. Prompt templates used to
   // be an in-card picker of their own; they are a page of the one panel now, so
   // both doors name this node identically in the target bar.
   const openPromptsForNode = useCallback(() => {
-    const target = promptPanelTarget(id, body, t('canvas.library.untitledPrompt', 'Prompt'));
+    const target = promptPanelTarget(id, body, untitledPrompt);
     useLibraryStore.getState().openPanel({ page: 'prompts', focusSearch: true, target });
-  }, [id, body, t]);
+  }, [id, body, untitledPrompt]);
   // Publish this card's inserters so the PANEL can write chips into the body.
   // The panel knows only the node id — the editor handle lives in this render.
   //
@@ -587,11 +573,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           </button>
           <button
             type="button"
-            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center`}
             onClick={openPromptsForNode}
             aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
             data-testid="prompt-library-button"
-            disabled={readOnly}
           >
             <Library size={12} />
           </button>

@@ -229,14 +229,16 @@ export function AttachedComposerPanel({
           />
         )}
       </div>
-      {/* No target: the composer is not a prompt NODE yet — Run is what mints
-          one — so there is nothing for the panel's target bar to aim at. It
-          opens on Prompts and the user copies from there. */}
+      {/* `target: null` CLEARS the aim; omitting the key would keep whatever is
+          armed (openPanel treats undefined as "leave it"). The composer is not
+          a prompt NODE yet — Run is what mints one — so there is nothing here
+          to aim at, and a panel left aimed at some other card would Insert and
+          Apply-all into a node the user never clicked. */}
       <button
         type="button"
         data-testid="composer-library"
         aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
-        onClick={() => useLibraryStore.getState().openPanel({ page: 'prompts' })}
+        onClick={() => useLibraryStore.getState().openPanel({ page: 'prompts', target: null })}
         className="nodrag absolute right-3 top-16 flex h-6 w-6 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
       >
         <Library size={12} />

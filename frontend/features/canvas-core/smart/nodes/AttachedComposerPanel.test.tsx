@@ -127,9 +127,26 @@ describe('AttachedComposerPanel', () => {
     const openPanel = vi.spyOn(useLibraryStore.getState(), 'openPanel');
     render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A]} pinned />);
     fireEvent.click(screen.getByTestId('composer-library'));
-    expect(openPanel).toHaveBeenCalledWith({ page: 'prompts' });
+    expect(openPanel).toHaveBeenCalledWith({ page: 'prompts', target: null });
     expect(screen.queryByTestId('asset-prompt-picker')).toBeNull();
-    openPanel.mockRestore();
+  });
+
+  // `openPanel` reads a MISSING `target` as "keep the one you have", so the
+  // composer door has to clear it explicitly. Without that, a panel already
+  // aimed at a prompt card stays aimed at it, and the Prompts page's Insert /
+  // Apply-all write through `target.nodeId` — into a card nobody clicked.
+  it('clears a target another card armed, rather than inheriting its aim', () => {
+    seed();
+    useLibraryStore.getState().openPanel({
+      page: 'prompts',
+      target: { nodeId: 'p9', kind: 'prompt', title: 'someone else' },
+    });
+    expect(useLibraryStore.getState().target).not.toBeNull();
+
+    render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A]} pinned />);
+    fireEvent.click(screen.getByTestId('composer-library'));
+
+    expect(useLibraryStore.getState().target).toBeNull();
   });
 
   it('read-only renders nothing', () => {

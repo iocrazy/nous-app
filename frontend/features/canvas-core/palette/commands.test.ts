@@ -285,6 +285,5 @@ describe('library-add command', () => {
     cmd.run();
     expect(openPanel).toHaveBeenCalledWith();
     expect(cmd.enabled?.() ?? true).toBe(true);
-    openPanel.mockRestore();
   });
 });
