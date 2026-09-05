@@ -5437,7 +5437,32 @@
     "agentAsking": "Agent 需要你的回复",
     "replyHere": "输入你的回复…",
     "reply": "回复",
-    "replying": "提交中…"
+    "replying": "提交中…",
+    "budget": "预算",
+    "editBudget": "修改",
+    "unlimited": "不限",
+    "budgetRule": "80% 提醒，100% 记录",
+    "budgetInvalid": "请输入 0 或以上的整数（分）",
+    "done": "完成",
+    "now": "正在",
+    "steps": "步骤",
+    "context": "上下文",
+    "cancelling": "取消中…",
+    "retryWaiting": "重试 {{attempt}}/{{max}} · 等待 {{s}}s",
+    "retried": "已重试 {{attempt}}/{{max}}",
+    "subIssuesDone": "子任务 {{done}}/{{total}} 完成",
+    "inboxPending": "{{count}} 条插话待领取",
+    "steerHint": "agent 运行中——你的评论会在它下一步开始前被读到。",
+    "replyHint": "你的评论将开始 agent 的下一轮。",
+    "divertedToast": "已送达运行中的 agent——下一步前读到",
+    "phase": {
+      "running": "运行中",
+      "waiting_input": "等你回答",
+      "paused": "已暂停",
+      "blocked": "受阻",
+      "done": "已完成",
+      "idle": "空闲"
+    }
   },
   "issues": {
     "pageTitle": "待办事项",

@@ -95,6 +95,10 @@ export interface IssueMessagePostResponse {
    *  (suppressed / `/note` body) and the Legacy path (no assignee agent)
    *  both start nothing and leave this false. */
   agent_dispatched: boolean;
+  /** harness P4 §1-③: a root run was mid-turn, so the comment went to its
+   *  inbox (claimed before the next step) instead of starting a new turn. */
+  diverted_to_inbox?: boolean;
+  inbox_id?: string | null;
 }
 
 /** Thrown by callers (e.g. TaskCenter's needs-input answer handler) when a

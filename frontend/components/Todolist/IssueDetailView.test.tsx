@@ -14,7 +14,11 @@ import type { Issue } from '../../services/issuesService';
 // Inline defaults are the real UI copy — return them so assertions read
 // like the screen does.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, fallback?: string) => fallback ?? key }),
+  useTranslation: () => ({
+    // `t(key, 'Fallback')` echoes the real UI copy; `t(key, {vars})` echoes
+    // the key so interpolated strings stay assertable.
+    t: (key: string, arg2?: unknown) => (typeof arg2 === 'string' ? arg2 : key),
+  }),
 }));
 
 vi.mock('../../services/usageService', () => ({
@@ -46,11 +50,51 @@ vi.mock('../../supabaseClient', () => ({ getSupabaseClient: () => null }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 
 // Child panels do their own fetching — out of scope for this view's test.
-vi.mock('./PipelineRunStrip', () => ({ PipelineRunStrip: () => null }));
+vi.mock('./blocks/PipelineRunStrip', () => ({ PipelineRunStrip: () => null }));
 vi.mock('./DeliverablesZone', () => ({ DeliverablesZone: () => null }));
-vi.mock('./StageBriefMirror', () => ({ StageBriefMirror: () => null }));
 vi.mock('./RunPipelineMenu', () => ({ RunPipelineMenu: () => null }));
 vi.mock('./IssueRelatedTab', () => ({ IssueRelatedTab: () => null }));
+vi.mock('../../services/workflowService', () => ({
+  fetchStageBoard: vi.fn(async () => ({ node: { brief: '', status: 'todo' } })),
+}));
+
+// issue.rollup — the cockpit + rail read it; the default is a running issue
+// with one live run so the cockpit has something to draw.
+const progressState: { value: Record<string, unknown> | null } = { value: null };
+vi.mock('../../services/issuesService', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../services/issuesService')>();
+  return {
+    ...mod,
+    getIssueProgress: vi.fn(async () => progressState.value),
+    updateIssue: vi.fn(async () => ({})),
+  };
+});
+vi.mock('../../services/aiLibraryService', () => ({ aiLibraryService: { cancelRun: vi.fn(async () => undefined) } }));
+
+function mkProgress(over: Record<string, unknown> = {}) {
+  return {
+    issue_id: '1',
+    status: 'in_progress',
+    phase: 'running',
+    paused_at: null,
+    current_run: {
+      id: '501',
+      status: 'running',
+      started_at: '2026-08-03T00:00:00Z',
+      model: 'm',
+      view: { v: 1, phase: 'running', step: { done: 3, total: 7, label: 'Drafting scene 3' }, current: { turn: 1, step: 4, model: 'm' }, retry: null, context: { used_pct: 62, window: 128000 }, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 1, budget: null, revision: 9 },
+      cost: { spent_cents: 0.9 },
+    },
+    runs: [{ id: '501', status: 'running', started_at: '2026-08-03T00:00:00Z', ended_at: null, model: 'm', error_code: null, cost_cents: 0.9, ended: null, step: null }, { id: '500', status: 'completed', started_at: null, ended_at: null, model: 'm', error_code: null, cost_cents: 0.7, ended: { reason: 'completed' }, step: null }],
+    sub_issues: { total: 2, done: 1, items: [] },
+    inbox_pending: 1,
+    budget: { budget_cents: 200, spent_cents: 160, pct: 80, state: 'warn' },
+    origin: { kind: 'manual', origin_id: null },
+    execution_state: { turn: 3 },
+    computed_at: '2026-08-03T00:00:01Z',
+    ...over,
+  };
+}
 
 const { IssueDetailView } = await import('./IssueDetailView');
 
@@ -112,7 +156,10 @@ function renderDetail(issue: UiIssue) {
 }
 
 describe('IssueDetailView — 右栏进度/关联轨道', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress();
+  });
 
   it('renders the progress panel with status, run count and assignee', async () => {
     const { container } = renderDetail(mkIssue());
@@ -149,7 +196,10 @@ describe('IssueDetailView — 右栏进度/关联轨道', () => {
 });
 
 describe('IssueDetailView — needs_input 提问卡挂载', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress({ phase: 'waiting_input', current_run: null, runs: [] });
+  });
 
   it('mounts the question card when the agent declared needs_input', async () => {
     const { container } = renderDetail(mkIssue({
@@ -180,5 +230,84 @@ describe('IssueDetailView — needs_input 提问卡挂载', () => {
       expect(container.querySelector('[data-testid="detail-progress-panel"]')).not.toBeNull();
     });
     expect(container.querySelector('[data-testid="needs-input-card"]')).toBeNull();
+  });
+});
+
+
+describe('IssueDetailView — cockpit + 区块注册表 (harness P4 T8)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress();
+  });
+
+  it('draws the cockpit from the rollup through the selectors', async () => {
+    const { container } = renderDetail(mkIssue());
+    const cockpit = await waitFor(() => {
+      const el = container.querySelector('[data-testid="issue-cockpit"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(cockpit.querySelector('[data-testid="cockpit-steps"]')?.textContent).toMatch(/3\/7/);
+    expect(cockpit.querySelector('[data-testid="cockpit-context"]')?.textContent).toMatch(/62%/);
+    expect(cockpit.querySelector('[data-testid="cockpit-budget"]')?.textContent).toMatch(/\$1\.60.*\$2\.00/);
+    expect(cockpit.querySelector('[data-testid="cockpit-runs"]')?.textContent).toMatch(/2.*turn 1.*step 4/);
+    expect(cockpit.textContent).toContain('Drafting scene 3');
+    expect(cockpit.querySelector('[data-testid="cockpit-cancel"]')).not.toBeNull();
+    expect(cockpit.querySelector('[data-testid="cockpit-subline"]')?.textContent).toMatch(/issueDetail\.subIssuesDone/);
+    // composer says what a comment does while the agent runs
+    expect(screen.getByTestId('reply-hint').textContent).toMatch(/picked up before its next step/);
+  });
+
+  it('cancel goes through the run cancel endpoint with the current run id', async () => {
+    const { aiLibraryService } = await import('../../services/aiLibraryService');
+    const { container } = renderDetail(mkIssue());
+    const btn = await waitFor(() => {
+      const el = container.querySelector('[data-testid="cockpit-cancel"]');
+      expect(el).not.toBeNull();
+      return el as HTMLButtonElement;
+    });
+    btn.click();
+    await waitFor(() => expect(aiLibraryService.cancelRun).toHaveBeenCalledWith('501'));
+  });
+
+  it('draws no cockpit and a reply hint when idle', async () => {
+    progressState.value = mkProgress({ phase: 'idle', current_run: null, runs: [] });
+    const { container } = renderDetail(mkIssue());
+    await waitFor(() => expect(container.querySelector('[data-testid="detail-progress-panel"]')).not.toBeNull());
+    await waitFor(() => expect(screen.getByTestId('reply-hint').textContent).toMatch(/starts the agent/));
+    expect(container.querySelector('[data-testid="cockpit-cancel"]')).toBeNull();
+  });
+
+  it('blocks match by origin kind: a publish issue gets no stage brief, a project_stage mirror does', async () => {
+    const { fetchStageBoard } = await import('../../services/workflowService');
+    progressState.value = mkProgress({ origin: { kind: 'publish', origin_id: 'p-1' } });
+    const first = renderDetail(mkIssue({ raw: { origin_kind: 'publish', origin_id: 'p-1' } as never }));
+    await waitFor(() => expect(first.container.querySelector('[data-testid="detail-budget-panel"]')).not.toBeNull());
+    expect(fetchStageBoard).not.toHaveBeenCalled();
+    first.unmount();
+    progressState.value = mkProgress({ origin: { kind: 'project_stage', origin_id: 'node-1' } });
+    renderDetail(mkIssue({ raw: { origin_kind: 'project_stage', origin_id: 'node-1' } as never }));
+    await waitFor(() => expect(fetchStageBoard).toHaveBeenCalledWith('7', 'node-1'));
+  });
+
+  it('shows the budget block with spend / budget and edits through PATCH', async () => {
+    const { updateIssue } = await import('../../services/issuesService');
+    const { container } = renderDetail(mkIssue());
+    const panel = await waitFor(() => {
+      const el = container.querySelector('[data-testid="detail-budget-panel"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(panel.querySelector('[data-testid="budget-spent"]')?.textContent).toMatch(/\$1\.60.*\$2\.00/);
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.click(panel.querySelector('button') as HTMLButtonElement); // Edit
+    const input = await waitFor(() => {
+      const el = panel.querySelector('[data-testid="budget-input"]');
+      expect(el).not.toBeNull();
+      return el as HTMLInputElement;
+    });
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.submit(input.closest('form')!);
+    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(1, { budget_cents: 500 }));
   });
 });

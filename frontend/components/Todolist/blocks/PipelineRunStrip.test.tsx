@@ -10,10 +10,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PipelineRunStrip } from './PipelineRunStrip';
-import type { PipelineRun } from '../../services/pipelinesService';
-import * as svc from '../../services/pipelinesService';
+import type { PipelineRun } from '../../../services/pipelinesService';
+import * as svc from '../../../services/pipelinesService';
 
-vi.mock('../../services/pipelinesService', () => ({
+vi.mock('../../../services/pipelinesService', () => ({
   listIssuePipelineRuns: vi.fn(),
   cancelRun: vi.fn(),
 }));

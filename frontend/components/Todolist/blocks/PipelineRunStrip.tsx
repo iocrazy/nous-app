@@ -14,8 +14,8 @@ import {
   cancelRun,
   listIssuePipelineRuns,
   type PipelineRun,
-} from '../../services/pipelinesService';
-import type { AgentRef } from './types';
+} from '../../../services/pipelinesService';
+import type { AgentRef } from '../types';
 
 interface Props {
   issueId: number | string;

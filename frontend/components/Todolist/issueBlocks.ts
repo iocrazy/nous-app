@@ -8,14 +8,31 @@
 
 import type { ComponentType } from 'react';
 
+import type { IssueProgress } from '../../services/issuesService';
+
 export type IssueBlockZone = 'cockpit' | 'timeline' | 'context';
+
+/** Page-level handles a block may need beyond the issue itself. Optional so
+ * matchers can be tested with literals; blocks degrade when a field is absent. */
+export interface IssueBlockEnv {
+  agentsById?: Record<string, { id: string; name?: string | null }>;
+  projectPath?: string | null;
+  subtaskCount?: { total: number; done: number } | null;
+  assigneeName?: string;
+  refreshKey?: number;
+  teamId?: string;
+  /** Ask the page to re-read the issue + rollup (after a PATCH, a cancel …). */
+  onIssueChanged?: () => void;
+}
 
 /** What `match` sees. Kept structural so blocks can be tested with literals. */
 export interface IssueBlockContext {
   issue: Record<string, unknown>;
-  rollup: Record<string, unknown> | null;
+  /** issue.rollup from GET /issues/{id}/progress; null until loaded. */
+  rollup: IssueProgress | null;
   originKind: string | null;
   phase: string | null;
+  env: IssueBlockEnv;
 }
 
 export interface IssueBlockProps {
@@ -62,13 +79,16 @@ export function __resetIssueBlocks(): void {
 /** Build the matcher input from an issue row + its rollup. */
 export function issueBlockContext(
   issue: Record<string, unknown>,
-  rollup: Record<string, unknown> | null,
+  rollup: IssueProgress | null,
+  env: IssueBlockEnv = {},
 ): IssueBlockContext {
-  const origin = (rollup?.origin as Record<string, unknown> | undefined)?.kind ?? issue.origin_kind;
+  const raw = issue.raw as Record<string, unknown> | undefined;
+  const origin = rollup?.origin?.kind ?? issue.origin_kind ?? raw?.origin_kind;
   return {
     issue,
     rollup,
     originKind: typeof origin === 'string' ? origin : null,
-    phase: typeof rollup?.phase === 'string' ? (rollup.phase as string) : null,
+    phase: typeof rollup?.phase === 'string' ? rollup.phase : null,
+    env,
   };
 }

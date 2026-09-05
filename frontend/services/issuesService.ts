@@ -62,6 +62,9 @@ export interface Issue {
   ai_session_id: string | null;
   execution_locked_at: string | null;
   execution_state: Record<string, unknown> | null;
+  /** harness P4 (mig 453): target-level pause + budget. Absent on older payloads. */
+  paused_at?: string | null;
+  budget_cents?: number | null;
   request_depth: number;
   started_at: string | null;
   completed_at: string | null;
@@ -96,6 +99,9 @@ export interface IssueCreatePayload {
 }
 
 export interface IssueUpdatePayload {
+  /** harness P4 §1-⑤: integer cents, >= 0; NULL = unlimited (use clear_budget). */
+  budget_cents?: number;
+  clear_budget?: boolean;
   title?: string;
   description?: string;
   priority?: IssuePriority;
@@ -275,3 +281,50 @@ export async function deleteIssue(issueId: number): Promise<void> {
 
 // UI label/order/color maps live in components/Todolist/issueConfig.ts
 // (single source of truth). The service layer stays presentation-free.
+
+
+// ── issue.rollup (harness P4 §1-②) ──────────────────────────────────────────
+
+export type IssuePhase = 'paused' | 'waiting_input' | 'running' | 'blocked' | 'done' | 'idle';
+
+export interface IssueProgressRun {
+  id: string;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  model: string | null;
+  error_code: string | null;
+  cost_cents: number;
+  ended: { reason: string } | null;
+  step: { done: number; total: number; label: string | null } | null;
+}
+
+export interface IssueProgress {
+  issue_id: string;
+  status: string;
+  phase: IssuePhase;
+  paused_at: string | null;
+  current_run: {
+    id: string;
+    status: string;
+    started_at: string | null;
+    model: string | null;
+    /** `agent_runs.metadata_json.view` — read through runView.ts selectors. */
+    view: Record<string, unknown>;
+    cost: Record<string, unknown>;
+  } | null;
+  runs: IssueProgressRun[];
+  sub_issues: { total: number; done: number; items: { id: string; identifier: string | null; title: string | null; status: string | null }[] };
+  inbox_pending: number;
+  budget: { budget_cents: number | null; spent_cents: number; pct: number | null; state: 'ok' | 'warn' | 'over' };
+  origin: { kind: string; origin_id?: string | null; [k: string]: unknown };
+  execution_state: Record<string, unknown>;
+  computed_at: string;
+}
+
+/** `GET /issues/{id}/progress` — computed from the runs, never from
+ *  execution_state alone (the MH-1 drift). */
+export async function getIssueProgress(issueId: number): Promise<IssueProgress> {
+  const res = await fetch(`${_base}/${issueId}/progress`, { headers: await getAuthHeaders() });
+  return _json<IssueProgress>(res);
+}
