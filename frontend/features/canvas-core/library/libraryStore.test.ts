@@ -79,14 +79,14 @@ describe('libraryStore', () => {
     expect(useLibraryStore.getState().focusNonce).toBe(before + 1);
   });
 
-  it('persists page / store / width, and nothing else', () => {
+  it('persists page / store / width / lang, and nothing else', () => {
     const s = useLibraryStore.getState();
     s.openPanel({ mediaStore: 'assets' });
     s.setWidth(420);
     s.setQuery('harbour');
     s.setSelection(['uploads:1']);
     const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
-    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 420 });
+    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 420, promptLang: 'en' });
   });
 
   // ── Spec §3.1: the aimed-at node is highlighted while the panel points at
@@ -140,7 +140,7 @@ describe('libraryStore', () => {
     expect(s().uploadSource).toBe('all');
   });
 
-  it('the source chip is NOT persisted — only page / store / width are', () => {
+  it('the source chip is NOT persisted — only the four durable knobs are', () => {
     // A restored "Downloaded" would open the shelf tomorrow already filtered,
     // with the chip the only clue, on a panel the user last used for uploads.
     const s = () => useLibraryStore.getState();
@@ -148,7 +148,7 @@ describe('libraryStore', () => {
     s().setUploadSource('web');
     const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
     expect(saved.uploadSource).toBeUndefined();
-    expect(saved).toEqual({ page: 'media', mediaStore: 'uploads', width: 340 });
+    expect(saved).toEqual({ page: 'media', mediaStore: 'uploads', width: 340, promptLang: 'en' });
   });
 
   it('the Assets shelf starts narrowed to the library', () => {
@@ -157,13 +157,13 @@ describe('libraryStore', () => {
     expect(useLibraryStore.getState().assetsInLibraryOnly).toBe(true);
   });
 
-  it('the in-library toggle is NOT persisted — only page / store / width are', () => {
+  it('the in-library toggle is NOT persisted — only the four durable knobs are', () => {
     const s = () => useLibraryStore.getState();
     s().openPanel({ mediaStore: 'assets' });
     s().setAssetsInLibraryOnly(false);
     const saved = JSON.parse(localStorage.getItem(LIBRARY_STORAGE_KEY) ?? '{}');
     expect(saved.assetsInLibraryOnly).toBeUndefined();
-    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 340 });
+    expect(saved).toEqual({ page: 'media', mediaStore: 'assets', width: 340, promptLang: 'en' });
   });
 
   it('widening the Assets shelf drops the selection with it', () => {
@@ -224,5 +224,29 @@ describe('libraryStore', () => {
   it('a corrupt stored value is ignored, not thrown on', () => {
     localStorage.setItem(LIBRARY_STORAGE_KEY, '{not json');
     expect(() => useLibraryStore.getState().setWidth(360)).not.toThrow();
+  });
+
+  it('switches width with the page and persists the language', () => {
+    useLibraryStore.getState().setPage('prompts');
+    expect(useLibraryStore.getState().width).toBe(600);
+    useLibraryStore.getState().setPage('media');
+    expect(useLibraryStore.getState().width).toBe(340);
+    useLibraryStore.getState().setPromptLang('zh');
+    expect(JSON.parse(localStorage.getItem('canvas.library.v1')!).promptLang).toBe('zh');
+  });
+
+  it('prompt segment and form are session state with sane defaults', () => {
+    expect(useLibraryStore.getState().promptSegment).toBe('mine');
+    expect(useLibraryStore.getState().promptForm).toBeNull();
+    useLibraryStore.getState().setPromptSegment('system');
+    useLibraryStore.getState().setPromptForm('album');
+    expect(useLibraryStore.getState().promptSegment).toBe('system');
+    // Neither setter persists, so nothing has written the blob yet — force a
+    // durable write and read what THAT wrote. Without this line there is no
+    // stored value at all and the assertions below would read as green on a
+    // store that did persist the two filters.
+    useLibraryStore.getState().setWidth(360);
+    expect(JSON.parse(localStorage.getItem('canvas.library.v1')!)).not.toHaveProperty('promptSegment');
+    expect(JSON.parse(localStorage.getItem('canvas.library.v1')!)).not.toHaveProperty('promptForm');
   });
 });

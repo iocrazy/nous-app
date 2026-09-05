@@ -344,6 +344,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           if (!editor) throw new EditorGoneError();
           editor.insertAsset(asset, opts);
         },
+        insertText: (text) => {
+          const editor = bodyEditorRef.current;
+          if (!editor) throw new EditorGoneError();
+          editor.insertText(text);
+        },
       }),
     [id],
   );

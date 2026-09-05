@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 
+import type { PromptForm, PromptSegment } from '../../../services/promptsService';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type {
   AssetScope,
@@ -33,6 +34,11 @@ const STORAGE_NAMESPACE = 'canvas.library';
 export const LIBRARY_STORAGE_KEY = `${STORAGE_NAMESPACE}.v1`;
 
 export type LibraryPage = 'media' | 'prompts';
+
+/** The natural width of each page (spec §3.1). The Prompts page draws a card
+ *  grid with a preview column; at the Media page's 340px it wraps to one
+ *  narrow column per row and the preview is unreadable. */
+export const PANEL_WIDTH: Record<LibraryPage, number> = { media: 340, prompts: 600 };
 
 export interface LibraryTarget {
   nodeId: string;
@@ -78,9 +84,13 @@ interface Persisted {
   page: LibraryPage;
   mediaStore: LibraryStore;
   width: number;
+  /** Which language column of a prompt the Prompts page shows. Durable
+   *  because it is a reading preference, not a filter: it narrows nothing and
+   *  the toggle is on screen whenever the page is. */
+  promptLang: 'en' | 'zh';
 }
 
-const DEFAULTS: Persisted = { page: 'media', mediaStore: 'assets', width: 340 };
+const DEFAULTS: Persisted = { page: 'media', mediaStore: 'assets', width: 340, promptLang: 'en' };
 
 function readPersisted(): Persisted {
   try {
@@ -94,6 +104,7 @@ function readPersisted(): Persisted {
           ? parsed.mediaStore
           : 'assets',
       width: typeof parsed.width === 'number' && parsed.width > 0 ? parsed.width : DEFAULTS.width,
+      promptLang: parsed.promptLang === 'zh' ? 'zh' : 'en',
     };
   } catch (err) {
     // A corrupt value must degrade to the default, not white-screen the canvas.
@@ -133,6 +144,13 @@ export interface LibraryPanelState extends Persisted {
   assetsInLibraryOnly: boolean;
   assetScope: AssetScope;
   generatedScope: GeneratedScope;
+  /** Which shelf the Prompts page is showing. Not persisted: it is a filter,
+   *  and a restored `system` segment opens the page listing none of the user's
+   *  own prompts. */
+  promptSegment: PromptSegment;
+  /** The Prompts page's form filter, `null` for all forms. Not persisted, for
+   *  the same reason as `promptSegment`. */
+  promptForm: PromptForm | null;
   selection: LibraryItemKey[];
   target: LibraryTarget | null;
   /** Bumped whenever something asks the search box to take focus. */
@@ -147,6 +165,9 @@ export interface LibraryPanelState extends Persisted {
   toggle(): void;
   setPage(page: LibraryPage): void;
   setMediaStore(store: LibraryStore): void;
+  setPromptLang(lang: 'en' | 'zh'): void;
+  setPromptSegment(s: PromptSegment): void;
+  setPromptForm(f: PromptForm | null): void;
   setQuery(q: string): void;
   setKind(kind: string | null): void;
   setUploadSource(source: UploadSource): void;
@@ -157,10 +178,12 @@ export interface LibraryPanelState extends Persisted {
   /**
    * No caller yet — kept deliberately, not dead code awaiting a sweep.
    *
-   * `width` is already persisted and already read by the panel's geometry; P3's
-   * Prompts page opens at 600px against the Media page's 340px (spec §3.1), and
-   * this is the setter that switch goes through. Deleting it would mean
-   * re-adding the setter, the persist call and its test together next quarter.
+   * The PAGE-width switch does NOT come through here: `setPage` and `openPanel`
+   * assert `PANEL_WIDTH[page]` themselves, because that width belongs to the
+   * page rather than to whoever last called a setter. This one is for a width
+   * the USER chooses (a drag handle on the panel edge), which is why it
+   * persists. Deleting it would mean re-adding the setter, the persist call and
+   * its test together when that handle lands.
    */
   setWidth(px: number): void;
   clearTarget(): void;
@@ -182,8 +205,8 @@ function releaseHighlight(target: LibraryTarget | null): void {
 
 export const useLibraryStore = create<LibraryPanelState>((set, get) => {
   const persist = () => {
-    const { page, mediaStore, width } = get();
-    writePersisted({ page, mediaStore, width });
+    const { page, mediaStore, width, promptLang } = get();
+    writePersisted({ page, mediaStore, width, promptLang });
   };
   return {
     ...readPersisted(),
@@ -194,6 +217,8 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     assetsInLibraryOnly: true,
     assetScope: 'all',
     generatedScope: 'this-canvas',
+    promptSegment: 'mine',
+    promptForm: null,
     selection: [],
     target: null,
     focusNonce: 0,
@@ -212,9 +237,16 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
         // on `uploads`, and `assetsInLibraryOnly` is KEPT here on purpose —
         // see the Persisted doc above.
         const switching = opts.mediaStore !== undefined && opts.mediaStore !== s.mediaStore;
+        // Spec §3.1/§3.4: a page carries its own width, so an open that lands
+        // on the OTHER page re-asserts it. Guarded on the page actually
+        // changing — re-asserting on a same-page open would throw away a
+        // width the user dragged.
+        const nextPage = opts.page;
+        const changingPage = nextPage !== undefined && nextPage !== s.page;
         return {
           open: true,
-          page: opts.page ?? s.page,
+          page: nextPage ?? s.page,
+          ...(changingPage ? { width: PANEL_WIDTH[nextPage] } : null),
           mediaStore: opts.mediaStore ?? s.mediaStore,
           kind: switching ? null : s.kind,
           target: opts.target !== undefined ? opts.target : s.target,
@@ -243,7 +275,9 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
       else get().openPanel();
     },
     setPage(page) {
-      set({ page });
+      // Spec §3.1/§3.4: the two pages have different natural widths and the
+      // width is persisted, so switching pages re-asserts the page's width.
+      set({ page, width: PANEL_WIDTH[page] });
       persist();
     },
     setMediaStore(mediaStore) {
@@ -255,6 +289,19 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
       // the way back with nothing on screen saying why.
       set({ mediaStore, selection: [], kind: null, uploadSource: 'all' });
       persist();
+    },
+    setPromptLang(promptLang) {
+      set({ promptLang });
+      persist();
+    },
+    // Selection cleared for the reason the other filter setters clear it: the
+    // keys resolve against rows the narrowed query may not return, so a kept
+    // selection is counted by the footer and dropped at send time.
+    setPromptSegment(promptSegment) {
+      set({ promptSegment, selection: [] });
+    },
+    setPromptForm(promptForm) {
+      set({ promptForm });
     },
     setQuery(query) {
       set({ query });

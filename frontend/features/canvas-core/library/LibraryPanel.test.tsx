@@ -190,14 +190,16 @@ function textPromptNode() {
  *  `PromptNodeView`; the panel only ever sees it through the registry. */
 const insertImage = vi.fn();
 const insertAsset = vi.fn();
+const insertText = vi.fn();
 const handleUndos: Array<() => void> = [];
 function armMentionHandle(nodeId = 'p1') {
-  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset }));
+  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset, insertText }));
 }
 function releaseHandles() {
   while (handleUndos.length > 0) handleUndos.pop()?.();
   insertImage.mockReset();
   insertAsset.mockReset();
+  insertText.mockReset();
 }
 
 function renderPanel() {
