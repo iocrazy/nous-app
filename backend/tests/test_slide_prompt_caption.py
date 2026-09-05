@@ -305,6 +305,7 @@ async def test_caption_slide_workflow_merges_only_this_slide(tmp_path: Path) -> 
         return_value={"id": _RID, "media_id": _MID, "mime_type": "image/jpeg"}
     )
     repo.merge_slide_prompt = AsyncMock(return_value={"en": "a prompt"})
+    repo.update_resource = AsyncMock(return_value=None)
 
     media_repo = MagicMock()
     media_repo.get_by_id = AsyncMock(return_value={"download_path": "web/douyin/123"})
@@ -351,7 +352,12 @@ async def test_caption_slide_workflow_merges_only_this_slide(tmp_path: Path) -> 
     repo.merge_slide_prompt.assert_awaited_once_with(
         _RID, "002.jpg", {"en": "a prompt", "zh": "一句提示词"}
     )
-    repo.update_resource.assert_not_called()
+    # mig 453: the ONLY whole-row PATCH is the origin stamp. The slide text
+    # itself still travels exclusively through the per-slide merge, so this
+    # workflow still cannot clobber another slide's prompt — the property the
+    # blanket assert_not_called used to stand for.
+    repo.update_resource.assert_awaited_once_with(_RID, {"prompt_origin": "captioned"})
+    assert "slide_prompts" not in repo.update_resource.await_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -377,6 +383,7 @@ async def test_caption_slide_workflow_materializes_a_migrated_slide(
         return_value={"id": _RID, "media_id": _MID, "mime_type": "image/jpeg"}
     )
     repo.merge_slide_prompt = AsyncMock(return_value={"en": "a prompt"})
+    repo.update_resource = AsyncMock(return_value=None)
 
     media_repo = MagicMock()
     media_repo.get_by_id = AsyncMock(

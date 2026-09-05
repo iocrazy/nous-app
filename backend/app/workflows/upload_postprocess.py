@@ -51,6 +51,7 @@ from loguru import logger
 
 from app.db.scope import Scope, request_scope
 from app.services.library.media_storage import materialize
+from app.services.prompts.origin import stamp_origin
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -208,6 +209,7 @@ async def upload_postprocess_workflow(
                         if pair.get("params") and not current.get("gen_params"):
                             patch["gen_params"] = pair["params"]
                         if patch:
+                            stamp_origin(patch, "extracted")
                             await svc.repo.update_resource(resource_id, patch)
             except Exception as e:
                 logger.warning(

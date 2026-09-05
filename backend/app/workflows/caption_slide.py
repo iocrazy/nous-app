@@ -138,6 +138,9 @@ async def caption_slide_workflow(
             # negative-prompt field, so any neg_en/neg_zh the user typed by
             # hand survives (merge_slide_prompt merges INTO the existing entry).
             await repo.merge_slide_prompt(resource_id, slide_name, entry)
+            # mig 453: the row-level origin follows the last writer of any
+            # slide's text (spec §8 — per-slide origin is deferred).
+            await repo.update_resource(resource_id, {"prompt_origin": "captioned"})
 
         await manager.update_progress(wf_id, 100, subtitle="Slide prompt generated")
         logger.info(

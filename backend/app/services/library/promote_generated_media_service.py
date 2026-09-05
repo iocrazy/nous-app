@@ -217,6 +217,8 @@ class PromoteGeneratedMediaService:
                     "current_version": 1,
                     "file_hash": file_hash,
                     "gen_prompt": gen.get("prompt"),
+                    # mig 453: a generation's prompt is machine-recorded text.
+                    "prompt_origin": "extracted" if gen.get("prompt") else None,
                     "gen_params": generation_params_from_generated_media(gen),
                 }
             )

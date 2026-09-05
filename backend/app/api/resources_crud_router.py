@@ -45,6 +45,7 @@ from app.schemas.resources import (
 )
 from app.services.library.resource_file_path import resolve_resource_file_path
 from app.services.library.resources_service import ResourcesService
+from app.services.prompts.origin import stamp_origin
 
 router = APIRouter(prefix="/resources")
 
@@ -894,6 +895,11 @@ async def update_resource(
         # Trash must go through DELETE (resource_item removal).
         update_data.pop("is_trashed", None)
         update_data.pop("trashed_at", None)
+
+        # mig 453: a PATCH that carries prompt text is the user typing. The
+        # column is not in ResourceUpdate on purpose — clients do not get to
+        # claim an origin, the server derives it from what was written.
+        stamp_origin(update_data, "typed")
 
         if not update_data:
             return {"success": True, "data": resource}

@@ -104,6 +104,8 @@ async def test_caption_sb_row_calls_llm_with_materialized_path(tmp_path):
         "gen_prompt": "an english prompt",
         "gen_prompt_zh": "a zh prompt",
         "gen_prompt_json": None,
+        # mig 453: the caption workflow wrote the positive text.
+        "prompt_origin": "captioned",
     }
 
 
