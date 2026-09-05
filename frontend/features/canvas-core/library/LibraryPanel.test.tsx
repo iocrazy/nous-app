@@ -45,6 +45,7 @@ const fetchGenerated = vi.fn();
 const listGenerationCapabilities = vi.fn();
 const placeLibraryItems = vi.fn();
 const addReferences = vi.fn();
+const importResourceAsCanvasMedia = vi.fn();
 
 vi.mock('../../../services/resourceSearchService', () => ({
   searchResources: (...a: unknown[]) => searchResources(...a),
@@ -69,10 +70,18 @@ vi.mock('./addReferences', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   addReferences: (...a: unknown[]) => addReferences(...a),
 }));
+// The mention path does NOT go through the mocked `addReferences` — it resolves
+// each picked row through the real `resolveReferenceRefs`, which mints a durable
+// url for an upload. Left unmocked it would reach the network from a unit test.
+vi.mock('../smart/mediaImport', () => ({
+  importResourceAsCanvasMedia: (...a: unknown[]) => importResourceAsCanvasMedia(...a),
+}));
 
+import { MAX_REFERENCE_IMAGES } from '../smart/refOrder';
 import { _resetModelCapabilitiesCache } from '../smart/nodes/useModelCapabilities';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { LibraryPanel } from './LibraryPanel';
+import { registerMentionHandle } from './mentionHandles';
 import { PREVIEW_DELAY_MS } from './LibraryPreviewCard';
 import { useLibraryStore } from './libraryStore';
 
@@ -143,6 +152,39 @@ function promptNode(manualRefs: Array<{ url: string; kind: string }> = []) {
   };
 }
 
+/** A prompt card with NO `gen` — the legacy/Text kind. A text run sends
+ *  `body` only (`runner.backend.ts`), so a reference added here would be
+ *  dropped without a word; the panel offers MENTIONS instead. */
+function textPromptNode() {
+  return {
+    id: 'p1',
+    type: 'prompt',
+    position: { x: 0, y: 0 },
+    data: {
+      body: 'Harbour at dusk',
+      provider_slug: '',
+      agent_id: null,
+      run_status: 'idle',
+      resource_refs: [],
+      gen: null,
+    },
+  };
+}
+
+/** Stand in for the node's body editor. The real one is registered by
+ *  `PromptNodeView`; the panel only ever sees it through the registry. */
+const insertImage = vi.fn();
+const insertAsset = vi.fn();
+const handleUndos: Array<() => void> = [];
+function armMentionHandle(nodeId = 'p1') {
+  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset }));
+}
+function releaseHandles() {
+  while (handleUndos.length > 0) handleUndos.pop()?.();
+  insertImage.mockReset();
+  insertAsset.mockReset();
+}
+
 function renderPanel() {
   return render(
     <MemoryRouter initialEntries={[`/team/${SCOPE}/canvas/900000000000000001`]}>
@@ -188,11 +230,16 @@ beforeEach(() => {
     nodeIds: ['media-1'], inserted: 1, skipped: 0, failed: [],
   });
   addReferences.mockReset().mockResolvedValue({ added: 1, skipped: 0, clamped: 0, failed: [] });
+  importResourceAsCanvasMedia
+    .mockReset()
+    .mockResolvedValue({ url: '/api/v1/generated-media/gm-1/file', kind: 'image' });
+  releaseHandles();
 });
 
 afterEach(() => {
   HTMLElement.prototype.getBoundingClientRect = realRect;
   cleanup();
+  releaseHandles();
   useCanvasCoreStore.getState().reset();
 });
 
@@ -631,5 +678,132 @@ describe('LibraryPanel', () => {
     await openOnUploads();
     fireEvent.click(screen.getByTestId('library-select-all'));
     expect(useLibraryStore.getState().selection).toEqual([`uploads:${UPLOAD_ROW.id}`]);
+  });
+});
+
+// ── A Text-kind target commits MENTIONS, not references ─────────────────────
+//
+// The header's Open Library button (follow-up Task 3) can aim the panel at a
+// prompt of ANY kind, and a text run sends `body` alone — `manual_refs` on a
+// text node is dropped by the runner with nothing said. So when the aim is a
+// text prompt the primary action writes chips into the body instead, which is
+// the same result the `⌥`-drop already produces.
+
+describe('LibraryPanel aimed at a Text-kind prompt', () => {
+  const TEXT_TARGET = { nodeId: 'p1', kind: 'prompt' as const, title: 'Harbour at dusk' };
+
+  it('offers Insert Mentions where a gen node offers Add References', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    expect(screen.getByTestId('library-primary').textContent).toContain('Insert 1 Mentions');
+  });
+
+  it('a gen node still offers Add References — the split is on `gen`, not on the panel', async () => {
+    seedNodes([promptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    expect(screen.getByTestId('library-primary').textContent).toContain('Add 1 References');
+  });
+
+  it('inserting writes a chip through the node handle, and never a reference', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(insertImage).toHaveBeenCalledTimes(1));
+    // `consumeMention: false` is load-bearing: the default deletes back to the
+    // last `@` within 80 characters of the caret, which is the `@` picker's
+    // contract and destroys text on a path that has no pending query.
+    expect(insertImage.mock.calls[0][1]).toEqual({ consumeMention: false });
+    expect(insertImage.mock.calls[0][0]).toMatchObject({
+      url: '/api/v1/generated-media/gm-1/file',
+      alias: UPLOAD_ROW.name,
+    });
+    expect(addReferences).not.toHaveBeenCalled();
+    // A commit that worked clears the pick, exactly as the reference path does
+    // — otherwise a second click silently inserts the same chip again.
+    await waitFor(() => expect(useLibraryStore.getState().selection).toEqual([]));
+  });
+
+  it('says the consequence in the text prompt is chips, not reference images', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    const line = screen.getByTestId('library-consequence').textContent ?? '';
+    expect(line).toContain('Inserting mentions into Harbour at dusk');
+    expect(line).toContain('not reference images');
+  });
+
+  it('with no editor registered it refuses OUT LOUD rather than doing nothing', async () => {
+    // The card can be unmounted — the surface culls off-viewport nodes — and
+    // an insert into an editor that is not there must not be a silent no-op.
+    seedNodes([textPromptNode()]);
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    expect(String(addToast.mock.calls[0][0])).toContain('Open the prompt node');
+    expect(String(addToast.mock.calls[0][1])).toBe('error');
+    expect(insertImage).not.toHaveBeenCalled();
+    // The pick survives a refusal — clearing it would look like success.
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('a mention that fails is reported in the mention vocabulary', async () => {
+    importResourceAsCanvasMedia.mockRejectedValue(new Error('mint down'));
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    expect(String(addToast.mock.calls[0][0])).toContain('could not be inserted as a mention');
+    expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('double-clicking one row inserts that row alone', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.doubleClick(screen.getAllByTestId('library-cell')[0]);
+    await waitFor(() => expect(insertImage).toHaveBeenCalledTimes(1));
+    expect(addReferences).not.toHaveBeenCalled();
+  });
+
+  it('drops the reference file count — a mention is not a reference send', async () => {
+    seedNodes([textPromptNode()]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    // The footer's "N files" describes what the model receives as references.
+    // On a text prompt that number is zero by construction, and printing it
+    // would claim a send that never happens.
+    const footer = screen.getByTestId('library-footer-count').textContent ?? '';
+    expect(footer).toContain('1 selected');
+    expect(footer).not.toContain('file');
+  });
+
+  it('leftover manual_refs on a switched-to-Text node do not raise a quota note', async () => {
+    // Switching a card from Image to Text keeps whatever `manual_refs` it had.
+    // Those are dead weight a text run ignores, so a "20 / 20 references used"
+    // note over a mention shelf would be a true number about the wrong thing —
+    // and the ceiling it enforces would disable an action that spends none of
+    // that quota. Filled to `MAX_REFERENCE_IMAGES` on purpose: below it the
+    // case passes whether or not the mention branch is exempt.
+    const node = textPromptNode();
+    (node.data as Record<string, unknown>).manual_refs = Array.from(
+      { length: MAX_REFERENCE_IMAGES },
+      (_, i) => ({ url: `/api/v1/resources/${i + 1}/cover`, kind: 'image' }),
+    );
+    seedNodes([node]);
+    armMentionHandle();
+    await openOnUploads(TEXT_TARGET);
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    expect(screen.queryByTestId('library-note')).toBeNull();
+    expect((screen.getByTestId('library-primary') as HTMLButtonElement).disabled).toBe(false);
   });
 });

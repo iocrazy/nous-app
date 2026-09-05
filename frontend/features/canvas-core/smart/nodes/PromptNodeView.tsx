@@ -4,7 +4,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
-import { ImagePlus, Library, Play, Split, Square, Zap } from 'lucide-react';
+import { ImagePlus, Images, Library, Play, Split, Square, Zap } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
 import type { DroppedRef, GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
@@ -37,6 +37,7 @@ import { addReferences } from '../../library/addReferences';
 import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
 import { useLibraryDrop, useLibraryMention } from '../../library/useLibraryDrop';
 import { useLibraryStore } from '../../library/libraryStore';
+import { registerMentionHandle } from '../../library/mentionHandles';
 import type { PromptImageRef } from './promptImageRefs';
 import {
   PromptMentionPicker,
@@ -299,11 +300,37 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const requestChainStop = useChainRunStore((s) => s.requestStop);
   // The card's heading is the literal "Prompt", so the body's first line is
   // what a user would call this one — that is what the target bar names.
-  const openLibraryForRefs = useCallback(() => {
+  //
+  // Named ForNode rather than ForRefs because what the panel COMMITS depends
+  // on the target's kind, and this function does not decide it. Aimed at an
+  // Image/Video prompt it adds references; aimed at a Text prompt it inserts
+  // mention chips, because a text run sends `body` alone and a `manual_refs`
+  // entry would be dropped without a word. Three buttons open it — the
+  // header's fixed one (every kind), and the two reference affordances that
+  // exist on gen kinds only.
+  const openLibraryForNode = useCallback(() => {
     const title = (body ?? '').split('\n')[0].slice(0, 40) || 'Prompt';
     const target = { nodeId: id, kind: 'prompt' as const, title };
     useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads', focusSearch: true, target });
   }, [id, body]);
+  // Publish this card's inserters so the PANEL can write chips into the body.
+  // The panel knows only the node id — the editor handle lives in this render.
+  //
+  // WRAPPERS that read the ref at CALL time, not `bodyEditorRef.current` read
+  // here. Registering the value would freeze whatever the ref happened to hold
+  // at registration; the editor can remount under a stable node id (the body
+  // resizer and the kind switch both re-render this subtree), and the registry
+  // would then be pointing at a detached handle with nothing to say so. The
+  // deps are `[id]` alone for the same reason: re-registering on every render
+  // would be churn, and there is nothing else to re-read.
+  useEffect(
+    () =>
+      registerMentionHandle(id, {
+        insertImage: (image, opts) => bodyEditorRef.current?.insertImage(image, opts),
+        insertAsset: (asset, opts) => bodyEditorRef.current?.insertAsset(asset, opts),
+      }),
+    [id],
+  );
   const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
   const manualUrlSet = new Set(manualRefs.map((r) => r.url));
   const removeManualRef = useCallback(
@@ -562,6 +589,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           >
             <Split size={11} />
           </button>
+          {/* FIXED on every kind. The only other doors to the panel are the
+              two reference affordances below, which a gen kind alone draws —
+              so a Text prompt had no way to open the Library at all. What the
+              panel commits still follows the kind: references for Image/Video,
+              mention chips for Text. */}
+          <button
+            type="button"
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
+            onClick={openLibraryForNode}
+            aria-label={t('canvas.library.openPanel', 'Open Library')}
+            data-testid="prompt-open-library"
+            disabled={readOnly}
+          >
+            <Images size={12} />
+          </button>
           <button
             type="button"
             className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
@@ -773,7 +815,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
-                onClick={openLibraryForRefs}
+                onClick={openLibraryForNode}
                 disabled={stripEntries.length >= MAX_REFERENCE_IMAGES}
                 title={
                   stripEntries.length >= MAX_REFERENCE_IMAGES
@@ -794,7 +836,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               data-testid="add-reference"
               aria-label="Add reference image"
               title="Add reference image"
-              onClick={openLibraryForRefs}
+              onClick={openLibraryForNode}
               className="nodrag flex h-6 items-center gap-1 rounded border border-dashed border-canvas-line px-2 text-[10px] text-canvas-muted hover:text-canvas-text"
             >
               <ImagePlus size={12} />

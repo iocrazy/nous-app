@@ -129,6 +129,11 @@ const ALLOWED_DEFAULTS = new Set([
   // The panel's asset-scope chip: the whole media library, as opposed to
   // just what this project links. Names THE library, not a choice of one.
   'All Library',
+  // Every prompt card's fixed header button, which opens THE panel. It is
+  // deliberately not "Open Media Library" or "Open Assets": one library per
+  // canvas is the whole point of this guard, so the bare word is the correct
+  // name here rather than a disambiguation that would imply a second one.
+  'Open Library',
 ]);
 
 /** All three patterns, over one file. */

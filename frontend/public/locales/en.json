@@ -3313,7 +3313,12 @@
       "previewOtherSlots_other": "{{count}} files in other slots are not sent by default",
       "noProject": "This canvas has no project",
       "mentionFailed_one": "{{count}} could not be inserted as a mention",
-      "mentionFailed_other": "{{count}} could not be inserted as mentions"
+      "mentionFailed_other": "{{count}} could not be inserted as mentions",
+      "openPanel": "Open Library",
+      "insertMentions_one": "Insert {{count}} Mention",
+      "insertMentions_other": "Insert {{count}} Mentions",
+      "mentionTargetConsequence": "Inserting mentions into {{title}} · a text prompt reads chips, not reference images",
+      "mentionNoEditor": "Open the prompt node before inserting mentions"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
