@@ -98,6 +98,31 @@ describe('LibraryPromptPreview', () => {
     const rows = screen.getAllByTestId('library-prompt-slide');
     fireEvent.click(rows[2].querySelector('button')!);
     expect(onSlideChange).toHaveBeenCalledWith('003.jpg');
-    expect(onInsert).toHaveBeenCalled();
+    expect(onInsert).toHaveBeenCalledWith('003.jpg');
+  });
+  // Ruling R17. The per-slide button selects and acts in one tick, so a parent
+  // reading its own `slideName` would act on the slide the user just left.
+  // These three assertions are what make the argument the source of truth.
+  it('the slide travels through the callbacks — the parent never has to look it up', () => {
+    const onInsert = vi.fn(), onApplyAll = vi.fn();
+    const { rerender } = render(<LibraryPromptPreview {...props} entry={album} slideName="002.jpg" onInsert={onInsert} onApplyAll={onApplyAll} />);
+    fireEvent.click(screen.getAllByTestId('library-prompt-slide')[2].querySelector('button')!);
+    expect(onInsert).toHaveBeenLastCalledWith('003.jpg');   // the row acted on, not the row selected
+    fireEvent.click(screen.getByRole('button', { name: 'Insert slide 002.jpg' }));
+    expect(onInsert).toHaveBeenLastCalledWith('002.jpg');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all from 002.jpg' }));
+    expect(onApplyAll).toHaveBeenLastCalledWith('002.jpg');
+    rerender(<LibraryPromptPreview {...props} entry={image} onInsert={onInsert} onApplyAll={onApplyAll} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Insert positive' }));
+    expect(onInsert).toHaveBeenLastCalledWith(undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply all' }));
+    expect(onApplyAll).toHaveBeenLastCalledWith(undefined);
+  });
+  // Ruling R18. An album has no Positive block, which is where the note used
+  // to live — so this is the case that had no note at all.
+  it('album: a one-sided slide gets the shown-language note too', () => {
+    render(<LibraryPromptPreview {...props} entry={album} lang="zh" slideName="003.jpg" />);
+    expect(screen.getByText('EN only')).toBeInTheDocument();
+    expect(screen.getAllByTestId('library-prompt-slide')).toHaveLength(3);
   });
 });

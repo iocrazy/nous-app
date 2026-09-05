@@ -2,7 +2,15 @@
 //
 // Right column (spec §3.4): what Apply all would write, labelled by what it
 // is. An album previews as its slides; the selected slide's negative and
-// params sit beneath. Actions are named after the thing they act on.
+// params sit beneath. Actions are named after the thing they act on, and are
+// handed the slide they act on rather than leaving the parent to look it up
+// (ruling R17).
+//
+// The substituted-language note sits in the HEADER, not in the Positive block
+// label: an album has no Positive block, so a note living there would go
+// missing for exactly the entries whose per-slide text is most often
+// one-sided (ruling R18). Header placement makes it one note for whichever
+// source is active.
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { FormTag, OriginTag } from '../../../components/prompts/PromptTags';
@@ -16,8 +24,14 @@ export interface LibraryPromptPreviewProps {
   onSlideChange: (name: string) => void;
   canAct: boolean;
   actHint: string;
-  onInsert: () => void;
-  onApplyAll: () => void;
+  /** The slide to act on is passed IN, and the argument is authoritative
+   *  (`undefined` for a non-album entry). The parent must not read its own
+   *  `slideName` state inside these handlers: the per-slide Insert changes
+   *  the selection and acts in the same tick, and React has not committed
+   *  the new `slideName` by then — a parent reading its own state would act
+   *  on the PREVIOUSLY selected slide (ruling R17). */
+  onInsert: (slideName?: string) => void;
+  onApplyAll: (slideName?: string) => void;
   onSaveAsTemplate: () => void;
 }
 
@@ -53,6 +67,9 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
         <FormTag form={entry.form} />
         <OriginTag origin={entry.origin} params={entry.params} />
         <span className="flex-1" />
+        {text.shownLang && text.shownLang !== lang && (
+          <span className="shrink-0 text-[9.5px] text-canvas-muted">{text.shownLang === 'en' ? t('canvas.library.enOnly', 'EN only') : t('canvas.library.zhOnly', '中 only')}</span>
+        )}
         <div className="flex overflow-hidden rounded-full border border-canvas-line text-[10px]">
           {(['en', 'zh'] as PromptLang[]).map((l) => {
             const has = l === 'en' ? avail === 'both' || avail === 'en' : avail === 'both' || avail === 'zh';
@@ -85,7 +102,7 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
                       <p className={`m-0 line-clamp-2 font-mono text-[10.5px] ${has ? 'text-canvas-text' : 'text-canvas-muted'}`}>{has ? st.positive : t('canvas.library.noPromptOnSlide', 'No prompt on this slide')}</p>
                       <small className="text-[9.5px] text-canvas-muted">{s.name}</small>
                     </div>
-                    <button type="button" className={`${BTN} px-2 py-0.5 text-[10.5px]`} disabled={!has || !p.canAct} onClick={(e) => { e.stopPropagation(); p.onSlideChange(s.name); p.onInsert(); }}>{t('canvas.library.insert', 'Insert')}</button>
+                    <button type="button" className={`${BTN} px-2 py-0.5 text-[10.5px]`} disabled={!has || !p.canAct} onClick={(e) => { e.stopPropagation(); p.onSlideChange(s.name); p.onInsert(s.name); }}>{t('canvas.library.insert', 'Insert')}</button>
                   </div>
                 );
               })}
@@ -93,7 +110,7 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
           </div>
         ) : (
           <div>
-            <div className={BLOCK_LABEL}>{t('canvas.library.positive', 'Positive')}{text.shownLang && text.shownLang !== lang && <span className="font-normal normal-case tracking-normal">{text.shownLang === 'en' ? t('canvas.library.enOnly', 'EN only') : t('canvas.library.zhOnly', '中 only')}</span>}</div>
+            <div className={BLOCK_LABEL}>{t('canvas.library.positive', 'Positive')}</div>
             <pre data-testid="library-prompt-positive" className="m-0 whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-canvas-text">{text.positive || t('canvas.library.noPositive', 'No positive prompt')}</pre>
           </div>
         )}
@@ -112,8 +129,8 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
         {entry.origin === 'captioned' && <p className="m-0 text-[10.5px] text-canvas-muted">{t('canvas.library.captionedNote', 'This text describes the picture, it did not make it')}</p>}
       </div>
       <div className="flex items-center gap-1.5 border-t border-canvas-line px-2.5 py-2">
-        <button type="button" className={`${BTN} bg-[var(--accent-text)] text-white`} disabled={!canInsert} onClick={p.onInsert}>{insertLabel}</button>
-        <button type="button" className={BTN} disabled={!canInsert} onClick={p.onApplyAll}>{applyLabel}</button>
+        <button type="button" className={`${BTN} bg-[var(--accent-text)] text-white`} disabled={!canInsert} onClick={() => p.onInsert(slide?.name)}>{insertLabel}</button>
+        <button type="button" className={BTN} disabled={!canInsert} onClick={() => p.onApplyAll(slide?.name)}>{applyLabel}</button>
         {entry.form !== 'template' && <button type="button" className={`${BTN} border-transparent`} onClick={p.onSaveAsTemplate}>{t('canvas.library.saveAsTemplate', 'Save as template…')}</button>}
         <span className="flex-1" />
         <span className="text-[10.5px] text-canvas-muted">{p.canAct ? '↵ · ⇧↵' : p.actHint}</span>
