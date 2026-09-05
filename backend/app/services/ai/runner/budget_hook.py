@@ -42,7 +42,9 @@ async def load_issue_budget(recorder: Any) -> Optional[tuple[int, float]]:
         return None
     row = await issue_repository.get_by_id(issue_id)
     budget = (row or {}).get("budget_cents")
-    if not isinstance(budget, int) or budget <= 0:
+    # NULL = unlimited. 0 is a real budget ("spend nothing more"): any spend
+    # is over it.
+    if not isinstance(budget, int) or budget < 0:
         return None
     conversation_id = next(
         (tid for kind, tid in targets if kind == "conversation"), None
@@ -86,7 +88,11 @@ class BudgetGateHook:
             or 0.0
         )
         spent = round(prior + live, 4)
-        pct = spent * 100.0 / budget
+        pct = (
+            spent * 100.0 / budget
+            if budget > 0
+            else (float(HALT_PCT) if spent > 0 else 0.0)
+        )
         action = "halt" if pct >= HALT_PCT else "warn" if pct >= WARN_PCT else None
         if action is None:
             return StepDecision.CONTINUE

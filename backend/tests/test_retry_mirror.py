@@ -49,9 +49,19 @@ async def test_llm_retry_mirrors_last_retry(monkeypatch):
     # and PG finds no matching function. Seen live 2026-08-27 — the mock
     # boundary hid it. The path must be cast to text[].
     assert "AS TEXT[]" in sql, sql
-    blob = next(v for v in params.values() if isinstance(v, str) and "attempt" in v)
-    assert '"attempt": 2' in blob and '"delay_ms": 3200' in blob
+    # The value is bound as a Python dict through the JSONB type — never a
+    # pre-serialised string (that double-encodes into a jsonb STRING; every
+    # phase-2 mirror row landed that way, 2026-09-05 真栈验收).
+    retry = next(v for v in params.values() if isinstance(v, dict) and "attempt" in v)
+    assert retry["attempt"] == 2 and retry["delay_ms"] == 3200
     assert (
-        "policy_key" not in blob and "failure" not in blob
+        "policy_key" not in retry and "failure" not in retry
     ), "only what the card renders"
-    assert '"at": "20' in blob, "the card needs a timestamp to age the wait"
+    assert str(retry["at"]).startswith(
+        "20"
+    ), "the card needs a timestamp to age the wait"
+    # "{}" is the COALESCE default for a NULL column, the one legitimate string
+    assert not any(
+        isinstance(v, str) and v.lstrip().startswith("{") and v != "{}"
+        for v in params.values()
+    ), "a JSON-looking string bind means double encoding"

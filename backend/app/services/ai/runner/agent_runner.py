@@ -1053,6 +1053,19 @@ class AgentRunner:
                 cost = recorder.cost_of(prompt, completion, cached)
             except Exception:  # noqa: BLE001
                 cost = None
+        # Context gauge: this call's prompt is the context the model just held.
+        # A local fold (no event row) — the compactor only reports on
+        # compaction, so without this the gauge stays empty on every turn that
+        # never compacts (2026-09-05 真栈验收: view.context null).
+        if recorder is not None and hasattr(recorder, "measure_context") and prompt > 0:
+            try:
+                from app.agent_framework.context_window import resolve_model_window
+
+                window, known = resolve_model_window(getattr(composed, "model", None))
+                if known and window:
+                    recorder.measure_context(prompt, int(window))
+            except Exception:  # noqa: BLE001 — a gauge never fails a turn
+                pass
         await emit_event(
             recorder,
             "step_end",

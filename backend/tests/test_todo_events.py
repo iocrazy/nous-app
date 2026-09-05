@@ -240,11 +240,10 @@ async def test_todo_write_mirrors_into_metadata_json(monkeypatch):
     assert len(inserts) == 1 and len(mirrors) == 1, executed
     sql, params = mirrors[0]
     assert "agent_runs" in sql and "AS TEXT[]" in sql
-    assert {"view", "cost", "todos"} <= set(params.values())
-    view_blob = next(
-        v for v in params.values() if isinstance(v, str) and '"phase"' in v
-    )
-    assert '"done": 1' in view_blob and '"total": 2' in view_blob
+    keys = [v for v in params.values() if isinstance(v, str)]
+    assert {"view", "cost", "todos"} <= set(keys)
+    view = next(v for v in params.values() if isinstance(v, dict) and "phase" in v)
+    assert view["step"] == {"done": 1, "total": 2, "label": "b"}
 
 
 @pytest.mark.unit
