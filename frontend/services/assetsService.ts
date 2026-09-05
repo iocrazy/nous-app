@@ -141,6 +141,14 @@ export interface AssetCreateBody {
    */
   role_tag?: string;
   description?: string;
+  /** Prompt-type assets carry their body here (server: `AssetCreate.prompt_*`). */
+  prompt_positive?: string | null;
+  prompt_negative?: string | null;
+  prompt_positive_zh?: string | null;
+  prompt_negative_zh?: string | null;
+  /** jsonb object of group → values, e.g. `{ group: ['Lighting'] }` — the shape
+   *  `_tag_match` (assets_repository.py) searches with `?tag=`. */
+  tags?: Record<string, string[]>;
   /**
    * Defaults to `manual` SERVER-side. Any caller creating an asset on behalf
    * of a generation must pass `generated` explicitly: the backend's own
