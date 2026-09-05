@@ -40,6 +40,10 @@ import type {
 } from '../../../services/generatedService';
 import { GeneratedCard } from './GeneratedCard';
 import { CleanupDialog } from './CleanupDialog';
+import {
+  isNonVisualMediaKind,
+  type NonVisualMediaKind,
+} from '../mediaKindPlaceholder';
 import { PinLightbox } from '../assets/sheet/PinLightbox';
 import {
   generatedMediaFileUrl,
@@ -82,9 +86,15 @@ const MEDIA_KIND_LABELS: Record<(typeof MEDIA_KINDS)[number], { key: string; fal
 };
 
 /** `media_kind` → what the lightbox should draw. Unknown kinds stay on the
- *  image path, matching the backend's own default for an unrecognised mime. */
-const lightboxKindFor = (kind: string | undefined): 'image' | 'video' | 'audio' | 'file' =>
-  kind === 'video' || kind === 'audio' || kind === 'file' ? kind : 'image';
+ *  image path, matching the backend's own default for an unrecognised mime.
+ *  The non-visual half comes from `isNonVisualMediaKind`, not from a second
+ *  copy of that list. */
+const lightboxKindFor = (
+  kind: string | undefined,
+): 'image' | 'video' | NonVisualMediaKind => {
+  if (kind === 'video') return 'video';
+  return isNonVisualMediaKind(kind) ? kind : 'image';
+};
 
 const MENU_ITEM =
   'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-content-2 hover:bg-island-2';

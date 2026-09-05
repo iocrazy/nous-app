@@ -36,7 +36,7 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 // `thumbnail_path > cover_image_path > original`, and a viewer opened to
 // inspect a pin at full screen would be showing a thumbnail.
 import { getResourceFileUrl } from '../../../../services/resourceService';
-import { placeholderFor } from '../../mediaKindPlaceholder';
+import { placeholderFor, type NonVisualMediaKind } from '../../mediaKindPlaceholder';
 
 export interface PinLightboxProps {
   /** Ids, in the order the caller shows them. Resource ids by default; any
@@ -54,7 +54,7 @@ export interface PinLightboxProps {
    * `file` have nothing to display, so they get an icon placeholder instead
    * of an `<img>` pointed at bytes no browser will draw. Default: `image`.
    */
-  kindFor?: (id: string) => 'image' | 'video' | 'audio' | 'file';
+  kindFor?: (id: string) => 'image' | 'video' | NonVisualMediaKind;
   /** Details panel for the current item (source, model, date, state…). */
   metadataFor?: (id: string) => React.ReactNode;
   /** Action row for the current item, under the media. */

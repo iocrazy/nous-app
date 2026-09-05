@@ -38,9 +38,18 @@ export const NON_VISUAL_MEDIA: Record<NonVisualMediaKind, Placeholder> = {
   file: { Icon: FileIcon, labelKey: 'generated.type.file', fallback: 'File' },
 };
 
+/** Narrowing guard, derived from the list rather than re-spelling it — a
+ *  hand-written `kind === 'audio' || kind === 'file'` compiles clean after a
+ *  third kind is added to the array and silently does nothing. */
+export function isNonVisualMediaKind(
+  kind: string | null | undefined,
+): kind is NonVisualMediaKind {
+  return (NON_VISUAL_MEDIA_KINDS as readonly string[]).includes(kind ?? '');
+}
+
 /** The placeholder for a `media_kind`, or `null` when the kind is visual. */
 export function placeholderFor(kind: string | null | undefined): Placeholder | null {
-  return kind === 'audio' || kind === 'file' ? NON_VISUAL_MEDIA[kind] : null;
+  return isNonVisualMediaKind(kind) ? NON_VISUAL_MEDIA[kind] : null;
 }
 
 /**
@@ -55,6 +64,10 @@ export function mediaFormatLabel(mime: string | null | undefined): string | null
   const subtype = (mime ?? '').split(';')[0].split('/')[1]?.trim() ?? '';
   if (!subtype) return null;
   // `audio/x-m4a` → `M4A`: the `x-` prefix is a registry detail, not a format.
-  const cleaned = subtype.replace(/^x-/i, '').toUpperCase();
-  return cleaned.length > 12 ? cleaned.slice(0, 12) : cleaned;
+  //
+  // Deliberately NOT length-capped here. The badge that renders this already
+  // carries `truncate`, and a slice on top of that would turn a long subtype
+  // (an Office document mime) into a silent stump where the CSS would have
+  // produced a readable elision. One truncation, and it is the one that shows.
+  return subtype.replace(/^x-/i, '').toUpperCase();
 }
