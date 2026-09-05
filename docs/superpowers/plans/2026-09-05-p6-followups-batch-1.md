@@ -34,3 +34,8 @@
 ### Task 3: 「As Asset」文案统一
 **Files:** Modify `frontend/public/locales/{en,zh}.json`（`generated.action.saveAsAsset`），受影响测试/e2e 断言。
 - [ ] 提交 `chore(i18n): unify the save-as-asset entry label to As Asset`
+
+### Task 4: 收件箱音频行标题与 Source 筛选（T2 披露）
+**Files:** Modify `backend/app/services/library/generated_inbox_service.py`（`_mint_args_for_resource`：铸行时把 `prompt`/标题来源设为资源文件名（去扩展名），使 `derive_title` 不再落到 `audio · library_upload`）+ 对应测试；Modify `frontend/components/resources/generated/generatedFilters.ts`（`SOURCE_OPTIONS` 加 `library_upload`，i18n en/zh）+ 测试。
+- 裁决 D：标题来源 = 资源 `filename` 去扩展名；若为空回退现状；`library_upload` Source 标签 "Library Upload" / 「资源库导入」。
+- [ ] 提交 `fix(generated): library-upload rows carry the file's name; Source filter knows library_upload`
