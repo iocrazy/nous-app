@@ -296,3 +296,13 @@ describe('view-first selectors (mig 453) with legacy fallback', () => {
     expect((task.metadata as Record<string, unknown>).cost).toEqual({ spent_cents: 1 });
   });
 });
+
+
+describe('legacy mirror keys stored as jsonb strings (phase-2 rows)', () => {
+  it('still yields progress from a stringified todos / last_retry', () => {
+    const todos = JSON.stringify({ todos: [], counts: { total: 4, completed: 1, in_progress: 0 } });
+    expect(todoProgress({ todos })).toEqual({ done: 1, total: 4, label: null });
+    const last_retry = JSON.stringify({ attempt: 2, max_retries: 4, delay_ms: 0, at: null });
+    expect(retryProgress({ last_retry }, 0)).toEqual({ attempt: 2, max: 4, waitingSeconds: 0 });
+  });
+});

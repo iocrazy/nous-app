@@ -107,3 +107,22 @@ describe('foldEvents — steps do not stack', () => {
     expect(foldEvents([null as unknown as AgentRunEvent])).toEqual([]);
   });
 });
+
+
+describe('foldEvents — real wire shape: nested payload fields are JSON strings', () => {
+  it('reads usage / counts / todos / result through JSON.parse, as _truncate_payload writes them', () => {
+    seq = 0;
+    const nodes = foldEvents([
+      ev('step_start', { turn: 1, step: 1, model: 'm' }, { turn: 1, step: 1 }),
+      ev('todo_write', { todos: JSON.stringify([{ content: 'a', status: 'in_progress', active_form: 'Doing a' }]), counts: JSON.stringify({ total: 3, completed: 1, in_progress: 1 }) }),
+      ev('step_end', { turn: 1, step: 1, usage: JSON.stringify({ prompt: 3067, completion: 629, cached: 0 }), cost_cents: null, duration_ms: 16903 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'CreateShot', iteration: 1, result: '{"ok": false, "error": "nope"}' }),
+    ], { isRunning: false });
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error();
+    expect(step.summary.todo).toEqual({ done: 1, total: 3 });
+    expect(step.lines.find((l) => l.type === 'todo')?.label).toBe('Doing a');
+    expect(step.lines.find((l) => l.type === 'tool')?.ok).toBe(false);
+    expect(step.summary.durationMs).toBe(16903);
+  });
+});
