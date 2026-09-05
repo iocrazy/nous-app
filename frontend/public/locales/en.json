@@ -1188,7 +1188,15 @@
     "agentSteps": "Steps",
     "agentModel": "Model",
     "visionDescription": "Description",
-    "visionText": "Detected text"
+    "visionText": "Detected text",
+    "steer": "Steer",
+    "steerPlaceholder": "Steer the running agent…",
+    "steerSend": "Send",
+    "steerSent": "Sent — read before the next step",
+    "steerEnded": "Run already ended",
+    "steerFailed": "Could not send",
+    "budgetUsed": "budget {{pct}}%",
+    "agentTrajectory": "Trajectory"
   },
   "plans": {
     "free": "Free"

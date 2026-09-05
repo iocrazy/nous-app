@@ -44,6 +44,7 @@ const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'flow', label: 'Flow' },
   { value: 'date', label: 'Date' },
   { value: 'agent', label: 'Agent' },
+  { value: 'target', label: 'Target' },
 ];
 
 const GroupByPicker: React.FC<{

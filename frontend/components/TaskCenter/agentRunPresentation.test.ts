@@ -127,6 +127,8 @@ describe('AGENT_RUN_SELECT — the column contract the badge depends on', () => 
       'id', 'user_id', 'status', 'trigger', 'input_summary', 'output_summary',
       'error_message', 'started_at', 'ended_at', 'created_at', 'prompt_tokens',
       'completion_tokens', 'cost_cents', 'model', 'task_id',
+      // T11: the steer target the Active card posts to
+      'conversation_id', 'issue_id',
     ]) {
       expect(AGENT_RUN_SELECT).toMatch(new RegExp(`(^|,)${col}(,|$)`));
     }

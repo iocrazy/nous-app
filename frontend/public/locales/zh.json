@@ -1188,7 +1188,15 @@
     "agentSteps": "步骤",
     "agentModel": "模型",
     "visionDescription": "描述",
-    "visionText": "识别文字"
+    "visionText": "识别文字",
+    "steer": "插一句",
+    "steerPlaceholder": "给运行中的 agent 插一句…",
+    "steerSend": "发送",
+    "steerSent": "已送达——下一步前读到",
+    "steerEnded": "运行已结束",
+    "steerFailed": "发送失败",
+    "budgetUsed": "预算 {{pct}}%",
+    "agentTrajectory": "轨迹"
   },
   "plans": {
     "free": "免费"

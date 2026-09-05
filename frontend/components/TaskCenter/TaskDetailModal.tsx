@@ -7,12 +7,7 @@ import { taskTypeLabel } from '../../contexts/TaskManagerContext';
 import { taskErrorCopy } from '../../utils/taskErrorCopy';
 import { explanationParagraphs } from '../../utils/humanizeTaskError';
 import { useTaskResult } from './useTaskResult';
-import { MediaResultBody } from './bodies/MediaResultBody';
-import { AgentResultBody } from './bodies/AgentResultBody';
-import { TextResultBody } from './bodies/TextResultBody';
-import { VisionResultBody } from './bodies/VisionResultBody';
-import { CanvasGenResultBody } from './bodies/CanvasGenResultBody';
-import { CoverFramesResultBody } from './bodies/CoverFramesResultBody';
+import { resultBodyFor } from './bodies/registry';
 
 interface TaskDetailModalProps {
   task: UnifiedTask | null;
@@ -86,21 +81,12 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           {!result.loading && result.error && (
             <div className="p-4 text-xs text-red-400">{result.error}</div>
           )}
-          {!result.loading && !result.error && (
-            <>
-              {result.kind === 'media' && (
-                <MediaResultBody task={task} resource={result.data} onOpenResource={onOpenResource} />
-              )}
-              {result.kind === 'agent' && <AgentResultBody task={task} />}
-              {(result.kind === 'transcript' || result.kind === 'summary') && (
-                <TextResultBody kind={result.kind} data={result.data} />
-              )}
-              {result.kind === 'vision' && <VisionResultBody task={task} data={result.data} />}
-              {result.kind === 'canvasGen' && <CanvasGenResultBody task={task} />}
-              {result.kind === 'coverFrames' && <CoverFramesResultBody task={task} />}
-              {result.kind === 'generic' && <GenericResultBody task={task} />}
-            </>
-          )}
+          {!result.loading && !result.error && (() => {
+            // One body per result kind, from the registry — a new kind is a new
+            // registration, never another branch here.
+            const Body = resultBodyFor(result.kind);
+            return <Body task={task} data={result.data} kind={result.kind} onOpenResource={onOpenResource} />;
+          })()}
         </div>
       </div>
     </div>,
@@ -193,18 +179,3 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   );
 };
 
-const GenericResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
-  const { t } = useTranslation();
-  const hasMeta = task.metadata && Object.keys(task.metadata).length > 0;
-  return (
-    <div className="p-4 space-y-3">
-      {hasMeta ? (
-        <pre className="text-[11px] text-ink-400 font-mono whitespace-pre-wrap break-words bg-ink-950/50 rounded p-3">
-          {JSON.stringify(task.metadata, null, 2)}
-        </pre>
-      ) : (
-        <div className="text-xs text-ink-500">{t('topbar.noResultDetail')}</div>
-      )}
-    </div>
-  );
-};

@@ -25,6 +25,7 @@ export interface AgentRef {
 export const AGENT_RUN_SELECT =
   'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,' +
   'created_at,prompt_tokens,completion_tokens,cost_cents,model,task_id,agent_id,metadata_json,' +
+  'conversation_id,issue_id,' +
   'ai_agents(slug,name)';
 
 /** Subset of public.agent_runs the Task Center reads. */
@@ -60,6 +61,11 @@ export interface AgentRunRow {
   /** ai_agents PK (NOT NULL in DB since mig 145) — the join key the hook
    * caches names by, and the only agent handle a realtime payload carries. */
   agent_id?: string | null;
+  /** The run's inbox targets (harness P4 §1-③): the conversation it ran in
+   * and, for issue turns, the issue. BIGINT snowflakes — number over
+   * realtime, number-or-string over REST; normalized with String(). */
+  conversation_id?: string | number | null;
+  issue_id?: string | number | null;
   /** Present on fetched rows, absent on realtime ones. */
   ai_agents?: AgentRef | null;
 }
@@ -223,6 +229,9 @@ export function agentRunToTask(run: AgentRunRow, cachedAgentName?: string): Unif
       // these; the three legacy keys above go once every row carries them.
       view: run.metadata_json?.view ?? null,
       cost: run.metadata_json?.cost ?? null,
+      // Where a steer from the card goes (T11): issue first, else conversation.
+      agent_conversation_id: run.conversation_id != null ? String(run.conversation_id) : null,
+      agent_issue_id: run.issue_id != null ? String(run.issue_id) : null,
     },
     created_at: run.created_at,
     started_at: run.started_at || undefined,
