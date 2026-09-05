@@ -427,10 +427,21 @@ async def build_agent_runner_stack(
         max_parallel=max_parallel,
     )
 
+    # Seam A: the step-boundary chain, registered here so the order is
+    # visible in one place. Later tasks append pause / inbox / budget hooks.
+    from app.services.ai.runner.step_hooks import (
+        CancelHook,
+        HeartbeatHook,
+        StepHookChain,
+    )
+
+    step_hooks = StepHookChain([HeartbeatHook(), CancelHook()])
+
     runner = AgentRunner(
         adapter=fallback_chain,
         skill_tool=skill_tool,
         hooks=registry,
+        step_hooks=step_hooks,
         delegate_tool=delegate_tool,
         mcp_registry=mcp_registry,
         parent_run_id=parent_run_id,

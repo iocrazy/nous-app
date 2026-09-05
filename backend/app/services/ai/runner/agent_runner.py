@@ -41,6 +41,12 @@ from app.services.ai.runner.reasoning import (
     strip_reasoning,
 )
 from app.services.ai.runner.run_recorder import RunRecorder
+from app.services.ai.runner.step_hooks import (
+    StepContext,
+    StepDecision,
+    StepHookChain,
+    default_step_hooks,
+)
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import (
     HookContext,
@@ -242,10 +248,14 @@ class AgentRunner:
         parent_run_id: Optional[str] = None,
         agent_depth: int = 0,
         delegation_chain: tuple[str, ...] = (),
+        step_hooks: Optional[StepHookChain] = None,
     ) -> None:
         self.adapter = adapter
         self.skill_tool = skill_tool
         self.hooks = hooks  # None = no hook chain (back-compat default)
+        # Seam A (harness p4): the per-step cross-cutting chain. None →
+        # exactly the behaviour the old inline blocks had (heartbeat, cancel).
+        self.step_hooks: StepHookChain = step_hooks or default_step_hooks()
         # M2 multi-agent scope, threaded into every HookContext. Defaults
         # describe a top-of-tree turn; sub-agent / workforce wiring passes
         # the inherited values (see build_agent_runner_stack).
@@ -596,11 +606,20 @@ class AgentRunner:
             # run_turn). Without this a long multi-iteration stream never
             # refreshes heartbeat_at, so the sweeper can wrongly mark a healthy
             # run heartbeat_lost; and a DB-side cancel would be ignored.
-            if recorder is not None:
-                await recorder.heartbeat()
-                if await recorder.check_cancelled():
-                    inc_metric("streaming_cancelled_cooperative")
-                    return
+            _step_ctx = StepContext(
+                turn=1,
+                step=iteration,
+                recorder=recorder,
+                composed=composed,
+                messages=messages,
+                parent_run_id=self.parent_run_id,
+                is_stream=True,
+            )
+            if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:
+                inc_metric("streaming_cancelled_cooperative")
+                return
+            if _step_ctx.injected:
+                messages.extend(_step_ctx.injected)
 
             # Per-iteration tool_call accumulation. Provider sends each
             # tool_call as deltas across multiple chunks; we stitch them.
@@ -1385,10 +1404,23 @@ class AgentRunner:
                     "error_code": "run_timeout",
                 }
 
-            if recorder is not None:
-                await recorder.heartbeat()
-                if await recorder.check_cancelled():
-                    return {"content": "", "raw": None, "cancelled": True}
+            _step_ctx = StepContext(
+                turn=1,
+                step=iteration,
+                recorder=recorder,
+                composed=composed,
+                messages=messages,
+                parent_run_id=self.parent_run_id,
+            )
+            if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:
+                return {
+                    "content": "",
+                    "raw": None,
+                    "cancelled": True,
+                    "stop_reason": _step_ctx.stop_reason,
+                }
+            if _step_ctx.injected:
+                messages.extend(_step_ctx.injected)
 
             # Wave G (G4): per-call output budget. Compute a max_tokens
             # cap based on remaining window. If smaller than what
