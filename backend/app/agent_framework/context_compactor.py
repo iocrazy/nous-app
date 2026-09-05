@@ -85,13 +85,10 @@ class CompactionStats:
 
 
 async def _emit(recorder: Any, event_type: str, payload: dict[str, Any]) -> None:
-    """Best-effort transcript event. Telemetry never fails a turn."""
-    if recorder is None or not hasattr(recorder, "record_event"):
-        return
-    try:
-        await recorder.record_event(event_type, payload)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[compactor] {} event not recorded: {}", event_type, exc)
+    """Thin alias onto the single transcript entry (runner/events.py)."""
+    from app.services.ai.runner.events import emit
+
+    await emit(recorder, event_type, payload)
 
 
 class ContextCompactor:

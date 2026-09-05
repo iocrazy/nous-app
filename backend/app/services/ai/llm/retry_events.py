@@ -12,9 +12,10 @@ lifecycle event, and filing it as an error would light up every
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from loguru import logger
+from app.services.ai.runner.events import emit
 
 RETRY_EVENT_TYPE = "llm_retry"
 
@@ -22,19 +23,18 @@ RETRY_EVENT_TYPE = "llm_retry"
 def make_retry_observer(recorder: Any) -> Callable[[dict], Awaitable[None]]:
     """An ``on_retry`` observer that files each retry on ``recorder``.
 
-    Tolerates a recorder without ``record_event`` (several call sites pass
-    lightweight stand-ins) by doing nothing — a missing sink is not worth an
-    exception on a path that is already handling a failure.
+    Stamps ``at`` (UTC ISO) so the Task Center can age the wait; the fold
+    copies it — folds never read the clock, replay must be deterministic.
+    Goes through the single event entry (``runner/events.py``), which
+    tolerates a recorder without ``record_event`` and never raises.
     """
 
     async def _observe(event: dict) -> None:
-        record = getattr(recorder, "record_event", None)
-        if record is None:
-            return
-        try:
-            await record(RETRY_EVENT_TYPE, event)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[retry_events] could not record retry: {exc!r}")
+        await emit(
+            recorder,
+            RETRY_EVENT_TYPE,
+            {**event, "at": datetime.now(timezone.utc).isoformat()},
+        )
 
     return _observe
 

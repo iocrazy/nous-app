@@ -441,12 +441,12 @@ async def test_record_event_appends_sequenced_truncated_rows() -> None:
 
     assert [e["seq"] for e in table.event_inserts] == [1, 2]
     assert table.event_inserts[0]["event_type"] == "user"
-    import json as _json
-
-    payload0 = _json.loads(table.event_inserts[0]["payload"])
+    # ORM insert (mig 453 writer) binds the payload dict onto the JSONB column
+    # directly — the old text() path json.dumps'd it.
+    payload0 = table.event_inserts[0]["payload"]
     assert payload0["content"] == "hello"
     # Long string value truncated to the cap (+ ellipsis).
-    payload1 = _json.loads(table.event_inserts[1]["payload"])
+    payload1 = table.event_inserts[1]["payload"]
     result_val = payload1["result"]
     assert len(result_val) <= RunRecorder.EVENT_VALUE_MAX_CHARS + 3
     # Non-string values JSON-encoded.

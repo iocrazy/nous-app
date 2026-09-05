@@ -681,9 +681,16 @@ class AgentRunsRepository(AsyncpgRepository):
 
     async def mark_heartbeat_lost(self, *, stale_before: datetime) -> int:
         """Bulk-flip stuck running rows (heartbeat_at < stale_before) →
-        heartbeat_lost. Returns the row count for telemetry. A SET-based UPDATE
-        (naturally idempotent). Committed via write_scope. Datetimes bound as
-        ``datetime`` objects, never isoformat strings."""
+        heartbeat_lost. Returns the row count for telemetry (see
+        ``mark_heartbeat_lost_ids`` for the ids)."""
+        return len(await self.mark_heartbeat_lost_ids(stale_before=stale_before))
+
+    async def mark_heartbeat_lost_ids(self, *, stale_before: datetime) -> list[int]:
+        """Same UPDATE, returning the flipped run ids so the sweeper can close
+        each transcript with ``turn_end{reason:interrupted}`` (mig 453 spine:
+        the event log is replay-complete only if a crashed run still gets its
+        terminal event). SET-based, idempotent; committed via write_scope.
+        Datetimes bound as ``datetime`` objects, never isoformat strings."""
         try:
             async with write_scope() as session:
                 result = await session.execute(
@@ -696,11 +703,12 @@ class AgentRunsRepository(AsyncpgRepository):
                         error_code="heartbeat_lost",
                         error_message="No heartbeat for >2 minutes",
                     )
+                    .returning(AgentRuns.id)
                 )
-                return result.rowcount or 0
+                return [int(r[0]) for r in result.fetchall()]
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
-            return 0
+            return []
 
     # ------------------------------------------------------------------
     # Aggregate

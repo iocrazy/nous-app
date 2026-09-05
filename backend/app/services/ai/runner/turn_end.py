@@ -23,7 +23,7 @@ import asyncio
 from enum import Enum
 from typing import Any, Optional
 
-from loguru import logger
+from app.services.ai.runner.events import emit
 
 TURN_END_EVENT_TYPE = "turn_end"
 
@@ -38,6 +38,10 @@ class TurnEndReason(str, Enum):
     CANCELLED = "cancelled"  # user cancel / abort (incl. hook abort)
     AWAITING_APPROVAL = "awaiting_approval"  # paused for a human decision
     ERROR = "error"  # exception or error result (incl. run timeout)
+    INTERRUPTED = (
+        "interrupted"  # closed after the fact by the sweeper (crash / lost heartbeat)
+    )
+    PAUSED = "paused"  # target-level pause (phase 2)
 
 
 # ── the markers the runner's exits carry, and what each one means ─────────
@@ -142,14 +146,8 @@ def classify_exception(exc: BaseException) -> tuple[TurnEndReason, dict[str, Any
 async def emit_turn_end(
     recorder: Any, reason: TurnEndReason, extra: dict[str, Any]
 ) -> None:
-    """Best-effort ``turn_end`` event. Telemetry never fails a turn."""
-    if recorder is None or not hasattr(recorder, "record_event"):
-        return
-    payload = {"reason": reason.value, **extra}
-    try:
-        await recorder.record_event(TURN_END_EVENT_TYPE, payload)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[turn_end] event not recorded: {}", exc)
+    """One typed ``turn_end`` per turn, through the single event entry."""
+    await emit(recorder, TURN_END_EVENT_TYPE, {"reason": reason.value, **extra}, turn=1)
 
 
 __all__ = [
