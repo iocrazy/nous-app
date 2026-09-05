@@ -56,14 +56,12 @@ const refusedGen = (over: Partial<UnifiedTask> = {}): UnifiedTask =>
 
 describe('TaskDetailModal — content refusal', () => {
   it("shows the model's own words without the user opening anything", () => {
-    const { container } = render(
-      <TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />,
-    );
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
     const panel = screen.getByTestId('task-error-detail');
     expect(panel.textContent).toContain('我不能帮助生成');
     expect(panel.textContent).toContain('更安全的提示词');
     // Not inside a <details>: that is exactly the burial being fixed.
-    expect(container.querySelector('details')?.contains(panel)).not.toBe(true);
+    expect(panel.closest('details')).toBeNull();
   });
 
   // Asserted on the headline element specifically: the raw string still sits
@@ -107,5 +105,39 @@ describe('TaskRowExpanded — content refusal', () => {
   it("shows the model's own words in the expanded row too", () => {
     render(<TaskRowExpanded task={refusedGen()} />);
     expect(screen.getByTestId('task-error-detail').textContent).toContain('我不能帮助生成');
+  });
+});
+
+// ── the refusal modal reads like an answer, not a stack dump (2026-09-05) ────
+describe('TaskDetailModal — refusal presentation', () => {
+  // `screen`, not `container`: the modal portals to document.body, so a
+  // container query finds nothing and passes for the wrong reason.
+  it('does not also offer a raw Details disclosure that only repeats the headline', () => {
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
+    expect(screen.queryByText(/^Details$/i)).toBeNull();
+  });
+
+  it('renders the model markdown emphasis as text, not literal asterisks', () => {
+    const words = '可以改为**黑色挂脖皮革上衣**，保留橙色玫瑰。';
+    render(
+      <TaskDetailModal
+        task={refusedGen({ metadata: { kind: 'image', failure: { code: 'content_refused', detail: words } } } as Partial<UnifiedTask>)}
+        onClose={vi.fn()} onOpenResource={vi.fn()}
+      />,
+    );
+    const panel = screen.getByTestId('task-error-detail');
+    expect(panel.textContent).toContain('黑色挂脖皮革上衣');
+    expect(panel.textContent).not.toContain('**');
+  });
+
+  it('labels the explanation so it reads as the model speaking', () => {
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
+    expect(screen.getByText(/what the model said/i)).toBeInTheDocument();
+  });
+
+  it('does not promise a result for a run that already failed', () => {
+    render(<TaskDetailModal task={refusedGen()} onClose={vi.fn()} onOpenResource={vi.fn()} />);
+    expect(screen.queryByText(/Result appears here when the generation finishes/i)).toBeNull();
+    expect(screen.getByText(/no image was produced/i)).toBeInTheDocument();
   });
 });

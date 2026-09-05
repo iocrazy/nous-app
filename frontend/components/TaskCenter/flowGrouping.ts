@@ -216,3 +216,34 @@ export function summarizeFlowItems(items: PanelItem[]): TaskCounts {
 export function isTerminalStatus(status: string): boolean {
   return TERMINAL.has(status);
 }
+
+
+/**
+ * A fan-out is N identical siblings ("Generate 3 images"): every step has the
+ * same task_type. There is nothing to follow step by step, so the card shows
+ * dots only and does not auto-expand the in-flight one — the expanded child
+ * read as a second task (2026-09-05). A pipeline (parse → download → …) is
+ * not a fan-out and keeps following its current step.
+ */
+export function isFanOut(flow: FlowItem): boolean {
+  if (flow.steps.length < 2) return false;
+  const first = flow.steps[0].task_type;
+  return flow.steps.every((s) => s.task_type === first);
+}
+
+
+/**
+ * What the TopBar badge shows: active work in FLOW units, i.e. what the user
+ * calls "a task". One "Generate 3 images" submission is 1, not 3 — the same
+ * unit `summarizeFlowItems` gives the panel header, so the badge and the
+ * header under it can never disagree again (they did: "2" over "1 queued").
+ * In-flight uploads are excluded here because UploadContext draws and counts
+ * those itself.
+ */
+export function countActiveFlowUnits(tasks: UnifiedTask[]): number {
+  const backend = tasks.filter(
+    (t) => !(t.task_type === 'upload' && (t.status === 'pending' || t.status === 'processing')),
+  );
+  const c = summarizeFlowItems(groupTasksByFlow(backend));
+  return c.running + c.queued;
+}

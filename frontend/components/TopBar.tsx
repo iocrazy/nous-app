@@ -24,8 +24,7 @@ import {
   groupTasksByFlow,
   isActiveItem,
   summarizeFlowItems,
-  type PanelItem,
-} from './TaskCenter/flowGrouping';
+  type PanelItem, countActiveFlowUnits } from './TaskCenter/flowGrouping';
 import { useAgentRunTasks } from './TaskCenter/useAgentRunTasks';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -508,10 +507,15 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut, onO
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();
-  const { totalActive } = useTaskManager();
+  const { tasks, totalActive } = useTaskManager();
   const inbox = useInbox();
   const uploadingCount = upload.items.filter(i => i.status === 'uploading').length;
-  const badgeCount = totalActive + uploadingCount;
+  // Flow units, same as the panel header (one "Generate 3 images" = 1). The
+  // server's totalActive counts rows; it is kept only as the fallback for
+  // the moment before the working set has loaded, when there are no rows to
+  // group yet — active rows are always in the working set once it exists.
+  const activeFlowUnits = tasks.length > 0 ? countActiveFlowUnits(tasks) : totalActive;
+  const badgeCount = activeFlowUnits + uploadingCount;
 
   // Auto-open task center panel when upload starts (instant, browser-side)
   useEffect(() => {

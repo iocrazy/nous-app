@@ -262,3 +262,35 @@ describe('retry collapsing — one step per (task_type, resource) subject', () =
     expect(flow.latestCreatedAt).toBe('2026-08-14T10:02:00Z');
   });
 });
+
+import { countActiveFlowUnits } from './flowGrouping';
+
+// The TopBar badge said "2" for one "Generate 2 images" submission while the
+// panel header right under it said "1 queued": the badge counted task rows
+// (server active total) and the header counted flows. One number, flow units.
+describe('countActiveFlowUnits', () => {
+  const t = (o: Partial<UnifiedTask>): UnifiedTask =>
+    ({ id: Math.random().toString(36).slice(2), user_id: 'u', task_type: 'canvas_gen', title: 'Generate image',
+       status: 'pending', progress: 0, metadata: {}, created_at: '2026-09-05T00:00:00Z', ...o }) as UnifiedTask;
+
+  it('counts one flow of N active siblings as 1', () => {
+    expect(countActiveFlowUnits([
+      t({ flow_id: 'f', status: 'processing' }), t({ flow_id: 'f', status: 'pending' }),
+    ])).toBe(1);
+  });
+
+  it('counts ungrouped active tasks one each', () => {
+    expect(countActiveFlowUnits([t({ status: 'processing' }), t({ status: 'pending' })])).toBe(2);
+  });
+
+  it('ignores finished rows and in-flight uploads (UploadContext draws those)', () => {
+    expect(countActiveFlowUnits([
+      t({ status: 'completed' }), t({ status: 'failed' }),
+      t({ task_type: 'upload', status: 'processing' }),
+    ])).toBe(0);
+  });
+
+  it('a flow whose steps are all finished is not active', () => {
+    expect(countActiveFlowUnits([t({ flow_id: 'f', status: 'completed' }), t({ flow_id: 'f', status: 'failed' })])).toBe(0);
+  });
+});
