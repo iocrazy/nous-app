@@ -73,4 +73,31 @@ describe('LibraryPromptPreview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'EN' }));
     expect(onLangChange).toHaveBeenCalledWith('en');
   });
+  // The four cases above never mount the empty right column, the captioned
+  // rules, the textless entry, or a slide's own Insert — all four are
+  // prescribed behaviour, and all four are branches nothing else reaches.
+  it('no entry: invites a pick rather than showing an empty frame', () => {
+    render(<LibraryPromptPreview {...props} entry={null} />);
+    expect(screen.getByText('Pick a prompt to preview it')).toBeInTheDocument();
+    expect(screen.queryByTestId('library-prompt-preview')).toBeNull();
+  });
+  it('captioned: says the text did not make the picture and drops the params', () => {
+    render(<LibraryPromptPreview {...props} entry={{ ...image, origin: 'captioned' }} />);
+    expect(screen.getByText('This text describes the picture, it did not make it')).toBeInTheDocument();
+    expect(screen.queryByTestId('library-prompt-params')).toBeNull();
+  });
+  it('nothing to insert: both actions stay disabled even with a target', () => {
+    render(<LibraryPromptPreview {...props} entry={{ ...image, positive_en: null, positive_zh: null, negative_en: null }} />);
+    expect(screen.getByTestId('library-prompt-positive')).toHaveTextContent('No positive prompt');
+    expect(screen.getByRole('button', { name: 'Insert positive' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
+  });
+  it("a slide's own Insert selects that slide as well as inserting it", () => {
+    const onSlideChange = vi.fn(), onInsert = vi.fn();
+    render(<LibraryPromptPreview {...props} entry={album} slideName="002.jpg" onSlideChange={onSlideChange} onInsert={onInsert} />);
+    const rows = screen.getAllByTestId('library-prompt-slide');
+    fireEvent.click(rows[2].querySelector('button')!);
+    expect(onSlideChange).toHaveBeenCalledWith('003.jpg');
+    expect(onInsert).toHaveBeenCalled();
+  });
 });

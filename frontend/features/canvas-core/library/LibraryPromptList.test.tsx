@@ -46,4 +46,20 @@ describe('LibraryPromptList', () => {
     rerender(<LibraryPromptList items={[]} activeKey={null} onActivate={onActivate} lang="en" loading={false} error={null} onRetry={() => {}} emptyLabel="Nothing Here Yet" />);
     expect(screen.getByText('Nothing Here Yet')).toBeInTheDocument();
   });
+  // The brief prescribes a spinner that yields to whatever is already on
+  // screen, so a refetch does not blank the list the user is reading. Neither
+  // half of that is reachable from the two cases above.
+  it('spins only while the first page is still empty', () => {
+    const { rerender } = render(<LibraryPromptList items={[]} activeKey={null} onActivate={() => {}} lang="en" loading={true} error={null} onRetry={() => {}} emptyLabel="Nothing Here Yet" />);
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByTestId('library-prompt-empty')).toBeNull();
+    rerender(<LibraryPromptList items={items} activeKey={null} onActivate={() => {}} lang="en" loading={true} error={null} onRetry={() => {}} emptyLabel="Nothing Here Yet" />);
+    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(screen.getAllByTestId('library-prompt-row')).toHaveLength(3);
+  });
+  it('an error wins over items — a stale list beside a failed refetch reads as fresh', () => {
+    render(<LibraryPromptList items={items} activeKey={null} onActivate={() => {}} lang="en" loading={false} error={new Error('x')} onRetry={() => {}} emptyLabel="Nothing Here Yet" />);
+    expect(screen.getByTestId('library-prompt-error')).toBeInTheDocument();
+    expect(screen.queryAllByTestId('library-prompt-row')).toHaveLength(0);
+  });
 });
