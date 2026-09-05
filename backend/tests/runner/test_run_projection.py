@@ -107,7 +107,7 @@ def test_budget_check_marks_view_and_cost():
         "budget_check",
         {"pct": 82.4, "action": "warn", "budget_cents": 200},
     )
-    assert v["view"]["budget"] == {"pct": 82, "state": "warn"}
+    assert v["view"]["budget"] == {"pct": 82, "state": "warn", "spent_cents": None}
     assert v["cost"]["budget_cents"] == 200 and v["cost"]["pct"] == 82
 
 
