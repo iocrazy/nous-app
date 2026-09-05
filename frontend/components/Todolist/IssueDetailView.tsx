@@ -9,7 +9,7 @@
  * WebSocket (replaces polling from commit 3453a990).
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import {
@@ -20,6 +20,9 @@ import type { UiIssue, AgentRef } from './types';
 import type { CommentTriggerPreview, IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { formatElapsed } from './formatElapsed';
+import { blocksFor, issueBlockContext } from './issueBlocks';
+import './blocks';
+import { useIssueProgress } from './useIssueProgress';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
@@ -27,15 +30,9 @@ import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, p
 import { NeedsInputCard } from './NeedsInputCard';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
-import { PipelineRunStrip } from './PipelineRunStrip';
-import { DeliverablesZone } from './DeliverablesZone';
-import { StageBriefMirror } from './StageBriefMirror';
-import { IssueCostLine } from './IssueCostLine';
-import { SubtaskBar } from './SubtaskBar';
 import type { SubtaskCount } from './issueFlow';
 import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
-import { usageService, type IssueUsage } from '../../services/usageService';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
 
@@ -85,141 +82,8 @@ const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string
   );
 };
 
-/** Terminal statuses stop the elapsed clock — a finished issue has no "now". */
-const TERMINAL_STATUSES = ['done', 'cancelled'];
-
-/** One label/value row inside a right-rail panel. */
-const RailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div className="flex items-baseline justify-between gap-3 text-[13px]">
-    <span className="text-[11px] uppercase tracking-wider text-ink-500 shrink-0">{label}</span>
-    <span className="text-ink-300 text-right min-w-0 truncate">{children}</span>
-  </div>
-);
-
-/**
- * A2 right rail, card 1 — the progress track: where the issue stands, how much
- * work it took, how long it has been running, and who is on it. `run_count`
- * has been in the usage response all along without ever reaching the UI; the
- * turn counter comes from `execution_state.turn` (merged in by the dispatch
- * loop each turn, cleared on the terminal set_status write).
- */
-const DetailProgressPanel: React.FC<{
-  issue: UiIssue;
-  assigneeName?: string;
-  refreshKey: number;
-}> = ({ issue, assigneeName, refreshKey }) => {
-  const { t } = useTranslation();
-  const [usage, setUsage] = useState<IssueUsage | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const live = !TERMINAL_STATUSES.includes(issue.status);
-
-  useEffect(() => {
-    let cancelled = false;
-    usageService
-      .getIssueUsage(String(issue.id))
-      .then((u) => { if (!cancelled) setUsage(u); })
-      .catch((err) => console.error('[DetailProgressPanel] usage load failed', err));
-    return () => { cancelled = true; };
-  }, [issue.id, refreshKey]);
-
-  useEffect(() => {
-    if (!live) return;
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [live]);
-
-  const startMs = issue.raw.started_at ? new Date(issue.raw.started_at).getTime() : NaN;
-  const endMs = live ? nowMs : new Date(issue.updated_at).getTime();
-  const elapsed = Number.isFinite(startMs) && Number.isFinite(endMs)
-    ? Math.max(0, Math.floor((endMs - startMs) / 1000))
-    : null;
-  const turn = Number((issue.raw.execution_state as Record<string, unknown> | null)?.turn) || null;
-
-  return (
-    <section
-      data-testid="detail-progress-panel"
-      className="rounded-lg border border-ink-800/80 bg-ink-900/40 px-3 py-2.5 space-y-2"
-    >
-      <h2 className="text-[11px] uppercase tracking-wider text-ink-500">
-        {t('issueDetail.progress', 'Progress')}
-      </h2>
-      <RailRow label={t('issueDetail.status', 'Status')}>
-        <span className="inline-flex items-center gap-1.5">
-          <IssueStatusIcon status={issue.status} size={13} />
-          {issue.status.replace(/_/g, ' ')}
-        </span>
-      </RailRow>
-      <RailRow label={t('issueDetail.runs', 'Runs')}>
-        <span className="tabular-nums">
-          {usage?.run_count ?? 0}
-          {turn != null && <span className="text-ink-500"> · turn {turn}</span>}
-        </span>
-      </RailRow>
-      {elapsed != null && (
-        <RailRow label={t('issueDetail.elapsed', 'Elapsed')}>
-          <span className="tabular-nums">{formatElapsed(elapsed)}</span>
-        </RailRow>
-      )}
-      {assigneeName && (
-        <RailRow label={t('issueDetail.assignee', 'Assignee')}>{assigneeName}</RailRow>
-      )}
-      <IssueCostLine issueId={String(issue.id)} refreshKey={refreshKey} />
-    </section>
-  );
-};
-
-/**
- * A2 right rail, card 2 — everything this issue hangs off: its project, its
- * sub-issue progress, and the pipeline strip (the "next stop" when this issue
- * is one step of a run). All three used to sit in the article flow, pushing
- * the conversation below the fold.
- */
-const DetailLinksPanel: React.FC<{
-  issue: UiIssue;
-  agentsById: Record<string, AgentRef>;
-  projectPath: string | null;
-  subtaskCount?: SubtaskCount;
-  refreshKey: number;
-}> = ({ issue, agentsById, projectPath, subtaskCount, refreshKey }) => {
-  const { t } = useTranslation();
-  return (
-    <section
-      data-testid="detail-links-panel"
-      className="rounded-lg border border-ink-800/80 bg-ink-900/40 px-3 py-2.5 space-y-2"
-    >
-      <h2 className="text-[11px] uppercase tracking-wider text-ink-500">
-        {t('issueDetail.links', 'Links')}
-      </h2>
-      {issue.project && (
-        <RailRow label={t('issueDetail.project', 'Project')}>
-          {projectPath ? (
-            <Link
-              to={projectPath}
-              data-testid="detail-open-project"
-              className="inline-flex items-center gap-1.5 text-[var(--accent-text)] hover:underline"
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
-              {issue.project.name}
-            </Link>
-          ) : (
-            issue.project.name
-          )}
-        </RailRow>
-      )}
-      {subtaskCount && subtaskCount.total > 0 && (
-        <div data-testid="detail-tasks" className="space-y-1">
-          <span className="text-[11px] uppercase tracking-wider text-ink-500">
-            {t('issueDetail.subIssues', 'Sub-issues')}
-          </span>
-          <SubtaskBar count={subtaskCount} size="detail" />
-        </div>
-      )}
-      <PipelineRunStrip issueId={issue.id} agentsById={agentsById} refreshKey={refreshKey} />
-    </section>
-  );
-};
-
 export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched, subtaskCount }) => {
+  const { t } = useTranslation();
   const { teamId } = useParams<{ teamId: string }>();
   const [tab, setTab] = useState<DetailTab>('timeline');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
@@ -236,14 +100,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // Group-by-Project header uses). Only numeric team ids are valid routes.
   const projectPath =
     issue.project && teamId ? `/team/${teamId}/projects/${issue.project.id}` : null;
-  // Deliverables: any project-backed issue shows the dropzone. A workflow-node
-  // mirror (origin_kind='project_stage') routes uploads into the node's stage
-  // folder — the stage name is the title's suffix ("<Project> — <Stage>"); a
-  // plain project issue lands them in the project root (no stage).
-  const isStageMirror = issue.raw.origin_kind === 'project_stage';
-  const stageName = isStageMirror
-    ? issue.title.split(' — ').slice(1).join(' — ') || undefined
-    : undefined;
   // Run-confirm gate: dispatch always goes through a confirm dialog that
   // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -262,6 +118,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
+
+  // issue.rollup (harness P4): phase / current run / budget / children, derived
+  // server-side from the runs. Polls while live, nudged by agent_runs Realtime.
+  const { progress, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
+  const phase = progress?.phase ?? null;
 
   // Stable ref so the WS event handler always reads the latest messages
   // without needing to re-open the socket.
@@ -412,7 +273,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               : { kind: a.kind, url: a.url, mime: a.mime ?? undefined },
           )
         : undefined;
-      await postIssueMessage(issue.id, {
+      const res = await postIssueMessage(issue.id, {
         body,
         agent_id: agentId ?? undefined,
         attachments: attachmentPayload,
@@ -420,6 +281,13 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         // would read as "an explicit empty exclusion list".
         suppress_agent_ids: suppressAgentIds?.length ? suppressAgentIds : undefined,
       });
+      // harness P4 §1-③: a running root run took the comment as a steer. Say
+      // so — the thread shows the comment either way, but "no new turn" is
+      // the news, not a silent no-op.
+      if (res?.diverted_to_inbox) {
+        addToast(t('issueDetail.divertedToast', 'Sent to the running agent — picked up before its next step'), 'success');
+        void refreshProgress();
+      }
       // Spec-1b: for issues with an assigned agent the backend writes to
       // ai_messages (not issue_messages) and returns an optimistic comment
       // whose id does NOT match the real ai_messages row.  Appending the
@@ -486,6 +354,30 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       });
   };
 
+  const blockCtx = useMemo(
+    () =>
+      issueBlockContext(
+        issue as unknown as Record<string, unknown>,
+        progress,
+        {
+          agentsById,
+          projectPath,
+          subtaskCount: subtaskCount ?? null,
+          assigneeName: issue.assignee?.name ?? issue.assignee_user_label,
+          refreshKey: pipelineRefresh,
+          teamId,
+          onIssueChanged: () => {
+            void refreshProgress();
+            onIssueDispatched?.();
+          },
+        },
+      ),
+    [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched],
+  );
+  const cockpitBlocks = blocksFor('cockpit', blockCtx);
+  const contextBlocks = blocksFor('context', blockCtx);
+  const agentLive = isAgentWorking || phase === 'running';
+
   return (
     <div className={`flex flex-col bg-ink-950 border-t border-ink-800/80 h-full min-h-0`}>
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-ink-800/80 text-[13px] text-ink-500">
@@ -508,7 +400,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <span title={issue.priority}>
               <PriorityIcon priority={issue.priority} />
             </span>
-            {(isAgentWorking || (!!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled')) && (
+            {(agentLive || (!!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled')) && (
               <AgentWorkingBadge startedAt={issue.raw.started_at} agentName={issue.assignee?.name} />
             )}
             <div className="ml-auto flex items-center gap-1">
@@ -526,9 +418,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <p className="mt-2 text-[14px] text-ink-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
           )}
 
-          {/* Sub-issue progress, the project link, the pipeline strip and the
-              cost line all moved into the right rail (DetailLinksPanel /
-              DetailProgressPanel) — they used to push the conversation down. */}
+          {/* Zone: cockpit — registered blocks (issueBlocks.ts); today one block
+              reading the rollup through runView selectors. */}
+          {cockpitBlocks.map((b) => (
+            <b.component key={b.id} ctx={blockCtx} />
+          ))}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button
@@ -569,27 +463,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               />
             )}
           </div>
-
-          {/* M4 Autopilot (task O1/O2/O3, spec §3) — pinned read-only echo of
-              the node's brief while it's in_review. Same mounting gate as
-              DeliverablesZone below (project-backed + workflow-node mirror
-              only); `origin_id` is the node id for a `project_stage` mirror. */}
-          {isStageMirror && issue.project && issue.raw.origin_id && (
-            <StageBriefMirror
-              projectId={String(issue.project.id)}
-              nodeId={issue.raw.origin_id}
-            />
-          )}
-
-          {issue.project && (
-            <DeliverablesZone
-              projectId={String(issue.project.id)}
-              issueId={issue.id}
-              isStageMirror={isStageMirror}
-              projectName={issue.project.name}
-              stageName={stageName}
-            />
-          )}
 
           {isAskingUser && (
             <NeedsInputCard
@@ -641,7 +514,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                     aiSessionId={issue.raw.ai_session_id}
                   />
                 )}
-              {isAgentWorking && (
+              {agentLive && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">
                   <span
                     className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
@@ -657,19 +530,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           )}
         </div>
 
-        <aside className="mt-6 md:mt-0 md:sticky md:top-6 space-y-3">
-          <DetailProgressPanel
-            issue={issue}
-            assigneeName={issue.assignee?.name ?? issue.assignee_user_label}
-            refreshKey={pipelineRefresh}
-          />
-          <DetailLinksPanel
-            issue={issue}
-            agentsById={agentsById}
-            projectPath={projectPath}
-            subtaskCount={subtaskCount}
-            refreshKey={pipelineRefresh}
-          />
+        <aside className="mt-6 md:mt-0 md:sticky md:top-6 space-y-3" data-testid="issue-context-rail">
+          {/* Zone: context — registered blocks, matched per issue (origin kind,
+              project, children …) and ordered. No branches here. */}
+          {contextBlocks.map((b) => (
+            <b.component key={b.id} ctx={blockCtx} />
+          ))}
         </aside>
         </div>
       </div>
@@ -682,6 +548,13 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           agents={agents}
           defaultAgentId={issue.assignee?.id ?? null}
           onSubmit={handleReply}
+          hint={
+            phase === 'running'
+              ? t('issueDetail.steerHint', 'The agent is running — your comment is picked up before its next step.')
+              : phase === 'idle' && issue.assignee
+                ? t('issueDetail.replyHint', "Your comment starts the agent's next turn.")
+                : undefined
+          }
           triggerPreview={triggerPreview}
           onNoteBoundaryChange={setNoteDraftBody}
           triggerAgentName={

@@ -23,9 +23,7 @@ import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
 import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
 import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
-import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
-import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
-import { summarizeWrites } from '../agentActivity/toolActivity';
+import { TrajectoryRenderer } from '../agentActivity/TrajectoryRenderer';
 import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
@@ -222,7 +220,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         </span>
       </div>
       <RunMetaLine msg={msg} />
-      <RunToolActivity runId={msg.agent_run_id} isRunning={isRunning} />
+      <RunTrajectory runId={msg.agent_run_id} isRunning={isRunning} />
       {msg.body && (
         <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
@@ -233,32 +231,19 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
 };
 
 /**
- * The tools this run actually called, as chips, plus the shot cards it wrote.
- *
- * Sourced from `agent_run_transcript_events` — unlike the chat panel, an
- * IssueMessage carries no tool-call trace, only `agent_run_id`. Renders once
- * per run: a standalone `agent_run` row shows it, and an EXPANDED run group
- * shows it via the same `AgentRunEvent` it renders per member.
- *
- * Shot rows are non-interactive here: the storyboard editor isn't mounted on
- * the issues route, so there is nowhere to jump to.
+ * What this run did, step by step — the shared TrajectoryRenderer over the
+ * run's transcript (harness P4 seam C). Steps do not stack: the live step is
+ * the one expanded block, finished steps are one-line summaries. Sourced from
+ * `agent_run_transcript_events` — an IssueMessage carries only `agent_run_id`.
+ * Renders once per run; a capability denial keeps its own notice above.
  */
-const RunToolActivity: React.FC<{ runId: string | null; isRunning: boolean }> = ({
-  runId,
-  isRunning,
-}) => {
-  const { activities, denials } = useRunToolActivity(runId, isRunning);
-  const writes = useMemo(() => summarizeWrites(activities), [activities]);
-  if (activities.length === 0 && denials.length === 0) return null;
+const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
+  const { events, denials } = useRunToolActivity(runId, isRunning);
+  if (events.length === 0 && denials.length === 0) return null;
   return (
-    <div className="ml-7 mb-1.5 space-y-1.5">
+    <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory">
       {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
-      {activities.length > 0 && (
-        <>
-          <ToolActivityChips activities={activities} />
-          <TurnWriteSummary summary={writes} interactive={false} />
-        </>
-      )}
+      <TrajectoryRenderer events={events} isRunning={isRunning} />
     </div>
   );
 };

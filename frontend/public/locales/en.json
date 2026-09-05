@@ -5437,7 +5437,32 @@
     "agentAsking": "Agent needs your answer",
     "replyHere": "Reply here…",
     "reply": "Reply",
-    "replying": "Replying…"
+    "replying": "Replying…",
+    "budget": "Budget",
+    "editBudget": "Edit",
+    "unlimited": "unlimited",
+    "budgetRule": "Warns at 80%, records at 100%",
+    "budgetInvalid": "Enter a whole number of cents, 0 or more",
+    "done": "done",
+    "now": "Now",
+    "steps": "Steps",
+    "context": "Context",
+    "cancelling": "Cancelling…",
+    "retryWaiting": "Retry {{attempt}}/{{max}} · waiting {{s}}s",
+    "retried": "Retried {{attempt}}/{{max}}",
+    "subIssuesDone": "{{done}}/{{total}} sub-issues done",
+    "inboxPending": "{{count}} message waiting for the agent",
+    "steerHint": "The agent is running — your comment is picked up before its next step.",
+    "replyHint": "Your comment starts the agent's next turn.",
+    "divertedToast": "Sent to the running agent — picked up before its next step",
+    "phase": {
+      "running": "Running",
+      "waiting_input": "Waiting for you",
+      "paused": "Paused",
+      "blocked": "Blocked",
+      "done": "Done",
+      "idle": "Idle"
+    }
   },
   "issues": {
     "pageTitle": "Issues",

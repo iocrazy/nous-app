@@ -6,7 +6,7 @@
  * the timeline renders one chip row per run.
  */
 
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { MessageBubble } from '../chat/AIChatBubble';
@@ -129,7 +129,7 @@ describe('chat bubble — the trace is partitioned, never rendered twice', () =>
   });
 });
 
-describe('collaboration timeline — one chip row per run', () => {
+describe('collaboration timeline — one trajectory per run', () => {
   const runMsg = {
     id: 'm-run',
     issue_id: 1,
@@ -142,7 +142,7 @@ describe('collaboration timeline — one chip row per run', () => {
     created_at: '2026-08-04T12:00:00Z',
   };
 
-  it('fetches the transcript and renders each tool call once', async () => {
+  it('fetches the transcript once and folds both tool calls into ONE step node (harness P4: steps do not stack)', async () => {
     getRunEvents.mockResolvedValue({
       items: [
         {
@@ -166,17 +166,21 @@ describe('collaboration timeline — one chip row per run', () => {
     );
 
     await waitFor(() => {
-      expect(
-        container.querySelectorAll('[data-testid="tool-activity-chip"]'),
-      ).toHaveLength(2);
+      expect(container.querySelectorAll('[data-testid="traj-step"]')).toHaveLength(1);
     });
     expect(getRunEvents).toHaveBeenCalledWith('777', 0);
-    expect(
-      container.querySelectorAll('[data-testid="turn-write-summary"]'),
-    ).toHaveLength(1);
+    // A finished step is one summary row until opened; opening it shows one
+    // line per call — still one node.
+    const step = container.querySelector('[data-testid="traj-step"]')!;
+    expect(step.querySelectorAll('[data-testid="traj-line-tool"]')).toHaveLength(0);
+    fireEvent.click(step.querySelector('button')!);
+    expect(step.querySelectorAll('[data-testid="traj-line-tool"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="traj-step"]')).toHaveLength(1);
+    // No chip row on this surface any more — the trajectory replaced it.
+    expect(container.querySelector('[data-testid="tool-activity-chip"]')).toBeNull();
   });
 
-  it('renders shot rows as plain text — no editor to jump to on this route', async () => {
+  it('renders tool lines as plain text — no editor to jump to on this route', async () => {
     getRunEvents.mockResolvedValue({
       items: [
         {
@@ -192,11 +196,16 @@ describe('collaboration timeline — one chip row per run', () => {
     const { container } = render(
       <IssueChatThread messages={[runMsg as never]} agentsById={{}} />,
     );
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="turn-write-shot"]')).not.toBeNull();
+    const step = await waitFor(() => {
+      const el = container.querySelector('[data-testid="traj-step"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
     });
-    const row = container.querySelector('[data-testid="turn-write-shot"]')!;
-    expect(row.tagName).toBe('DIV');
+    fireEvent.click(step.querySelector('button')!);
+    const line = step.querySelector('[data-testid="traj-line-tool"]')!;
+    expect(line.tagName).toBe('DIV');
+    expect(line.textContent).toContain('CreateShot');
+    expect(line.querySelector('a')).toBeNull();
   });
 
   it('renders no chips when the run made no tool calls', async () => {

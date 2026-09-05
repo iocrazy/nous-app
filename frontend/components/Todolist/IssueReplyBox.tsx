@@ -54,6 +54,10 @@ interface IssueReplyBoxProps {
     suppressAgentIds?: string[],
   ) => Promise<void>;
   disabled?: boolean;
+  /** One line above the editor saying what a comment does right now (e.g.
+   *  "the agent is running — this is picked up before its next step").
+   *  Server phase decides it; the box only shows it. */
+  hint?: string;
   /** The server's verdict on what a comment here would start. Null while it
    *  loads, or when the trigger-chip flag is off — the chip stays hidden. */
   triggerPreview?: CommentTriggerPreview | null;
@@ -92,6 +96,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   defaultAgentId,
   onSubmit,
   disabled,
+  hint,
   triggerPreview,
   triggerAgentName,
   onNoteBoundaryChange,
@@ -358,6 +363,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             onSelect={handleMentionSelect}
             activeIndex={mentionActiveIndex}
           />
+        </div>
+      )}
+
+      {hint && (
+        <div className="px-3 pt-2 text-[11px] text-ink-500" data-testid="reply-hint">
+          {hint}
         </div>
       )}
 

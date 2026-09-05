@@ -7,9 +7,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { createInstance, type i18n as I18n } from 'i18next';
 
-import enJson from '../../public/locales/en.json';
-import { StageBriefMirror } from './StageBriefMirror';
-import type { ProjectStageNode, StageBoardData } from '../../types';
+import enJson from '../../../public/locales/en.json';
+import { StageBriefMirror } from './StageBriefBlock';
+import type { ProjectStageNode, StageBoardData } from '../../../types';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -25,7 +25,7 @@ function makeI18n(): I18n {
 const mockWorkflowService = vi.hoisted(() => ({
   fetchStageBoard: vi.fn(),
 }));
-vi.mock('../../services/workflowService', () => mockWorkflowService);
+vi.mock('../../../services/workflowService', () => mockWorkflowService);
 
 function node(over: Partial<ProjectStageNode> = {}): ProjectStageNode {
   return {
