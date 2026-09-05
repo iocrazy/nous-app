@@ -481,20 +481,39 @@ async def _dispatch_and_record_failure(**kwargs: Any) -> Dict[str, Any]:
     try:
         return await dispatch_to_daemon(**kwargs)
     except DaemonJobFailedError as exc:
-        await _record_failure_detail(exc)
+        # Raises for transient codes; returns {"failed": …} for deterministic
+        # ones — the caller must check for that key before reading gen_id.
+        return await _record_failure_detail(exc)
 
 
-async def _record_failure_detail(exc: BaseException) -> None:
-    """Persist a failed generation's explanation, then re-raise one clean line.
+# Failures whose second attempt is guaranteed to be the first attempt again.
+# A content refusal is the model's ANSWER to these exact words; retrying it
+# only buys a second daemon job on the user's ChatGPT quota and another
+# minute of waiting (measured 2026-09-05: every refusal ran twice, 1:43 and
+# 2:09 wall-clock for a verdict the first attempt already had).
+NON_RETRYABLE_FAILURE_CODES = frozenset({"content_refused"})
 
-    Never returns: it always raises. Both codex image paths funnel through
-    here — the user's own daemon and the in-container subprocess — because a
-    user cannot tell which one ran and neither should read differently.
 
-    What crosses the DBOS boundary is a plain ``RuntimeError``: a raised
-    exception gets pickled, and the typed error's extra fields would not
-    survive that trip anyway. Still a raise, never a failed dict — returning
-    one would have the mirror trigger mark the task completed (route C §4).
+async def _record_failure_detail(exc: BaseException) -> Dict[str, Any]:
+    """Persist a failed generation's explanation; return a marker or re-raise.
+
+    Both codex image paths funnel through here — the user's own daemon and
+    the in-container subprocess — because a user cannot tell which one ran
+    and neither should read differently.
+
+    Two exits, chosen by the failure code:
+
+    * **Deterministic** (``NON_RETRYABLE_FAILURE_CODES``): return
+      ``{"failed": <one ASCII line>}``. The step returns normally, so DBOS
+      does NOT retry it; ``raise_if_failed`` in the workflow turns the marker
+      into the raise that fails the task. Route C §4 forbids the WORKFLOW
+      returning a failed dict (the mirror would mark the task completed) —
+      a step returning one, with the workflow raising, is exactly how you
+      opt a deterministic failure out of step retries.
+    * **Anything else**: raise a plain ``RuntimeError`` (pickled across the
+      DBOS boundary; the typed error's extra fields would not survive
+      anyway) so the step's ``max_attempts`` still buys a second try for a
+      daemon crash or a network blip.
     """
     from app.services.generation.failure import describe_generation_failure
 
@@ -502,7 +521,19 @@ async def _record_failure_detail(exc: BaseException) -> None:
     task_id = DBOS.workflow_id
     if task_id:
         await _patch_task_metadata(task_id, patch)
+    if patch["failure"]["code"] in NON_RETRYABLE_FAILURE_CODES:
+        return {"failed": message}
     raise RuntimeError(message) from exc
+
+
+def raise_if_failed(media: Dict[str, Any]) -> Dict[str, Any]:
+    """The workflow-side half of ``_record_failure_detail``: a step result
+    carrying ``failed`` becomes the raise that fails the task (route C §4).
+    Anything else passes through untouched."""
+    failed = media.get("failed") if isinstance(media, dict) else None
+    if failed:
+        raise RuntimeError(str(failed))
+    return media
 
 
 async def _patch_task_metadata(task_id: str, patch: Dict[str, Any]) -> None:
@@ -693,6 +724,13 @@ async def generate_canvas_media_step(
                 "source_asset_id": await _source_asset_id_for(params, daemon_scope_id),
             },
         )
+        if result.get("failed"):
+            # Deterministic failure (a refusal): no retry — see
+            # _record_failure_detail. The workflow raises on this marker.
+            return {
+                "media_kind": kind if kind in ("image", "video") else "image",
+                "failed": result["failed"],
+            }
         return {
             "media_kind": kind if kind in ("image", "video") else "image",
             "local_path": None,
@@ -806,7 +844,8 @@ async def generate_canvas_media_step(
             # provider loses the message it chose to raise.
             if not getattr(exc, "detail", ""):
                 raise
-            await _record_failure_detail(exc)
+            marker = await _record_failure_detail(exc)  # raises unless deterministic
+            return {"media_kind": "image", "failed": marker["failed"]}
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None
     if not remote_url and not local_path:
@@ -1093,8 +1132,10 @@ async def canvas_generation_workflow(
     user_id: Optional[str],
     source_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    media = await generate_canvas_media_step(
-        kind, prompt, model, params, source_url, user_id, canvas_id, node_id
+    media = raise_if_failed(
+        await generate_canvas_media_step(
+            kind, prompt, model, params, source_url, user_id, canvas_id, node_id
+        )
     )
     result = await persist_canvas_generation_step(
         media=media,

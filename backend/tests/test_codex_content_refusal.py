@@ -231,9 +231,8 @@ async def test_the_workflow_persists_the_refusal_and_raises_a_clean_line():
         # The step reads the task row's id off the ambient workflow, the same
         # way record_canvas_generation_result_step does.
         patch.object(m.DBOS, "workflow_id", "wf-refusal-1", create=True),
-        pytest.raises(RuntimeError) as exc,
     ):
-        await generate_canvas_media_step(
+        media = await generate_canvas_media_step(
             kind="image",
             prompt="a cat",
             model="codex-local-image",
@@ -244,8 +243,13 @@ async def test_the_workflow_persists_the_refusal_and_raises_a_clean_line():
 
     assert patched["failure"]["code"] == "content_refused"
     assert patched["failure"]["detail"] == REFUSAL_TEXT
-    assert all(ord(c) < 128 for c in str(exc.value))
-    assert "content_refused" in str(exc.value)
+    # A refusal is deterministic: the same words are declined the same way.
+    # Raising here would have DBOS retry the step (max_attempts=2) — measured
+    # 2026-09-05: every refusal cost a second daemon job and ~1 more minute.
+    # So the step RETURNS the failure and the workflow raises (route C §4 is
+    # about the WORKFLOW never returning a failed dict; a step may).
+    assert all(ord(c) < 128 for c in media["failed"])
+    assert "content_refused" in media["failed"]
 
 
 def test_content_refused_is_a_non_retryable_4xx_on_the_llm_path():
@@ -301,9 +305,8 @@ async def test_the_server_side_codex_branch_records_the_refusal_too():
             new=fake_patch_metadata,
         ),
         patch.object(m.DBOS, "workflow_id", "wf-refusal-2", create=True),
-        pytest.raises(RuntimeError) as exc,
     ):
-        await generate_canvas_media_step(
+        media = await generate_canvas_media_step(
             kind="image",
             prompt="a cat",
             model="codex-image",
@@ -314,5 +317,62 @@ async def test_the_server_side_codex_branch_records_the_refusal_too():
 
     assert patched["failure"]["code"] == "content_refused"
     assert patched["failure"]["detail"] == REFUSAL_TEXT
-    assert all(ord(c) < 128 for c in str(exc.value))
-    assert "content_refused" in str(exc.value)
+    assert all(ord(c) < 128 for c in media["failed"])
+    assert "content_refused" in media["failed"]
+
+
+# ── deterministic failures do not get a DBOS retry ─────────────────────────
+
+
+def test_the_workflow_raises_when_the_step_returned_a_failure():
+    """The step returns; the WORKFLOW is what fails the task (route C §4:
+    returning a dict from the workflow would mark it completed)."""
+    from app.workflows.canvas_generation import raise_if_failed
+
+    with pytest.raises(RuntimeError) as exc:
+        raise_if_failed({"failed": "[content_refused] declined", "media_kind": "image"})
+    assert str(exc.value) == "[content_refused] declined"
+    # A normal media dict passes through untouched.
+    good = {"media_kind": "image", "local_path": "/x.png"}
+    assert raise_if_failed(good) is good
+
+
+@pytest.mark.asyncio
+async def test_a_transient_daemon_failure_still_raises_in_the_step():
+    """Only REFUSALS skip the retry. A daemon crash / timeout may well succeed
+    on the second attempt, and that is what max_attempts=2 is for."""
+    from unittest.mock import AsyncMock, patch
+
+    import app.workflows.canvas_generation as m
+    from app.workflows.canvas_generation import generate_canvas_media_step
+
+    async def fake_dispatch(**_kw):
+        raise DaemonJobFailedError(
+            "job_failed: gpt-image-2-skill exited 1", code="job_failed", detail=""
+        )
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch("app.workflows.canvas_generation._patch_task_metadata", new=AsyncMock()),
+        patch.object(m.DBOS, "workflow_id", "wf-transient-1", create=True),
+        pytest.raises(RuntimeError) as exc,
+    ):
+        await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={"ratio": "9:16"},
+            source_url=None,
+            user_id="u1",
+        )
+    assert "job_failed" in str(exc.value)
