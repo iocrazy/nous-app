@@ -21,12 +21,16 @@ class FakeCatalog:
         self.resources = resources
         self.examples = examples or {}
         self.calls = []
+        self.example_calls = []
+        self.limits = []
 
-    async def list_prompted_resources(self, scope_id, *, project_id=None):
+    async def list_prompted_resources(self, scope_id, *, project_id=None, limit=2000):
         self.calls.append(("resources", scope_id, project_id))
+        self.limits.append(limit)
         return list(self.resources)
 
     async def example_file_ids(self, asset_ids):
+        self.example_calls.append(list(asset_ids))
         return {a: self.examples.get(a, []) for a in asset_ids}
 
 
@@ -200,3 +204,72 @@ async def test_counts():
         "project": None,
         "system": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_counts_skips_the_thumbnail_lookup_that_list_needs():
+    catalog = FakeCatalog([resource(10)])
+    svc = PromptCatalogService(
+        assets_repo=FakeAssets([asset(1, "Tpl")]), catalog_repo=catalog
+    )
+    await svc.counts(SCOPE, project_id=None)
+    # counts() only takes len(); a thumbnail query per segment is pure cost
+    assert catalog.example_calls == []
+    await svc.list(
+        SCOPE,
+        segment="mine",
+        project_id=None,
+        form=None,
+        origin=None,
+        q=None,
+        limit=60,
+        offset=0,
+    )
+    assert catalog.example_calls == [[1]]
+
+
+@pytest.mark.asyncio
+async def test_templates_page_until_a_short_page_then_stop():
+    rows = [asset(i, f"T{i}") for i in range(1, 451)]
+
+    class PagingAssets(FakeAssets):
+        async def list(self, scope_id, **kw):
+            self.calls.append((scope_id, kw))
+            off, lim = kw["offset"], kw["limit"]
+            return self.rows[off : off + lim]
+
+    assets = PagingAssets(rows)
+    svc = PromptCatalogService(assets_repo=assets, catalog_repo=FakeCatalog([]))
+    page = await svc.list(
+        SCOPE,
+        segment="mine",
+        project_id=None,
+        form=None,
+        origin=None,
+        q=None,
+        limit=1000,
+        offset=0,
+    )
+    # 200 + 200 + 50: a single unpaged read would have stopped at the repo's cap of 200
+    assert [c[1]["offset"] for c in assets.calls] == [0, 200, 400]
+    assert page["total"] == 450
+
+
+@pytest.mark.asyncio
+async def test_pictures_read_is_bounded_by_the_service_ceiling():
+    from app.services.prompts.catalog_service import _PICTURE_CEILING
+
+    catalog = FakeCatalog([resource(10)])
+    svc = PromptCatalogService(assets_repo=FakeAssets([]), catalog_repo=catalog)
+    await svc.list(
+        SCOPE,
+        segment="mine",
+        project_id=None,
+        form=None,
+        origin=None,
+        q=None,
+        limit=60,
+        offset=0,
+    )
+    # Unbounded, this read materializes every prompted resource in the scope.
+    assert catalog.limits == [_PICTURE_CEILING]

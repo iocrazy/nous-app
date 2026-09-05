@@ -22,6 +22,10 @@ from app.models.media import ResourceItems, Resources
 from app.repositories.media_repository import has_prompt_expr
 
 _EXAMPLES_PER_ASSET = 3
+# Safety net only — the catalog service passes its own ceiling explicitly.
+# An UNBOUNDED read here would materialize every prompted resource in the
+# scope on every request, so the default is a bound, not None.
+_DEFAULT_PICTURE_LIMIT = 2000
 
 _COLUMNS = (
     Resources.id,
@@ -39,7 +43,13 @@ _COLUMNS = (
 
 
 class PromptCatalogRepository:
-    def _prompted_resources_stmt(self, scope_id: int, *, project_id: Optional[int]):
+    def _prompted_resources_stmt(
+        self,
+        scope_id: int,
+        *,
+        project_id: Optional[int],
+        limit: int = _DEFAULT_PICTURE_LIMIT,
+    ):
         stmt = (
             select(*_COLUMNS)
             .join(ResourceItems, ResourceItems.resource_id == Resources.id)
@@ -57,12 +67,24 @@ class PromptCatalogRepository:
                 .where(Canvases.project_id == int(project_id))
             )
             stmt = stmt.where(Resources.id.in_(referenced))
-        return stmt.order_by(Resources.updated_at.desc())
+        return stmt.order_by(Resources.updated_at.desc()).limit(int(limit))
 
     async def list_prompted_resources(
-        self, scope_id: int, *, project_id: Optional[int] = None
+        self,
+        scope_id: int,
+        *,
+        project_id: Optional[int] = None,
+        limit: int = _DEFAULT_PICTURE_LIMIT,
     ) -> List[Dict[str, Any]]:
-        stmt = self._prompted_resources_stmt(scope_id, project_id=project_id)
+        """Prompted resources, newest first, capped at ``limit``.
+
+        A caller that gets exactly ``limit`` rows back cannot tell a full scope
+        from a truncated one — the catalog service compares the length against
+        its own ceiling and logs when they meet.
+        """
+        stmt = self._prompted_resources_stmt(
+            scope_id, project_id=project_id, limit=limit
+        )
         async with read_scope() as session:
             rows = (await session.execute(stmt)).mappings().all()
         return [dict(r) for r in rows]
