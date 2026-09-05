@@ -53,8 +53,10 @@ export function AttachedComposerPanel({
     inputUrls[0] ?? null,
   );
   // @-mention over this node's own images. They are already the node's, so
-  // mentioning one costs nothing — no import, no URL rewriting. The asset
-  // library is deliberately not offered here yet (it is being reworked).
+  // mentioning one costs nothing — no import, no URL rewriting. The `@` picker
+  // stays scoped to those: assets and saved prompts live in the panel, which
+  // the bookshelf below opens on its Prompts page with no target (this
+  // composer is not a node yet, so there is nothing to aim at).
   const [mentionOpen, setMentionOpen] = useState(false);
   const editorRef = useRef<PromptBodyEditorHandle | null>(null);
   const mentionImages = useMemo<PromptImageRef[]>(

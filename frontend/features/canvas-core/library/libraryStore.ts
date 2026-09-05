@@ -224,6 +224,9 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
     focusNonce: 0,
 
     openPanel(opts = {}) {
+      // Captured BEFORE the set below replaces it — an explicit `target: null`
+      // has to release the ring the OLD aim put on a card.
+      const prevTarget = get().target;
       set((s) => {
         // A PROGRAMMATIC segment switch is a segment switch. `setMediaStore`
         // drops the kind chip because it belongs to the shelf being left, and
@@ -261,6 +264,11 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
       // The canvas's own selection is the highlight this board already has,
       // so this borrows it rather than inventing a second marker.
       if (opts.target) useCanvasCoreStore.getState().setSelection([opts.target.nodeId]);
+      // An explicit clear un-highlights, the same as `close()` and
+      // `clearTarget()` — those are the only other ways an aim ends, and a
+      // ring left on a card the panel no longer points at says the aim is
+      // still live. `undefined` keeps the target, so it keeps the ring too.
+      else if (opts.target === null) releaseHighlight(prevTarget);
       persist();
     },
     // Closing releases the target. A target that outlives its panel silently

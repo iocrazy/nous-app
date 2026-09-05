@@ -118,6 +118,27 @@ describe('libraryStore', () => {
     expect(canvasSelection()).toEqual([]);
   });
 
+  it('re-opening with an explicit null target releases the old aim too', () => {
+    // The composer's bookshelf opens on Prompts with `target: null` because it
+    // has no node to aim at. Without this, the panel showed no target while a
+    // card it no longer pointed at kept the ring.
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ target: TARGET });
+    expect(canvasSelection()).toEqual(['p1']);
+    s().openPanel({ page: 'prompts', target: null });
+    expect(s().target).toBeNull();
+    expect(canvasSelection()).toEqual([]);
+  });
+
+  it('an OMITTED target keeps both the aim and its highlight', () => {
+    // The distinction the fix above rests on: `undefined` means "leave it".
+    const s = () => useLibraryStore.getState();
+    s().openPanel({ target: TARGET });
+    s().openPanel({ page: 'prompts' });
+    expect(s().target).toEqual(TARGET);
+    expect(canvasSelection()).toEqual(['p1']);
+  });
+
   it('a selection the user moved on to is NOT cleared by closing', () => {
     // Between opening and closing the user can click another card. Clearing
     // unconditionally would deselect something this panel never selected.
