@@ -30,6 +30,7 @@ import type { PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { chipClass, type Label } from './libraryChrome';
 import { LibraryMediaPage } from './LibraryMediaPage';
+import { LibraryPromptsPage } from './LibraryPromptsPage';
 import { useLibraryStore, type LibraryPage } from './libraryStore';
 import { isMentionTarget } from './libraryTarget';
 
@@ -185,9 +186,7 @@ export function LibraryPanel(): React.ReactElement | null {
       )}
 
       {page === 'prompts' ? (
-        <p data-testid="library-prompts-stub" className="p-3 text-[11px] text-canvas-muted">
-          {t('canvas.library.promptsLater', 'Prompt templates are coming soon')}
-        </p>
+        <LibraryPromptsPage target={target} targetData={targetData} />
       ) : (
         <LibraryMediaPage target={target} targetData={targetData} />
       )}
