@@ -8,8 +8,12 @@ from app.repositories.prompt_catalog_repository import PromptCatalogRepository
 SCOPE = 331438215859255
 
 
+def _compile(stmt):
+    return stmt.compile(dialect=postgresql.dialect())
+
+
 def _sql(stmt) -> str:
-    return str(stmt.compile(dialect=postgresql.dialect()))
+    return str(_compile(stmt))
 
 
 def test_mine_joins_resource_items_on_scope_and_requires_a_prompt():
@@ -21,7 +25,7 @@ def test_mine_joins_resource_items_on_scope_and_requires_a_prompt():
     # see test_assets_repository_sql.py, which pins ``public.assets.*``).
     assert "JOIN public.resource_items" in sql and "resource_items.scope_id" in sql
     assert "is_trashed" in sql
-    assert "gen_prompt" in sql and "slide_prompts" in sql  # has_prompt_expr
+    assert "btrim(coalesce(" in sql  # has_prompt_expr, not the projection
     assert "canvas_resource_refs" not in sql
 
 
@@ -31,5 +35,9 @@ def test_project_segment_goes_through_canvas_refs():
 
 
 def test_example_files_stmt_filters_slot_examples():
-    sql = _sql(PromptCatalogRepository()._example_files_stmt([1, 2]))
+    compiled = _compile(PromptCatalogRepository()._example_files_stmt([1, 2]))
+    sql = str(compiled)
     assert "asset_files.slot" in sql and "asset_files.sort_order" in sql
+    # The slot rides as a bound parameter, so the column name alone would
+    # also hold for ``slot == "covers"`` — pin the value, not the predicate.
+    assert "examples" in compiled.params.values()
