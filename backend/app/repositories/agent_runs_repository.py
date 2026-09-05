@@ -737,6 +737,65 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             return 0.0
 
+    async def list_for_issue(
+        self,
+        *,
+        issue_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Root runs on an issue (by issue_id or its session conversation),
+        newest first, with the folded ``metadata_json`` views. ``id`` /
+        ``parent_run_id`` stay native int (issue.rollup stringifies)."""
+        keys = []
+        if issue_id is not None:
+            keys.append(AgentRuns.issue_id == int(issue_id))
+        if conversation_id is not None:
+            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        if not keys:
+            return []
+        cols = (
+            AgentRuns.id,
+            AgentRuns.status,
+            AgentRuns.trigger,
+            AgentRuns.model,
+            AgentRuns.started_at,
+            AgentRuns.ended_at,
+            AgentRuns.cost_cents,
+            AgentRuns.error_code,
+            AgentRuns.metadata_json,
+            AgentRuns.agent_id,
+        )
+        try:
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(*cols)
+                            .where(or_(*keys))
+                            .where(AgentRuns.parent_run_id.is_(None))
+                            .order_by(AgentRuns.started_at.desc())
+                            .limit(limit)
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+            out = []
+            for r in rows:
+                d = dict(r)
+                d["cost_cents"] = (
+                    float(d["cost_cents"]) if d.get("cost_cents") is not None else None
+                )
+                d["agent_id"] = (
+                    str(d["agent_id"]) if d.get("agent_id") is not None else None
+                )
+                out.append(d)
+            return out
+        except Exception as e:
+            logger.error(f"[agent_runs] list_for_issue failed: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------
