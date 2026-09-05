@@ -136,3 +136,20 @@ describe('modelLabel', () => {
     expect(modelLabel({ name: 'x-row' })).toBe('x-row');
   });
 });
+
+describe('GenFooterControls — model popover rows', () => {
+  it('lists a local row by its plain name: no "(Local)" tag, no "· local" suffix', () => {
+    render(
+      <GenFooterControls
+        gen={{ kind: 'image', model: '', ratio: '1:1', count: 1 } as never}
+        models={[{ name: 'codex-local-image', display_name: 'GPT Image 2 (Local)', is_local: true }] as never}
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('pill-model'));
+    const row = screen.getByRole('button', { name: /GPT Image 2/ });
+    expect(row.textContent).toBe('GPT Image 2');
+    expect(screen.queryByText(/· local/)).toBeNull();
+    expect(screen.queryByText(/\(Local\)/)).toBeNull();
+  });
+});
