@@ -5512,5 +5512,25 @@
     "failedWithStatus": "HTTP {{status}} — verification failed",
     "unknownReason": "unknown reason",
     "malformed": "malformed response"
+  },
+  "trajectory": {
+    "you": "You",
+    "step": "Step {{n}}",
+    "live": "In progress",
+    "tools": "{{count}} tools",
+    "retries": "retry ×{{count}}",
+    "compaction": "context compacted",
+    "outputs": "{{count}} outputs",
+    "output": "Output · {{chars}} chars",
+    "todoUpdated": "Plan updated",
+    "thinking": "Thinking…",
+    "failed": "failed",
+    "inboxClaimed": "Inbox · picked up your {{kind}}",
+    "beforeStep": "before step {{n}}",
+    "budgetWarn": "Budget {{pct}}% used",
+    "budgetHalt": "Budget exceeded ({{pct}}%)",
+    "turnEnd": "Turn ended · {{reason}}",
+    "steps": "{{count}} steps",
+    "denied": "Blocked: {{tool}}"
   }
 }

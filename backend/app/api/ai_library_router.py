@@ -2403,7 +2403,14 @@ async def list_run_events(
         rows = (
             (
                 await session.execute(
-                    select(TE.seq, TE.event_type, TE.payload, TE.created_at)
+                    select(
+                        TE.seq,
+                        TE.event_type,
+                        TE.payload,
+                        TE.created_at,
+                        TE.turn,
+                        TE.step,
+                    )
                     .where(TE.run_id == int(run_id))
                     .where(TE.seq > after_seq)
                     .where(*_event_type_filter(TE, types))

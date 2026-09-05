@@ -1,4 +1,5 @@
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
+import { endedReason, retryState, selectRunView, stepProgress } from './runView';
 
 // agent_runs is the universal record for every agent turn (chat + issue +
 // scheduled). The Task Center merges those runs in client-side (the two-table
@@ -82,12 +83,14 @@ export function agentDisplayName(run: Pick<AgentRunRow, 'ai_agents'>): string | 
  * run says done while the agent was in fact stopped short.
  */
 export function turnEndSubtitle(metadata: Record<string, unknown> | null | undefined): string | null {
-  const reason = metadata?.turn_end_reason;
+  // view-first (mig 453 fold), legacy mirror key as the transition fallback
+  const reason = endedReason(selectRunView(metadata)) ?? metadata?.turn_end_reason;
   switch (reason) {
     case 'max_iterations':    return 'Stopped at tool limit';
     case 'provider_length':   return 'Cut off by model limit';
     case 'context_rejected':  return 'Rejected: context too large';
     case 'awaiting_approval': return 'Waiting for approval';
+    case 'interrupted':       return 'Interrupted';
     default:                  return null;
   }
 }
@@ -120,6 +123,8 @@ export interface TodoProgress {
  * than silence.
  */
 export function todoProgress(metadata: Record<string, unknown> | null | undefined): TodoProgress | null {
+  const fromView = stepProgress(selectRunView(metadata));
+  if (fromView) return fromView;
   const snap = metadata?.todos as Partial<AgentTodoSnapshot> | undefined;
   const counts = snap?.counts;
   if (!snap || !counts || typeof counts.total !== 'number' || typeof counts.completed !== 'number') {
@@ -149,6 +154,8 @@ export function retryProgress(
   metadata: Record<string, unknown> | null | undefined,
   now: number,
 ): RetryProgress | null {
+  const fromView = retryState(selectRunView(metadata), now);
+  if (fromView) return fromView;
   const r = metadata?.last_retry as
     | { attempt?: unknown; max_retries?: unknown; delay_ms?: unknown; at?: unknown }
     | undefined;
@@ -210,6 +217,10 @@ export function agentRunToTask(run: AgentRunRow, cachedAgentName?: string): Unif
       todos: run.metadata_json?.todos ?? null,
       last_retry: run.metadata_json?.last_retry ?? null,
       turn_end_reason: run.metadata_json?.turn_end_reason ?? null,
+      // P4 whole-value projections (mig 453). Selectors in runView.ts read
+      // these; the three legacy keys above go once every row carries them.
+      view: run.metadata_json?.view ?? null,
+      cost: run.metadata_json?.cost ?? null,
     },
     created_at: run.created_at,
     started_at: run.started_at || undefined,
