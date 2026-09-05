@@ -5512,5 +5512,25 @@
     "failedWithStatus": "HTTP {{status}} —— 验证失败",
     "unknownReason": "未知原因",
     "malformed": "响应格式异常"
+  },
+  "trajectory": {
+    "you": "你",
+    "step": "第 {{n}} 步",
+    "live": "进行中",
+    "tools": "{{count}} 个工具",
+    "retries": "重试 ×{{count}}",
+    "compaction": "上下文已压缩",
+    "outputs": "{{count}} 段产出",
+    "output": "产出 · {{chars}} 字",
+    "todoUpdated": "计划已更新",
+    "thinking": "思考中…",
+    "failed": "失败",
+    "inboxClaimed": "收件箱 · 已领取你的{{kind}}",
+    "beforeStep": "第 {{n}} 步前",
+    "budgetWarn": "预算已用 {{pct}}%",
+    "budgetHalt": "预算超支（{{pct}}%）",
+    "turnEnd": "本轮结束 · {{reason}}",
+    "steps": "{{count}} 步",
+    "denied": "已拦截：{{tool}}"
   }
 }

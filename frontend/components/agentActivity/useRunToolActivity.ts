@@ -10,9 +10,11 @@
  * every re-render of the thread. Live runs poll until they settle.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
+import type { AgentRunEvent } from '../../types';
+import { foldEvents, type TrajectoryNode } from './TrajectoryRenderer/foldEvents';
 import {
   denialsFromTranscriptEvents,
   fromTranscriptEvents,
@@ -25,6 +27,7 @@ const LIVE_POLL_MS = 5_000;
 interface CachedRunToolActivity {
   activities: ToolActivity[];
   denials: CapabilityDenial[];
+  events: AgentRunEvent[];
 }
 
 /** runId -> {activities, denials}, for runs already known to be finished. */
@@ -38,6 +41,10 @@ export function __clearRunToolActivityCache(): void {
 export interface UseRunToolActivityResult {
   activities: ToolActivity[];
   denials: CapabilityDenial[];
+  /** The raw transcript, for TrajectoryRenderer (one fetch feeds both views). */
+  events: AgentRunEvent[];
+  /** Folded trajectory nodes — steps that do not stack (foldEvents). */
+  nodes: TrajectoryNode[];
   loaded: boolean;
 }
 
@@ -51,6 +58,9 @@ export function useRunToolActivity(
   const [denials, setDenials] = useState<CapabilityDenial[]>(() =>
     runId ? (settledCache.get(runId)?.denials ?? []) : [],
   );
+  const [events, setEvents] = useState<AgentRunEvent[]>(() =>
+    runId ? (settledCache.get(runId)?.events ?? []) : [],
+  );
   const [loaded, setLoaded] = useState(() =>
     Boolean(runId && settledCache.has(runId)),
   );
@@ -59,6 +69,7 @@ export function useRunToolActivity(
     if (!runId) {
       setActivities([]);
       setDenials([]);
+      setEvents([]);
       setLoaded(true);
       return;
     }
@@ -67,6 +78,7 @@ export function useRunToolActivity(
     if (cached && !isRunning) {
       setActivities(cached.activities);
       setDenials(cached.denials);
+      setEvents(cached.events);
       setLoaded(true);
       return;
     }
@@ -85,10 +97,11 @@ export function useRunToolActivity(
         const nextActivities = fromTranscriptEvents(items);
         const nextDenials = denialsFromTranscriptEvents(items);
         if (!isRunning) {
-          settledCache.set(runId, { activities: nextActivities, denials: nextDenials });
+          settledCache.set(runId, { activities: nextActivities, denials: nextDenials, events: items });
         }
         setActivities(nextActivities);
         setDenials(nextDenials);
+        setEvents(items);
       } catch (err) {
         // A run owned by another user reads as 404 — the chips just don't
         // render for them. Not an error worth surfacing in the thread.
@@ -111,5 +124,6 @@ export function useRunToolActivity(
     };
   }, [runId, isRunning]);
 
-  return { activities, denials, loaded };
+  const nodes = useMemo(() => foldEvents(events, { isRunning }), [events, isRunning]);
+  return { activities, denials, events, nodes, loaded };
 }

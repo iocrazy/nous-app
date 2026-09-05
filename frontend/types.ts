@@ -1990,14 +1990,40 @@ export interface LiveAgentRun {
 }
 
 /** One transcript event of a run (mig 285 agent_run_events). */
+/** Every event type the backend CHECK allows (mig 285 / 436 / 443 / 453).
+ * The union is open-ended on purpose: `foldEvents` ignores what it does not
+ * know, so a new backend type never breaks an old client. */
+export type AgentRunEventType =
+  | 'user'
+  | 'assistant'
+  | 'tool_call'
+  | 'error'
+  | 'system'
+  | 'capability_denied'
+  | 'llm_retry'
+  | 'todo_write'
+  | 'compaction_start'
+  | 'compaction_summary'
+  | 'compaction_end'
+  | 'turn_end'
+  | 'step_start'
+  | 'step_end'
+  | 'inbox_claimed'
+  | 'deliverable'
+  | 'budget_check'
+  | (string & {});
+
 export interface AgentRunEvent {
   seq: number;
   // 'capability_denied': Task 5 (Agent 权限页梳理立项) — the capability gate's
   // abort, recorded once per tool per turn (backend/app/services/ai/runner/
   // agent_runner.py). payload: { tool: string, reason: string }.
-  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system' | 'capability_denied';
+  event_type: AgentRunEventType;
   payload: Record<string, unknown>;
   created_at: string;
+  /** mig 453 step coordinates; null on rows written before them. */
+  turn?: number | null;
+  step?: number | null;
 }
 
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */

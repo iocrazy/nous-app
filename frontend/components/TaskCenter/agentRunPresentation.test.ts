@@ -276,3 +276,23 @@ describe('retryProgress', () => {
     expect(retryProgress({ last_retry: { attempt: '2' } }, atMs)).toBeNull();
   });
 });
+
+
+describe('view-first selectors (mig 453) with legacy fallback', () => {
+  const view = { v: 1, phase: 'running', step: { done: 2, total: 5, label: 'B' }, current: null, retry: { attempt: 1, max: 3, delay_ms: 0, model: null, at: null }, context: null, blocked: null, children: { total: 0, done: 0 }, ended: { reason: 'max_iterations' }, inbox_pending: 0, budget: null, revision: 3 };
+  it('prefers view over the legacy keys', () => {
+    const meta = { view, todos: { todos: [], counts: { total: 9, completed: 9, in_progress: 0 } }, last_retry: { attempt: 9, max_retries: 9 }, turn_end_reason: 'completed' };
+    expect(todoProgress(meta)).toEqual({ done: 2, total: 5, label: 'B' });
+    expect(retryProgress(meta, 0)).toEqual({ attempt: 1, max: 3, waitingSeconds: 0 });
+    expect(turnEndSubtitle(meta)).toBe('Stopped at tool limit');
+  });
+  it('still reads the legacy keys on rows without view', () => {
+    expect(todoProgress({ todos: { todos: [], counts: { total: 4, completed: 1, in_progress: 0 } } })).toEqual({ done: 1, total: 4, label: null });
+    expect(turnEndSubtitle({ turn_end_reason: 'awaiting_approval' })).toBe('Waiting for approval');
+  });
+  it('carries view/cost through to the task metadata', () => {
+    const task = agentRunToTask(baseRow({ metadata_json: { view, cost: { spent_cents: 1 } } }));
+    expect((task.metadata as Record<string, unknown>).view).toEqual(view);
+    expect((task.metadata as Record<string, unknown>).cost).toEqual({ spent_cents: 1 });
+  });
+});
