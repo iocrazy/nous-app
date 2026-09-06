@@ -142,3 +142,23 @@ T1 → T2 → T3 → (T4, T5, T6 并行) → T7 → (T8, T9, T10, T11 并行) �
 
 - **合并前必须 `non-success == 0`**：#2127 在 rebase 后 checks 重新排队时被合并（旧 5/5 结论已过期）；结果无害（本地全量绿）但流程有洞，后续所有合并改为先数 non-success。
 - **mock 掉 session 的写路径测试要配一次真库回滚验证**：jsonb 路径类型（2026-08-27）与 JSONB 绑定双重编码（2026-09-05）是同一族。
+
+## 上线后账（2026-09-06，全部前端链合并之后）
+
+前端链按 T8 → T9 → T10 → T11 顺序合并（末 #2133 → `4919096d`），`version.json` 4919096，`e2e:prod` 3/3，调试账号真登录截图三处新 UI 均在。随后的真栈走查与补验又挖出六处，全部当天合并上线并复验：
+
+| PR | 症状（真栈） | 根因 | 修法 |
+|---|---|---|---|
+| #2137 | 7 月的 probe issue（in_review）在列表显示 `running · 860h`，与同页 rollup 的 idle 打架 | 六处同形谓词把「有 `dbos_workflow_id` 且不在 done/cancelled」读成 live；id 从不清除 | `isIssueLive = id && status === 'in_progress'`（与 issue_lifecycle / reconcile sweeper 同口径），六处合一 |
+| #2138 mig 454 | 90d 内 7 个在用模型只有 doubao pro 有价格行，其余 `cost_cents` 恒 NULL | 上架模型不带价格行 | 补 lite/pro（方舟 ≤32K 档 ¥ @7.10）、DeepSeek V4 三款（官方峰时价）、ModelScope 与自托管 0 行；每行显式 `supports_vision`（DB 行优先且 `bool(NULL)=False` 会剥图） |
+| #2139 | 没有机制防止下一个模型再次静默无价 | — | admin 列表端点每行 `price_coverage`（priced/missing/not_applicable/unknown），与探针 `last_test_status` 正交；admin 页对 missing 画红 Tag；读表失败报 unknown 不报 missing |
+| #2142 | 零预算 issue：钩子落 `budget_check{halt,100}`，rollup 却报 `pct null / ok` | rollup 的 `budget > 0` 守卫让 0 像不限 | 0 → 有花费即 100（over） |
+| #2146 | todo run `view.step` 3/3 正确，`metadata_json.todos.todos` 为空 → 详情页 Steps 整表二期起一直空 | `_legacy_todos` 写死 `[]` | 折叠把条目留在 `view.todos`（字段白名单、上限 `MAX_TODO_ITEMS`、整值替换），legacy 从 view 取 |
+| #2148 | doubao lite 把 `"?op=replace&items=…"` 塞进 `file` 连错四次，整轮零 todo 快照 | Skill 工具 schema 只声明 `skill/file`，内建 todo 的入参模型看不到 | 声明可选 `op/items/id`；prompts README 补「工具 schema」三问 |
+
+**补验通过的一期未验项**：`budget_check` 落行（halt 记录、run 不中断）；issue 评论运行中 `diverted_to_inbox=true` → 下一步 `inbox_claimed`、模型采纳插话；todo n/m 随快照推进（#2148 后 lite 首次调用即正确）。**仍未真栈验**：`turn_end(interrupted)`——要在生产上杀 worker，不做。
+
+**教训追加**：
+- 「读正常 ≠ 服务正常」的 agent 版：n/m 计数还在，整表却空了两期无人发现——**派生键替换原始数据时，要检查下游是否还有人读原始形状**。
+- 模型用不了它没被展示的参数。工具的入参契约必须写进 inputSchema，不能只写在错误信息里；改模型可见面同时补 README 三问。
+- 「自带借口的失败模式」又一例：探针 / 价格表 / 预算 rollup 三处都是「没有信号」而不是「红灯」，与 `reference-self-concealing-failure-modes` 同族。
