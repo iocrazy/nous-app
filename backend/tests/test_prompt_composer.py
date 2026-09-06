@@ -236,6 +236,23 @@ def test_skill_tool_has_required_params(fake_agent, fake_skills):
     params = skill_tool["function"]["parameters"]
     assert "skill" in params["properties"]
     assert "file" in params["properties"]
+    # The built-in todo skill's arguments are part of the advertised schema:
+    # a model cannot use an argument it was never shown (2026-09-06 — doubao
+    # lite jammed "?op=replace&items=" into `file` and never produced a todo
+    # snapshot). Tokenize-style assertions, not a full pin.
+    props = params["properties"]
+    assert set(props["op"]["enum"]) == {
+        "replace",
+        "complete",
+        "in_progress",
+        "pending",
+        "show",
+    }
+    assert props["items"]["type"] == "array"
+    assert props["items"]["items"]["required"] == ["content"]
+    assert props["id"]["type"] == "integer"
+    assert "todo" in skill_tool["function"]["description"]
+    assert params["required"] == ["skill"]  # todo args stay optional
     assert params["required"] == ["skill"]
 
 
