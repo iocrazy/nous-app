@@ -17,10 +17,41 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import en from '../../public/locales/en.json';
+
+/**
+ * The i18n mock resolves against the REAL `en.json` rather than echoing the
+ * key or the inline defaultValue. A mock that returns the fallback proves the
+ * component ASKED for a string; it says nothing about whether the string
+ * exists, so all three assertions below would stay green with both locale
+ * entries deleted (review M1). Resolving through the locale makes a missing
+ * key a failing test.
+ */
+const lookup = (key: string): string | undefined =>
+  key.split('.').reduce<unknown>(
+    (node, part) =>
+      node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined,
+    en as unknown,
+  ) as string | undefined;
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: unknown) =>
-      typeof fallback === 'string' ? fallback : key,
+    // The real three-arg shape: `t(key)`, `t(key, options)` and
+    // `t(key, defaultValue, options)`. The locale hit WINS over the inline
+    // default — that ordering is the whole point.
+    t: (k: string, arg2?: unknown, arg3?: unknown) => {
+      const opts = (typeof arg2 === 'object' ? arg2 : arg3) as
+        | Record<string, unknown>
+        | undefined;
+      const hit = lookup(k);
+      const template =
+        typeof hit === 'string' ? hit : typeof arg2 === 'string' ? arg2 : k;
+      let out = template;
+      for (const [name, value] of Object.entries(opts ?? {})) {
+        out = out.split(`{{${name}}}`).join(String(value));
+      }
+      return out;
+    },
   }),
 }));
 
@@ -172,6 +203,47 @@ describe('StagedAssetLoadoutMenu — choosing', () => {
     await waitFor(() => expect(screen.queryByText('Rainy Night')).toBeNull());
   });
 
+  it('closes on Escape', async () => {
+    // Same escape hatch the mention picker gives in both hosts. Without it the
+    // only ways out were picking something or finding the button again.
+    renderMenu();
+    await click(screen.getByTestId('staged-asset-loadout-button'));
+    await waitFor(() => expect(screen.getByText('Rainy Night')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    expect(screen.queryByText('Rainy Night')).toBeNull();
+  });
+
+  it('closes on a mousedown outside itself', async () => {
+    renderMenu();
+    await click(screen.getByTestId('staged-asset-loadout-button'));
+    await waitFor(() => expect(screen.getByText('Rainy Night')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.mouseDown(document.body);
+    });
+
+    expect(screen.queryByText('Rainy Night')).toBeNull();
+  });
+
+  it('stays open when the mousedown lands inside the menu', async () => {
+    // The guard that keeps the outside-click listener from fighting the menu's
+    // own items: they commit on mousedown, so a listener that closed first
+    // would swallow the pick.
+    renderMenu();
+    await click(screen.getByTestId('staged-asset-loadout-button'));
+    await waitFor(() => expect(screen.getByText('Rainy Night')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByTestId('staged-asset-loadout-menu'));
+    });
+
+    expect(screen.getByText('Rainy Night')).toBeTruthy();
+  });
+
   it('withdraws the button when the character turns out to have one loadout', async () => {
     // One loadout is not a choice. The button can only go away AFTER the
     // answer arrives — the count is not knowable from the staged snapshot.
@@ -200,7 +272,7 @@ describe('StagedAssetLoadoutMenu — a failed fetch is visible, not silent', () 
     await click(button);
 
     await waitFor(() =>
-      expect(button.getAttribute('title')).toBe('Could not load loadouts'),
+      expect(button.getAttribute('title')).toBe('Could Not Load Loadouts'),
     );
     expect(screen.queryByRole('menu')).toBeNull();
   });

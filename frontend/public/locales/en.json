@@ -3745,7 +3745,7 @@
     "stagedAsset": {
       "chooseLoadout": "Choose Loadout",
       "defaultLoadout": "Default Loadout",
-      "loadoutsUnavailable": "Could not load loadouts"
+      "loadoutsUnavailable": "Could Not Load Loadouts"
     },
     "suggestions": {
       "outlineStory": "Help me outline a story",

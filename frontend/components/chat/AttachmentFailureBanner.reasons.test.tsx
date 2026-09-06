@@ -3,9 +3,9 @@
  *
  * The count alone was already an improvement on the old silent no-op, but "2
  * attachments could not be used" does not tell a user whether to re-share an
- * asset, generate its first image, or stop waiting on a deleted one. Five
+ * asset, generate its first image, or stop waiting on a deleted one. Six
  * typed reasons come back from the backend and each one has a different next
- * step.
+ * step — ruling C's four, v2's `loadout_not_owned`, and the reference cap.
  *
  * The i18n mock resolves against the REAL en locale rather than echoing keys:
  * an assertion that a key was addressed proves nothing about whether the

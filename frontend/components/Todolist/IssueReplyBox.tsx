@@ -31,12 +31,8 @@ import { useComposerPaste } from '../../hooks/useComposerPaste';
 import { useResourceSearch } from '../../hooks/useResourceSearch';
 import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
-import type {
-  AssetGridPickerHandle,
-  AssetGridQuery,
-  AssetGridRow,
-} from '../assets/AssetGridPicker';
-import { searchAssetsAccessible } from '../../services/assetsService';
+import type { AssetGridRow } from '../assets/AssetGridPicker';
+import { useMentionAssetsTab } from '../chat/useMentionAssetsTab';
 import { MAX_ASSET_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 import {
   stageAsset as stageAssetInto,
@@ -181,15 +177,6 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf'
   >('');
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
-  // The picker's sixth tab. Its own flag rather than a seventh `activeKind`
-  // value: the two axes answer to different searches, and a shared enum would
-  // make every read re-derive which one it is holding.
-  const [mentionAssetsTab, setMentionAssetsTab] = useState(false);
-  // `null` until the grid answers. An unvisited tab badging "0" would state
-  // that the user's library is empty — a claim no request has been made to
-  // support.
-  const [mentionAssetCount, setMentionAssetCount] = useState<number | null>(null);
-  const mentionAssetPickerRef = useRef<AssetGridPickerHandle | null>(null);
   const { data: mentionData, loading: mentionLoading } = useResourceSearch(
     mentionQuery,
     mentionActiveKind,
@@ -396,6 +383,11 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     if (editor) editor.setEditable(!inputBlocked);
   }, [editor, inputBlocked]);
 
+  // `useMentionAssetsTab` is declared BELOW — its `onSelect` closes the picker,
+  // and closing resets the tab, so the two reference each other. The ref breaks
+  // that cycle without making either one re-created on every render.
+  const mentionAssetsReset = useRef<() => void>(() => {});
+
   /**
    * Close, and forget which tab was open.
    *
@@ -406,10 +398,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
    */
   const closeMentionPicker = useCallback(() => {
     setMentionOpen(false);
-    setMentionAssetsTab(false);
-    // A count carried over would badge a number for a search this session
-    // never ran.
-    setMentionAssetCount(null);
+    mentionAssetsReset.current();
   }, []);
 
   // Close the picker on Escape or click-outside (mirrors AIChatPanel).
@@ -443,55 +432,6 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     setMentionQuery('');
     ed?.commands.focus();
   }, [closeMentionPicker]);
-
-  /**
-   * ↑ / ↓ / Enter, routed from the composer to the open picker.
-   *
-   * Only the ASSETS tab is claimed, exactly as in AIChatPanel. The five
-   * resource tabs have never moved their highlight with the arrows
-   * (`mentionActiveIndex` is pinned at 0), and claiming Enter for a row the
-   * user cannot see selected would swallow a keystroke that means something
-   * else here — plain Enter inserts a newline in a multi-line reply.
-   *
-   * `commitActive` answers false when nothing is highlighted, and that false
-   * is what lets the keystroke fall through to the editor.
-   */
-  const handleMentionKey = useCallback(
-    (key: 'ArrowUp' | 'ArrowDown' | 'Enter'): boolean => {
-      if (!mentionOpen || !mentionAssetsTab) return false;
-      const handle = mentionAssetPickerRef.current;
-      if (!handle) return false;
-      if (key === 'ArrowDown') {
-        handle.move(1);
-        return true;
-      }
-      if (key === 'ArrowUp') {
-        handle.move(-1);
-        return true;
-      }
-      return handle.commitActive();
-    },
-    [mentionOpen, mentionAssetsTab],
-  );
-  useEffect(() => { mentionKeyRef.current = handleMentionKey; }, [handleMentionKey]);
-
-  /**
-   * The Assets tab's transport: every team the user belongs to, plus the
-   * system presets. No `scope_id` — the reply box has a `teamId` for the
-   * RESOURCE search, but an asset reference is authorized server-side by team
-   * membership (the same predicate `asset_ref_resolver` reads), and narrowing
-   * it here would be a second, quieter answer to the same question.
-   */
-  const fetchMentionAssets = useCallback(
-    (params: AssetGridQuery, signal: AbortSignal): Promise<AssetGridRow[]> =>
-      searchAssetsAccessible(params.q ?? '', {
-        type: params.type ?? undefined,
-        library: params.library,
-        limit: params.limit,
-        signal,
-      }),
-    [],
-  );
 
   /**
    * Picking an asset STAGES it — it does not insert a tiptap node.
@@ -533,6 +473,21 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     [stagedAssets, addToast, t, closeMentionPicker],
   );
 
+  // The Assets tab itself — state, transport and key routing shared with
+  // AIChatPanel, so the two composers cannot drift about what mentioning an
+  // asset searches or which keys the grid claims.
+  const mentionAssets = useMentionAssetsTab({
+    pickerOpen: mentionOpen,
+    onSelect: handleMentionAssetSelect,
+  });
+  useEffect(() => {
+    mentionAssetsReset.current = mentionAssets.reset;
+  }, [mentionAssets.reset]);
+  // Same reason as `submitRef`: the editor's key handler closure is built once.
+  useEffect(() => {
+    mentionKeyRef.current = mentionAssets.handleKey;
+  }, [mentionAssets.handleKey]);
+
   return (
     <div
       {...rootProps}
@@ -548,20 +503,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             counts={mentionData.counts}
             activeKind={mentionActiveKind}
             onKindChange={(kind) => {
-              setMentionAssetsTab(false);
+              mentionAssets.deactivate();
               setMentionActiveKind(kind);
             }}
             onSelect={handleMentionSelect}
             activeIndex={mentionActiveIndex}
-            assets={{
-              active: mentionAssetsTab,
-              onActivate: () => setMentionAssetsTab(true),
-              count: mentionAssetCount,
-              onCountChange: setMentionAssetCount,
-              onSelect: handleMentionAssetSelect,
-              fetch: fetchMentionAssets,
-              pickerRef: mentionAssetPickerRef,
-            }}
+            assets={mentionAssets.assets}
           />
         </div>
       )}

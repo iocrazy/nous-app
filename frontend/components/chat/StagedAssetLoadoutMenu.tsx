@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shirt } from 'lucide-react';
 
@@ -83,6 +83,35 @@ export function StagedAssetLoadoutMenu({
     }
   }, [open, state, asset.scope_id, asset.asset_id]);
 
+  // Dismiss on Escape or a click anywhere else, mirroring the mention picker in
+  // both hosts. Without it the only ways out were picking something or finding
+  // the same small button again — and a menu that eats the next click on the
+  // composer reads as a stuck UI, not as a menu.
+  //
+  // `mousedown`, not `click`: the asset tiles and the chip's own × commit on
+  // mousedown, so a `click` listener would fire after the thing the user
+  // actually pressed had already acted.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    const onDown = (e: MouseEvent) => {
+      // Anything inside this menu's own wrapper is NOT outside — including the
+      // toggle button, which owns its own close and would otherwise be closed
+      // here and reopened by its handler in the same gesture.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-testid="staged-asset-loadout-root"]')) return;
+      setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [open]);
+
   const pick = useCallback(
     (loadoutId: string | null, loadoutName: string | null) => {
       onChange(loadoutId, loadoutName);
@@ -99,7 +128,7 @@ export function StagedAssetLoadoutMenu({
       : t('chat.stagedAsset.chooseLoadout', 'Choose Loadout');
 
   return (
-    <span className="relative inline-flex">
+    <span data-testid="staged-asset-loadout-root" className="relative inline-flex">
       <button
         type="button"
         data-testid="staged-asset-loadout-button"

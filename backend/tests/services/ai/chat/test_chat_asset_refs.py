@@ -703,6 +703,42 @@ def test_display_attachments_keeps_asset_keys_and_still_drops_bytes():
     ]
 
 
+def test_display_attachments_persists_both_loadout_shapes():
+    """The pair, because BOTH are real shapes as of v2.
+
+    ``loadout_id`` was whitelisted before anything could send one, and the
+    comment above ``_DISPLAY_ATTACHMENT_KEYS`` used to say so — telling readers
+    not to write a fixture containing one. The staged-chip loadout menu made it
+    reachable, so a fixture set covering only the absent case now under-tests
+    the persisted bubble. Asserted together rather than in two tests: the point
+    is the DIFFERENCE, and a reader of a persisted row has to tell "wears its
+    default" from "the author picked this outfit".
+    """
+    from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+
+    default_wear, picked = ConversationsAiStore.display_attachments(
+        [
+            {
+                "kind": "asset_ref",
+                "asset_id": ASSET_ID,
+                "loadout_id": None,
+                "name": "Lin Wei",
+            },
+            {
+                "kind": "asset_ref",
+                "asset_id": ASSET_ID,
+                "loadout_id": "5001",
+                "name": "Lin Wei",
+            },
+        ]
+    )
+
+    # None is DROPPED, so a reloaded bubble with no `loadout_id` means "the
+    # asset's default loadout" — never "this build could not emit one".
+    assert "loadout_id" not in default_wear
+    assert picked["loadout_id"] == "5001"
+
+
 def test_attachment_request_accepts_asset_ref_fields():
     """The wire shape the frontend will send. ``kind`` stays a free string —
     an unknown one must reach the typed per-attachment failure path, not a 422

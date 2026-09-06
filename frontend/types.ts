@@ -2475,10 +2475,14 @@ export type AssetRefAttachment = {
   /** BIGINT serialized as string (Snowflake). */
   asset_id: string;
   /** `asset_loadouts.id`, or null for "use the default loadout".
-   *  v1 ALWAYS sends null — neither entry point (the asset sheet's Send To
-   *  Agent, the @ picker's Assets tab) has a loadout picker. The field stays on
-   *  the wire because the server's default-loadout behaviour is defined
-   *  against it (ruling D) and the v2 picker will send a real id. */
+   *  Both values are live as of v2: staging an asset from either entry point
+   *  (the asset sheet's Send To Agent, the @ picker's Assets tab) still sends
+   *  null, and the staged chip's loadout menu can then replace it with a real
+   *  id. Null keeps its MEANING — the server's default-loadout behaviour is
+   *  defined against it (ruling D) — so it is never a missing value.
+   *  A loadout the asset does not own is refused as a typed
+   *  `loadout_not_owned` failure and the reference is dropped; the server no
+   *  longer falls back to the default. */
   loadout_id: string | null;
   /** Snapshot — the bubble uses this even if the asset is renamed later. */
   name: string;

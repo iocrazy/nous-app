@@ -92,13 +92,20 @@ _META_DECORATION_KEYS = ("agent_id", "prompt_tokens", "completion_tokens")
 # it, and the reference kinds carry no bytes to fall back on — the chip would
 # degrade to a bare name with no link.
 #
-# ⚠️ `loadout_id` is on this list but NEVER APPEARS IN A PERSISTED ROW TODAY.
-# The reducer drops None (`if a.get(k) is not None`), v1 has no loadout picker
-# at either entry point, so the wire always carries null and the key is always
-# dropped. It stays whitelisted so the day the v2 picker sends a real loadout
-# the value persists without a second migration of this tuple — but do not read
-# a persisted `loadout_id` expecting it to be there, and do not write a fixture
-# containing one: that is a shape this reducer cannot emit (final review M2).
+# `loadout_id` is REACHABLE as of v2. It was whitelisted ahead of time so that
+# the day a picker sent a real loadout the value would persist without a second
+# migration of this tuple; the staged-chip loadout menu
+# (`frontend/components/chat/StagedAssetLoadoutMenu.tsx`) is that day, and both
+# entry points can now carry one. The reducer still drops None
+# (`if a.get(k) is not None`), so BOTH shapes are real and a fixture set that
+# covers only one under-tests the persisted bubble:
+#
+#   * key absent  — the asset wears its default loadout (the common case, and
+#     what every pre-v2 row looks like);
+#   * key present — the author picked a specific outfit for that turn.
+#
+# A reader of a persisted row must therefore treat a missing `loadout_id` as
+# "default loadout", never as "this build cannot emit one".
 _DISPLAY_ATTACHMENT_KEYS = (
     "kind",
     "resource_id",

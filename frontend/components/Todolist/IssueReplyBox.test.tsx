@@ -24,6 +24,45 @@ vi.mock('../../services/aiLibraryService', () => ({
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
 
+import en from '../../public/locales/en.json';
+
+/**
+ * The i18n mock resolves against the REAL `en.json` rather than echoing the
+ * key or the inline defaultValue. A mock that returns the fallback proves the
+ * component ASKED for a string; it says nothing about whether the string
+ * exists, so the cap assertion below would stay green with the copy deleted
+ * (review M6). Resolving through the locale makes a missing
+ * key a failing test.
+ */
+const lookup = (key: string): string | undefined =>
+  key.split('.').reduce<unknown>(
+    (node, part) =>
+      node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined,
+    en as unknown,
+  ) as string | undefined;
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    // The real three-arg shape: `t(key)`, `t(key, options)` and
+    // `t(key, defaultValue, options)`. The locale hit WINS over the inline
+    // default — that ordering is the whole point.
+    t: (k: string, arg2?: unknown, arg3?: unknown) => {
+      const opts = (typeof arg2 === 'object' ? arg2 : arg3) as
+        | Record<string, unknown>
+        | undefined;
+      const hit = lookup(k);
+      const template =
+        typeof hit === 'string' ? hit : typeof arg2 === 'string' ? arg2 : k;
+      let out = template;
+      for (const [name, value] of Object.entries(opts ?? {})) {
+        out = out.split(`{{${name}}}`).join(String(value));
+      }
+      return out;
+    },
+  }),
+}));
+
+
 // The @-mention resource picker hook fires a debounced network search on
 // mount (useResourceSearch → searchResources). Stub it so jsdom never hits
 // the network and the component renders deterministically.
@@ -653,9 +692,14 @@ describe('IssueReplyBox — the Assets tab', () => {
     expect(screen.getAllByTestId('staged-asset-chip')).toHaveLength(
       MAX_ASSET_REF_ATTACHMENTS,
     );
+    // The SENTENCE, resolved from `en.json` and with `{{n}}` interpolated —
+    // not the key. A key assertion proves a toast fired; it stays green when
+    // the copy is missing, which is the one thing this refusal must not do.
     expect(addToast).toHaveBeenCalledWith(
-      expect.stringContaining('chat.attachmentFailureReason.attachment_limit_exceeded'),
+      `Only The First ${MAX_ASSET_REF_ATTACHMENTS} Assets Were Used`,
       'error',
     );
+    expect(addToast.mock.calls[0][0]).not.toContain('{{');
+    expect(addToast.mock.calls[0][0]).not.toContain('attachmentFailureReason');
   });
 });
