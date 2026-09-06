@@ -215,6 +215,42 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  // Ruling R24 (spec 2026-09-05-unified-prompts-library, Task 18 review): the
+  // shared `promptPatch` omits each key when its side of the payload is
+  // empty. Reachable in production from `PromptSection.tsx` — its Send to
+  // Canvas button is NOT disabled on an empty positive, and it sends
+  // `negative: negValue.trim() ? negValue : null`.
+  //
+  // ⚠️ `body` is pinned as the factory's `''`, NOT as an absent key:
+  // `createPromptNode` seeds `body: data.body ?? ''` unconditionally
+  // (`factories.ts:140`), so no patch of this expression can make that key
+  // disappear. What the omission actually buys is that the blank is not
+  // written through — hence the WHITESPACE positive here and not a bare
+  // `''`, which no mutation of this expression could distinguish.
+  // `negative_body` is genuinely absent (the factory adds it only when
+  // truthy) and an empty negative must not conjure the negative textarea.
+  it('omits both prompt keys when the payload sides are empty (R24)', async () => {
+    locationState = {
+      promptInsert: {
+        assetId: 'r1',
+        filename: 'hero.png',
+        positive: '   ',
+        negative: null,
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    const promptNode = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+    const data = promptNode.data as Record<string, unknown>;
+    expect(data.body).toBe('');
+    expect(data).not.toHaveProperty('negative_body');
+  });
+
   // ─── ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5) ────
 
   describe('autoRun payload', () => {

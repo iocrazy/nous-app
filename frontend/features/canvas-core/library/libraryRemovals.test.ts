@@ -34,7 +34,7 @@ function tsFiles(dir: string): string[] {
 }
 
 /**
- * This file names all three stems in `GONE` — it has to, that is the list —
+ * This file names every stem in `GONE` — it has to, that is the list —
  * so scanning it would make the guard permanently red about itself. Every
  * other file in the tree is fair game.
  */
