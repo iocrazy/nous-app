@@ -115,7 +115,7 @@ on:
       # ⚠️ That count has been wrong twice (it said "eight" when there were
       # seven, then "nine" when there were eight — each edit trusted the
       # previous number instead of counting). Recount, do not increment:
-      #   grep -c 'pytest-no-full-skip.sh" tests/' .github/workflows/schema-drift.yml
+      #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
     branches: [master]

@@ -177,6 +177,26 @@ const ALLOWED_DEFAULTS = new Set([
   'Open Library',
 ]);
 
+/** Is the match at `index` inside a comment?
+ *
+ *  Looks at what precedes it ON ITS OWN LINE: the line must START with `//`
+ *  or with `*` (a JSDoc/block continuation line). Leading only — a `//`
+ *  anywhere before the match would also swallow a real row whose earlier
+ *  property holds a URL (`href: 'https://…', label: 'Workflow library'`),
+ *  and a suppressed real label is the one failure this guard exists to
+ *  prevent. The marker is always to the left of the key, never inside the
+ *  quoted value, which is why COMMENT_OPENER (which tests the captured value)
+ *  cannot do this job.
+ *
+ *  Cheap and line-local rather than a parse: a false NEGATIVE here (a
+ *  multi-line block comment whose inner lines carry no `*`) only costs a
+ *  spurious offender someone then reads and fixes. */
+function isCommentedOut(src: string, index: number): boolean {
+  const lineStart = src.lastIndexOf('\n', index) + 1;
+  const before = src.slice(lineStart, index);
+  return /^\s*(\/\/|\*)/.test(before);
+}
+
 /** The exact row-table labels that genuinely name THE media library — the
  *  object-property counterpart of ALLOWED_DEFAULTS, and allow-listed the same
  *  way and for the same reason: by string, so a NEW offender landing in an
@@ -185,23 +205,6 @@ const ALLOWED_DEFAULTS = new Set([
  *  Each entry names the one panel the canvas is allowed to call Library. A
  *  label naming any OTHER library (a workflow store, a prompt-template store)
  *  does not belong here; it belongs in the rename table. */
-/** Is the match at `index` inside a comment?
- *
- *  Looks at what precedes it ON ITS OWN LINE: a `//` anywhere before it, or a
- *  leading `*` (a JSDoc/block continuation line). That is the whole hazard for
- *  an object property — the marker is always to the left of the key, never
- *  inside the quoted value, which is why COMMENT_OPENER cannot do this job.
- *
- *  Cheap and line-local rather than a parse: this test reads source as text
- *  everywhere else too, and a false NEGATIVE here (a multi-line block comment
- *  whose inner lines carry no `*`) only costs a spurious offender someone then
- *  reads and fixes — never a missed one. */
-function isCommentedOut(src: string, index: number): boolean {
-  const lineStart = src.lastIndexOf('\n', index) + 1;
-  const before = src.slice(lineStart, index);
-  return before.includes('//') || /^\s*\*/.test(before);
-}
-
 const ALLOWED_OBJECT_LABELS = new Set([
   // palette/commands.ts — the ⌘K row that opens THE panel.
   'Add from library…',
