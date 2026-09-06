@@ -470,14 +470,20 @@ class PromptComposer:
                 "description": (
                     "Load a local skill definition and its instructions. "
                     "Returns the SKILL body (and optional sub-file "
-                    "content)."
+                    'content). Built-in skill="todo" keeps your '
+                    "multi-step plan for this turn: op=replace with "
+                    "items to set the steps, then op=complete with id "
+                    "as you finish each."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "skill": {
                             "type": "string",
-                            "description": "Skill slug from <available_skills>.",
+                            "description": (
+                                "Skill slug from <available_skills>, or the "
+                                "built-in 'todo'."
+                            ),
                         },
                         "file": {
                             "type": "string",
@@ -485,6 +491,55 @@ class PromptComposer:
                                 "Optional sub-file path like "
                                 "'references/examples.md'. Omit to "
                                 "return the SKILL.md body."
+                            ),
+                        },
+                        # skill="todo" only. Declared here because a model
+                        # cannot use arguments it was never shown: on
+                        # 2026-09-06 doubao lite stuffed "?op=replace&items="
+                        # into `file` four times in a row and every call
+                        # failed, so the run never produced a todo snapshot
+                        # and the task card never showed n/m.
+                        "op": {
+                            "type": "string",
+                            "enum": [
+                                "replace",
+                                "complete",
+                                "in_progress",
+                                "pending",
+                                "show",
+                            ],
+                            "description": (
+                                "skill='todo' only: replace the whole list, "
+                                "change one item's status, or show it."
+                            ),
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string"},
+                                    "active_form": {
+                                        "type": "string",
+                                        "description": (
+                                            "Present-continuous label shown "
+                                            "while in progress, e.g. "
+                                            "'Writing scene 2'."
+                                        ),
+                                    },
+                                },
+                                "required": ["content"],
+                            },
+                            "description": (
+                                "skill='todo', op='replace' only: the full "
+                                "step list (max 30)."
+                            ),
+                        },
+                        "id": {
+                            "type": "integer",
+                            "description": (
+                                "skill='todo', op=complete/in_progress/"
+                                "pending: the item id from the list."
                             ),
                         },
                     },
