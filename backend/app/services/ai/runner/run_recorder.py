@@ -851,12 +851,20 @@ def _truncate(text: str, max_chars: int) -> str:
 
 
 def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
-    """JSON-safe copy of an event payload with long string values truncated.
+    """JSON-safe copy of an event payload with long values truncated.
 
-    One level deep is enough — event payloads are flat ({content}, {tool,
-    args, result}); nested dicts are stringified-then-truncated so a deep
-    tool result can't sneak megabytes past the cap.
+    Strings are cut at ``max_chars``. Nested dicts/lists (``usage``, ``counts``,
+    ``todos``, tool ``args``/``result``) are measured by their serialized size
+    and **kept as structure** when they fit — the log is the replay source
+    (mig 453 spine ①), and a fold given ``"{\"total\": 3}"`` where it expects a
+    dict silently returns nothing. Only an oversized nested value degrades to
+    its truncated JSON string, so a deep tool result still can't sneak
+    megabytes past the cap. Until 2026-09-06 every nested value was
+    stringified unconditionally; the frontend folds grew a JSON.parse
+    fallback for those rows and keep it for the stored history.
     """
+    import json as _json
+
     out: dict[str, Any] = {}
     for k, v in (payload or {}).items():
         if isinstance(v, str):
@@ -865,13 +873,15 @@ def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]
             out[k] = v
         else:
             try:
-                import json as _json
-
-                out[k] = _truncate(
-                    _json.dumps(v, ensure_ascii=False, default=str), max_chars
-                )
+                dumped = _json.dumps(v, ensure_ascii=False, default=str)
             except Exception:  # noqa: BLE001 — telemetry only
                 out[k] = _truncate(repr(v), max_chars)
+                continue
+            if len(dumped) <= max_chars:
+                # round-trip: JSON-safe copy (datetimes etc. already str'd)
+                out[k] = _json.loads(dumped)
+            else:
+                out[k] = _truncate(dumped, max_chars)
     return out
 
 
