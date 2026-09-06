@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IssueReplyBox } from './IssueReplyBox';
+import { MAX_ASSET_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -17,7 +18,11 @@ vi.mock('../../services/aiLibraryService', () => ({
   },
 }));
 
-vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+// One shared spy, not a fresh `vi.fn()` per render: the cap refusal below has
+// to assert what the composer SAID, and a spy the test cannot reach makes
+// "it told the user" unprovable.
+const addToast = vi.fn();
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
 
 // The @-mention resource picker hook fires a debounced network search on
 // mount (useResourceSearch → searchResources). Stub it so jsdom never hits
@@ -48,8 +53,17 @@ let editorRefNodes: Array<{
   scope: { type: string; id: string };
 }> = [];
 
+/** The options the component hands `useEditor`. Captured so a test can drive
+ *  the REAL `handleKeyDown` — "@" opens the mention picker, and with
+ *  `EditorContent` mocked away there is no other way to reach that production
+ *  code. Asserting against a re-implementation of it here would prove nothing
+ *  about the component. */
+let editorOptions: {
+  editorProps?: { handleKeyDown?: (view: unknown, e: KeyboardEvent) => boolean };
+} = {};
+
 vi.mock('@tiptap/react', () => ({
-  useEditor: () => ({
+  useEditor: (opts: unknown) => ((editorOptions = opts as typeof editorOptions), {
     getText: () => editorText,
     commands: {
       clearContent: vi.fn(),
@@ -75,11 +89,33 @@ vi.mock('@tiptap/react', () => ({
   EditorContent: () => null,
 }));
 
+/** `GET /api/v1/assets/search` rows — Envelope-unwrapped, every id a STRING
+ *  (`assets_repository._serialize` calls `str()` on every BIGINT column), and
+ *  `scope_id` null on a system preset. Copied from the real fixture rather
+ *  than tidied. */
+const AVA = {
+  id: '727145299382534201',
+  name: 'Ava',
+  asset_type: 'character' as const,
+  cover_file_id: '727145299382534301',
+  readiness: { state: 'ready' as const, missing: [] },
+  scope_id: '727145299382534200',
+};
+
+const searchAssetsAccessible = vi.fn();
+vi.mock('../../services/assetsService', () => ({
+  searchAssetsAccessible: (...args: unknown[]) => searchAssetsAccessible(...args),
+  // The staged chip's loadout menu fetches this on open. Never called in
+  // these tests, but the module must export it or the import throws.
+  fetchAssetDetail: vi.fn().mockResolvedValue({ loadouts: [] }),
+}));
+
 const _agents = [{ id: 'a1', slug: 'agent-1', name: 'Agent 1' }];
 
 describe('IssueReplyBox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    addToast.mockClear();
     editorText = '';
     editorRefNodes = [];
   });
@@ -370,5 +406,256 @@ describe('IssueReplyBox', () => {
       await waitFor(() => expect(onSubmit).toHaveBeenCalled());
       expect(onSubmit.mock.calls[0][3]).toBeUndefined();
     });
+  });
+});
+
+/**
+ * The Assets tab in the issue reply box (v2 Task 3).
+ *
+ * Ruling H deferred asset references here while the chat panel got them, so
+ * mentioning a character in an issue silently did nothing. The backend never
+ * needed a change: `IssueMessagePost.attachments` is already
+ * `List[AttachmentRequest]`, and `run_issue_reply_step` rebuilds them and
+ * calls the SAME `run_session_turn` the chat router does — asset refs are
+ * resolved (and capped) in `_run_session_turn_inner`, which both funnel
+ * through. What was missing was entirely on this side.
+ *
+ * The wire shape is the assertion that matters: `{kind, asset_id, loadout_id,
+ * name, mime, url}` and nothing else, with STRING ids. A field added or
+ * renamed in passing shows up here as a failing equality rather than as a
+ * reference the backend quietly fails to resolve.
+ */
+describe('IssueReplyBox — the Assets tab', () => {
+  beforeEach(() => {
+    searchAssetsAccessible.mockReset();
+    searchAssetsAccessible.mockResolvedValue([AVA]);
+    editorOptions = {};
+  });
+
+  /** Type "@" through the component's own key handler and let the picker open. */
+  async function openMentionPicker(): Promise<void> {
+    await act(async () => {
+      editorOptions.editorProps?.handleKeyDown?.(null, {
+        key: '@',
+        metaKey: false,
+        ctrlKey: false,
+        preventDefault: () => {},
+      } as unknown as KeyboardEvent);
+      // The handler defers the open by a tick so the character inserts first.
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+
+  async function stageAva(): Promise<void> {
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    fireEvent.mouseDown((await screen.findAllByTestId('mention-asset-option'))[0]);
+  }
+
+  it('offers the Assets tab beside the five resource kinds', async () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+    expect(await screen.findByTestId('resource-picker-tab-assets')).toBeInTheDocument();
+  });
+
+  it('stages a chip when a row is picked, instead of inserting a node', async () => {
+    // An asset is a turn-level attachment, not a span of the sentence — the
+    // same reading the chat panel takes, so the two entry points cannot
+    // disagree about what "mentioning a character" attached.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await stageAva();
+
+    const chip = await screen.findByTestId('staged-asset-chip');
+    expect(chip).toBeInTheDocument();
+    expect(chip.getAttribute('data-asset-id')).toBe('727145299382534201');
+    expect(screen.getByText('Ava')).toBeInTheDocument();
+  });
+
+  it('sends the asset as an asset_ref attachment in the real wire shape', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
+    );
+    editorText = 'what is she wearing?';
+    await stageAva();
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const [body, agentId, attachments] = onSubmit.mock.calls[0];
+    expect(body).toBe('what is she wearing?');
+    expect(agentId).toBe('a1');
+    expect(attachments).toEqual([
+      {
+        kind: 'asset_ref',
+        asset_id: '727145299382534201',
+        loadout_id: null,
+        name: 'Ava',
+        mime: '',
+        url: '',
+      },
+    ]);
+  });
+
+  it('keeps file attachments and resource refs alongside the asset', async () => {
+    // Three sources, one list. An asset that displaced either of the other two
+    // would be a regression nothing else in this file would notice.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
+    );
+    editorText = 'see these';
+    editorRefNodes = [
+      { resourceId: 'r1', name: 'clip.mp4', mime: 'video/mp4', scope: { type: 'personal', id: 'u' } },
+    ];
+    await stageAva();
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const kinds = (onSubmit.mock.calls[0][2] as Array<{ kind: string }>).map((a) => a.kind);
+    expect(kinds).toEqual(['resource_ref', 'asset_ref']);
+  });
+
+  it('clears the staged assets after a successful send', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
+    );
+    editorText = 'hi';
+    await stageAva();
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+
+    await waitFor(() => expect(screen.queryByTestId('staged-asset-chip')).toBeNull());
+  });
+
+  it('keeps the staged asset when the parent rejects, so the user can retry', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('offline'));
+    render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
+    );
+    editorText = 'hi';
+    await stageAva();
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(screen.getByTestId('staged-asset-chip')).toBeInTheDocument();
+  });
+
+  /** Press a bare key through the component's own editor key handler. */
+  function press(key: string): boolean | undefined {
+    return editorOptions.editorProps?.handleKeyDown?.(null, {
+      key,
+      metaKey: false,
+      ctrlKey: false,
+      preventDefault: () => {},
+    } as unknown as KeyboardEvent);
+  }
+
+  it('routes the arrow keys into the Assets grid once that tab is open', async () => {
+    // The same claim AIChatPanel makes, and the reason the picker handle is
+    // held by a ref here at all: without this the tab would be mouse-only.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    await screen.findAllByTestId('mention-asset-option');
+
+    expect(press('ArrowDown')).toBe(true);
+  });
+
+  it('leaves the arrow keys to the editor while the Assets tab is closed', async () => {
+    // The five resource tabs never moved their highlight with the arrows.
+    // Claiming the key there would break ordinary cursor movement in a
+    // multi-line reply for no gain.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+
+    expect(press('ArrowDown')).toBeFalsy();
+  });
+
+  it('stages the highlighted asset on ↵, which is what the picker hint promises', async () => {
+    // The grid highlights its first tile as soon as rows arrive, so ↵ has
+    // something to commit — the same behaviour AIChatPanel gets from the same
+    // handle, and what the picker's own "↵ insert" hint tells the user.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    await screen.findAllByTestId('mention-asset-option');
+
+    await act(async () => { press('Enter'); });
+
+    expect(await screen.findByTestId('staged-asset-chip')).toBeInTheDocument();
+  });
+
+  it('leaves plain ↵ to the editor while the Assets tab is closed', async () => {
+    // Issue replies are multi-line and send on ⌘↩, so a plain Enter the
+    // picker did not claim has to reach the editor as a newline.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+
+    expect(press('Enter')).toBeFalsy();
+  });
+
+  it('still sends on Cmd+Enter with the Assets tab open', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <IssueReplyBox agents={_agents as never} defaultAgentId="a1" onSubmit={onSubmit} />,
+    );
+    editorText = 'hi';
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    await screen.findAllByTestId('mention-asset-option');
+
+    await act(async () => {
+      editorOptions.editorProps?.handleKeyDown?.(null, {
+        key: 'Enter',
+        metaKey: true,
+        ctrlKey: false,
+        preventDefault: () => {},
+      } as unknown as KeyboardEvent);
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  });
+
+  it('refuses the ninth asset OUT LOUD rather than letting the server drop it', async () => {
+    // The server caps at MAX_ASSET_REF_ATTACHMENTS and reports the refusal in
+    // `attachment_failures` — which this composer never sees, because the
+    // issue turn runs asynchronously in a DBOS workflow. Without a check here
+    // the ninth pick would be a silent no-op, which CLAUDE.md forbids for any
+    // user-triggered path.
+    const rows = Array.from({ length: 9 }, (_, i) => ({
+      ...AVA,
+      id: `72714529938253430${i}`,
+      name: `Ava ${i}`,
+    }));
+    searchAssetsAccessible.mockResolvedValue(rows);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+
+    // Re-query the tiles every round: picking closes the picker, so the next
+    // open re-mounts the grid and the previous nodes are detached.
+    for (let i = 0; i < MAX_ASSET_REF_ATTACHMENTS; i += 1) {
+      await openMentionPicker();
+      fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+      fireEvent.mouseDown((await screen.findAllByTestId('mention-asset-option'))[i]);
+    }
+    expect(await screen.findAllByTestId('staged-asset-chip')).toHaveLength(
+      MAX_ASSET_REF_ATTACHMENTS,
+    );
+
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    fireEvent.mouseDown((await screen.findAllByTestId('mention-asset-option'))[8]);
+
+    // Still eight — and the user was told why, not left to wonder.
+    expect(screen.getAllByTestId('staged-asset-chip')).toHaveLength(
+      MAX_ASSET_REF_ATTACHMENTS,
+    );
+    expect(addToast).toHaveBeenCalledWith(
+      expect.stringContaining('chat.attachmentFailureReason.attachment_limit_exceeded'),
+      'error',
+    );
   });
 });

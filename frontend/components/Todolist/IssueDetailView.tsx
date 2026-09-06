@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
 import type { CommentTriggerPreview, IssueMessage } from '../../services/issueMessageService';
+import { toIssueAttachmentPayload } from './composerAttachmentPayload';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { formatElapsed } from './formatElapsed';
 import { blocksFor, issueBlockContext } from './issueBlocks';
@@ -267,13 +268,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     suppressAgentIds?: string[],
   ) => {
     try {
-      const attachmentPayload = attachments.length > 0
-        ? attachments.map((a) =>
-            a.kind === 'resource_ref'
-              ? { kind: a.kind, resource_id: a.resource_id, name: a.name, mime: a.mime, scope: a.scope }
-              : { kind: a.kind, url: a.url, mime: a.mime ?? undefined },
-          )
-        : undefined;
+      const attachmentPayload = toIssueAttachmentPayload(attachments);
       const res = await postIssueMessage(issue.id, {
         body,
         agent_id: agentId ?? undefined,
