@@ -582,3 +582,42 @@ async def test_no_finish_path_ever_writes_dead() -> None:
 
         finish = table.update_calls[-1]
         assert finish.get("liveness_state") != "dead"
+
+
+def test_truncate_payload_keeps_nested_structure_when_it_fits():
+    # The transcript is the replay source: a fold handed a JSON *string* where
+    # it expects a dict returns nothing (fold_todo's isinstance(total, int)).
+    from app.services.ai.runner.run_recorder import _truncate_payload
+
+    out = _truncate_payload(
+        {
+            "usage": {"prompt": 3, "completion": 1},
+            "todos": [{"id": 1, "content": "a"}],
+            "content": "x" * 10,
+            "n": 2,
+            "flag": None,
+        },
+        max_chars=500,
+    )
+    assert out["usage"] == {"prompt": 3, "completion": 1}
+    assert out["todos"] == [{"id": 1, "content": "a"}]
+    assert out["content"] == "x" * 10 and out["n"] == 2 and out["flag"] is None
+
+
+def test_truncate_payload_degrades_oversized_nested_value_to_truncated_string():
+    from app.services.ai.runner.run_recorder import _truncate_payload
+
+    big = {"result": "y" * 1000}
+    out = _truncate_payload({"result": big}, max_chars=50)
+    assert isinstance(out["result"], str)
+    assert out["result"].endswith("...") and len(out["result"]) == 53
+
+
+def test_truncate_payload_round_trips_non_json_scalars_inside_structure():
+    import datetime as dt
+
+    from app.services.ai.runner.run_recorder import _truncate_payload
+
+    when = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
+    out = _truncate_payload({"meta": {"at": when}}, max_chars=500)
+    assert out["meta"] == {"at": str(when)}  # default=str, still a dict
