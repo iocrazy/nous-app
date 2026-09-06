@@ -71,6 +71,11 @@ class MediahubModelResponse(BaseModel):
     last_test_status: Optional[str] = None
     last_test_detail: Optional[str] = None
     last_tested_at: Optional[str] = None
+    # Does RunRecorder have an ai_model_prices row to snapshot for this model?
+    # priced / missing / not_applicable / unknown (see model_pricing_coverage).
+    # Independent of the probe status: reachable and unpriced both happen.
+    # Only the list endpoint fills it; single-row responses leave None.
+    price_coverage: Optional[str] = None
 
 
 class MediahubModelPublic(BaseModel):

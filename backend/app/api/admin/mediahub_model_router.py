@@ -30,6 +30,10 @@ from app.services.ai.mediahub_model_health import (
 from app.services.ai.mediahub_model_health import (
     probe_result_status as _probe_result_status,
 )
+from app.services.ai.model_pricing_coverage import (
+    load_priced_models,
+    price_coverage_for,
+)
 from app.services.ai.providers.ai_provider import AIProviderFactory
 
 router = APIRouter()
@@ -42,8 +46,15 @@ def _mask_key(key: str) -> str:
     return f"{'*' * (len(key) - 4)}{key[-4:]}"
 
 
-def _to_response(row: dict) -> MediahubModelResponse:
-    """Convert DB row to admin response with masked API key."""
+def _to_response(
+    row: dict, *, price_coverage: str | None = None
+) -> MediahubModelResponse:
+    """Convert DB row to admin response with masked API key.
+
+    ``price_coverage`` is computed by the list endpoint (one price-table read
+    for the whole page); single-row responses leave it ``None`` and the admin
+    page refetches the list after every mutation anyway.
+    """
     return MediahubModelResponse(
         id=str(row["id"]),
         name=row["name"],
@@ -66,6 +77,7 @@ def _to_response(row: dict) -> MediahubModelResponse:
         last_tested_at=(
             str(row["last_tested_at"]) if row.get("last_tested_at") else None
         ),
+        price_coverage=price_coverage,
     )
 
 
@@ -74,7 +86,8 @@ async def list_mediahub_models(auth: AdminAuthDep):
     """List all Nous models (including disabled)."""
     repo = get_mediahub_model_repository()
     rows = await repo.list_all()
-    return [_to_response(r) for r in rows]
+    priced = await load_priced_models()
+    return [_to_response(r, price_coverage=price_coverage_for(r, priced)) for r in rows]
 
 
 @router.get("/protocols", response_model=ProviderProtocolListResponse)

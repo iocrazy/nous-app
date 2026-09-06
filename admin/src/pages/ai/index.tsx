@@ -39,6 +39,15 @@ interface NousModel {
   last_test_status?: 'ok' | 'fail' | 'not_probed' | null
   last_test_detail?: string | null
   last_tested_at?: string | null
+  // Does RunRecorder have an ai_model_prices row to snapshot for this model?
+  // Independent of the probe: a model can be reachable AND unpriced, and an
+  // unpriced model's runs record cost as NULL — the Usage page shows '—' and
+  // the budget hook never fires (mig 454 fixed 6 of 7 models in use).
+  //   priced          a row matches actual_model or the catalog name
+  //   missing         no row — add one (supabase/migrations, see mig 454)
+  //   not_applicable  not an LLM, or runs on the user's own machine
+  //   unknown         the price table could not be read; not a verdict
+  price_coverage?: 'priced' | 'missing' | 'not_applicable' | 'unknown' | null
 }
 
 interface ProviderProtocol {
@@ -135,6 +144,24 @@ const DOT_LABELS: Record<string, string> = {
   ok: 'Reachable',
   fail: 'Failed',
   not_probed: 'Not probed',
+}
+
+// "No price row" is its own tag, not a StatusDot state: the probe answers
+// "reachable?", this answers "will its runs have a cost?". Only `missing`
+// renders — priced is the normal case and painting it would be noise, and
+// `unknown` (price table unreadable) is not a verdict, so it stays silent too
+// rather than turning every row red when the lookup hiccups.
+function PriceCoverageTag({ coverage }: { coverage?: NousModel['price_coverage'] }) {
+  if (coverage !== 'missing') return null
+  return (
+    <Tag
+      color="red"
+      size="small"
+      title="No ai_model_prices row matches this model — its runs record cost as NULL (Usage shows '—', budget checks never fire). Add a row via a supabase migration, see mig 454."
+    >
+      No price row
+    </Tag>
+  )
 }
 
 function StatusDot({
@@ -744,6 +771,7 @@ export function AIModelsPage() {
                     />
                     <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
                     <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
+                    <PriceCoverageTag coverage={m.price_coverage} />
                     <Switch
                       size="small"
                       checked={m.is_enabled}
