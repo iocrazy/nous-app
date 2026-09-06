@@ -374,7 +374,9 @@ async def resolve_db_adapter(
             provider_key, actual_model, {provider_key: creds}, user_id=user_id
         )
 
-    return get_adapter_for_user(model, user_provider_config or {}, None)
+    return get_adapter_for_user(
+        model, user_provider_config or {}, None, user_id=user_id
+    )
 
 
 DEFAULT_ANALYZE_AGENT_SLUG = "analyze"

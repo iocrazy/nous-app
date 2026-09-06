@@ -309,41 +309,6 @@ async def upload_daemon_result(
                 pass
 
 
-class CodexPreferencesBody(BaseModel):
-    codex_model: Optional[str] = None
-
-
-@router.get("/preferences")
-async def get_preferences(auth: AuthDep) -> dict:
-    """The user's local-daemon knobs: today the Codex orchestrator model."""
-    from app.services.codex import preferences as prefs
-
-    return {
-        "data": prefs.preferences_payload(
-            await prefs.get_codex_model(str(auth.user_id))
-        )
-    }
-
-
-@router.put("/preferences")
-async def put_preferences(body: CodexPreferencesBody, auth: AuthDep) -> dict:
-    """Set (or clear with null) the orchestrator model the daemon passes as
-    ``--model``. Validated here because it becomes an argv token on the
-    user's machine."""
-    from app.services.codex import preferences as prefs
-
-    value = body.codex_model
-    if value is not None:
-        value = value.strip()
-        if not prefs.is_valid_model_name(value):
-            raise HTTPException(
-                status_code=422,
-                detail="codex_model must be 1-64 chars of letters, digits, '.', '-' or '_'",
-            )
-    saved = await prefs.set_codex_model(str(auth.user_id), value)
-    return {"data": prefs.preferences_payload(saved)}
-
-
 @router.get("/devices")
 async def list_devices(auth: AuthDep) -> dict:
     rows = await _list_daemons(str(auth.user_id))

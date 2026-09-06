@@ -198,7 +198,9 @@ async def test_translate_falls_back_on_429_through_real_build_fallback_llm() -> 
 
     captured_scoped_configs: list[dict] = []
 
-    def _fake_get_adapter_for_user(model, user_provider_config, _settings):
+    def _fake_get_adapter_for_user(
+        model, user_provider_config, _settings, *, user_id=None
+    ):
         captured_scoped_configs.append(dict(user_provider_config))
         # C1 regression guard: pre-fix, build_fallback_llm passed the FLAT
         # {"model","api_key","base_url"} config straight through — this

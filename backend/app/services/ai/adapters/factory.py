@@ -34,7 +34,7 @@ from app.services.ai.provider_protocols.base import (  # noqa: F401
 
 _KNOWN_PREFIXES = (
     "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
-    "org/name (ModelScope)"
+    "codex:* (local daemon), org/name (ModelScope)"
 )
 
 
@@ -60,6 +60,11 @@ def provider_key_for_model(model: str) -> str:
     # (``deepseek-ai/DeepSeek-V3`` starts with ``deepseek-``).
     if "/" in m:
         return "modelscope"
+    # ``codex:<model>`` — the Codex provider card's ids (services/codex/
+    # provider_card.py). Checked BEFORE the OpenAI rule: the bare names are
+    # ``gpt-*`` and would otherwise land on the OpenAI BYOK card.
+    if m.startswith("codex:"):
+        return "codex-local"
     if m.startswith("claude-"):
         return "claude"
     if m.startswith("deepseek-"):
@@ -116,6 +121,8 @@ def get_adapter_for_user(
     model: str,
     user_provider_config: Dict[str, Any],
     fallback_settings: Any,
+    *,
+    user_id: Optional[str] = None,
 ) -> AIAdapter:
     """Build an adapter using per-user BYO credentials with a global fallback.
 
@@ -128,10 +135,18 @@ def get_adapter_for_user(
     2026-07-07, 铁律): a provider with no resolved key raises
     :class:`ProviderNotConfiguredError` instead of reading env vars.
 
+    ``user_id`` is routing context, not a credential (see
+    :func:`get_adapter_for_key`): the ``codex-local`` BYOK card runs the turn
+    on THAT user's own paired machine and refuses to build without one.
+
     Raises ValueError for unknown model prefixes.
     """
     return _build_adapter_for_key(
-        provider_key_for_model(model), model, user_provider_config, fallback_settings
+        provider_key_for_model(model),
+        model,
+        user_provider_config,
+        fallback_settings,
+        user_id=user_id,
     )
 
 

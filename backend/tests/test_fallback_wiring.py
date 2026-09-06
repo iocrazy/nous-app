@@ -43,7 +43,7 @@ async def test_catalog_miss_falls_to_byok_factory():
             primary_model="m1", fallback_models=[], user_provider_config={"doubao": {}}
         )
     assert chain.adapter_factory("m1") == "BYOK_ADAPTER"
-    gau.assert_called_once_with("m1", {"doubao": {}}, None)
+    gau.assert_called_once_with("m1", {"doubao": {}}, None, user_id=None)
 
 
 @pytest.mark.asyncio
@@ -109,6 +109,7 @@ async def test_batch_explicit_provider_key_wraps_flat_config():
             }
         },
         None,
+        user_id=None,
     )
 
 
@@ -139,6 +140,7 @@ async def test_batch_empty_provider_key_derives_from_model_prefix():
             }
         },
         None,
+        user_id=None,
     )
 
 

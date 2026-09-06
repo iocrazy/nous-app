@@ -1037,13 +1037,7 @@
       "memory": "Memory"
     },
     "localCli": {
-      "model": "Codex model",
-      "modelHint": "The model gpt-image-2-skill orchestrates with (--model). Catalog default unless you pick one here; a model OpenAI stops accepting for ChatGPT accounts fails with HTTP 400.",
-      "modelDefault": "Catalog default",
-      "modelCustom": "Custom…",
-      "modelCustomPlaceholder": "e.g. gpt-6-astra",
-      "modelSaved": "Saved",
-      "errPreferences": "Could not load or save the Codex model preference.",
+      "modelHint": "Which Codex model runs is set on the provider card: Settings → AI → Providers → Codex (Local CLI). Its enabled models are what agents and image generation use.",
       "codexTitle": "GPT CLI (codex)",
       "codexDesc": "Run canvas generations on your own machine with your own codex login. Your credentials never leave your computer — nous only sends the job. Also usable as an agent model (Codex (Local)) — plain text only. Text jobs run in codex's read-only sandbox — it cannot write files, but it can read files on your machine. Do not feed untrusted text to an agent bound to Codex (Local).",
       "notPaired": "Not paired",
@@ -4005,11 +3999,13 @@
       "modelscope": "ModelScope (魔搭) — community inference, free tier",
       "volcengine": "ByteDance — 火山引擎语音识别",
       "ollama": "Local models, free & private",
-      "lmstudio": "Local models via LM Studio"
+      "lmstudio": "Local models via LM Studio",
+      "codexLocal": "Codex CLI on your own machine — your ChatGPT login, text and images"
     },
     "badge": {
       "recommended": "Recommended",
-      "freeTier": "Free Tier"
+      "freeTier": "Free Tier",
+      "localCli": "Local CLI"
     },
     "lang": {
       "auto": "Auto Detect",
@@ -4100,7 +4096,8 @@
     "nousDesc": "Platform-provided models. No API key required — select one as an agent's model or a transcription option.",
     "noPlatformModels": "No platform models available.",
     "settingsSaved": "Settings Saved!",
-    "saveSettings": "Save Settings"
+    "saveSettings": "Save Settings",
+    "addTyped": "Add “{{model}}”"
   },
   "aiLibrary": {
     "title": "AI Library",

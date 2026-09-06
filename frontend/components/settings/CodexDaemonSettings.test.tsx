@@ -37,8 +37,6 @@ vi.mock('../../services/codexDaemonService', async (importOriginal) => {
         },
       ]),
       revokeDevice: vi.fn().mockResolvedValue(undefined),
-      getPreferences: vi.fn().mockResolvedValue({ codex_model: null, options: ['gpt-6-astra'] }),
-      savePreferences: vi.fn(),
     },
   };
 });
@@ -118,46 +116,14 @@ describe('read-only sandbox disclosure', () => {
   });
 });
 
-// ── choosing the Codex orchestrator model (2026-09-05) ───────────────────────
-// IC's CLI settings let the user pick the model; ours only had the catalog
-// default, editable by an admin — and on 2026-09-05 OpenAI dropped that
-// default (gpt-5.4) for ChatGPT accounts, so every local image run failed
-// until someone with DB access repointed a row.
-describe('CodexDaemonSettings — model preference', () => {
-  it('shows the saved choice and the known options', async () => {
-    (codexDaemonService.getPreferences as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      codex_model: 'gpt-6-astra', options: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5'],
-    });
+// ── the model is chosen on the PROVIDER card, not here (2026-09-05) ───────
+// The selector that lived here for a day moved to Settings → AI → Providers →
+// Codex ("要像 Doubao 这样能够配置"): one knob, one place. This card only points
+// at it.
+describe('CodexDaemonSettings — model lives on the provider card', () => {
+  it('shows the pointer and no selector of its own', async () => {
     render(<CodexDaemonSettings />);
-    const select = (await screen.findByTestId('codex-model-select')) as HTMLSelectElement;
-    expect(select.value).toBe('gpt-6-astra');
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(
-      expect.arrayContaining(['', 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5', '__custom__']),
-    );
-  });
-
-  it('saves a picked option and clears back to the catalog default', async () => {
-    (codexDaemonService.getPreferences as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ codex_model: null, options: ['gpt-6-astra'] });
-    const save = codexDaemonService.savePreferences as unknown as ReturnType<typeof vi.fn>;
-    save.mockResolvedValue({ codex_model: 'gpt-6-astra', options: ['gpt-6-astra'] });
-    render(<CodexDaemonSettings />);
-    const select = await screen.findByTestId('codex-model-select');
-    fireEvent.change(select, { target: { value: 'gpt-6-astra' } });
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ codex_model: 'gpt-6-astra' }));
-    save.mockResolvedValue({ codex_model: null, options: ['gpt-6-astra'] });
-    fireEvent.change(select, { target: { value: '' } });
-    await waitFor(() => expect(save).toHaveBeenLastCalledWith({ codex_model: null }));
-  });
-
-  it('a custom name is typed, then saved on Enter', async () => {
-    (codexDaemonService.getPreferences as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ codex_model: null, options: ['gpt-6-astra'] });
-    const save = codexDaemonService.savePreferences as unknown as ReturnType<typeof vi.fn>;
-    save.mockResolvedValue({ codex_model: 'gpt-5.5', options: ['gpt-6-astra'] });
-    render(<CodexDaemonSettings />);
-    fireEvent.change(await screen.findByTestId('codex-model-select'), { target: { value: '__custom__' } });
-    const input = await screen.findByTestId('codex-model-custom');
-    fireEvent.change(input, { target: { value: 'gpt-5.5' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ codex_model: 'gpt-5.5' }));
+    expect(await screen.findByTestId('codex-model-hint')).toBeInTheDocument();
+    expect(screen.queryByTestId('codex-model-select')).toBeNull();
   });
 });

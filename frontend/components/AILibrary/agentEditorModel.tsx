@@ -25,6 +25,7 @@ export interface ProviderModelGroup {
 // avoid a circular-ish dependency; this mapping is small and stable).
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   openai: 'OpenAI',
+  'codex-local': 'Codex (Local CLI)',
   deepseek: 'DeepSeek',
   doubao: 'Doubao',
   minimax: 'MiniMax',
