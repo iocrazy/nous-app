@@ -77,6 +77,14 @@ class Assets(Base):
         CheckConstraint(
             "scope_id IS NOT NULL OR is_system_preset", name="assets_scope_or_preset"
         ),
+        # mig 458: the three jsonb columns must hold OBJECTS. NOT NULL does
+        # not stop the JSON value ``null`` (2026-09-06 outage, see the
+        # AssetResponse validator).
+        CheckConstraint(
+            "jsonb_typeof(attrs) = 'object' AND jsonb_typeof(platform_params) = 'object'"
+            " AND jsonb_typeof(tags) = 'object'",
+            name="assets_json_columns_are_objects",
+        ),
         Index(
             "idx_assets_scope_type",
             "scope_id",

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 # Snowflake ids ride as strings here (bigIntSafeFetch discipline), but the
 # service int()s them. Without this the first non-numeric body value is a
@@ -178,6 +178,20 @@ class AssetResponse(BaseModel):
     source: AssetSource = "manual"
     duplicated_from: Optional[str] = None
     is_system_preset: bool = False
+
+    @field_validator("attrs", "platform_params", "tags", mode="before")
+    @classmethod
+    def _json_null_is_empty(cls, value: Any) -> Any:
+        """A jsonb column can hold the JSON value ``null`` while satisfying
+        ``NOT NULL DEFAULT '{}'`` — 2026-09-06 one hand-seeded system preset
+        did exactly that, and because presets are unioned into EVERY scope,
+        the asset shelf's All / Prompts tabs and the chat @-picker answered 500
+        for every user until the row was repaired. mig 458 now refuses the
+        value at the table; this validator keeps one bad row from ever taking
+        a whole listing down again on the way OUT. ``None`` → ``{}``; anything
+        else still has to be a dict."""
+        return {} if value is None else value
+
     # mig 449 — see ``Assets.in_library``. REQUIRED, no default, unlike its
     # neighbours: this model is what FastAPI validates on the way out, and a
     # default would let a service that stopped emitting the key ship a row the
