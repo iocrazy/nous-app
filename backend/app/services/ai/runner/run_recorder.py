@@ -1009,11 +1009,15 @@ def _jsonable(value: Any) -> Any:
 
 
 def _legacy_todos(view: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Transition shape of ``metadata_json.todos`` for readers not yet on
+    ``view`` (AgentResultBody's Steps table reads ``todos.todos``). Until
+    2026-09-06 this returned ``todos: []`` — n/m survived, the table went
+    blank (真栈 run 346496695717971: 3/3 with zero rows)."""
     step = view.get("step")
     if not step:
         return None
     return {
-        "todos": [],
+        "todos": list(view.get("todos") or []),
         "counts": {
             "total": step["total"],
             "completed": step["done"],

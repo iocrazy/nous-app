@@ -22,6 +22,40 @@ def test_apply_never_mutates_its_input():
     assert v["view"]["step"] is None
 
 
+def test_todo_snapshot_keeps_the_item_list_in_view_bounded_and_whitelisted():
+    from app.agent_framework.agent_todo import MAX_TODO_ITEMS
+
+    v = rp.empty_views()
+    items = [
+        {
+            "id": i,
+            "content": f"c{i}",
+            "status": "pending",
+            "active_form": None,
+            "secret": "x",
+        }
+        for i in range(MAX_TODO_ITEMS + 5)
+    ]
+    v = rp.apply(
+        v,
+        "todo_write",
+        {"todos": items, "counts": {"total": len(items), "completed": 0}},
+    )
+    kept = v["view"]["todos"]
+    assert len(kept) == MAX_TODO_ITEMS
+    assert kept[0] == {
+        "id": 0,
+        "content": "c0",
+        "status": "pending",
+        "active_form": None,
+    }
+    # whole-value replace: a later, shorter snapshot does not leave stale rows
+    v = rp.apply(
+        v, "todo_write", {"todos": items[:2], "counts": {"total": 2, "completed": 0}}
+    )
+    assert [t["id"] for t in v["view"]["todos"]] == [0, 1]
+
+
 def test_todo_snapshot_becomes_step_with_active_label():
     v = rp.apply(
         rp.empty_views(),
@@ -138,3 +172,19 @@ def test_every_registered_fold_is_enumerable_and_covers_the_new_event_types():
         "llm_retry",
         "turn_end",
     } <= set(rp.registered_types())
+
+
+def test_legacy_todos_mirror_carries_the_items_from_view():
+    from app.services.ai.runner.run_recorder import _legacy_todos
+
+    view = {
+        "step": {"done": 1, "total": 2, "label": "b"},
+        "todos": [
+            {"id": 1, "content": "a", "status": "completed", "active_form": None},
+            {"id": 2, "content": "b", "status": "in_progress", "active_form": None},
+        ],
+    }
+    out = _legacy_todos(view)
+    assert out["counts"] == {"total": 2, "completed": 1, "in_progress": 1}
+    assert [t["id"] for t in out["todos"]] == [1, 2]
+    assert _legacy_todos({}) is None
