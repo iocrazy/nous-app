@@ -127,8 +127,21 @@ export function mergeRefAttachments(
 export interface StagedAssetRef {
   asset_id: string;
   /** Null means "the asset's default loadout" — the backend's reading, not a
-   *  missing value. v1 has no loadout picker at either entry point. */
+   *  missing value. v2's `StagedAssetLoadoutMenu` is what sets it to anything
+   *  else; both entry points still STAGE with null. */
   loadout_id: string | null;
+  /**
+   * The picked loadout's display name, or null.
+   *
+   * Composer-side only — it never crosses the boundary (`toAssetAttachment`
+   * sends the id, and the server re-reads the name from the row it owns). It
+   * exists so the chip can SAY which outfit is going with the message: a pick
+   * whose only evidence is a field on the wire is a pick the user cannot see
+   * they made, and therefore cannot correct.
+   *
+   * Always moves WITH `loadout_id` — null id means null name.
+   */
+  loadout_name: string | null;
   name: string;
   /** One of `ASSET_TYPES`; drives the chip's fallback icon. */
   asset_type: string;
@@ -146,6 +159,7 @@ export interface AssetRefInsertItem {
   name?: string | null;
   asset_type?: string | null;
   loadout_id?: string | null;
+  loadout_name?: string | null;
   cover_file_id?: string | null;
   scope_id?: string | null;
 }
@@ -159,6 +173,7 @@ export function toStagedAsset(item: AssetRefInsertItem): StagedAssetRef {
   return {
     asset_id: String(item.id ?? ''),
     loadout_id: item.loadout_id ?? null,
+    loadout_name: item.loadout_name ?? null,
     name: item.name ?? '',
     asset_type: item.asset_type ?? '',
     cover_file_id: item.cover_file_id ?? '',
@@ -178,6 +193,27 @@ export function stageAsset(
   return [...list, next];
 }
 
+/**
+ * Re-dress one staged asset (the chip's loadout menu).
+ *
+ * Both fields move together — an id with a stale name would put the wrong
+ * outfit on the chip while the right one goes on the wire, which is the exact
+ * disagreement the label exists to prevent. Untouched assets are returned by
+ * identity, so a menu on one chip cannot re-render the rest of the row.
+ */
+export function setStagedAssetLoadout(
+  list: StagedAssetRef[],
+  assetId: string,
+  loadoutId: string | null,
+  loadoutName: string | null,
+): StagedAssetRef[] {
+  return list.map((s) =>
+    s.asset_id === assetId
+      ? { ...s, loadout_id: loadoutId, loadout_name: loadoutName }
+      : s,
+  );
+}
+
 /** Drop one staged asset by id (the chip's × button). */
 export function removeStagedAsset(
   list: StagedAssetRef[],
@@ -188,10 +224,11 @@ export function removeStagedAsset(
 
 /**
  * The wire form. Only these fields cross the boundary — `asset_type`,
- * `cover_file_id` and `scope_id` are composer-side snapshots the server does
- * not read (it re-resolves the asset by id and re-checks access by team
- * membership), so sending them would state as fact something the receiver
- * would ignore.
+ * `cover_file_id`, `scope_id` and `loadout_name` are composer-side snapshots
+ * the server does not read (it re-resolves the asset by id and re-checks
+ * access by team membership), so sending them would state as fact something
+ * the receiver would ignore. `loadout_id` alone is the pick; the NAME beside
+ * it is for the chip.
  */
 export function toAssetAttachment(staged: StagedAssetRef): AssetRefAttachment {
   return {

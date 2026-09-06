@@ -3742,6 +3742,11 @@
       "loadout_not_owned": "所选造型不属于该角色",
       "attachment_limit_exceeded": "本轮只使用了前 {{n}} 个资产"
     },
+    "stagedAsset": {
+      "chooseLoadout": "选择造型",
+      "defaultLoadout": "默认造型",
+      "loadoutsUnavailable": "无法加载造型"
+    },
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",
       "reviewChapter": "审阅我的章节",

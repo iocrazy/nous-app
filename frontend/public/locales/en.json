@@ -3742,6 +3742,11 @@
       "loadout_not_owned": "That Loadout Does Not Belong To This Character",
       "attachment_limit_exceeded": "Only The First {{n}} Assets Were Used"
     },
+    "stagedAsset": {
+      "chooseLoadout": "Choose Loadout",
+      "defaultLoadout": "Default Loadout",
+      "loadoutsUnavailable": "Could not load loadouts"
+    },
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",

@@ -25,9 +25,11 @@ import {
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { ResourceChipBody } from './chat/ResourceChipBody';
 import { AssetChipBody } from './chat/AssetChipBody';
+import { StagedAssetLoadoutMenu } from './chat/StagedAssetLoadoutMenu';
 import {
   removeStagedAsset,
   removeStagedResource,
+  setStagedAssetLoadout,
   type StagedAssetRef,
   type StagedResourceRef,
 } from './chat/stagedResources';
@@ -119,6 +121,18 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     [assets, onAssetsChange],
   );
 
+  // The v2 loadout pick. The picker owns no staged state of its own — it
+  // reports the whole next list upward, exactly as removal does, so the two
+  // edits to one chip cannot end up with different owners.
+  const changeAssetLoadout = useCallback(
+    (assetId: string, loadoutId: string | null, loadoutName: string | null) => {
+      onAssetsChange?.(
+        setStagedAssetLoadout(assets, assetId, loadoutId, loadoutName),
+      );
+    },
+    [assets, onAssetsChange],
+  );
+
   const isDisabled = disabled || uploading;
 
   // Nothing staged at all + no upload → just the picker button (anchored to
@@ -178,6 +192,14 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
           name={a.name}
           assetType={a.asset_type}
           coverFileId={a.cover_file_id}
+          loadoutName={a.loadout_name}
+          loadoutMenu={(
+            <StagedAssetLoadoutMenu
+              asset={a}
+              onChange={(loadoutId, loadoutName) =>
+                changeAssetLoadout(a.asset_id, loadoutId, loadoutName)}
+            />
+          )}
           onRemove={() => removeAsset(a.asset_id)}
         />
       ))}

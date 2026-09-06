@@ -19,6 +19,12 @@ import { getResourceCoverUrl } from '../../services/resourceService';
  * route (an asset's cover IS a resource). The fallback is the asset's TYPE
  * icon, not a generic file glyph: "this is a character" is the most useful
  * thing a coverless chip can still say.
+ *
+ * v2 adds two things a CHARACTER chip can carry: the picked loadout's name in
+ * the label, and a `loadoutMenu` slot for the control that changes it. The
+ * menu is passed IN rather than rendered here so this file keeps no service
+ * dependency — it stays a pure presentation component that the resource chip
+ * beside it can be read against.
  */
 
 export interface AssetChipBodyProps {
@@ -28,6 +34,17 @@ export interface AssetChipBodyProps {
   assetType: string;
   /** `assets.cover_file_id`, or '' when the asset has no cover. */
   coverFileId?: string;
+  /**
+   * The picked loadout's name, or null while the asset wears its default.
+   *
+   * When set the label becomes `name · loadout`: the outfit is part of what is
+   * being sent, so the row has to say it. Silence here would leave a pick with
+   * no on-screen evidence — the user could neither confirm nor correct it.
+   */
+  loadoutName?: string | null;
+  /** The v2 loadout menu, rendered by the host so this component keeps no
+   *  service dependency of its own. Absent for every non-character chip. */
+  loadoutMenu?: React.ReactNode;
   onRemove: () => void;
 }
 
@@ -40,6 +57,8 @@ export function AssetChipBody({
   name,
   assetType,
   coverFileId = '',
+  loadoutName = null,
+  loadoutMenu,
   onRemove,
 }: AssetChipBodyProps): React.ReactElement {
   // An unknown type is possible in one real case: a bubble or draft written
@@ -61,7 +80,13 @@ export function AssetChipBody({
           <Icon size={11} />
         </span>
       )}
-      <span className="font-medium truncate max-w-[120px]">{name}</span>
+      <span
+        data-testid="staged-asset-chip-label"
+        className="font-medium truncate max-w-[160px]"
+      >
+        {loadoutName ? `${name} · ${loadoutName}` : name}
+      </span>
+      {loadoutMenu}
       <button
         type="button"
         onClick={onRemove}
