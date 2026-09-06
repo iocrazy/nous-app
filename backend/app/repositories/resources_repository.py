@@ -89,7 +89,7 @@ import json
 import uuid
 from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
@@ -136,6 +136,11 @@ _RESOURCE_VERSIONS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceVersions
 _FOLDERS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Folders)
 _RESOURCE_TAGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(ResourceTags)
 _TAGS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(Tags)
+
+#: The only columns ``merge_slide_prompt`` will write besides the slide map.
+#: mig 455: the origin has to land in the same flush as the text it labels.
+#: Kept to one key on purpose — see that method's docstring.
+_SLIDE_PROMPT_EXTRA_KEYS: frozenset[str] = frozenset({"prompt_origin"})
 
 # The exact column projection the legacy PostgREST ``find_by_hashes`` selected.
 # We read the full ORM entity (the proven-injectable read shape) then project
@@ -808,7 +813,12 @@ class ResourcesRepository(AsyncpgRepository):
             raise
 
     async def merge_slide_prompt(
-        self, resource_id: str, slide_name: str, entry: Dict[str, Any]
+        self,
+        resource_id: str,
+        slide_name: str,
+        entry: Dict[str, Any],
+        *,
+        extra: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Merge ONE slide's prompt fields into ``resources.slide_prompts``.
 
@@ -821,7 +831,23 @@ class ResourcesRepository(AsyncpgRepository):
         would widen the read-modify-write window across two transactions,
         and two slides captioned back-to-back on the same album is a
         perfectly ordinary thing for a user to do.
+
+        ``extra`` carries the columns that must land in the SAME flush as the
+        text — today only ``prompt_origin``, whose mig 455 rule is that it
+        follows the LAST writer of the positive text. Written as a second
+        PATCH it would leave a window where the new text is persisted under
+        the previous writer's origin. The whitelist is deliberately narrow:
+        a general column bag here would become a second, undocumented way to
+        PATCH a resource row — the whole-row write this method exists to
+        avoid.
         """
+        extra = dict(extra or {})
+        unknown = set(extra) - _SLIDE_PROMPT_EXTRA_KEYS
+        if unknown:
+            raise ValueError(
+                f"merge_slide_prompt extra accepts only "
+                f"{sorted(_SLIDE_PROMPT_EXTRA_KEYS)}; got {sorted(unknown)}"
+            )
         try:
             async with write_scope() as session:
                 obj = await session.get(Resources, self._bigint(resource_id))
@@ -832,6 +858,8 @@ class ResourcesRepository(AsyncpgRepository):
                 # a MutableDict, so the unit of work only sees the change if
                 # the attribute itself is set to a new object.
                 obj.slide_prompts = merged
+                for k, v in extra.items():
+                    setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
                 await session.flush()
             logger.info(
                 f"Merged slide prompt for resource {resource_id} slide {slide_name!r}"

@@ -15,7 +15,10 @@ WRITERS = {
     "workflows/backfill_resource_gen_params.py": 'stamp_origin(patch, "extracted")',
     "services/library/promote_generated_media_service.py": '"prompt_origin": "extracted"',
     "workflows/caption_asset.py": 'stamp_origin(update, "captioned")',
-    "workflows/caption_slide.py": '{"prompt_origin": "captioned"}',
+    # Slide text is merged by the repository, not carried in a patch dict, so
+    # this writer asks the helper what a slide_prompts write stamps and hands
+    # the repository that stamp — in the SAME flush as the text.
+    "workflows/caption_slide.py": 'stamp_origin({"slide_prompts": entry}, "captioned")',
 }
 
 #: Writers of a PROMPT_TEXT_KEYS column that deliberately do NOT stamp, with
