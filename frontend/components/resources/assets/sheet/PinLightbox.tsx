@@ -57,8 +57,10 @@ export interface PinLightboxProps {
    * draw. Default: `image`.
    */
   kindFor?: (id: string) => 'image' | 'video' | NonVisualMediaKind;
-  /** Display name for the audio player. Defaults to `slotLabel`. */
-  titleFor?: (id: string) => string;
+  /** Display name for the audio player. Falls back to `slotLabel` when it
+   *  returns nothing — including the empty string, which an untitled row
+   *  really does produce and which `??` would happily pass through. */
+  titleFor?: (id: string) => string | undefined;
   /** Details panel for the current item (source, model, date, state…). */
   metadataFor?: (id: string) => React.ReactNode;
   /** Action row for the current item, under the media. */
@@ -173,7 +175,7 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
           >
             <AudioWaveformPlayer
               src={srcFor(current)}
-              filename={titleFor?.(current) ?? slotLabel}
+              filename={titleFor?.(current) || slotLabel}
               layout="full"
             />
           </div>

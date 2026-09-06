@@ -9,15 +9,16 @@
  * put the guard in the database the failure would have been swallowed.
  *
  * These two helpers are what makes that impossible: one refuses the locked
- * folders before anything moves, the other names the reason a move failed so
- * the caller can echo it instead of discarding it.
+ * folders before anything moves, the other names the reason a folder mutation
+ * was refused so the caller can echo it instead of discarding it. Rename goes
+ * through the same PostgREST-direct write and reuses the second one.
  */
 
 import { describe, it, expect } from 'vitest';
 
 import { ApiError } from '../services/apiClient';
 import type { Folder } from '../types';
-import { partitionMovableFolders, describeMoveFailure } from './moveBatch';
+import { partitionMovableFolders, describeFolderMutationFailure } from './moveBatch';
 
 const folderRow = (over: Partial<Folder>): Folder => ({
   id: '742318905233408001',
@@ -83,12 +84,12 @@ describe('partitionMovableFolders', () => {
   });
 });
 
-describe('describeMoveFailure', () => {
+describe('describeFolderMutationFailure', () => {
   it('names the API layer 409 (mig 441 folders router)', () => {
     const err = new ApiError('System folder cannot be moved', 409, {
       code: 'system_folder',
     });
-    expect(describeMoveFailure(err)).toBe('system_folder');
+    expect(describeFolderMutationFailure(err)).toBe('system_folder');
   });
 
   it('names the DB trigger error PostgREST relays (mig 457)', () => {
@@ -101,20 +102,28 @@ describe('describeMoveFailure', () => {
         'folder 742318905233408002 (chat_uploads) is a system folder and cannot be renamed, moved or trashed',
       hint: 'system_folder',
     };
-    expect(describeMoveFailure(err)).toBe('system_folder');
+    expect(describeFolderMutationFailure(err)).toBe('system_folder');
   });
 
   it('falls back to unknown for an unrelated failure', () => {
-    expect(describeMoveFailure(new Error('boom'))).toBe('unknown');
+    expect(describeFolderMutationFailure(new Error('boom'))).toBe('unknown');
   });
 
   it('falls back to unknown for a different PostgREST error', () => {
     const err = { code: '23503', message: 'violates foreign key constraint', hint: null };
-    expect(describeMoveFailure(err)).toBe('unknown');
+    expect(describeFolderMutationFailure(err)).toBe('unknown');
+  });
+
+  // The marker is ours and a real refusal always carries it whole. Matching it
+  // as a substring would let an unrelated failure be reported to the user as a
+  // system-folder refusal — confidently, and wrongly.
+  it('does not match a message that merely contains the marker', () => {
+    const err = { code: 'PGRST301', message: 'unrelated system_folder_report failure' };
+    expect(describeFolderMutationFailure(err)).toBe('unknown');
   });
 
   it('falls back to unknown for a non-object throw', () => {
-    expect(describeMoveFailure(null)).toBe('unknown');
-    expect(describeMoveFailure('system_folder')).toBe('unknown');
+    expect(describeFolderMutationFailure(null)).toBe('unknown');
+    expect(describeFolderMutationFailure('system_folder')).toBe('unknown');
   });
 });

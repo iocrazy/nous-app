@@ -149,6 +149,16 @@ describe('PinLightbox — audio', () => {
     );
   });
 
+  // An untitled generation really does produce '', and `??` would pass it
+  // straight through — the player would render a blank name rather than fall
+  // back. `||` is load-bearing here, not a style choice.
+  it('falls back to the slot label when the title is empty', () => {
+    render(<PinLightbox {...base} kindFor={() => 'audio'} titleFor={() => ''} />);
+    expect(screen.getByTestId('waveform-player').getAttribute('data-filename')).toBe(
+      'Portrait',
+    );
+  });
+
   it('still navigates away from an audio item', () => {
     const onIndexChange = vi.fn();
     render(

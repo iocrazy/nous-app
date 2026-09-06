@@ -22,7 +22,7 @@ import {
   trashResources,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
-import { partitionMovableFolders, describeMoveFailure } from './moveBatch';
+import { partitionMovableFolders, describeFolderMutationFailure } from './moveBatch';
 import { useFileKeyboard } from './useFileKeyboard';
 import type { Folder, ResourceItem, SmartCollection } from '../types';
 
@@ -132,13 +132,33 @@ export function useResourceOperations({
       setRenamingFolderId(null);
       return;
     }
+    // `renameFolder` writes `folders` through PostgREST directly, so like the
+    // move path it never met the mig 441 API guard — and since mig 457 the DB
+    // trigger refuses it. Pre-refuse what we can see, and echo whatever the
+    // server refuses; a rename that silently does nothing is the defect this
+    // ticket exists to remove.
+    const target = childFolders.find((f) => f.id === renamingFolderId);
+    if (target?.is_system) {
+      addToast(t('resources.systemFolderLocked'), 'error');
+      setRenamingFolderId(null);
+      return;
+    }
     try {
       await renameFolder(renamingFolderId, renameFolderValue.trim());
       await Promise.all([loadFolders(), loadChildFolders()]);
       addToast(t('resources.renamedNotification', { name: renameFolderValue.trim() }), 'success');
-    } catch { /* ignore */ }
+    } catch (err) {
+      // The pre-refuse above only sees `childFolders`; a folder renamed from
+      // somewhere else still reaches the server, so this arm is not dead code.
+      if (describeFolderMutationFailure(err) === 'system_folder') {
+        addToast(t('resources.systemFolderLocked'), 'error');
+      } else {
+        addToast(t('resources.renameFailed', 'Rename Failed'), 'error');
+        console.error('[useResourceOperations] rename failed:', err);
+      }
+    }
     setRenamingFolderId(null);
-  }, [renamingFolderId, renameFolderValue, loadFolders, loadChildFolders, addToast, t]);
+  }, [renamingFolderId, renameFolderValue, childFolders, loadFolders, loadChildFolders, addToast, t]);
 
   // ─── Folder picker confirm ─────────────────────────
 
@@ -168,7 +188,7 @@ export function useResourceOperations({
           addToast(t('resources.moveSuccess', { count: totalMoved }), 'success');
         }
       } catch (err) {
-        if (describeMoveFailure(err) === 'system_folder') {
+        if (describeFolderMutationFailure(err) === 'system_folder') {
           addToast(t('resources.systemFolderLocked'), 'error');
         } else {
           addToast(t('resources.moveFailed', 'Move failed — nothing was changed for the remaining items'), 'error');

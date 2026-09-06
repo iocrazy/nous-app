@@ -1151,7 +1151,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
               : generatedMediaFileUrl(id);
           }}
           kindFor={(id) => lightboxKindFor(itemsById.get(id)?.media_kind)}
-          titleFor={(id) => itemsById.get(id)?.title ?? ''}
+          titleFor={(id) => itemsById.get(id)?.title}
           metadataFor={(id) => renderLightboxMeta(itemsById.get(id))}
           actionsFor={(id) => renderLightboxActions(itemsById.get(id))}
         />
