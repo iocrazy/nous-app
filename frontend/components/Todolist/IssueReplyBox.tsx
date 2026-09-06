@@ -31,14 +31,37 @@ import { useComposerPaste } from '../../hooks/useComposerPaste';
 import { useResourceSearch } from '../../hooks/useResourceSearch';
 import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
-import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
+import type { AssetGridRow } from '../assets/AssetGridPicker';
+import { useMentionAssetsTab } from '../chat/useMentionAssetsTab';
+import { MAX_ASSET_REF_ATTACHMENTS } from '../chat/attachmentLimits';
+import {
+  stageAsset as stageAssetInto,
+  toAssetAttachment,
+  type StagedAssetRef,
+} from '../chat/stagedResources';
+import { useToast } from '../Toast';
+import type {
+  AssetRefAttachment,
+  ResourceRefAttachment,
+  ResourceSearchResult,
+} from '../../types';
 import { IssueCommentTriggerChip } from './IssueCommentTriggerChip';
 import { isNoteDraft } from './isNoteDraft';
 import type { CommentTriggerPreview } from '../../services/issueMessageService';
 
 /** Merged attachment payload the parent forwards to the backend: staged file
- *  uploads plus collected resource references from @-mention chips. */
-export type ComposerAttachment = StagedAttachment | ResourceRefAttachment;
+ *  uploads, collected resource references from @-mention chips, and staged
+ *  library ASSETS (v2 Task 3).
+ *
+ *  All three arrive as `IssueMessagePost.attachments`, which is already
+ *  `List[AttachmentRequest]` — `run_issue_reply_step` rebuilds them and calls
+ *  the same `run_session_turn` the chat router does, so `asset_ref` is
+ *  resolved (and capped) by the very same code. No backend change was needed
+ *  to make this reach the agent. */
+export type ComposerAttachment =
+  | StagedAttachment
+  | ResourceRefAttachment
+  | AssetRefAttachment;
 
 interface IssueReplyBoxProps {
   agents: AgentRef[];
@@ -103,10 +126,16 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   teamId,
 }) => {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+  // Library ASSETS staged for this comment. Their own list beside the files,
+  // exactly as in AIChatPanel: an asset resolves through a different backend
+  // path and carries a different snapshot, and folding the two together would
+  // make every consumer re-derive which kind it is holding.
+  const [stagedAssets, setStagedAssets] = useState<StagedAssetRef[]>([]);
   // Store WHICH agent the user skipped, not a bare flag: if the assignee changes
   // between the preview and the send, `suppressed` below stops matching and the
   // chip re-arms itself, so a skip aimed at agent A can never silently swallow
@@ -162,17 +191,26 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     if (!editor) return;
     const text = editor.getText().trim();
     const refs = collectRefs(editor);
-    if ((!text && refs.length === 0) || submitting || uploading) return;
+    if (
+      (!text && refs.length === 0 && stagedAssets.length === 0)
+      || submitting
+      || uploading
+    ) {
+      return;
+    }
     setSubmitting(true);
     try {
       await onSubmit(
         text,
         agentId,
-        [...stagedAttachments, ...refs],
+        [...stagedAttachments, ...refs, ...stagedAssets.map(toAssetAttachment)],
         suppressed && suppressedAgentId ? [suppressedAgentId] : undefined,
       );
       editor.commands.clearContent(true);
       setStagedAttachments([]);
+      // Cleared only on SUCCESS — the catch below keeps everything staged so a
+      // rejected send can be retried without re-picking.
+      setStagedAssets([]);
       // One-shot: the next comment starts armed again.
       setSuppressedAgentId(null);
     } catch {
@@ -183,6 +221,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   }, [
     agentId,
     onSubmit,
+    stagedAssets,
     stagedAttachments,
     submitting,
     suppressed,
@@ -198,6 +237,19 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   // onPaste may change identity; forward through a ref so handlePaste is stable.
   const onPasteRef = useRef(onPaste);
   useEffect(() => { onPasteRef.current = onPaste; }, [onPaste]);
+
+  // Same reason as `submitRef`: the editor's key handler closure is built once
+  // by `useEditor`, so it must reach the LATEST routing callback rather than
+  // the one that existed at mount — otherwise it would forever read
+  // `mentionOpen === false` and route nothing.
+  //
+  // Seeded with a no-op rather than with `handleMentionKey`: that callback is
+  // declared BELOW `useEditor` (it depends on the picker state the editor's
+  // own handlers set up), and naming it here would be a temporal-dead-zone
+  // ReferenceError on every render. The effect underneath it does the wiring.
+  const mentionKeyRef = useRef<(key: 'ArrowUp' | 'ArrowDown' | 'Enter') => boolean>(
+    () => false,
+  );
 
   const editor = useEditor({
     extensions: [
@@ -216,6 +268,19 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         ].join(' '),
       },
       handleKeyDown(_view, event) {
+        // The open Assets tab gets first refusal on ↑ / ↓ / ↵. It answers
+        // false whenever it is not showing or nothing is highlighted, so every
+        // branch below still runs in that case. Checked BEFORE ⌘↩ only for
+        // the bare keys — a modifier means send, never navigate.
+        if (
+          !event.metaKey
+          && !event.ctrlKey
+          && (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter')
+          && mentionKeyRef.current(event.key)
+        ) {
+          event.preventDefault();
+          return true;
+        }
         // ⌘↩ / Ctrl+↩ → send (NOT plain Enter — issue replies are multi-line)
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
           event.preventDefault();
@@ -272,6 +337,11 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     const sync = () => {
       const text = editor.getText();
       setDraftEmpty(!text.trim() && collectRefs(editor).length === 0);
+      // NOTE: staged assets are deliberately NOT counted here. `draftEmpty`
+      // drives the trigger chip, whose question is "will ⌘↩ wake an agent",
+      // and the editor-update stream this runs on does not fire when an asset
+      // is staged. Reading a stale answer would be worse than a conservative
+      // one; the SUBMIT guard above is what actually decides sendability.
       const note = isNoteDraft(text);
       if (note !== lastNoteRef.current) {
         lastNoteRef.current = note;
@@ -313,16 +383,34 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     if (editor) editor.setEditable(!inputBlocked);
   }, [editor, inputBlocked]);
 
+  // `useMentionAssetsTab` is declared BELOW — its `onSelect` closes the picker,
+  // and closing resets the tab, so the two reference each other. The ref breaks
+  // that cycle without making either one re-created on every render.
+  const mentionAssetsReset = useRef<() => void>(() => {});
+
+  /**
+   * Close, and forget which tab was open.
+   *
+   * The reset belongs on CLOSE, not on open: the live query updates on every
+   * keystroke, so resetting there would bounce the user off the Assets tab the
+   * moment they typed the next character. Closing ends the mention session,
+   * which is the only moment the choice stops meaning anything.
+   */
+  const closeMentionPicker = useCallback(() => {
+    setMentionOpen(false);
+    mentionAssetsReset.current();
+  }, []);
+
   // Close the picker on Escape or click-outside (mirrors AIChatPanel).
   useEffect(() => {
     if (!mentionOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMentionOpen(false);
+      if (e.key === 'Escape') closeMentionPicker();
     };
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('[data-testid="resource-picker"]')) {
-        setMentionOpen(false);
+        closeMentionPicker();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -331,7 +419,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClick);
     };
-  }, [mentionOpen]);
+  }, [mentionOpen, closeMentionPicker]);
 
   const handleMentionSelect = useCallback((item: ResourceSearchResult) => {
     const ed = editorRef.current;
@@ -340,10 +428,65 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         insertResourceRef: (item: ResourceSearchResult) => boolean;
       }).insertResourceRef(item);
     }
-    setMentionOpen(false);
+    closeMentionPicker();
     setMentionQuery('');
     ed?.commands.focus();
-  }, []);
+  }, [closeMentionPicker]);
+
+  /**
+   * Picking an asset STAGES it — it does not insert a tiptap node.
+   *
+   * The cap is enforced HERE as well as on the server. The server refuses
+   * anything past `MAX_ASSET_REF_ATTACHMENTS` and reports it in
+   * `attachment_failures`, but an issue reply runs asynchronously in a DBOS
+   * workflow and this composer never sees that field — so without this check
+   * the ninth pick would be a silent no-op, which the "typed result and echo"
+   * rule forbids for any user-triggered path. The copy is the same sentence
+   * the chat banner shows for the same refusal, from the same key.
+   */
+  const handleMentionAssetSelect = useCallback(
+    (row: AssetGridRow) => {
+      const next = stageAssetInto(stagedAssets, {
+        id: row.id,
+        name: row.name,
+        asset_type: row.asset_type,
+        // Staging never picks an outfit; the chip's loadout menu does, and
+        // null is the backend's "use the default loadout".
+        loadout_id: null,
+        cover_file_id: row.cover_file_id,
+        scope_id: row.scope_id ?? null,
+      });
+      if (next.length > MAX_ASSET_REF_ATTACHMENTS) {
+        addToast(
+          t('chat.attachmentFailureReason.attachment_limit_exceeded', {
+            n: MAX_ASSET_REF_ATTACHMENTS,
+          }),
+          'error',
+        );
+        return;
+      }
+      setStagedAssets(next);
+      closeMentionPicker();
+      setMentionQuery('');
+      editorRef.current?.commands.focus();
+    },
+    [stagedAssets, addToast, t, closeMentionPicker],
+  );
+
+  // The Assets tab itself — state, transport and key routing shared with
+  // AIChatPanel, so the two composers cannot drift about what mentioning an
+  // asset searches or which keys the grid claims.
+  const mentionAssets = useMentionAssetsTab({
+    pickerOpen: mentionOpen,
+    onSelect: handleMentionAssetSelect,
+  });
+  useEffect(() => {
+    mentionAssetsReset.current = mentionAssets.reset;
+  }, [mentionAssets.reset]);
+  // Same reason as `submitRef`: the editor's key handler closure is built once.
+  useEffect(() => {
+    mentionKeyRef.current = mentionAssets.handleKey;
+  }, [mentionAssets.handleKey]);
 
   return (
     <div
@@ -359,9 +502,13 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             loading={mentionLoading}
             counts={mentionData.counts}
             activeKind={mentionActiveKind}
-            onKindChange={setMentionActiveKind}
+            onKindChange={(kind) => {
+              mentionAssets.deactivate();
+              setMentionActiveKind(kind);
+            }}
             onSelect={handleMentionSelect}
             activeIndex={mentionActiveIndex}
+            assets={mentionAssets.assets}
           />
         </div>
       )}
@@ -372,11 +519,15 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         </div>
       )}
 
-      {/* Attachment chip strip */}
+      {/* Attachment chip strip. The staged ASSETS ride in the same row as the
+          files, which also brings the v2 loadout menu here for free — the chip
+          and its menu live in ChatAttachmentPicker, not in either host. */}
       <div className="px-3 pt-2">
         <ChatAttachmentPicker
           attachments={stagedAttachments}
           onChange={setStagedAttachments}
+          assets={stagedAssets}
+          onAssetsChange={setStagedAssets}
           disabled={inputBlocked}
         />
       </div>

@@ -3739,7 +3739,13 @@
       "asset_deleted": "One Asset Has Been Deleted",
       "asset_no_primary_image": "One Asset Has No Main Image Yet",
       "asset_type_unknown": "One Asset Has A Type This Version Cannot Read",
+      "loadout_not_owned": "That Loadout Does Not Belong To This Character",
       "attachment_limit_exceeded": "Only The First {{n}} Assets Were Used"
+    },
+    "stagedAsset": {
+      "chooseLoadout": "Choose Loadout",
+      "defaultLoadout": "Default Loadout",
+      "loadoutsUnavailable": "Could Not Load Loadouts"
     },
     "suggestions": {
       "outlineStory": "Help me outline a story",

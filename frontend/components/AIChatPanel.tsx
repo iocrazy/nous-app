@@ -64,12 +64,7 @@ import {
 } from './chat/stagedResources';
 import type { ResourceRefInsertItem } from './chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from './chat/ResourcePickerSuggestion';
-import type {
-  AssetGridPickerHandle,
-  AssetGridQuery,
-  AssetGridRow,
-} from './assets/AssetGridPicker';
-import { searchAssetsAccessible } from '../services/assetsService';
+import type { AssetGridRow } from './assets/AssetGridPicker';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
@@ -79,6 +74,7 @@ import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
 import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
+import { useMentionAssetsTab } from './chat/useMentionAssetsTab';
 import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
@@ -418,14 +414,13 @@ export function AIChatPanel({
   >('');
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   // P5: the picker's sixth tab. Library ASSETS are a different population from
-  // the five resource kinds, so they get their own active flag rather than a
-  // seventh `activeKind` value — the two axes answer to different searches and
-  // a shared enum would make every read re-derive which one it is holding.
-  const [mentionAssetsTab, setMentionAssetsTab] = useState(false);
-  // `null` until the grid answers: an unvisited Assets tab must not badge a
-  // "0" the user reads as "my library is empty".
-  const [mentionAssetCount, setMentionAssetCount] = useState<number | null>(null);
-  const mentionAssetPickerRef = useRef<AssetGridPickerHandle | null>(null);
+  // the five resource kinds, so the tab's whole state, transport and key
+  // routing live in `useMentionAssetsTab`, shared with the issue reply box —
+  // the two composers must not drift about what an asset mention searches.
+  //
+  // Declared BELOW (its `onSelect` closes the picker, and closing resets the
+  // tab); this ref breaks that cycle.
+  const mentionAssetsReset = useRef<() => void>(() => {});
   const { data: mentionSearchData, loading: mentionLoading } = useResourceSearch(
     mentionQuery,
     mentionActiveKind,
@@ -448,10 +443,9 @@ export function AIChatPanel({
    */
   const closeMentionPicker = useCallback(() => {
     setMentionPickerOpen(false);
-    setMentionAssetsTab(false);
     // The next `@` opens a fresh session; a count carried over from the last
     // one would badge a number for a search this session never ran.
-    setMentionAssetCount(null);
+    mentionAssetsReset.current();
   }, []);
 
   // Item 1: close picker on Escape or click-outside
@@ -528,53 +522,6 @@ export function AIChatPanel({
   );
 
   /**
-   * The Assets tab's transport: every team the user belongs to, plus the
-   * system presets. No `scope_id` — a chat window outlives any one workspace
-   * route, so the server authorizes by membership instead (ruling B/G), which
-   * is the same predicate the backend's asset-ref resolver reads.
-   */
-  const fetchMentionAssets = useCallback(
-    (params: AssetGridQuery, signal: AbortSignal): Promise<AssetGridRow[]> =>
-      searchAssetsAccessible(params.q ?? '', {
-        type: params.type ?? undefined,
-        library: params.library,
-        limit: params.limit,
-        signal,
-      }),
-    [],
-  );
-
-  /**
-   * ↑ / ↓ / Enter, routed from the composer to the open picker.
-   *
-   * Only the ASSETS tab is claimed. The five resource tabs have never moved
-   * their highlight with the arrows — `mentionActiveIndex` has been pinned at
-   * 0 since the picker shipped — and claiming Enter for a row the user cannot
-   * see selected would silently swallow a send. That gap is real and named in
-   * the PR's known items; closing it is a change to the resource path, which
-   * this task deliberately leaves alone.
-   */
-  const handleMentionKey = useCallback(
-    (key: 'ArrowUp' | 'ArrowDown' | 'Enter'): boolean => {
-      if (!mentionPickerOpen || !mentionAssetsTab) return false;
-      const handle = mentionAssetPickerRef.current;
-      if (!handle) return false;
-      if (key === 'ArrowDown') {
-        handle.move(1);
-        return true;
-      }
-      if (key === 'ArrowUp') {
-        handle.move(-1);
-        return true;
-      }
-      // Enter. `commitActive` answers false when nothing is highlighted, and
-      // that false is what lets the keystroke fall through to send.
-      return handle.commitActive();
-    },
-    [mentionPickerOpen, mentionAssetsTab],
-  );
-
-  /**
    * Picking an asset STAGES it — it does not insert a tiptap node.
    *
    * An asset is not a span of the sentence: the backend resolves it into a
@@ -589,8 +536,9 @@ export function AIChatPanel({
         id: row.id,
         name: row.name,
         asset_type: row.asset_type,
-        // v1 has no loadout picker at either entry point; null is the
-        // backend's "use the default loadout", not a missing value.
+        // Staging never picks an outfit — the chip's loadout menu does, once
+        // the asset is in the row. null is the backend's "use the default
+        // loadout", not a missing value.
         loadout_id: null,
         cover_file_id: row.cover_file_id,
         scope_id: row.scope_id ?? null,
@@ -602,6 +550,16 @@ export function AIChatPanel({
     },
     [stageAsset, dropMentionTrigger, closeMentionPicker, focusComposer],
   );
+
+  // The Assets tab — state, transport and ↑/↓/↵ routing, shared with
+  // Todolist/IssueReplyBox.
+  const mentionAssets = useMentionAssetsTab({
+    pickerOpen: mentionPickerOpen,
+    onSelect: handleMentionAssetSelect,
+  });
+  useEffect(() => {
+    mentionAssetsReset.current = mentionAssets.reset;
+  }, [mentionAssets.reset]);
 
   // Paste + drag-drop upload hooks — all three funnel files into handleFiles
   // which reuses the same validation/upload pipeline as the picker button.
@@ -1486,20 +1444,12 @@ export function AIChatPanel({
               counts={mentionSearchData.counts}
               activeKind={mentionActiveKind}
               onKindChange={(kind) => {
-                setMentionAssetsTab(false);
+                mentionAssets.deactivate();
                 setMentionActiveKind(kind);
               }}
               onSelect={handleMentionSelect}
               activeIndex={mentionActiveIndex}
-              assets={{
-                active: mentionAssetsTab,
-                onActivate: () => setMentionAssetsTab(true),
-                count: mentionAssetCount,
-                onCountChange: setMentionAssetCount,
-                onSelect: handleMentionAssetSelect,
-                fetch: fetchMentionAssets,
-                pickerRef: mentionAssetPickerRef,
-              }}
+              assets={mentionAssets.assets}
             />
           </div>
         )}
@@ -1545,7 +1495,7 @@ export function AIChatPanel({
                       : t('chat.placeholder', 'Type a message...')
               }
               onMentionRequest={handleMentionRequest}
-              onMentionKey={handleMentionKey}
+              onMentionKey={mentionAssets.handleKey}
               editorRef={chatEditorRef}
               hasAttachments={
                 stagedAttachments.length > 0

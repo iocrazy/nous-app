@@ -114,3 +114,92 @@ def test_the_parser_does_not_accept_a_mention_in_prose(mirror_source):
     commented = " * MAX_ASSET_REF_ATTACHMENTS = 99 in some other place\n"
     with pytest.raises(AssertionError):
         _ts_int_const(commented, "MAX_ASSET_REF_ATTACHMENTS")
+
+
+# ── the reason VOCABULARY is a second copy too ──────────────────────────────
+#
+# The cap above is one number in two files. The reason codes are a longer
+# version of the same problem across THREE: `AssetRefFailureReason` decides
+# them, `AttachmentFailureBanner.NAMED_REASONS` decides which ones get a line
+# of their own, and the two locales decide what that line says. A code missing
+# from the TS set falls into the banner's counted bucket — degraded but never
+# wrong, which is exactly why nobody would notice; a code missing from a locale
+# renders the raw key at a user.
+#
+# Parsed, not executed, for the same reason the cap is: no node toolchain in
+# the backend run.
+
+BANNER = _ROOT / "frontend" / "components" / "chat" / "AttachmentFailureBanner.tsx"
+
+# Reasons the BANNER names that the resolver's Literal does not declare. Only
+# the limit code today, and it is legitimately absent from the resolver
+# vocabulary's producer set... except it IS in the Literal (the chat service
+# raises it one level up). So the sets are expected to match exactly, and this
+# tuple exists to make any future intentional divergence a deliberate edit
+# rather than a loosened assertion.
+_EXPECTED_EXTRA_IN_TS: tuple[str, ...] = ()
+
+
+def _ts_string_set(source: str, name: str) -> set[str]:
+    """The members of ``const <name> = new Set([...]);``.
+
+    Anchored on the declaration, and it takes only quoted string literals — a
+    computed member would come back missing rather than silently accepted,
+    which is the failure direction that keeps a stale set from reading as
+    agreement.
+    """
+    m = re.search(rf"^const {name}\s*=\s*new Set\(\[(.*?)\]\);", source, re.M | re.S)
+    assert m, f"{name} not found as a Set literal in {BANNER.name} — renamed?"
+    return set(re.findall(r"'([^']+)'", m.group(1)))
+
+
+@pytest.fixture(scope="module")
+def banner_source() -> str:
+    if not BANNER.exists():
+        pytest.skip(f"frontend banner not checked out: {BANNER} (backend-only tree)")
+    return BANNER.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_the_banner_names_exactly_the_reasons_the_backend_declares(banner_source):
+    from typing import get_args
+
+    from app.services.ai.chat.asset_ref_resolver import AssetRefFailureReason
+
+    declared = set(get_args(AssetRefFailureReason))
+    named = _ts_string_set(banner_source, "NAMED_REASONS")
+    assert named - declared == set(
+        _EXPECTED_EXTRA_IN_TS
+    ), "the banner names a reason the backend never produces"
+    assert declared - named == set(), (
+        "the backend produces a reason the banner has no line for — it would "
+        "land in the counted bucket and say nothing"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("locale", sorted(LOCALES))
+def test_every_declared_reason_has_copy_in_both_locales(locale):
+    from typing import get_args
+
+    from app.services.ai.chat.asset_ref_resolver import AssetRefFailureReason
+
+    if not LOCALES[locale].exists():
+        pytest.skip("frontend locales not checked out (backend-only tree)")
+    strings = json.loads(LOCALES[locale].read_text(encoding="utf-8"))["chat"][
+        "attachmentFailureReason"
+    ]
+    for reason in get_args(AssetRefFailureReason):
+        assert strings.get(reason), f"{locale}: no copy for {reason}"
+
+
+@pytest.mark.unit
+def test_the_set_parser_would_notice_a_missing_member():
+    """Guard on the guard: a parser that shrugged at an unfamiliar shape would
+    make both assertions above pass against a file that lists nothing."""
+    assert _ts_string_set("const X = new Set([\n  'a',\n  'b',\n]);\n", "X") == {
+        "a",
+        "b",
+    }
+    with pytest.raises(AssertionError):
+        _ts_string_set(" * const X = new Set(['a']); in a comment\n", "X")

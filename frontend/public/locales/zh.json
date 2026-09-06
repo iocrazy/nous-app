@@ -3739,7 +3739,13 @@
       "asset_deleted": "有资产已被删除",
       "asset_no_primary_image": "有资产还没有主图",
       "asset_type_unknown": "有资产的类型当前版本无法识别",
+      "loadout_not_owned": "所选造型不属于该角色",
       "attachment_limit_exceeded": "本轮只使用了前 {{n}} 个资产"
+    },
+    "stagedAsset": {
+      "chooseLoadout": "选择造型",
+      "defaultLoadout": "默认造型",
+      "loadoutsUnavailable": "无法加载造型"
     },
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",

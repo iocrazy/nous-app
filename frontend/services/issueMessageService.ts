@@ -59,6 +59,26 @@ export type IssueMessageAttachment =
       name: string;
       mime: string;
       scope: { type: 'personal' | 'team'; id: string };
+    }
+  /**
+   * A library ASSET (v2 Task 3). Named as its own member rather than left to
+   * the `url`-carrying branch above: an `asset_ref` is identified by
+   * `asset_id`, and a mapper that treated it as a binary attachment would send
+   * `{kind: 'asset_ref', url: ''}` — accepted by `AttachmentRequest` (every
+   * field is Optional), resolved to nothing, and reported back as
+   * `asset_not_accessible`. The union is what makes that omission a compile
+   * error instead of a mention that quietly does nothing.
+   *
+   * `loadout_id` null means "the asset's default loadout" — the backend's
+   * reading, not a missing value.
+   */
+  | {
+      kind: 'asset_ref';
+      asset_id: string;
+      loadout_id: string | null;
+      name: string;
+      mime: string;
+      url: string;
     };
 
 export interface IssueMessagePostPayload {

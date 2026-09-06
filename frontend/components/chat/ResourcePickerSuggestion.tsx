@@ -31,10 +31,12 @@ function _relative(iso: string): string {
 /**
  * The Assets tab (P5).
  *
- * OPTIONAL as a whole, and that is the point: the issue reply box
- * (`IssueReplyBox.tsx`) renders this same popover and, per ruling H, does not
- * support asset references in this phase. A required prop would have made
- * every existing caller declare a tab it does not want.
+ * OPTIONAL as a whole: a host that has no asset shelf to offer simply leaves
+ * it out, and the popover is the five-kind resource picker it was before P5.
+ * Both current hosts (`AIChatPanel.tsx` and, since the v2 batch,
+ * `Todolist/IssueReplyBox.tsx`) pass it, built by `useMentionAssetsTab` so the
+ * two cannot drift; the ruling-H "not in this phase" carve-out for the issue
+ * box is closed.
  *
  * The parent owns `active` for the same reason it owns `activeKind`: it is the
  * parent that routes the arrow keys, and a tab this component kept to itself

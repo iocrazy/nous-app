@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
   mergeAssetAttachments,
   removeStagedAsset,
+  setStagedAssetLoadout,
   stageAsset,
   toAssetAttachment,
   toStagedAsset,
@@ -45,6 +46,9 @@ describe('toStagedAsset', () => {
     expect(toStagedAsset(CHARACTER)).toEqual({
       asset_id: '727145299382534300',
       loadout_id: null,
+      // v2's chip label. Null until the loadout menu sets it, and it never
+      // reaches the wire — see the `toAssetAttachment` key-set test below.
+      loadout_name: null,
       name: 'Sang Yao',
       asset_type: 'character',
       cover_file_id: '727145299382534146',
@@ -98,7 +102,56 @@ describe('stageAsset / removeStagedAsset', () => {
   });
 });
 
+describe('setStagedAssetLoadout — the v2 pick', () => {
+  it('moves the id and the name together', () => {
+    // Separately would let the chip say one outfit while another goes on the
+    // wire — the exact disagreement the label exists to rule out.
+    const list = [toStagedAsset(CHARACTER)];
+    const next = setStagedAssetLoadout(list, CHARACTER.id, '900', 'Rainy Night');
+    expect(next[0].loadout_id).toBe('900');
+    expect(next[0].loadout_name).toBe('Rainy Night');
+  });
+
+  it('clears both for the default-loadout entry', () => {
+    const picked = setStagedAssetLoadout(
+      [toStagedAsset(CHARACTER)],
+      CHARACTER.id,
+      '900',
+      'Rainy Night',
+    );
+    const cleared = setStagedAssetLoadout(picked, CHARACTER.id, null, null);
+    expect(cleared[0].loadout_id).toBeNull();
+    expect(cleared[0].loadout_name).toBeNull();
+  });
+
+  it('returns the untouched assets by identity', () => {
+    // A menu on one chip must not re-render the rest of the row.
+    const list = [toStagedAsset(CHARACTER), toStagedAsset(PRESET)];
+    const next = setStagedAssetLoadout(list, CHARACTER.id, '900', 'Rainy Night');
+    expect(next[1]).toBe(list[1]);
+  });
+
+  it('changes nothing when no staged asset carries that id', () => {
+    const list = [toStagedAsset(CHARACTER)];
+    expect(setStagedAssetLoadout(list, 'not-staged', '900', 'X')).toEqual(list);
+  });
+});
+
 describe('toAssetAttachment — the wire shape', () => {
+  it('leaves the loadout NAME behind while sending the id', () => {
+    // The server re-reads the name from the row it owns; sending ours would
+    // assert something it ignores, and could disagree with it after a rename.
+    const staged = setStagedAssetLoadout(
+      [toStagedAsset(CHARACTER)],
+      CHARACTER.id,
+      '900',
+      'Rainy Night',
+    )[0];
+    const wire = toAssetAttachment(staged) as Record<string, unknown>;
+    expect(wire.loadout_id).toBe('900');
+    expect(wire).not.toHaveProperty('loadout_name');
+  });
+
   it('sends the four contract fields plus the two empty ones, and nothing else', () => {
     expect(toAssetAttachment(toStagedAsset(CHARACTER))).toEqual({
       kind: 'asset_ref',
