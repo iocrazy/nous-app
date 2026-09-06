@@ -110,3 +110,11 @@ describe('humanizeTaskError', () => {
     expect(humanizeTaskError('   ').message).toBe('Processing failed.');
   });
 });
+
+describe('humanizeTaskError — provider card switched off', () => {
+  it('names the card and where to turn it on', () => {
+    const r = humanizeTaskError('RuntimeError: [provider_card_disabled] Codex (Local CLI) is switched off');
+    expect(r.message).toMatch(/Codex \(Local CLI\)/);
+    expect(r.hint ?? '').toMatch(/Settings → AI → Providers/);
+  });
+});

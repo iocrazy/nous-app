@@ -7,7 +7,7 @@
 // move, not a rewrite.
 
 import React from 'react';
-import type { AISettings as AISettingsType } from '../../types';
+import type { AIProviderConfig, AISettings as AISettingsType } from '../../types';
 import { UiSelect } from '../ui';
 
 /**
@@ -39,6 +39,22 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   lmstudio: 'LM Studio',
   nous: 'Nous (Platform)',
 };
+
+/**
+ * Platform (Nous) rows the user may actually pick, per the Nous card on the
+ * Providers page — the ONE management entry (2026-09-06). ``undefined`` config
+ * = the user never touched the card = no restriction; ``enabled === false``
+ * = nothing; otherwise drop the rows listed in ``disabled_models``.
+ */
+export function visiblePlatformModels<T extends { name: string }>(
+  rows: T[],
+  nousConfig: AIProviderConfig | undefined,
+): T[] {
+  if (!nousConfig) return rows;
+  if (nousConfig.enabled === false) return [];
+  const disabled = new Set(nousConfig.disabled_models ?? []);
+  return rows.filter((m) => !disabled.has(m.name));
+}
 
 /**
  * Collect the curated whitelist of models exposed by every enabled

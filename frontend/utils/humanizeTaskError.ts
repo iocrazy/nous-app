@@ -56,6 +56,14 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     hint: 'Point this catalog row at a model Codex currently accepts (Settings → AI → the row\'s model), then run again.',
   },
   {
+    // The user's Codex provider card is switched off. The Providers page is
+    // the one management entry (2026-09-06): an application never runs what
+    // that page does not offer, and the fix is exactly one toggle.
+    test: /\[provider_card_disabled\]/i,
+    message: 'Codex (Local CLI) is switched off for this account.',
+    hint: 'Turn the card on under Settings → AI → Providers, then run again.',
+  },
+  {
     // The image model DECLINED the prompt on content grounds: it answered with
     // prose (why, plus a rewrite that would work) instead of calling the image
     // tool. Two raw shapes reach here and both must match:

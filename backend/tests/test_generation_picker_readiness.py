@@ -156,6 +156,7 @@ async def test_readiness_reads_the_online_devices_env_report():
         "u1",
         online_device_id=AsyncMock(return_value="343307213001627"),
         list_devices=AsyncMock(return_value=devices),
+        card_enabled=AsyncMock(return_value=True),
     )
     assert r == LocalReadiness(codex=True, dreamina=False)
 
@@ -179,3 +180,25 @@ async def test_readiness_never_raises_a_presence_outage_into_the_picker():
         list_devices=AsyncMock(return_value=[]),
     )
     assert r == LocalReadiness(codex=False, dreamina=False)
+
+
+# ── the Providers page is the ONE management entry (user, 2026-09-06) ────────
+# "画布属于应用，应用中都是要服务商中有对应可用模型才可以选" — a local engine is
+# offered only when its provider CARD is switched on, not merely when the
+# daemon happens to be online.
+
+
+@pytest.mark.asyncio
+async def test_codex_is_offered_only_when_its_provider_card_is_enabled():
+    devices = [{"id": "d1", "env_report": {"auth_ok": True, "skill_ok": True}}]
+    kw = dict(
+        online_device_id=AsyncMock(return_value="d1"),
+        list_devices=AsyncMock(return_value=devices),
+    )
+    off = await local_engine_readiness(
+        "u1", card_enabled=AsyncMock(return_value=False), **kw
+    )
+    on = await local_engine_readiness(
+        "u1", card_enabled=AsyncMock(return_value=True), **kw
+    )
+    assert off.codex is False and on.codex is True

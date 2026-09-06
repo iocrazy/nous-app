@@ -46,6 +46,7 @@ async def local_engine_readiness(
     *,
     online_device_id: Optional[Callable[[str], Awaitable[Optional[str]]]] = None,
     list_devices: Optional[Callable[[str], Awaitable[list[dict[str, Any]]]]] = None,
+    card_enabled: Optional[Callable[[str], Awaitable[bool]]] = None,
 ) -> LocalReadiness:
     try:
         if online_device_id is None:
@@ -56,6 +57,10 @@ async def local_engine_readiness(
             from app.repositories.codex_daemon_repository import CodexDaemonRepository
 
             list_devices = CodexDaemonRepository().list_for_user
+        if card_enabled is None:
+            from app.services.codex.provider_card import card_enabled as _ce
+
+            card_enabled = _ce
         device_id = await online_device_id(user_id)
         if not device_id:
             return LocalReadiness()
@@ -64,8 +69,13 @@ async def local_engine_readiness(
             if str(d.get("id")) == str(device_id):
                 report = dict(d.get("env_report") or {})
                 break
+        # The Providers page is the ONE management entry (2026-09-06): an
+        # online, logged-in daemon is necessary but the user must also have
+        # switched the Codex card on for any application to offer it.
         return LocalReadiness(
-            codex=bool(report.get("auth_ok")) and bool(report.get("skill_ok")),
+            codex=bool(report.get("auth_ok"))
+            and bool(report.get("skill_ok"))
+            and await card_enabled(user_id),
             dreamina=bool(report.get("dreamina_ok"))
             and bool(report.get("dreamina_auth_ok")),
         )

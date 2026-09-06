@@ -29,6 +29,12 @@ from app.services.ai.provider_protocols.base import ProviderNotConfiguredError
 from app.services.ai.provider_protocols.codex_local import CodexLocalProtocol
 from app.services.codex import provider_card as card
 
+# Bound at import time — before conftest's autouse fixture replaces the module
+# attribute with an always-True stub — so the gate itself can be tested.
+from app.services.codex.provider_card import (  # noqa: E402
+    card_enabled as real_card_enabled,
+)
+
 USER = "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
 
 
@@ -289,3 +295,42 @@ async def test_test_connection_route_dispatches_codex_local_to_the_daemon_probe(
         assert persisted.await_args.args[1:3] == ("codex-local", "ok")
     finally:
         app.dependency_overrides.pop(get_auth, None)
+
+
+# ── dispatch honours the card too, with a typed, actionable failure ─────────
+
+
+@pytest.mark.asyncio
+async def test_card_enabled_reads_the_toggle(monkeypatch):
+    monkeypatch.setattr(
+        card, "_load_ai_settings", AsyncMock(return_value=_settings({"enabled": True}))
+    )
+    assert await real_card_enabled(USER) is True
+    monkeypatch.setattr(
+        card, "_load_ai_settings", AsyncMock(return_value=_settings({"enabled": False}))
+    )
+    assert await real_card_enabled(USER) is False
+    monkeypatch.setattr(card, "_load_ai_settings", AsyncMock(return_value={}))
+    assert await real_card_enabled(USER) is False
+    monkeypatch.setattr(
+        card, "_load_ai_settings", AsyncMock(side_effect=RuntimeError("db"))
+    )
+    assert await real_card_enabled(USER) is False
+
+
+@pytest.mark.asyncio
+async def test_workflow_refuses_a_codex_run_when_the_card_is_off(monkeypatch):
+    from app.services.generation.failure import describe_generation_failure
+    from app.workflows import canvas_generation as wf
+
+    monkeypatch.setattr(card, "card_enabled", AsyncMock(return_value=False))
+    with pytest.raises(card.ProviderCardDisabledError) as ei:
+        await wf._require_provider_card("codex", USER)
+    message, patch = describe_generation_failure(ei.value)
+    assert patch["failure"]["code"] == "provider_card_disabled"
+    assert message.startswith("[provider_card_disabled]") and message.isascii()
+    assert "provider_card_disabled" in wf.NON_RETRYABLE_FAILURE_CODES
+
+    monkeypatch.setattr(card, "card_enabled", AsyncMock(return_value=True))
+    await wf._require_provider_card("codex", USER)  # no raise
+    await wf._require_provider_card("dreamina", USER)  # not gated by this card
