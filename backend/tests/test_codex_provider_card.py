@@ -148,13 +148,35 @@ async def test_orchestrator_model_prefers_selected_then_first_enabled(monkeypatc
             return_value=_settings(
                 {
                     "enabled": True,
-                    "enabled_models": ["codex:gpt-5.5"],
+                    "enabled_models": ["codex:gpt-5.5", "codex:gpt-6-astra"],
                     "selected_model": "codex:gpt-6-astra",
                 }
             )
         ),
     )
     assert await card.codex_orchestrator_model(USER) == "gpt-6-astra"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_ignores_a_selected_model_that_is_not_enabled(monkeypatch):
+    """Test Connection pre-seeds ``selected_model`` with the catalog's first
+    entry before any chip exists, and addEnabledModel never overwrites a
+    present value — so a user who enables ONLY gpt-5.5 would still draw with
+    gpt-6-astra. The chips are what the user sees; they win."""
+    monkeypatch.setattr(
+        card,
+        "_load_ai_settings",
+        AsyncMock(
+            return_value=_settings(
+                {
+                    "enabled": True,
+                    "enabled_models": ["codex:gpt-5.5"],
+                    "selected_model": "codex:gpt-6-astra",
+                }
+            )
+        ),
+    )
+    assert await card.codex_orchestrator_model(USER) == "gpt-5.5"
 
 
 @pytest.mark.asyncio

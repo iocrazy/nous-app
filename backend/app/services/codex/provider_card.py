@@ -79,13 +79,22 @@ async def codex_orchestrator_model(user_id: str) -> Optional[str]:
     cfg = ((settings or {}).get("ai_providers") or {}).get(PROVIDER_KEY) or {}
     if not isinstance(cfg, dict) or not cfg.get("enabled"):
         return None
+    enabled_raw = cfg.get("enabled_models")
+    enabled = (
+        [m for m in enabled_raw if isinstance(m, str)]
+        if isinstance(enabled_raw, list)
+        else []
+    )
+    # ``selected_model`` counts only when it is one of the chips. The card
+    # pre-seeds it with the catalog's first entry on Test Connection (before
+    # any chip exists) and never overwrites a present value, so on its own it
+    # can name a model the user never enabled. The chips are what the user
+    # sees; they win.
     candidates: list[str] = []
     selected = cfg.get("selected_model")
-    if isinstance(selected, str) and selected.strip():
+    if isinstance(selected, str) and selected.strip() and selected in enabled:
         candidates.append(selected)
-    enabled = cfg.get("enabled_models")
-    if isinstance(enabled, list):
-        candidates.extend(m for m in enabled if isinstance(m, str))
+    candidates.extend(enabled)
     for raw in candidates:
         bare = strip_model_prefix(raw)
         if is_valid_model_name(bare):
