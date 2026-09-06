@@ -230,6 +230,27 @@ class ParsedMedia(Base):
     )
 
 
+# The values ``resources.source_type`` may hold. ONE source of truth for the
+# ORM CHECK below and for every router allowlist that validates the column
+# (``resources_crud_router``, ``resources_search_router``). The DB side is
+# migration 363 (309 added ``generated``, 363 added ``derived``); the mirror
+# test ``tests/test_resources_source_type_mirror.py`` reads that migration and
+# refuses a drift in either direction — the model declared ``('web','upload')``
+# for a year after the DB had four values, and nothing noticed until a filter
+# started depending on the wider set.
+RESOURCE_SOURCE_TYPES: tuple[str, ...] = ("web", "upload", "generated", "derived")
+
+
+def _resource_source_type_check_sql() -> str:
+    """Render the CHECK the way ``pg_get_constraintdef`` prints it, so a
+    model-vs-live comparison sees the same shape it would for any other
+    varchar enum constraint in this file."""
+    members = ", ".join(
+        f"'{v}'::character varying::text" for v in RESOURCE_SOURCE_TYPES
+    )
+    return f"source_type::text = ANY (ARRAY[{members}])"
+
+
 class Resources(Base, UserScoped):
     """Resource-library rows, owned per-user via ``creator_id`` (a UUID — the
     Supabase auth ``sub``).
@@ -251,8 +272,7 @@ class Resources(Base, UserScoped):
             name="resources_prompt_origin_check",
         ),
         CheckConstraint(
-            "source_type::text = ANY (ARRAY['web'::character varying::text,"
-            " 'upload'::character varying::text])",
+            _resource_source_type_check_sql(),
             name="resources_source_type_check",
         ),
         ForeignKeyConstraint(

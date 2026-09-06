@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
+from app.models.media import RESOURCE_SOURCE_TYPES
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.ai._mime_kind import kind_from_mime
 from app.services.ai.resource_ai_status import effective_ai_statuses
@@ -90,7 +91,7 @@ async def search_resources(
         sources_list = [
             src.strip()
             for src in sources.split(",")
-            if src.strip() in {"upload", "web", "generated", "derived"}
+            if src.strip() in RESOURCE_SOURCE_TYPES
         ]
 
     # Treat empty-string team_id (e.g. `?team_id=`) as absent → global search.

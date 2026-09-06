@@ -28,6 +28,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_scope_access
 from app.db.scope import Scope, request_scope, system_request_scope
+from app.models.media import RESOURCE_SOURCE_TYPES
 from app.repositories.resources_repository import (
     UNTRANSCODED_BATCH,
     ResourcesRepository,
@@ -63,7 +64,8 @@ _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 # resources.source_type CHECK enum (see promote_generated_media_service):
 # web = platform parse/download, upload = user upload,
 # generated = AI/canvas promote artifact, derived = derived from another.
-_ALLOWED_SOURCE_TYPES = {"web", "upload", "generated", "derived"}
+# The set itself lives on the model beside the CHECK it mirrors.
+_ALLOWED_SOURCE_TYPES = frozenset(RESOURCE_SOURCE_TYPES)
 
 
 @router.get("")
