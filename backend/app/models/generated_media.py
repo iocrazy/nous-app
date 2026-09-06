@@ -57,6 +57,16 @@ class GeneratedMedia(Base):
             "source_asset_id",
             postgresql_where=text("source_asset_id IS NOT NULL"),
         ),
+        # mig 456: one inbox row per promoted resource. Partial so the many
+        # never-promoted rows (promoted_resource_id IS NULL) do not collide
+        # with each other. Subsumes the plain idx_genmedia_promoted (mig 307),
+        # which that migration drops.
+        Index(
+            "uq_genmedia_promoted_resource",
+            "promoted_resource_id",
+            unique=True,
+            postgresql_where=text("promoted_resource_id IS NOT NULL"),
+        ),
         {"schema": "public"},
     )
 
