@@ -48,6 +48,27 @@ async def client() -> AsyncClient:
         yield ac
 
 
+@pytest_asyncio.fixture
+async def public_client() -> AsyncClient:
+    """A client with NO auth override — for the routes that must answer a bare
+    ``<img>`` / ``<video>`` / ``<audio>`` carrying no Bearer header.
+
+    These tests used to pop ``app.dependency_overrides[get_auth]`` inline and
+    never put it back. Nothing has caught fire because the autouse
+    ``_override_auth`` teardown pops it again anyway, but that means each test
+    was relying on another fixture to undo its own mutation of a global. The
+    restore here is unconditional and belongs to whoever did the popping.
+    """
+    saved = app.dependency_overrides.pop(get_auth, None)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        if saved is not None:
+            app.dependency_overrides[get_auth] = saved
+
+
 @pytest.mark.asyncio
 async def test_list_uses_caller_personal_scope(monkeypatch, client):
     """list_generations must resolve the caller's personal team scope_id and
@@ -293,11 +314,11 @@ async def test_cover_404_when_file_missing_on_disk(monkeypatch, tmp_path, client
 
 
 @pytest.mark.asyncio
-async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
+async def test_cover_happy_path_no_auth(monkeypatch, tmp_path, public_client):
     """GET /{id}/cover returns 200 + file bytes with NO auth header required.
 
-    This test deliberately does NOT install the auth override fixture and
-    does NOT pass any Authorization header — verifying the endpoint is public.
+    ``public_client`` deliberately removes the auth override, and no
+    Authorization header is sent — verifying the endpoint is public.
     """
     file_name = "thumb.jpg"
     file_content = b"\xff\xd8\xff\xe0JFIF cover bytes"
@@ -313,14 +334,11 @@ async def test_cover_happy_path_no_auth(monkeypatch, tmp_path):
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
 
-    # Build a fresh client WITHOUT the auth override (cover must be public).
-    app.dependency_overrides.pop(get_auth, None)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-        monkeypatch.setattr(serving, "settings", fake_settings)
+    # `public_client` has no auth override — cover must be public.
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
-        resp = await ac.get("/api/v1/generated-media/30/cover")
+    resp = await public_client.get("/api/v1/generated-media/30/cover")
 
     assert resp.status_code == 200, resp.text
     assert resp.content == file_content
@@ -360,7 +378,7 @@ async def test_cover_404_for_non_image_media_kind(monkeypatch, tmp_path, client)
 
 
 # ---------------------------------------------------------------------------
-# /stream endpoint tests (no-auth public VIDEO serving — <video src>)
+# /stream endpoint tests (no-auth public TIMED-MEDIA serving — <video>/<audio>)
 # ---------------------------------------------------------------------------
 
 
@@ -378,10 +396,12 @@ async def test_stream_404_when_row_missing(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_stream_404_for_non_video_media_kind(monkeypatch, tmp_path, client):
-    """GET /{id}/stream returns 404 when media_kind != 'video' (e.g. 'image').
+async def test_stream_404_for_non_timed_media_kind(monkeypatch, tmp_path, client):
+    """GET /{id}/stream returns 404 for a kind that isn't video or audio.
 
-    Images are served by /cover; /stream is video-only.
+    Images are served by /cover. Widening /stream to audio must not widen it
+    to everything — this is the half of the pair that keeps the audio test
+    below meaning something.
     """
     file_name = "pic.jpg"
     (tmp_path / file_name).write_bytes(b"fake jpeg bytes")
@@ -400,11 +420,11 @@ async def test_stream_404_for_non_video_media_kind(monkeypatch, tmp_path, client
 
     resp = await client.get("/api/v1/generated-media/77/stream")
     assert resp.status_code == 404
-    assert resp.json()["error"] == "no video"
+    assert resp.json()["error"] == "not streamable"
 
 
 @pytest.mark.asyncio
-async def test_stream_happy_path_no_auth(monkeypatch, tmp_path):
+async def test_stream_happy_path_no_auth(monkeypatch, tmp_path, public_client):
     """GET /{id}/stream returns 200 + video bytes with NO auth header required.
 
     Mirrors /cover's public posture — a bare <video src> can't carry a Bearer
@@ -424,17 +444,49 @@ async def test_stream_happy_path_no_auth(monkeypatch, tmp_path):
 
     fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
 
-    app.dependency_overrides.pop(get_auth, None)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
-        monkeypatch.setattr(serving, "settings", fake_settings)
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(serving, "settings", fake_settings)
 
-        resp = await ac.get("/api/v1/generated-media/30/stream")
+    resp = await public_client.get("/api/v1/generated-media/30/stream")
 
     assert resp.status_code == 200, resp.text
     assert resp.content == file_content
     assert "video/mp4" in resp.headers.get("content-type", "")
+    assert "public" in resp.headers.get("cache-control", "")
+
+
+@pytest.mark.asyncio
+async def test_stream_serves_audio_rows(monkeypatch, tmp_path, public_client):
+    """GET /{id}/stream serves an audio row, with the row's own mime.
+
+    The inbox lightbox paints audio with a bare <audio src>, which can carry
+    no Bearer header — exactly the constraint that made /stream public for
+    video. There were no audio rows in production when this shipped, so this
+    test is the only thing exercising the branch.
+    """
+    file_name = "voice.mp3"
+    file_content = b"ID3\x03\x00\x00\x00 fake mp3 bytes"
+    (tmp_path / file_name).write_bytes(file_content)
+
+    async def _fake_get_by_id(self, gen_id: int):
+        return {
+            "id": gen_id,
+            "file_path": file_name,
+            "mime": "audio/mpeg",
+            "media_kind": "audio",
+        }
+
+    fake_settings = types.SimpleNamespace(DOWNLOAD_PATH=str(tmp_path))
+
+    monkeypatch.setattr(r.GeneratedMediaRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(serving, "settings", fake_settings)
+
+    resp = await public_client.get("/api/v1/generated-media/31/stream")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.content == file_content
+    # The row's own mime, not a hardcoded video/* — /stream never guessed.
+    assert "audio/mpeg" in resp.headers.get("content-type", "")
     assert "public" in resp.headers.get("cache-control", "")
 
 

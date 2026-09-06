@@ -200,9 +200,12 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             />
           ) : placeholder ? (
             // No player: pressing the tile opens the lightbox, which is where
-            // an audio player belongs when one arrives. The badge is the mime
-            // subtype — the wire carries no filename and no duration, and the
-            // title line under the tile is the row's name.
+            // the audio player lives. Deliberate — this placeholder sits
+            // inside the tile's own <button>, and a player in there would nest
+            // interactive elements (its transport controls would fight the
+            // zoom gesture). The badge is the mime subtype — the wire carries
+            // no filename and no duration, and the title line under the tile
+            // is the row's name.
             <span
               data-testid="generated-card-placeholder"
               data-media-kind={item.media_kind}

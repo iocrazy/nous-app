@@ -22,6 +22,7 @@ import {
   trashResources,
 } from '../services/resourceService';
 import type { SmartFolderRules } from '../services/resourceService';
+import { partitionMovableFolders, describeFolderMutationFailure } from './moveBatch';
 import { useFileKeyboard } from './useFileKeyboard';
 import type { Folder, ResourceItem, SmartCollection } from '../types';
 
@@ -131,20 +132,48 @@ export function useResourceOperations({
       setRenamingFolderId(null);
       return;
     }
+    // `renameFolder` writes `folders` through PostgREST directly, so like the
+    // move path it never met the mig 441 API guard — and since mig 457 the DB
+    // trigger refuses it. Pre-refuse what we can see, and echo whatever the
+    // server refuses; a rename that silently does nothing is the defect this
+    // ticket exists to remove.
+    const target = childFolders.find((f) => f.id === renamingFolderId);
+    if (target?.is_system) {
+      addToast(t('resources.systemFolderLocked'), 'error');
+      setRenamingFolderId(null);
+      return;
+    }
     try {
       await renameFolder(renamingFolderId, renameFolderValue.trim());
       await Promise.all([loadFolders(), loadChildFolders()]);
       addToast(t('resources.renamedNotification', { name: renameFolderValue.trim() }), 'success');
-    } catch { /* ignore */ }
+    } catch (err) {
+      // The pre-refuse above only sees `childFolders`; a folder renamed from
+      // somewhere else still reaches the server, so this arm is not dead code.
+      if (describeFolderMutationFailure(err) === 'system_folder') {
+        addToast(t('resources.systemFolderLocked'), 'error');
+      } else {
+        addToast(t('resources.renameFailed', 'Rename Failed'), 'error');
+        console.error('[useResourceOperations] rename failed:', err);
+      }
+    }
     setRenamingFolderId(null);
-  }, [renamingFolderId, renameFolderValue, loadFolders, loadChildFolders, addToast, t]);
+  }, [renamingFolderId, renameFolderValue, childFolders, loadFolders, loadChildFolders, addToast, t]);
 
   // ─── Folder picker confirm ─────────────────────────
 
   const handleFolderPickerConfirm = useCallback(async (targetFolderId: string | null, targetLibraryId?: string | null) => {
-    try {
-      if (folderPickerMode === 'move') {
-        for (const folder of operationTargetFolders) {
+    if (folderPickerMode === 'move') {
+      // The context menu hides Move on a system folder, but that menu only
+      // ever sees the one right-clicked folder — a multi-select batch walks
+      // straight past it. Refuse the locked ones here, out loud, BEFORE
+      // anything moves, so a partial batch is never a surprise.
+      const { movable, locked } = partitionMovableFolders(operationTargetFolders);
+      if (locked.length > 0) {
+        addToast(t('resources.systemFolderLocked'), 'error');
+      }
+      try {
+        for (const folder of movable) {
           await moveFolder(folder.id, targetFolderId, targetLibraryId);
         }
         if (operationTargetItems.length === 1) {
@@ -152,19 +181,38 @@ export function useResourceOperations({
         } else if (operationTargetItems.length > 1) {
           await moveResourceItems(operationTargetItems.map((i) => i.id), targetFolderId, targetLibraryId);
         }
+        const totalMoved = movable.length + operationTargetItems.length;
+        // Zero happens when the whole selection was locked: the error toast
+        // above already said so, and "Moved 0 files" would contradict it.
+        if (totalMoved > 0) {
+          addToast(t('resources.moveSuccess', { count: totalMoved }), 'success');
+        }
+      } catch (err) {
+        if (describeFolderMutationFailure(err) === 'system_folder') {
+          addToast(t('resources.systemFolderLocked'), 'error');
+        } else {
+          addToast(t('resources.moveFailed', 'Move failed — nothing was changed for the remaining items'), 'error');
+          console.error('[useResourceOperations] move failed:', err);
+        }
+      } finally {
+        // In `finally` because a batch can fail halfway: the folders that did
+        // move must still show up in their new home.
         await Promise.all([loadFolders(), loadChildFolders()]);
         await reloadResources();
-        const totalMoved = operationTargetItems.length + operationTargetFolders.length;
-        addToast(t('resources.moveSuccess', { count: totalMoved }), 'success');
-      } else if (folderPickerMode === 'copy') {
+      }
+    } else if (folderPickerMode === 'copy') {
+      try {
         for (const item of operationTargetItems) {
           if (item.resource?.id) {
             await copyResourceItem(String(item.resource.id), scopeId, targetFolderId, targetLibraryId);
           }
         }
         addToast(t('resources.copySuccess', { count: operationTargetItems.length }), 'success');
+      } catch (err) {
+        addToast(t('resources.copyFailed', 'Copy failed'), 'error');
+        console.error('[useResourceOperations] copy failed:', err);
       }
-    } catch { /* ignore */ }
+    }
     setFolderPickerMode(null);
     setOperationTargetItems([]);
     setOperationTargetFolders([]);

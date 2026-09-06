@@ -584,9 +584,9 @@ class GeneratedMediaRepository:
 
         Idempotent by ``promoted_resource_id``: a resource that already has an
         inbox row gets that row back instead of a duplicate. The check is a
-        SELECT, not a DB constraint — ``promoted_resource_id`` has no unique
-        index (``idx_genmedia_promoted`` is a plain index) — so two concurrent
-        callers for the same resource can still both insert.
+        SELECT, and a SELECT alone cannot stop two concurrent callers for the
+        same resource from each finding nothing and both inserting — under
+        READ COMMITTED neither sees the other's uncommitted row.
 
         ⚠️ **Whether that is acceptable is a property of the CALLER, not of
         this method.** Three writers today, and they do not share a risk
@@ -607,10 +607,13 @@ class GeneratedMediaRepository:
           calling this method; the loser blocks until the winner commits and
           then finds the winner's row here.
 
-        A partial unique index on ``promoted_resource_id`` would be the real
-        fix, but it cannot be added blind: legacy promotes may already have
-        left duplicates in production, which would make ``CREATE INDEX`` fail
-        under CI auto-apply. Tracked as a follow-up, not done here.
+        Since migration 456 the database also carries a partial unique index,
+        ``uq_genmedia_promoted_resource``, so a duplicate row is now
+        impossible even if a future caller forgets the lock. The lock is kept
+        anyway, because the two guards do different jobs: the index turns a
+        lost race into an ``IntegrityError``, while the lock turns it into
+        "loser finds the winner's row" — and finding the row is the behaviour
+        the Save-as-Asset dialog wants from a double submit.
 
         ``params`` is the row's internal metadata (it never reaches the wire —
         ``GeneratedItem`` drops it). ``save_resource_as_asset`` uses it to carry
