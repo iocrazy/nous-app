@@ -92,3 +92,28 @@ class TestGenerationRowSource:
             is None
         )
         assert extracted_from_generation(None) is None
+
+
+class TestSystemScope:
+    """Resources mixes in UserScoped(creator_id). With SCOPE_ENFORCE_RESOURCES
+    on (production; never in unit tests) a scoped-mapper touch with no ambient
+    scope is fail-closed, so the SYSTEM boundary has to open before the first
+    statement — both the scan and the per-row write.
+    """
+
+    def _source(self) -> str:
+        from pathlib import Path
+
+        import app.workflows.backfill_resource_gen_params as mod
+
+        return Path(mod.__file__).read_text()
+
+    def test_scan_runs_under_system_request_scope(self):
+        source = self._source()
+        assert "system_request_scope(" in source
+        assert source.index("system_request_scope(") < source.index("select(")
+        assert source.index("system_request_scope(") < source.index("read_scope()")
+
+    def test_write_runs_under_system_request_scope(self):
+        source = self._source()
+        assert source.index("system_request_scope(") < source.index("write_scope()")
