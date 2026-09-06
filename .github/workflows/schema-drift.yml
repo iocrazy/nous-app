@@ -93,6 +93,13 @@ on:
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/repositories/canvas_asset_refs_repository.py'
+      # The prompt catalog's OTHER half (templates come from
+      # assets_repository above). Its membership rule IS has_prompt_expr,
+      # which lives in media_repository — a change to either can only be
+      # settled by running it, so both entries point at the same step.
+      - 'backend/app/repositories/prompt_catalog_repository.py'
+      - 'backend/app/repositories/media_repository.py'
+      - 'backend/tests/db/test_prompt_catalog_repository_integration.py'
       - 'backend/app/services/assets/**'
       # The canvas→asset mirror is written by CanvasService on save and rebuilt
       # by the backfill; both are exercised by the E2 case below, so a change to
@@ -105,6 +112,10 @@ on:
       # The full-skip guard every integration step below runs through. A change
       # to it changes what "green" means for all eight, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
+      # ⚠️ That count has been wrong twice (it said "eight" when there were
+      # seven, then "nine" when there were eight — each edit trusted the
+      # previous number instead of counting). Recount, do not increment:
+      #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
     branches: [master]
@@ -353,3 +364,21 @@ jobs:
           # index, which is what proves the migration and `chat_upload.py`
           # agree instead of each minting a row.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_chat_uploads_folder_migration.py -v
+
+      - name: Exercise the prompt-catalog repository against the built schema (mig 455)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place PromptCatalogRepository's ORM statements execute.
+          # Its other test compiles them and greps the SQL text, which cannot
+          # settle any of: what has_prompt_expr()'s btrim/JSONB clause tree
+          # actually admits (a whitespace-only prompt must be OUT, a
+          # slide_prompts map with no gen_prompt must be IN — that pair IS the
+          # catalog's membership rule), whether DISTINCT really collapses the
+          # resource_items fan-out (without it one prompt renders twice),
+          # whether slot='examples' really partitions a template's thumbnails
+          # from its cover and reference files, or whether the eleven projected
+          # columns — prompt_origin among them — all exist.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_prompt_catalog_repository_integration.py -v

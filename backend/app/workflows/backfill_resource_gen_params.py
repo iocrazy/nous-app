@@ -33,6 +33,7 @@ from dbos import DBOS
 from loguru import logger
 from sqlalchemy import or_, select, update
 
+from app.db.scope import system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Resources
 from app.models.generated_media import GeneratedMedia
@@ -140,77 +141,90 @@ async def backfill_resource_gen_params_workflow(
     }
 
     try:
-        async with read_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(
-                            Resources.id,
-                            Resources.file_path,
-                            Resources.mime_type,
-                            Resources.gen_prompt,
-                            Resources.gen_prompt_negative,
-                            Resources.gen_params,
-                            GeneratedMedia.model.label("gen_model"),
-                            GeneratedMedia.provider.label("gen_provider"),
-                            GeneratedMedia.params.label("gen_row_params"),
+        # Resources mixes in UserScoped(creator_id): under
+        # SCOPE_ENFORCE_RESOURCES a scoped table touched with no ambient
+        # scope is fail-closed (UnscopedQueryError). A backfill is
+        # deliberately cross-user, so SYSTEM is the correct treatment —
+        # same entry-point pattern as backfill_resource_prompt_origin.
+        async with system_request_scope(
+            reason=(
+                "backfill resource_gen_params: system-wide extraction of "
+                "generation params for rows that predate mig 440"
+            )
+        ):
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(
+                                Resources.id,
+                                Resources.file_path,
+                                Resources.mime_type,
+                                Resources.gen_prompt,
+                                Resources.gen_prompt_negative,
+                                Resources.gen_params,
+                                GeneratedMedia.model.label("gen_model"),
+                                GeneratedMedia.provider.label("gen_provider"),
+                                GeneratedMedia.params.label("gen_row_params"),
+                            )
+                            .outerjoin(
+                                GeneratedMedia,
+                                GeneratedMedia.promoted_resource_id == Resources.id,
+                            )
+                            .where(
+                                Resources.gen_params.is_(None),
+                                Resources.is_trashed.is_(False),
+                                Resources.file_path.is_not(None),
+                                or_(
+                                    Resources.mime_type == "image/png",
+                                    GeneratedMedia.id.is_not(None),
+                                ),
+                            )
+                            .order_by(Resources.id)
+                            .limit(limit)
                         )
-                        .outerjoin(
-                            GeneratedMedia,
-                            GeneratedMedia.promoted_resource_id == Resources.id,
-                        )
-                        .where(
-                            Resources.gen_params.is_(None),
-                            Resources.is_trashed.is_(False),
-                            Resources.file_path.is_not(None),
-                            or_(
-                                Resources.mime_type == "image/png",
-                                GeneratedMedia.id.is_not(None),
-                            ),
-                        )
-                        .order_by(Resources.id)
-                        .limit(limit)
                     )
+                    .mappings()
+                    .all()
                 )
-                .mappings()
-                .all()
-            )
-        for row in rows:
-            result["scanned"] += 1
-            gen_row = (
-                {
-                    "model": row["gen_model"],
-                    "provider": row["gen_provider"],
-                    "params": row["gen_row_params"],
-                }
-                if row["gen_model"] or row["gen_provider"] or row["gen_row_params"]
-                else None
-            )
-            extracted = extracted_from_generation(gen_row)
-            source = "from_generation"
-            if not extracted and row["mime_type"] == "image/png":
-                extracted = await _extract(row["file_path"])
-                source = "from_png"
-            if not extracted:
-                result["no_metadata"] += 1
-                continue
-            patch = build_patch(dict(row), extracted)
-            if not patch:
-                result["no_metadata"] += 1
-                continue
-            if dry_run:
-                result["would_fix"] += 1
-                continue
-            async with write_scope() as session:
-                await session.execute(
-                    update(Resources)
-                    .where(Resources.id == row["id"], Resources.gen_params.is_(None))
-                    .values(**patch)
+            for row in rows:
+                result["scanned"] += 1
+                gen_row = (
+                    {
+                        "model": row["gen_model"],
+                        "provider": row["gen_provider"],
+                        "params": row["gen_row_params"],
+                    }
+                    if row["gen_model"] or row["gen_provider"] or row["gen_row_params"]
+                    else None
                 )
-            result["fixed"] += 1
-            result[source] += 1
-            if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
-                result["fixed_ids"].append(str(row["id"]))
+                extracted = extracted_from_generation(gen_row)
+                source = "from_generation"
+                if not extracted and row["mime_type"] == "image/png":
+                    extracted = await _extract(row["file_path"])
+                    source = "from_png"
+                if not extracted:
+                    result["no_metadata"] += 1
+                    continue
+                patch = build_patch(dict(row), extracted)
+                if not patch:
+                    result["no_metadata"] += 1
+                    continue
+                if dry_run:
+                    result["would_fix"] += 1
+                    continue
+                async with write_scope() as session:
+                    await session.execute(
+                        update(Resources)
+                        .where(
+                            Resources.id == row["id"], Resources.gen_params.is_(None)
+                        )
+                        .values(**patch)
+                    )
+                result["fixed"] += 1
+                result[source] += 1
+                if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
+                    result["fixed_ids"].append(str(row["id"]))
     except Exception:
         try:
             await manager.patch_metadata(task_id, result)

@@ -9,13 +9,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3] / "app"
 
+#: Each value is the needle, or a TUPLE of needles that must ALL be present
+#: (same shape as EXEMPT_SHAPE below). A tuple is what a writer needs when
+#: computing the stamp and delivering it are separate statements: pinning only
+#: the computation leaves "stamp computed, then dropped on the floor" green.
 WRITERS = {
     "api/resources_crud_router.py": 'stamp_origin(update_data, "typed")',
     "workflows/upload_postprocess.py": 'stamp_origin(patch, "extracted")',
     "workflows/backfill_resource_gen_params.py": 'stamp_origin(patch, "extracted")',
     "services/library/promote_generated_media_service.py": '"prompt_origin": "extracted"',
     "workflows/caption_asset.py": 'stamp_origin(update, "captioned")',
-    "workflows/caption_slide.py": '{"prompt_origin": "captioned"}',
+    # The one writer whose stamp does NOT ride in a patch dict: slide text is
+    # merged by the repository, so this asks the helper what a slide_prompts
+    # write stamps and hands the repository that stamp alone. Both halves are
+    # pinned — the second needle is the DELIVERY, without which the workflow
+    # would compute an origin and never write it.
+    "workflows/caption_slide.py": (
+        'stamp_origin({"slide_prompts": entry}, "captioned")',
+        'extra={"prompt_origin": stamp["prompt_origin"]}',
+    ),
 }
 
 #: Writers of a PROMPT_TEXT_KEYS column that deliberately do NOT stamp, with
@@ -41,9 +53,12 @@ EXEMPT_SHAPE = {
 
 
 def test_every_prompt_writer_stamps_origin():
-    missing = [
-        rel for rel, needle in WRITERS.items() if needle not in (ROOT / rel).read_text()
-    ]
+    missing = []
+    for rel, needles in WRITERS.items():
+        if isinstance(needles, str):
+            needles = (needles,)
+        source = (ROOT / rel).read_text()
+        missing += [f"{rel}: {n}" for n in needles if n not in source]
     assert missing == [], f"writers without an origin stamp: {missing}"
 
 

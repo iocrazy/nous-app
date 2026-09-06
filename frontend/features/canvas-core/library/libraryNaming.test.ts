@@ -22,14 +22,11 @@ const ROOT = path.resolve(__dirname, '..');
 const ALLOWED = new Set([
   path.join(ROOT, 'library', 'LibraryPanel.tsx'),
   path.join(ROOT, 'ui', 'TopNodeBar.tsx'),
-  // ⌘K row naming the one Library the canvas has.
-  //
-  // Documents consent, and buys nothing today: a command's `title:` is a bare
-  // object property, which no pattern below reaches (USER_TEXT wants a JSX
-  // attribute or text position, the other two want a t() / tuple literal). It
-  // is here so the day a pattern DOES reach command titles, this row reads as
-  // an allowed name rather than a new offender.
-  path.join(ROOT, 'palette', 'commands.ts'),
+  // ⚠️ `palette/commands.ts` and `ui/canvasShortcuts.ts` were briefly listed
+  // here, when OBJECT_TEXT below was file-gated. They are not any more, and
+  // must not come back: both are ROW TABLES whose whole purpose is to grow, so
+  // a file entry would wave through the next Library named from them. Their
+  // two strings are allow-listed individually in ALLOWED_OBJECT_LABELS.
 ]);
 
 function tsFiles(dir: string): string[] {
@@ -100,6 +97,38 @@ const T_DEFAULT = /\bt\(\s*'[^']*'\s*,\s*'([^']*)'/g;
  *  thing is fixed, and this one has to survive the next chip map. */
 const LABEL_TUPLE = /\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g;
 
+/** The OBJECT-PROPERTY form — `title: 'Add from library…'` in a command row,
+ *  `label: 'Library panel'` in the shortcut table.
+ *
+ *  A FOURTH blind spot, and the widest one: USER_TEXT wants a JSX attribute
+ *  (`title=`) or a text position, so a label declared as a bare object
+ *  property is invisible to it, and the two patterns above want a `t()` call
+ *  or a two-string tuple. Anything rendered from a const table of rows —
+ *  the ⌘K palette, the shortcut help, any future menu — declares its user
+ *  text exactly this way.
+ *
+ *  Same key set the JSX pattern already trusts as user-facing (`title`,
+ *  `placeholder`, plus the `label` / `hint` these tables use), which is what
+ *  keeps it off identifiers and code: a property name alone is not enough,
+ *  the value has to be a quoted single-line string. Commented-out rows are
+ *  dropped by `isCommentedOut` below — NOT by COMMENT_OPENER, which cannot
+ *  help here: it tests whether the CAPTURED VALUE opens a comment, and in
+ *  `// title: 'Old library'` the marker sits before the property, so the
+ *  capture is the bare label and COMMENT_OPENER never fires. Verified by
+ *  mutation rather than assumed.
+ *
+ *  Matched library-free and filtered by HAS_LIBRARY, like LABEL_TUPLE, so the
+ *  canary below can count real matches instead of only the offender it
+ *  currently knows about.
+ *
+ *  ALLOW-LISTED BY EXACT STRING, never by file — see ALLOWED_OBJECT_LABELS.
+ *  The two files this pattern was written for are the ⌘K command table and the
+ *  shortcut table, i.e. lists that exist in order to gain rows; exempting
+ *  either wholesale is the failure mode ALLOWED_DEFAULTS' comment describes,
+ *  and it was verified as real (adding a second `library` title to
+ *  commands.ts left the suite green) before this gate was changed. */
+const OBJECT_TEXT = /(?:title|label|hint|placeholder)\s*:\s*['"]([^'"\n]*)['"]/g;
+
 const HAS_LIBRARY = /\blibrary\b/i;
 
 /** The exact English defaults that genuinely name THE media library — the
@@ -148,7 +177,46 @@ const ALLOWED_DEFAULTS = new Set([
   'Open Library',
 ]);
 
-/** All three patterns, over one file. */
+/** Is the match at `index` inside a comment?
+ *
+ *  Looks at what precedes it ON ITS OWN LINE: the line must START with `//`
+ *  or with `*` (a JSDoc/block continuation line). Leading only — a `//`
+ *  anywhere before the match would also swallow a real row whose earlier
+ *  property holds a URL (`href: 'https://…', label: 'Workflow library'`),
+ *  and a suppressed real label is the one failure this guard exists to
+ *  prevent. The marker is always to the left of the key, never inside the
+ *  quoted value, which is why COMMENT_OPENER (which tests the captured value)
+ *  cannot do this job.
+ *
+ *  Cheap and line-local rather than a parse: a false NEGATIVE here (a
+ *  multi-line block comment whose inner lines carry no `*`) only costs a
+ *  spurious offender someone then reads and fixes. */
+function isCommentedOut(src: string, index: number): boolean {
+  const lineStart = src.lastIndexOf('\n', index) + 1;
+  const before = src.slice(lineStart, index);
+  return /^\s*(\/\/|\*)/.test(before);
+}
+
+/** The exact row-table labels that genuinely name THE media library — the
+ *  object-property counterpart of ALLOWED_DEFAULTS, and allow-listed the same
+ *  way and for the same reason: by string, so a NEW offender landing in an
+ *  already-listed file is still caught.
+ *
+ *  Each entry names the one panel the canvas is allowed to call Library. A
+ *  label naming any OTHER library (a workflow store, a prompt-template store)
+ *  does not belong here; it belongs in the rename table. */
+const ALLOWED_OBJECT_LABELS = new Set([
+  // palette/commands.ts — the ⌘K row that opens THE panel.
+  'Add from library…',
+  // ui/TopNodeBar.tsx — the chip in the node bar, same panel.
+  'Library',
+  // ui/canvasShortcuts.ts — the `?` help row documenting the L shortcut for
+  // that same panel. Renaming it would make the shortcut help disagree with
+  // the button it documents.
+  'Library panel',
+]);
+
+/** All four patterns, over one file. */
 function scan(file: string): { offenders: string[]; defaults: string[] } {
   const src = fs.readFileSync(file, 'utf8');
   const rel = path.relative(ROOT, file);
@@ -160,6 +228,21 @@ function scan(file: string): { offenders: string[]; defaults: string[] } {
       const text = m[1].trim();
       if (COMMENT_OPENER.test(text)) continue;
       offenders.push(`${rel}: ${text}`);
+    }
+  }
+
+  // OUTSIDE the ALLOWED branch on purpose: string-gated like the two below,
+  // so a new Library named from a file that already names the right one is
+  // still an offender.
+  for (const m of src.matchAll(OBJECT_TEXT)) {
+    const text = m[1].trim();
+    if (isCommentedOut(src, m.index ?? 0)) continue;
+    if (!HAS_LIBRARY.test(text)) continue;
+    // Deliberately NOT pushed to `defaults`: that list feeds the t()-default
+    // canary, and padding it with object labels would keep that canary green
+    // even if T_DEFAULT stopped matching anything.
+    if (!ALLOWED_OBJECT_LABELS.has(text)) {
+      offenders.push(`${rel}: object label ${text}`);
     }
   }
 
@@ -192,6 +275,17 @@ describe('the word Library on the canvas', () => {
       ...fs.readFileSync(f, 'utf8').matchAll(LABEL_TUPLE),
     ]);
     expect(pairs.length).toBeGreaterThan(20);
+  });
+
+  it('the object-property pattern matches real code — the canary one level further down', () => {
+    // The ⌘K row this pattern was added for is the only library-bearing
+    // object label outside the shortcut table, so counting offenders would
+    // be a guard verified only by the thing it catches. Count every row
+    // label instead: a typo in OBJECT_TEXT drops all of them.
+    const labels = tsFiles(ROOT).flatMap((f) => [
+      ...fs.readFileSync(f, 'utf8').matchAll(OBJECT_TEXT),
+    ]);
+    expect(labels.length).toBeGreaterThan(40);
   });
 
   it('names exactly one thing: the panel and its chip', () => {

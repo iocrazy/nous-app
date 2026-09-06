@@ -46,6 +46,7 @@ from app.db.scope import Scope, request_scope
 # Module-level like caption_asset's own import of materialize — the two
 # workflows share the adapter, so they should also share how they reach it.
 from app.services.library.media_storage import materialize, resolve_media_source
+from app.services.prompts.origin import stamp_origin
 from app.workflows.caption_asset import call_caption, resolve_caption_provider
 
 
@@ -137,10 +138,23 @@ async def caption_slide_workflow(
             # Only the positive sides are written. The caption contract has no
             # negative-prompt field, so any neg_en/neg_zh the user typed by
             # hand survives (merge_slide_prompt merges INTO the existing entry).
-            await repo.merge_slide_prompt(resource_id, slide_name, entry)
             # mig 455: the row-level origin follows the last writer of any
-            # slide's text (spec §8 — per-slide origin is deferred).
-            await repo.update_resource(resource_id, {"prompt_origin": "captioned"})
+            # slide's text (spec §8 — per-slide origin is deferred). It rides
+            # in the SAME flush as the text: as a second PATCH, a failure
+            # between the two left the new text labelled with the previous
+            # writer's origin and nothing said so.
+            #
+            # stamp_origin keys off the text column present in the patch, and
+            # the slide text here is merged by the repository — so ask the
+            # helper what a slide_prompts write stamps, and hand the
+            # repository that stamp alone.
+            stamp = stamp_origin({"slide_prompts": entry}, "captioned")
+            await repo.merge_slide_prompt(
+                resource_id,
+                slide_name,
+                entry,
+                extra={"prompt_origin": stamp["prompt_origin"]},
+            )
 
         await manager.update_progress(wf_id, 100, subtitle="Slide prompt generated")
         logger.info(
