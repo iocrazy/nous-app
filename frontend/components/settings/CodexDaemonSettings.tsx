@@ -17,15 +17,11 @@ import {
   codexDaemonService,
   isDeviceOnline,
   type CodexDevice,
-  type CodexPreferences,
 } from '../../services/codexDaemonService';
 import { deviceEnvReport, EnvReportLine } from './LocalCliSettings';
 
 const BTN_PRIMARY =
   'flex items-center gap-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-50';
-/** <select> value that opens the free-text input; never sent to the server. */
-const CUSTOM_MODEL = '__custom__';
-
 const BTN_SECONDARY =
   'flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-content';
 
@@ -42,43 +38,6 @@ export function CodexDaemonSettings() {
     auth_ok: boolean;
   } | null>(null);
   const [detecting, setDetecting] = useState(false);
-  const [prefs, setPrefs] = useState<CodexPreferences | null>(null);
-  const [customModel, setCustomModel] = useState(false);
-  const [customDraft, setCustomDraft] = useState('');
-  const [modelSaved, setModelSaved] = useState(false);
-
-  const loadPrefs = useCallback(async () => {
-    try {
-      setPrefs(await codexDaemonService.getPreferences());
-    } catch (err) {
-      console.error('[codex-daemon] preferences load failed:', err);
-      setError(t('settings.localCli.errPreferences'));
-    }
-  }, [t]);
-
-  const saveModel = async (value: string | null) => {
-    try {
-      const next = await codexDaemonService.savePreferences({ codex_model: value });
-      setPrefs(next);
-      setCustomModel(false);
-      setCustomDraft('');
-      setModelSaved(true);
-      window.setTimeout(() => setModelSaved(false), 2000);
-    } catch (err) {
-      console.error('[codex-daemon] preferences save failed:', err);
-      setError(t('settings.localCli.errPreferences'));
-    }
-  };
-
-  const onModelChange = (value: string) => {
-    if (value === CUSTOM_MODEL) {
-      setCustomModel(true);
-      setCustomDraft('');
-      return;
-    }
-    void saveModel(value === '' ? null : value);
-  };
-
   const detectCli = useCallback(async () => {
     setDetecting(true);
     try {
@@ -106,10 +65,6 @@ export function CodexDaemonSettings() {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    void loadPrefs();
-  }, [loadPrefs]);
 
   useEffect(() => {
     void refresh();
@@ -239,48 +194,12 @@ export function CodexDaemonSettings() {
         </div>
       )}
 
-      {prefs && (
-        <div
-          data-testid="codex-model-row"
-          className="rounded-xl border border-line px-3 py-2 text-xs text-content-2"
-        >
-          <label className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-content">{t('settings.localCli.model')}</span>
-            <select
-              data-testid="codex-model-select"
-              className="rounded-lg border border-line bg-surface px-2 py-1 text-xs text-content"
-              value={customModel ? CUSTOM_MODEL : (prefs.codex_model ?? '')}
-              onChange={(e) => onModelChange(e.target.value)}
-            >
-              <option value="">{t('settings.localCli.modelDefault')}</option>
-              {[...prefs.options, ...(prefs.codex_model && !prefs.options.includes(prefs.codex_model) ? [prefs.codex_model] : [])].map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-              <option value={CUSTOM_MODEL}>{t('settings.localCli.modelCustom')}</option>
-            </select>
-            {customModel && (
-              <input
-                data-testid="codex-model-custom"
-                autoFocus
-                className="rounded-lg border border-line bg-surface px-2 py-1 font-mono text-xs text-content"
-                placeholder={t('settings.localCli.modelCustomPlaceholder')}
-                value={customDraft}
-                onChange={(e) => setCustomDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && customDraft.trim()) void saveModel(customDraft.trim());
-                  if (e.key === 'Escape') setCustomModel(false);
-                }}
-              />
-            )}
-            {modelSaved && (
-              <span className="text-[10px] font-semibold text-ok">{t('settings.localCli.modelSaved')}</span>
-            )}
-          </label>
-          <div className="mt-1 text-[10px] text-content-3">{t('settings.localCli.modelHint')}</div>
-        </div>
-      )}
+      {/* The model is chosen on the PROVIDER card (Settings → AI → Providers →
+          Codex), together with its enabled-model chips — one knob, one place.
+          This card only points there. */}
+      <div data-testid="codex-model-hint" className="text-[10px] text-content-3">
+        {t('settings.localCli.modelHint')}
+      </div>
 
       {helpOpen && (
         <div className="rounded-xl border border-line p-3 text-xs text-content-3">

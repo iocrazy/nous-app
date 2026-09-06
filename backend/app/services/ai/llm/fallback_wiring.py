@@ -188,7 +188,9 @@ async def build_fallback_llm(
         if pre_resolved is not None:
             return pre_resolved
         if not _is_flat_config:
-            return _get_adapter_for_user(model, user_provider_config, None)
+            return _get_adapter_for_user(
+                model, user_provider_config, None, user_id=user_id
+            )
 
         # Batch style (summarize/visual-analyze): resolve THIS attempt's
         # provider key (explicit if the service was given one, else derived
@@ -212,7 +214,7 @@ async def build_fallback_llm(
             }
         }
         try:
-            return _get_adapter_for_user(model, scoped, None)
+            return _get_adapter_for_user(model, scoped, None, user_id=user_id)
         except ValueError:
             return _flat_degrade(model)
 

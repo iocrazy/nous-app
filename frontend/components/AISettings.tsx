@@ -30,6 +30,7 @@ import {
   ExternalLink,
   Lock,
   AlertTriangle,
+  Terminal,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent, AIGovernanceFlags } from '../types';
 import {
@@ -70,6 +71,9 @@ const PROVIDER_META: Record<
     color: string;
     badge?: string;
     isLocal?: boolean;
+    // No credential of its own (the paired daemon is the credential): hides
+    // the API-key field and keeps Test Connection reachable without one.
+    noApiKey?: boolean;
     defaultBaseUrl?: string;
     models: string[];
     whisperModels?: string[];
@@ -93,6 +97,20 @@ const PROVIDER_META: Record<
     whisperModels: ['whisper-1'],
     summaryModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     analysisModels: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  },
+  // Codex on the user's OWN machine (paired daemon + ChatGPT login). Model ids
+  // carry a ``codex:`` prefix so routing does not confuse them with the OpenAI
+  // card's ``gpt-*`` (backend services/codex/provider_card.py). Test
+  // Connection asks the daemon; success fills this catalog.
+  'codex-local': {
+    name: 'Codex (Local CLI)',
+    description: 'aiSettings.providerDesc.codexLocal',
+    icon: <Terminal size={18} />,
+    color: 'emerald',
+    badge: 'aiSettings.badge.localCli',
+    noApiKey: true,
+    website: 'https://chatgpt.com/codex',
+    models: ['codex:gpt-6-astra', 'codex:gpt-5.6-sol', 'codex:gpt-5.5'],
   },
   deepseek: {
     name: 'DeepSeek',
@@ -312,6 +330,7 @@ const EnabledModelsField: React.FC<{
   const { t } = useTranslation();
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState('');
+  const typed = filter.trim();
 
   const remaining = useMemo(
     () =>
@@ -388,7 +407,22 @@ const EnabledModelsField: React.FC<{
               <X size={14} />
             </button>
           </div>
-          {catalog.length === 0 ? (
+          {/* A name the catalog does not list (providers rename models faster
+              than any list keeps up) can still be enabled by typing it. */}
+          {typed && !enabledModels.includes(typed) && !catalog.includes(typed) && (
+            <button
+              type="button"
+              data-testid="add-custom-model"
+              onClick={() => {
+                onAdd(typed);
+                setFilter('');
+              }}
+              className="mb-1 w-full text-left rounded px-2 py-1 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors"
+            >
+              {t('aiSettings.addTyped', { model: typed })}
+            </button>
+          )}
+          {catalog.length === 0 && !typed ? (
             <div className="text-xs text-ink-500 px-1 py-2">
               {t('aiSettings.catalogEmpty')}
             </div>
@@ -1465,6 +1499,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             return (
               <div
                 key={providerKey}
+                data-testid={`provider-card-${providerKey}`}
                 className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
                   config.enabled ? colors.border : 'border-ink-800'
                 }`}
@@ -1517,7 +1552,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                 {config.enabled && (
                   <div className="px-6 pb-5 pt-2 border-t border-ink-800/50 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                     {/* API Key (for cloud providers) */}
-                    {!isLocal && (
+                    {!isLocal && !meta.noApiKey && (
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
@@ -1615,9 +1650,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                         request means "use what the server already holds",
                         so a saved provider is always testable — the old
                         re-type-to-test dead-end is gone. */}
-                    {(isLocal || config.api_key || config.api_key_set) && (
+                    {(isLocal || meta.noApiKey || config.api_key || config.api_key_set) && (
                       <div className="pt-1">
                         <button
+                          data-testid={`test-connection-${providerKey}`}
                           onClick={() => testConnection(providerKey)}
                           disabled={connStatus === 'testing'}
                           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 border disabled:opacity-50 disabled:cursor-not-allowed ${

@@ -32,6 +32,7 @@ from app.services.ai.provider_health import (
     validate_provider_key,
 )
 from app.services.ai.providers.ai_provider import AIProviderFactory
+from app.services.codex import provider_card as codex_card
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
@@ -321,15 +322,21 @@ async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
             app_id = app_id or stored.get("app_id")
             base_url = base_url or stored.get("base_url")
 
-    result = await AIProviderFactory.test_connection(
-        provider_key=body.provider_key,
-        config={
-            "api_key": api_key,
-            "app_id": app_id,
-            "base_url": base_url,
-            "model": body.model,
-        },
-    )
+    if body.provider_key == codex_card.PROVIDER_KEY:
+        # No credential to test: the user's paired daemon IS the credential.
+        # Asks presence + env_report instead of dialing a URL; same result
+        # shape, so persistence and the card need no special case.
+        result = await codex_card.test_codex_local_connection(str(auth.user_id))
+    else:
+        result = await AIProviderFactory.test_connection(
+            provider_key=body.provider_key,
+            config={
+                "api_key": api_key,
+                "app_id": app_id,
+                "base_url": base_url,
+                "model": body.model,
+            },
+        )
 
     # Best-effort: persist the probe outcome so the Settings UI can show
     # "Last tested ..." after a reload (mirrors the admin mediahub_models probe

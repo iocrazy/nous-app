@@ -73,9 +73,13 @@ class CodexLocalProtocol(ProviderProtocol):
     ) -> Any:
         from app.services.ai.adapters.codex_daemon import CodexDaemonAdapter
         from app.services.ai.provider_protocols.base import ProviderNotConfiguredError
+        from app.services.codex.provider_card import strip_model_prefix
 
         user_id = str(context.get("user_id") or "").strip()
         if not user_id:
             # Routing is per-user; without a user there is no daemon to dial.
             raise ProviderNotConfiguredError("codex-local", model)
-        return CodexDaemonAdapter(user_id=user_id, model=model or "")
+        # The provider card's ids carry a ``codex:`` prefix so routing does
+        # not confuse them with the OpenAI card's ``gpt-*``; this is the one
+        # place it comes off before the name becomes ``codex exec --model``.
+        return CodexDaemonAdapter(user_id=user_id, model=strip_model_prefix(model))

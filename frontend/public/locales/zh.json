@@ -1037,13 +1037,7 @@
       "memory": "记忆"
     },
     "localCli": {
-      "model": "Codex 模型",
-      "modelHint": "gpt-image-2-skill 用来编排出图的模型（--model）。不选则用目录默认；OpenAI 对 ChatGPT 账号停止支持的模型会直接 HTTP 400。",
-      "modelDefault": "目录默认",
-      "modelCustom": "自定义…",
-      "modelCustomPlaceholder": "例如 gpt-6-astra",
-      "modelSaved": "已保存",
-      "errPreferences": "无法读取或保存 Codex 模型设置。",
+      "modelHint": "用哪个 Codex 模型在服务商卡上设置：设置 → AI → 服务商 → Codex (Local CLI)。那里启用的模型就是 agent 和出图使用的。",
       "codexTitle": "GPT CLI (codex)",
       "codexDesc": "在你自己的电脑上用自己的 codex 登录态跑画布生成。凭证不出本机——nous 只负责派任务。也可作为 agent 模型（Codex (Local)）使用——仅纯文本。文本任务运行在 codex 的只读沙箱中——不能写文件，但可以读取你电脑上的文件。请勿把不可信文本喂给绑定了 Codex (Local) 的 agent。",
       "notPaired": "未配对",
@@ -4005,11 +3999,13 @@
       "modelscope": "ModelScope（魔搭）—— 社区推理，含免费额度",
       "volcengine": "字节 —— 火山引擎语音识别",
       "ollama": "本地模型，免费且私密",
-      "lmstudio": "通过 LM Studio 运行本地模型"
+      "lmstudio": "通过 LM Studio 运行本地模型",
+      "codexLocal": "你自己机器上的 Codex CLI —— 用你的 ChatGPT 登录，文本与出图"
     },
     "badge": {
       "recommended": "推荐",
-      "freeTier": "免费额度"
+      "freeTier": "免费额度",
+      "localCli": "本地 CLI"
     },
     "lang": {
       "auto": "自动检测",
@@ -4100,7 +4096,8 @@
     "nousDesc": "平台提供的模型，无需 API Key —— 可直接选作 agent 的模型或转写选项。",
     "noPlatformModels": "暂无可用的平台模型。",
     "settingsSaved": "设置已保存！",
-    "saveSettings": "保存设置"
+    "saveSettings": "保存设置",
+    "addTyped": "添加「{{model}}」"
   },
   "aiLibrary": {
     "title": "AI 库",
