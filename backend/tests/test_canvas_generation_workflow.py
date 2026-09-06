@@ -22,7 +22,6 @@ from app.workflows.canvas_generation import (
     persist_canvas_generation_step,
 )
 
-
 # A provider that honours every knob. These tests were written before
 # capabilities existed, so their SimpleNamespace provider resolves to
 # ProviderCapabilities.none() and every knob they pass gets reconciled away.
