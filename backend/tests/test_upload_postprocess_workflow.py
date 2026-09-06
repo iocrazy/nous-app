@@ -369,7 +369,7 @@ async def test_png_prompt_writes_positive_and_negative_when_both_empty():
             "gen_prompt": "masterpiece, 1girl",
             "gen_prompt_negative": "lowres",
             "gen_params": _PARAMS,
-            # mig 453: PNG metadata extraction is a machine writer.
+            # mig 455: PNG metadata extraction is a machine writer.
             "prompt_origin": "extracted",
         },
     )

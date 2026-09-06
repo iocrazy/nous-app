@@ -1,4 +1,4 @@
--- 453: resources.prompt_origin — WHO wrote the prompt text on this row.
+-- 455: resources.prompt_origin — WHO wrote the prompt text on this row.
 --
 -- Three writers share gen_prompt / gen_prompt_zh / slide_prompts and until now
 -- nothing recorded which one wrote last: PNG-metadata extraction and the
@@ -19,7 +19,7 @@ ALTER TABLE public.resources
         CHECK (prompt_origin IN ('typed', 'extracted', 'captioned'));
 
 COMMENT ON COLUMN public.resources.prompt_origin IS
-    'Last writer of gen_prompt/gen_prompt_zh/slide_prompts: typed | extracted | captioned (mig 453)';
+    'Last writer of gen_prompt/gen_prompt_zh/slide_prompts: typed | extracted | captioned (mig 455)';
 
 -- PostgREST schema cache (see mig 284 for why NOTIFY rather than a restart).
 NOTIFY pgrst, 'reload schema';

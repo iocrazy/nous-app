@@ -20,7 +20,7 @@ class TestBuildPatch:
             "gen_params": {"tool": "a1111", "seed": 1},
             "gen_prompt": "cat",
             "gen_prompt_negative": "dog",
-            # mig 453: writing the positive text stamps who wrote it.
+            # mig 455: writing the positive text stamps who wrote it.
             "prompt_origin": "extracted",
         }
 

@@ -400,7 +400,7 @@ class Resources(Base, UserScoped):
     )
     prompt_origin: Mapped[str | None] = mapped_column(
         Text,
-        comment="Last writer of the prompt text: typed | extracted | captioned (mig 453)",
+        comment="Last writer of the prompt text: typed | extracted | captioned (mig 455)",
     )
     url: Mapped[str | None] = mapped_column(Text)
     rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))

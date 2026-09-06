@@ -1,4 +1,4 @@
-"""backfill_resource_prompt_origin — label rows that predate mig 453.
+"""backfill_resource_prompt_origin — label rows that predate mig 455.
 
 THE BACKFILL PARADIGM (see ``backfill_resource_gen_params.py``): DBOS workflow,
 ``dry_run=True`` by default, row-wise idempotent (only rows with
@@ -40,7 +40,7 @@ async def backfill_resource_prompt_origin_workflow(
     limit: int = 2000,
     run_user_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Label ``resources.prompt_origin`` for prompt rows that predate mig 453."""
+    """Label ``resources.prompt_origin`` for prompt rows that predate mig 455."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     manager = get_task_manager()
@@ -51,7 +51,7 @@ async def backfill_resource_prompt_origin_workflow(
         await manager.create(
             user_id=owner,
             task_type="backfill",
-            title="Backfill: resource prompt origin (mig 453)",
+            title="Backfill: resource prompt origin (mig 455)",
             subtitle=f"dry_run={dry_run} limit={limit}",
             dbos_workflow_id=task_id,
             metadata={
@@ -87,7 +87,7 @@ async def backfill_resource_prompt_origin_workflow(
         async with system_request_scope(
             reason=(
                 "backfill resource_prompt_origin: system-wide labelling of "
-                "rows that predate mig 453"
+                "rows that predate mig 455"
             )
         ):
             async with read_scope() as session:

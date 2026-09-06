@@ -70,7 +70,7 @@ PromptEntry {
 
 ### 3.2 来源列 `resources.prompt_origin`
 
-- 迁移 `453_resources_prompt_origin.sql`：`ADD COLUMN prompt_origin text CHECK (prompt_origin IN ('typed','extracted','captioned'))`，可空；`NOTIFY pgrst, 'reload schema'`。
+- 迁移 `455_resources_prompt_origin.sql`：`ADD COLUMN prompt_origin text CHECK (prompt_origin IN ('typed','extracted','captioned'))`，可空；`NOTIFY pgrst, 'reload schema'`。
 - **规则：来源跟着正向文字的最后一个写入方走。** 每个写 `gen_prompt` / `gen_prompt_zh` / `slide_prompts` 的地方同一批 patch 里写 `prompt_origin`：
   - `resources_crud_router.update_resource`（用户 PATCH，含 `ResourcePromptSection` 的正向 / 逐张编辑）→ `typed`。`prompt_origin` **不进** `ResourceUpdate` 请求体，服务端在 `update_data` 含任一提示词键时自己写。
   - `upload_postprocess`（PNG 元数据）、`backfill_resource_gen_params`、`promote_generated_media_service`（画布生成落库）→ `extracted`。
@@ -174,7 +174,7 @@ PromptEntry {
 
 ## 6. 分期
 
-- **P3-A · 数据**：迁移 453 + 五个写入方 + 回填 workflow + 读模型端点（`/prompts`、`/prompts/counts`）。独立可上线，前端无感。
+- **P3-A · 数据**：迁移 455 + 五个写入方 + 回填 workflow + 读模型端点（`/prompts`、`/prompts/counts`）。独立可上线，前端无感。
 - **P3-B · 资源库提示词页**：`PromptsShelf` 替换 `assetType==='prompt'` 的 `AssetShelf`；`promptsService.ts`；计数改读 `/prompts/counts`；Save as template。
 - **P3-C · 画布面板 Prompts 页**：`LibraryPromptsPage` + 四动作 + 图集逐张 + 宽度切换 + 键盘 + 语言切换 + `⌘K` + 书架入口 + 删除清单。
 

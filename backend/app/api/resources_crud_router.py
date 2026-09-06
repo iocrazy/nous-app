@@ -896,7 +896,7 @@ async def update_resource(
         update_data.pop("is_trashed", None)
         update_data.pop("trashed_at", None)
 
-        # mig 453: a PATCH that carries prompt text is the user typing. The
+        # mig 455: a PATCH that carries prompt text is the user typing. The
         # column is not in ResourceUpdate on purpose — clients do not get to
         # claim an origin, the server derives it from what was written.
         stamp_origin(update_data, "typed")

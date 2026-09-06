@@ -1,4 +1,4 @@
-"""mig 453: the ORM must carry the column AND its CHECK, or schema-drift goes red."""
+"""mig 455: the ORM must carry the column AND its CHECK, or schema-drift goes red."""
 
 from sqlalchemy import CheckConstraint
 

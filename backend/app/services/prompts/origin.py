@@ -1,4 +1,4 @@
-"""Who wrote the prompt text on a resource (mig 453).
+"""Who wrote the prompt text on a resource (mig 455).
 
 RULE: origin follows the LAST writer of the positive text. Every writer of
 ``gen_prompt`` / ``gen_prompt_zh`` / ``slide_prompts`` calls :func:`stamp_origin`
@@ -54,7 +54,7 @@ def _nonempty_object(value: Any) -> bool:
 
 
 def derive_origin(row: Mapping[str, Any]) -> Optional[str]:
-    """Backfill rule for rows written before mig 453 (spec §3.2).
+    """Backfill rule for rows written before mig 455 (spec §3.2).
 
     ``None`` when the row carries no prompt text at all — such rows are not
     prompts and must stay NULL rather than be labelled.

@@ -17,7 +17,7 @@
 - New backend module reading prompts must never query Supabase from the browser; delete `fetchPromptAssets` in Phase C.
 - Semantic colour tokens only (`ok/warn/danger/info`, `--accent-*`, `canvas-*`); no `indigo/amber/red/emerald` class names. Lucide icons, never emoji.
 - `prompt_origin ∈ {typed, extracted, captioned}`; rule: **origin follows the last writer of the positive text**.
-- Migration number **453** (`git fetch origin master` first; if 453 is taken, renumber and update every reference in this plan's Task A1).
+- Migration number **455** (453 and 454 were taken on master by the time this branch finished — `git fetch origin master` first; if 455 is taken, renumber and update every reference in this plan's Task A1).
 - Panel widths: Prompts page 600px, Media page 340px. Album insertion is per slide. System segment renders only when `counts.system > 0`. Captioned rows sort last and render muted.
 - Commit after every task; never `git add -A` — add the files the task names.
 - No `docker compose` / production commands in tests. Frontend tests: `cd frontend && npx vitest run <path>`; backend: `cd backend && uv run pytest <path> -q`.
@@ -25,7 +25,7 @@
 ## File Structure
 
 **Backend (Phase A)**
-- Create `supabase/migrations/453_resources_prompt_origin.sql` — the column + CHECK.
+- Create `supabase/migrations/455_resources_prompt_origin.sql` — the column + CHECK.
 - Modify `backend/app/models/media.py` — `Resources.prompt_origin` + CheckConstraint in `__table_args__` (schema-drift gate is two-way).
 - Create `backend/app/services/prompts/__init__.py`, `origin.py` — `PROMPT_ORIGINS`, `stamp_origin`, `derive_origin` (pure).
 - Modify the five writers: `backend/app/api/resources_crud_router.py` (PATCH → typed), `backend/app/workflows/upload_postprocess.py`, `backend/app/workflows/backfill_resource_gen_params.py`, `backend/app/services/library/promote_generated_media_service.py` (→ extracted), `backend/app/workflows/caption_asset.py`, `backend/app/workflows/caption_slide.py` (→ captioned).
@@ -57,7 +57,7 @@
 ### Task 1 (A1): `resources.prompt_origin` column (migration + ORM)
 
 **Files:**
-- Create: `supabase/migrations/453_resources_prompt_origin.sql`
+- Create: `supabase/migrations/455_resources_prompt_origin.sql`
 - Modify: `backend/app/models/media.py` (Resources: `__table_args__` at ~line 247, columns near `gen_prompt_json` ~line 393)
 - Test: `backend/tests/models/test_resources_prompt_origin_column.py`
 
@@ -67,13 +67,13 @@
 - [ ] **Step 1: Confirm the migration number is free**
 
 Run: `git fetch -q origin master && git ls-tree --name-only origin/master supabase/migrations/ | sort | tail -1`
-Expected: `supabase/migrations/452_realtime_publication_frontend_tables.sql`. If a 453 exists, use the next free number everywhere in this task.
+Expected: `supabase/migrations/454_ai_model_prices_2026_09.sql`. If a 455 exists, use the next free number everywhere in this task.
 
 - [ ] **Step 2: Write the failing model test**
 
 ```python
 # backend/tests/models/test_resources_prompt_origin_column.py
-"""mig 453: the ORM must carry the column AND its CHECK, or schema-drift goes red."""
+"""mig 455: the ORM must carry the column AND its CHECK, or schema-drift goes red."""
 from sqlalchemy import CheckConstraint
 
 from app.models import Resources
@@ -100,7 +100,7 @@ Expected: FAIL with `KeyError: 'prompt_origin'`. (Create `backend/tests/models/_
 - [ ] **Step 4: Write the migration**
 
 ```sql
--- 453: resources.prompt_origin — WHO wrote the prompt text on this row.
+-- 455: resources.prompt_origin — WHO wrote the prompt text on this row.
 --
 -- Three writers share gen_prompt / gen_prompt_zh / slide_prompts and until now
 -- nothing recorded which one wrote last: PNG-metadata extraction and the
@@ -121,7 +121,7 @@ ALTER TABLE public.resources
         CHECK (prompt_origin IN ('typed', 'extracted', 'captioned'));
 
 COMMENT ON COLUMN public.resources.prompt_origin IS
-    'Last writer of gen_prompt/gen_prompt_zh/slide_prompts: typed | extracted | captioned (mig 453)';
+    'Last writer of gen_prompt/gen_prompt_zh/slide_prompts: typed | extracted | captioned (mig 455)';
 
 -- PostgREST schema cache (see mig 284 for why NOTIFY rather than a restart).
 NOTIFY pgrst, 'reload schema';
@@ -134,7 +134,7 @@ In `backend/app/models/media.py`, inside `class Resources`, directly after the `
 ```python
     prompt_origin: Mapped[str | None] = mapped_column(
         Text,
-        comment="Last writer of the prompt text: typed | extracted | captioned (mig 453)",
+        comment="Last writer of the prompt text: typed | extracted | captioned (mig 455)",
     )
 ```
 
@@ -155,8 +155,8 @@ Expected: `2 passed` and `TEXT`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add supabase/migrations/453_resources_prompt_origin.sql backend/app/models/media.py backend/tests/models/test_resources_prompt_origin_column.py backend/tests/models/__init__.py
-git commit -m "feat(db): resources.prompt_origin — who wrote the prompt text (mig 453)"
+git add supabase/migrations/455_resources_prompt_origin.sql backend/app/models/media.py backend/tests/models/test_resources_prompt_origin_column.py backend/tests/models/__init__.py
+git commit -m "feat(db): resources.prompt_origin — who wrote the prompt text (mig 455)"
 ```
 
 ### Task 2 (A2): origin helper + stamp every writer
@@ -248,7 +248,7 @@ Expected: `ModuleNotFoundError: app.services.prompts` for the first file; the wi
 
 ```python
 # backend/app/services/prompts/origin.py
-"""Who wrote the prompt text on a resource (mig 453).
+"""Who wrote the prompt text on a resource (mig 455).
 
 RULE: origin follows the LAST writer of the positive text. Every writer of
 ``gen_prompt`` / ``gen_prompt_zh`` / ``slide_prompts`` calls :func:`stamp_origin`
@@ -287,7 +287,7 @@ def _nonempty_object(value: Any) -> bool:
 
 
 def derive_origin(row: Mapping[str, Any]) -> Optional[str]:
-    """Backfill rule for rows written before mig 453 (spec §3.2).
+    """Backfill rule for rows written before mig 455 (spec §3.2).
 
     ``None`` when the row carries no prompt text at all — such rows are not
     prompts and must stay NULL rather than be labelled.
@@ -317,7 +317,7 @@ from app.services.prompts.origin import stamp_origin
 and in `update_resource`, right after `update_data.pop("trashed_at", None)`:
 
 ```python
-        # mig 453: a PATCH that carries prompt text is the user typing. The
+        # mig 455: a PATCH that carries prompt text is the user typing. The
         # column is not in ResourceUpdate on purpose — clients do not get to
         # claim an origin, the server derives it from what was written.
         stamp_origin(update_data, "typed")
@@ -345,7 +345,7 @@ to
 `backend/app/services/library/promote_generated_media_service.py` — in the `create_resource({...})` dict at ~line 219, directly after `"gen_prompt": gen.get("prompt"),` add:
 
 ```python
-                    # mig 453: a generation's prompt is machine-recorded text.
+                    # mig 455: a generation's prompt is machine-recorded text.
                     "prompt_origin": "extracted" if gen.get("prompt") else None,
 ```
 
@@ -358,7 +358,7 @@ to
 `backend/app/workflows/caption_slide.py` — directly after `await repo.merge_slide_prompt(resource_id, slide_name, entry)` (~line 140):
 
 ```python
-            # mig 453: the row-level origin follows the last writer of any
+            # mig 455: the row-level origin follows the last writer of any
             # slide's text (spec §8 — per-slide origin is deferred).
             await repo.update_resource(resource_id, {"prompt_origin": "captioned"})
 ```
@@ -422,7 +422,7 @@ Expected: `ModuleNotFoundError`.
 
 ```python
 # backend/app/workflows/backfill_resource_prompt_origin.py
-"""backfill_resource_prompt_origin — label rows that predate mig 453.
+"""backfill_resource_prompt_origin — label rows that predate mig 455.
 
 THE BACKFILL PARADIGM (see ``backfill_resource_gen_params.py``): DBOS workflow,
 ``dry_run=True`` by default, row-wise idempotent (only rows with
@@ -469,7 +469,7 @@ async def backfill_resource_prompt_origin_workflow(
         await manager.create(
             user_id=owner,
             task_type="backfill",
-            title="Backfill: resource prompt origin (mig 453)",
+            title="Backfill: resource prompt origin (mig 455)",
             subtitle=f"dry_run={dry_run} limit={limit}",
             dbos_workflow_id=task_id,
             metadata={"backfill": "resource_prompt_origin", "dry_run": dry_run, "limit": limit},
@@ -4189,7 +4189,7 @@ git commit -m "chore(canvas): delete AssetPromptPicker / loadPromptAsset / fetch
 Add to `CLAUDE.md` under "Asset Library (P0 数据层)" after the P4 bullet:
 
 ```
-- **统一提示词库**（P3, 2026-09）：提示词 = 模板资产 ∪ 带 `gen_prompt` 的图片 ∪ 带 `slide_prompts` 的图集，后端 `GET /api/v1/prompts` 归一成 PromptEntry（`app/services/prompts/`），资源库「提示词」tab 与画布面板 Prompts 页都只读它，浏览器不再直查提示词。`resources.prompt_origin`（mig 453）记录正向文字的最后写入方 typed / extracted / captioned，六个写入方都要 `stamp_origin`（`tests/services/prompts/test_origin_wiring.py` 钉住）。图集逐张插入；「存为模板」把图挂 `examples` 槽、文件不搬。spec：`docs/superpowers/specs/2026-09-05-unified-prompts-library-design.md`。
+- **统一提示词库**（P3, 2026-09）：提示词 = 模板资产 ∪ 带 `gen_prompt` 的图片 ∪ 带 `slide_prompts` 的图集，后端 `GET /api/v1/prompts` 归一成 PromptEntry（`app/services/prompts/`），资源库「提示词」tab 与画布面板 Prompts 页都只读它，浏览器不再直查提示词。`resources.prompt_origin`（mig 455）记录正向文字的最后写入方 typed / extracted / captioned，六个写入方都要 `stamp_origin`（`tests/services/prompts/test_origin_wiring.py` 钉住）。图集逐张插入；「存为模板」把图挂 `examples` 槽、文件不搬。spec：`docs/superpowers/specs/2026-09-05-unified-prompts-library-design.md`。
 ```
 
 In the P1/P2 plan's header "Plan-time rulings" area add one line: "P3 shipped as `docs/superpowers/plans/2026-09-05-unified-prompts-p3.md` (unified prompts; Prompts page no longer a stub)."
