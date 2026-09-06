@@ -1420,6 +1420,8 @@
     "trainingSetExportFailed": "Export failed",
     "moveSuccess": "Moved {{count}} files",
     "copySuccess": "Copied {{count}} files",
+    "moveFailed": "Move failed — nothing was changed for the remaining items",
+    "copyFailed": "Copy failed",
     "confirm": "Confirm",
     "cancel": "Cancel",
     "rootFolder": "Root",
