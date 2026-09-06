@@ -12,7 +12,12 @@ ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_API_URL=""
 
 COPY package*.json ./
-RUN npm ci
+# --mount=type=cache：npm 下载的包留在 builder 缓存里（2026-09-06 加，
+# 构建机走 5G 计费网络）。层顺序本来就是对的 —— 先 COPY 清单再 npm ci，
+# 最后才 COPY 源码，改代码不会重装依赖；缓存是再加一道保险，
+# 让 package-lock.json 真变动时也只补下新增的包。
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 COPY . .
 RUN npm run build

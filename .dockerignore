@@ -8,6 +8,13 @@ __pycache__
 *$py.class
 *.so
 .Python
+# ⚠️ .dockerignore 的模式**不递归**：裸写 `.venv` 只匹配构建上下文根目录的
+# /.venv，匹配不到 backend/.venv（宿主机上实测 738MB）。少了下面这行，
+# `COPY backend/ .` 会把宿主机的 venv 整个拷进镜像层 —— 后面即使
+# `rm -rf .venv` 也删不掉层历史里的那 738MB，镜像白背这个体积。
+# 而且它会覆盖依赖层刚建好的 /app/.venv，让 Dockerfile 的分层缓存失效。
+# 2026-09-06 补。Dockerfile 的依赖层/源码层拆分依赖这一行，别删。
+**/.venv
 .venv
 venv
 ENV

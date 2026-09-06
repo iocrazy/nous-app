@@ -44,8 +44,11 @@ jobs:
           # 出货产物 —— 门禁跑的和线上跑的不是同一个 major，验过的等于没验。
           # 仓库此前既无 .nvmrc 也无 package.json engines，无处对齐。
           node-version-file: .nvmrc
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          # 不配 cache：本 job 跑在 self-hosted runner 上，~/.npm 本来就跨 job
+          # 持久。setup-node 的 cache 会把它压包传到 GitHub 云端再拉回来，本地
+          # 已有的东西绕一趟公网，纯属白烧流量。这台机器走 5G 计费网络，
+          # 2026-09-06 实测每个 job 因此多花约 0.36 GB 上行。
+          # 切回 ubuntu-latest 时应把 cache: 'npm' 和 cache-dependency-path 加回来。
 
       - name: Install dependencies
         run: npm ci
@@ -102,6 +105,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/check-migration-numbers.sh pr "${{ github.base_ref }}"
 
+      # enable-cache 关掉后 setup-uv 不再代管 UV_CACHE_DIR，这里显式钉死，
+      # 让缓存目录与关闭前保持一致，不依赖 action 的默认行为。
+      - name: Pin uv cache dir to the persistent tool cache
+        run: echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/uv-cache" >> "$GITHUB_ENV"
+
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
@@ -115,7 +123,12 @@ jobs:
           # runner.tool_cache 在 self-hosted 上跨 job 持久（正是我们要的），
           # 在托管 runner 上是 /opt/hostedtoolcache、每次新建，所以这样写
           # 切回 ubuntu-latest 也不会坏，只是回到"无缓存"的旧行为。
-          enable-cache: true
+          # enable-cache 关掉的是**云端**缓存（打包上传到 GitHub 再拉回）。
+          # 本地那份仍然生效：cache-local-path 指向 runner.tool_cache，在
+          # self-hosted 上跨 job 持久，原来要解决的"每轮从 PyPI 重下"依旧解决。
+          # 2026-09-06 关闭，原因是这台构建机走 5G 计费网络。
+          # 切回 ubuntu-latest 时要改回 true，否则回到无缓存的旧行为。
+          enable-cache: false
           cache-local-path: ${{ runner.tool_cache }}/uv-cache
 
       - uses: actions/setup-python@v5
@@ -251,13 +264,23 @@ jobs:
       - name: Keep uv-managed interpreters out of the runner user's home
         run: echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TOOL_CACHE/uv-python" >> "$GITHUB_ENV"
 
+      # enable-cache 关掉后 setup-uv 不再代管 UV_CACHE_DIR，这里显式钉死，
+      # 让缓存目录与关闭前保持一致，不依赖 action 的默认行为。
+      - name: Pin uv cache dir to the persistent tool cache
+        run: echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/uv-cache" >> "$GITHUB_ENV"
+
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
           # 理由同 backend job 的同名配置（_temp 每个 job 开始时清空，缓存必须
           # 落在跨 job 存活的 tool_cache）。与 backend job 共用同一个缓存目录
           # 是有意的 —— uv 缓存按包内容寻址，两个 job 不会串味。
-          enable-cache: true
+          # enable-cache 关掉的是**云端**缓存（打包上传到 GitHub 再拉回）。
+          # 本地那份仍然生效：cache-local-path 指向 runner.tool_cache，在
+          # self-hosted 上跨 job 持久，原来要解决的"每轮从 PyPI 重下"依旧解决。
+          # 2026-09-06 关闭，原因是这台构建机走 5G 计费网络。
+          # 切回 ubuntu-latest 时要改回 true，否则回到无缓存的旧行为。
+          enable-cache: false
           cache-local-path: ${{ runner.tool_cache }}/uv-cache
 
       - uses: actions/setup-python@v5
@@ -351,9 +374,11 @@ jobs:
         with:
           components: clippy
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: nous-core
+      # 2026-09-06 移除 Swatinem/rust-cache@v2（原 workspaces: nous-core）。
+      # 它把 target/ 和 ~/.cargo 打包传到 GitHub 云端缓存，而本 job 跑在
+      # self-hosted runner 上，这两个目录本来就跨 job 留在本地磁盘，
+      # 云端往返是纯浪费。这台构建机走 5G 计费网络，缓存动辄几百 MB。
+      # 切回 ubuntu-latest 时应把这个 action 加回来。
 
       - name: Check compilation
         env:

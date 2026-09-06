@@ -52,15 +52,20 @@ ARG CFT_MIRROR
 # `/etc/apt/sources.list`, which does not exist here. Both URIs need it: the
 # archive one AND security.ubuntu.com (they are separate stanzas, and leaving
 # security on the slow host reintroduces the same timeout).
-RUN if [ -n "$UBUNTU_MIRROR" ]; then \
+# BuildKit 缓存挂载（2026-09-06 加，构建机走 5G 计费网络）。删 docker-clean、
+# 去掉 `rm -rf /var/lib/apt/lists/*`，否则缓存永远是空的；缓存挂载不进镜像层，
+# 去掉清理反而让镜像更小。
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean; \
+    if [ -n "$UBUNTU_MIRROR" ]; then \
         sed -i \
             -e "s|http://archive.ubuntu.com/ubuntu/|http://${UBUNTU_MIRROR}/ubuntu/|g" \
             -e "s|http://security.ubuntu.com/ubuntu/|http://${UBUNTU_MIRROR}/ubuntu/|g" \
             /etc/apt/sources.list.d/ubuntu.sources; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends xvfb \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends xvfb
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
@@ -89,7 +94,8 @@ WORKDIR /app
 # Dev extras are opt-in under [project.optional-dependencies] and are never
 # installed by a plain sync, so the image stays free of pytest/httpx.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
 
 # patchright 自带**另一份** Chromium，跟基础镜像里的不是同一个。实测（构建
 # 期探测，2026-08-08）：装完 patchright 后 executable_path 指向
@@ -122,23 +128,34 @@ RUN uv sync --frozen --no-install-project
 # patchright 用**自己**的安装逻辑解压 + 登记 registry，我们只负责供字节。<v> 从
 # patchright 的 browsers.json 动态读取（patchright 一升级自动跟着走，不写死版本号）。
 # CFT_MIRROR 空串时回退 patchright 默认 CDN（海外构建用，见文件顶部 ARG 注释）。
-RUN set -eux; \
+# --mount=type=cache：两个 CfT zip 合计约 175MB，原先下到 /tmp/cft 且用完就
+# `rm -rf`，这一层每失效一次就重下一次。改成落在 builder 缓存里，按版本号
+# 分目录，patchright 升级后 V 变了自然会下新版，旧版留着由 builder 缓存的
+# 容量上限兜底回收。下载先写 .part 再改名：中途失败不会留下一个"看起来
+# 存在"的半截 zip，下次仍会重下。
+RUN --mount=type=cache,target=/var/cache/cft,sharing=locked \
+    set -eux; \
     if [ -n "${CFT_MIRROR}" ]; then \
         V="$(python3 -c 'import json,os,patchright; d=json.load(open(os.path.join(os.path.dirname(patchright.__file__),"driver/package/browsers.json"))); print(next(b["browserVersion"] for b in d["browsers"] if b["name"]=="chromium"))')"; \
-        dst="/tmp/cft/builds/cft/${V}/linux64"; \
+        dst="/var/cache/cft/builds/cft/${V}/linux64"; \
         mkdir -p "${dst}"; \
         for z in chrome-linux64.zip chrome-headless-shell-linux64.zip; do \
-            curl -fSL --retry 3 --retry-delay 2 -o "${dst}/${z}" "${CFT_MIRROR}/${V}/linux64/${z}"; \
+            if [ -s "${dst}/${z}" ]; then \
+                echo "cft cache hit: ${z}"; \
+            else \
+                curl -fSL --retry 3 --retry-delay 2 -o "${dst}/${z}.part" "${CFT_MIRROR}/${V}/linux64/${z}"; \
+                mv "${dst}/${z}.part" "${dst}/${z}"; \
+            fi; \
         done; \
-        python3 -m http.server 8909 --bind 127.0.0.1 --directory /tmp/cft >/tmp/cft-httpd.log 2>&1 & \
+        python3 -m http.server 8909 --bind 127.0.0.1 --directory /var/cache/cft >/tmp/cft-httpd.log 2>&1 & \
         srv_pid=$!; \
         for _ in $(seq 1 40); do \
-            curl -sf "http://127.0.0.1:8909/builds/cft/${V}/linux64/chrome-linux64.zip" -o /dev/null && break; \
+            curl -sf -r 0-0 "http://127.0.0.1:8909/builds/cft/${V}/linux64/chrome-linux64.zip" -o /dev/null && break; \
             sleep 0.25; \
         done; \
         PLAYWRIGHT_DOWNLOAD_HOST=http://127.0.0.1:8909 patchright install chromium; \
         kill "${srv_pid}" 2>/dev/null || true; \
-        rm -rf /tmp/cft /tmp/cft-httpd.log; \
+        rm -f /tmp/cft-httpd.log; \
     else \
         patchright install chromium; \
     fi; \

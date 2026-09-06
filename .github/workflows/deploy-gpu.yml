@@ -192,7 +192,19 @@ jobs:
           # 还能手动退到更早的一版。:local / :rollback 带 tag,不在 dangling 之列,
           # 不受影响(已验证)。
           docker image prune -f --filter "until=48h" || true
-          # 缓存上限 60GB。国内源就位后从零重建的代价可接受,不必囤两百 G。
-          docker builder prune -f --keep-storage 60GB || true
+          # 2026-09-06 改成有条件回收。原来这里无条件 `builder prune
+          # --keep-storage 60GB`,每次部署完都把构建缓存砍到 60GB —— 而
+          # Dockerfile 刚加的 apt/pip/uv/cargo/CfT 缓存挂载全都存在 builder
+          # 缓存里,砍掉就等于下次构建从零重下,层顺序优化也一起白做。
+          # 原注释说"从零重建的代价可接受",那是按国内源的**时间**算的;
+          # 这台机器改走 5G 计费网络后,代价变成了**流量**,每次约 0.4GB。
+          # 磁盘 937GB、当前可用 500GB 以上,不缺这点空间。
+          # 门槛 150GB 与上面 Disk guard 一致:真的快满了才回收。
+          if [ "$(avail)" -lt 150 ]; then
+            echo "::warning::可用 $(avail)GB < 150GB —— 回收构建缓存"
+            docker builder prune -f --keep-storage 60GB || true
+          else
+            echo "可用 $(avail)GB >= 150GB —— 保留构建缓存(省流量)"
+          fi
           echo "回收: ${BEFORE}GB -> $(avail)GB 可用"
           docker system df || true

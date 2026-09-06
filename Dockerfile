@@ -63,12 +63,20 @@ ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 # Debian 13 ships deb822 sources, so this rewrites debian.sources rather than
 # the classic sources.list. Both URIs (debian + debian-security) are covered by
 # the single host substitution.
-RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+# BuildKit 缓存挂载（2026-09-06 加，构建机走 5G 计费网络）：把 .deb 与 apt
+# 索引留在 builder 缓存里，这一层失效时只补下变化的包，不再整层重下。
+# 三点必须一起做，少一个缓存就永远是空的：
+#   1) 删 docker-clean —— 基础镜像里"装完即删 .deb"的钩子；
+#   2) 不再 `rm -rf /var/lib/apt/lists/*` —— 那清的正是缓存本身；
+#   3) 缓存挂载的内容不进镜像层，所以去掉清理反而让镜像更小。
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y \
     curl \
     build-essential \
     --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
 
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -84,11 +92,16 @@ RUN if [ -n "${CARGO_MIRROR}" ]; then \
       && echo "cargo registry -> ${CARGO_MIRROR}"; \
     fi
 
-RUN pip install maturin
+RUN --mount=type=cache,target=/root/.cache/pip pip install maturin
 
 WORKDIR /rust
 COPY nous-core/ .
-RUN maturin build --release
+# crates 注册表与 git 源缓存复用，crates.io/rsproxy 不再每次重拉。
+# ⚠️ /rust/target 故意**不**缓存：产物 wheel 要靠下面的 `COPY --from` 取走，
+# 而缓存挂载的内容不属于镜像层，缓存了就 COPY 不到。
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    maturin build --release
 
 # ============================================
 # Stage 2: Final Python application
@@ -100,6 +113,9 @@ ARG PIP_MIRROR
 # Same reasoning as the rust-builder stage above.
 ENV PIP_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
+# uv 的缓存挂载在另一个文件系统上，默认的硬链接策略会失败并退化成拷贝，
+# 每次刷一堆警告。显式设成 copy，与 browser/Dockerfile 一致。
+ENV UV_LINK_MODE=copy
 
 # Install Chrome, ffmpeg, Node.js, build tools and dependencies.
 # Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
@@ -107,7 +123,10 @@ ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 #
 # This is the layer that hurts when the cache misses — several hundred MB of
 # chromium + ffmpeg + fonts. See the APT_MIRROR note at the top.
-RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y \
     wget \
     curl \
@@ -119,8 +138,7 @@ RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sou
     build-essential \
     ffmpeg \
     nodejs \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    --no-install-recommends
 
 # ── GPU Transcode Support (uncomment as needed) ──
 # NVIDIA: Install CUDA toolkit for h264_nvenc
@@ -172,32 +190,57 @@ RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-stat
     && gpt-image-2-skill -V 2>&1 | grep -q "${GPT_IMAGE_2_SKILL_VERSION}"
 
 # Install uv package manager
-RUN pip install uv
-
-# nous-core Rust module from the build stage. The wheel is copied here but
-# INSTALLED AFTER `uv sync` (below) — see the note there for why.
-COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
+RUN --mount=type=cache,target=/root/.cache/pip pip install uv
 
 # Install yt-dlp and faster-whisper
-RUN pip install yt-dlp==2024.12.23 faster-whisper==1.1.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install yt-dlp==2024.12.23 faster-whisper==1.1.0
 
 # py-spy: sample a live process's Python stacks from outside the
 # interpreter. Kept in the image so an event-loop freeze (2026-07-06 P0)
 # can be diagnosed BEFORE the restart destroys the evidence:
 #   docker exec mediahub-app-backend py-spy dump --pid 1
-RUN pip install py-spy==0.4.0
+RUN --mount=type=cache,target=/root/.cache/pip pip install py-spy==0.4.0
 
 # Set working directory
 WORKDIR /app
 
-# Copy backend code
+# ── 依赖层与源码层分离（2026-09-06）──────────────────────────────
+# 改之前：`COPY backend/ .` 排在 `uv sync` 前面，于是 backend 下任何一个 .py
+# 改动都让 COPY 层失效，`uv sync` 跟着失效，177 个依赖从 mirrors.aliyun.com
+# 整包重下。实测近 30 天 backend 有 203 次提交，而 uv.lock 只变了 1 次 ——
+# 202 次重下是纯浪费。这台自托管构建机走 5G 计费网络，每次约 0.4GB。
+# 拆开之后：只有 pyproject.toml / uv.lock 真的变了才会重下依赖。
+# 写法与 browser/Dockerfile 的两段式保持一致。
+#
+# --frozen：lock 过期时直接报错，而不是静默联网重解析。重解析既费流量又会
+#   让依赖悄悄漂移。2026-09-06 用 `uv lock --check` 离线验证过 lock 是最新的。
+# --no-install-project：pyproject.toml 里 packages = ["app"]，而 app/ 要到
+#   下一层才进来，这一层装项目自身必然失败；这里只装第三方依赖。
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
+
+# 源码层。改代码只失效这一层往后，上面的依赖层原样命中。
+#
+# ⚠️ 这里原本跟着一句 `rm -rf .venv`，用来删掉被 COPY 带进来的宿主机 venv
+# （宿主机 backend/.venv 实测 738MB）。现在改成在 .dockerignore 里用
+# `**/.venv` 递归排除 —— 裸写 `.venv` 只匹配上下文根目录，匹配不到
+# backend/.venv，这是原来那句 rm 存在的真正原因。
+# 若把 .dockerignore 里那行删了，宿主机 venv 会覆盖上一层建好的 /app/.venv，
+# 这里的分层优化即刻失效。两处是绑定的。
 COPY backend/ .
 
-# Remove any existing local venv (different architecture incompatible)
-RUN rm -rf .venv
+# 把项目自身装进 venv。第三方依赖已在上面就位，这一步不联网。
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
 
-# Install Python dependencies
-RUN uv sync
+# nous-core Rust module from the build stage.
+# ⚠️ 这个 COPY 原先在上面三次 pip install 之前（2026-09-06 下移）。放在前面时，
+# 只要 nous-core/ 的 Rust 代码一改，wheel 就变，COPY 层失效，后面
+# yt-dlp / faster-whisper / py-spy 三次 pip install 全部跟着重下。
+# 挪到真正用它的地方之前，Rust 改动就只影响这一层往后。
+COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
 
 # Install the nous-core wheel INTO THE VENV, not the system interpreter.
 # The app runs as /app/.venv/bin/python and that venv is built by `uv sync`
@@ -207,7 +250,8 @@ RUN uv sync
 # does not exist yet or is about to be deleted.
 # (yt-dlp / faster-whisper stay on the system interpreter above: they are used
 # as CLI binaries on PATH, not imported by the app.)
-RUN uv pip install --python /app/.venv/bin/python /tmp/nous_core*.whl \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python /tmp/nous_core*.whl \
     && rm -f /tmp/nous_core*.whl \
     && /app/.venv/bin/python -c "import nous_core; assert hasattr(nous_core, 'fetch_to_file')"
 
