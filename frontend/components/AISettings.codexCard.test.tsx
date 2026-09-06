@@ -103,6 +103,7 @@ describe('agent model picker', () => {
     }));
     expect(groups.find((g) => g.providerKey === 'codex-local')).toEqual({
       providerKey: 'codex-local', providerName: 'Codex (Local CLI)', models: ['codex:gpt-6-astra'],
+      labels: { 'codex:gpt-6-astra': 'gpt-6-astra' },
     });
   });
 });

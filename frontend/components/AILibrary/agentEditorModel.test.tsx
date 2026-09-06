@@ -93,3 +93,32 @@ describe('renderModelSelect — health marking', () => {
     expect(trigger.textContent).toContain('health check failed');
   });
 });
+
+// ── display names (user 2026-09-06: "名字不还是没有改吗?") ─────────────────
+// The picker showed catalog ids (mediahub-deepseek-v4-pro) and prefixed card
+// ids (codex:gpt-5.6-sol). The VALUE stays the id — that is what routing and
+// the agent row store — but the visible text is the human name.
+describe('renderModelSelect — labels', () => {
+  it('shows a group-provided label while keeping the id as the value', () => {
+    const groups: ProviderModelGroup[] = [
+      {
+        providerKey: 'nous',
+        providerName: 'Nous (Platform)',
+        models: ['mediahub-deepseek-v4-pro'],
+        labels: { 'mediahub-deepseek-v4-pro': 'DeepSeek V4 Pro' },
+      },
+    ];
+    renderSelect({ groups, value: 'mediahub-deepseek-v4-pro' });
+    const opt = document.querySelector('option[value="mediahub-deepseek-v4-pro"]') as HTMLOptionElement;
+    expect(opt.textContent).toBe('DeepSeek V4 Pro');
+  });
+
+  it('getAvailableModels labels the Codex card models without the codex: prefix', async () => {
+    const { getAvailableModels } = await import('./agentEditorModel');
+    const g = getAvailableModels({
+      providers: { 'codex-local': { enabled: true, enabled_models: ['codex:gpt-5.6-sol'] } },
+    } as never).find((x) => x.providerKey === 'codex-local');
+    expect(g?.models).toEqual(['codex:gpt-5.6-sol']);
+    expect(g?.labels).toEqual({ 'codex:gpt-5.6-sol': 'gpt-5.6-sol' });
+  });
+});

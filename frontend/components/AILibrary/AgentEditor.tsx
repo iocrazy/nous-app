@@ -176,6 +176,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         providerKey: 'nous',
         providerName: PROVIDER_DISPLAY_NAMES.nous,
         models: nousLlm.map((m) => m.name),
+        // Show the catalog's display name, not the row id.
+        labels: Object.fromEntries(
+          nousLlm.map((m) => [m.name, m.display_name || m.name]),
+        ),
       });
     }
     return base;
