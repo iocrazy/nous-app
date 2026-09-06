@@ -10,7 +10,8 @@ import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
  *  backend re-bases its binary indices for exactly that reason).
  *
  *  `reason` is a CLOSED VOCABULARY on the reference path (ruling C's four
- *  asset codes plus `attachment_limit_exceeded`, which the chat service raises
+ *  asset codes, v2's `loadout_not_owned`, plus `attachment_limit_exceeded`,
+ *  which the chat service raises
  *  for `asset_ref` entries only — resource refs are uncapped) and FREE FORM on the binary one —
  *  `chat_attachment_resolver` builds it as
  *  `f"{type(exc).__name__}: {exc}"` for anything it caught, so two binary
@@ -23,10 +24,12 @@ export interface AttachmentFailure {
 }
 
 /**
- * The reasons this build has copy for — ruling C's four, plus
+ * The reasons this build has copy for — ruling C's four, `loadout_not_owned`
+ * (v2: the staged chip's loadout picker made a foreign loadout id reachable, so
+ * the resolver refuses instead of quietly re-dressing the character), and
  * `attachment_limit_exceeded`, which the chat service raises when a turn
  * carries more `asset_ref` attachments than `MAX_ASSET_REF_ATTACHMENTS`. All
- * five arrive with `kind: 'asset_ref'`; `resource_ref` has no cap (any number
+ * six arrive with `kind: 'asset_ref'`; `resource_ref` has no cap (any number
  * of them is one batched query) and no typed failure of its own.
  *
  * Keyed on REASON, never on kind: the kind says which bucket the attachment
@@ -44,6 +47,7 @@ const NAMED_REASONS = new Set([
   'asset_deleted',
   'asset_no_primary_image',
   'asset_type_unknown',
+  'loadout_not_owned',
   'attachment_limit_exceeded',
 ]);
 
@@ -71,7 +75,8 @@ export interface AttachmentFailureBannerProps {
  * silent no-op the "typed result" discipline in CLAUDE.md now forbids.
  *
  * P5 extends it from a bare count to the REASONS: reference attachments fail
- * for five typed causes (ruling C's four, plus the reference-count cap) and
+ * for six typed causes (ruling C's four, v2's `loadout_not_owned`, plus the
+ * reference-count cap) and
  * each one has a different thing to do about it. A code with no string is COUNTED into one generic line, never
  * printed — an untranslated identifier in a user-facing banner is the failure
  * mode this component exists to prevent, not a lesser version of it, and one

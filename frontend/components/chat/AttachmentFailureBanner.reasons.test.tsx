@@ -64,6 +64,10 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     ['asset_deleted', 'One Asset Has Been Deleted'],
     ['asset_no_primary_image', 'One Asset Has No Main Image Yet'],
     ['asset_type_unknown', 'One Asset Has A Type This Version Cannot Read'],
+    // v2's sixth code. The loadout picker on the staged chip made a foreign
+    // loadout id reachable by a real user, so the backend stopped falling back
+    // to the default and started refusing out loud.
+    ['loadout_not_owned', 'That Loadout Does Not Belong To This Character'],
     // Interpolated, not literal: the copy says `{{n}}` and the banner feeds it
     // `MAX_ASSET_REF_ATTACHMENTS`. Asserting the rendered sentence is what
     // proves the interpolation actually happened — a raw `{{n}}` reaching a

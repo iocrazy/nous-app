@@ -507,10 +507,17 @@ async def test_an_asset_with_no_loadouts_composes_without_one(db):
     assert refs[0].loadout_id is None
 
 
-async def test_a_loadout_belonging_to_another_asset_falls_back_to_the_default(db):
-    """Disclosed gap: ruling C fixes the user-visible reasons at four and none
-    of them means "that outfit is not this character's", and no v1 client can
-    send one. The fallback is logged rather than silent."""
+async def test_a_loadout_belonging_to_another_asset_is_refused_out_loud(db):
+    """v2: a foreign loadout id is a TYPED REFUSAL, and the reference is dropped.
+
+    v1 fell back to the default and logged, because ruling C fixed the reason
+    vocabulary at four values and no client could send a foreign id anyway (both
+    entry points sent ``null``). The v2 loadout picker makes the input reachable
+    by a real user, so the fallback would now be silent wrong-doing: they picked
+    an outfit, the model would describe a different one, and nothing on screen
+    would say so. Delivering a picture of the wrong outfit is worse than
+    delivering none — so the ref is dropped, not merely re-dressed.
+    """
     db["assets"].append(_asset_row(34, prompt_positive="a tall detective"))
     _give_image(db, 34, 3400)
     db["asset_loadouts"].append(
@@ -528,8 +535,107 @@ async def test_a_loadout_belonging_to_another_asset_falls_back_to_the_default(db
     refs, failures = await resolve_asset_refs(
         [_att("34", loadout_id="999999")], user_id=USER
     )
-    assert refs[0].loadout_id == "340"
+    assert refs == []
+    assert [f.reason for f in failures] == ["loadout_not_owned"]
+    # Reported at the position of the chip the user can see, not at a position
+    # among the asset refs.
+    assert [f.index for f in failures] == [0]
+
+
+async def test_a_foreign_loadout_does_not_take_down_the_other_refs_in_the_turn(db):
+    """One refused mention is one refused mention.
+
+    The drop is per-reference: an unrelated asset mentioned in the same message
+    still composes. Pinned because "drop the ref" is implemented inside the loop
+    that builds them, and an early return there would be invisible in a
+    single-attachment test.
+    """
+    db["assets"].append(_asset_row(35, prompt_positive="a tall detective"))
+    _give_image(db, 35, 3500)
+    db["asset_loadouts"].append(
+        {
+            "id": 350,
+            "asset_id": 35,
+            "is_default": True,
+            "sort_order": 0,
+            "name": "daywear",
+            "prompt_extra": "collar up",
+            "costume_ids": [],
+            "prop_ids": [],
+        }
+    )
+    db["assets"].append(_asset_row(36, prompt_positive="a quiet café"))
+    _give_image(db, 36, 3600)
+
+    refs, failures = await resolve_asset_refs(
+        [_att("35", loadout_id="999999"), _att("36")], user_id=USER
+    )
+    assert [r.asset_id for r in refs] == ["36"]
+    assert [(f.index, f.reason) for f in failures] == [(0, "loadout_not_owned")]
+
+
+async def test_a_loadout_the_asset_does_own_still_composes(db):
+    """The positive half of the same branch — a requested id that IS the
+    asset's resolves to that loadout and reports nothing."""
+    db["assets"].append(_asset_row(37, prompt_positive="a tall detective"))
+    _give_image(db, 37, 3700)
+    db["asset_loadouts"].extend(
+        [
+            {
+                "id": 370,
+                "asset_id": 37,
+                "is_default": True,
+                "sort_order": 0,
+                "name": "daywear",
+                "prompt_extra": "collar up",
+                "costume_ids": [],
+                "prop_ids": [],
+            },
+            {
+                "id": 371,
+                "asset_id": 37,
+                "is_default": False,
+                "sort_order": 1,
+                "name": "rainy night",
+                "prompt_extra": "soaked coat",
+                "costume_ids": [],
+                "prop_ids": [],
+            },
+        ]
+    )
+    refs, failures = await resolve_asset_refs(
+        [_att("37", loadout_id="371")], user_id=USER
+    )
     assert [f.reason for f in failures] == []
+    assert refs[0].loadout_id == "371"
+    assert "soaked coat" in refs[0].consistency_prompt
+
+
+async def test_a_requested_loadout_on_an_asset_with_no_loadouts_is_refused(db):
+    """No loadouts at all is not "use the default" when one was ASKED FOR.
+
+    The v1 shape returned ``None`` here and composed anyway, which is right for
+    an unrequested loadout and wrong for a requested one: the user picked
+    something this asset cannot provide, and silence would be the same lie the
+    foreign-id case tells.
+    """
+    db["assets"].append(_asset_row(38, prompt_positive="a tall detective"))
+    _give_image(db, 38, 3800)
+    refs, failures = await resolve_asset_refs(
+        [_att("38", loadout_id="999999")], user_id=USER
+    )
+    assert refs == []
+    assert [f.reason for f in failures] == ["loadout_not_owned"]
+
+
+async def test_the_new_reason_is_in_the_declared_vocabulary():
+    """``AssetRefFailureReason`` is what the frontend mirrors; a reason produced
+    but not declared would be invisible to the copy the banner reads."""
+    from typing import get_args
+
+    from app.services.ai.chat.asset_ref_resolver import AssetRefFailureReason
+
+    assert "loadout_not_owned" in get_args(AssetRefFailureReason)
 
 
 async def test_the_loadout_filters_which_linked_costumes_are_described(db):

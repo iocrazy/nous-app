@@ -54,16 +54,24 @@ from app.services.assets.slots import PRIMARY_SLOT
 _MEDIA_READ_REASON = "chat-asset-ref-primary-image-availability"
 
 # The closed vocabulary every `attachment_failures` entry on the REFERENCE
-# path draws from. Declared here because this is where four of the five are
-# produced; the fifth (`attachment_limit_exceeded`) is emitted by
+# path draws from. Declared here because this is where five of the six are
+# produced; the sixth (`attachment_limit_exceeded`) is emitted by
 # `ai_library_chat_service` — the cap counts `asset_ref` entries only (resource
 # refs are uncapped by ruling), and it is applied before this resolver runs. One list, so a frontend adding copy for
 # a new code has one place to read.
+#
+# ⚠️ This list is MIRRORED by `frontend/components/chat/AttachmentFailureBanner
+# .tsx`'s `NAMED_REASONS` and by `chat.attachmentFailureReason.*` in BOTH
+# locales. `tests/services/ai/chat/test_attachment_limit_frontend_mirror.py`
+# reads those files and fails on either half of the drift: a code the banner
+# does not name lands in its counted bucket (degraded, silent), and a code with
+# no locale string renders the raw key at a user.
 AssetRefFailureReason = Literal[
     "asset_not_accessible",
     "asset_deleted",
     "asset_no_primary_image",
     "asset_type_unknown",
+    "loadout_not_owned",
     "attachment_limit_exceeded",
 ]
 
@@ -119,36 +127,47 @@ def coerce_asset_id(value: Any) -> Optional[str]:
 
 async def _pick_loadout(
     relations: AssetRelationsRepository, asset_id: int, requested: Optional[str]
-) -> Optional[Dict[str, Any]]:
-    """The loadout this reference composes with: the requested one, else the
-    asset's default (ruling D), else None.
+) -> Tuple[Optional[Dict[str, Any]], Optional[AssetRefFailureReason]]:
+    """``(loadout, failure_reason)`` for one reference.
 
-    A ``loadout_id`` that belongs to ANOTHER asset falls back to the default and
-    logs. ``AssetsService._owned_loadout`` raises a typed 422 for the same input,
-    and this path cannot: ruling C fixes the user-visible reason vocabulary at
-    four values and none of them means "that outfit is not this character's".
-    No v1 client can produce the input either — both entry points send ``null``
-    (ruling D) — so the choice is between a disclosed fallback and inventing a
-    reason the UI has no string for. When the v2 loadout picker lands it should
-    bring a fifth reason with it; that is the deferred work, and the log line is
-    how we would learn it is being hit before then.
+    Three outcomes, and they are three different facts:
+
+    * a ``requested`` id the asset OWNS → ``(that loadout, None)``;
+    * a ``requested`` id it does not own → ``(None, "loadout_not_owned")``, and
+      the caller DROPS the reference;
+    * nothing requested → ``(the default loadout or None, None)`` (ruling D).
+
+    **Why the foreign id is refused rather than defaulted.** v1 fell back to the
+    default and logged: ruling C fixed the user-visible vocabulary at four codes,
+    none of which meant "that outfit is not this character's", and no v1 client
+    could send the input anyway — both entry points hardcoded ``null``. The v2
+    loadout picker on the staged chip makes it reachable by a real person, and a
+    fallback then becomes a silent substitution of something they explicitly
+    chose. So the deferred fifth reason this docstring used to promise now
+    exists, and the reference goes away with it: a picture of the WRONG outfit,
+    delivered without comment, is worse than no picture and a sentence saying
+    why. ``AssetsService._owned_loadout`` raises a typed 422 on the same input;
+    this is the same refusal in the shape ``attachment_failures`` speaks.
+
+    An asset with NO loadouts is refused too when one was requested. Returning
+    "no loadout" there is right for an unrequested loadout and wrong for a
+    requested one — the user asked for something this asset cannot provide, and
+    silence would tell the same lie the foreign-id case tells.
     """
     loadouts = await relations.list_loadouts(int(asset_id))
-    if not loadouts:
-        return None
-    by_id = {str(lo["id"]): lo for lo in loadouts}
     if requested is not None:
-        owned = by_id.get(requested)
+        owned = {str(lo["id"]): lo for lo in loadouts}.get(requested)
         if owned is not None:
-            return owned
+            return owned, None
         logger.warning(
             f"[asset_ref_resolver] loadout {requested!r} does not belong to asset "
-            f"{asset_id} — falling back to the default loadout"
+            f"{asset_id} — the reference is refused, not re-dressed"
         )
+        return None, "loadout_not_owned"
     for lo in loadouts:
         if lo.get("is_default"):
-            return lo
-    return None
+            return lo, None
+    return None, None
 
 
 async def _linked_rows(
@@ -238,8 +257,9 @@ async def resolve_asset_refs(
     the second mention would render a duplicate line without adding anything —
     and any failure is reported against the FIRST mention's index.
 
-    Failure vocabulary (ruling C, amended by final review I2 with a fifth
-    code), all of which reach the user through ``attachment_failures``:
+    Failure vocabulary (ruling C, amended by final review I2 with the limit
+    code and by v2 with ``loadout_not_owned``), all of which reach the user
+    through ``attachment_failures``:
 
     ``asset_not_accessible``
         No row the caller can read, and no ``asset_id`` we could parse. The
@@ -258,6 +278,11 @@ async def resolve_asset_refs(
         neither the primary image nor readiness can be computed. Dropped, and
         loudly — the same posture ``slots.readiness`` takes, because a renamed
         or typo'd type must not come back as a well-formed entry with no image.
+    ``loadout_not_owned``
+        A ``loadout_id`` was requested and the asset does not own it. Dropped:
+        the v2 picker means somebody CHOSE that outfit, so quietly composing a
+        different one would substitute for a decision rather than report a
+        problem. See :func:`_pick_loadout`.
     ``attachment_limit_exceeded``
         NOT produced here. The turn carried more ``asset_ref`` attachments
         than ``ai_library_chat_service.MAX_ASSET_REF_ATTACHMENTS``, so this one
@@ -357,9 +382,14 @@ async def resolve_asset_refs(
             )
             continue
         native_id = int(row["id"])
-        loadout = await _pick_loadout(
+        loadout, loadout_failure = await _pick_loadout(
             relations, native_id, requested_loadout.get(asset_id)
         )
+        if loadout_failure is not None:
+            failures.append(
+                AssetRefFailure(index=first_index[asset_id], reason=loadout_failure)
+            )
+            continue
         linked = await _linked_rows(assets, relations, user_id, native_id, loadout)
         slot_map = files_by_slot(await relations.list_files(native_id), loadout)
         staged.append((asset_id, row, loadout, linked, slot_map))
