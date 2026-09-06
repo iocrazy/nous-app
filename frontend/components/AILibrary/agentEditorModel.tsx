@@ -18,6 +18,9 @@ export interface ProviderModelGroup {
   providerKey: string;
   providerName: string;
   models: string[];
+  /** Human label per model id. The VALUE stays the id — routing and the
+   *  agent row store ids — only the visible text changes. Missing → the id. */
+  labels?: Record<string, string>;
 }
 
 // Friendly names for providers when the Overview model picker renders optgroups.
@@ -57,10 +60,18 @@ export function getAvailableModels(
       const whitelist = config?.enabled_models;
       const fallback = config?.selected_model ? [config.selected_model] : [];
       const models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);
+      // The Codex card's ids carry a ``codex:`` routing prefix (backend
+      // services/codex/provider_card.py); the group already says Codex, so
+      // the label drops it.
+      const labels =
+        key === 'codex-local'
+          ? Object.fromEntries(models.map((m) => [m, m.replace(/^codex:/i, '')]))
+          : undefined;
       return {
         providerKey: key,
         providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
         models,
+        ...(labels ? { labels } : {}),
       };
     })
     .filter((g) => g.models.length > 0);
@@ -117,13 +128,14 @@ export function renderModelSelect(params: {
         <optgroup key={group.providerKey} label={group.providerName}>
           {group.models.map((m) => {
             const warning = unhealthyLabels?.[m];
+            const label = group.labels?.[m] ?? m;
             return (
               <option
                 key={`${group.providerKey}:${m}`}
                 value={m}
                 data-health={warning ? 'fail' : undefined}
               >
-                {warning ? `${m} — ${warning}` : m}
+                {warning ? `${label} — ${warning}` : label}
               </option>
             );
           })}
