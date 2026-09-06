@@ -33,9 +33,6 @@ export interface UseMentionAssetsTabOptions {
 export interface MentionAssetsTab {
   /** Ready to spread onto `ResourcePickerSuggestion`'s `assets` prop. */
   assets: AssetsTabProps;
-  /** True while the Assets tab is the visible one. Hosts read it to reset the
-   *  tab when the user clicks back to a resource kind. */
-  active: boolean;
   /** Leave the Assets tab without closing the picker (the host's
    *  `onKindChange`). */
   deactivate: () => void;
@@ -135,5 +132,5 @@ export function useMentionAssetsTab({
     [active, count, onSelect, fetch],
   );
 
-  return { assets, active, deactivate, handleKey, reset };
+  return { assets, deactivate, handleKey, reset };
 }
