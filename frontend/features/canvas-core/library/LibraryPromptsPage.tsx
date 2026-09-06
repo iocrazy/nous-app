@@ -24,8 +24,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useOptionalToast } from '../../../components/Toast';
 import { TemplateForm, type TemplateFormValue } from '../../../components/prompts/TemplateForm';
-import { initialTemplateValue } from '../../../components/prompts/SaveAsTemplateDialog';
-import { promptText, saveAsTemplate, PROMPT_FORMS, type PromptEntry, type PromptForm, type PromptLang, type PromptSegment } from '../../../services/promptsService';
+import { initialTemplateValue, shownSide } from '../../../components/prompts/SaveAsTemplateDialog';
+import { promptText, saveAsTemplate, textForSide, PROMPT_FORMS, type PromptEntry, type PromptForm, type PromptLang, type PromptSegment } from '../../../services/promptsService';
 import { useCanvasScope } from '../smart/canvasScope';
 import { useCanvasReadOnly } from '../smart/nodes/useCanvasReadOnly';
 import type { PromptNodeData } from '../smart/types';
@@ -67,10 +67,16 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
   const [group, setGroup] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [formValue, setFormValue] = useState<TemplateFormValue | null>(null);
+  // Which language columns the open form's text belongs in — captured when the
+  // form opens, from the side the prefill actually read (I3). `null` for
+  // "Save current" / "New", whose text comes from a canvas node and has no
+  // language, so it stays EN.
+  const [formSide, setFormSide] = useState<PromptLang | null>(null);
   const [busy, setBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const catalog = usePromptCatalog({ scopeId, segment, projectId, form, query, enabled: open });
+  const { reload } = catalog;
   const items = useMemo(() => {
     const all = catalog.page?.items ?? [];
     return group ? all.filter((e) => e.tags.includes(group)) : all;
@@ -135,6 +141,7 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
   }, [active, targetData, applyNow]);
 
   const openForm = useCallback((mode: 'current' | 'new' | 'promote', entry: PromptEntry | null) => {
+    setFormSide(mode === 'promote' && entry ? shownSide(entry, undefined, lang) : null);
     if (mode === 'promote' && entry) {
       setFormValue(initialTemplateValue(entry, undefined, lang));
     } else if (mode === 'current' && targetData) {
@@ -149,19 +156,21 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
     if (!formValue || !formValue.title.trim() || !formValue.positive.trim()) return;
     setBusy(true);
     try {
-      const { assetId } = await saveAsTemplate(scopeId, { title: formValue.title, group: formValue.group, positive: formValue.positive, negative: formValue.negative, exampleResourceIds: formValue.exampleIds });
+      const { assetId } = await saveAsTemplate(scopeId, { title: formValue.title, group: formValue.group, exampleResourceIds: formValue.exampleIds, ...textForSide(formSide, formValue.positive, formValue.negative) });
       toast?.addToast(t('canvas.library.savedToMine', 'Saved to Mine'), 'success');
       setSheet(null);
       useLibraryStore.getState().setPromptSegment('mine');
       setActiveKey(`template:${assetId}`);
-      catalog.reload();
+      reload();
     } catch (err) {
       console.error('[LibraryPromptsPage] save failed:', err);
       toast?.addToast(t('canvas.library.saveFailed', { code: (err as { code?: string })?.code ?? 'unknown', defaultValue: 'Could not save: {{code}}' }), 'error');
     } finally {
       setBusy(false);
     }
-  }, [formValue, scopeId, toast, t, catalog]);
+    // `catalog` is a fresh object every render, so depending on it made this
+    // memo never hold; `catalog.reload` is the stable identity.
+  }, [formValue, formSide, scopeId, toast, t, reload]);
 
   // Presets exist at all? Read by both the chip row and the Tab cycle, so the
   // two can never disagree about whether `system` is reachable.
@@ -174,7 +183,13 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
       if (sheet) { e.stopPropagation(); setSheet(null); return; }
       return; // LibraryPanel closes on Escape
     }
-    if (editing && e.key !== 'Enter') return;
+    // ↑↓ are navigation, not typing. The panel opens with focus in the search
+    // box, so handing every key to the field made the arrow navigation spec
+    // §3.4 advertises unavailable at exactly the moment the page opens — the
+    // user had to click a row first. A multi-line textarea is the exception:
+    // there ↑↓ move the caret between lines and belong to the field.
+    const navKey = e.key === 'ArrowDown' || e.key === 'ArrowUp';
+    if (editing && e.key !== 'Enter' && !(navKey && editing.tagName !== 'TEXTAREA')) return;
     if (e.key === '/' && !editing) { e.preventDefault(); searchRef.current?.focus(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();

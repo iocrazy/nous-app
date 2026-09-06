@@ -5,7 +5,7 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useOptionalToast } from '../Toast';
-import { promptText, saveAsTemplate, type PromptEntry, type PromptLang } from '../../services/promptsService';
+import { promptText, saveAsTemplate, textForSide, type PromptEntry, type PromptLang } from '../../services/promptsService';
 import { TemplateForm, type TemplateFormValue } from './TemplateForm';
 
 export interface SaveAsTemplateDialogProps {
@@ -22,8 +22,15 @@ export interface SaveAsTemplateDialogProps {
  *  numbered lines and ticks the album resource (slides are not resources). */
 export function initialTemplateValue(entry: PromptEntry, slideNames: string[] | undefined, lang: PromptLang): TemplateFormValue {
   if (entry.form === 'album' && entry.slides) {
-    const picked = entry.slides.filter((s) => (slideNames ? slideNames.includes(s.name) : !!promptText(s, lang).positive));
-    const positive = picked.map((s, i) => `${i + 1}. ${promptText(s, lang).positive}`).filter((l) => !/^\d+\. $/.test(l)).join('\n');
+    // Number AFTER dropping the textless ones. A textless slide is offered
+    // like any other (spec §3.1 keeps it listed so "5 of 6 have text" stays
+    // honest), so it can be ticked — numbering first left a hole: "1. …",
+    // "3. …".
+    const picked = entry.slides
+      .filter((s) => (slideNames ? slideNames.includes(s.name) : true))
+      .map((s) => promptText(s, lang).positive)
+      .filter((line) => line.trim().length > 0);
+    const positive = picked.map((line, i) => `${i + 1}. ${line}`).join('\n');
     return { title: entry.title, group: '', positive, negative: '', exampleIds: entry.source.id ? [entry.source.id] : [] };
   }
   const text = promptText(entry, lang);
@@ -34,6 +41,21 @@ export function initialTemplateValue(entry: PromptEntry, slideNames: string[] | 
     negative: text.negative ?? '',
     exampleIds: entry.form === 'image' && entry.source.id ? [entry.source.id] : [],
   };
+}
+
+/** Which language side the prefill actually read from — i.e. the columns the
+ *  promoted template must be written into (see `textForSide`). For an album it
+ *  is the first ticked slide that supplied any text. */
+export function shownSide(entry: PromptEntry, slideNames: string[] | undefined, lang: PromptLang): PromptLang | null {
+  if (entry.form === 'album' && entry.slides) {
+    for (const s of entry.slides) {
+      if (slideNames && !slideNames.includes(s.name)) continue;
+      const side = promptText(s, lang).shownLang;
+      if (side) return side;
+    }
+    return null;
+  }
+  return promptText(entry, lang).shownLang;
 }
 
 export function SaveAsTemplateDialog({ scopeId, entry, slideNames, lang, onClose, onSaved }: SaveAsTemplateDialogProps): React.ReactElement {
@@ -56,7 +78,8 @@ export function SaveAsTemplateDialog({ scopeId, entry, slideNames, lang, onClose
     setBusy(true);
     try {
       const { assetId } = await saveAsTemplate(scopeId, {
-        title: value.title, group: value.group, positive: value.positive, negative: value.negative, exampleResourceIds: value.exampleIds,
+        title: value.title, group: value.group, exampleResourceIds: value.exampleIds,
+        ...textForSide(shownSide(entry, slideNames, lang), value.positive, value.negative),
       });
       toast?.addToast(t('prompts.save.saved', 'Saved to Mine'), 'success');
       onSaved(assetId);

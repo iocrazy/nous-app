@@ -178,6 +178,48 @@ describe('LibraryPromptsPage', () => {
     undo();
   });
 
+  // I3: promoting a Chinese prompt while the panel shows 中 used to write the
+  // text into the ENGLISH columns, so the new template read "EN only" and its
+  // 中 toggle greyed out — no error, no data loss, nothing that would report it.
+  it('Save as template writes a zh-only entry into the zh columns', async () => {
+    const zh: PromptEntry = { ...image, positive_en: null, negative_en: null, positive_zh: '雨中的自行车', negative_zh: '模糊' };
+    fetchPrompts.mockResolvedValue({ ...page, items: [zh] });
+    useLibraryStore.setState({ promptLang: 'zh' } as never);
+    mount({});
+    fireEvent.click(await screen.findByTestId('library-prompt-row'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as template…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Mine' }));
+    await waitFor(() => expect(saveAsTemplate).toHaveBeenCalled());
+    const input = saveAsTemplate.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(input.positiveZh).toBe('雨中的自行车');
+    expect(input.positive).toBe('');
+  });
+
+  it('Save current from a node stays in the en columns — the node has no language', async () => {
+    mount({ body: 'my prompt', negative_body: 'ugly' });
+    await screen.findByTestId('library-prompt-row');
+    fireEvent.click(screen.getByRole('button', { name: 'Save current…' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Mine 1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Mine' }));
+    await waitFor(() => expect(saveAsTemplate).toHaveBeenCalled());
+    const input = saveAsTemplate.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(input.positive).toBe('my prompt');
+    expect(input.positiveZh).toBeUndefined();
+  });
+
+  // The panel opens with focus in the search box (`focusSearch`), so a guard
+  // that hands EVERY key to the field makes the arrow navigation unavailable
+  // at exactly the moment the page opens — the user must click a row first.
+  it('ArrowDown moves the selection while the search box has focus', async () => {
+    fetchPrompts.mockResolvedValue({ ...page, items: [image, { ...image, key: 'image:11', title: 'Second', positive_en: 'second' }], total: 2 });
+    mount({});
+    await screen.findAllByTestId('library-prompt-row');
+    const search = screen.getByTestId('library-search');
+    search.focus();
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(screen.getAllByTestId('library-prompt-row')[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('keyboard: ArrowDown moves, Enter inserts, Escape cancels an open form before closing', async () => {
     fetchPrompts.mockResolvedValue({ ...page, items: [image, { ...image, key: 'image:11', title: 'Second', positive_en: 'second' }], total: 2 });
     const insertText = vi.fn();

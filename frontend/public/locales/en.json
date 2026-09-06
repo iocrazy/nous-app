@@ -2058,7 +2058,7 @@
       "loadFailed": "Could not load prompts",
       "emptyFiltered": "No prompts match these filters",
       "emptyNone": "No prompts yet — upload a picture that carries generation metadata, run a caption, or save one from a canvas.",
-      "capped": "Showing the first 200 — narrow with search or filters",
+      "capped": "Showing the first {{limit}} — narrow with search or filters",
       "enOnly": "EN only",
       "zhOnly": "中 only",
       "captionedNote": "No parameters — this text describes the picture, it did not make it",

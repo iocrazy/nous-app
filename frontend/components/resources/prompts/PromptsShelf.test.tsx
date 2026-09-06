@@ -2,7 +2,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string, d?: unknown) => (typeof d === 'string' ? d : (d as { defaultValue?: string })?.defaultValue ?? k) }) }));
+// Interpolating `t` (same shape as TemplateForm.test.tsx): the cap notice
+// carries the page size as `{{limit}}`, and a passthrough mock would render a
+// literal `{{limit}}` that real i18next never shows.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, d?: unknown) => {
+      const text = typeof d === 'string' ? d : (d as { defaultValue?: string })?.defaultValue ?? k;
+      if (typeof d !== 'object' || d === null) return text;
+      const opts = d as Record<string, unknown>;
+      return text.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (name in opts ? String(opts[name]) : m));
+    },
+  }),
+}));
 vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 vi.mock('../../../contexts/ResourcesContext', () => ({ useResourcesContext: () => ({ scopeId: '9000', resPath: (p: string) => p, refreshAssetCounts: vi.fn() }) }));
 vi.mock('../SendToCanvasModal', () => ({ SendToCanvasModal: (p: { positive: string }) => <div data-testid="send-modal">{p.positive}</div> }));
@@ -116,6 +128,8 @@ describe('PromptsShelf', () => {
 
   // Ruling R14: no pagination this PR, so the cap has to be visible — a page
   // that silently stops at 200 next to an "All 640" chip is a lie by omission.
+  // The number in the notice is interpolated from `PAGE_LIMIT`, not typed into
+  // the copy — the two used to be able to drift apart silently.
   it('says so when the page is capped at 200', async () => {
     const many = Array.from({ length: 200 }, (_, i) => ({ ...image, key: `image:${i}` }));
     fetchPrompts.mockResolvedValue({ items: many, total: 640, by_form: { template: 0, image: 640, album: 0 }, by_origin: { typed: 0, extracted: 640, captioned: 0 } });

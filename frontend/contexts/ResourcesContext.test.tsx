@@ -417,9 +417,40 @@ describe('ResourcesContext — asset counts', () => {
     expect(screen.getByTestId('assetCounts').textContent).toContain('"location":2');
   });
 
-  it('keeps the asset-row prompt count when the unified count fails', async () => {
-    // A badge that blanks (or drops to zero) on a failed SECOND request would
-    // claim an empty shelf on an answer we never got.
+  // M8: the fallback used to be `/assets/counts`'s `prompt`, which counts
+  // TEMPLATE ROWS ONLY — a different metric under the same label, reading 0
+  // while the page lists 13. The last known unified number is the honest
+  // thing to keep; a failed refresh must not rewrite the badge.
+  it('keeps the LAST KNOWN unified count when a refresh of it fails', async () => {
+    promptCounts.mockResolvedValueOnce({ mine: 12, project: null, system: 3 });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderAssetsAt('/team/42/resources/assets');
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12'),
+    );
+
+    assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, prompt: 7 });
+    promptCounts.mockRejectedValueOnce(new Error('boom'));
+    await act(async () => {
+      refreshAssets();
+    });
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '[ResourcesContext] prompt counts failed:',
+        expect.any(Error),
+      ),
+    );
+    // 12, not the 7 template rows `/assets/counts` just reported.
+    expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12');
+    spy.mockRestore();
+  });
+
+  it('omits the prompt count entirely when the FIRST unified fetch fails', async () => {
+    // Nothing known yet, so there is no last value to keep. The badge is then
+    // absent (the sidebar renders no number for `undefined`) rather than
+    // showing the template-row count under the unified label.
     assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, prompt: 7 });
     promptCounts.mockRejectedValueOnce(new Error('boom'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -427,13 +458,24 @@ describe('ResourcesContext — asset counts', () => {
     renderAssetsAt('/team/42/resources/assets');
 
     await waitFor(() =>
-      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":7'),
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4'),
     );
-    expect(spy).toHaveBeenCalledWith(
-      '[ResourcesContext] prompt counts failed:',
-      expect.any(Error),
-    );
+    expect(screen.getByTestId('assetCounts').textContent).not.toContain('"prompt"');
     spy.mockRestore();
+  });
+
+  it('asks for both counts at once, not one after the other', async () => {
+    // Serialized, the badge waited for two round trips before showing any of
+    // the six numbers.
+    const pending = deferred<typeof ZERO_COUNTS>();
+    assetCounts.mockReturnValueOnce(pending.promise);
+
+    renderAssetsAt('/team/42/resources/assets');
+
+    await waitFor(() => expect(promptCounts).toHaveBeenCalledWith('team-1'));
+    await act(async () => {
+      pending.resolve({ ...ZERO_COUNTS, character: 4 });
+    });
   });
 });
 

@@ -177,7 +177,7 @@ export const PromptsShelf: React.FC = () => {
             )}
           </div>
           {(page?.items.length ?? 0) >= PAGE_LIMIT && (
-            <p className="py-2 text-[11px] text-content-3">{t('prompts.shelf.capped', 'Showing the first 200 — narrow with search or filters')}</p>
+            <p className="py-2 text-[11px] text-content-3">{t('prompts.shelf.capped', { limit: PAGE_LIMIT, defaultValue: 'Showing the first {{limit}} — narrow with search or filters' })}</p>
           )}
         </>
       )}

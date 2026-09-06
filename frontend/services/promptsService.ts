@@ -135,6 +135,15 @@ export function paramChips(params: Record<string, unknown> | null): string[] {
   return out;
 }
 
+/** Relative catalog URL → absolute.
+ *
+ *  Deliberately NOT `features/canvas-core/smart/mediaUrl.ts::absolutize`: a
+ *  resource-library service importing canvas code is the wrong direction, and
+ *  the catalog is consumed by both surfaces. Nothing behaves differently — the
+ *  only extra rule there is a cache-bust on `/api/v1/generated-media/{id}/cover`,
+ *  and no catalog thumb has that shape (they are `/api/v1/resources/{id}/cover`
+ *  and `/api/v1/media/{id}/slides/{name}`). Keep them apart rather than
+ *  "unifying" and inheriting that rule by accident. */
 export function thumbSrc(url: string | null | undefined): string {
   if (!url) return '';
   return url.startsWith('/api/') ? `${getApiUrl()}${url}` : url;
@@ -148,6 +157,20 @@ export interface SaveAsTemplateInput {
   positiveZh?: string;
   negativeZh?: string;
   exampleResourceIds: string[];
+}
+
+/** Route promoted text into the columns of the side it was actually read from.
+ *
+ *  A Chinese prompt promoted while the panel showed 中 belongs in
+ *  `positive_zh` / `negative_zh`; written to the English columns it comes back
+ *  labelled "EN only" with the 中 toggle greyed out, and nothing throws to say
+ *  so. `side` is `promptText(...).shownLang` — the side that actually supplied
+ *  the text — or null when the language is unknown (a canvas node's body),
+ *  which stays EN. */
+export function textForSide(side: PromptLang | null, positive: string, negative: string): Pick<SaveAsTemplateInput, 'positive' | 'negative' | 'positiveZh' | 'negativeZh'> {
+  return side === 'zh'
+    ? { positive: '', negative: '', positiveZh: positive, negativeZh: negative }
+    : { positive, negative };
 }
 
 /** Spec §3.5: create the prompt asset, hang the pictures on its `examples`

@@ -35,6 +35,13 @@ describe('initialTemplateValue', () => {
   it('joins ticked slides as numbered lines; examples is the album resource', () => {
     expect(initialTemplateValue(album, ['002.jpg', '003.jpg'], 'en')).toEqual({ title: 'Harvest', group: '', positive: '1. winking\n2. leaning', negative: '', exampleIds: ['7'] });
   });
+  // A textless slide is offered like any other (spec §3.1 keeps it in the
+  // list so "5 of 6 have text" stays honest), so it can be ticked — and the
+  // number it consumed used to leave a hole: "1. …" then "3. …".
+  it('numbers the ticked slides AFTER dropping the textless ones', () => {
+    const withHole = { ...album, slides: [album.slides![0], album.slides![2], album.slides![1]] };
+    expect(initialTemplateValue(withHole, ['002.jpg', '005.jpg', '003.jpg'], 'en').positive).toBe('1. winking\n2. leaning');
+  });
 });
 
 describe('SaveAsTemplateDialog', () => {
@@ -46,6 +53,32 @@ describe('SaveAsTemplateDialog', () => {
     expect(saveAsTemplate).toHaveBeenCalledWith('9000', expect.objectContaining({ title: 'Bicycle', positive: 'p', exampleResourceIds: ['10'] }));
     expect(addToast).toHaveBeenCalledWith('Saved to Mine', 'success');
   });
+  // I3: `saveAsTemplate` takes `positiveZh` / `negativeZh` and nothing passed
+  // them, so a Chinese prompt promoted while the panel showed 中 landed in the
+  // ENGLISH columns and the new template then read "EN only".
+  it('a zh-only entry viewed in zh is written to the zh columns', async () => {
+    const zhEntry: PromptEntry = { ...image, positive_en: null, negative_en: null, positive_zh: '雨中的自行车', negative_zh: '模糊' };
+    render(<SaveAsTemplateDialog scopeId="9000" entry={zhEntry} lang="zh" onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Mine' }));
+    await waitFor(() => expect(saveAsTemplate).toHaveBeenCalled());
+    const input = saveAsTemplate.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(input.positiveZh).toBe('雨中的自行车');
+    expect(input.negativeZh).toBe('模糊');
+    expect(input.positive).toBe('');
+    expect(input.negative).toBe('');
+  });
+
+  it('an en entry still goes to the en columns', async () => {
+    render(<SaveAsTemplateDialog scopeId="9000" entry={image} lang="en" onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Mine' }));
+    await waitFor(() => expect(saveAsTemplate).toHaveBeenCalled());
+    const input = saveAsTemplate.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(input.positive).toBe('p');
+    expect(input.negative).toBe('n');
+    expect(input.positiveZh).toBeUndefined();
+    expect(input.negativeZh).toBeUndefined();
+  });
+
   it('refuses an empty title or positive without calling the API', () => {
     render(<SaveAsTemplateDialog scopeId="9000" entry={{ ...image, title: '', positive_en: null }} lang="en" onClose={() => {}} onSaved={() => {}} />);
     expect(screen.getByRole('button', { name: 'Save to Mine' })).toBeDisabled();
