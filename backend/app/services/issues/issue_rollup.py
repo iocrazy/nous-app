@@ -81,9 +81,17 @@ def compute_rollup(
     current = next((r for r in runs if r.get("status") == "running"), None)
     spent = round(sum(_run_cents(r) for r in runs), 4)
     budget = issue.get("budget_cents")
-    pct = (
-        round(spent * 100 / budget) if isinstance(budget, int) and budget > 0 else None
-    )
+    # Same reading as BudgetGateHook: NULL = unlimited (no pct), 0 = a real
+    # budget meaning "spend nothing more" — any spend is 100 % over it. Before
+    # 2026-09-06 the `budget > 0` guard left 0 looking unlimited (pct None,
+    # state ok) while the hook on the same run had already recorded
+    # budget_check{halt, pct 100}: two answers for one number.
+    pct: Optional[int] = None
+    if isinstance(budget, int) and budget >= 0:
+        if budget > 0:
+            pct = round(spent * 100 / budget)
+        else:
+            pct = 100 if spent > 0 else 0
     state = "ok"
     if pct is not None:
         state = "over" if pct >= 100 else "warn" if pct >= 80 else "ok"

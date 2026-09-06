@@ -120,6 +120,29 @@ def test_rollup_sums_ended_run_cost_plus_live_spend_against_the_budget():
     assert out["issue_id"] == "7"
 
 
+def test_rollup_zero_budget_is_a_real_budget_not_unlimited():
+    # Mirrors BudgetGateHook: 0 means "spend nothing more". Seen on MH-61
+    # (2026-09-06): the hook recorded budget_check{halt, pct 100} while this
+    # rollup said pct None / state ok for the very same run.
+    out = compute_rollup(
+        _issue(budget_cents=0),
+        [_run("completed", cents=0.128)],
+        [],
+        0,
+        {"kind": "manual"},
+        now=T0,
+    )
+    assert out["budget"] == {
+        "budget_cents": 0,
+        "spent_cents": 0.128,
+        "pct": 100,
+        "state": "over",
+    }
+    # ...and nothing spent yet is 0 %, not "over" — the run has not started.
+    out = compute_rollup(_issue(budget_cents=0), [], [], 0, {"kind": "manual"}, now=T0)
+    assert out["budget"]["pct"] == 0 and out["budget"]["state"] == "ok"
+
+
 def test_rollup_without_budget_and_children_done_count():
     children = [
         {"id": 11, "identifier": "N-11", "title": "a", "status": "done"},
