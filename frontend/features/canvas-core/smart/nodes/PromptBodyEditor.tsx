@@ -359,7 +359,15 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
         if (!editor) return;
         const { state } = editor.view;
         const from = state.selection.from;
-        const chain = editor.chain().focus();
+        // A caller with no pending `@query` (the Library panel, the ⌥ drop)
+        // reaches an editor nobody is typing in. Its "caret" is then whatever
+        // ProseMirror seeded — position 0 on a never-focused card — so the
+        // chip landed in FRONT of the prose (seen on prod, 2026-09-05). No
+        // focus means no caret intent: append instead. The `@` picker keeps
+        // the real caret: its popover re-claims focus for its search box, and
+        // the caret it must consume back to is the one the user left.
+        const atEnd = !consumeMention && !editor.isFocused;
+        const chain = editor.chain().focus(atEnd ? 'end' : undefined);
         if (consumeMention) {
           const textBefore = state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\n');
           const at = textBefore.lastIndexOf('@');

@@ -218,6 +218,24 @@ describe('PromptBodyEditor', () => {
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('draft hero'));
   });
 
+  it('consumeMention:false on a never-focused editor appends — not position 0', async () => {
+    // The Library panel and the ⌥ drop insert into a card nobody is typing
+    // in. ProseMirror's seed selection on such a card is the document start,
+    // so the chip used to land in FRONT of the prose. No focus → no caret
+    // intent → append.
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="a wide shot" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+
+    ref.current?.insertImage(CHIP, { consumeMention: false });
+
+    await screen.findByTestId('prompt-image-chip');
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith('a wide shot@hero.png '),
+    );
+  });
+
   it('consumeMention:false survives a SECOND @ in range — chip one is not eaten', async () => {
     // The narrow multi-item case: with two literal `@` inside the 80-character
     // window, the default deleted back past the first chip. Two drops in a row
