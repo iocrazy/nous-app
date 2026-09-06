@@ -22,14 +22,18 @@ const ROOT = path.resolve(__dirname, '..');
 const ALLOWED = new Set([
   path.join(ROOT, 'library', 'LibraryPanel.tsx'),
   path.join(ROOT, 'ui', 'TopNodeBar.tsx'),
-  // ⌘K row naming the one Library the canvas has.
+  // ⌘K row naming the one Library the canvas has (`title: 'Add from library…'`).
   //
-  // Documents consent, and buys nothing today: a command's `title:` is a bare
-  // object property, which no pattern below reaches (USER_TEXT wants a JSX
-  // attribute or text position, the other two want a t() / tuple literal). It
-  // is here so the day a pattern DOES reach command titles, this row reads as
-  // an allowed name rather than a new offender.
+  // LOAD-BEARING since OBJECT_TEXT below started reaching bare object
+  // properties. It used to be consent with nothing behind it — no pattern
+  // could see a command's `title:`, so the row would not have caught a
+  // second Library named from the palette either. Delete it and the suite
+  // goes red naming this file.
   path.join(ROOT, 'palette', 'commands.ts'),
+  // Keyboard-shortcut help row for the same panel (`label: 'Library panel'`).
+  // A ninth site the earlier patterns could not see: the shortcut table is
+  // object literals, so neither the JSX positions nor t() reached it.
+  path.join(ROOT, 'ui', 'canvasShortcuts.ts'),
 ]);
 
 function tsFiles(dir: string): string[] {
@@ -100,6 +104,28 @@ const T_DEFAULT = /\bt\(\s*'[^']*'\s*,\s*'([^']*)'/g;
  *  thing is fixed, and this one has to survive the next chip map. */
 const LABEL_TUPLE = /\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g;
 
+/** The OBJECT-PROPERTY form — `title: 'Add from library…'` in a command row,
+ *  `label: 'Library panel'` in the shortcut table.
+ *
+ *  A FOURTH blind spot, and the widest one: USER_TEXT wants a JSX attribute
+ *  (`title=`) or a text position, so a label declared as a bare object
+ *  property is invisible to it, and the two patterns above want a `t()` call
+ *  or a two-string tuple. Anything rendered from a const table of rows —
+ *  the ⌘K palette, the shortcut help, any future menu — declares its user
+ *  text exactly this way.
+ *
+ *  Same key set the JSX pattern already trusts as user-facing (`title`,
+ *  `placeholder`, plus the `label` / `hint` these tables use), which is what
+ *  keeps it off identifiers and code: a property name alone is not enough,
+ *  the value has to be a quoted single-line string. Comments are still not
+ *  this test's business — a commented-out row would match, and that is the
+ *  same trade the patterns above already make.
+ *
+ *  Matched library-free and filtered by HAS_LIBRARY, like LABEL_TUPLE, so the
+ *  canary below can count real matches instead of only the offender it
+ *  currently knows about. */
+const OBJECT_TEXT = /(?:title|label|hint|placeholder)\s*:\s*['"]([^'"\n]*)['"]/g;
+
 const HAS_LIBRARY = /\blibrary\b/i;
 
 /** The exact English defaults that genuinely name THE media library — the
@@ -148,7 +174,7 @@ const ALLOWED_DEFAULTS = new Set([
   'Open Library',
 ]);
 
-/** All three patterns, over one file. */
+/** All four patterns, over one file. */
 function scan(file: string): { offenders: string[]; defaults: string[] } {
   const src = fs.readFileSync(file, 'utf8');
   const rel = path.relative(ROOT, file);
@@ -160,6 +186,14 @@ function scan(file: string): { offenders: string[]; defaults: string[] } {
       const text = m[1].trim();
       if (COMMENT_OPENER.test(text)) continue;
       offenders.push(`${rel}: ${text}`);
+    }
+    // File-gated with USER_TEXT rather than string-gated with the two below:
+    // these are labels in a row table, so the question a reviewer answers is
+    // "may THIS surface name a Library", which is what ALLOWED records.
+    for (const m of src.matchAll(OBJECT_TEXT)) {
+      const text = m[1].trim();
+      if (!HAS_LIBRARY.test(text)) continue;
+      offenders.push(`${rel}: object label ${text}`);
     }
   }
 
@@ -192,6 +226,17 @@ describe('the word Library on the canvas', () => {
       ...fs.readFileSync(f, 'utf8').matchAll(LABEL_TUPLE),
     ]);
     expect(pairs.length).toBeGreaterThan(20);
+  });
+
+  it('the object-property pattern matches real code — the canary one level further down', () => {
+    // The ⌘K row this pattern was added for is the only library-bearing
+    // object label outside the shortcut table, so counting offenders would
+    // be a guard verified only by the thing it catches. Count every row
+    // label instead: a typo in OBJECT_TEXT drops all of them.
+    const labels = tsFiles(ROOT).flatMap((f) => [
+      ...fs.readFileSync(f, 'utf8').matchAll(OBJECT_TEXT),
+    ]);
+    expect(labels.length).toBeGreaterThan(40);
   });
 
   it('names exactly one thing: the panel and its chip', () => {
