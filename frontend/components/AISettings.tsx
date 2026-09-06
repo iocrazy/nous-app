@@ -74,6 +74,10 @@ const PROVIDER_META: Record<
     // No credential of its own (the paired daemon is the credential): hides
     // the API-key field and keeps Test Connection reachable without one.
     noApiKey?: boolean;
+    // Explanatory line under the chips (i18n key, interpolates {{model}} =
+    // first enabled chip). For providers whose capabilities are not the
+    // chips themselves — Codex draws with a fixed image model.
+    noteKey?: string;
     defaultBaseUrl?: string;
     models: string[];
     whisperModels?: string[];
@@ -109,6 +113,7 @@ const PROVIDER_META: Record<
     color: 'emerald',
     badge: 'aiSettings.badge.localCli',
     noApiKey: true,
+    noteKey: 'aiSettings.providerNote.codexLocal',
     website: 'https://chatgpt.com/codex',
     models: ['codex:gpt-6-astra', 'codex:gpt-5.6-sol', 'codex:gpt-5.5'],
   },
@@ -1643,7 +1648,16 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       />
                     )}
 
-                    {/* Local codex moved to the Local CLI tab (2026-08-26). */}
+                    {meta.noteKey && (
+                      <p
+                        data-testid={`provider-note-${providerKey}`}
+                        className="text-[11px] text-ink-400"
+                      >
+                        {t(meta.noteKey, {
+                          model: (config.enabled_models ?? [])[0] || config.selected_model || '—',
+                        })}
+                      </p>
+                    )}
 
                     {/* Test Connection button. A stored key is tested
                         SERVER-SIDE (2026-08-26): a blank api_key in the

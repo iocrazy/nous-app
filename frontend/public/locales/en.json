@@ -1044,7 +1044,6 @@
       "allOffline": "All offline",
       "nOnline": "{{count}} online",
       "pairDevice": "Pair a device",
-      "detectCli": "Detect CLI",
       "help": "Help",
       "refresh": "Refresh",
       "helpSetup": "One-time setup on your machine (needs Node 20+ and a ChatGPT subscription). This is the only step the installer cannot do for you — it installs the CLIs itself:",
@@ -1061,12 +1060,6 @@
       "lastSeen": "last seen {{time}}",
       "neverConnected": "never connected",
       "serverRuntimeNote": "Server runtime (shared). Your own devices report their CLI state on the device rows below after pairing.",
-      "skillInstalled": "GPT Image 2 helper installed — canvas image jobs on the server use it.",
-      "skillMissing": "gpt-image-2-skill not installed on the server.",
-      "codexInstalled": "codex CLI {{version}} installed.",
-      "codexMissing": "codex chat CLI is not on the server — text tasks never run here, they run on your own device.",
-      "authPresent": "OAuth session present — login is validated on first run.",
-      "authMissing": "No OAuth session — the server runtime is not logged in.",
       "envNotReported": "Environment not reported yet — starts with the next daemon connect.",
       "loggedIn": "logged in",
       "notLoggedIn": "not logged in",
@@ -1074,7 +1067,6 @@
       "errDevices": "Could not load your devices",
       "errPairCode": "Could not create a pairing code",
       "errRevoke": "Could not revoke that device",
-      "errDetect": "CLI detection failed",
       "jimengTitle": "Dreamina (即梦) CLI",
       "jimengDesc": "Per-device dreamina runs with YOUR credits — pair a device above and its dreamina check appears on the device row. This card manages the transitional server-side shared account.",
       "jimengLoggedIn": "Logged in",
@@ -1088,10 +1080,6 @@
       "loginDone": "I've approved — check status",
       "errStatus": "Could not reach the server CLI",
       "errLogin": "Login flow failed to start",
-      "serverBadge": "Server",
-      "upToDate": "(latest)",
-      "updateAvailable": "(update available: {{version}})",
-      "detectNote": "Checks the SERVER runtime. Your own machine's CLIs appear on its device row after pairing.",
       "effectiveDevice": "Now: text and images both run on {{device}} with your ChatGPT login.",
       "effectiveNotLoggedIn": "Now: {{device}} is online but codex is not logged in there — run `codex login` on it.",
       "effectiveNone": "Now: no device online — the server can only draw images; text tasks cannot use Codex until a device is paired and online."
@@ -4203,7 +4191,10 @@
     "noPlatformModels": "No platform models available.",
     "settingsSaved": "Settings Saved!",
     "saveSettings": "Save Settings",
-    "addTyped": "Add “{{model}}”"
+    "addTyped": "Add “{{model}}”",
+    "providerNote": {
+      "codexLocal": "Text tasks run on the chips above. Images always use gpt-image-2 — it is not a pick — orchestrated by the first enabled model ({{model}}); in the canvas choose GPT Image 2."
+    }
   },
   "aiLibrary": {
     "title": "AI Library",

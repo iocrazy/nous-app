@@ -86,6 +86,15 @@ describe('Codex provider card', () => {
   });
 });
 
+describe('Codex provider card — image model note', () => {
+  it('says images use gpt-image-2 orchestrated by the first enabled model (user: "没有识别到图像模型?")', async () => {
+    render(<AISettings settings={base({ 'codex-local': { enabled: true, enabled_models: ['codex:gpt-6-astra'] } })} onSave={vi.fn()} section="providers" />);
+    const note = await screen.findByTestId('provider-note-codex-local');
+    expect(note.textContent).toContain('gpt-image-2');
+    expect(note.textContent).toContain('codex:gpt-6-astra');
+  });
+});
+
 describe('agent model picker', () => {
   it('lists the Codex card under its own group once models are enabled', () => {
     const groups = getAvailableModels(base({
