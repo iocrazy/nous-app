@@ -1527,7 +1527,13 @@ git commit -m "feat(api): GET /prompts + /prompts/counts — unified prompt cata
 ```bash
 docker exec nous-db psql -U postgres -p 55434 -d postgres -Atc "SELECT prompt_origin, count(*) FROM public.resources WHERE coalesce(is_trashed,false)=false AND (btrim(coalesce(gen_prompt,''))<>'' OR btrim(coalesce(gen_prompt_zh,''))<>'' OR (slide_prompts IS NOT NULL AND slide_prompts::text NOT IN ('{}','null','[]'))) GROUP BY 1;"
 ```
-Expected: no `NULL` bucket.
+Expected: the `NULL` bucket is either absent or exactly `skipped_no_text` rows
+(the backfill result reports that number). Those are the rows `has_prompt_expr()`
+selects and `derive_origin` refuses to label — the sentinel disagreement
+documented on `prompts.origin.is_blank_text` — and they stay NULL on every
+future run, so a non-zero count is only a failure when it does NOT match.
+Also check `hit_limit` in the same result: `true` means the one-shot scan was
+full and more rows exist than this run saw.
 
 - [ ] **Step 2: Probe the endpoint** with the debug account token (mint via `E2E_MINT_TOKEN=1` per `frontend/e2e-prod/README.md`): `GET https://cn.nous.ink:88/api/v1/prompts?scope_id=331438215859255&segment=mine` → `total ≥ 1`, `by_origin` sums to `total`, every item validates against §3.1 (form/origin/thumbs/slides).
 

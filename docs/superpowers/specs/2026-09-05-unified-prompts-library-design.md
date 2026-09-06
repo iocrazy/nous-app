@@ -145,7 +145,7 @@ PromptEntry {
 ## 4. 验收（可证伪）
 
 1. **读模型**：对生产库 `GET /prompts?scope_id=<调试账号个人 scope>&segment=mine` 返回 `total ≥ 1` 且每条 `form/origin/thumbs` 与 §3.1 一致；`by_origin` 之和 = `total`。
-2. **来源列**：回填 dry-run 报告的分布 = §1 表（7 extracted / 5 captioned / 1 captioned album / 0 typed）；live 后 `SELECT count(*) FROM resources WHERE prompt_origin IS NULL AND (has_prompt)` = 0。
+2. **来源列**：回填 dry-run 报告的分布 = §1 表（7 extracted / 5 captioned / 1 captioned album / 0 typed）；live 后 `SELECT count(*) FROM resources WHERE prompt_origin IS NULL AND (has_prompt)` 应等于回填结果里的 `skipped_no_text`（通常为 0）——这些是 SQL 行过滤器 `has_prompt_expr()` 选中、而 `derive_origin` 判定为无文字的哨兵行（`'[]'` / `'null'` / `'{}'` / `'""'`），它们**永远**留 NULL，所以「非零」只有在与该计数相等时才算通过。
 3. **写入方**：在资源详情页改一段正向 → 该行 `prompt_origin='typed'`；对一张 A1111 PNG 走上传 → `extracted`；跑一次 caption → `captioned`。
 4. **资源库页**：`/resources/assets/prompt` 不再是「Nothing here yet」；形态 / 来源分段计数之和等于 total；图集卡展开后无文字 slide 的 Send 禁用；captioned 卡不画参数行。
 5. **面板 Insert**：瞄准一个正文为 `draft @` 的节点，Insert positive 后正文为 `draft @` + 正向，`@` 仍在；`manual_refs` 不变。
@@ -191,5 +191,6 @@ PromptEntry {
 - **图集来源粒度**：`prompt_origin` 是行级。一张图集若被 caption 后又手改了两张，整行仍显示最后写入方。要做条目级需要 `slide_prompts[name].origin`，两处写入方（`caption_slide`、`ResourcePromptSection` PATCH）都要带上，留待有真实需求时。
 - **图集存模板的 examples**：只能挂图集资源本身（slide 不是 `resources` 行），模板缩略图因此来自 slides 端点而非 `asset_files`。
 - **"This project" 对图片的定义**是「被该项目任一画布引用过」（`canvas_resource_refs`），不是「传到该项目的库里」——后者在 `libraries.scope_type='project'` 上，但上传路径今天不一定写它。两种定义并存时以画布引用为准，因为它回答的是「这个项目用过这段提示词吗」。
+- **`q` 过滤是 Python 子串匹配，不是 §3.1 写的 `ILIKE`**（`entries.matches_query`）：整个 segment 已经在内存里（模板与图片各有 2000 条上限），再回 SQL 走一趟没有收益。行为差异只有一处 —— `%` 和 `_` 在这里是**字面字符**，不是通配符；没有安全后果（这一层没有 SQL）。哪天计数与过滤下沉到 SQL，这条随之作废。
 - **贴身 composer** 不接目标机制（§3.6）。
 - 图集「全部送出」本期不提供：`promptInsert` 通道一次导航只插一个节点，逐张 Send 覆盖需求（裁决 R10）。
