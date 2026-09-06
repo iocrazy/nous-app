@@ -358,3 +358,10 @@ export function useAuth(): AuthContextValue {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+
+/** Like `useAuth`, but `null` outside the provider instead of throwing — for
+ *  leaf components whose only need is an optional value (the media token on
+ *  an `<img>`), so they still render in isolation. */
+export function useOptionalAuth(): AuthContextValue | null {
+  return useContext(AuthContext);
+}

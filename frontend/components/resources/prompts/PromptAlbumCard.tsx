@@ -7,10 +7,12 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FormTag, OriginTag } from '../../prompts/PromptTags';
 import { PromptThumbs } from '../../prompts/PromptThumbs';
-import { promptText, thumbSrc, type PromptEntry, type PromptLang, type PromptSlide } from '../../../services/promptsService';
+import { promptText, type PromptEntry, type PromptLang, type PromptSlide } from '../../../services/promptsService';
+import { usePromptThumbSrc } from '../../prompts/usePromptThumbSrc';
 import type { PromptCardProps } from './PromptCard';
 
 export function PromptAlbumCard({ entry, lang, onSend, onSaveAsTemplate, onOpen }: PromptCardProps): React.ReactElement {
+  const src = usePromptThumbSrc();
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Memoised, not a bare `?? []`: a fresh literal each render would make the
@@ -37,7 +39,7 @@ export function PromptAlbumCard({ entry, lang, onSend, onSaveAsTemplate, onOpen 
             const has = !!text.positive;
             return (
               <div key={s.name} data-testid="prompt-slide-row" className={`grid grid-cols-[40px_1fr_auto] items-start gap-2 rounded-lg bg-island-2 p-1.5 ${has ? '' : 'opacity-60'}`}>
-                {s.url ? <img src={thumbSrc(s.url)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="block h-10 w-10 rounded-md bg-card" />}
+                {s.url ? <img src={src(s.url)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="block h-10 w-10 rounded-md bg-card" />}
                 <div className="min-w-0">
                   <pre className={`m-0 line-clamp-2 whitespace-pre-wrap font-mono text-[10.5px] ${has ? 'text-content' : 'text-content-3'}`}>{has ? text.positive : t('prompts.shelf.noPromptOnSlide', 'No prompt on this slide')}</pre>
                   <span className="text-[9.5px] text-content-3">{s.name}{s.positive_en && s.positive_zh ? ' · EN · 中' : s.positive_zh ? ' · 中' : s.positive_en ? ' · EN' : ''}</span>
