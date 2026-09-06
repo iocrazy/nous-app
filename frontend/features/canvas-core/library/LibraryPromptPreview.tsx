@@ -14,7 +14,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { FormTag, OriginTag } from '../../../components/prompts/PromptTags';
-import { langAvailability, paramChips, promptText, thumbSrc, type PromptEntry, type PromptLang, type PromptSlide } from '../../../services/promptsService';
+import { langAvailability, paramChips, promptText, type PromptEntry, type PromptLang, type PromptSlide } from '../../../services/promptsService';
+import { usePromptThumbSrc } from '../../../components/prompts/usePromptThumbSrc';
 
 export interface LibraryPromptPreviewProps {
   entry: PromptEntry | null;
@@ -51,6 +52,7 @@ const BLOCK_LABEL = 'mb-0.5 flex items-baseline gap-1.5 text-[9.5px] font-semibo
 const BTN = 'nodrag rounded-lg border border-canvas-line px-2.5 py-1 text-[11px] font-medium text-canvas-text disabled:opacity-40';
 
 export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactElement {
+  const thumb = usePromptThumbSrc();
   const { t } = useTranslation();
   const { entry, lang } = p;
   if (!entry) {
@@ -89,7 +91,7 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2.5 py-2">
         {entry.thumbs.length > 0 && !entry.slides && (
-          <div className="flex gap-1.5">{entry.thumbs.map((th) => <img key={th.url} src={thumbSrc(th.url)} alt="" className="h-14 w-14 rounded-lg object-cover" />)}</div>
+          <div className="flex gap-1.5">{entry.thumbs.map((th) => <img key={th.url} src={thumb(th.url)} alt="" className="h-14 w-14 rounded-lg object-cover" />)}</div>
         )}
         {entry.slides ? (
           <div>
@@ -102,7 +104,7 @@ export function LibraryPromptPreview(p: LibraryPromptPreviewProps): React.ReactE
                 return (
                   <div key={s.name} data-testid="library-prompt-slide" data-active={on ? 'true' : 'false'} onClick={() => p.onSlideChange(s.name)}
                     className={`nodrag grid cursor-pointer grid-cols-[40px_1fr_auto] items-center gap-2 rounded-lg p-1.5 ${on ? 'bg-[var(--accent-soft)] ring-1 ring-inset ring-[var(--accent-border)]' : 'bg-canvas-card'} ${has ? '' : 'opacity-60'}`}>
-                    {s.url ? <img src={thumbSrc(s.url)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="block h-10 w-10 rounded-md bg-canvas-page" />}
+                    {s.url ? <img src={thumb(s.url)} alt="" className="h-10 w-10 rounded-md object-cover" /> : <span className="block h-10 w-10 rounded-md bg-canvas-page" />}
                     <div className="min-w-0">
                       <p className={`m-0 line-clamp-2 font-mono text-[10.5px] ${has ? 'text-canvas-text' : 'text-canvas-muted'}`}>{has ? st.positive : t('canvas.library.noPromptOnSlide', 'No prompt on this slide')}</p>
                       <small className="text-[9.5px] text-canvas-muted">{s.name}</small>

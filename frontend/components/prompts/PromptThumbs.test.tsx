@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
+const authState: { mediaToken: string | null } = { mediaToken: null };
+vi.mock('../../contexts/AuthContext', () => ({ useOptionalAuth: () => authState }));
 import { PromptThumbs } from './PromptThumbs';
 
 describe('PromptThumbs', () => {
@@ -18,5 +20,23 @@ describe('PromptThumbs', () => {
     render(<PromptThumbs thumbs={thumbs} count={6} testId="t" />);
     expect(screen.getAllByRole('img')).toHaveLength(3);
     expect(screen.getByText('6')).toBeInTheDocument();
+  });
+
+  it('album slide thumbnails carry the session media token; covers do not', () => {
+    authState.mediaToken = 'tok';
+    render(
+      <PromptThumbs
+        thumbs={[
+          { url: '/api/v1/media/9/slides/002.jpg', kind: 'image' },
+          { url: '/api/v1/resources/1/cover', kind: 'image' },
+        ]}
+      />,
+    );
+    const srcs = screen.getAllByRole('img').map((el) => el.getAttribute('src'));
+    expect(srcs).toEqual([
+      'https://api.test/api/v1/media/9/slides/002.jpg?token=tok',
+      'https://api.test/api/v1/resources/1/cover',
+    ]);
+    authState.mediaToken = null;
   });
 });

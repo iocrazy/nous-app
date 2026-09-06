@@ -144,9 +144,19 @@ export function paramChips(params: Record<string, unknown> | null): string[] {
  *  and no catalog thumb has that shape (they are `/api/v1/resources/{id}/cover`
  *  and `/api/v1/media/{id}/slides/{name}`). Keep them apart rather than
  *  "unifying" and inheriting that rule by accident. */
-export function thumbSrc(url: string | null | undefined): string {
+/** Album slide files are served by `/api/v1/media/{id}/slides/{name}`, which
+ *  is an authenticated endpoint: a bare `<img src>` cannot send a Bearer
+ *  header, so — like SlidePlayer and every other slide `<img>` in the app —
+ *  the URL carries the short-lived media token as `?token=`. Covers
+ *  (`/resources/{id}/cover`) are public and need nothing. */
+const SLIDE_URL_RE = /^\/api\/v1\/media\/[^/]+\/slides\//;
+
+export function thumbSrc(url: string | null | undefined, mediaToken?: string | null): string {
   if (!url) return '';
-  return url.startsWith('/api/') ? `${getApiUrl()}${url}` : url;
+  const absolute = url.startsWith('/api/') ? `${getApiUrl()}${url}` : url;
+  if (!mediaToken || !SLIDE_URL_RE.test(url)) return absolute;
+  const sep = absolute.includes('?') ? '&' : '?';
+  return `${absolute}${sep}token=${encodeURIComponent(mediaToken)}`;
 }
 
 export interface SaveAsTemplateInput {

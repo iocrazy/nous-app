@@ -67,6 +67,19 @@ describe('helpers', () => {
     expect(thumbSrc('https://x/y.png')).toBe('https://x/y.png');
     expect(thumbSrc(null)).toBe('');
   });
+
+  it('thumbSrc carries the media token only on album slide URLs', () => {
+    // Slides are served by an authenticated endpoint; a bare <img> cannot send
+    // Bearer, so the token rides along as ?token= exactly like SlidePlayer.
+    expect(thumbSrc('/api/v1/media/9/slides/002.jpg', 'tok/1')).toBe(
+      'https://api.test/api/v1/media/9/slides/002.jpg?token=tok%2F1',
+    );
+    expect(thumbSrc('/api/v1/media/9/slides/a.jpg?x=1', 'tok')).toBe('https://api.test/api/v1/media/9/slides/a.jpg?x=1&token=tok');
+    // Covers are public — no token leaks into their URL.
+    expect(thumbSrc('/api/v1/resources/1/cover', 'tok')).toBe('https://api.test/api/v1/resources/1/cover');
+    // No session token yet → the plain URL (the old behaviour), never "token=null".
+    expect(thumbSrc('/api/v1/media/9/slides/002.jpg', null)).toBe('https://api.test/api/v1/media/9/slides/002.jpg');
+  });
 });
 
 describe('saveAsTemplate', () => {
