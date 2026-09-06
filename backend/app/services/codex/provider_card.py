@@ -61,6 +61,40 @@ async def _load_ai_settings(user_id: str) -> dict:
     return await get_ai_settings(user_id)
 
 
+class ProviderCardDisabledError(RuntimeError):
+    """The user's Codex provider card is switched off, so no application may
+    run Codex for them — the Providers page is the one management entry.
+    One ASCII line with its own marker (see ``generation/failure.py``); the
+    ``code`` / ``detail`` attributes are what ``describe_generation_failure``
+    reads."""
+
+    code = "provider_card_disabled"
+
+    def __init__(self) -> None:
+        self.detail = (
+            "Codex (Local CLI) is switched off under Settings → AI → Providers. "
+            "Turn the card on, then run again."
+        )
+        super().__init__(
+            "[provider_card_disabled] Codex (Local CLI) is switched off under "
+            "Settings > AI > Providers. Turn the card on, then run again."
+        )
+
+
+async def card_enabled(user_id: str) -> bool:
+    """Is the user's Codex provider card switched on? False on any doubt —
+    an application must not offer or run what the management page does not."""
+    try:
+        settings = await _load_ai_settings(user_id)
+    except Exception as exc:  # noqa: BLE001 — fail closed, never raise into a picker
+        logger.warning(
+            "[codex-card] settings lookup failed, treating card as off: {}", exc
+        )
+        return False
+    cfg = ((settings or {}).get("ai_providers") or {}).get(PROVIDER_KEY) or {}
+    return bool(isinstance(cfg, dict) and cfg.get("enabled"))
+
+
 async def codex_orchestrator_model(user_id: str) -> Optional[str]:
     """The Codex model the user's card names, bare (no prefix), or None.
 

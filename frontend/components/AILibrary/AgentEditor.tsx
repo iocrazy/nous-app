@@ -42,7 +42,7 @@ import { AgentCostTab } from './AgentCostTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import PermissionChangeLog from './PermissionChangeLog';
-import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
+import { PROVIDER_DISPLAY_NAMES, getAvailableModels, visiblePlatformModels } from './agentEditorModel';
 import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
@@ -171,14 +171,17 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
 
   const modelGroups = useMemo(() => {
     const base = getAvailableModels(aiSettings);
-    if (nousEnabled && nousLlm.length > 0) {
+    // Platform rows obey the Nous card on the Providers page — the one
+    // management entry — exactly as the canvas picker does server-side.
+    const platform = visiblePlatformModels(nousLlm, aiSettings?.providers?.nous);
+    if (nousEnabled && platform.length > 0) {
       base.push({
         providerKey: 'nous',
         providerName: PROVIDER_DISPLAY_NAMES.nous,
-        models: nousLlm.map((m) => m.name),
+        models: platform.map((m) => m.name),
         // Show the catalog's display name, not the row id.
         labels: Object.fromEntries(
-          nousLlm.map((m) => [m.name, m.display_name || m.name]),
+          platform.map((m) => [m.name, m.display_name || m.name]),
         ),
       });
     }

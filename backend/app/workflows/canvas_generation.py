@@ -90,6 +90,19 @@ async def _local_engine(
     return None
 
 
+async def _require_provider_card(engine: str, user_id: Optional[str]) -> None:
+    """The Providers page is the one management entry (2026-09-06): a codex
+    run for a user whose Codex card is off is refused with a typed, actionable
+    failure — never run on the strength of the daemon merely being online.
+    Dreamina has no card yet; nothing to require."""
+    if engine != "codex" or not user_id:
+        return
+    from app.services.codex import provider_card
+
+    if not await provider_card.card_enabled(str(user_id)):
+        raise provider_card.ProviderCardDisabledError()
+
+
 async def _capabilities_for(actual_provider: str) -> "ProviderCapabilities":
     """Capabilities of the protocol serving `actual_provider`; restrictive
     default when unknown (drops loudly rather than ignoring quietly)."""
@@ -501,7 +514,7 @@ async def _dispatch_and_record_failure(**kwargs: Any) -> Dict[str, Any]:
 # only buys a second daemon job on the user's ChatGPT quota and another
 # minute of waiting (measured 2026-09-05: every refusal ran twice, 1:43 and
 # 2:09 wall-clock for a verdict the first attempt already had).
-NON_RETRYABLE_FAILURE_CODES = frozenset({"content_refused"})
+NON_RETRYABLE_FAILURE_CODES = frozenset({"content_refused", "provider_card_disabled"})
 
 
 async def _record_failure_detail(exc: BaseException) -> Dict[str, Any]:
@@ -616,6 +629,7 @@ async def generate_canvas_media_step(
     )
     if local:
         engine, engine_model = local
+        await _require_provider_card(engine, user_id)
         # Capabilities live under the catalog's actual_provider, so map the
         # engine back to it. Neither name in hand is that key: ``engine_model``
         # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears

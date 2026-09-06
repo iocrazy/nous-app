@@ -42,6 +42,7 @@ import {
   GOVERNANCE_ALL_ALLOWED,
 } from '../services/aiService';
 import { useTranslation } from 'react-i18next';
+import { visiblePlatformModels } from './AILibrary/agentEditorModel';
 import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
 import { suspectedNonChatKind, nonChatKindKey } from '../utils/nonChatModel';
@@ -790,9 +791,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   const nousConfig = localSettings.providers.nous;
   const visibleNousModels = useMemo(() => {
     if (!governance.nous_enabled) return [];
-    if (nousConfig?.enabled === false) return [];
-    const disabled = new Set(nousConfig?.disabled_models ?? []);
-    return nousModels.filter((m) => !disabled.has(m.name));
+    // Same predicate the agent editor uses (one management entry, one rule).
+    return visiblePlatformModels(nousModels, nousConfig);
   }, [governance.nous_enabled, nousConfig, nousModels]);
 
   // Flip the platform-card master switch. Absent config => currently ON, so the

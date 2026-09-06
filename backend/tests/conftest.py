@@ -101,3 +101,21 @@ def sample_script_data():
         "name": "Test Script",
         "description": "A test script",
     }
+
+
+@pytest.fixture(autouse=True)
+def _codex_provider_card_on(monkeypatch):
+    """Default: the user's Codex provider card is ON.
+
+    Since 2026-09-06 the Providers page is the one management entry — the
+    canvas daemon branch and the picker refuse Codex when the card is off
+    (``services/codex/provider_card.card_enabled``). Without this default every
+    daemon-branch test would hit a real settings read, fail it, and be refused
+    for a reason it is not about. The gate's own tests set the value they need
+    on top of this (a test-level monkeypatch wins over an autouse fixture).
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services.codex import provider_card
+
+    monkeypatch.setattr(provider_card, "card_enabled", AsyncMock(return_value=True))

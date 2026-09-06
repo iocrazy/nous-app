@@ -122,3 +122,21 @@ describe('renderModelSelect — labels', () => {
     expect(g?.labels).toEqual({ 'codex:gpt-5.6-sol': 'gpt-5.6-sol' });
   });
 });
+
+// ── platform rows obey the Providers page's Nous card (user 2026-09-06:
+// "agent 也属于应用，可用模型取值也来源于唯一管理入口") ────────────────────────
+describe('visiblePlatformModels', () => {
+  const rows = [{ name: 'a' }, { name: 'b' }] as never[];
+  it('drops rows the user switched off on the Nous card', async () => {
+    const { visiblePlatformModels } = await import('./agentEditorModel');
+    expect(visiblePlatformModels(rows, { enabled: true, disabled_models: ['b'] } as never).map((m: { name: string }) => m.name)).toEqual(['a']);
+  });
+  it('offers nothing when the Nous card itself is off', async () => {
+    const { visiblePlatformModels } = await import('./agentEditorModel');
+    expect(visiblePlatformModels(rows, { enabled: false } as never)).toEqual([]);
+  });
+  it('an absent card config means no restriction', async () => {
+    const { visiblePlatformModels } = await import('./agentEditorModel');
+    expect(visiblePlatformModels(rows, undefined)).toHaveLength(2);
+  });
+});
