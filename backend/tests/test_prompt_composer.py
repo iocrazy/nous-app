@@ -252,7 +252,13 @@ def test_skill_tool_has_required_params(fake_agent, fake_skills):
     assert props["items"]["items"]["required"] == ["content"]
     assert props["id"]["type"] == "integer"
     assert "todo" in skill_tool["function"]["description"]
-    assert params["required"] == ["skill"]  # todo args stay optional
+    # Built-in task (sub-agent spawn) — same rule, same PR family.
+    assert props["subagent_type"]["type"] == "string"
+    assert props["prompt"]["type"] == "string"
+    assert props["tasks"]["type"] == "array"
+    assert props["tasks"]["items"]["required"] == ["subagent_type", "prompt"]
+    assert "task" in skill_tool["function"]["description"]
+    assert params["required"] == ["skill"]  # todo/task args stay optional
     assert params["required"] == ["skill"]
 
 
