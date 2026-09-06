@@ -858,8 +858,14 @@ class ResourcesRepository(AsyncpgRepository):
                 # a MutableDict, so the unit of work only sees the change if
                 # the attribute itself is set to a new object.
                 obj.slide_prompts = merged
-                for k, v in extra.items():
-                    setattr(obj, _RESOURCES_NAME_TO_ATTR.get(k, k), v)
+                # Same treatment update_resource gives its patch: ISO-string
+                # timestamps parsed at the boundary (asyncpg rejects them at
+                # flush), and the column name resolved through the mapping
+                # with NO `.get(k, k)` fallback — an unmapped name must raise
+                # KeyError here rather than setattr an arbitrary attribute
+                # that silently persists nothing.
+                for k, v in coerce_datetime_strings(Resources, extra).items():
+                    setattr(obj, _RESOURCES_NAME_TO_ATTR[k], v)
                 await session.flush()
             logger.info(
                 f"Merged slide prompt for resource {resource_id} slide {slide_name!r}"

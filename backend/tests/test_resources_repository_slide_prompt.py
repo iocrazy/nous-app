@@ -99,3 +99,21 @@ async def test_unknown_extra_key_raises_before_anything_is_written(monkeypatch):
     assert session.gets == []
     assert session.flushed == 0
     assert obj.slide_prompts is None
+
+
+def test_every_whitelisted_extra_key_is_a_real_mapped_column():
+    """The whitelist and the column mapping cannot drift apart.
+
+    ``merge_slide_prompt`` resolves each key through ``_RESOURCES_NAME_TO_ATTR``
+    with no fallback, so a whitelist entry that is not a mapped column would be
+    a ``KeyError`` at write time — on the caption path, in production, not here.
+    Widening ``_SLIDE_PROMPT_EXTRA_KEYS`` to something misspelled fails at this
+    assertion instead.
+    """
+    from app.repositories.resources_repository import (
+        _RESOURCES_NAME_TO_ATTR,
+        _SLIDE_PROMPT_EXTRA_KEYS,
+    )
+
+    unmapped = _SLIDE_PROMPT_EXTRA_KEYS - set(_RESOURCES_NAME_TO_ATTR)
+    assert unmapped == set(), f"whitelisted but not a resources column: {unmapped}"
