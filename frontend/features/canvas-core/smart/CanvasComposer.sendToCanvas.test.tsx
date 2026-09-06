@@ -5,9 +5,9 @@
 // into a Prompt node + Media node pair, then clears the router state so a
 // reload/back-nav doesn't reinsert it.
 //
-// The node/connection SHAPE (lang fallback, cover url, position offset,
-// connection id) is already covered by loadPromptAsset.test.ts — the pure
-// builder this wiring reuses. This file only proves the composer-level
+// The node/connection SHAPE (position offset, item kind, connection id) is
+// already covered by promptReferenceMedia.test.ts — the pure builder this
+// wiring reuses. This file only proves the composer-level
 // wiring fires at the right time and clears up after itself; it does NOT
 // re-derive the full canvas surface (surfaceRef geometry, viewport, React
 // Flow) that a true end-to-end drop-position test would need.
@@ -41,9 +41,9 @@ const mockRerunPrompt = vi.fn();
 vi.mock('./regenerate', () => ({
   rerunPrompt: (...args: unknown[]) => mockRerunPrompt(...args),
 }));
-// CanvasComposer only pulls the PromptAsset type + getResourceCoverUrl (the
-// mint-failure fallback) from resourceService — full mock avoids pulling in
-// supabaseClient's env-var-dependent init through the real module.
+// CanvasComposer only pulls getResourceCoverUrl (the mint-failure fallback)
+// from resourceService — full mock avoids pulling in supabaseClient's
+// env-var-dependent init through the real module.
 vi.mock('../../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
 }));
@@ -148,6 +148,55 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
+  // Ruling R11(b): a prompt template has no picture of its own. The payload
+  // then carries no assetId, and importing/derivng a cover from one would put
+  // a tile that resolves to nothing on the board.
+  it('inserts the prompt node alone when the payload carries no assetId', async () => {
+    locationState = {
+      promptInsert: {
+        filename: 'Golden hour',
+        positive: 'warm rim light',
+        negative: 'flare',
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(1));
+    const { nodes, connections, selection } = useCanvasCoreStore.getState();
+    const promptNode = nodes[0] as Record<string, unknown>;
+    expect(promptNode.type).toBe('prompt');
+    expect((promptNode.data as Record<string, unknown>).body).toBe('warm rim light');
+    expect((promptNode.data as Record<string, unknown>).negative_body).toBe('flare');
+    expect(mockImportResource).not.toHaveBeenCalled();
+    expect(connections).toHaveLength(0);
+    expect(selection).toEqual([promptNode.id]);
+    expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', { replace: true });
+  });
+
+  it('prefers the payload coverUrl over the id-derived one when the import fails', async () => {
+    mockImportResource.mockRejectedValueOnce(new Error('no mint'));
+    locationState = {
+      promptInsert: {
+        assetId: 'album7',
+        filename: '002.jpg',
+        positive: 'winking',
+        coverUrl: 'https://api.test/slides/002.jpg',
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    const mediaNode = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as Record<string, unknown>).type === 'media') as Record<string, unknown>;
+    const items = (mediaNode.data as { items: Array<{ url: string }> }).items;
+    expect(items[0].url).toBe('https://api.test/slides/002.jpg');
+  });
+
   it('does nothing when there is no pending promptInsert', () => {
     locationState = null;
     useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
@@ -164,6 +213,42 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     render(<CanvasComposer />);
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  // Ruling R24 (spec 2026-09-05-unified-prompts-library, Task 18 review): the
+  // shared `promptPatch` omits each key when its side of the payload is
+  // empty. Reachable in production from `PromptSection.tsx` — its Send to
+  // Canvas button is NOT disabled on an empty positive, and it sends
+  // `negative: negValue.trim() ? negValue : null`.
+  //
+  // ⚠️ `body` is pinned as the factory's `''`, NOT as an absent key:
+  // `createPromptNode` seeds `body: data.body ?? ''` unconditionally
+  // (`factories.ts:140`), so no patch of this expression can make that key
+  // disappear. What the omission actually buys is that the blank is not
+  // written through — hence the WHITESPACE positive here and not a bare
+  // `''`, which no mutation of this expression could distinguish.
+  // `negative_body` is genuinely absent (the factory adds it only when
+  // truthy) and an empty negative must not conjure the negative textarea.
+  it('omits both prompt keys when the payload sides are empty (R24)', async () => {
+    locationState = {
+      promptInsert: {
+        assetId: 'r1',
+        filename: 'hero.png',
+        positive: '   ',
+        negative: null,
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    const promptNode = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+    const data = promptNode.data as Record<string, unknown>;
+    expect(data.body).toBe('');
+    expect(data).not.toHaveProperty('negative_body');
   });
 
   // ─── ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5) ────

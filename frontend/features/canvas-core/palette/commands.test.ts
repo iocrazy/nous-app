@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useLibraryStore } from '../library/libraryStore';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
   buildCanvasCommands,
@@ -267,5 +268,22 @@ describe('buildCanvasCommands — read-only', () => {
     useCanvasCoreStore.setState({ readOnly: true });
 
     expect(cmds.find((c) => c.id === 'undo')!.enabled?.()).toBe(false);
+  });
+});
+
+// ---- library-add ----------------------------------------------------------
+
+describe('library-add command', () => {
+  it('opens the panel on its remembered page and stays enabled read-only', () => {
+    // The latch is the whole point of the case: every WRITE command greys out
+    // here, and this one must not — reading the library is not an edit. Without
+    // the latch the assertion below passes on `enabled: writable` too.
+    useCanvasCoreStore.setState({ readOnly: true });
+    const cmd = buildCanvasCommands().find((c) => c.id === 'library-add')!;
+    expect(cmd.title).toBe('Add from library…');
+    const openPanel = vi.spyOn(useLibraryStore.getState(), 'openPanel');
+    cmd.run();
+    expect(openPanel).toHaveBeenCalledWith();
+    expect(cmd.enabled?.() ?? true).toBe(true);
   });
 });

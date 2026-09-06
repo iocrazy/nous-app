@@ -37,6 +37,7 @@ from app.db.session import read_scope, write_scope
 from app.models import Resources
 from app.models.generated_media import GeneratedMedia
 from app.services.library.media_storage import materialize
+from app.services.prompts.origin import stamp_origin
 
 SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
 _AUDIT_IDS_CAP = 200
@@ -89,7 +90,7 @@ def build_patch(current: dict, extracted: dict) -> dict:
         and not (current.get("gen_prompt_negative") or "").strip()
     ):
         patch["gen_prompt_negative"] = extracted["negative"]
-    return patch
+    return stamp_origin(patch, "extracted")
 
 
 @DBOS.workflow()

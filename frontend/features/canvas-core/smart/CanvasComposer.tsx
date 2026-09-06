@@ -47,7 +47,7 @@ import {
 } from './genSlots';
 import { resolveAssetRef } from './assetRef';
 import { promptBodyForRun } from './mentionedAssets';
-import { buildPromptAssetLoad } from './loadPromptAsset';
+import { buildPromptReferenceMedia } from './promptReferenceMedia';
 import { importResourceAsCanvasMedia } from './mediaImport';
 import {
   resolveEffectiveSourceUrl,
@@ -66,7 +66,7 @@ import {
 import { topoSortPrompts } from './topology';
 import type { CanvasConnection, CanvasNode } from '../types';
 import type { PromptNodeData } from './types';
-import { getResourceCoverUrl, type PromptAsset } from '../../../services/resourceService';
+import { getResourceCoverUrl } from '../../../services/resourceService';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
 import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
@@ -75,17 +75,20 @@ import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
 /** Shape of the router state SendToCanvasModal navigates here with
  *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4 / Phase 3 Task
  *  3; `autoRun`/`ratio` added by spec 2026-07-28-prompt-dataline, Task 5).
- *  `coverUrl` travels along for completeness but isn't consumed below —
- *  the adapter mints a fresh durable URL from `assetId` via
- *  importResourceAsCanvasMedia (falling back to the cover URL only if that
- *  mint fails), then hands it to buildPromptAssetLoad, which keeps the
- *  media-node construction on the one tested code path shared with the
- *  in-canvas Library picker (PromptNodeView). When `autoRun` is set, the
+ *  The insert mints a fresh durable URL from `assetId` via
+ *  importResourceAsCanvasMedia (falling back to `coverUrl`, else the
+ *  resource's cover, only if that mint fails), then hands it to
+ *  buildPromptReferenceMedia, which owns the media-node + connection
+ *  construction. When `autoRun` is set, the
  *  inserted prompt node gets `gen: {kind:'image', model:'', ratio}` merged
  *  in before the commit, then `rerunPrompt(id)` fires once — this is the
  *  "⚡ Generate Similar" one-click flow from a resource's result card. */
 interface PendingPromptInsert {
-  assetId: string;
+  /** The resource behind the prompt. ABSENT for a text-only insert (ruling
+   *  R11): a prompt template has no resource row, so there is nothing to
+   *  import and no cover to fall back to — the canvas gets the prompt node
+   *  alone. Present means a real `resources.id`, never an asset id. */
+  assetId?: string;
   filename: string;
   positive: string;
   negative?: string;
@@ -264,7 +267,13 @@ export function CanvasComposer({
     const insert = (location.state as { promptInsert?: PendingPromptInsert } | null)
       ?.promptInsert;
     if (!insert) return;
-    const insertKey = `${canvasId}:${insert.assetId}`;
+    // A text-only insert has no id to key on, so the key is what does vary
+    // between two of them. Two sends of the same text to the same canvas
+    // within one mount still collapse to one — the guard cannot tell them
+    // apart, and inserting the same prompt twice is the worse failure.
+    const insertKey = insert.assetId
+      ? `${canvasId}:${insert.assetId}`
+      : `${canvasId}:${insert.filename}:${insert.positive.length}`;
     // Guard is check-and-set BEFORE the mint's await below so StrictMode's
     // synchronous double-invoke can't both pass the check and each mint/
     // insert their own pair — both invocations run before either commit
@@ -273,42 +282,49 @@ export function CanvasComposer({
     insertedRef.current = insertKey;
 
     void (async () => {
-      let mediaUrl: string;
-      let mediaKind: 'image' | 'video';
-      try {
-        const imported = await importResourceAsCanvasMedia(insert.assetId);
-        mediaUrl = imported.url;
-        mediaKind = imported.kind;
-      } catch (err) {
-        console.error('[promptAsset] durable import failed, falling back to cover:', err);
-        mediaUrl = getResourceCoverUrl(insert.assetId); // visual-only fallback, no i2i
-        mediaKind = 'image'; // cover endpoint always serves an image
-      }
-
       const position = dropPosition();
       const promptNode = createPromptNode({}, { position });
-      // Adapter: the payload already carries the resolved positive/negative
-      // text (PromptSection picked the lang side), so both sides of the
-      // fake asset get the same value — buildPromptAssetLoad's lang
-      // fallback logic is a no-op here, it's only used for the shared
-      // node/connection construction.
-      const asset: PromptAsset = {
-        id: insert.assetId,
-        filename: insert.filename,
-        gen_prompt: insert.positive,
-        gen_prompt_zh: insert.positive,
-        gen_prompt_negative: insert.negative ?? null,
-        gen_prompt_negative_zh: insert.negative ?? null,
-        updated_at: '',
+
+      // The payload already carries the resolved positive/negative text
+      // (the sender picked the lang side), so the patch is the same
+      // expression on both branches. Each key is omitted when empty: an
+      // empty `body` would blow away text the user had already typed into
+      // the node, and an empty `negative_body` would render the negative
+      // textarea for no reason. promptPatch is spread over the node's
+      // existing data at the commit below, so an omitted key is a no-op.
+      const promptPatch: { body?: string; negative_body?: string } = {
+        ...(insert.positive.trim() ? { body: insert.positive } : {}),
+        ...(insert.negative ? { negative_body: insert.negative } : {}),
       };
-      const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
-        asset,
-        lang: 'en',
-        promptNodeId: promptNode.id,
-        promptNodePosition: position,
-        mediaUrl,
-        mediaKind,
-      });
+
+      // Text-only insert: no import, no media node, no connection. Minting a
+      // cover from an id the payload does not have would put a tile that
+      // resolves to nothing next to the prompt.
+      let media: ReturnType<typeof buildPromptReferenceMedia> | null = null;
+
+      if (insert.assetId) {
+        let mediaUrl: string;
+        let mediaKind: 'image' | 'video';
+        try {
+          const imported = await importResourceAsCanvasMedia(insert.assetId);
+          mediaUrl = imported.url;
+          mediaKind = imported.kind;
+        } catch (err) {
+          console.error('[promptAsset] durable import failed, falling back to cover:', err);
+          // The sender's own picture when it gave one (an album slide is not
+          // the album's cover), else the resource's cover.
+          mediaUrl = insert.coverUrl ?? getResourceCoverUrl(insert.assetId); // visual-only fallback, no i2i
+          mediaKind = 'image'; // cover endpoint always serves an image
+        }
+
+        media = buildPromptReferenceMedia({
+          promptNodeId: promptNode.id,
+          promptNodePosition: position,
+          mediaUrl,
+          mediaKind,
+          name: insert.filename,
+        });
+      }
       const filledPromptNode = {
         ...promptNode,
         data: {
@@ -330,9 +346,14 @@ export function CanvasComposer({
       };
 
       const store = useCanvasCoreStore.getState();
-      setNodes([...store.nodes, filledPromptNode, mediaNode as unknown as CanvasNode]);
-      setConnections([...store.connections, connection as unknown as CanvasConnection]);
-      setSelection([filledPromptNode.id, mediaNode.id]);
+      if (media) {
+        setNodes([...store.nodes, filledPromptNode, media.mediaNode as unknown as CanvasNode]);
+        setConnections([...store.connections, media.connection as unknown as CanvasConnection]);
+        setSelection([filledPromptNode.id, media.mediaNode.id]);
+      } else {
+        setNodes([...store.nodes, filledPromptNode]);
+        setSelection([filledPromptNode.id]);
+      }
 
       if (insert.autoRun) {
         rerunPrompt(filledPromptNode.id).catch((err) =>

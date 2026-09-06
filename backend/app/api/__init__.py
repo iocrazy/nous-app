@@ -52,6 +52,10 @@ from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
 from app.api.project_assets_router import router as _project_assets_router
 from app.api.projects_router import router as projects_router
+
+# Aliased for the same reason as ``assets_api_router`` above: the bare
+# basename would shadow the ``app.api.prompts_router`` module attribute.
+from app.api.prompts_router import router as prompts_api_router
 from app.api.realtime_router import router as realtime_router
 from app.api.resources_router import router as resources_router
 from app.api.reviews_router import router as reviews_router
@@ -146,6 +150,7 @@ api_router.include_router(router=_project_assets_router, tags=["Project Assets"]
 
 api_router.include_router(router=generated_media_router, tags=["Generated Media"])
 api_router.include_router(router=assets_api_router, tags=["Assets"])
+api_router.include_router(router=prompts_api_router, tags=["Prompts"])
 api_router.include_router(router=generated_api_router, tags=["Generated Inbox"])
 api_router.include_router(router=cover_templates_router, tags=["Cover Templates"])
 

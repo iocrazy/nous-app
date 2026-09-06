@@ -5,9 +5,9 @@
 // opposite case: a file that quietly comes back, or an import that outlives
 // its usefulness in a comment-shaped reference nobody notices.
 //
-// `AssetPromptPicker` and `MentionImageGrid` are NOT here: they are P3 and are
-// still mounted (see the plan's Plan-time ruling 5). Asserting their absence
-// now would be asserting a thing this plan deliberately does not do.
+// `AssetPromptPicker` and `loadPromptAsset` joined the list in P3 (spec
+// 2026-09-05 §3.7). `MentionImageGrid` stays mounted in the attached composer
+// on purpose (spec §3.6).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +20,8 @@ const GONE = [
   'smart/nodes/AssetPickerDialog.tsx',
   'smart/nodes/CanvasMentionPicker.tsx',
   'library/LibraryReferencePopover.tsx',
+  'smart/nodes/AssetPromptPicker.tsx',
+  'smart/loadPromptAsset.ts',
 ];
 
 function tsFiles(dir: string): string[] {
@@ -32,7 +34,7 @@ function tsFiles(dir: string): string[] {
 }
 
 /**
- * This file names all three stems in `GONE` — it has to, that is the list —
+ * This file names every stem in `GONE` — it has to, that is the list —
  * so scanning it would make the guard permanently red about itself. Every
  * other file in the tree is fair game.
  */
@@ -57,5 +59,10 @@ describe('components this plan retires', () => {
 
   it('found files at all — an empty scan would pass every case above', () => {
     expect(scanned().length).toBeGreaterThan(40);
+  });
+
+  it('nothing in frontend/ still calls the browser-side prompt query', () => {
+    const svc = fs.readFileSync(path.resolve(ROOT, '../../services/resourceService.ts'), 'utf8');
+    expect(svc).not.toMatch(/fetchPromptAssets|interface PromptAsset\b/);
   });
 });

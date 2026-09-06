@@ -217,6 +217,17 @@ class PromoteGeneratedMediaService:
                     "current_version": 1,
                     "file_hash": file_hash,
                     "gen_prompt": gen.get("prompt"),
+                    # mig 455: a generation's prompt is machine-recorded text.
+                    # Hand-rolled rather than `stamp_origin`: that helper
+                    # stamps whenever a prompt-text KEY is present in the
+                    # patch, which is the right rule for a PATCH (the key is
+                    # there because the text changed) and the wrong one for
+                    # this INSERT dict, where `gen_prompt` is always present
+                    # and may be null. Stamping "extracted" on a promoted
+                    # generation that carried no prompt would label an
+                    # unprompted row. `test_origin_wiring.py` pins this call
+                    # site by its literal for the same reason.
+                    "prompt_origin": "extracted" if gen.get("prompt") else None,
                     "gen_params": generation_params_from_generated_media(gen),
                 }
             )

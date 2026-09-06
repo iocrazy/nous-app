@@ -228,10 +228,13 @@ class TestCaptionAssetWorkflowLegacyResult:
         # I3: gen_prompt_json is ALWAYS included (NULL when the structured
         # contract wasn't met this run) so a degraded re-run clears any
         # stale JSON left by a previous structured run.
+        # mig 455: the caption workflow is a writer of the positive text, so
+        # the same patch carries prompt_origin='captioned'.
         assert written == {
             "gen_prompt": "a fox",
             "gen_prompt_zh": "一只狐狸",
             "gen_prompt_json": None,
+            "prompt_origin": "captioned",
         }
         write_tags.assert_not_awaited()
 

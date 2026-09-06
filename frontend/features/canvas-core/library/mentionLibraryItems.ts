@@ -39,11 +39,17 @@ import {
 import type { LibraryItem } from './librarySearch';
 import { EditorGoneError } from './mentionHandles';
 
-/** Exactly the two inserters this needs, so the helper can be pinned without
+/** Exactly the inserters this needs, so the helper can be pinned without
  *  an editor. `PromptBodyEditorHandle` satisfies it structurally. */
 export interface MentionInserters {
   insertImage: (image: PromptImageRef, opts?: { consumeMention?: boolean }) => void;
   insertAsset: (asset: MentionedAsset, opts?: { consumeMention?: boolean }) => void;
+  /** Plain text at the caret WITHOUT consuming a pending `@query` — the
+   *  registered wrapper passes `{ consumeMention: false }` (the editor's
+   *  default would eat back to the last `@` within 80 characters; see the
+   *  header of this file). The Prompts page's Insert positive relies on
+   *  this. */
+  insertText: (text: string) => void;
 }
 
 /**

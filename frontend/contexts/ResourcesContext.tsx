@@ -30,6 +30,7 @@ import {
 import { fetchLibraries } from '../services/libraryService';
 import { fetchGeneratedCounts } from '../services/generatedService';
 import { fetchAssetCounts, type AssetCounts } from '../services/assetsService';
+import { fetchPromptCounts } from '../services/promptsService';
 import { ASSET_TYPES, type AssetType } from '../components/assets/assetSlots';
 import { useKeysetPagination } from '../hooks/useKeysetPagination';
 import type { KeysetCursor } from '../services/pagination';
@@ -138,7 +139,9 @@ export interface ResourcesContextType {
    *  rendered at all, so a failed fetch never shows six fake zeros. A type
    *  that really has none comes back as 0 from the server, which IS rendered
    *  as nothing — the distinction the null preserves is "we could not ask". */
-  assetCounts: AssetCounts | null;
+  /** Partial: a count we do not have is ABSENT, never zero. The unified
+   *  prompt count comes from a second request that can fail on its own. */
+  assetCounts: Partial<AssetCounts> | null;
   /** Re-fetch `assetCounts` (e.g. after creating or deleting an asset). */
   refreshAssetCounts: () => void;
   resourceTagNamesMap: Record<string, string>;
@@ -321,7 +324,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }, []);
 
   // ── Asset library counts (the six Assets sub-item badges) ──
-  const [assetCounts, setAssetCounts] = useState<AssetCounts | null>(null);
+  const [assetCounts, setAssetCounts] = useState<Partial<AssetCounts> | null>(null);
   const [assetCountsTick, setAssetCountsTick] = useState(0);
   const refreshAssetCounts = useCallback(() => {
     setAssetCountsTick((v) => v + 1);
@@ -758,9 +761,30 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // Same guard, same reason as the Generated pill above.
     if (!scopeId) return;
     let cancelled = false;
-    fetchAssetCounts(scopeId)
-      .then((counts) => {
-        if (!cancelled) setAssetCounts(counts);
+    // Both counts at once: the badge needs the unified number and the other
+    // five come from `/assets/counts`, so serializing them made the six badges
+    // wait for two round trips.
+    Promise.all([
+      fetchAssetCounts(scopeId),
+      fetchPromptCounts(scopeId).catch((err) => {
+        console.error('[ResourcesContext] prompt counts failed:', err);
+        return null;
+      }),
+    ])
+      .then(([counts, prompts]) => {
+        if (cancelled) return;
+        // The Prompts tab lists the unified catalog (templates + prompted
+        // pictures), so its badge must count THAT — `/assets/counts` only
+        // knows the template rows. When the unified count fails we KEEP THE
+        // LAST KNOWN one: substituting the template-row number would show a
+        // different metric under the same label (0 while the page lists 13).
+        // With nothing known yet the key stays absent, which the sidebar
+        // already renders as no badge rather than as a zero.
+        setAssetCounts((prev) => {
+          const { prompt: _templatesOnly, ...rest } = counts;
+          const unified = prompts ? prompts.mine : prev?.prompt;
+          return unified === undefined ? rest : { ...rest, prompt: unified };
+        });
       })
       .catch((err) => {
         console.error('[ResourcesContext] asset counts failed:', err);

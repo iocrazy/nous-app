@@ -20,6 +20,8 @@ class TestBuildPatch:
             "gen_params": {"tool": "a1111", "seed": 1},
             "gen_prompt": "cat",
             "gen_prompt_negative": "dog",
+            # mig 455: writing the positive text stamps who wrote it.
+            "prompt_origin": "extracted",
         }
 
     def test_never_clobbers_user_values(self):
@@ -37,7 +39,7 @@ class TestBuildPatch:
         patch = build_patch(
             {"gen_prompt": ""}, {"positive": "cat", "negative": None, "params": None}
         )
-        assert patch == {"gen_prompt": "cat"}
+        assert patch == {"gen_prompt": "cat", "prompt_origin": "extracted"}
 
 
 class TestRouterWiring:

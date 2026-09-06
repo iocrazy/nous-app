@@ -247,6 +247,10 @@ class Resources(Base, UserScoped):
     __table_args__ = (
         CheckConstraint("rating >= 0 AND rating <= 5", name="resources_rating_check"),
         CheckConstraint(
+            "prompt_origin IN ('typed', 'extracted', 'captioned')",
+            name="resources_prompt_origin_check",
+        ),
+        CheckConstraint(
             "source_type::text = ANY (ARRAY['web'::character varying::text,"
             " 'upload'::character varying::text])",
             name="resources_source_type_check",
@@ -393,6 +397,10 @@ class Resources(Base, UserScoped):
     gen_prompt_json: Mapped[str | None] = mapped_column(
         Text,
         comment="Structured JSON prompt (subject/style/composition/lighting/color/text/aspect_ratio)",
+    )
+    prompt_origin: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Last writer of the prompt text: typed | extracted | captioned (mig 455)",
     )
     url: Mapped[str | None] = mapped_column(Text)
     rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))

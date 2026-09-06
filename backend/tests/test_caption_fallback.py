@@ -606,6 +606,7 @@ async def test_caption_slide_workflow_threads_fallback_models_to_call_caption(
         return_value={"id": rid, "media_id": mid, "mime_type": "image/jpeg"}
     )
     repo.merge_slide_prompt = AsyncMock(return_value={"en": "a prompt"})
+    repo.update_resource = AsyncMock(return_value=None)
 
     media_repo = MagicMock()
     media_repo.get_by_id = AsyncMock(return_value={"download_path": "web/douyin/123"})

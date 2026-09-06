@@ -289,10 +289,15 @@ const CASES: NodeCase[] = [
       { what: 'kind picker', label: 'Prompt kind' },
       { what: 'provider picker', label: 'Prompt provider' },
       { what: 'agent picker', label: 'Prompt agent' },
-      { what: 'library loader', label: 'Prompt Templates' },
       { what: 'ref chip remove', label: 'Remove reference to clip' },
       { what: 'Retry', testId: 'prompt-retry' },
     ],
+    // The bookshelf moved out of `writes` when it stopped writing: it used to
+    // load a template straight into the card, and now it only opens the panel
+    // on its Prompts page. Browsing is what a viewer is entitled to, and its
+    // two siblings onto the same panel (the ⌘K row and the bare `L` shortcut)
+    // were never gated — the page itself withholds every write and says so.
+    reads: [{ what: 'prompt template shelf', label: 'Prompt Templates' }],
   },
   {
     name: 'prompt (image generation)',

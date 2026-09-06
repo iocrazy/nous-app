@@ -15,7 +15,7 @@ import { getMentionHandle, registerMentionHandle } from './mentionHandles';
 import type { MentionInserters } from './mentionLibraryItems';
 
 function fakeHandle(): MentionInserters {
-  return { insertImage: vi.fn(), insertAsset: vi.fn() };
+  return { insertImage: vi.fn(), insertAsset: vi.fn(), insertText: vi.fn() };
 }
 
 const undos: Array<() => void> = [];
@@ -64,5 +64,13 @@ describe('mentionHandles', () => {
     undo();
     undo();
     expect(getMentionHandle('p1')).toBeNull();
+  });
+
+  it('carries insertText alongside the two chip inserters', () => {
+    const insertText = vi.fn();
+    const undo = registerMentionHandle('n1', { insertImage: vi.fn(), insertAsset: vi.fn(), insertText });
+    getMentionHandle('n1')!.insertText('hello');
+    expect(insertText).toHaveBeenCalledWith('hello');
+    undo();
   });
 });

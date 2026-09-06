@@ -369,6 +369,8 @@ async def test_png_prompt_writes_positive_and_negative_when_both_empty():
             "gen_prompt": "masterpiece, 1girl",
             "gen_prompt_negative": "lowres",
             "gen_params": _PARAMS,
+            # mig 455: PNG metadata extraction is a machine writer.
+            "prompt_origin": "extracted",
         },
     )
 
@@ -419,7 +421,9 @@ async def test_png_prompt_never_clobbers_existing_negative():
         )
 
     assert result["status"] == "success"
-    update_resource.assert_any_await(_RID, {"gen_prompt": "masterpiece, 1girl"})
+    update_resource.assert_any_await(
+        _RID, {"gen_prompt": "masterpiece, 1girl", "prompt_origin": "extracted"}
+    )
 
 
 async def test_png_prompt_never_clobbers_existing_positive():

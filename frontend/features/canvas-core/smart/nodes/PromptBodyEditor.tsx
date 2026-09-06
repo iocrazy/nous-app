@@ -69,20 +69,21 @@ export interface PromptBodyEditorHandle {
    *  unless `opts.consumeMention` is false. */
   insertAsset: (asset: MentionedAsset, opts?: MentionInsertOptions) => void;
   /**
-   * Insert plain text at the caret, replacing a pending `@query` token.
+   * Insert plain text at the caret, replacing a pending `@query` token unless
+   * `opts.consumeMention` is false — the same contract as the two chip
+   * inserters, and it takes the option for the same reason: the consuming
+   * step deletes back to the last literal `@` within 80 characters, which is
+   * a text heuristic that cannot tell a pending query from prose.
    *
-   * NO PRODUCTION CALLER as of PR #2102. The `⌥` library drop used to be one —
-   * `insertText('@' + title + ' ')` per item — and final review ruling R31
-   * replaced it with `mentionLibraryItems.ts`, which inserts real chips: the
-   * characters `@Harbour` are prose a run never reads, and routed through
-   * `insertAtMention` they also ate the text before the caret.
-   *
-   * Kept because it is the editor handle's only plain-text door and its
-   * `@`-consuming behaviour is pinned by three cases in
-   * `PromptBodyEditor.test.tsx`. Anything reaching for it to write a MENTION
-   * wants `insertAsset` / `insertImage` instead.
+   * The `⌥` library drop used to be a caller — `insertText('@' + title + ' ')`
+   * per item — and final review ruling R31 replaced it with
+   * `mentionLibraryItems.ts`, which inserts real chips: the characters
+   * `@Harbour` are prose a run never reads. The Prompts page's Insert
+   * positive is the plain-text caller, and it passes `consumeMention: false`.
+   * Anything reaching for this to write a MENTION wants `insertAsset` /
+   * `insertImage` instead.
    */
-  insertText: (text: string) => void;
+  insertText: (text: string, opts?: MentionInsertOptions) => void;
   focus: () => void;
 }
 
@@ -401,8 +402,8 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
     );
 
     const insertText = useCallback(
-      (text: string) => {
-        insertAtMention([{ type: 'text', text }]);
+      (text: string, opts?: MentionInsertOptions) => {
+        insertAtMention([{ type: 'text', text }], opts?.consumeMention ?? true);
       },
       [insertAtMention],
     );

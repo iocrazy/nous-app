@@ -40,6 +40,7 @@ from loguru import logger
 
 from app.db.scope import Scope, request_scope
 from app.services.library.media_storage import materialize
+from app.services.prompts.origin import stamp_origin
 
 
 @DBOS.step()
@@ -199,6 +200,7 @@ async def caption_asset_workflow(
             )
 
             await manager.update_progress(wf_id, 85, subtitle="Saving prompt & tags")
+            stamp_origin(update, "captioned")
             await repo.update_resource(resource_id, update)
 
         # Tags/tag_groups are shared vocabulary tables — write them under

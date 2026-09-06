@@ -77,13 +77,20 @@ vi.mock('../smart/mediaImport', () => ({
   importResourceAsCanvasMedia: (...a: unknown[]) => importResourceAsCanvasMedia(...a),
 }));
 
+// The Prompts page is Task 16's own subject and has its own suite. Stubbed
+// here so these cases pin WHICH page the panel mounts, not what that page
+// draws — the real one would pull the whole prompt catalog into a panel test.
+vi.mock('./LibraryPromptsPage', () => ({
+  LibraryPromptsPage: () => <div data-testid="library-prompts-page" />,
+}));
+
 import { MAX_REFERENCE_IMAGES } from '../smart/refOrder';
 import { _resetModelCapabilitiesCache } from '../smart/nodes/useModelCapabilities';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { LibraryPanel } from './LibraryPanel';
 import { registerMentionHandle } from './mentionHandles';
 import { PREVIEW_DELAY_MS } from './LibraryPreviewCard';
-import { useLibraryStore } from './libraryStore';
+import { PANEL_WIDTH, useLibraryStore } from './libraryStore';
 
 const SCOPE = '727145299382534100';
 
@@ -190,14 +197,16 @@ function textPromptNode() {
  *  `PromptNodeView`; the panel only ever sees it through the registry. */
 const insertImage = vi.fn();
 const insertAsset = vi.fn();
+const insertText = vi.fn();
 const handleUndos: Array<() => void> = [];
 function armMentionHandle(nodeId = 'p1') {
-  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset }));
+  handleUndos.push(registerMentionHandle(nodeId, { insertImage, insertAsset, insertText }));
 }
 function releaseHandles() {
   while (handleUndos.length > 0) handleUndos.pop()?.();
   insertImage.mockReset();
   insertAsset.mockReset();
+  insertText.mockReset();
 }
 
 function renderPanel() {
@@ -631,12 +640,24 @@ describe('LibraryPanel', () => {
     expect(screen.queryByTestId('library-target')).toBeNull();
   });
 
-  it('the Prompts page is the one line P3 will replace', () => {
+  it('the Prompts page renders LibraryPromptsPage', () => {
     act(() => { useLibraryStore.getState().openPanel(); });
     renderPanel();
     fireEvent.click(screen.getByTestId('library-page-prompts'));
-    expect(screen.getByTestId('library-prompts-stub')).toBeTruthy();
+    expect(screen.getByTestId('library-prompts-page')).toBeTruthy();
     expect(screen.queryByTestId('library-grid')).toBeNull();
+  });
+
+  // Spec §3.1/§3.4: the two pages have different natural widths. At the Media
+  // page's 340px the Prompts page's list + preview columns are unreadable, so
+  // an open that lands on Prompts re-asserts the width — and the island must
+  // actually be drawn at it, not merely record it in the store.
+  it('opening on the Prompts page widens the island to its own width', () => {
+    act(() => { useLibraryStore.getState().openPanel({ page: 'prompts' }); });
+    renderPanel();
+    expect(useLibraryStore.getState().width).toBe(PANEL_WIDTH.prompts);
+    expect(useLibraryStore.getState().width).toBe(600);
+    expect(screen.getByTestId('library-panel')).toHaveStyle({ width: '600px' });
   });
 
   // ── "This Project" needs a project ────────────────────────────────────
