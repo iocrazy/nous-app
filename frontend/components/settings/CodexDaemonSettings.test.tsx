@@ -3,6 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CodexDaemonSettings } from './CodexDaemonSettings';
 
+import en from '../../public/locales/en.json';
+
+// Resolve against the shipped English copy (with {{interpolation}}) so the
+// effective-line assertions read real sentences, not bare keys.
+vi.mock('react-i18next', () => {
+  const t = (key: string, opts?: Record<string, unknown>) => {
+    const raw = key.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown>)?.[k], en);
+    let out = typeof raw === 'string' ? raw : key;
+    for (const [k, v] of Object.entries(opts ?? {})) out = out.replace(`{{${k}}}`, String(v));
+    return out;
+  };
+  return { useTranslation: () => ({ t }) };
+});
+
 vi.mock('../../services/apiClient', () => ({
   apiFetch: vi.fn().mockResolvedValue({
     json: async () => ({
@@ -42,7 +56,6 @@ vi.mock('../../services/codexDaemonService', async (importOriginal) => {
 });
 
 import { codexDaemonService } from '../../services/codexDaemonService';
-import en from '../../public/locales/en.json';
 import zh from '../../public/locales/zh.json';
 
 describe('CodexDaemonSettings', () => {
@@ -93,7 +106,7 @@ describe('CodexDaemonSettings', () => {
     const text = screen.getByTestId('codex-cli-readout').textContent ?? '';
     expect(text).toContain('gpt-image-2-skill 0.7.3');
     expect(text).toContain('/usr/local/bin/gpt-image-2-skill');
-    expect(text).toContain('settings.localCli.authPresent');
+    expect(text).toContain('OAuth session present');
   });
 });
 
@@ -125,5 +138,30 @@ describe('CodexDaemonSettings — model lives on the provider card', () => {
     render(<CodexDaemonSettings />);
     expect(await screen.findByTestId('codex-model-hint')).toBeInTheDocument();
     expect(screen.queryByTestId('codex-model-select')).toBeNull();
+  });
+});
+
+// ── what runs WHERE, stated once (user 2026-09-06: "不还是提示仅出图吗?") ─────
+// The server readout said "codex chat CLI not installed on the server
+// (image-only)", which reads as "this feature only does images" — while the
+// user's own device had codex logged in and was running every text task. The
+// card now states the effective situation in one line above the server detail.
+describe('CodexDaemonSettings — effective line', () => {
+  it('names the online device that runs text and images', async () => {
+    (codexDaemonService.listDevices as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: '1', device_name: 'mac-mini', platform: 'darwin', created_at: null,
+        last_seen_at: new Date().toISOString(), env_report: { codex_ok: true, auth_ok: true } },
+    ]);
+    render(<CodexDaemonSettings />);
+    const line = await screen.findByTestId('codex-effective-line');
+    expect(line.textContent).toContain('mac-mini');
+    expect(line.textContent).toMatch(/text and images/i);
+  });
+
+  it('says the server can only draw when no device is online', async () => {
+    (codexDaemonService.listDevices as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    render(<CodexDaemonSettings />);
+    const line = await screen.findByTestId('codex-effective-line');
+    expect(line.textContent).toMatch(/no device online/i);
   });
 });

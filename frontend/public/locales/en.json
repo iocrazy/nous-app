@@ -1064,7 +1064,7 @@
       "skillInstalled": "GPT Image 2 helper installed — canvas image jobs on the server use it.",
       "skillMissing": "gpt-image-2-skill not installed on the server.",
       "codexInstalled": "codex CLI {{version}} installed.",
-      "codexMissing": "codex chat CLI not installed on the server (image-only).",
+      "codexMissing": "codex chat CLI is not on the server — text tasks never run here, they run on your own device.",
       "authPresent": "OAuth session present — login is validated on first run.",
       "authMissing": "No OAuth session — the server runtime is not logged in.",
       "envNotReported": "Environment not reported yet — starts with the next daemon connect.",
@@ -1091,7 +1091,10 @@
       "serverBadge": "Server",
       "upToDate": "(latest)",
       "updateAvailable": "(update available: {{version}})",
-      "detectNote": "Checks the SERVER runtime. Your own machine's CLIs appear on its device row after pairing."
+      "detectNote": "Checks the SERVER runtime. Your own machine's CLIs appear on its device row after pairing.",
+      "effectiveDevice": "Now: text and images both run on {{device}} with your ChatGPT login.",
+      "effectiveNotLoggedIn": "Now: {{device}} is online but codex is not logged in there — run `codex login` on it.",
+      "effectiveNone": "Now: no device online — the server can only draw images; text tasks cannot use Codex until a device is paired and online."
     },
     "nav": {
       "account": "ACCOUNT",

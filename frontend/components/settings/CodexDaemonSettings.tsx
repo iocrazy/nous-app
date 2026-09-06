@@ -95,6 +95,17 @@ export function CodexDaemonSettings() {
   };
 
   const online = devices.filter((d) => isDeviceOnline(d)).length;
+  // What actually runs where, in one line. The server readout below is a
+  // detail about the SERVER runtime (it never has the chat CLI); text tasks
+  // run on the user's own device, and saying only the server half read as
+  // "this feature is image-only" (2026-09-06).
+  const onlineDevice = devices.find((d) => isDeviceOnline(d));
+  const onlineReport = onlineDevice ? deviceEnvReport(onlineDevice) : null;
+  const effectiveKey = !onlineDevice
+    ? 'settings.localCli.effectiveNone'
+    : onlineReport?.codex_ok && onlineReport?.auth_ok
+      ? 'settings.localCli.effectiveDevice'
+      : 'settings.localCli.effectiveNotLoggedIn';
 
   return (
     <div className="space-y-3" data-testid="codex-daemon-settings">
@@ -159,6 +170,15 @@ export function CodexDaemonSettings() {
           <RefreshCw size={12} /> {t('settings.localCli.refresh')}
         </button>
       </div>
+
+      {!loading && (
+        <div
+          data-testid="codex-effective-line"
+          className="rounded-xl border border-line px-3 py-2 text-xs text-content"
+        >
+          {t(effectiveKey, { device: onlineDevice?.device_name ?? '' })}
+        </div>
+      )}
 
       {serverCli && (
         <div
