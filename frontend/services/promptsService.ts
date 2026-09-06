@@ -3,7 +3,7 @@
 // The unified prompt catalog (spec 2026-09-05 §3.1). ONE client for both
 // surfaces — the resource library's Prompts page and the canvas Library panel.
 // Nothing here talks to Supabase; the browser-side prompt query this replaces
-// (`fetchPromptAssets`) returned an empty list on RLS errors and is gone.
+// returned an empty list on RLS errors and is gone.
 import { getApiUrl } from '../utils/apiConfig';
 import { attachFile, createAsset, updateAsset } from './assetsService';
 import { envelopeFetch } from './apiEnvelope';

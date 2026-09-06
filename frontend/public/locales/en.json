@@ -3558,11 +3558,6 @@
     "loopPromptPlaceholder": "Prompt for this round — {{计数}} = round index",
     "loopImageWillOutput": "Will output {{n}} image(s)",
     "loopImageEmpty": "Connect an image or image group to the left port",
-    "assetPromptPicker": {
-      "searchPlaceholder": "Search by filename…",
-      "all": "All",
-      "noResults": "No prompt assets found"
-    },
     "nodeBar": {
       "media": "Upload",
       "shot": "Shot",

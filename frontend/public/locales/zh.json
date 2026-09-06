@@ -3558,11 +3558,6 @@
     "loopPromptPlaceholder": "本轮提示词 — {{计数}} = 当前轮次",
     "loopImageWillOutput": "将输出 {{n}} 张",
     "loopImageEmpty": "把图片或图片组连接到左侧输入口",
-    "assetPromptPicker": {
-      "searchPlaceholder": "按文件名搜索…",
-      "all": "全部",
-      "noResults": "未找到带提示词的素材"
-    },
     "nodeBar": {
       "media": "上传",
       "shot": "分镜",

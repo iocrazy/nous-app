@@ -78,7 +78,6 @@ vi.mock('../mediaImport', async (importOriginal) => ({
   importResourceAsCanvasMedia: (...a: unknown[]) => importResourceAsCanvasMedia(...a),
 }));
 vi.mock('../../../../services/resourceService', () => ({
-  fetchPromptAssets: vi.fn().mockResolvedValue([]),
   getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
 }));
 

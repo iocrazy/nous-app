@@ -1,9 +1,9 @@
 // features/canvas-core/smart/promptReferenceMedia.test.ts
 // Pure builder that turns a Send-to-Canvas payload's picture into a media
 // node + the connection wiring it into the freshly created prompt node.
-// Ported from the retired loadPromptAsset.test.ts (spec 2026-09-05 §3.7):
-// the lang-fallback cases died with the picker that fed them; the node and
-// connection shape lives on here.
+// Ported from the picker-era builder's tests, retired in P3 (spec
+// 2026-09-05 §3.7): the lang-fallback cases died with the picker that fed
+// them; the node and connection shape lives on here.
 
 import { describe, expect, it } from 'vitest';
 
