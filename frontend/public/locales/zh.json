@@ -1044,7 +1044,6 @@
       "allOffline": "全部离线",
       "nOnline": "{{count}} 台在线",
       "pairDevice": "配对设备",
-      "detectCli": "检测 CLI",
       "help": "帮助",
       "refresh": "刷新",
       "helpSetup": "在你的电脑上一次性准备（需要 Node 20+ 和 ChatGPT 订阅）。这是安装脚本唯一替你做不了的一步 —— CLI 它会自己装：",
@@ -1061,12 +1060,6 @@
       "lastSeen": "最后在线 {{time}}",
       "neverConnected": "从未连接",
       "serverRuntimeNote": "服务器共享运行时。你自己设备的 CLI 状态在配对后的设备行中显示。",
-      "skillInstalled": "GPT Image 2 helper 已安装——服务器侧画布出图使用它。",
-      "skillMissing": "服务器未安装 gpt-image-2-skill。",
-      "codexInstalled": "codex CLI {{version}} 已安装。",
-      "codexMissing": "服务器没有 codex 对话 CLI——文本任务本来就不在服务器上跑，而是在你自己的设备上。",
-      "authPresent": "OAuth 登录态存在——首次执行时由 CLI 校验。",
-      "authMissing": "无 OAuth 登录态——服务器运行时未登录。",
       "envNotReported": "环境尚未上报——daemon 下次连接时开始。",
       "loggedIn": "已登录",
       "notLoggedIn": "未登录",
@@ -1074,7 +1067,6 @@
       "errDevices": "无法加载设备列表",
       "errPairCode": "无法生成配对码",
       "errRevoke": "无法吊销该设备",
-      "errDetect": "CLI 检测失败",
       "jimengTitle": "即梦 (Dreamina) CLI",
       "jimengDesc": "每台设备的 dreamina 用你自己的积分——在上方配对设备后，设备行会显示其 dreamina 检测。此卡管理过渡期的服务器共享账号。",
       "jimengLoggedIn": "已登录",
@@ -1088,10 +1080,6 @@
       "loginDone": "已授权 — 检查状态",
       "errStatus": "无法连接服务器 CLI",
       "errLogin": "登录流程启动失败",
-      "serverBadge": "服务器",
-      "upToDate": "（已是最新）",
-      "updateAvailable": "（可更新到 {{version}}）",
-      "detectNote": "检测的是「服务器」运行时。你本机的 CLI 状态在配对后显示于设备行。",
       "effectiveDevice": "当前：文本与出图都在 {{device}} 上执行（用你的 ChatGPT 登录）。",
       "effectiveNotLoggedIn": "当前：{{device}} 在线但未登录 codex——在那台机器上运行 `codex login`。",
       "effectiveNone": "当前：没有在线设备——服务器只能出图；配对并上线一台设备后文本任务才能用 Codex。"
@@ -4203,7 +4191,10 @@
     "noPlatformModels": "暂无可用的平台模型。",
     "settingsSaved": "设置已保存！",
     "saveSettings": "保存设置",
-    "addTyped": "添加「{{model}}」"
+    "addTyped": "添加「{{model}}」",
+    "providerNote": {
+      "codexLocal": "文本任务用上面的模型。出图固定用 gpt-image-2（不是可选项），由第一个启用的模型（{{model}}）编排；画布里选 GPT Image 2 即可。"
+    }
   },
   "aiLibrary": {
     "title": "AI 库",

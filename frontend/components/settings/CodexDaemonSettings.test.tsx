@@ -97,16 +97,11 @@ describe('CodexDaemonSettings', () => {
       expect(codexDaemonService.revokeDevice).toHaveBeenCalledWith('1'),
     );
   });
-  it('Detect CLI shows the IC-style server readout', async () => {
+  it('has no server-runtime detection — that server never has the chat CLI and the check only alarmed users (2026-09-06)', async () => {
     render(<CodexDaemonSettings />);
-    fireEvent.click(screen.getByTestId('codex-detect-cli'));
-    await waitFor(() =>
-      expect(screen.getByTestId('codex-cli-readout')).toBeInTheDocument(),
-    );
-    const text = screen.getByTestId('codex-cli-readout').textContent ?? '';
-    expect(text).toContain('gpt-image-2-skill 0.7.3');
-    expect(text).toContain('/usr/local/bin/gpt-image-2-skill');
-    expect(text).toContain('OAuth session present');
+    await screen.findByTestId('codex-daemon-settings');
+    expect(screen.queryByTestId('codex-detect-cli')).toBeNull();
+    expect(screen.queryByTestId('codex-cli-readout')).toBeNull();
   });
 });
 
