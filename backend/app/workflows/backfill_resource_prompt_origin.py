@@ -34,6 +34,29 @@ def plan_row(row: Mapping[str, Any]) -> Optional[str]:
     return derive_origin(row)
 
 
+def summarize_scan(
+    result: dict[str, Any], *, row_count: int, limit: int
+) -> dict[str, Any]:
+    """Add the two signals the counters alone do not carry. Returns ``result``.
+
+    ``skipped_no_text`` — rows ``has_prompt_expr()`` selected that
+    :func:`derive_origin` refused to label, i.e. the sentinel disagreement
+    documented on ``prompts.origin.is_blank_text``. These stay NULL on every
+    future run, so spec §4 item 2's residual
+    ``prompt_origin IS NULL AND has_prompt`` count should equal this number —
+    without it, that check reads as an unexplained non-zero.
+
+    ``hit_limit`` — the scan is one shot, so a full page means there are more
+    rows than this run saw. Reported independently of the other counters: a
+    run can be both complete-looking and truncated.
+    """
+    result["skipped_no_text"] = (
+        result["scanned"] - result["would_fix"] - result["fixed"]
+    )
+    result["hit_limit"] = row_count >= limit
+    return result
+
+
 @DBOS.workflow()
 async def backfill_resource_prompt_origin_workflow(
     dry_run: bool = True,
@@ -138,6 +161,7 @@ async def backfill_resource_prompt_origin_workflow(
             logger.warning(f"[backfill-prompt-origin] failed-run metadata patch: {e}")
         raise
 
+    summarize_scan(result, row_count=len(rows), limit=limit)
     subtitle = (
         f"dry-run: {result['would_fix']}/{result['scanned']} would get an origin"
         if dry_run

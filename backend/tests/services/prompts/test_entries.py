@@ -160,3 +160,41 @@ def test_blank_sentinels_render_as_missing(value):
 def test_entries_does_not_keep_its_own_blank_set():
     """One owner: origin.BLANK_TEXT. A local copy here could drift unnoticed."""
     assert "_BLANK =" not in inspect.getsource(entries_module)
+
+
+def test_slide_names_are_percent_encoded_in_the_url():
+    """Album slide names come from downloads, so a space or a ``?`` in one is
+    not hypothetical — unencoded it truncates the ``<img src>`` at the query
+    string and the picture silently never loads."""
+    e = entry_from_resource({**ALBUM, "slide_prompts": {"a b?c.jpg": {"en": "x"}}})
+    assert e["slides"][0]["url"] == "/api/v1/media/99/slides/a%20b%3Fc.jpg"
+    assert e["slides"][0]["name"] == "a b?c.jpg"
+    assert e["thumbs"][0]["url"] == "/api/v1/media/99/slides/a%20b%3Fc.jpg"
+
+
+def test_has_any_text_reads_the_slides_not_just_the_row():
+    from app.services.prompts.entries import has_any_text
+
+    assert has_any_text(entry_from_resource({**IMAGE})) is True
+    assert (
+        has_any_text(
+            entry_from_resource(
+                {
+                    **IMAGE,
+                    "gen_prompt": "[]",
+                    "gen_prompt_zh": None,
+                    "gen_prompt_negative": None,
+                    "gen_prompt_negative_zh": None,
+                }
+            )
+        )
+        is False
+    )
+    assert (
+        has_any_text(
+            entry_from_resource(
+                {**ALBUM, "slide_prompts": {"01.jpg": {}, "02.jpg": {"zh": "巷子"}}}
+            )
+        )
+        is True
+    )

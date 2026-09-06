@@ -23,6 +23,7 @@ from app.services.assets.assets_service import AssetError
 from app.services.prompts.entries import (
     entry_from_asset,
     entry_from_resource,
+    has_any_text,
     matches_query,
     sort_entries,
 )
@@ -140,7 +141,13 @@ class PromptCatalogService:
         pictures = await self._pictures(
             scope_id, segment=segment, project_id=project_id
         )
-        return sort_entries(templates + pictures)
+        # The ONE place textless rows are dropped, so `total`, the facet
+        # counts, the badge and the list can never disagree. The SQL row
+        # filter and the Python blank rule disagree on the sentinels `'[]'` /
+        # `'null'` / `'{}'` / `'""'` (see `entries.has_any_text`); a row that
+        # only the SQL side calls text would render as a card with a title, no
+        # body, both actions disabled and nothing saying why.
+        return sort_entries([e for e in templates + pictures if has_any_text(e)])
 
     async def list(
         self,

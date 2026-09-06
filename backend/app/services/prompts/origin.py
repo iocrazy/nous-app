@@ -38,9 +38,21 @@ def stamp_origin(patch: Dict[str, Any], origin: str) -> Dict[str, Any]:
 def is_blank_text(value: Any) -> bool:
     """True when ``value`` carries no prompt text.
 
-    The one owner of that contract: this same set decides both whether a row
-    *has* prompt text (:func:`derive_origin` here) and whether an entry *shows*
-    prompt text (``entries._text``), so the two cannot drift apart.
+    Owns the *display* side of that contract: this same set decides both
+    whether :func:`derive_origin` labels a row and whether an entry SHOWS
+    prompt text (``entries._text``), so those two cannot drift apart.
+
+    ⚠️ It is NOT what selects the rows. That is
+    ``media_repository.has_prompt_expr()`` in SQL, and the two disagree ON
+    PURPOSE about the sentinels in :data:`BLANK_TEXT` (``'[]'``, ``'null'``,
+    ``'{}'``, ``'""'``): the SQL predicate only asks for non-whitespace text,
+    because it also lights the "has a prompt" icon on media cards and must
+    stay cheap and index-friendly. A row whose only positive is a sentinel is
+    therefore SELECTED by SQL, labelled ``None`` here, and left NULL by the
+    backfill for good — which is why
+    ``backfill_resource_prompt_origin.summarize_scan`` reports
+    ``skipped_no_text``, and why ``entries.has_any_text`` drops the row from
+    the catalog rather than showing a card with no body.
     """
     return not isinstance(value, str) or value.strip() in BLANK_TEXT
 

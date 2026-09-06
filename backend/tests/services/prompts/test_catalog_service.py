@@ -273,3 +273,87 @@ async def test_pictures_read_is_bounded_by_the_service_ceiling():
     )
     # Unbounded, this read materializes every prompted resource in the scope.
     assert catalog.limits == [_PICTURE_CEILING]
+
+
+@pytest.mark.asyncio
+async def test_a_row_whose_only_text_is_a_sentinel_is_not_a_card():
+    """The SQL row filter and the Python blank rule disagree on purpose.
+
+    ``media_repository.has_prompt_expr`` selects any non-whitespace text, so a
+    row whose only positive is the literal ``'[]'`` reaches the builder; every
+    text field then renders as ``None`` (``origin.is_blank_text``). Shown, it
+    is a card with a title, no body and both actions disabled — and no
+    explanation. It is dropped at the entry seam instead, so ``total`` and the
+    badge agree with what the shelf lists.
+    """
+    catalog = FakeCatalog(
+        [resource(10), resource(13, gen_prompt="[]", gen_params=None)]
+    )
+    svc = PromptCatalogService(assets_repo=FakeAssets([]), catalog_repo=catalog)
+    page = await svc.list(
+        SCOPE,
+        segment="mine",
+        project_id=None,
+        form=None,
+        origin=None,
+        q=None,
+        limit=60,
+        offset=0,
+    )
+    assert [e["key"] for e in page["items"]] == ["image:10"]
+    assert page["total"] == 1
+    assert await svc.counts(SCOPE, project_id=None) == {
+        "mine": 1,
+        "project": None,
+        "system": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_album_whose_first_slide_is_textless_is_still_a_card():
+    """The drop rule reads the slides too.
+
+    An album's own positive is its FIRST slide's text, so an album whose
+    slide 1 is blank but whose slide 2 is not would look textless at the row
+    level while carrying exactly what the user came for.
+    """
+    catalog = FakeCatalog(
+        [
+            resource(
+                14,
+                media_id=77,
+                gen_prompt=None,
+                slide_prompts={"01.jpg": {}, "02.jpg": {"en": "a lit alley"}},
+            )
+        ]
+    )
+    svc = PromptCatalogService(assets_repo=FakeAssets([]), catalog_repo=catalog)
+    page = await svc.list(
+        SCOPE,
+        segment="mine",
+        project_id=None,
+        form=None,
+        origin=None,
+        q=None,
+        limit=60,
+        offset=0,
+    )
+    assert [e["key"] for e in page["items"]] == ["album:14"]
+
+
+def test_pictures_read_runs_under_system_request_scope():
+    """Mirrors the backfill's pin (``test_backfill_resource_prompt_origin.py:28``).
+
+    ``Resources`` is UserScoped and ``SCOPE_ENFORCE_RESOURCES`` is on in
+    production ONLY, so a refactor that hoists or drops this ``async with``
+    keeps every unit test green and 500s the Prompts page on deploy.
+    """
+    from pathlib import Path
+
+    import app.services.prompts.catalog_service as mod
+
+    source = Path(mod.__file__).read_text()
+    assert "system_request_scope(" in source
+    assert source.index("system_request_scope(") < source.index(
+        "list_prompted_resources("
+    )

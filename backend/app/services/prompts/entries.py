@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+from urllib.parse import quote
 
 from .origin import is_blank_text
 
@@ -79,7 +80,15 @@ def _slides(row: Mapping[str, Any]) -> List[Dict[str, Any]]:
         out.append(
             {
                 "name": name,
-                "url": f"/api/v1/media/{media_id}/slides/{name}" if media_id else None,
+                # The name is a path SEGMENT, so nothing in it may keep its
+                # URL meaning: an album slide called ``a b?c.jpg`` (names come
+                # from downloads) would otherwise truncate the ``<img src>`` at
+                # the ``?`` and the picture silently never loads.
+                "url": (
+                    f"/api/v1/media/{media_id}/slides/{quote(name, safe='')}"
+                    if media_id
+                    else None
+                ),
                 "positive_en": _text(entry.get("en")),
                 "positive_zh": _text(entry.get("zh")),
                 "negative_en": _text(entry.get("neg_en")),
@@ -131,6 +140,25 @@ def entry_from_resource(row: Mapping[str, Any]) -> Dict[str, Any]:
         ],
         "slides": slides,
     }
+
+
+def has_any_text(entry: Mapping[str, Any]) -> bool:
+    """True when the entry shows prompt text ANYWHERE.
+
+    Both languages, positive and negative, the row's own text and — for an
+    album — every slide's, because an album's own line is only its FIRST
+    slide's and a blank first slide says nothing about the rest.
+
+    The catalog drops entries this returns False for: the SQL row filter
+    (``media_repository.has_prompt_expr``) counts the sentinels ``'[]'`` /
+    ``'null'`` / ``'{}'`` / ``'""'`` as text while ``origin.is_blank_text``
+    does not, so such a row would otherwise reach the shelf as a card with a
+    title, no body, both actions disabled and no explanation.
+    """
+    sides = ("positive_en", "positive_zh", "negative_en", "negative_zh")
+    if any(entry.get(k) for k in sides):
+        return True
+    return any(s.get(k) for s in (entry.get("slides") or []) for k in sides)
 
 
 def matches_query(entry: Mapping[str, Any], q: str) -> bool:
