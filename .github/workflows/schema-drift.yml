@@ -110,8 +110,12 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all nine, so it has to re-run
+      # to it changes what "green" means for all eight, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
+      # ⚠️ That count has been wrong twice (it said "eight" when there were
+      # seven, then "nine" when there were eight — each edit trusted the
+      # previous number instead of counting). Recount, do not increment:
+      #   grep -c 'pytest-no-full-skip.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
     branches: [master]

@@ -44,6 +44,20 @@ migrations above the watermark, which includes 455):
 Skips cleanly when INTEGRATION_DATABASE_URL is unset. Every test builds its own
 team/resource fixture with fresh ids and tears it down in a ``finally``, so the
 cases are independent and the file is re-runnable against the same DB.
+
+WHAT THIS FILE DOES NOT COVER (so a green run is not over-read)
+──────────────────────────────────────────────────────────────
+  * the ``project_id`` branch — ``_prompted_resources_stmt``'s
+    ``CanvasResourceRefs``/``Canvases`` subquery, i.e. the "this project"
+    filter. It needs a canvas fixture; today only the compiled-SQL test pins
+    that the subquery is present, and nothing executes it.
+  * ``_EXAMPLES_PER_ASSET = 3`` — both example fixtures below have two files,
+    so the truncation arm never runs.
+  * ``ORDER BY updated_at DESC`` and ``limit`` — case 1 compares a set and the
+    others expect a single row, so neither ordering nor the cap is asserted.
+
+These are gaps, not decisions. Each is a live statement that Postgres has still
+never been asked to run the way the closed ones now are.
 """
 
 from __future__ import annotations
@@ -59,8 +73,6 @@ import pytest
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
-
-pytest.importorskip("asyncpg")
 
 _skip = pytest.mark.skipif(
     not _TEST_DSN,
@@ -117,7 +129,10 @@ async def fx(pg) -> Dict[str, Any]:
         user_id,
         uuid.uuid4().hex[:16],
     )
-    created: Dict[str, List[int]] = {"resources": [], "assets": []}
+    # Only resources need id bookkeeping: assets are torn down by scope /
+    # created_by below (which also catches a scope-less row), and
+    # asset_files CASCADEs from both assets and resources.
+    created: Dict[str, List[int]] = {"resources": []}
     try:
         yield {
             "user_id": str(user_id),
@@ -187,7 +202,6 @@ async def _asset(pg, fx, name: str) -> int:
         name,
         uuid.UUID(fx["user_id"]),
     )
-    fx["created"]["assets"].append(int(aid))
     return int(aid)
 
 
@@ -211,14 +225,15 @@ def _scope():
 async def test_list_prompted_resources_admits_text_and_slides_and_excludes_the_rest(
     orm_dsn, pg, fx
 ):
-    """The four rows that decide the catalog's membership rule.
+    """The five rows that decide the catalog's membership rule.
 
     ``gen_prompt`` text and a ``slide_prompts`` map are the "image" and "album"
-    halves of the catalog; a trashed row and a whitespace-only prompt are the
-    two exclusions ``has_prompt_expr()`` exists to make. The whitespace case is
-    the one no compiled-SQL pin can settle: the prompt editor writes ``''`` (and
-    a user can type spaces) when a field is cleared, so a bare NOT NULL test
-    would list a resource with nothing to show.
+    halves of the catalog; a trashed row, a whitespace-only prompt and an empty
+    slide map are the three exclusions ``has_prompt_expr()`` exists to make. The
+    whitespace case is the one no compiled-SQL pin can settle: the prompt editor
+    writes ``''`` (and a user can type spaces) when a field is cleared, so a bare
+    NOT NULL test would list a resource with nothing to show. The empty-map case
+    is its counterpart on the JSONB arm.
     """
     typed = await _resource(
         pg, fx, "typed.png", gen_prompt="a lighthouse at dusk", prompt_origin="typed"
@@ -232,6 +247,11 @@ async def test_list_prompted_resources_admits_text_and_slides_and_excludes_the_r
     )
     await _resource(pg, fx, "trashed.png", gen_prompt="in the bin", is_trashed=True)
     await _resource(pg, fx, "blank.png", gen_prompt="   ")
+    # The OTHER half of the slide arm: `slide_prompts` is present but empty.
+    # `has_prompt_expr()` requires BOTH `IS NOT NULL` and `!= '{}'`, and only
+    # this row can tell the two apart — with just NULL and non-empty rows, a
+    # predicate that dropped the `!= '{}'` test would still pass.
+    await _resource(pg, fx, "no-slides", slide_prompts=json.dumps({}))
 
     async with _scope():
         rows = await _repo().list_prompted_resources(fx["team_id"])
