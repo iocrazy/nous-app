@@ -76,21 +76,25 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 ```json
 {"name": "Skill",
- "description": "Load a local skill definition and its instructions. Returns the SKILL body (and optional sub-file content). Built-in skill=\"todo\" keeps your multi-step plan for this turn: op=replace with items to set the steps, then op=complete with id as you finish each.",
+ "description": "Load a local skill definition and its instructions. Returns the SKILL body (and optional sub-file content). Built-in skill=\"todo\" keeps your multi-step plan for this turn: op=replace with items to set the steps, then op=complete with id as you finish each. Built-in skill=\"task\" runs a sub-agent synchronously: subagent_type + prompt (or tasks=[...] to fan out) and returns its result.",
  "parameters": {"type": "object", "required": ["skill"],
    "properties": {
-     "skill": "Skill slug from <available_skills>, or the built-in 'todo'.",
+     "skill": "Skill slug from <available_skills>, or a built-in: 'todo' or 'task'.",
      "file":  "Optional sub-file path like 'references/examples.md'. Omit to return the SKILL.md body.",
      "op":    {"enum": ["replace", "complete", "in_progress", "pending", "show"]},
      "items": [{"content": "string", "active_form": "string (optional)"}],
-     "id":    "integer"}}}
+     "id":    "integer",
+     "subagent_type": "string", "prompt": "string", "description": "string",
+     "tasks": [{"subagent_type": "string", "prompt": "string", "description": "string (optional)"}]}}}
 ```
+
+`subagent_type` / `prompt` / `description` / `tasks` 只对 `skill="task"`（同步派子 agent）有意义，与 todo 的四个参数同一天补齐、同一理由。
 
 `op` / `items` / `id` 只对 `skill="todo"` 有意义，2026-09-06 起才声明——此前模型只看得到 `skill` 与 `file`，内建 todo 的参数全靠猜：doubao lite 把 `"?op=replace&items=…"` 塞进 `file` 连错四次，整轮没有一个 todo 快照，任务卡的 n/m 也就从未出现。模型用不了它没被展示的参数，这不是提示词问题。
 
 #### Token effect
 
-固定约 180 token，不随 agent 配置增长；每次请求都带（provider 把 `tools` 当请求的一部分计费）。
+固定约 300 token，不随 agent 配置增长；每次请求都带（provider 把 `tools` 当请求的一部分计费）。
 
 #### KV Cache effect
 
@@ -166,7 +170,7 @@ Use the ResourceFetch tool to load any of these on demand:
 
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
-- **内建 `task` skill（同步派子 agent）的参数仍未在 `Skill` schema 里声明**。与 `todo` 在 2026-09-06 之前的处境相同：模型只能从错误信息里学它的入参。补的时候照 `op/items/id` 的做法加可选字段，别开第二个工具。
+- **`Skill` 的 inputSchema 现在同时承载 skill 装载、内建 `todo`、内建 `task` 三类参数**，靠 description 里的「skill='…' only」区分。这是裁决不是遗漏：三者共用一个工具名是既有契约（`AgentRunner` 按 `tool_name == "Skill"` 分派），拆成三个工具会改动分派处与所有 pin。代价是 schema 约 300 token 且每次请求都带。
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
 - **binary 附件超过 8 条时被静默截断**（`chat_attachment_resolver.py` 的 `capped = requests[:MAX_ATTACHMENTS_PER_TURN]`）。第 9 条起既不解析也**不产出 `attachment_failures` 条目**，只写一条 warning 日志——用户贴了 12 张图，其中 4 张从未到达模型而界面上没有任何提示。与「触发路径必须类型化失败回显」相悖，是 P5 之前就存在的缺口。⚠️ `asset_ref` 那一侧**不是**这样（`MAX_ASSET_REF_ATTACHMENTS` 超出即类型化回显）——两者数值相同、行为相反，别读串。
 - **`resource_ref` 的条数仍然没有服务端上限**，这是**裁决而不是遗漏**：不论多少条都是一次批量查询，封它只会拿走一条能用的路（`@` 选择器不限制暂存条数）。代价是系统消息里 `<resource>` 那一半的体积仍由客户端决定——今天的写方只有我们自己的 composer UI，直接打 API 的调用方可以把目录撑长。真出现问题时该封的是**渲染出来的字符数**，不是条数。

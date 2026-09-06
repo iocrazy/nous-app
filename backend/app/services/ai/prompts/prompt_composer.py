@@ -473,7 +473,9 @@ class PromptComposer:
                     'content). Built-in skill="todo" keeps your '
                     "multi-step plan for this turn: op=replace with "
                     "items to set the steps, then op=complete with id "
-                    "as you finish each."
+                    'as you finish each. Built-in skill="task" runs '
+                    "a sub-agent synchronously: subagent_type + prompt "
+                    "(or tasks=[...] to fan out) and returns its result."
                 ),
                 "parameters": {
                     "type": "object",
@@ -481,8 +483,8 @@ class PromptComposer:
                         "skill": {
                             "type": "string",
                             "description": (
-                                "Skill slug from <available_skills>, or the "
-                                "built-in 'todo'."
+                                "Skill slug from <available_skills>, or a "
+                                "built-in: 'todo' or 'task'."
                             ),
                         },
                         "file": {
@@ -540,6 +542,48 @@ class PromptComposer:
                             "description": (
                                 "skill='todo', op=complete/in_progress/"
                                 "pending: the item id from the list."
+                            ),
+                        },
+                        # skill="task" only — same reasoning as the todo
+                        # block above (2026-09-06): SubAgentTaskService.spawn
+                        # reads subagent_type / prompt / description, or
+                        # tasks=[{...}] for a parallel fan-out (MAX_FANOUT).
+                        "subagent_type": {
+                            "type": "string",
+                            "description": (
+                                "skill='task' only: slug of the agent to run "
+                                "(see <available_workers>)."
+                            ),
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": (
+                                "skill='task' only: the instruction for the "
+                                "sub-agent, self-contained."
+                            ),
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": (
+                                "skill='task' only: short label for the "
+                                "sub-task (shown in the run's trajectory)."
+                            ),
+                        },
+                        "tasks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "subagent_type": {"type": "string"},
+                                    "prompt": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["subagent_type", "prompt"],
+                            },
+                            "description": (
+                                "skill='task' only: run several sub-agents in "
+                                "parallel instead of subagent_type+prompt "
+                                "(max 10)."
                             ),
                         },
                     },
