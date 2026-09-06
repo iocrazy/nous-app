@@ -58,6 +58,15 @@ vi.mock('../../../services/generatedMediaService', () => ({
   generatedMediaFileUrl: (id: string) => `https://api.test/gen/${id}/file`,
 }));
 
+// The real player decodes the file with `fetch` + `AudioContext` and observes
+// its container with `ResizeObserver`; jsdom has none of the three. Stubbed to
+// a marker carrying the props the lightbox is responsible for handing it.
+vi.mock('../../AudioWaveformPlayer', () => ({
+  AudioWaveformPlayer: ({ src, filename }: { src: string; filename: string }) => (
+    <div data-testid="waveform-player" data-src={src} data-filename={filename} />
+  ),
+}));
+
 const fetchProjects = vi.fn();
 vi.mock('../../../services/projectsService', () => ({
   fetchProjects: (...a: unknown[]) => fetchProjects(...a),
@@ -818,20 +827,26 @@ describe('GeneratedView — preview lightbox', () => {
     expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
   });
 
-  it('opens an audio row on a placeholder — no <img>, no crash, actions intact', async () => {
+  it('plays an audio row through /stream — no placeholder, actions intact', async () => {
     fetchGenerated.mockResolvedValue({
       items: [{ ...ITEM_A, media_kind: 'audio', mime: 'audio/mpeg' }],
       next_cursor: null,
     });
     await openFirstCard();
 
-    const placeholder = await screen.findByTestId('pin-lightbox-placeholder');
-    expect(placeholder.getAttribute('data-media-kind')).toBe('audio');
-    expect(placeholder.querySelector('.lucide-audio-lines')).toBeTruthy();
+    const audio = await screen.findByTestId('pin-lightbox-audio');
+    expect(audio.getAttribute('data-resource-id')).toBe(ITEM_A.id);
+    expect(screen.queryByTestId('pin-lightbox-placeholder')).toBeNull();
     expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
     expect(screen.queryByTestId('pin-lightbox-video')).toBeNull();
 
-    // The point of degrading rather than hiding: the row is still triageable.
+    // `/stream`, not `/file`: the player fetches the bytes itself and can
+    // carry no Bearer header, and `/stream` is the Range-capable public route.
+    const player = screen.getByTestId('waveform-player');
+    expect(player.getAttribute('data-src')).toBe(`https://api.test/gen/${ITEM_A.id}/stream`);
+    expect(player.getAttribute('data-filename')).toBe(ITEM_A.title);
+
+    // Playing it must not have cost the row its triage actions.
     const panel = await screen.findByTestId('pin-lightbox-panel');
     expect(within(panel).getByRole('button', { name: /Save To Uploads/ })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: /As Asset/ })).toBeTruthy();

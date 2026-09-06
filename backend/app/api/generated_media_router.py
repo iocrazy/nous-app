@@ -145,19 +145,22 @@ async def get_generation_cover(gen_id: int, full: int = 0):
 
 @router.get("/{gen_id}/stream")
 async def get_generation_stream(gen_id: int, request: Request):
-    """Serve a generated VIDEO's bytes (no auth required).
+    """Serve a generated VIDEO or AUDIO row's bytes (no auth required).
 
-    Same world-readable-by-id posture as ``/cover``: a bare ``<video src>`` can't
-    carry a Bearer header, and the snowflake id is unguessable. Video-only —
-    image rows 404 here (use ``/cover``). ``/file`` stays the auth-gated download.
-    Both backends support Range: filesystem via FileResponse, object-store via a
-    streamed range-passthrough (no full-file memory spike).
+    Same world-readable-by-id posture as ``/cover``: a bare ``<video src>``
+    can't carry a Bearer header, and neither can a bare ``<audio src>`` — the
+    inbox lightbox's audio player is exactly that. The snowflake id is
+    unguessable. Timed media only — image rows 404 here (use ``/cover``);
+    ``/file`` stays the auth-gated download. Both backends support Range:
+    filesystem via FileResponse, object-store via a streamed range-passthrough
+    (no full-file memory spike), and both serve the row's own ``mime``, so
+    audio needed no separate serving path.
     """
     row = await GeneratedMediaRepository().get_by_id(gen_id)
     if not row:
         raise HTTPException(status_code=404, detail="not found")
-    if row.get("media_kind") != "video":
-        raise HTTPException(status_code=404, detail="no video")
+    if row.get("media_kind") not in ("video", "audio"):
+        raise HTTPException(status_code=404, detail="not streamable")
     return await _serve_video_stream(
         row,
         request,

@@ -36,6 +36,7 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 // `thumbnail_path > cover_image_path > original`, and a viewer opened to
 // inspect a pin at full screen would be showing a thumbnail.
 import { getResourceFileUrl } from '../../../../services/resourceService';
+import { AudioWaveformPlayer } from '../../../AudioWaveformPlayer';
 import { placeholderFor, type NonVisualMediaKind } from '../../mediaKindPlaceholder';
 
 export interface PinLightboxProps {
@@ -50,11 +51,14 @@ export interface PinLightboxProps {
   /** id → media URL. Defaults to the resource file route. */
   srcFor?: (id: string) => string;
   /**
-   * What to render for an id. `video` gets a `<video controls>`; `audio` and
-   * `file` have nothing to display, so they get an icon placeholder instead
-   * of an `<img>` pointed at bytes no browser will draw. Default: `image`.
+   * What to render for an id. `video` gets a `<video controls>`, `audio` gets
+   * a waveform player; `file` has nothing to display or play, so it gets an
+   * icon placeholder instead of an `<img>` pointed at bytes no browser will
+   * draw. Default: `image`.
    */
   kindFor?: (id: string) => 'image' | 'video' | NonVisualMediaKind;
+  /** Display name for the audio player. Defaults to `slotLabel`. */
+  titleFor?: (id: string) => string;
   /** Details panel for the current item (source, model, date, state…). */
   metadataFor?: (id: string) => React.ReactNode;
   /** Action row for the current item, under the media. */
@@ -69,6 +73,7 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
   onClose,
   srcFor = getResourceFileUrl,
   kindFor,
+  titleFor,
   metadataFor,
   actionsFor,
 }) => {
@@ -98,7 +103,10 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
   const current = resourceIds[Math.min(Math.max(index, 0), count - 1)];
   const kind = kindFor?.(current) ?? 'image';
   const isVideo = kind === 'video';
-  const placeholder = placeholderFor(kind);
+  const isAudio = kind === 'audio';
+  // `audio` has a player of its own now, so it must not also claim the
+  // placeholder branch below — `file` is what is left with nothing to show.
+  const placeholder = isAudio ? null : placeholderFor(kind);
   const metadata = metadataFor?.(current);
   const actions = actionsFor?.(current);
 
@@ -154,10 +162,24 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
             data-resource-id={current}
             className="max-h-full max-w-full object-contain"
           />
+        ) : isAudio ? (
+          // The card tile stays a placeholder that opens this viewer: a player
+          // inside the tile's own <button> would nest interactive elements.
+          // Here there is no such constraint, so audio is actually playable.
+          <div
+            data-testid="pin-lightbox-audio"
+            data-resource-id={current}
+            className="w-full max-w-2xl"
+          >
+            <AudioWaveformPlayer
+              src={srcFor(current)}
+              filename={titleFor?.(current) ?? slotLabel}
+              layout="full"
+            />
+          </div>
         ) : placeholder ? (
-          // No player here either (ruling B keeps that for its own ticket) —
-          // but the metadata panel and the action row below still render, so
-          // an audio row is fully triageable from the viewer.
+          // Nothing to draw and nothing to play — but the metadata panel and
+          // the action row below still render, so the row stays triageable.
           <div
             data-testid="pin-lightbox-placeholder"
             data-resource-id={current}

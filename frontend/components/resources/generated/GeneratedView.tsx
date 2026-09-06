@@ -1141,12 +1141,17 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
           onClose={() => setLightboxIndex(null)}
           // The FULL file, not `/cover` — a viewer opened to inspect a
           // generation at full screen must not be showing the thumbnail.
-          srcFor={(id) =>
-            itemsById.get(id)?.media_kind === 'video'
+          // Timed media goes through `/stream`, which is Range-capable and
+          // needs no Bearer header: `/file` is auth-gated, and neither a
+          // `<video src>` nor the audio player's fetch can carry one.
+          srcFor={(id) => {
+            const kind = itemsById.get(id)?.media_kind;
+            return kind === 'video' || kind === 'audio'
               ? generatedMediaStreamUrl(id)
-              : generatedMediaFileUrl(id)
-          }
+              : generatedMediaFileUrl(id);
+          }}
           kindFor={(id) => lightboxKindFor(itemsById.get(id)?.media_kind)}
+          titleFor={(id) => itemsById.get(id)?.title ?? ''}
           metadataFor={(id) => renderLightboxMeta(itemsById.get(id))}
           actionsFor={(id) => renderLightboxActions(itemsById.get(id))}
         />

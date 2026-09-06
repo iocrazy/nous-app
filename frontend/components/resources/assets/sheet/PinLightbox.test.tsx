@@ -21,6 +21,15 @@ vi.mock('../../../../services/resourceService', () => ({
   getResourceFileUrl: (id: string) => `https://api.test/resources/${id}/file`,
 }));
 
+// The real player decodes the file with `fetch` + `AudioContext` to draw its
+// waveform, and jsdom has neither. Stubbed to a marker that records the two
+// props the lightbox is responsible for handing it.
+vi.mock('../../../AudioWaveformPlayer', () => ({
+  AudioWaveformPlayer: ({ src, filename }: { src: string; filename: string }) => (
+    <div data-testid="waveform-player" data-src={src} data-filename={filename} />
+  ),
+}));
+
 import { PinLightbox } from './PinLightbox';
 
 const base = {
@@ -66,21 +75,81 @@ describe('PinLightbox — generic media', () => {
   });
 
   // A kind with nothing to draw must not fall through to the <img>: pointing
-  // one at an mp3 renders a broken-image icon and calls it a preview.
-  it.each([
-    ['audio', 'lucide-audio-lines'],
-    ['file', 'lucide-file'],
-  ] as const)('places an icon, not an <img>, for a %s item', (kind, iconClass) => {
-    render(<PinLightbox {...base} kindFor={() => kind} />);
-    const placeholder = screen.getByTestId('pin-lightbox-placeholder');
-    expect(placeholder.getAttribute('data-media-kind')).toBe(kind);
-    expect(placeholder.querySelector(`.${iconClass}`)).toBeTruthy();
-    expect(placeholder.textContent).toBe('No Preview');
+  // one at an opaque blob renders a broken-image icon and calls it a preview.
+  it.each([['file', 'lucide-file']] as const)(
+    'places an icon, not an <img>, for a %s item',
+    (kind, iconClass) => {
+      render(<PinLightbox {...base} kindFor={() => kind} />);
+      const placeholder = screen.getByTestId('pin-lightbox-placeholder');
+      expect(placeholder.getAttribute('data-media-kind')).toBe(kind);
+      expect(placeholder.querySelector(`.${iconClass}`)).toBeTruthy();
+      expect(placeholder.textContent).toBe('No Preview');
+      expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
+      expect(screen.queryByTestId('pin-lightbox-video')).toBeNull();
+    },
+  );
+
+  it('keeps navigating when the current item has no preview', () => {
+    const onIndexChange = vi.fn();
+    render(
+      <PinLightbox
+        {...base}
+        onIndexChange={onIndexChange}
+        kindFor={(id) => (id === 'r1' ? 'file' : 'image')}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('pin-lightbox-next'));
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('PinLightbox — audio', () => {
+  // Audio used to land on the placeholder with the rest of the non-visual
+  // kinds. It is the one of those that CAN be played, and the lightbox is
+  // where the card tile's zoom gesture leads — a player inside the tile's
+  // own button would nest interactive elements.
+  it('plays an audio item instead of showing the no-preview icon', () => {
+    render(<PinLightbox {...base} kindFor={() => 'audio'} />);
+
+    expect(screen.getByTestId('pin-lightbox-audio')).toBeTruthy();
+    expect(screen.queryByTestId('pin-lightbox-placeholder')).toBeNull();
     expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
     expect(screen.queryByTestId('pin-lightbox-video')).toBeNull();
   });
 
-  it('keeps navigating when the current item has no preview', () => {
+  it('hands the player the current item’s URL', () => {
+    render(
+      <PinLightbox
+        {...base}
+        index={1}
+        kindFor={() => 'audio'}
+        srcFor={(id) => `https://api.test/generated-media/${id}/stream`}
+      />,
+    );
+    expect(screen.getByTestId('waveform-player').getAttribute('data-src')).toBe(
+      'https://api.test/generated-media/r2/stream',
+    );
+    expect(screen.getByTestId('pin-lightbox-audio').getAttribute('data-resource-id')).toBe(
+      'r2',
+    );
+  });
+
+  it('titles the player from titleFor, falling back to the slot label', () => {
+    const { unmount } = render(
+      <PinLightbox {...base} kindFor={() => 'audio'} titleFor={(id) => `Take ${id}`} />,
+    );
+    expect(screen.getByTestId('waveform-player').getAttribute('data-filename')).toBe(
+      'Take r1',
+    );
+    unmount();
+
+    render(<PinLightbox {...base} kindFor={() => 'audio'} />);
+    expect(screen.getByTestId('waveform-player').getAttribute('data-filename')).toBe(
+      'Portrait',
+    );
+  });
+
+  it('still navigates away from an audio item', () => {
     const onIndexChange = vi.fn();
     render(
       <PinLightbox
