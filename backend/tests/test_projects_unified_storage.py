@@ -20,6 +20,7 @@ import pytest
 
 import app.services.library.projects_service as ps
 from app.services.library.media_storage import StoredObject
+from app.services.library.storage_errors import ObjectStoreWriteFailed
 
 
 class FakeUploadFile:
@@ -212,7 +213,11 @@ async def test_upload_file_flag_off_dedups_duplicate_names(service, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_upload_file_store_failure_falls_back_to_filesystem(service, monkeypatch):
+async def test_upload_file_store_failure_raises_typed_error_and_writes_nothing(
+    service, monkeypatch
+):
+    """S3 down is a HARD failure (2026-09-07): no mediatrack fallback, no
+    project_files row."""
     monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
     _seed_project(service.repo, 5, team_id=9)
 
@@ -220,22 +225,17 @@ async def test_upload_file_store_failure_falls_back_to_filesystem(service, monke
         raise RuntimeError("storage-api unreachable")
 
     monkeypatch.setattr(ps, "store_local_file", failing_store_local_file)
+    files_before = dict(service.repo.files)
 
-    err_mock = MagicMock()
-    monkeypatch.setattr(ps.logger, "error", err_mock)
+    file = FakeUploadFile("photo.png", b"never-saved", "image/png")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_file(project_id="5", user_id="u1", file=file)
 
-    file = FakeUploadFile("photo.png", b"fallback-bytes", "image/png")
-    created = await service.upload_file(project_id="5", user_id="u1", file=file)
-
-    expected = "mediatrack/5/photo.png"
-    assert created["file_path"] == expected
-
-    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"fallback-bytes"
-
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert excinfo.value.details["where"] == "project_upload_file"
+    assert excinfo.value.details["project_id"] == "5"
+    assert excinfo.value.details["filename"] == "photo.png"
+    assert [p for p in Path(ps.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    assert service.repo.files == files_before
 
 
 @pytest.mark.asyncio
@@ -246,14 +246,13 @@ async def test_upload_file_missing_project_raises(service):
 
 
 @pytest.mark.asyncio
-async def test_upload_file_scope_resolution_failure_falls_back_to_filesystem(
+async def test_upload_file_scope_resolution_failure_is_a_storage_failure(
     service, monkeypatch
 ):
-    """PIN (review fix): scope resolution is part of the storage track. A
-    personal project (team_id NULL) whose owner has no personal-team row
-    raises ValueError from _resolve_personal_team_id — that must degrade to
-    the fs fallback, NOT escape as a bogus router-level "404 Project not
-    found"."""
+    """Scope resolution is part of the storage track: without a scope there
+    is no object key. A personal project whose owner lacks a personal-team
+    row fails the same typed way — the ValueError is the CAUSE, and must not
+    escape raw as a bogus router-level "404 Project not found"."""
     monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
     _seed_project(service.repo, 6, team_id=None, owner_id="orphan-owner")
 
@@ -263,27 +262,16 @@ async def test_upload_file_scope_resolution_failure_falls_back_to_filesystem(
     monkeypatch.setattr(
         ps, "_resolve_personal_team_id", failing_resolve_personal_team_id
     )
-
     store_mock = MagicMock()
     monkeypatch.setattr(ps, "store_local_file", store_mock)
-    err_mock = MagicMock()
-    monkeypatch.setattr(ps.logger, "error", err_mock)
 
-    file = FakeUploadFile("orphan.txt", b"scope-failure bytes", "text/plain")
-    created = await service.upload_file(project_id="6", user_id="u1", file=file)
+    file = FakeUploadFile("orphan.txt", b"never-saved", "text/plain")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_file(project_id="6", user_id="u1", file=file)
 
-    # No exception escaped; the file landed on the legacy mediatrack path.
-    expected = "mediatrack/6/orphan.txt"
-    assert created["file_path"] == expected
-    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"scope-failure bytes"
-
-    # The object-store write was never attempted (scope resolution raised
-    # first), and the fallback was logged at ERROR with the standard shape.
-    store_mock.assert_not_called()
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert isinstance(excinfo.value.__cause__, ValueError)
+    store_mock.assert_not_called()  # scope resolution raised first
+    assert [p for p in Path(ps.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
 
 
 # ── Task 3.2: upload_new_version dual-track (the "另一子路径" write point) ──
@@ -385,7 +373,9 @@ async def test_new_version_flag_off_keeps_legacy_filesystem_path(service, monkey
 
 
 @pytest.mark.asyncio
-async def test_new_version_store_failure_falls_back_to_filesystem(service, monkeypatch):
+async def test_new_version_store_failure_raises_typed_error_and_writes_nothing(
+    service, monkeypatch
+):
     monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
     _seed_project(service.repo, 12, team_id=9)
 
@@ -410,32 +400,25 @@ async def test_new_version_store_failure_falls_back_to_filesystem(service, monke
 
     monkeypatch.setattr(ps, "store_local_file", failing_store_local_file)
 
-    err_mock = MagicMock()
-    monkeypatch.setattr(ps.logger, "error", err_mock)
+    file = FakeUploadFile("photo-v2.png", b"never-saved", "image/png")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_new_version(
+            project_id="12", file_id="502", user_id="u1", file=file
+        )
 
-    file = FakeUploadFile("photo-v2.png", b"fallback v2 bytes", "image/png")
-    version = await service.upload_new_version(
-        project_id="12", file_id="502", user_id="u1", file=file
-    )
-
-    expected = "mediatrack/12/versions/502/v2_photo-v2.png"
-    assert version["file_path"] == expected
-
-    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"fallback v2 bytes"
-
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert excinfo.value.details["where"] == "project_upload_new_version"
+    assert excinfo.value.details["file_id"] == "502"
+    assert [p for p in Path(ps.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    assert [v["version_number"] for v in service.repo.versions] == [1]
+    assert service.repo.files[502]["current_version"] == 1
 
 
 @pytest.mark.asyncio
-async def test_new_version_scope_resolution_failure_falls_back_to_filesystem(
+async def test_new_version_scope_resolution_failure_is_a_storage_failure(
     service, monkeypatch
 ):
-    """PIN (review fix): same contract as upload_file — a scope-resolution
-    raise inside the flag-on track degrades to the fs fallback instead of
-    escaping the dual-track boundary."""
+    """Same contract as upload_file: a scope-resolution raise inside the
+    flag-on track is the typed storage failure, with the ValueError as cause."""
     monkeypatch.setattr(ps.settings, "FEATURE_UNIFIED_STORAGE", True)
     _seed_project(service.repo, 13, team_id=None, owner_id="orphan-owner")
 
@@ -461,26 +444,19 @@ async def test_new_version_scope_resolution_failure_falls_back_to_filesystem(
     monkeypatch.setattr(
         ps, "_resolve_personal_team_id", failing_resolve_personal_team_id
     )
-
     store_mock = MagicMock()
     monkeypatch.setattr(ps, "store_local_file", store_mock)
-    err_mock = MagicMock()
-    monkeypatch.setattr(ps.logger, "error", err_mock)
 
-    file = FakeUploadFile("orphan-v2.txt", b"scope-failure v2 bytes", "text/plain")
-    version = await service.upload_new_version(
-        project_id="13", file_id="503", user_id="u1", file=file
-    )
+    file = FakeUploadFile("orphan-v2.txt", b"never-saved", "text/plain")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_new_version(
+            project_id="13", file_id="503", user_id="u1", file=file
+        )
 
-    expected = "mediatrack/13/versions/503/v2_orphan-v2.txt"
-    assert version["file_path"] == expected
-    on_disk = Path(ps.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"scope-failure v2 bytes"
-
+    assert isinstance(excinfo.value.__cause__, ValueError)
     store_mock.assert_not_called()
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert [p for p in Path(ps.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    assert [v["version_number"] for v in service.repo.versions] == [1]
 
 
 # ── Task 3.2 audit note: no serve/tooling-read points exist in the grep'd

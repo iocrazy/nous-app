@@ -356,8 +356,11 @@ export const ResourcesViewInner: React.FC = () => {
     try {
       await uploadNewVersion(ops.versionTargetId, file);
       addToast(t('resources.versionUploadSuccess'), 'success');
-    } catch {
-      addToast(t('resources.versionUploadFailed'), 'error');
+    } catch (err) {
+      // The service now carries the backend's own sentence (e.g. the
+      // object-store 503); only fall back to the generic key without one.
+      const reason = err instanceof Error && err.message ? err.message : '';
+      addToast(reason || t('resources.versionUploadFailed'), 'error');
     }
     ops.setVersionTargetId(null);
     e.target.value = '';

@@ -199,3 +199,50 @@ async def test_overwrite_invalidates_media_path_cache(tmp_path):
 
     assert media_path_cache.get("10", "file") is None
     media_path_cache.clear()
+
+
+async def test_overwrite_store_failure_raises_and_leaves_version_untouched(tmp_path):
+    """2026-09-07 hard-fail: S3 refusing the bytes must not repoint the
+    version at a filesystem copy — the version row stays as it was."""
+    from app.services.library.storage_errors import ObjectStoreWriteFailed
+
+    svc = _svc()
+    svc.repo = MagicMock()
+    svc.repo.get_resource_by_id = AsyncMock(
+        return_value={"id": "10", "filename": "notes.md", "current_version": 1}
+    )
+    svc.repo.get_version_by_id = AsyncMock(
+        return_value={"id": "77", "resource_id": "10", "version_number": 1}
+    )
+    svc.repo.get_first_resource_item = AsyncMock(return_value={"scope_id": "42"})
+    svc.repo.update_version = AsyncMock()
+    svc.repo.update_resource = AsyncMock()
+    file = SimpleNamespace(filename="notes.md", content_type="text/markdown", size=12)
+
+    with (
+        patch(
+            "app.services.library.resources_service.unified_storage_enabled",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.services.library.resources_service.stream_upload_to_disk",
+            AsyncMock(return_value=(12, "deadbeef")),
+        ),
+        patch(
+            "app.services.library.resources_service.sniff_mime",
+            return_value="text/markdown",
+        ),
+        patch(
+            "app.services.library.resources_service.store_local_file",
+            AsyncMock(side_effect=RuntimeError("storage-api unreachable")),
+        ),
+    ):
+        with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+            await svc.overwrite_version_content(
+                resource_id="10", version_id="77", user_id="u1", file=file
+            )
+
+    assert excinfo.value.details["where"] == "overwrite_version_content"
+    assert excinfo.value.details["version_id"] == "77"
+    svc.repo.update_version.assert_not_awaited()
+    svc.repo.update_resource.assert_not_awaited()

@@ -1581,6 +1581,7 @@
     "dupSkipLink": "Skip & Link Existing",
     "dupUploadAnyway": "Upload Anyway",
     "importDone": "Import complete: {{uploaded}} uploaded, {{linked}} linked, {{failed}} failed",
+    "importDoneWithReason": "Import complete: {{uploaded}} uploaded, {{linked}} linked, {{failed}} failed — {{reason}}",
     "genParams": {
       "title": "Generation Params",
       "tool": "Tool",

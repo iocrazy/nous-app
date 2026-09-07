@@ -43,3 +43,46 @@ describe('overwriteVersionContent', () => {
     expect(r.id).toBe('77');
   });
 });
+
+describe('version writers surface the backend\'s own sentence', () => {
+  const SENTENCE = 'Storage is unavailable, so nothing was saved. Try again in a moment.';
+
+  it('overwriteVersionContent throws the AppError `error` on a 503', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        text: async () =>
+          JSON.stringify({ success: false, error: SENTENCE, code: 'object_store_write_failed' }),
+      }) as unknown as Response),
+    );
+    await expect(
+      overwriteVersionContent('10', '77', 'x', 'a.txt', 'text/plain'),
+    ).rejects.toThrow(SENTENCE);
+  });
+
+  it('saveTextAsNewVersion throws FastAPI `detail` when that is what came back', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 413,
+        text: async () => JSON.stringify({ detail: 'File too large. Maximum size is 500 MB.' }),
+      }) as unknown as Response),
+    );
+    await expect(
+      saveTextAsNewVersion('10', 'x', 'a.txt', 'text/plain'),
+    ).rejects.toThrow('File too large. Maximum size is 500 MB.');
+  });
+
+  it('keeps the generic sentence when the body says nothing usable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 502, text: async () => '<html>bad gateway' }) as unknown as Response),
+    );
+    await expect(
+      overwriteVersionContent('10', '77', 'x', 'a.txt', 'text/plain'),
+    ).rejects.toThrow('Failed to overwrite version');
+  });
+});

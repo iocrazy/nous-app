@@ -104,8 +104,11 @@ async def test_upload_dedup_skips_put_when_exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_falls_back_to_filesystem_on_storage_error(tmp_path, monkeypatch):
-    """storage-api down → upload must NOT hard-fail; write to filesystem."""
+async def test_upload_storage_error_is_a_hard_failure(tmp_path, monkeypatch):
+    """storage-api down → typed ObjectStoreWriteFailed: no filesystem row,
+    nothing on disk (2026-09-07: the transit dir is not a durable store)."""
+    from app.services.library.storage_errors import ObjectStoreWriteFailed
+
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     store = AsyncMock()
@@ -118,18 +121,19 @@ async def test_upload_falls_back_to_filesystem_on_storage_error(tmp_path, monkey
 
     monkeypatch.setattr(gm_svc, "_insert_uploaded_row", fake_insert)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
-        await gm_svc.register_uploaded_media(
-            user_id="u",
-            scope_id=7,
-            file_bytes=b"PNG",
-            filename="s.png",
-            mime="image/png",
-            origin=_origin(),
-        )
-    # Fell through to filesystem: local rel path, no sb://, bytes on disk.
-    assert inserted["file_path"].startswith("teams/7/chat/")
-    assert "sb://" not in inserted["file_path"]
-    assert (tmp_path / inserted["file_path"]).read_bytes() == b"PNG"
+        with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+            await gm_svc.register_uploaded_media(
+                user_id="u",
+                scope_id=7,
+                file_bytes=b"PNG",
+                filename="s.png",
+                mime="image/png",
+                origin=_origin(),
+            )
+    assert excinfo.value.details["where"] == "register_uploaded_media"
+    assert excinfo.value.details["scope_id"] == 7
+    assert inserted == {}
+    assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
 
 
 @pytest.mark.asyncio

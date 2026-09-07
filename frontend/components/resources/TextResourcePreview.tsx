@@ -132,7 +132,11 @@ export function TextResourcePreview({ resource, fileUrl, canEdit, onSaved }: Pro
       onSaved?.();
     } catch (e) {
       console.error('Failed to save text resource:', e);
-      addToast(t('resources.saveFailed', 'Failed to save'), 'error');
+      // The version writers throw the backend's own sentence when it sent
+      // one (e.g. the object-store 503) — say that rather than a bare
+      // "Failed to save".
+      const reason = e instanceof Error && e.message ? e.message : '';
+      addToast(reason || t('resources.saveFailed', 'Failed to save'), 'error');
     } finally {
       setSaving(false);
     }

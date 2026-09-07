@@ -193,6 +193,33 @@ describe('typed failures', () => {
     expect(e.message).toBe('File too large. Maximum size is 500 MB.');
   });
 
+  /**
+   * 2026-09-07: an object-store write failure answers 503 through the
+   * AppError handler, whose envelope is `{error, code, request_id}` — not
+   * FastAPI's `{detail}`. The user sentence lives in `error`; it must reach
+   * `detail`/`message` the same way a `detail` would, or the one failure the
+   * backend now explains would be the one shown as "Upload failed (server)".
+   */
+  it('reads the AppError envelope (`error`) when there is no `detail`', async () => {
+    const done = uploadResource(file(), 'scope-1', undefined, () => {});
+    await Promise.resolve();
+    FakeXhr.last?.finish(
+      503,
+      JSON.stringify({
+        success: false,
+        error: 'Storage is unavailable, so nothing was saved. Try again in a moment.',
+        code: 'object_store_write_failed',
+        request_id: 'r1',
+      }),
+    );
+
+    const e = (await done.catch((err: unknown) => err)) as ResourceUploadError;
+    expect(e.reason).toBe('server');
+    expect(e.status).toBe(503);
+    expect(e.detail).toBe('Storage is unavailable, so nothing was saved. Try again in a moment.');
+    expect(e.message).toBe('Storage is unavailable, so nothing was saved. Try again in a moment.');
+  });
+
   it('says the detail is absent rather than inventing one', async () => {
     const done = uploadResource(file(), 'scope-1', undefined, () => {});
     await Promise.resolve();

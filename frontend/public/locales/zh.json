@@ -1581,6 +1581,7 @@
     "dupSkipLink": "跳过并链接已有文件",
     "dupUploadAnyway": "仍然上传",
     "importDone": "导入完成：上传 {{uploaded}} 个，链接 {{linked}} 个，失败 {{failed}} 个",
+    "importDoneWithReason": "导入完成：上传 {{uploaded}} 个，链接 {{linked}} 个，失败 {{failed}} 个——{{reason}}",
     "genParams": {
       "title": "生成参数",
       "tool": "工具",

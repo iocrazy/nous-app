@@ -42,6 +42,10 @@ from app.services.library.media_storage import (
     to_file_path,
 )
 from app.services.library.object_gc import delete_object_if_unreferenced
+from app.services.library.storage_errors import (
+    discard_orphan_row,
+    object_store_write_failed,
+)
 from app.services.library.storage_flag import unified_storage_enabled
 
 
@@ -185,10 +189,20 @@ class ResourcesService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.error(
-                        f"[upload_resource] unified-storage write failed, falling "
-                        f"back to filesystem: scope={scope_id} error={exc!r}"
+                    # Hard failure (2026-09-07): the row went in ahead of the
+                    # bytes, so take it out again before surfacing.
+                    await discard_orphan_row(
+                        self.repo.delete_resource, resource_id, where="upload_resource"
                     )
+                    raise object_store_write_failed(
+                        exc,
+                        where="upload_resource",
+                        scope_id=scope_id,
+                        resource_id=resource_id,
+                        filename=safe_name,
+                        mime=mime,
+                        size_bytes=file_size,
+                    ) from exc
             if stored is not None:
                 relative_path = stored.file_path
             else:
@@ -312,11 +326,15 @@ class ResourcesService:
                             sha256=file_hash,
                         )
                     except Exception as exc:
-                        logger.error(
-                            f"[upload_new_version] unified-storage write failed, "
-                            f"falling back to filesystem: resource={resource_id} "
-                            f"error={exc!r}"
-                        )
+                        raise object_store_write_failed(
+                            exc,
+                            where="upload_new_version",
+                            scope_id=str(item["scope_id"]),
+                            resource_id=str(resource_id),
+                            filename=safe_name,
+                            mime=mime,
+                            size_bytes=file_size,
+                        ) from exc
             if stored is not None:
                 relative_path = stored.file_path
             else:
@@ -440,12 +458,17 @@ class ResourcesService:
                             filename=safe_name,
                             sha256=file_hash,
                         )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.error(
-                            f"[overwrite_version_content] unified-storage write "
-                            f"failed, falling back to filesystem: "
-                            f"resource={resource_id} error={exc!r}"
-                        )
+                    except Exception as exc:
+                        raise object_store_write_failed(
+                            exc,
+                            where="overwrite_version_content",
+                            scope_id=str(item["scope_id"]),
+                            resource_id=str(resource_id),
+                            version_id=str(version_id),
+                            filename=safe_name,
+                            mime=mime,
+                            size_bytes=file_size,
+                        ) from exc
 
             if stored is not None:
                 relative_path = stored.file_path

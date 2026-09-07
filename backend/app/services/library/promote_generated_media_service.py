@@ -24,6 +24,10 @@ from app.services.library.media_storage import (
     store_local_file,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.storage_errors import (
+    discard_orphan_row,
+    object_store_write_failed,
+)
 from app.services.library.storage_flag import unified_storage_enabled
 
 # generated_media.params keys that ARE generation parameters (the column
@@ -234,9 +238,9 @@ class PromoteGeneratedMediaService:
             resource_id = str(resource["id"])
 
             # 2) write the file: dual-track, mirrors the resources upload
-            # dual-track write (Task 2.1) — unified storage first, fall
-            # back to the existing filesystem copy2 on flag-off or any
-            # storage failure.
+            # dual-track write (Task 2.1) — unified storage first; the
+            # filesystem copy2 only on flag-off. A storage failure is hard
+            # and typed (2026-09-07), and the row from step 1 is discarded.
             stored = None
             if await unified_storage_enabled():
                 try:
@@ -248,11 +252,20 @@ class PromoteGeneratedMediaService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.error(
-                        f"[promote] unified-storage write failed, falling "
-                        f"back to filesystem: scope={target_scope_id} "
-                        f"error={exc!r}"
+                    await discard_orphan_row(
+                        self.res_repo.delete_resource,
+                        resource_id,
+                        where="promote_generated_media",
                     )
+                    raise object_store_write_failed(
+                        exc,
+                        where="promote_generated_media",
+                        scope_id=str(target_scope_id),
+                        resource_id=resource_id,
+                        filename=filename,
+                        mime=mime,
+                        size_bytes=size,
+                    ) from exc
             if stored is not None:
                 rel = stored.file_path
             else:

@@ -33,6 +33,7 @@ from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.services.library.media_storage import store_local_file
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.storage_errors import object_store_write_failed
 from app.services.library.storage_flag import unified_storage_enabled
 
 # Card enrichment defaults when a project has no stage/members/history rows
@@ -544,9 +545,10 @@ class ProjectsService:
         Steps:
         1. Validate project exists
         2. Stream to a temp file, then dual-track: FEATURE_UNIFIED_STORAGE on
-           content-addresses it into the Supabase Storage `library` bucket;
-           flag off (or any storage failure) moves it into
-           DOWNLOAD_PATH/mediatrack/{project_id}/ (legacy, dedup-suffixed).
+           content-addresses it into the Supabase Storage `library` bucket
+           (a storage failure is a hard, typed ObjectStoreWriteFailed);
+           flag off moves it into DOWNLOAD_PATH/mediatrack/{project_id}/
+           (legacy, dedup-suffixed).
         3. Classify file type from MIME
         4. Extract video metadata via ffprobe (if applicable)
         5. Create DB record
@@ -600,11 +602,11 @@ class ProjectsService:
 
             stored = None
             if await unified_storage_enabled():
-                # Scope resolution lives INSIDE the try: it can raise (a
-                # personal project whose owner lacks a personal-team row)
-                # and ANY storage-track failure must degrade to the fs
-                # fallback — never escape as a bogus "Project not found"
-                # 404 via the router's generic ValueError handler.
+                # Scope resolution lives INSIDE the try: without a scope
+                # there is no object key, so a personal project whose owner
+                # lacks a personal-team row is a storage failure too — typed,
+                # never a bogus "Project not found" 404 via the router's
+                # generic ValueError handler.
                 try:
                     scope_id = await self._resolve_project_scope_id(project)
                     stored = await store_local_file(
@@ -615,10 +617,14 @@ class ProjectsService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.error(
-                        f"[upload_file] unified-storage write failed, falling "
-                        f"back to filesystem: project={project_id} error={exc!r}"
-                    )
+                    raise object_store_write_failed(
+                        exc,
+                        where="project_upload_file",
+                        project_id=str(project_id),
+                        filename=safe_name,
+                        mime=mime,
+                        size_bytes=file_size,
+                    ) from exc
 
             if stored is not None:
                 relative_path = stored.file_path
@@ -819,7 +825,7 @@ class ProjectsService:
             if await unified_storage_enabled():
                 # Scope resolution lives INSIDE the try (same contract as
                 # upload_file): a scope-resolution failure is a storage-
-                # track failure and must degrade to the fs fallback.
+                # track failure — typed, hard.
                 try:
                     scope_id = await self._resolve_project_scope_id(project)
                     stored = await store_local_file(
@@ -830,11 +836,15 @@ class ProjectsService:
                         sha256=file_hash,
                     )
                 except Exception as exc:
-                    logger.error(
-                        f"[upload_new_version] unified-storage write failed, "
-                        f"falling back to filesystem: project={project_id} "
-                        f"file={file_id} error={exc!r}"
-                    )
+                    raise object_store_write_failed(
+                        exc,
+                        where="project_upload_new_version",
+                        project_id=str(project_id),
+                        file_id=str(file_id),
+                        filename=safe_name,
+                        mime=mime,
+                        size_bytes=file_size,
+                    ) from exc
 
             if stored is not None:
                 relative_path = stored.file_path

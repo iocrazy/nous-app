@@ -118,3 +118,17 @@ describe('humanizeTaskError — provider card switched off', () => {
     expect(r.hint ?? '').toMatch(/Settings → AI → Providers/);
   });
 });
+
+describe('humanizeTaskError — object store write failed', () => {
+  it('names the storage outage and says nothing was saved, whatever the wrapper', () => {
+    for (const raw of [
+      'Storage is unavailable, so nothing was saved. Try again in a moment.',
+      'ObjectStoreWriteFailed: Storage is unavailable, so nothing was saved. Try again in a moment.',
+      'DBOSMaxStepRetriesExceeded: RuntimeError: [object_store_write_failed] where=promote_generated_media',
+    ]) {
+      const r = humanizeTaskError(raw);
+      expect(r.message).toBe('Storage is unavailable, so nothing was saved.');
+      expect(r.hint ?? '').toMatch(/try again/i);
+    }
+  });
+});

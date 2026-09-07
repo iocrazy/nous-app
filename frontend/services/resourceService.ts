@@ -1243,16 +1243,35 @@ export function classifyUploadStatus(status: number): UploadFailureReason {
   return 'rejected';
 }
 
-/** Pull FastAPI's `{"detail": "..."}` out of a body, or null if it is not there. */
-function uploadDetail(body: string): string | null {
+/**
+ * The backend's own sentence for a failed request, or null.
+ *
+ * Two envelopes reach here: FastAPI's `HTTPException` → `{"detail": "..."}`,
+ * and the `AppError` handler → `{"error": "...", "code": "..."}` (typed
+ * domain failures — e.g. `object_store_write_failed`, 2026-09-07). Reading
+ * only `detail` made the one failure the backend explains best arrive as
+ * "Upload failed (server)".
+ */
+export function errorMessageFromBody(body: string): string | null {
   try {
     const parsed = JSON.parse(body);
     const detail = parsed?.detail;
-    return typeof detail === 'string' && detail !== '' ? detail : null;
+    if (typeof detail === 'string' && detail !== '') return detail;
+    const error = parsed?.error;
+    if (typeof error === 'string' && error !== '') return error;
+    return null;
   } catch {
     return null;
   }
 }
+
+/** `errorMessageFromBody` over a non-2xx Response, with a fallback sentence. */
+async function errorMessageFromResponse(response: Response, fallback: string): Promise<string> {
+  const text = await response.text().catch(() => '');
+  return errorMessageFromBody(text) ?? fallback;
+}
+
+const uploadDetail = errorMessageFromBody;
 
 /**
  * Upload one file into a scope's library.
@@ -1594,7 +1613,9 @@ export async function uploadNewVersion(
     `${apiUrl}/api/v1/resources/${resourceId}/versions?${params}`,
     { method: 'POST', headers, body: formData },
   );
-  if (!response.ok) throw new Error('Failed to upload new version');
+  if (!response.ok) {
+    throw new Error(await errorMessageFromResponse(response, 'Failed to upload new version'));
+  }
   const json = await response.json();
   return json.data;
 }
@@ -1641,7 +1662,9 @@ export async function overwriteVersionContent(
     `${apiUrl}/api/v1/resources/${resourceId}/versions/${versionId}/content`,
     { method: 'PUT', headers, body: formData },
   );
-  if (!response.ok) throw new Error('Failed to overwrite version');
+  if (!response.ok) {
+    throw new Error(await errorMessageFromResponse(response, 'Failed to overwrite version'));
+  }
   const json = await response.json();
   return json.data;
 }

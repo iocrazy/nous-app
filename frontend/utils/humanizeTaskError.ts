@@ -82,6 +82,16 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     hint: "Open Details for the model's own explanation and the rewrite it suggests, then edit the wording and run again.",
   },
   {
+    // The object store (S3) refused or failed a write. Since 2026-09-07 this
+    // is a HARD failure — nothing was written anywhere (no filesystem
+    // fallback: the transit dir is not a durable store). Raw shapes: the
+    // backend's own sentence (HTTP path, task_tracking.error_msg) or the
+    // typed code inside an engine wrapper (DBOS path).
+    test: /object_store_write_failed|storage is unavailable, so nothing was saved/i,
+    message: 'Storage is unavailable, so nothing was saved.',
+    hint: 'Try again in a moment. If it keeps failing, the object store is down and needs an operator.',
+  },
+  {
     // ffmpeg audio extraction produced no stream — the source video has no
     // audio track (e.g. a B站 DASH clip merged without sound). The
     // extract→transcribe chain (manual Transcribe on a no-audio video) fails
