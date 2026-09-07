@@ -19,6 +19,18 @@ on:
       # 一份开发工作树,又与另外四个容器共用项目名 gpu-server 却指向不同的
       # compose 文件(从开发树 up 有可能顺带影响生产容器)。
       - 'admin/**'
+      # codex-daemon 烤在 backend 镜像里(Dockerfile:235
+      # `COPY tools/codex-daemon/ /app/codex-daemon-dist/`),由后端的
+      # /api/v1/codex-daemon/dist/* 分发。此前它不在本清单里,于是**只改
+      # daemon 的 commit 不触发任何部署** —— 新版永远发不出去,直到某次
+      # 顺带碰了 backend/** 才被捎上。已实际发生两次(01c04c32 的 0.5.2
+      # 双线路、33711cbd 的 0.5.1 心跳等 pong),没暴露纯属运气。
+      #
+      # ⚠️ smoke 里那个 daemon 版本探针**抓不到这个缺口**:它拿本次 checkout
+      # 的 package.json 比对 backend 服务的版本,而镜像正是从同一个 checkout
+      # build 的,两边必然相等。它验的是"镜像装的和这次 checkout 一致",
+      # 验不了"daemon 的改动有没有触发部署"。这条 path 才是那道防线。
+      - 'tools/codex-daemon/**'
   workflow_dispatch:
 
 concurrency:
