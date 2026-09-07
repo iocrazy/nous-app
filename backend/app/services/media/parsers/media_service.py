@@ -29,7 +29,7 @@ def _file_type_from_mime(mime: str | None) -> str:
     Task 8: the platform's numeric ``media_type`` code (0/4/68/2/51...) is
     NOT a valid file_type — it must never be written to this column
     directly. Kept as a local copy (not shared with
-    ``downloader.py::_file_type_from_mime`` / ``sideload.py::_classify`` /
+    ``downloader.py::_file_type_from_mime`` /
     ``resources_service.py::_classify_file_type``) — three near-identical
     5-line classifiers is an acceptable cost to avoid cross-module import
     coupling for this task; consolidating them is a follow-up refactor.
