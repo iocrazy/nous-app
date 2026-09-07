@@ -6,7 +6,6 @@ Resources Upload Router
 Upload, duplicate detection, link-existing, and permission endpoints.
 """
 
-import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -127,77 +126,6 @@ async def check_duplicates_batch(
     except Exception as e:
         logger.error("Failed to batch check duplicates: {}", e)
         raise HTTPException(status_code=500, detail="Failed to check duplicates")
-
-
-# Batch-name whitelist: one path segment, no separators/dots-prefix — the
-# scan step re-verifies resolved paths, this is the cheap first gate.
-_SIDELOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$")
-
-
-@router.post("/sideload")
-async def sideload_import(
-    auth: AuthDep,
-    inbox_path: str = Query(..., description="Batch dir name under sideload-inbox/"),
-    scope_id: str = Query(...),
-    folder_id: Optional[str] = Query(None),
-    library_id: Optional[str] = Query(None),
-    mode: str = Query("move", pattern="^(move|register)$"),
-    _guard: None = Depends(verify_scope_access),
-):
-    """Register files already ON the NAS volume (million-files P2).
-
-    The user copies a directory tree into ``{library}/sideload-inbox/<batch>/``
-    and this dispatches one DBOS workflow that hashes, dedups (zero-copy link)
-    and registers everything — no HTTP byte transfer. Thumbnails are NOT
-    generated here (the lazy cover path owns them). Flat dispatch envelope:
-    ``{"success": true, "task_id": ...}``.
-    """
-    from app.services.infra.dbos_orchestrator import start_workflow_routed
-    from app.services.infra.unified_task_manager import get_task_manager
-    from app.workflows.sideload import inbox_root, sideload_workflow
-
-    if not _SIDELOAD_NAME_RE.match(inbox_path) or ".." in inbox_path:
-        raise HTTPException(status_code=400, detail="Invalid inbox path name")
-    batch_dir = inbox_root() / inbox_path
-    if not batch_dir.is_dir():
-        raise HTTPException(
-            status_code=404,
-            detail=f"sideload-inbox/{inbox_path} not found on the library volume",
-        )
-
-    try:
-        from uuid import uuid4
-
-        wf_id = f"sideload-{uuid4().hex}"
-        mgr = get_task_manager()
-        task_id = await mgr.create(
-            user_id=auth.user_id,
-            task_type="sideload",
-            title=f"Sideload {inbox_path}",
-            subtitle="Scanning…",
-            metadata={"inbox_path": inbox_path, "mode": mode},
-            dbos_workflow_id=wf_id,
-        )
-        await start_workflow_routed(
-            "sideload",
-            dbos_workflow_callable=sideload_workflow,
-            dbos_workflow_kwargs={
-                "user_id": auth.user_id,
-                "scope_id": scope_id,
-                "inbox_rel": inbox_path,
-                "folder_id": folder_id,
-                "library_id": library_id,
-                "mode": mode,
-                "task_id": task_id,
-            },
-            workflow_id=wf_id,
-        )
-        return {"success": True, "task_id": task_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to dispatch sideload for {inbox_path}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start sideload import")
 
 
 @router.post("/link-existing")
