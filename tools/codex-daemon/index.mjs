@@ -42,10 +42,48 @@ import { fileURLToPath } from 'node:url';
  *  backend/app/services/codex/daemon_dispatch.py, which is what 0.4.0 marks:
  *  a daemon at or above it forwards --quality, one below it drops the knob on
  *  the floor. */
-export const DAEMON_VERSION = '0.5.1';
+export const DAEMON_VERSION = '0.5.2';
 
-const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
-const WS_BASE = API_BASE.replace(/^http/, 'ws');
+/** Two lines to nous, like the web app: the direct line first, the Cloudflare
+ *  tunnel second. Until 0.5.2 the daemon dialled api.nous.ink only — one edge
+ *  blip (2026-09-06/07, twice) and every user's local engines went offline
+ *  with no fallback. NOUS_API_BASE still overrides: one base, or a comma list. */
+export const DEFAULT_API_BASES = ['https://cn.nous.ink:88', 'https://api.nous.ink'];
+
+export function parseApiBases(env) {
+  const bases = String(env ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+  return bases.length ? bases : [...DEFAULT_API_BASES];
+}
+
+/** The ordered list plus a cursor. `advance()` is called when a connection died
+ *  young (see run()); a connection that lived keeps its line. HTTP calls
+ *  (pair, upload, ref downloads) use whichever line is current. */
+export class ApiBases {
+  constructor(list) {
+    this.list = [...list];
+    this.index = 0;
+  }
+  get current() {
+    return this.list[this.index];
+  }
+  get ws() {
+    return this.current.replace(/^http/, 'ws');
+  }
+  advance() {
+    if (this.list.length > 1) this.index = (this.index + 1) % this.list.length;
+    return this.current;
+  }
+  /** Allowlist for URLs the daemon will fetch: a nous URL on ANY of our lines. */
+  owns(url) {
+    const s = String(url);
+    return this.list.some((b) => s.startsWith(`${b}/`));
+  }
+}
+
+const BASES = new ApiBases(parseApiBases(process.env.NOUS_API_BASE));
 /** Both the config dir and the systemd unit dir must agree on where
  *  "$XDG_CONFIG_HOME" is, or `install-service` writes the unit somewhere the
  *  config is not — which is exactly how a service ends up running as "not
@@ -195,7 +233,7 @@ async function pair(argv) {
   const { code, name } = parsePairArgs(argv);
   if (!code) throw new Error('usage: nous-codex pair <CODE> [--name <device>]');
   const deviceName = (name || os.hostname()).slice(0, 64);
-  const res = await fetch(`${API_BASE}/api/v1/codex-daemon/pair`, {
+  const res = await fetch(`${BASES.current}/api/v1/codex-daemon/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -347,7 +385,7 @@ export const REF_MAX_REDIRECTS = 3;
  *  chat-attachment URLs, not just server-built ones. */
 export function assertNousUrl(url) {
   const s = String(url);
-  if (!s.startsWith(`${API_BASE}/`)) {
+  if (!BASES.owns(s)) {
     refRejected(`refusing to fetch a non-nous url: ${s.slice(0, 80)}`);
   }
   return s;
@@ -717,7 +755,7 @@ async function uploadResult(filePath, ticket) {
   const mime = MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? 'image/png';
   body.append('file', new Blob([bytes], { type: mime }), path.basename(filePath));
   body.append('ticket', ticket);
-  const res = await fetch(`${API_BASE}/api/v1/codex-daemon/upload`, {
+  const res = await fetch(`${BASES.current}/api/v1/codex-daemon/upload`, {
     method: 'POST',
     body,
   });
@@ -740,7 +778,7 @@ export function isTerminalClose(code) {
 }
 
 async function connect(cfg) {
-  const ws = new WebSocket(`${WS_BASE}/api/v1/ws/codex-agent`, {
+  const ws = new WebSocket(`${BASES.ws}/api/v1/ws/codex-agent`, {
     headers: { Authorization: `Bearer ${cfg.device_token}` },
   });
   let heartbeat;
@@ -748,7 +786,7 @@ async function connect(cfg) {
   const liveness = new HeartbeatLiveness();
 
   ws.addEventListener('open', () => {
-    log('connected to nous');
+    log(`connected to nous (${BASES.current})`);
     // Whatever stopped us last time is demonstrably over — otherwise `status`
     // keeps reporting a revocation that a later re-pair already resolved.
     clearLastStop().catch(() => {});
@@ -947,7 +985,15 @@ async function run() {
     }
     // A connection that lived a while means the endpoint is healthy —
     // reset the backoff so a nightly blip doesn't leave us at 30s forever.
-    if (Date.now() - started > 60_000) backoff = RECONNECT_MIN_MS;
+    // One that died young means THIS line is the problem right now: try the
+    // other one next (no-op with a single configured base).
+    if (Date.now() - started > 60_000) {
+      backoff = RECONNECT_MIN_MS;
+    } else {
+      const was = BASES.current;
+      const next = BASES.advance();
+      if (next !== was) log(`switching line: ${was} → ${next}`);
+    }
     log(`reconnecting in ${Math.round(backoff / 1000)}s`);
     await new Promise((r) => setTimeout(r, backoff));
     backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
@@ -1250,7 +1296,7 @@ async function status() {
   console.log(`config file : ${CONFIG_FILE} ${cfg ? '(present)' : '(MISSING — not paired)'}`);
   console.log(`device id   : ${cfg?.device_id ?? '(none)'}`);
   console.log(`last stop   : ${describeLastStop(await readLastStop()) ?? '(none recorded)'}`);
-  console.log(`api base    : ${API_BASE}`);
+  console.log(`api bases   : ${BASES.list.join(', ')}`);
   console.log(`script      : ${scriptPath()}`);
   console.log(`node        : ${process.execPath} ${process.version}`);
 
