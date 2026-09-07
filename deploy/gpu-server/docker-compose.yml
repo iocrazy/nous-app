@@ -262,7 +262,12 @@ services:
         # anon key 是公开的。
         VITE_API_URL: ""
         VITE_SUPABASE_URL: http://127.0.0.1:9082
-        VITE_SUPABASE_ANON_KEY: ${NOUS_ANON_KEY}
+        # 默认值写死是刻意的,它消掉一整类静默故障:${NOUS_ANON_KEY} 未设时
+        # compose 只警告不失败,会 build 出一个 anon key 为空、却照常返回 200
+        # 的 admin —— 探针全绿而管理台登不进去。这个 key 是 **publishable**
+        # 的(本来就烤进浏览器能下载的 JS 包),与 frontend/.env.production 明文
+        # 提交 anon key 是同一性质。轮换/换实例时用环境变量覆盖即可。
+        VITE_SUPABASE_ANON_KEY: ${NOUS_ANON_KEY:-sb_publishable_RpMLzAWk2qZbmC_LJVvCxN_RwlFfOys}
     image: nous-admin:local
     container_name: nous-admin
     restart: unless-stopped
