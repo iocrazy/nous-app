@@ -49,6 +49,10 @@ class _Entry:
     exception: Optional[BaseException] = None
     long_running: bool = False
     gates_readiness: bool = True
+    # A gate whose FAILURE must block readiness (degraded/503), not merely be
+    # recorded. For probes that exist to refuse a bad state — the media work
+    # dir being an overlay shadow dir (2026-09-07).
+    fatal: bool = False
 
 
 @dataclass
@@ -77,6 +81,7 @@ class BackgroundTaskRegistry:
         *,
         long_running: bool = False,
         gates_readiness: bool = True,
+        fatal: bool = False,
     ) -> asyncio.Task:
         """Wrap `coro` in a tracked Task and start it.
 
@@ -97,6 +102,12 @@ class BackgroundTaskRegistry:
         - **detached housekeeping** (`gates_readiness=False`): finite work that
           readiness must NOT wait for (e.g. a sweep deliberately delayed 30s).
           It is allowed to finish, and finishing is not a crash.
+
+        Plus one modifier: `fatal=True` on a startup gate means its FAILURE
+        blocks readiness ("degraded"/503) instead of merely being recorded.
+        Default gates are warn-only (a failed schema probe must not take the
+        process down); a probe that exists to refuse a state — the media work
+        dir being an overlay shadow dir — must be fatal or it guards nothing.
 
         ⚠️ Do NOT express "keep it off the readiness gate" as
         `long_running=True` — that lies about the task's shape, and the moment
@@ -141,6 +152,7 @@ class BackgroundTaskRegistry:
             started_at=started_at,
             long_running=long_running,
             gates_readiness=gates_readiness,
+            fatal=fatal,
         )
         self._entries[name] = entry
         logger.info(f"[bg-task:{name}] spawned")
@@ -159,7 +171,16 @@ class BackgroundTaskRegistry:
             for e in self._entries.values()
             if not e.long_running and e.gates_readiness
         )
-        return finite_done and not self.dead_daemons()
+        return finite_done and not self.dead_daemons() and not self.failed_fatal_gates()
+
+    def failed_fatal_gates(self) -> List[str]:
+        """Names of `fatal` gates that finished with an exception — each one
+        is a state the process refused to run in; `/readyz` says "degraded"."""
+        return [
+            e.name
+            for e in self._entries.values()
+            if e.fatal and e.task.done() and e.exception is not None
+        ]
 
     def dead_daemons(self) -> List[str]:
         """Names of `long_running` daemons whose task finished (= crashed).
@@ -185,6 +206,7 @@ class BackgroundTaskRegistry:
                     "done": entry.task.done(),
                     "long_running": entry.long_running,
                     "gates_readiness": entry.gates_readiness,
+                    "fatal": entry.fatal,
                     "duration_seconds": duration,
                     "error": (
                         f"{type(entry.exception).__name__}: {entry.exception}"

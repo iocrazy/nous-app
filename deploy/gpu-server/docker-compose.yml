@@ -57,8 +57,13 @@ services:
       # CodexCliProvider(gpt-image-2-skill)的登录态文件。凭证是宿主机 heygo 的
       # Codex OAuth 会话(bind mount,见下方 volumes),不是 api_key。
       - CODEX_AUTH_FILE=/app/.codex/auth.json
+      - MEDIA_WORK_DIR_REQUIRE_MARKER=true
     volumes:
-      - /mnt/heytime/Sources/nous/media:/app/downloads
+      # 媒体中转区(2026-09-07):yt-dlp 落盘 / ffmpeg HLS 工作目录 / 缩略图暂存,
+      # 上传 S3 后即删。本机 NVMe(ext4),不再走 nas-B 的 CIFS——成品仍在 S3。
+      # 目录要带 .mounted marker(up.sh 校验)且对 uid 1031 可写(ACL),
+      # 容器内 work_dir_probe 会真写一次;缺 marker = 影子目录,拒绝就绪。
+      - /media/heygo/cache/nous-cache:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
       # Codex OAuth 会话目录,必须读写:CLI 会把刷新后的 access_token 写回
       # auth.json。容器 uid=1031 vs 宿主 heygo(1000) —— 用 ACL 授权,不改属主:
@@ -175,7 +180,8 @@ services:
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     volumes:
       - ./nginx-gateway:/etc/nginx/templates:ro
-      - /mnt/heytime/Sources/nous/media:/app/downloads:ro
+      # 只读旧路径 /f/（签名直出）——库里已无本地路径，保留形状待退役。
+      - /media/heygo/cache/nous-cache:/app/downloads:ro
     depends_on:
       - backend
     healthcheck:
@@ -205,8 +211,13 @@ services:
       # 同 backend:shot/canvas 生成 workflow 实际跑在 worker 上,codex 生图
       # 的 subprocess 也在这里执行。
       - CODEX_AUTH_FILE=/app/.codex/auth.json
+      - MEDIA_WORK_DIR_REQUIRE_MARKER=true
     volumes:
-      - /mnt/heytime/Sources/nous/media:/app/downloads
+      # 媒体中转区(2026-09-07):yt-dlp 落盘 / ffmpeg HLS 工作目录 / 缩略图暂存,
+      # 上传 S3 后即删。本机 NVMe(ext4),不再走 nas-B 的 CIFS——成品仍在 S3。
+      # 目录要带 .mounted marker(up.sh 校验)且对 uid 1031 可写(ACL),
+      # 容器内 work_dir_probe 会真写一次;缺 marker = 影子目录,拒绝就绪。
+      - /media/heygo/cache/nous-cache:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
       # 同 backend:Codex OAuth 会话目录(读写,ACL 授权 uid 1031)。
       - /home/heygo/.codex:/app/.codex

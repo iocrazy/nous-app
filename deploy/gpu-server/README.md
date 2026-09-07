@@ -241,7 +241,7 @@ docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz
 ## P1 衔接
 
 - ingress `api.nous.ink` 改指 backend、`sb.nous.ink` 改指 Kong
-- 持久卷落 `/media/heygo/program/datahub/nous/data/{postgres,redis,storage,runner}`；媒体根 = NAS 挂载点（机上已挂 `192.168.8.9` heytime CIFS 与 `10.0.0.9` NFS，share 待点名）
+- 持久卷落 `/media/heygo/program/datahub/nous/data/{postgres,redis,storage,runner}`；媒体**中转区**（`/app/downloads`：yt-dlp 落盘 / HLS 转码 / 缩略图暂存，上传 S3 后即删）自 2026-09-07 起在本机 NVMe `/media/heygo/cache/nous-cache`（ext4，带 `.mounted` marker，ACL 授 uid 1031），不再走 nas-B 的 CIFS；成品一律在 nas-B 的 SeaweedFS（S3）
 - 部署机制换 self-hosted runner（epic spec §6 P1 与 §4.1 拓扑）
 - backend→AI 走 localhost:8000（nous-center 网关原生跑在本机，零容器，互不干扰）
 - 起栈脚本加 `.mounted` marker 检查（nofail 防护）
