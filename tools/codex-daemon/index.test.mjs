@@ -13,6 +13,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  HeartbeatLiveness,
   clearLastStop,
   describeLastStop,
   isTerminalClose,
@@ -835,8 +836,13 @@ test('buildImageArgs: falls back to 1024x1024 when size is missing (old-server s
 // updated — the opposite of the trade MIN_IMAGE_DAEMON_VERSION exists to make
 // (there, `quality` was silently discarded, i.e. the job lied about what it
 // did). Degrading is right when the job still does what it says.
-test('DAEMON_VERSION is 0.5.0 — image jobs are gated server-side on 0.4.0', () => {
-  assert.equal(DAEMON_VERSION, '0.5.0');
+//
+// 0.5.1 adds the pong watchdog (HeartbeatLiveness): a daemon that only sent
+// pings sat "connected" on a half-open socket for good after a tunnel blip
+// (2026-09-06). The server minimum still stays at 0.4.0 — an older daemon
+// generates correctly, it just needs a restart after such a blip.
+test('DAEMON_VERSION is 0.5.1 — image jobs are gated server-side on 0.4.0', () => {
+  assert.equal(DAEMON_VERSION, '0.5.1');
 });
 
 // ── content refusal: the model declined and said why (2026-09-04) ───────────
@@ -996,4 +1002,26 @@ test('imageJobFailure: on a refusal the model text wins over envelope detail', (
   const err = imageJobFailure(raw);
   assert.equal(classifyJobError(err), 'content_refused');
   assert.match(err.detail, /抱歉/);
+});
+
+// ── half-open sockets (2026-09-06) ──────────────────────────────────────────
+// A tunnel blip left the socket ESTABLISHED on this side with the pings
+// stuck in Send-Q while the server had already timed the device out (90s, no
+// frame). The daemon only SENT pings and never waited for pongs, so it sat
+// "connected" forever and the user's local engines vanished from every
+// picker. Liveness = pongs, not the ability to enqueue a ping.
+test('HeartbeatLiveness: two pings without a pong mean the socket is dead', () => {
+  const live = new HeartbeatLiveness({ missesAllowed: 2 });
+  assert.equal(live.beforePing(), false);   // first ping: nothing outstanding
+  assert.equal(live.beforePing(), false);   // one unanswered — still tolerated
+  assert.equal(live.beforePing(), true);    // two unanswered — dead
+});
+
+test('HeartbeatLiveness: a pong clears the outstanding count', () => {
+  const live = new HeartbeatLiveness({ missesAllowed: 2 });
+  live.beforePing();
+  live.beforePing();
+  live.gotPong();
+  assert.equal(live.beforePing(), false);
+  assert.equal(live.outstanding, 1);
 });
