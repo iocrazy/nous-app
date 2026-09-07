@@ -249,7 +249,7 @@ login) is tracked as follow-up work; it is not in this first version.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NOUS_API_BASE` | `https://api.nous.ink` | Point at a different nous deployment. On Linux and macOS `install-service` bakes it into the unit/plist, so the background service uses the same one. **On Windows it is not** — a scheduled task carries no environment of its own, so set it as a user environment variable (`setx NOUS_API_BASE "…"`) before the task runs. |
+| `NOUS_API_BASE` | `https://cn.nous.ink:88,https://api.nous.ink` | One base, or a comma list tried in order (a connection that dies young moves to the next line; the web app uses the same two). Point at a different nous deployment or at the LAN backend when the daemon runs on the server itself. On Linux and macOS `install-service` bakes it into the unit/plist, so the background service uses the same one. **On Windows it is not** — a scheduled task carries no environment of its own, so set it as a user environment variable (`setx NOUS_API_BASE "…"`) before the task runs. |
 
 ## Development
 

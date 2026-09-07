@@ -13,7 +13,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  ApiBases,
+  DEFAULT_API_BASES,
   HeartbeatLiveness,
+  parseApiBases,
   clearLastStop,
   describeLastStop,
   isTerminalClose,
@@ -841,8 +844,9 @@ test('buildImageArgs: falls back to 1024x1024 when size is missing (old-server s
 // pings sat "connected" on a half-open socket for good after a tunnel blip
 // (2026-09-06). The server minimum still stays at 0.4.0 — an older daemon
 // generates correctly, it just needs a restart after such a blip.
-test('DAEMON_VERSION is 0.5.1 — image jobs are gated server-side on 0.4.0', () => {
-  assert.equal(DAEMON_VERSION, '0.5.1');
+// 0.5.2 dials two lines (cn direct, then the tunnel) — see ApiBases.
+test('DAEMON_VERSION is 0.5.2 — image jobs are gated server-side on 0.4.0', () => {
+  assert.equal(DAEMON_VERSION, '0.5.2');
 });
 
 // ── content refusal: the model declined and said why (2026-09-04) ───────────
@@ -1024,4 +1028,41 @@ test('HeartbeatLiveness: a pong clears the outstanding count', () => {
   live.gotPong();
   assert.equal(live.beforePing(), false);
   assert.equal(live.outstanding, 1);
+});
+
+// ── two lines to nous, like the web app (2026-09-07) ─────────────────────────
+// Every other user's daemon dialled api.nous.ink only — the Cloudflare tunnel —
+// and had no fallback, so an edge blip took their local engines offline. The
+// web app already runs cn.nous.ink:88 direct with api.nous.ink as fallback;
+// the daemon now carries the same two and rotates when a connection dies young.
+test('parseApiBases: default is the direct line first, the tunnel second', () => {
+  assert.deepEqual(parseApiBases(undefined), DEFAULT_API_BASES);
+  assert.deepEqual(DEFAULT_API_BASES, ['https://cn.nous.ink:88', 'https://api.nous.ink']);
+});
+
+test('parseApiBases: NOUS_API_BASE may name one base or a comma list; trailing slashes go', () => {
+  assert.deepEqual(parseApiBases('http://10.0.0.10:8890/'), ['http://10.0.0.10:8890']);
+  assert.deepEqual(parseApiBases(' https://a.example , https://b.example/ '), ['https://a.example', 'https://b.example']);
+});
+
+test('ApiBases: rotates on advance, wraps, and derives the ws base', () => {
+  const b = new ApiBases(['https://a.example', 'https://b.example']);
+  assert.equal(b.current, 'https://a.example');
+  assert.equal(b.ws, 'wss://a.example');
+  assert.equal(b.advance(), 'https://b.example');
+  assert.equal(b.advance(), 'https://a.example');
+});
+
+test('ApiBases: a single base never rotates', () => {
+  const b = new ApiBases(['http://10.0.0.10:8890']);
+  assert.equal(b.advance(), 'http://10.0.0.10:8890');
+  assert.equal(b.ws, 'ws://10.0.0.10:8890');
+});
+
+test('ApiBases.owns: a nous URL on EITHER line passes the allowlist', () => {
+  const b = new ApiBases(DEFAULT_API_BASES);
+  assert.equal(b.owns('https://api.nous.ink/api/v1/generated-media/1'), true);
+  assert.equal(b.owns('https://cn.nous.ink:88/api/v1/generated-media/1'), true);
+  assert.equal(b.owns('https://cn.nous.ink/api/v1/x'), false);   // no port — a different host:port
+  assert.equal(b.owns('https://evil.example/api.nous.ink/'), false);
 });
