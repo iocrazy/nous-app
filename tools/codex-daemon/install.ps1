@@ -4,15 +4,15 @@
 #    systemd path are the tested ones; this file is the same flow translated,
 #    kept here so Windows users have a starting point rather than nothing.
 #
-#   irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1 | iex
+#   irm https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.ps1 | iex
 #   # or, with the pairing code up front:
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) ABCD2345
+#   & ([scriptblock]::Create((irm https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.ps1))) ABCD2345
 #   # trailing args are forwarded to `pair`:
 #   … ABCD2345 --name "studio pc"
 #
 # UPGRADING an already-paired machine (no pairing code; the device token is
 # kept and the scheduled task is re-registered on the new code):
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) -Update
+#   & ([scriptblock]::Create((irm https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.ps1))) -Update
 #
 # $env:NOUS_API_BASE is honoured while this script runs, but a scheduled task
 # carries no environment of its own — set it with `setx NOUS_API_BASE "…"` (or
@@ -34,7 +34,10 @@ $ErrorActionPreference = 'Stop'
 # ignore it, which is why the $LASTEXITCODE checks below are still here.
 $PSNativeCommandUseErrorActionPreference = $true
 
-$RawUrl     = 'https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs'
+# Served by nous itself, on both lines the daemon will use; $env:NOUS_API_BASE
+# narrows this to one base or a comma list, exactly as the daemon reads it.
+$Bases      = if ($env:NOUS_API_BASE) { $env:NOUS_API_BASE } else { 'https://cn.nous.ink:88,https://api.nous.ink' }
+$DistPath   = '/api/v1/codex-daemon/dist'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'nous-codex'
 $Script     = Join-Path $InstallDir 'nous-codex.mjs'
 # Must match `xdgConfigHome()` in index.mjs — read only, never written here.
@@ -88,7 +91,19 @@ if (Get-Command gpt-image-2-skill -ErrorAction SilentlyContinue) {
 # ── the daemon itself ─────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Write-Host "downloading the daemon to $Script …"
-Invoke-WebRequest -UseBasicParsing -Uri $RawUrl -OutFile $Script
+$fetched = $false
+foreach ($base in ($Bases -split ',')) {
+  $base = $base.Trim().TrimEnd('/')
+  if (-not $base) { continue }
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri "$base$DistPath/index.mjs" -OutFile $Script
+    $fetched = $true
+    break
+  } catch {
+    Write-Host "download failed on $base — trying the next line"
+  }
+}
+if (-not $fetched) { throw "download failed on every line: $Bases" }
 
 # ── codex login (browser OAuth; we cannot do it for you) ──────────────────
 $authJson = Join-Path $env:USERPROFILE '.codex\auth.json'

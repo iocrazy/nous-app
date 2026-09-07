@@ -17,6 +17,7 @@ import {
   isDeviceOnline,
   type CodexDevice,
 } from '../../services/codexDaemonService';
+import { getApiUrl } from '../../utils/apiConfig';
 import { deviceEnvReport, EnvReportLine } from './LocalCliSettings';
 
 const BTN_PRIMARY =
@@ -194,9 +195,7 @@ export function CodexDaemonSettings() {
             data-testid="codex-pair-command"
             className="mt-1 block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
           >
-            curl -fsSL
-            https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh |
-            sh -s -- {pairCode}
+            curl -fsSL {getApiUrl()}/api/v1/codex-daemon/dist/install.sh | sh -s -- {pairCode}
           </code>
           <div className="mt-1.5 text-[10px] text-content-3">
             {t('settings.localCli.pairServiceNote')}

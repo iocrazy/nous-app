@@ -1,14 +1,14 @@
 #!/bin/sh
 # nous-codex one-line installer (macOS / Linux).
 #
-#   curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- <PAIRING-CODE>
+#   curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.sh | sh -s -- <PAIRING-CODE>
 #
 # Anything after the pairing code is forwarded to `pair`, so this works too:
 #   … | sh -s -- <PAIRING-CODE> --name "studio mac"
 #
 # UPGRADING an already-paired machine (no pairing code needed — the existing
 # device token is kept and the service is restarted on the new code):
-#   curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- --update
+#   curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.sh | sh -s -- --update
 #
 # Running it with no arguments at all does the same thing when this machine is
 # already paired; it only asks for a pairing code when there is nothing to keep.
@@ -20,7 +20,11 @@
 # NOUS_API_BASE is honoured and carried into the service unit.
 set -eu
 
-RAW_URL="https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs"
+# The daemon is served by nous itself, on both lines the daemon will later use
+# (cn direct first, the Cloudflare tunnel second). NOUS_API_BASE narrows this to
+# one base, or a comma list, exactly as the daemon reads it.
+BASES="${NOUS_API_BASE:-https://cn.nous.ink:88,https://api.nous.ink}"
+DIST_PATH="/api/v1/codex-daemon/dist"
 INSTALL_DIR="${HOME}/.local/share/nous-codex"
 SCRIPT="${INSTALL_DIR}/nous-codex.mjs"
 # Must match `xdgConfigHome()` in index.mjs — this is only read, never written.
@@ -71,13 +75,20 @@ fi
 # ── the daemon itself ─────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
 say "downloading the daemon to ${SCRIPT} …"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$RAW_URL" -o "$SCRIPT" || die "download failed: $RAW_URL"
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$SCRIPT" "$RAW_URL" || die "download failed: $RAW_URL"
-else
-  die "neither curl nor wget is available — cannot download $RAW_URL"
-fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 \
+  || die "neither curl nor wget is available — cannot download the daemon"
+fetched=0
+for base in $(printf '%s' "$BASES" | tr ',' ' '); do
+  base="${base%/}"
+  url="${base}${DIST_PATH}/index.mjs"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$SCRIPT" && fetched=1 && break
+  else
+    wget -qO "$SCRIPT" "$url" && fetched=1 && break
+  fi
+  say "download failed on $base — trying the next line"
+done
+[ "$fetched" -eq 1 ] || die "download failed on every line: $BASES"
 chmod 0755 "$SCRIPT"
 
 # ── codex login (browser OAuth; we cannot do it for you) ──────────────────
@@ -105,7 +116,7 @@ CODE="${1-}"
 if [ "$UPDATE_ONLY" -eq 1 ]; then
   has_pairing || die "--update needs a machine that is already paired, but ${CONFIG_FILE} holds no device token.
 Install it fresh instead, with a code from nous → Settings → AI → Local CLI → Pair a device:
-    curl -fsSL ${RAW_URL%/index.mjs}/install.sh | sh -s -- <PAIRING-CODE>"
+    curl -fsSL ${BASES%%,*}${DIST_PATH}/install.sh | sh -s -- <PAIRING-CODE>"
   say "keeping the existing pairing (${CONFIG_FILE})"
 elif [ -z "$CODE" ] && has_pairing; then
   # Already paired and nothing was asked for: this is an upgrade.
