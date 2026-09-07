@@ -662,15 +662,19 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 **为什么后端与 migration 必须 self-hosted**：gpupc 无公网 IP（CGNAT），GitHub 云端 runner 既不能 SSH 进来也收不到 webhook，只能反过来让 gpupc 主动连出去拉任务。附带好处：省掉 ACR 跨境推拉、build 用本机 48 核、不消耗 Actions 分钟数。
 
-**`ci.yml` 也在 self-hosted 上（2026-08-06 起）**，理由不同：账户付款失败让托管 runner 的 job 全部 2 秒内被拦，CI 完全失去守卫能力。计费恢复后可以切回 `ubuntu-latest`（三处 `runs-on`）。
+**`ci.yml` 已于 2026-09-07 迁回 `ubuntu-latest`（五个 job 全部）**。它曾在 2026-08-06 迁去 self-hosted，理由是账户付款失败让托管 runner 的 job 全部 2 秒内被拦；那个理由已失效（同日 `lint-workflows` / `deploy-pages` / `schema-drift` 在托管 runner 上都拿到真实 runner 并跑绿），而代价在累积：单 runner 让五个 job 串行且与 `deploy-gpu` 争用（2026-09-06 两次 PR 分别排队 3h26m / 3h30m）、gpupc 走 5G 计费网络每个 job 都在烧流量、CI 构建与生产 Postgres 同盘会拖慢后者**且没有任何探针会告诉你**。
 
-⚠️ **public repo + self-hosted runner 必须带 fork 守卫**。本仓库是 public，而 runner 就是生产部署机（以 `heygo` 身份跑，workdir 在 `datahub` 盘），fork 里的任意代码在上面执行等于把机器交出去 —— 这是 GitHub 官方对该组合的明确警告。`ci.yml` 三个 job 都有：
+⚠️ **要再迁回 self-hosted 是五处 `runs-on`，不是三处** —— 旧注释写的"三处"写于 `rust` 与 `codex-daemon` 两个 job 加入之前，照它改会漏两个。同时要把三处云端缓存重新关掉（`setup-node` 的 npm、两处 `setup-uv` 的 `enable-cache`、rust 的 `Swatinem/rust-cache`）。
+
+⚠️ **self-hosted 安全性的真正依据不是 fork 守卫，是触发器**。留在 gpupc 的三条链（`deploy-gpu` / `run-migration` / `config-drift`）**没有一个吃 `pull_request`** —— 全是 `push: branches:[master]` + `schedule` + `workflow_dispatch`，所以 fork 代码没有任何路径能到达那台机器。
+
+`ci.yml` 五个 job 的 fork 守卫**刻意保留**：
 
 ```yaml
 if: github.event.pull_request.head.repo.full_name == github.repository
 ```
 
-fork PR 因此**没有 CI**（显示 skipped 而非 failed）。这是刻意的取舍：宁可 fork PR 无守卫，也不开这个口子。往 self-hosted 上加任何 `pull_request` 触发的 workflow，都要同步加这一行。
+仓库现在是 **private**（外部 fork PR 本就不会发生），删掉换不回任何东西；而万一将来再迁回 self-hosted，少这一行就等于把生产部署机交给任何人。**往 self-hosted 上加任何 `pull_request` 触发的 workflow，都必须带这一行。**
 
 runner 的 workspace 与生产数据同盘（`/media/heygo/program`），`actions/checkout` 默认 `clean: true` 会 `git clean -ffdx`，所以 `node_modules` / `target/` 不累积；代价是每次重装依赖。
 
@@ -763,7 +767,7 @@ CI 里那步用的是 `docker://rhysd/actionlint:latest`，本机 docker pull �
 
 | 首个 error | 含义 | 处置 |
 |---|---|---|
-| `runner_name` 为空 + `steps=0` + 2 秒 fail | 账户计费失败（托管 runner 被拦） | 走 self-hosted（不计费）。⚠️ 别指望"切 public"，见下 |
+| `runner_name` 为空 + `steps=0` + 2 秒 fail | 账户计费失败（托管 runner 被拦） | 临时走 self-hosted（不计费）。⚠️ 别指望"切 public"，见下。**2026-09-07 实测计费已恢复**，托管 runner 正常 |
 | `Failed to resolve action download info: Service Unavailable` | **GitHub Actions 侧 outage**，job 死在准备阶段 | 只能等 + 重跑。**迁 self-hosted 无效** —— runner 一样要向 GitHub API 取 action 元数据 |
 | 有真实步骤日志与耗时 | 代码/配置真的挂了 | 正常修 |
 
@@ -838,7 +842,8 @@ cd frontend && npm run e2e:prod
   **改完自查**：跑完确认 `SHOW session_replication_role` 回到 `origin`、目标表 `pg_trigger.tgenabled` 仍是 `'O'`，再以 postgres 跑一次同样的 UPDATE 确认**被拦**（正向对照，证明抑制只限于那一个事务）。两次撞墙记录：365（176 的 SET ROLE 导致 DROP TABLE 权限不足）、405（PR #1695，同一句在 ephemeral 库 `permission denied for table issues`）。
 - **`env_file` 改动必须 `docker compose up -d` 重建容器**，`docker restart` 不会重读。同理 compose 的 service/env/volume/ports 改动也必须 `up -d`。
 - **self-hosted runner 会僵死**。网络抖动导致 session 失效后 runner 不会自愈（日志里刷 `broker.actions.githubusercontent.com` 500 或 `unexpected EOF`），GitHub 侧显示 `offline` 而进程还活着。修：`sudo systemctl restart actions.runner.iocrazy-nous-app.gpu-runner.service`。查状态：`gh api /repos/iocrazy/nous-app/actions/runners`。
-- **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。
+- **托管 runner 依赖账户付款正常**（**2026-09-07 复查：已恢复正常，`ci.yml` 已迁回托管**）。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。
+  ⚠️ **仓库现在是 private + GitHub Free**，所以 Actions 分钟数是计费资源（2000 分钟/月），也不支持 branch protection。按现有 job 时长估算每次 PR push 约 13–16 计费分钟。额度不够时的下一手是给 `ci.yml` 加 path 过滤（Free+private 无 required check，不存在"skipped 卡住 PR"的风险），但那条注释指出的"门禁静默跳过"语义风险仍然成立。
   **判别法**：`gh api repos/iocrazy/nous-app/actions/runs/<id>/jobs --jq '.jobs[] | "\(.name) runner=\(.runner_name) steps=\(.steps|length)"'` —— `runner` 为空 + `steps=0` 就是这种假红，不是代码问题。
   **切 public 是解**（2026-07-26 实测：private 下重跑两轮都被拦，切 public 后立刻拿到真实 runner，全套 6 分钟跑绿）。但 ⚠️ **repo 会自己弹回 private**（免费额度用尽时 GitHub 强制回退，2026-05-29 一天触发 5 次，见 [[reference_github_repo_visibility_revert]]），所以"CI 突然又假红"要先复查 `gh repo view --json visibility`。
 - **`pr-behind-check.yml` 两档行为不同，别一概而论**（2026-07-26 查清）：
@@ -853,8 +858,14 @@ cd frontend && npm run e2e:prod
 
 | | gpupc | Mac mini |
 |---|---|---|
-| 角色 | 部署机（self-hosted runner + 生产栈 + GPU 推理） | 开发机 |
-| 主管 | `backend/**`、`deploy/**`、`.github/workflows/**`、`supabase/migrations/**` | `frontend/**`、`admin/**`、浏览器扩展、iOS Shortcut |
+| 角色 | **只做部署**（生产栈 + GPU 推理 + 三条运维链的 self-hosted runner） | **唯一的开发机** |
+| 主管 | 生产运行时。**不在这台机器上编辑代码** | 全部代码 —— `backend/**`、`frontend/**`、`admin/**`、`deploy/**`、`.github/workflows/**`、`supabase/migrations/**` |
+
+⚠️ **2026-09-07 起 gpupc 不再是开发机**。`ci.yml` 迁回托管 runner、`nous-admin` 接进 `deploy-gpu.yml` 之后，gpupc 上不再需要开发工作树。
+
+那个目录（`/media/heygo/program/projects-code/repos/nous-app`）降级为**部署 checkout**：只读、没人在上面编辑、由 `nous deploy` 自己 `fetch + reset --hard` 同步。区别是语义上的（有没有人在上面写代码），不是路径上的。`deploy/gpu-server/nous` 的 dirty 守卫把这条约定变成可执行检查 —— 目录一脏，`nous deploy` 就拒绝并逐行列出脏文件，而不是静默 `reset --hard` 抹掉。
+
+从 Mac mini 做运维的通道是 **ZeroTier + SSH**（`heygo@10.0.0.10`，免密已通）。SSH 进去看日志/探针/重启**不等于**在那编辑代码，两者不冲突。完整闭环：本机编辑 → `gh pr create` → CI 在 GitHub → 合并 → `deploy-gpu.yml` 自动在 gpupc 部署 → `gh run watch` 看 smoke → `ssh gpupc 'nous status'` 验真栈 → 本机 `npm run e2e:prod` 走查。
 
 铁律：**同一时刻只有一台机器往 master 推**，谁先推谁赢，另一台 `git rebase origin/master`。
 
@@ -907,19 +918,24 @@ docker inspect <容器> --format '{{index .Config.Labels "com.docker.compose.pro
 |---|---|---|---|
 | `nous-db` 及整个 supabase 栈 | `mediahub-sb-prod` | datahub 活目录（不在 git） | 有，靠上面的 drift 检查兜 |
 | `nous-backend` / `worker` / `browser` / `gateway` | `gpu-server` | **runner 工作区 checkout** | 无——每次部署从 git 重出 |
-| `nous-admin` | `gpu-server` | **开发工作树** `projects-code/repos/nous-app/` | ⚠️ 见下 |
+| `nous-admin` | `gpu-server` | **runner 工作区 checkout**（2026-09-07 起） | 无——每次部署从 git 重出 |
 
-⚠️ **`nous-admin` 是从开发工作树构建的**，而那棵树可以挂在任意分支上（实测时挂在 `chore/ext-release-packaging`）。更麻烦的是它与另外四个容器**共用项目名 `gpu-server` 却指向不同的 compose 文件**——从开发树跑 `docker compose up -d --build admin` 时，compose 看到的是开发树那份 compose 对整个项目的定义，有可能顺带影响到另外四个容器。手动部署 admin 前先确认开发树的 `deploy/gpu-server/docker-compose.yml` 与 master 一致。根治要么给 admin 补自动部署链（阻塞项见「已知缺口」的 `NOUS_ANON_KEY`），要么让它也从 runner checkout 构建。
+`nous-admin` 曾经是从**开发工作树**构建的，那是个真缺口：那棵树可以挂在任意分支上，而它与另外四个容器共用项目名 `gpu-server` 却指向不同的 compose 文件，从开发树 `up` 有可能顺带影响生产容器。2026-09-07 已接进 `deploy-gpu.yml`（paths / 回滚锚点 / `up.sh --build` 清单 / smoke 探针 / 回滚清单五处同改），与另外四个容器同源。
 
 ### 已知缺口
 
-- **admin 没有自动部署**。gpupc 的 `nous-admin` 是 compose 本机 build（`context: ../../admin`），但 `deploy-gpu.yml` 的 paths 不含 `admin/**`。补齐前提是先决定 build arg `NOUS_ANON_KEY` 怎么进 CI（缺了会 build 出空 anon key 的 admin）。当前只能手动：`cd deploy/gpu-server && NOUS_ANON_KEY=<key> docker compose up -d --build admin`。
-- **`deploy-frontend.yml` 只是校验、不部署**，且它轮询的 `version.json` `commitSha` 依赖构建环境变量（见「前端链的关键设计」）。目前仅在设了 `PROD_FRONTEND_VERSION_URL` 仓库变量时才跑，未配置即 no-op。要么指向 `https://app.nous.ink/version.json` 让它真正生效，要么退役 —— 现在这样"存在但不生效"最容易误以为有守卫。
+- ~~**admin 没有自动部署**~~ —— **2026-09-07 已补齐**。当时记的阻塞项「`NOUS_ANON_KEY` 怎么进 CI」实测**不成立**：那是 **publishable** key（本来就烤进浏览器能下载的 JS 包，与 `frontend/.env.production` 明文提交 anon key 同一性质），所以直接在 compose 里写成默认值 `${NOUS_ANON_KEY:-sb_publishable_...}`，既不需要 CI secret，又从根上消掉"变量未设 → compose 只警告不失败 → build 出空 key 的 admin"这一整类静默故障。
+- ~~**`deploy-frontend.yml` 存在但不生效**~~ —— **2026-09-07 查清并修复，但结论与原记载相反**。原文说"未配置即 no-op"，实际上 `PROD_FRONTEND_VERSION_URL` **是配了的**，只是指向 `https://mediahub.heygo.cn/version.json` —— 2026-07-25 迁移前的 NAS 时代域名，早已不存在。于是每次前端改动它都连拿 60 次 `<unreachable>`，然后把"探针自己够不着"解读成"部署没上线"，红 15 分钟。**部署一直是好的**（`app.nous.ink/version.json` 的 `commitSha` 与 push 的 SHA 一致，`buildTime` 在 push 后 54 秒）。已把变量改指 `https://app.nous.ink/version.json`。
+  教训与「空输出不是否定结论」同族：探针够不着目标 ≠ 目标是坏的。**新加轮询型探针时，必须能区分"拿到值且不匹配"与"一次都没拿到值"，后者应该报"探针失效"而不是报"被测对象失败"。**
 - **migration 与代码部署无顺序保证**。`run-migration.yml` 与 `deploy-gpu.yml` 独立触发，同一个 PR 里既加 migration 又改依赖它的代码时，两者谁先完成不确定。
 
-## Discord 通知规则
+## Discord 通知规则（可选，当前不可用）
 
-当以下场景发生时，**必须**通过 Discord MCP 发送通知：
+⚠️ **2026-09-07：Discord MCP 未登录**（`discord_send` 返回 `Discord client not logged in.`），所以这一节描述的通知发不出去。原文写的是"**必须**发送"，实测每次尝试都失败 —— 一条永远做不到的强制要求只会让每个会话都白撞一次墙，还容易让人以为通知已经发了。
+
+因此降级为**可选**：MCP 可用时按下面的模板发；不可用时**不要重试、不要绕道**，在回复里说明即可。恢复登录后可以把"可选"改回强制。
+
+（同日已移除 `~/.claude/settings.json` 里那个每条消息都注入「强制规则」横幅的 `UserPromptSubmit` hook —— 那是用户级全局设置，不在本仓库。）
 
 ### 触发条件
 
