@@ -253,6 +253,24 @@ export function useResourceUpload({
         : computeFileHash(f);
 
     let result: { uploaded: number; linked: number; failed: number; total: number };
+    // The first reason the backend spelled out for a failed upload
+    // (`ResourceUploadError.detail`, e.g. the object-store 503 sentence).
+    // Recognised by `name`, not `instanceof` — see PublishPage's
+    // describeUploadFailure for why crossing the module boundary that way
+    // is the check that quietly stops holding.
+    let firstReason: string | null = null;
+    const rememberReason = (err: unknown): never => {
+      if (
+        firstReason === null &&
+        typeof err === 'object' &&
+        err !== null &&
+        (err as { name?: unknown }).name === 'ResourceUploadError' &&
+        typeof (err as { detail?: unknown }).detail === 'string'
+      ) {
+        firstReason = (err as { detail: string }).detail;
+      }
+      throw err;
+    };
     try {
       try {
         result = await runImport(
@@ -263,6 +281,7 @@ export function useResourceUpload({
             upload: (f) =>
               uploadResource(f, scopeId, selectedFolderId, undefined, selectedLibraryId).then(
                 () => undefined,
+                rememberReason,
               ),
             link: (existingId) =>
               linkExistingResource(existingId, scopeId, selectedFolderId, selectedLibraryId).then(
@@ -291,13 +310,21 @@ export function useResourceUpload({
       }
 
       // ── Finish ───────────────────────────────────────────────────────────────
+      // Partial failure is informational; nothing-got-through is an error;
+      // and when the backend said WHY, the toast repeats it (a count alone
+      // told the user nothing about what to do).
+      const counts = {
+        uploaded: result.uploaded,
+        linked: result.linked,
+        failed: result.failed,
+      };
+      const severity =
+        result.failed === 0 ? 'success' : result.failed === result.total ? 'error' : 'info';
       addToast(
-        t('resources.importDone', {
-          uploaded: result.uploaded,
-          linked: result.linked,
-          failed: result.failed,
-        }),
-        result.failed > 0 ? 'info' : 'success',
+        firstReason !== null
+          ? t('resources.importDoneWithReason', { ...counts, reason: firstReason })
+          : t('resources.importDone', counts),
+        severity,
       );
 
       try {

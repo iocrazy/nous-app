@@ -5,8 +5,9 @@ rows), NOT regenerable derivatives — so with FEATURE_UNIFIED_STORAGE on
 they must land in the object store like uploads do, not keep minting
 legacy filesystem rows. Exercises persist_derived_image against a stubbed
 repo: flag on routes bytes through store_local_file() into the
-"sb://library/..." shape, flag off (and any storage failure) preserves the
-legacy atomic filesystem write. Mirrors test_resources_unified_storage.py.
+"sb://library/..." shape, flag off preserves the legacy atomic filesystem
+write, and a storage FAILURE with the flag on is a hard, typed failure
+(2026-09-07 — the transit dir is not a durable store). Mirrors test_resources_unified_storage.py.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import pytest
 import app.services.canvas.derive_persistence as dp
 from app.services.canvas.derive_persistence import persist_derived_image
 from app.services.library.media_storage import StoredObject
+from app.services.library.storage_errors import ObjectStoreWriteFailed
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +37,11 @@ class FakeRepo:
         self.updated_resource: Dict[str, Any] | None = None
         self.versions: List[Dict[str, Any]] = []
         self.items: List[Dict[str, Any]] = []
+        self.deleted: List[str] = []
+
+    async def delete_resource(self, resource_id: str) -> bool:
+        self.deleted.append(str(resource_id))
+        return True
 
     async def get_resource_by_id(self, resource_id: str):  # pragma: no cover
         return None
@@ -145,7 +152,9 @@ async def test_flag_off_keeps_legacy_filesystem_path(repo, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_flag_on_store_failure_falls_back_to_filesystem(repo, monkeypatch):
+async def test_flag_on_store_failure_raises_typed_error_and_discards_row(
+    repo, monkeypatch
+):
     monkeypatch.setattr(dp.settings, "FEATURE_UNIFIED_STORAGE", True)
 
     async def failing_store_local_file(*args, **kwargs):
@@ -153,42 +162,33 @@ async def test_flag_on_store_failure_falls_back_to_filesystem(repo, monkeypatch)
 
     monkeypatch.setattr(dp, "store_local_file", failing_store_local_file)
 
-    # Fallback logs at ERROR (spec §8 — visible in the ERROR funnel)
-    err_mock = MagicMock()
-    monkeypatch.setattr(dp.logger, "error", err_mock)
-
-    resource = await _persist(repo, scope_id="9")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await _persist(repo, scope_id="9")
 
     rid = str(repo.created_resource["id"])
-    expected = f"teams/9/derived/{rid}/v1/crop-orig.png"
-    assert resource["file_path"] == expected
-
-    on_disk = Path(dp.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == PNG_BYTES
-
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert excinfo.value.details["where"] == "persist_derived_image"
+    assert excinfo.value.details["resource_id"] == rid
+    assert [p for p in Path(dp.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    assert repo.deleted == [rid]
+    assert repo.versions == [] and repo.items == []
 
 
 @pytest.mark.asyncio
-async def test_flag_on_non_numeric_scope_falls_back_not_crashes(repo, monkeypatch):
-    """Legacy scope ids may be non-numeric strings (existing derive tests use
-    'scope-1'); int() failing must degrade to the filesystem branch with an
-    ERROR log, never bubble out of persist_derived_image."""
+async def test_flag_on_non_numeric_scope_is_a_storage_failure(repo, monkeypatch):
+    """A scope id the object key cannot encode (legacy 'scope-1') has
+    nowhere to be stored: typed failure with the ValueError as cause, the
+    store never called, the row discarded — not a silent filesystem row."""
     monkeypatch.setattr(dp.settings, "FEATURE_UNIFIED_STORAGE", True)
 
     store_mock = MagicMock()
     monkeypatch.setattr(dp, "store_local_file", store_mock)
-    err_mock = MagicMock()
-    monkeypatch.setattr(dp.logger, "error", err_mock)
 
-    resource = await _persist(repo, scope_id="scope-1")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await _persist(repo, scope_id="scope-1")
 
-    rid = str(repo.created_resource["id"])
-    assert resource["file_path"] == f"teams/scope-1/derived/{rid}/v1/crop-orig.png"
+    assert isinstance(excinfo.value.__cause__, ValueError)
     store_mock.assert_not_called()  # int('scope-1') raised before the call
-    err_mock.assert_called_once()
+    assert repo.deleted == [str(repo.created_resource["id"])]
 
 
 # ─── load_source_image read side (sb:// dual-track) ──────────────────

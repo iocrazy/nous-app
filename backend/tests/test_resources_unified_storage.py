@@ -2,8 +2,9 @@
 
 Exercises ResourcesService against a stubbed repo (in-memory dict) so the
 tests pin ONLY the storage-selection logic — flag on routes bytes through
-store_local_file() into the "sb://library/..." shape, flag off (and any
-storage failure) preserves the legacy filesystem move. Mirrors the
+store_local_file() into the "sb://library/..." shape, flag off preserves the
+legacy filesystem move, and a storage FAILURE with the flag on is a hard,
+typed failure (2026-09-07 — the transit dir is not a durable store). Mirrors the
 FakeStore style of test_media_storage_unified.py.
 """
 
@@ -14,6 +15,7 @@ import pytest
 
 import app.services.library.resources_service as rs
 from app.services.library.media_storage import StoredObject
+from app.services.library.storage_errors import ObjectStoreWriteFailed
 
 
 class FakeUploadFile:
@@ -73,6 +75,10 @@ class FakeResourcesRepo:
             v["version_number"] for v in self.versions if int(v["resource_id"]) == rid
         ]
         return (max(numbers) if numbers else 0) + 1
+
+    async def delete_resource(self, resource_id) -> bool:
+        self.resources.pop(int(resource_id), None)
+        return True
 
     async def get_first_resource_item(self, resource_id):
         rid = int(resource_id)
@@ -157,7 +163,13 @@ async def test_flag_off_keeps_legacy_filesystem_path(service, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_flag_on_store_failure_falls_back_to_filesystem(service, monkeypatch):
+async def test_flag_on_store_failure_raises_typed_error_and_writes_nothing(
+    service, monkeypatch
+):
+    """S3 down is a HARD failure: no filesystem fallback, nothing on disk,
+    and the resource row created ahead of the bytes is discarded again.
+    The typed error carries the developer context (see
+    test_object_store_hard_fail.py for the HTTP/log contract)."""
     monkeypatch.setattr(rs.settings, "FEATURE_UNIFIED_STORAGE", True)
 
     async def failing_store_local_file(*args, **kwargs):
@@ -165,25 +177,20 @@ async def test_flag_on_store_failure_falls_back_to_filesystem(service, monkeypat
 
     monkeypatch.setattr(rs, "store_local_file", failing_store_local_file)
 
-    # Task 2.4c: fallback logs at ERROR (spec §8 — visible in the ERROR funnel)
-    err_mock = MagicMock()
-    monkeypatch.setattr(rs.logger, "error", err_mock)
+    file = FakeUploadFile("photo.png", b"never-saved", "image/png")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_resource(
+            user_id="u1", file=file, scope_id="9", folder_id=None, library_id=None
+        )
 
-    file = FakeUploadFile("photo.png", b"fallback-bytes", "image/png")
-    resource = await service.upload_resource(
-        user_id="u1", file=file, scope_id="9", folder_id=None, library_id=None
-    )
-
-    resource_id = str(resource["id"])
-    expected = f"teams/9/uploads/{resource_id}/v1/photo.png"
-    assert resource["file_path"] == expected
-
-    on_disk = Path(rs.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"fallback-bytes"
-
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    err = excinfo.value
+    assert err.details["where"] == "upload_resource"
+    assert err.details["scope_id"] == "9"
+    assert err.details["filename"] == "photo.png"
+    assert isinstance(err.__cause__, RuntimeError)
+    assert [p for p in Path(rs.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    assert service.repo.resources == {}
+    assert service.repo.versions == [] and service.repo.items == []
 
 
 # ── Task 2.2: upload_new_version dual-track ─────────────────────────────────
@@ -301,7 +308,9 @@ async def test_new_version_flag_off_keeps_legacy_filesystem_path(service, monkey
 
 
 @pytest.mark.asyncio
-async def test_new_version_store_failure_falls_back_to_filesystem(service, monkeypatch):
+async def test_new_version_store_failure_raises_typed_error_and_writes_nothing(
+    service, monkeypatch
+):
     monkeypatch.setattr(rs.settings, "FEATURE_UNIFIED_STORAGE", True)
 
     async def failing_store_local_file(*args, **kwargs):
@@ -309,28 +318,22 @@ async def test_new_version_store_failure_falls_back_to_filesystem(service, monke
 
     monkeypatch.setattr(rs, "store_local_file", failing_store_local_file)
 
-    # Task 2.4c: fallback logs at ERROR (spec §8 — visible in the ERROR funnel)
-    err_mock = MagicMock()
-    monkeypatch.setattr(rs.logger, "error", err_mock)
-
     rid = await _seed_resource(
         service.repo, scope_id="9", file_path="teams/9/uploads/RID/v1/orig.txt"
     )
     existing = f"teams/9/uploads/{rid}/v1/orig.txt"
     service.repo.resources[int(rid)]["file_path"] = existing
 
-    file = FakeUploadFile("photo-v2.png", b"fallback v2 bytes", "image/png")
-    version = await service.upload_new_version(resource_id=rid, user_id="u1", file=file)
+    file = FakeUploadFile("photo-v2.png", b"never-saved", "image/png")
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await service.upload_new_version(resource_id=rid, user_id="u1", file=file)
 
-    expected = f"teams/9/uploads/{rid}/v2/photo-v2.png"
-    assert version["file_path"] == expected
-
-    on_disk = Path(rs.settings.DOWNLOAD_PATH) / expected
-    assert on_disk.exists()
-    assert on_disk.read_bytes() == b"fallback v2 bytes"
-
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert excinfo.value.details["where"] == "upload_new_version"
+    assert excinfo.value.details["resource_id"] == rid
+    assert [p for p in Path(rs.settings.DOWNLOAD_PATH).rglob("*") if p.is_file()] == []
+    # No v2 row, and the resource still points at v1.
+    assert [v["version_number"] for v in service.repo.versions] == [1]
+    assert service.repo.resources[int(rid)]["file_path"] == existing
 
 
 @pytest.mark.asyncio

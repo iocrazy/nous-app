@@ -34,6 +34,7 @@ from app.services.library.media_storage import (
     sha256_file,
     to_file_path,
 )
+from app.services.library.storage_errors import object_store_write_failed
 
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB ceiling per generation
 
@@ -408,7 +409,7 @@ async def _register_uploaded_to_object_store(
 
     Dedup: identical bytes hash to the same key, so a re-upload skips the PUT
     (the row still inserts, pointing at the shared object). Raises on any
-    storage failure so the caller can fall back to the filesystem.
+    storage failure; the caller turns that into the typed hard failure.
     """
     sha, key = content_key(
         scope_id=scope_id, data=file_bytes, mime=mime, filename=filename
@@ -441,9 +442,11 @@ async def register_uploaded_media(
     """Write uploaded bytes into the staged store and insert one row. Returns it.
 
     Object-store path (flag on + image): content-addressed upload to the
-    chat-media bucket. Falls back to the filesystem on ANY storage error so an
-    upload never hard-fails because storage-api is down. Videos and non-image
-    uploads always stay on the filesystem (object store is for small images).
+    chat-media bucket. A storage error is a HARD, typed failure
+    (ObjectStoreWriteFailed, 2026-09-07) — the filesystem under
+    DOWNLOAD_PATH is a transit dir, not a place to keep a user's upload.
+    Videos and non-image uploads still stay on the filesystem (object store
+    is for small images).
     """
     kind = media_kind_from_mime(mime)
     if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind == "image":
@@ -458,10 +461,14 @@ async def register_uploaded_media(
                 origin=origin,
             )
         except Exception as exc:
-            logger.warning(
-                f"[register_uploaded_media] object-store upload failed, "
-                f"falling back to filesystem: scope={scope_id} error={exc!r}"
-            )
+            raise object_store_write_failed(
+                exc,
+                where="register_uploaded_media",
+                scope_id=scope_id,
+                filename=filename,
+                mime=mime,
+                size_bytes=len(file_bytes),
+            ) from exc
     gen_uuid = _uuid.uuid4().hex
     rel = f"teams/{scope_id}/{subdir}/{_date_bucket()}/{gen_uuid}/{_safe_filename(filename)}"
     dest = f"{settings.DOWNLOAD_PATH}/{rel}"

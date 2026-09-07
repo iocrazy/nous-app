@@ -418,13 +418,15 @@ async def test_promote_flag_on_writes_object_store_destination(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
+async def test_promote_flag_on_store_failure_raises_and_discards_row(
     monkeypatch, tmp_path
 ):
-    """FEATURE_UNIFIED_STORAGE on but store_local_file raises -> falls back
-    to the pre-existing filesystem copy2, with a logger.error (same
-    fallback discipline as Tasks 2.1/2.2; ERROR level per Task 2.4c)."""
+    """FEATURE_UNIFIED_STORAGE on and store_local_file raises -> the typed
+    ObjectStoreWriteFailed escapes; no filesystem copy, no file_path
+    update, no mark_promoted, and the resource row created ahead of the
+    bytes is discarded again (2026-09-07 hard-fail)."""
     import app.services.library.promote_generated_media_service as svc_mod
+    from app.services.library.storage_errors import ObjectStoreWriteFailed
 
     src = tmp_path / "teams/42/generations/abc/media.png"
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -441,45 +443,37 @@ async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
     async def _create_resource(data):
         return {"id": 555}
 
-    async def _create_version(data):
-        return {"id": 1}
-
-    async def _create_item(data):
-        return {"id": 2}
-
-    updated = {}
-
-    async def _update_resource(resource_id, data):
-        updated["args"] = (resource_id, data)
-        return {}
+    calls = {"marked": False, "updated": False, "deleted": []}
 
     async def _mark(gen_id, rid):
+        calls["marked"] = True
         return _gen_row(promoted_resource_id=str(rid))
+
+    async def _update_resource(resource_id, data):
+        calls["updated"] = True
+        return {}
+
+    async def _delete_resource(resource_id):
+        calls["deleted"].append(str(resource_id))
+        return True
 
     async def failing_store_local_file(**kwargs):
         raise RuntimeError("storage-api unreachable")
 
     monkeypatch.setattr(svc_mod, "store_local_file", failing_store_local_file)
-    err_mock = MagicMock()
-    monkeypatch.setattr(svc_mod.logger, "error", err_mock)
-
     monkeypatch.setattr(svc.gen_repo, "get_by_id", _get_by_id)
     monkeypatch.setattr(svc.gen_repo, "mark_promoted", _mark)
     monkeypatch.setattr(svc.res_repo, "create_resource", _create_resource)
-    monkeypatch.setattr(svc.res_repo, "create_version", _create_version)
-    monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
     monkeypatch.setattr(svc.res_repo, "update_resource", _update_resource)
+    monkeypatch.setattr(svc.res_repo, "delete_resource", _delete_resource)
 
-    out = await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
+    with pytest.raises(ObjectStoreWriteFailed) as excinfo:
+        await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
 
-    assert out["id"] == 555
-    expected_rel = "teams/42/uploads/555/v1/generated-image.png"
-    assert updated["args"] == ("555", {"file_path": expected_rel})
-    dst = tmp_path / expected_rel
-    assert dst.exists()
-    assert dst.read_bytes() == b"imgbytes"
-    err_mock.assert_called_once()
-    assert "unified-storage write failed" in err_mock.call_args[0][0]
+    assert excinfo.value.details["where"] == "promote_generated_media"
+    assert excinfo.value.details["resource_id"] == "555"
+    assert calls == {"marked": False, "updated": False, "deleted": ["555"]}
+    assert not (tmp_path / "teams/42/uploads").exists()
 
 
 class TestGenerationParamsFromGeneratedMedia:

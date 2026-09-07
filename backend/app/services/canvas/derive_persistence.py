@@ -19,10 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol
 
-from loguru import logger
-
 from app.core.config import settings
 from app.services.library.media_storage import materialize, store_local_file
+from app.services.library.storage_errors import (
+    discard_orphan_row,
+    object_store_write_failed,
+)
 from app.services.library.storage_flag import unified_storage_enabled
 
 
@@ -47,6 +49,7 @@ class ResourceRepoProtocol(Protocol):
     async def update_resource(self, resource_id: str, data: dict): ...
     async def create_version(self, data: dict): ...
     async def create_resource_item(self, data: dict): ...
+    async def delete_resource(self, resource_id: str): ...
 
 
 @dataclass(frozen=True)
@@ -183,8 +186,10 @@ async def persist_derived_image(
     # derived bytes are staged to a tmp file first — flag on tries the
     # object store (store_local_file sha256-hashes the tmp internally for
     # its content KEY; we deliberately still don't write file_hash to the
-    # row, see create_resource above), flag off / storage failure keeps the
-    # legacy atomic tmp + os.replace filesystem write byte-identical.
+    # row, see create_resource above), flag off keeps the legacy atomic
+    # tmp + os.replace filesystem write byte-identical. A storage FAILURE
+    # with the flag on is hard and typed (2026-09-07) — the row created
+    # above is discarded again.
     base = Path(settings.DOWNLOAD_PATH)
     base.mkdir(parents=True, exist_ok=True)
     # Tmp lives under DOWNLOAD_PATH so the fallback os.replace stays a
@@ -204,11 +209,18 @@ async def persist_derived_image(
                     filename=filename,
                 )
             except Exception as exc:
-                logger.error(
-                    f"[persist_derived_image] unified-storage write failed, "
-                    f"falling back to filesystem: scope={scope_id} "
-                    f"resource={new_resource_id} error={exc!r}"
+                await discard_orphan_row(
+                    repo.delete_resource, new_resource_id, where="persist_derived_image"
                 )
+                raise object_store_write_failed(
+                    exc,
+                    where="persist_derived_image",
+                    scope_id=scope_id,
+                    resource_id=new_resource_id,
+                    filename=filename,
+                    mime=mime_type or "image/png",
+                    size_bytes=len(image_bytes),
+                ) from exc
         if stored is not None:
             relative_path = stored.file_path
         else:

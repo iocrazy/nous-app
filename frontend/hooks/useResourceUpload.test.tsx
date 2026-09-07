@@ -360,6 +360,41 @@ describe('useResourceUpload — two-phase batch import', () => {
 
   // ── Toast summary ─────────────────────────────────────────────────────────
 
+  /**
+   * 2026-09-07: when every file fails for a reason the backend spelled out
+   * (an object-store write failure answers 503 with one sentence), the
+   * summary toast must repeat that sentence and be an error — "3 failed"
+   * with an info badge told the user nothing about what to do.
+   */
+  it('toast repeats the backend\'s reason when uploads fail with one', async () => {
+    const SENTENCE = 'Storage is unavailable, so nothing was saved. Try again in a moment.';
+    mockUploadResource.mockImplementation(async () => {
+      throw Object.assign(new Error(SENTENCE), {
+        name: 'ResourceUploadError',
+        reason: 'server',
+        status: 503,
+        detail: SENTENCE,
+      });
+    });
+    mockRunImport.mockImplementationOnce(async (files, deps) => {
+      const d = deps as { upload: (f: File) => Promise<void> };
+      for (const f of files) await d.upload(f).catch(() => undefined);
+      return { uploaded: 0, linked: 0, failed: files.length, total: files.length };
+    });
+
+    const { result } = renderHook(() => useResourceUpload(defaultOpts), { wrapper });
+
+    await act(async () => {
+      await result.current.handleUpload([makeFile('file-0.txt'), makeFile('file-1.txt')]);
+    });
+
+    expect(addToastSpy).toHaveBeenCalledWith(
+      expect.stringContaining('importDoneWithReason'),
+      'error',
+    );
+    expect(addToastSpy).toHaveBeenCalledWith(expect.stringContaining(SENTENCE), 'error');
+  });
+
   it('toast is fired with importDone key after completion', async () => {
     mockRunImport.mockResolvedValueOnce({ uploaded: 2, linked: 1, failed: 0, total: 3 });
 
