@@ -44,10 +44,26 @@ The walkthrough logs in as the project's dedicated Claude debug account
 (`claude.debug@nous.test`). Credentials are read at runtime from one of:
 
 1. `DEBUG_TEST_EMAIL` / `DEBUG_TEST_PASSWORD` environment variables, or
-2. an out-of-tree `KEY=VALUE` file, path given by `CLAUDE_DEBUG_ENV_FILE`
-   (default: `/media/heygo/program/datahub/nous/secrets/claude-debug.env`,
-   mode `0600` — gpupc's existing convention for this account, see the
-   `claude-debug-test-account` memory note).
+2. `CLAUDE_DEBUG_ENV_FILE` — an explicit path to an out-of-tree `KEY=VALUE`
+   file. ⚠️ If set but unreadable this **throws**; it does not fall through
+   to the defaults. An explicit override that gets silently ignored would run
+   the suite against the wrong account and you'd never know.
+3. Otherwise the default candidates, first readable one wins:
+   - `~/.nous/claude-debug.env` — machine-agnostic, works on whichever box is
+     the dev machine today. Create it with:
+     ```bash
+     mkdir -p ~/.nous && chmod 700 ~/.nous
+     # write DEBUG_TEST_EMAIL / DEBUG_TEST_PASSWORD into it, then:
+     chmod 600 ~/.nous/claude-debug.env
+     ```
+   - `/media/heygo/program/datahub/nous/secrets/claude-debug.env` — gpupc's
+     historical convention (see the `claude-debug-test-account` memory note),
+     kept as a fallback so running this suite on gpupc still works.
+
+The gpupc path used to be the *only* default. That was correct while gpupc
+was also the dev machine; since 2026-09-07 it only runs production and the
+dev machine is elsewhere, so a home-relative default is the one that works
+without per-machine configuration.
 
 Never paste the password into a conversation, commit, or this file. See
 `helpers.ts::loadProdCreds` for the exact resolution order.

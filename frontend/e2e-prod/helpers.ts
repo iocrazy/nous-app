@@ -1,24 +1,39 @@
 // e2e-prod/helpers.ts — credential loading for the real-stack walkthrough.
 //
-// Credentials NEVER go in the repo. Two supported sources, in priority
-// order:
+// Credentials NEVER go in the repo. Sources, in priority order:
 //   1. DEBUG_TEST_EMAIL / DEBUG_TEST_PASSWORD environment variables.
-//   2. A KEY=VALUE env file OUTSIDE the repo tree, path given by
-//      CLAUDE_DEBUG_ENV_FILE (default: the path this repo's Claude debug
-//      account convention already uses — see
-//      memory/claude-debug-test-account.md — /media/heygo/program/datahub/
-//      nous/secrets/claude-debug.env, mode 0600).
+//   2. CLAUDE_DEBUG_ENV_FILE — an explicit path to a KEY=VALUE file.
+//      If set but unreadable this THROWS; it does not fall through to the
+//      defaults below. An explicit override that silently gets ignored is
+//      worse than no override — you would be testing with the wrong account
+//      and never know.
+//   3. The default candidates below, first readable one wins.
+//
+// The default used to be a single gpupc-specific absolute path. That was
+// correct while gpupc was also the dev machine; since 2026-09-07 it only
+// runs production, and the dev machine is elsewhere — so the primary default
+// is now home-relative and works on any machine. The gpupc path stays as a
+// second candidate so nothing breaks if this suite is ever run there.
 //
 // See README.md for the full account/access story.
 
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 export interface ProdCreds {
   email: string;
   password: string;
 }
 
-const DEFAULT_CREDS_FILE = '/media/heygo/program/datahub/nous/secrets/claude-debug.env';
+/** Tried in order; first readable file wins. Both are OUTSIDE the repo. */
+const DEFAULT_CREDS_FILES = [
+  // Machine-agnostic — works on whichever box is the dev machine today.
+  // Create with: mkdir -p ~/.nous && chmod 700 ~/.nous, file mode 0600.
+  join(homedir(), '.nous', 'claude-debug.env'),
+  // gpupc's historical convention (see memory/claude-debug-test-account.md).
+  '/media/heygo/program/datahub/nous/secrets/claude-debug.env',
+];
 
 function parseEnvFile(path: string): Record<string, string> {
   const text = readFileSync(path, 'utf8');
@@ -46,16 +61,44 @@ export function loadProdCreds(): ProdCreds {
     return { email: process.env.DEBUG_TEST_EMAIL, password: process.env.DEBUG_TEST_PASSWORD };
   }
 
-  const credsFile = process.env.CLAUDE_DEBUG_ENV_FILE || DEFAULT_CREDS_FILE;
+  // An explicitly-pointed file must exist. Falling back on failure would
+  // silently run the suite against a different account than the operator
+  // asked for.
+  const explicit = process.env.CLAUDE_DEBUG_ENV_FILE;
+  let credsFile: string;
   let parsed: Record<string, string>;
-  try {
-    parsed = parseEnvFile(credsFile);
-  } catch (err) {
-    throw new Error(
-      `e2e-prod walkthrough needs credentials. Set DEBUG_TEST_EMAIL / DEBUG_TEST_PASSWORD env vars, ` +
-        `or point CLAUDE_DEBUG_ENV_FILE at a KEY=VALUE file that has them ` +
-        `(default: ${DEFAULT_CREDS_FILE}). Reading the default file failed: ${(err as Error).message}`,
-    );
+
+  if (explicit) {
+    try {
+      parsed = parseEnvFile(explicit);
+      credsFile = explicit;
+    } catch (err) {
+      throw new Error(
+        `CLAUDE_DEBUG_ENV_FILE points at ${explicit} but reading it failed: ` +
+          `${(err as Error).message}. Not falling back to the defaults — an explicit ` +
+          `override that gets silently ignored would run this suite against the wrong account.`,
+      );
+    }
+  } else {
+    const attempts: string[] = [];
+    let found: { file: string; parsed: Record<string, string> } | null = null;
+    for (const candidate of DEFAULT_CREDS_FILES) {
+      try {
+        found = { file: candidate, parsed: parseEnvFile(candidate) };
+        break;
+      } catch (err) {
+        attempts.push(`  ${candidate} — ${(err as Error).message}`);
+      }
+    }
+    if (!found) {
+      throw new Error(
+        `e2e-prod walkthrough needs credentials. Set DEBUG_TEST_EMAIL / DEBUG_TEST_PASSWORD ` +
+          `env vars, or point CLAUDE_DEBUG_ENV_FILE at a KEY=VALUE file that has them, ` +
+          `or create one of the default files (mode 0600):\n${attempts.join('\n')}`,
+      );
+    }
+    credsFile = found.file;
+    parsed = found.parsed;
   }
 
   const email = parsed.DEBUG_TEST_EMAIL;
