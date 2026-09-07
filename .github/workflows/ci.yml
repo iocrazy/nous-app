@@ -15,22 +15,24 @@ concurrency:
 jobs:
   frontend:
     name: Frontend Build
-    # fork PR 一律跳过。本仓库是 public，而下面的 runner 是生产部署机 ——
-    # 让 fork 里的代码在上面执行等于把机器交给任何人（GitHub 官方对
-    # public repo + self-hosted runner 的警告就是这条）。宁可 fork PR
-    # 没有 CI，也不开这个口子。
+    # fork PR 一律跳过。守卫留着不删：仓库现在是 private，外部 fork PR 本就
+    # 不会发生，删掉换不回任何东西；而万一将来再迁回 self-hosted，少这一行
+    # 就等于把生产部署机交给任何人。
     if: github.event.pull_request.head.repo.full_name == github.repository
-    # self-hosted，不是 ubuntu-latest。2026-08-06：账户付款失败让所有托管
-    # runner 的 job 在 2 秒内 fail（runner_name 为空、steps=0，annotation 写着
-    # "recent account payments have failed"），CI 完全失去守卫能力。
+    # 2026-09-07 迁回 ubuntu-latest。2026-08-06 迁去 self-hosted 的理由已失效，
+    # 而代价在累积：
+    #  · 计费假红（runner_name 为空 + steps=0 + 2 秒 fail）已恢复 —— 同日
+    #    lint-workflows / deploy-pages / schema-drift 在托管 runner 上都拿到
+    #    真实 runner 并跑绿。
+    #  · 单 runner 让五个 job 串行且与 deploy-gpu 争用，2026-09-06 两次 PR
+    #    分别排队 3h26m / 3h30m。
+    #  · gpupc 走 5G 计费网络，每个 job 的 checkout + 装依赖都在烧流量。
+    #  · CI 构建（48 核跑满 + buildkit 打 IO）与生产 Postgres 同盘会拖慢后者，
+    #    而没有任何探针会告诉你 —— 与「探针必须探真信号」同族。
     #
-    # ⚠️「切 public 就能解」这条旧经验这次不成立 —— repo 已经是 public 仍被拦，
-    # 说明是付款方式本身失败，不是免费额度用尽。self-hosted 不计费，同期
-    # deploy-gpu 三次全 success 可证它不受影响。
-    #
-    # 代价：只有一个 runner，三个 job 由并行变串行，且与 deploy-gpu 争用。
-    # 计费恢复后切回：三处 runs-on 改成 ubuntu-latest 即可，if 守卫留着无害。
-    runs-on: [self-hosted, gpu]
+    # ⚠️ 若要再迁回 self-hosted：**五处** runs-on 都要改（旧注释写"三处"是错的，
+    # rust 与 codex-daemon 是后加的），并把下面各处的云端缓存重新关掉。
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
@@ -44,11 +46,11 @@ jobs:
           # 出货产物 —— 门禁跑的和线上跑的不是同一个 major，验过的等于没验。
           # 仓库此前既无 .nvmrc 也无 package.json engines，无处对齐。
           node-version-file: .nvmrc
-          # 不配 cache：本 job 跑在 self-hosted runner 上，~/.npm 本来就跨 job
-          # 持久。setup-node 的 cache 会把它压包传到 GitHub 云端再拉回来，本地
-          # 已有的东西绕一趟公网，纯属白烧流量。这台机器走 5G 计费网络，
-          # 2026-09-06 实测每个 job 因此多花约 0.36 GB 上行。
-          # 切回 ubuntu-latest 时应把 cache: 'npm' 和 cache-dependency-path 加回来。
+          # 托管 runner 每次新建，~/.npm 不跨 job 持久，所以云端缓存是净收益。
+          # 2026-09-06 在 self-hosted 上关过它（那台机器本地已有缓存，走 5G
+          # 上行做云端往返每 job 白烧约 0.36 GB）—— 迁回托管后该理由不成立。
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -80,7 +82,7 @@ jobs:
     name: Backend Lint & Deps
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
@@ -105,31 +107,15 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/check-migration-numbers.sh pr "${{ github.base_ref }}"
 
-      # enable-cache 关掉后 setup-uv 不再代管 UV_CACHE_DIR，这里显式钉死，
-      # 让缓存目录与关闭前保持一致，不依赖 action 的默认行为。
-      - name: Pin uv cache dir to the persistent tool cache
-        run: echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/uv-cache" >> "$GITHUB_ENV"
-
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-          # 缓存必须落在**跨 job 存活**的地方。默认 setup-uv 把
-          # UV_CACHE_DIR 指向 `_work/_temp/setup-uv-cache`，而 `_temp`
-          # 每个 job 开始时都会被清空 —— 于是这台构建机上明明有一份完整
-          # 的 uv 缓存，CI 却一次都用不上，每轮都从 PyPI 从零重下几百 MB。
-          # 2026-08-07 连挂三轮（virtualenv / dbos / posthog 各卡一次）
-          # 的直接原因就是这个。
-          #
-          # runner.tool_cache 在 self-hosted 上跨 job 持久（正是我们要的），
-          # 在托管 runner 上是 /opt/hostedtoolcache、每次新建，所以这样写
-          # 切回 ubuntu-latest 也不会坏，只是回到"无缓存"的旧行为。
-          # enable-cache 关掉的是**云端**缓存（打包上传到 GitHub 再拉回）。
-          # 本地那份仍然生效：cache-local-path 指向 runner.tool_cache，在
-          # self-hosted 上跨 job 持久，原来要解决的"每轮从 PyPI 重下"依旧解决。
-          # 2026-09-06 关闭，原因是这台构建机走 5G 计费网络。
-          # 切回 ubuntu-latest 时要改回 true，否则回到无缓存的旧行为。
-          enable-cache: false
-          cache-local-path: ${{ runner.tool_cache }}/uv-cache
+          # 托管 runner 上没有任何跨 job 持久的本地目录，所以必须开云端缓存，
+          # 否则每轮从 PyPI 重下几百 MB —— 2026-08-07 曾因此连挂三轮
+          # （virtualenv / dbos / posthog 各卡一次）。
+          # 2026-09-06 在 self-hosted 上关过它（本地已有缓存，云端往返在 5G
+          # 计费网络上是纯浪费）—— 迁回托管后该理由不成立。
+          enable-cache: true
 
       - uses: actions/setup-python@v5
         with:
@@ -223,7 +209,7 @@ jobs:
     name: Browser Sidecar Tests
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest
     # 在此之前 `browser/` 的 600 个用例**全仓没有任何 workflow 跑过** ——
     # ci.yml 的 pytest 步骤 working-directory 是 backend、只跑 backend/tests/，
     # 于是纯 browser 改动的 PR 绿灯不代表那套测试跑过一次。
@@ -264,24 +250,12 @@ jobs:
       - name: Keep uv-managed interpreters out of the runner user's home
         run: echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TOOL_CACHE/uv-python" >> "$GITHUB_ENV"
 
-      # enable-cache 关掉后 setup-uv 不再代管 UV_CACHE_DIR，这里显式钉死，
-      # 让缓存目录与关闭前保持一致，不依赖 action 的默认行为。
-      - name: Pin uv cache dir to the persistent tool cache
-        run: echo "UV_CACHE_DIR=$RUNNER_TOOL_CACHE/uv-cache" >> "$GITHUB_ENV"
-
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-          # 理由同 backend job 的同名配置（_temp 每个 job 开始时清空，缓存必须
-          # 落在跨 job 存活的 tool_cache）。与 backend job 共用同一个缓存目录
-          # 是有意的 —— uv 缓存按包内容寻址，两个 job 不会串味。
-          # enable-cache 关掉的是**云端**缓存（打包上传到 GitHub 再拉回）。
-          # 本地那份仍然生效：cache-local-path 指向 runner.tool_cache，在
-          # self-hosted 上跨 job 持久，原来要解决的"每轮从 PyPI 重下"依旧解决。
-          # 2026-09-06 关闭，原因是这台构建机走 5G 计费网络。
-          # 切回 ubuntu-latest 时要改回 true，否则回到无缓存的旧行为。
-          enable-cache: false
-          cache-local-path: ${{ runner.tool_cache }}/uv-cache
+          # 理由同 backend job 的同名配置。uv 缓存按包内容寻址，两个 job
+          # 共用同一份不会串味。
+          enable-cache: true
 
       - uses: actions/setup-python@v5
         with:
@@ -327,7 +301,7 @@ jobs:
     name: Rust Check
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest
     # ⚠️ 把 rust 工具链关进 runner 的 tool cache，别碰 runner 用户的 home。
     #
     # 迁到 self-hosted 后第一次跑 rust job，就把开发者的 ~/.cargo/bin/rustup
@@ -347,10 +321,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # $RUNNER_TOOL_CACHE 是 runner 自动导出的环境变量（托管 runner 上是
-      # /opt/hostedtoolcache），在 shell 里取得到，所以这样写切回
-      # ubuntu-latest 也不会坏。写进 $GITHUB_ENV 后对后续所有 step 生效。
+      # $RUNNER_TOOL_CACHE 是 runner 自动导出的环境变量，写进 $GITHUB_ENV 后
+      # 对后续所有 step 生效。
+      #
+      # 只在 self-hosted 上重定向。托管 runner 用完即销毁，没有"活人的 home"
+      # 要保护；反过来把 RUSTUP_HOME 指向空目录会让 dtolnay/rust-toolchain
+      # 放弃预装工具链、每轮重下几百 MB，在计费分钟数上是净亏。
+      # Swatinem/rust-cache 读 CARGO_HOME（源码 config.ts:
+      # `process.env.CARGO_HOME || path.join(HOME, ".cargo")`），两种情形下
+      # 都能找到正确目录，所以这个条件不会让缓存失效。
       - name: Keep the rust toolchain out of the runner user's home
+        if: runner.environment == 'self-hosted'
         run: |
           echo "CARGO_HOME=$RUNNER_TOOL_CACHE/rust/cargo" >> "$GITHUB_ENV"
           echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rust/rustup" >> "$GITHUB_ENV"
@@ -374,11 +355,13 @@ jobs:
         with:
           components: clippy
 
-      # 2026-09-06 移除 Swatinem/rust-cache@v2（原 workspaces: nous-core）。
-      # 它把 target/ 和 ~/.cargo 打包传到 GitHub 云端缓存，而本 job 跑在
-      # self-hosted runner 上，这两个目录本来就跨 job 留在本地磁盘，
-      # 云端往返是纯浪费。这台构建机走 5G 计费网络，缓存动辄几百 MB。
-      # 切回 ubuntu-latest 时应把这个 action 加回来。
+      # 托管 runner 上 target/ 与 ~/.cargo 都不跨 job 持久，而 nous-core 是
+      # pyo3 扩展、冷编译要好几分钟，所以云端缓存是净收益。2026-09-06 在
+      # self-hosted 上移除过它（那两个目录本来就留在本地磁盘，云端往返在 5G
+      # 计费网络上纯属浪费）—— 迁回托管后该理由不成立。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nous-core
 
       - name: Check compilation
         env:
@@ -394,11 +377,11 @@ jobs:
 
   codex-daemon:
     name: Codex Daemon Tests
-    # fork PR 一律跳过 —— 同 frontend job 的理由（public repo + self-hosted
-    # runner 就是生产部署机）。往 self-hosted 上加任何 pull_request 触发的
-    # job 都要带这一行。
+    # fork PR 一律跳过 —— 同 frontend job 的理由。本 job 现在跑托管 runner，
+    # 守卫留着是为了迁回 self-hosted 时不用重加（那时漏掉这一行，等于把生产
+    # 部署机交给任何人）。
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, gpu]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: tools/codex-daemon
