@@ -20,10 +20,16 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
+      # deploy-paths 覆盖检查要读根 Dockerfile。只监听 workflows 会漏掉
+      # 「加了一条 COPY 但没碰 workflow」这个方向 —— 而那正是它要防的缺陷。
+      - 'Dockerfile'
+      - 'scripts/check-deploy-paths-cover-dockerfile.py'
   push:
     branches: [master]
     paths:
       - '.github/workflows/**'
+      - 'Dockerfile'
+      - 'scripts/check-deploy-paths-cover-dockerfile.py'
 
 permissions:
   contents: read
@@ -34,6 +40,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # 断言根 Dockerfile 每条 COPY 的源路径都在 deploy-gpu.yml 的 paths 里。
+      # 两份都是**显式清单**,不同步就出现「改了会进镜像的文件却不触发部署」——
+      # 不报错、不红灯,只是新代码永远发不出去。本仓已出现四次(gateway 502、
+      # browser、admin、tools/codex-daemon),最后一次直到 #2173 才发现。
+      #
+      # ⚠️ smoke 探针抓不到这一类:镜像正是从触发部署的那个 checkout build 的,
+      # 所以「镜像里装的」和「checkout 里有的」必然相等。缺的是**触发**不是内容。
+      #
+      # 先跑 --selftest:一个恒真的门禁比没有门禁更糟(它给的是虚假的安全感)。
+      - name: Deploy paths cover Dockerfile COPY sources (selftest first)
+        run: |
+          python3 scripts/check-deploy-paths-cover-dockerfile.py --selftest
+          python3 scripts/check-deploy-paths-cover-dockerfile.py
 
       - name: Run actionlint
         uses: docker://rhysd/actionlint:latest
