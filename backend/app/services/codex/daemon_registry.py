@@ -37,16 +37,31 @@ class DaemonRegistry:
             "[codex-daemon] device online user={} device={}", user_id[:8], device_id
         )
 
-    def unregister(self, *, user_id: str, device_id: str) -> None:
+    def unregister(
+        self, *, user_id: str, device_id: str, ws: _Sendable | None = None
+    ) -> bool:
+        """Drop a device's connection. Returns True when something was removed.
+
+        With ``ws`` given, only that exact socket is removed: a daemon that
+        reconnects before the server noticed the old socket died (systemctl
+        restart, the 0.5.1 pong watchdog) re-registers the SAME device id, and
+        the old session's teardown running afterwards must not evict the fresh
+        one (2026-09-07: every reconnect showed ~30s "offline"). Without ``ws``
+        (revocation) the device is removed whichever socket holds it.
+        """
         devices = self._conns.get(user_id)
         if not devices:
-            return
+            return False
+        current = devices.get(device_id)
+        if current is None or (ws is not None and current is not ws):
+            return False
         devices.pop(device_id, None)
         if not devices:
             self._conns.pop(user_id, None)
         logger.info(
             "[codex-daemon] device offline user={} device={}", user_id[:8], device_id
         )
+        return True
 
     def is_online(self, user_id: str) -> bool:
         return bool(self._conns.get(user_id))

@@ -132,3 +132,37 @@ async def test_unauthenticated_socket_is_accepted_then_closed(monkeypatch):
         "close",
     ], f"accept() must come first, got {calls}"
     assert calls[1][1] == 4001
+
+
+# ── a stale connection's close must not evict the fresh one (2026-09-07) ─────
+# systemctl restart / the 0.5.1 pong watchdog reconnect BEFORE the server has
+# noticed the old socket is gone. The old session's ``finally`` then ran
+# ``unregister(user, device)`` and ``mark_offline`` by key alone — evicting the
+# NEW socket and deleting presence, so every reconnect produced ~30s of
+# "offline" (real-stack: online 04:27:17, offline 04:27:26, back on the next
+# ping). Teardown must act only when the registry still holds THIS socket.
+
+
+@pytest.mark.asyncio
+async def test_unregister_of_a_stale_socket_leaves_the_fresh_one_registered():
+    reg = DaemonRegistry()
+    old, fresh = _FakeWS(), _FakeWS()
+    reg.register(user_id="u1", device_id="d1", ws=old)
+    reg.register(user_id="u1", device_id="d1", ws=fresh)  # reconnect, same device
+    assert reg.unregister(user_id="u1", device_id="d1", ws=old) is False
+    assert reg.is_online("u1") is True
+    assert await reg.send_job("u1", {"type": "job", "job_id": "j"}) is True
+    assert fresh.sent and not old.sent
+
+
+@pytest.mark.asyncio
+async def test_unregister_of_the_current_socket_still_clears_it():
+    reg = DaemonRegistry()
+    ws = _FakeWS()
+    reg.register(user_id="u1", device_id="d1", ws=ws)
+    assert reg.unregister(user_id="u1", device_id="d1", ws=ws) is True
+    assert reg.is_online("u1") is False
+    # Without a socket in hand (revoke path) it behaves as before.
+    reg.register(user_id="u1", device_id="d1", ws=ws)
+    assert reg.unregister(user_id="u1", device_id="d1") is True
+    assert reg.is_online("u1") is False

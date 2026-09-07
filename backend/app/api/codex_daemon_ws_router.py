@@ -372,11 +372,14 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
         logger.warning("[codex-daemon] socket error device={} err={}", device_id, exc)
     finally:
         forwarder.cancel()
-        registry.unregister(user_id=user_id, device_id=device_id)
-        # Clearing presence on one device's exit briefly hides a second
-        # device of the same user; its next ping (≤30s) restores the marker.
-        # Better a 30s false-offline than a 90s zombie-online.
-        await daemon_presence.mark_offline(user_id, device_id)
+        # Only THIS socket's registration is torn down: a reconnect that beat
+        # us here re-registered the same device with a fresh socket, and its
+        # presence must survive our exit (2026-09-07). Clearing presence on
+        # one device's exit still briefly hides a second device of the same
+        # user; its next ping (≤30s) restores the marker. Better a 30s
+        # false-offline than a 90s zombie-online.
+        if registry.unregister(user_id=user_id, device_id=device_id, ws=websocket):
+            await daemon_presence.mark_offline(user_id, device_id)
         try:
             await websocket.close()
         except Exception:
