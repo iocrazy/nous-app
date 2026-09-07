@@ -230,6 +230,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 若把 .dockerignore 里那行删了，宿主机 venv 会覆盖上一层建好的 /app/.venv，
 # 这里的分层优化即刻失效。两处是绑定的。
 COPY backend/ .
+# The codex daemon is distributed by this backend (api/codex_daemon_dist_router):
+# the repo is private, so raw.githubusercontent.com is not a download path.
+COPY tools/codex-daemon/ /app/codex-daemon-dist/
 
 # 把项目自身装进 venv。第三方依赖已在上面就位，这一步不联网。
 RUN --mount=type=cache,target=/root/.cache/uv \

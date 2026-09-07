@@ -18,7 +18,7 @@ and uploads the finished file back.
 2. On the machine you want to pair (macOS / Linux):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- ABCD2345
+curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.sh | sh -s -- ABCD2345
 ```
 
 That installs the two CLIs if they are missing, drops the daemon in
@@ -39,7 +39,7 @@ npm i -g @openai/codex gpt-image-2-skill
 codex login
 
 mkdir -p ~/.local/share/nous-codex
-curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs \
+curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/index.mjs \
   -o ~/.local/share/nous-codex/nous-codex.mjs
 cd ~/.local/share/nous-codex
 
@@ -60,13 +60,13 @@ Already paired? Update in place. **No pairing code is needed** — the existing
 device token is kept, and the service is restarted on the new code:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- --update
+curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.sh | sh -s -- --update
 ```
 
 Windows:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) -Update
+& ([scriptblock]::Create((irm https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.ps1))) -Update
 ```
 
 Running the installer with **no arguments** on an already-paired machine does
@@ -77,7 +77,7 @@ re-pairs — that is how you move a machine to a different account.
 Manually, the upgrade is the download plus `install-service`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs \
+curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/index.mjs \
   -o ~/.local/share/nous-codex/nous-codex.mjs
 node ~/.local/share/nous-codex/nous-codex.mjs install-service   # restarts it
 ```

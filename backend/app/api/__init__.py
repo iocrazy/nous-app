@@ -260,6 +260,9 @@ from app.api.health_router import router as deep_health_router  # noqa: E402
 
 api_router.include_router(router=deep_health_router, tags=["Health"])
 
+from app.api.codex_daemon_dist_router import (  # noqa: E402
+    router as codex_daemon_dist_router,
+)
 from app.api.codex_daemon_router import router as codex_daemon_router  # noqa: E402
 from app.api.codex_daemon_ws_router import (  # noqa: E402
     router as codex_daemon_ws_router,
@@ -278,6 +281,7 @@ from app.api.ws_ticket_router import router as ws_ticket_router  # noqa: E402
 api_router.include_router(router=schedules_router, tags=["Schedules"])
 api_router.include_router(router=lanes_router, tags=["Lanes"])
 api_router.include_router(router=codex_daemon_router, tags=["Codex Daemon"])
+api_router.include_router(router=codex_daemon_dist_router, tags=["Codex Daemon"])
 api_router.include_router(router=jimeng_cli_router, tags=["Jimeng CLI"])
 api_router.include_router(router=codex_cli_router, tags=["Codex CLI"])
 api_router.include_router(router=codex_daemon_ws_router, tags=["Codex Daemon"])

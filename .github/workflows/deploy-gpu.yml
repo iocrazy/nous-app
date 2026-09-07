@@ -85,7 +85,7 @@ jobs:
         run: |
           for c in nous-backend nous-worker; do
             ok=0
-            for i in $(seq 1 40); do
+            for _ in $(seq 1 40); do
               if docker exec "$c" curl -fsS http://localhost:8080/api/v1/readyz >/dev/null 2>&1; then
                 echo "$c: ready"
                 docker exec "$c" curl -sS http://localhost:8080/api/v1/readyz | head -c 200; echo
@@ -102,13 +102,26 @@ jobs:
             fi
           done
 
+          # daemon 分发探针(2026-09-07):仓库是 private,raw.githubusercontent 是
+          # 404,daemon 的安装/更新只剩后端这一条路。烤进镜像的 COPY 漏了、路由
+          # 没注册,都是「readyz 全绿但没人装得上 daemon」的静默缺口,这里验真信号:
+          # 版本号必须与本次 checkout 的 package.json 一致。
+          ver='s/.*"version": *"\([^"]*\)".*/\1/p'
+          want=$(sed -n "$ver" tools/codex-daemon/package.json | head -1)
+          got=$(docker exec nous-backend curl -fsS http://localhost:8080/api/v1/codex-daemon/dist/version.json | sed -n "$ver" || true)
+          if [ "$got" != "$want" ]; then
+            echo "::error::daemon dist mismatch: served=$got want=$want"
+            exit 1
+          fi
+          echo "daemon dist: $got"
+
           # browser 的探针独立一段:端口(8090)、路径(/healthz)、工具都不同
           # (playwright/python 基础镜像不保证有 curl,用 python3 urllib)。
           # 必须验:backend 全绿而 browser 挂掉时,发布链路是坏的但现有探针一路
           # 放行 —— 正是 2026-07-22「探针没探真信号,静默 3 天」的同款形态。
           # 轮次给到 60×3s=180s:冷启动要拉 Xvfb + 预热 chromium,比 API 慢。
           ok=0
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if docker exec nous-browser python3 -c \
                  "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=15).status==200 else 1)" \
                  >/dev/null 2>&1; then
@@ -157,7 +170,7 @@ jobs:
           ./up.sh $SERVICES               # 不带 --build:直接用锚点镜像
           echo "::warning::已回滚到上一个镜像;本次 commit 的代码未生效"
           for c in nous-backend nous-worker; do
-            for i in $(seq 1 30); do
+            for _ in $(seq 1 30); do
               if docker exec "$c" curl -fsS http://localhost:8080/api/v1/readyz >/dev/null 2>&1; then
                 echo "$c: 回滚后 ready"; break
               fi
@@ -167,7 +180,7 @@ jobs:
           # 回滚同样重建了容器 —— 不刷 gateway 的话,「回滚成功」仍是公网 502
           # (正是这次被抓到的次生故障形态)。
           docker exec nous-gateway nginx -s reload || true
-          for i in $(seq 1 40); do
+          for _ in $(seq 1 40); do
             if docker exec nous-browser python3 -c \
                  "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=15).status==200 else 1)" \
                  >/dev/null 2>&1; then

@@ -76,7 +76,10 @@ describe('CodexDaemonSettings', () => {
     // The old copy told users to run `node nous-codex.mjs run` in a terminal,
     // which dies with the terminal — the installer registers a login service.
     const command = screen.getByTestId('codex-pair-command').textContent ?? '';
-    expect(command).toContain('tools/codex-daemon/install.sh');
+    // Served by our own backend (2026-09-07): the repo is private, so the
+    // old raw.githubusercontent.com one-liner is a 404 for every user.
+    expect(command).toContain('/api/v1/codex-daemon/dist/install.sh');
+    expect(command).not.toContain('raw.githubusercontent');
     expect(command).toContain('sh -s -- ABCD2345');
     expect(command).not.toContain('nous-codex.mjs run');
     // One-time setup moved into the collapsible Help (IC-style card).

@@ -53,8 +53,8 @@ MIN_IMAGE_DAEMON_VERSION = "0.4.0"
 #    (install.sh's pair block) and dies without one, and the reader is already
 #    paired by definition. `--update` is the route that keeps their token.
 _UPDATE_COMMAND = (
-    "curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master"
-    "/tools/codex-daemon/install.sh | sh -s -- --update"
+    "curl -fsSL https://cn.nous.ink:88/api/v1/codex-daemon/dist/install.sh"
+    " | sh -s -- --update"
 )
 
 
