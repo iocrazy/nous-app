@@ -1,3 +1,5 @@
+> **已退役（2026-09-07）**：`/f/` 签名直出、`app/services/media/nginx_direct.py`、gateway 的媒体目录挂载与 `system_settings.nginx_direct_serve` 已全部移除。前提是媒体数据全量迁入对象存储后库里不再有任何本地路径，nginx 没有磁盘可直出。下文仅作历史记录。
+
 # nginx 静态直出(signed direct serve)— Runbook
 
 > ⚠️ **2026-07-28 更新:NAS 老栈已退役,本文下半部分(NAS Runbook)仅存档。**

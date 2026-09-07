@@ -537,17 +537,10 @@ async def serve_resource_file(
         # Storage unification: file_path may be a legacy filesystem-relative
         # path OR an `sb://` object-store row (Task 2.1/2.2 dual-track
         # uploads). serve_stored_file is the ONE reader that handles both
-        # shapes; the P3 nginx direct-serve redirect only ever applies to
-        # legacy fs rows (nginx has no route for object-store keys).
+        # shapes. (The P3 nginx direct-serve 302 for legacy fs rows was
+        # retired 2026-09-07: no row has a local path any more.)
         from app.services.library.media_serving import serve_stored_file
-        from app.services.library.media_storage import resolve_media_source
-        from app.services.media.nginx_direct import maybe_direct_redirect
 
-        loc = resolve_media_source(file_path)
-        if not loc.is_object_store:
-            redirect = await maybe_direct_redirect(loc.rel_path)  # P3, legacy only
-            if redirect is not None:
-                return redirect
         return await serve_stored_file(
             file_path,
             mime=resource.get("mime_type", "application/octet-stream"),
@@ -652,7 +645,6 @@ async def serve_resource_cover(resource_id: str, request: Request):
         from app.core.config import settings
         from app.services.library.media_serving import serve_stored_file
         from app.services.library.media_storage import resolve_media_source
-        from app.services.media.nginx_direct import maybe_direct_redirect
 
         # Try thumbnail first, then cover image (independent uploads).
         for field in ("thumbnail_path", "cover_image_path"):
@@ -686,11 +678,6 @@ async def serve_resource_cover(resource_id: str, request: Request):
 
             full_path = Path(settings.DOWNLOAD_PATH) / rel_path
             if full_path.exists():
-                # nginx direct serve (P3): bytes leave the Python process —
-                # 302 to the signed :8081 URL when the DB toggle is on.
-                redirect = await maybe_direct_redirect(rel_path)
-                if redirect is not None:
-                    return redirect
                 mime, _ = mimetypes.guess_type(str(full_path))
                 return FileResponse(
                     path=str(full_path),
@@ -765,12 +752,6 @@ async def serve_resource_cover(resource_id: str, request: Request):
             if exists:
                 size = resource.get("file_size_bytes") or 0
                 if mime_type.startswith("image/") and 0 < size <= 512_000:
-                    if not loc.is_object_store:
-                        redirect = await maybe_direct_redirect(
-                            loc.rel_path
-                        )  # P3, legacy only
-                        if redirect is not None:
-                            return redirect
                     mime, _ = mimetypes.guess_type(file_path)
                     return await serve_stored_file(
                         file_path,

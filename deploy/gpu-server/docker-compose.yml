@@ -170,18 +170,12 @@ services:
     image: nginx:alpine
     container_name: nous-gateway
     ports:
-      # nas-A(cn.nous.ink:88)的反代目标。/f/ 签名直出走 sendfile,
-      # 其余全部转 nous-backend。签名公式必须与
-      # backend app/services/media/nginx_direct.py 完全一致。
+      # nas-A(cn.nous.ink:88)的反代目标。全部转 nous-backend;/f/ 签名直出
+      # 已于 2026-09-07 退役(库里没有本地路径了),gateway 不再挂任何媒体目录、
+      # 也不再需要 secrets env。
       - "10.0.0.10:8080:80"
-    # 与 backend 共用 secrets env(仅用到 NGINX_SECURE_LINK_SECRET,
-    # NAS 时代同款约定;nginx 官方镜像 entrypoint 只 envsubst 已定义
-    # 环境变量,nginx 自身的 $arg_st/$uri 等不受影响)。
-    env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     volumes:
       - ./nginx-gateway:/etc/nginx/templates:ro
-      # 只读旧路径 /f/（签名直出）——库里已无本地路径，保留形状待退役。
-      - /media/heygo/cache/nous-cache:/app/downloads:ro
     depends_on:
       - backend
     healthcheck:

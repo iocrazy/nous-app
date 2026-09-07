@@ -1,19 +1,16 @@
 # nous GPU-stack Nginx GATEWAY template (envsubst by the official nginx
 # image: /etc/nginx/templates/*.template → /etc/nginx/conf.d/*.conf at start).
 #
-# 2026-07-28: restores the NAS-era signed direct serve (million-files P3)
-# on the gpupc stack. nas-A forwards cn.nous.ink:88 → 10.0.0.10:8080, which
-# is now THIS container (backend moved to host port 8890 as the debug door):
-#   /f/       signed direct file serve (secure_link) — bytes off disk
+# nas-A forwards cn.nous.ink:88 → 10.0.0.10:8080, which is THIS container
+# (backend sits on host port 8890 as the debug door):
 #   /health   gateway health
 #   /         everything else proxied to nous-backend (API / WS / SSE)
+# 2026-09-07: the signed direct file serve (/f/, million-files P3) is gone —
+# every media row lives in the object store, so nginx has no disk to serve.
 # NOTE: /stream/ is deliberately NOT direct-served here (unlike the NAS-era
 # gateway) — the gpupc stack has been serving streams through FastAPI since
 # 2026-07-25 and HLS is moving to object storage (#1575); adding it back is
 # a separate decision.
-# ${NGINX_SECURE_LINK_SECRET} comes from the container env (shared
-# secrets/backend.env, same convention as the NAS-era stack — see
-# docs/runbook/nginx-direct-serve.md).
 
 # WebSocket upgrade mapping (conf.d files live inside the http block).
 map $http_upgrade $connection_upgrade {
@@ -24,23 +21,6 @@ map $http_upgrade $connection_upgrade {
 server {
     listen 80;
     server_name _;
-
-    # Signed direct file serve (million-files P3) — FastAPI answers cover/
-    # file requests with a 302 here; bytes go straight from disk via
-    # sendfile. Signature formula must match backend
-    # app/services/media/nginx_direct.py sign_direct_url EXACTLY.
-    location /f/ {
-        alias /app/downloads/;
-
-        secure_link $arg_st,$arg_e;
-        secure_link_md5 "$secure_link_expires$uri ${NGINX_SECURE_LINK_SECRET}";
-
-        if ($secure_link = "") { return 403; }
-        if ($secure_link = "0") { return 410; }
-
-        add_header Cache-Control "private, max-age=86400";
-        add_header Access-Control-Allow-Origin *;
-    }
 
     # Health check
     location /health {

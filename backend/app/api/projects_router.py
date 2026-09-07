@@ -1283,12 +1283,8 @@ async def download_file(
     uploads post-epic) — ``serve_stored_file`` is the ONE reader that
     handles both, so this endpoint never special-cases the shape.
 
-    Deliberately EXCLUDED from the P3 nginx direct-serve redirect (no
-    ``maybe_direct_redirect`` consult): this endpoint forces
-    ``Content-Disposition: attachment``, but nginx's ``/f/`` location sets
-    no Content-Disposition — a P3 302 there would silently open the file
-    inline instead of downloading. Same exemption as
-    ``resources_versions_router.py::serve_version_file``.
+    Forces ``Content-Disposition: attachment`` (the nginx direct-serve 302
+    that once had to be excluded here was retired 2026-09-07).
     """
     from urllib.parse import quote as urlquote
 
