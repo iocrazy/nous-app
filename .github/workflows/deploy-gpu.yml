@@ -14,6 +14,11 @@ on:
       # 与 backend 同栈同 job:两者靠 BROWSER_SERVICE_URL + 共享 token 强耦合,
       # 分开部署会出现"新 backend 打老 browser"的中间态。
       - 'browser/**'
+      # admin 管理台(2026-09-07 接入)。此前它不在任何自动部署链里,只能从开发
+      # 工作树手动 `docker compose up -d --build admin` —— 那既逼着 gpupc 常驻
+      # 一份开发工作树,又与另外四个容器共用项目名 gpu-server 却指向不同的
+      # compose 文件(从开发树 up 有可能顺带影响生产容器)。
+      - 'admin/**'
   workflow_dispatch:
 
 concurrency:
@@ -66,6 +71,7 @@ jobs:
         run: |
           docker tag nous-backend:local nous-backend:rollback || true
           docker tag nous-browser:local nous-browser:rollback || true
+          docker tag nous-admin:local nous-admin:rollback || true
 
       - name: Build & restart backend stack
         run: |
@@ -74,7 +80,7 @@ jobs:
           # 此处显式清单没带它,backend 让出 10.0.0.10:8080 而网关无人创建,
           # cn.nous.ink 入口 502 约 5 分钟(手动 up -d gateway 恢复)。
           # browser 同理:清单是显式的,漏了就永远起不来也不会报错。
-          ./up.sh --build backend worker gateway browser
+          ./up.sh --build backend worker gateway browser admin
 
       # 探 /api/v1/readyz 而不是 /health —— /health 返回硬编码
       # {"status":"healthy"},DBOS 挂了照样 200,2026-07-22 的 3 天静默故障就是
@@ -138,6 +144,29 @@ jobs:
             exit 1
           fi
 
+          # admin 的探针两段,缺一不可。
+          # ① nginx 起来了。它只绑回环 127.0.0.1:8090,而 runner 就在本机,
+          #    所以直接探宿主机端口 —— 顺带把"端口发布本身"也验了。
+          # ② 构建参数真的进了产物。①单独绿**不算数**:anon key 为空的 admin
+          #    照样返回 200,管理台却登不进去 —— 正是「探针没探真信号」那一族,
+          #    也正是 compose 里给 anon key 写死默认值要防的那个故障。
+          #    两种格式都接受:sb_publishable_ 新格式 / eyJ 旧版 JWT。
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS -m 8 -o /dev/null http://127.0.0.1:8090/ 2>/dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::nous-admin never reached ready — 127.0.0.1:8090 kept failing"
+            docker logs --tail 80 nous-admin
+            exit 1
+          fi
+          if ! docker exec nous-admin sh -c 'grep -rqE "sb_publishable_[A-Za-z0-9_-]{20,}|eyJhbGciOiJ[A-Za-z0-9_.-]{40,}" /usr/share/nginx/html/assets/'; then
+            echo "::error::nous-admin 产物里找不到 anon key —— 构建参数没进去。管理台会登不进去,而它照样返回 200"
+            exit 1
+          fi
+          echo "nous-admin: ready (anon key 已烤入产物)"
+
           # gateway 的 nginx 在启动时解析一次 upstream IP;容器 destroy/recreate
           # 后 IP 可能漂移(单次部署常拿回同 IP,连换两轮就会错位 —— 2026-08-24
           # 回滚事故:容器已 healthy 而公网全线 502,根因就是 gateway 持旧 IP)。
@@ -164,6 +193,13 @@ jobs:
             SERVICES="$SERVICES browser"
           else
             echo "::warning::nous-browser 无回滚锚点(首次部署?),仅回滚 backend/worker"
+          fi
+          # admin 同样单独判断(它比 backend 更晚接入,存在无锚点的过渡态)。
+          if docker image inspect nous-admin:rollback >/dev/null 2>&1; then
+            docker tag nous-admin:rollback nous-admin:local
+            SERVICES="$SERVICES admin"
+          else
+            echo "::warning::nous-admin 无回滚锚点(首次接入?),本次不回滚 admin"
           fi
           cd "$GITHUB_WORKSPACE/deploy/gpu-server"
           # shellcheck disable=SC2086  # 有意做词分割,SERVICES 是服务名列表
