@@ -97,3 +97,63 @@ def test_reap_stale_input_waits_is_registered_as_housekeeping():
     call = src[idx : idx + 220]
     assert "gates_readiness=False" in call
     assert "long_running=True" not in call
+
+
+# ── 第四类:fatal gate(2026-09-07)────────────────────────────────────────────
+# 有限门任务失败仍算 done,/readyz 照样 200——对「探到就该拒绝启动」的探针
+# (work_dir_probe:中转卷没挂/不可写)这是错的:部署 smoke 探 readyz,200 就放行,
+# 影子目录照样上线。fatal=True 的门失败 → not ready + degraded/503。
+
+
+async def _boom() -> None:
+    raise RuntimeError("work dir not mounted")
+
+
+@pytest.mark.asyncio
+async def test_failed_fatal_gate_blocks_readiness_as_degraded():
+    reg = BackgroundTaskRegistry()
+    reg.spawn("work_dir_probe", _boom(), fatal=True)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert reg.failed_fatal_gates() == ["work_dir_probe"]
+    assert reg.all_done() is False
+    snap = {e["name"]: e for e in reg.status_snapshot()}
+    assert snap["work_dir_probe"]["fatal"] is True
+    assert "not mounted" in snap["work_dir_probe"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_failed_non_fatal_gate_keeps_the_old_semantics():
+    """未标 fatal 的门失败仍只是记录——不把每个 warn-only 探针都变成停机。"""
+    reg = BackgroundTaskRegistry()
+    reg.spawn("schema_probe", _boom())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert reg.failed_fatal_gates() == []
+    assert reg.all_done() is True
+
+
+@pytest.mark.asyncio
+async def test_readyz_reports_a_failed_fatal_gate_as_degraded_503():
+    from fastapi import Response
+
+    from app.api import lifespan_router as lr
+
+    reg = BackgroundTaskRegistry()
+    reg.spawn("work_dir_probe", _boom(), fatal=True)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    resp = Response()
+    body = await lr._readyz_payload(reg, resp)
+    assert resp.status_code == 503
+    assert body["status"] == "degraded"
+
+
+def test_work_dir_probe_is_registered_fatal():
+    """把守卫接进启动链的那一行本身也要钉住,否则守卫写好了没人调用。"""
+    import inspect
+
+    from app.startup import bootstrap
+
+    src = inspect.getsource(bootstrap.install_background_bootstrap)
+    assert 'spawn("work_dir_probe", _bg_work_dir_probe(), fatal=True)' in src

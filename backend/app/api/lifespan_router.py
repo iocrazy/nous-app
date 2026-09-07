@@ -124,6 +124,12 @@ async def readyz(request: Request, response: Response) -> Dict[str, Any]:
             "tasks": [],
         }
 
+    return await _readyz_payload(registry, response)
+
+
+async def _readyz_payload(registry: Any, response: Response) -> Dict[str, Any]:
+    """The verdict half of /readyz, separable from the app-state lookup so a
+    registry in a known state can be asserted on directly."""
     dbos_state = _dbos_readiness()
     dbos_broken = dbos_state == "configured_but_disabled"
 
@@ -134,7 +140,7 @@ async def readyz(request: Request, response: Response) -> Dict[str, Any]:
 
     if ready:
         verdict = "ready"
-    elif registry.dead_daemons() or dbos_broken:
+    elif registry.dead_daemons() or registry.failed_fatal_gates() or dbos_broken:
         verdict = "degraded"
     else:
         verdict = "starting"

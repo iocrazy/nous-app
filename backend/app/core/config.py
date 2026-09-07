@@ -191,6 +191,14 @@ class Settings(BaseSettings):
     # Docker 部署时使用默认值 /app/downloads（容器内路径）
     # 本地开发时可通过 .env 覆盖为实际路径
     DOWNLOAD_PATH: str = Field(default="/app/downloads", description="视频存储路径")
+    # Production compose sets this: DOWNLOAD_PATH must then carry the host
+    # volume's ``.mounted`` marker or startup readiness degrades (see
+    # startup/work_dir_probe.py). Off by default so dev boxes / CI, which have
+    # no bind mount, are not asked for one.
+    MEDIA_WORK_DIR_REQUIRE_MARKER: bool = Field(
+        default=False,
+        description="DOWNLOAD_PATH 必须带 .mounted marker（生产 compose 打开）",
+    )
     # materialize() 的 S3 读通缓存目录。必须指向部署机本地盘(compose bind
     # /app/s3cache → gpupc NVMe)——放 CIFS 上比直接拉 S3 还慢(实测 145 vs
     # 266 MB/s),等于负优化。空 = 禁用(退回 temp 下载用完即删的旧行为)。

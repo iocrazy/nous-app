@@ -21,6 +21,17 @@ from app.lifespan_helpers import BackgroundTaskRegistry
 from app.startup.stall_detector import _bg_stall_detector
 
 
+async def _bg_work_dir_probe() -> None:
+    """The media work dir is a real, writable, mounted volume — or readiness
+    degrades. Raising is the point: see startup/work_dir_probe.py."""
+    from app.core.config import settings
+    from app.startup.work_dir_probe import probe_work_dir
+
+    probe_work_dir(
+        settings.DOWNLOAD_PATH, require_marker=settings.MEDIA_WORK_DIR_REQUIRE_MARKER
+    )
+
+
 async def _bg_schema_probe() -> None:
     """P0-1: warn-only sanity probe for migration drift."""
     try:
@@ -351,6 +362,8 @@ def install_background_bootstrap(app: FastAPI) -> None:
     """Spawn all background bootstrap tasks into `app.state.bg_tasks`."""
     app.state.bg_tasks = BackgroundTaskRegistry()
     app.state.bg_tasks.spawn("schema_probe", _bg_schema_probe())
+    # fatal: a shadow-dir / unwritable work dir is refused, not run on.
+    app.state.bg_tasks.spawn("work_dir_probe", _bg_work_dir_probe(), fatal=True)
     app.state.bg_tasks.spawn("secrets_selfheal", _bg_secrets_selfheal())
     app.state.bg_tasks.spawn("seed_loader", _bg_seed_loader())
     app.state.bg_tasks.spawn("deployment_log", _bg_deployment_log())
