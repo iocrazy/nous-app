@@ -94,13 +94,7 @@ async def test_cover_upload_sb_row_writes_derived_dir_and_serves_back(
     assert not (Path(tmp_path) / "sb:").exists()
 
     # Read side: GET /cover serves exactly the stored cover_image_path.
-    with (
-        p1,
-        patch(
-            "app.services.media.nginx_direct.maybe_direct_redirect",
-            new=AsyncMock(return_value=None),
-        ),
-    ):
+    with p1:
         resp = await serve_resource_cover(_RID, MagicMock())
     assert isinstance(resp, FileResponse)
     assert resp.path == str(on_disk)

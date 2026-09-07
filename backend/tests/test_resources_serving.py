@@ -3,9 +3,8 @@
 Task 2.3 (spec 2026-07-12): `/resources/{id}/file`, `/cover` and the version
 file endpoint route through `serve_stored_file`, so `sb://` rows written by
 the dual-track uploads are servable while legacy filesystem rows keep
-byte-identical behavior — including the P3 nginx direct-serve redirect,
-which must ONLY ever be consulted for legacy fs rows (nginx has no route
-for object-store keys).
+byte-identical behavior. (The P3 nginx direct-serve 302 for legacy fs
+rows was retired 2026-09-07 — no row has a local path any more.)
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import Response
 from starlette.requests import Request
 
 from app.api.resources_crud_router import serve_resource_file
@@ -57,13 +56,11 @@ async def test_sb_row_served_via_serve_stored_file():
     res = _resource(file_path=SB_PATH, mime_type="image/png")
     sentinel = Response(content=b"sb-bytes", media_type="image/png")
     serve = AsyncMock(return_value=sentinel)
-    redirect = AsyncMock(return_value=None)
 
     with (
         _patch_repo(res),
         _patch_access(),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch("app.services.media.nginx_direct.maybe_direct_redirect", new=redirect),
     ):
         resp = await serve_resource_file(
             res["id"],
@@ -82,64 +79,9 @@ async def test_sb_row_served_via_serve_stored_file():
 
 
 @pytest.mark.asyncio
-async def test_legacy_row_consults_nginx_direct_redirect():
-    """Legacy fs row → maybe_direct_redirect is consulted with the rel path
-    and its RedirectResponse is returned (P3 behavior unchanged)."""
-    res = _resource()
-    sentinel = RedirectResponse("https://host:8081/f/x?st=sig", status_code=302)
-    redirect = AsyncMock(return_value=sentinel)
-    serve = AsyncMock()
-
-    with (
-        _patch_repo(res),
-        _patch_access(),
-        patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch("app.services.media.nginx_direct.maybe_direct_redirect", new=redirect),
-    ):
-        resp = await serve_resource_file(
-            res["id"],
-            _request(),
-            authorization=None,
-            x_api_key=None,
-            token=None,
-            share_token=None,
-        )
-
-    assert resp is sentinel
-    redirect.assert_awaited_once_with(FS_PATH)
-    serve.assert_not_awaited()  # 302 short-circuits the reader
-
-
-@pytest.mark.asyncio
-async def test_sb_row_never_touches_nginx_direct_redirect():
-    """sb:// row → maybe_direct_redirect must NOT be called (nginx has no
-    route for object-store keys — a signed :8081 URL would 404/403)."""
-    res = _resource(file_path=SB_PATH, mime_type="image/png")
-    serve = AsyncMock(return_value=Response(content=b"x"))
-    redirect = AsyncMock()
-
-    with (
-        _patch_repo(res),
-        _patch_access(),
-        patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch("app.services.media.nginx_direct.maybe_direct_redirect", new=redirect),
-    ):
-        await serve_resource_file(
-            res["id"],
-            _request(),
-            authorization=None,
-            x_api_key=None,
-            token=None,
-            share_token=None,
-        )
-
-    redirect.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_legacy_row_falls_through_to_serve_stored_file():
-    """Legacy fs row with the P3 toggle off (redirect → None) → falls through
-    to the shared reader (FileResponse path lives in serve_stored_file now)."""
+    """Legacy fs row → the shared reader (FileResponse path lives in
+    serve_stored_file now)."""
     res = _resource()
     sentinel = Response(content=b"fs-bytes")
     serve = AsyncMock(return_value=sentinel)
@@ -148,10 +90,6 @@ async def test_legacy_row_falls_through_to_serve_stored_file():
         _patch_repo(res),
         _patch_access(),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch(
-            "app.services.media.nginx_direct.maybe_direct_redirect",
-            new=AsyncMock(return_value=None),
-        ),
     ):
         resp = await serve_resource_file(
             res["id"],
@@ -193,12 +131,11 @@ def _version(**over):
 
 @pytest.mark.asyncio
 async def test_version_sb_row_served_via_serve_stored_file():
-    """Version originals route through the shared reader too; sb:// rows
-    never consult the P3 redirect, and the download filename survives."""
+    """Version originals route through the shared reader too, and the
+    download filename survives."""
     ver = _version()
     sentinel = Response(content=b"v-bytes")
     serve = AsyncMock(return_value=sentinel)
-    redirect = AsyncMock()
 
     with (
         _patch_version_repo(ver),
@@ -208,7 +145,6 @@ async def test_version_sb_row_served_via_serve_stored_file():
             new=AsyncMock(return_value="u1"),
         ),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch("app.services.media.nginx_direct.maybe_direct_redirect", new=redirect),
     ):
         resp = await serve_version_file(
             ver["resource_id"],
@@ -220,7 +156,6 @@ async def test_version_sb_row_served_via_serve_stored_file():
         )
 
     assert resp is sentinel
-    redirect.assert_not_awaited()
     args, kwargs = serve.await_args
     assert args[0] == SB_PATH
     assert kwargs["mime"] == "image/png"
@@ -233,18 +168,13 @@ async def test_version_sb_row_served_via_serve_stored_file():
     [(FS_PATH, "video/mp4"), (SB_PATH, "image/png")],
     ids=["legacy-fs-row", "sb-row"],
 )
-async def test_version_download_never_consults_p3_redirect(file_path, mime):
-    """The version download endpoint is EXCLUDED from the P3 nginx redirect
-    for BOTH path shapes: it forces `Content-Disposition: attachment`, and
-    nginx's /f/ location sets no Content-Disposition — a 302 there would
-    silently open the file inline instead of downloading. Every row goes
-    through serve_stored_file directly (pre-port behavior: no P3 consult)."""
+async def test_version_download_serves_both_shapes_as_attachment(file_path, mime):
+    """Every row shape goes through serve_stored_file with
+    `Content-Disposition: attachment` — the version download must never
+    open inline."""
     ver = _version(file_path=file_path, mime_type=mime)
     sentinel = Response(content=b"v-bytes")
     serve = AsyncMock(return_value=sentinel)
-    redirect = AsyncMock(
-        return_value=RedirectResponse("https://host:8081/f/y?st=sig", status_code=302)
-    )
 
     with (
         _patch_version_repo(ver),
@@ -254,7 +184,6 @@ async def test_version_download_never_consults_p3_redirect(file_path, mime):
             new=AsyncMock(return_value="u1"),
         ),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),
-        patch("app.services.media.nginx_direct.maybe_direct_redirect", new=redirect),
     ):
         resp = await serve_version_file(
             ver["resource_id"],
@@ -266,7 +195,6 @@ async def test_version_download_never_consults_p3_redirect(file_path, mime):
         )
 
     assert resp is sentinel
-    redirect.assert_not_awaited()
     args, kwargs = serve.await_args
     assert args[0] == file_path
     assert kwargs["disposition"].startswith("attachment;")
