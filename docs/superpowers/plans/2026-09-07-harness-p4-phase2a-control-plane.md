@@ -33,7 +33,7 @@
 
 **Files:**
 - Create: `supabase/migrations/459_transcript_event_types_phase2a.sql`
-- Modify: `backend/app/models/agents.py`（`AgentRunTranscriptEvents` 的 `CheckConstraint` 字面量同步，schema-drift 门禁会比对）
+- Modify: `backend/app/models/agents.py`（`AgentRunTranscriptEvents` 的 `CheckConstraint` 字面量同步；schema-drift 门禁只比对表/列/FK、**不比对 CHECK 体**，两侧绑定靠 `tests/models/test_transcript_event_types_phase2a.py` 解析 ARRAY 做集合相等）
 - Modify: `docs/superpowers/specs/2026-09-06-harness-p4-phase2a-control-plane-design.md`（§1「回答通道」段、§4「UI 稿」段）
 
 **Interfaces:**
