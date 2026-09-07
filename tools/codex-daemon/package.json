@@ -1,6 +1,6 @@
 {
   "name": "@nous/codex-daemon",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Run nous canvas generations on your own machine with your own codex login.",
   "bin": { "nous-codex": "./index.mjs" },
   "type": "module",

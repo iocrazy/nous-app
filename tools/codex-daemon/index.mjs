@@ -42,7 +42,7 @@ import { fileURLToPath } from 'node:url';
  *  backend/app/services/codex/daemon_dispatch.py, which is what 0.4.0 marks:
  *  a daemon at or above it forwards --quality, one below it drops the knob on
  *  the floor. */
-export const DAEMON_VERSION = '0.5.0';
+export const DAEMON_VERSION = '0.5.1';
 
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
@@ -58,6 +58,31 @@ function xdgConfigHome() {
 const CONFIG_DIR = path.join(xdgConfigHome(), 'nous-codex');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HEARTBEAT_MS = 30_000;
+
+/** Liveness is measured in PONGS, not in the ability to enqueue a ping.
+ *
+ *  2026-09-06: a tunnel blip (cloudflared lost its edge connections) left this
+ *  socket ESTABLISHED with the pings piling up in Send-Q while nous had long
+ *  timed the device out (90s without a frame). The daemon sat "connected" for
+ *  good and the user's local engines vanished from every picker. The server
+ *  answers every ping with {type:"pong"}; two pings in a row with no pong means
+ *  the connection is dead on the far side, and the only fix is to tear it down
+ *  so the close handler reconnects. */
+export class HeartbeatLiveness {
+  constructor({ missesAllowed = 2 } = {}) {
+    this.missesAllowed = missesAllowed;
+    this.outstanding = 0;
+  }
+  /** Call before each ping. True = give up on this socket. */
+  beforePing() {
+    if (this.outstanding >= this.missesAllowed) return true;
+    this.outstanding += 1;
+    return false;
+  }
+  gotPong() {
+    this.outstanding = 0;
+  }
+}
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -719,6 +744,8 @@ async function connect(cfg) {
     headers: { Authorization: `Bearer ${cfg.device_token}` },
   });
   let heartbeat;
+  let finish = () => {};
+  const liveness = new HeartbeatLiveness();
 
   ws.addEventListener('open', () => {
     log('connected to nous');
@@ -731,6 +758,19 @@ async function connect(cfg) {
       } catch { /* non-fatal */ }
     }
     heartbeat = setInterval(() => {
+      if (liveness.beforePing()) {
+        // The global (undici) WebSocket has no terminate(): close() only
+        // starts a handshake that a dead peer never answers. So resolve the
+        // connection ourselves — run() reconnects — and let the old socket
+        // fall away on its own; `finish` is idempotent for its late close.
+        try {
+          ws.close(1001, 'no pong');
+        } catch {
+          /* nothing to do */
+        }
+        finish('heartbeat timeout: no pong for 2 pings', 1006);
+        return;
+      }
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch {
@@ -744,6 +784,10 @@ async function connect(cfg) {
     try {
       msg = JSON.parse(String(event.data));
     } catch {
+      return;
+    }
+    if (msg.type === 'pong') {
+      liveness.gotPong();
       return;
     }
     if (msg.type !== 'job') return;
@@ -781,13 +825,16 @@ async function connect(cfg) {
 
   // Resolves with the close code so run() can tell "retry" from "give up".
   return new Promise((resolve) => {
-    const done = (why, code) => {
+    let finished = false;
+    finish = (why, code) => {
+      if (finished) return; // a late close of a socket we already gave up on
+      finished = true;
       clearInterval(heartbeat);
       log(`disconnected (${why})`);
       resolve(code);
     };
-    ws.addEventListener('close', (e) => done(`code ${e.code}`, e.code));
-    ws.addEventListener('error', () => done('socket error', null));
+    ws.addEventListener('close', (e) => finish(`code ${e.code}`, e.code));
+    ws.addEventListener('error', () => finish('socket error', null));
   });
 }
 
