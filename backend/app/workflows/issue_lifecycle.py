@@ -331,6 +331,7 @@ async def run_issue_reply_step(
         "awaiting_input": parked is not None,
         "question": question,
         "options": extract_issue_options(result.get("tool_calls")),
+        "stop_reason": result.get("stop_reason"),
     }
 
 
@@ -917,6 +918,14 @@ async def _run_dispatch_with_continuation(
         # too — a human may have closed the issue while the agent was waiting.
         fresh = await load_issue(issue_id)
         fresh_status = (fresh or {}).get("status")
+        if (fresh or {}).get("paused_at"):
+            # Target-level pause (phase 2a): no turn starts while paused. The
+            # status is left as is (in_progress) — ``paused_at`` is the truth
+            # and ``/resume`` clears it and re-dispatches.
+            logger.info(
+                f"[execute_issue] issue {issue_id} is paused; not starting a turn"
+            )
+            return _paused_result(issue_id, res, attempt, wait_rounds)
         if fresh_status in PREEMPT_STATUSES:
             logger.info(
                 f"[execute_issue] issue {issue_id} externally set to "
@@ -975,6 +984,12 @@ async def _run_dispatch_with_continuation(
                 user_id,
                 is_continuation=(attempt > 0 or wait_rounds > 0),
             )
+        if (res or {}).get("stop_reason") == "paused":
+            # PauseHook stopped the run at a step boundary. Not an outcome:
+            # nothing is routed, no status is written, the lock is released by
+            # execute_issue's finally. ``paused_at`` (stamped by /pause before
+            # the flag was raised) is what the UI and /resume read.
+            return _paused_result(issue_id, res, attempt, wait_rounds)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
         if outcome == "continue" and attempt < max_continuations:
@@ -999,6 +1014,21 @@ async def _run_dispatch_with_continuation(
         run_id=(res or {}).get("run_id"),
     )
     return {"outcome": outcome, "attempts": attempt, "wait_rounds": wait_rounds}
+
+
+def _paused_result(
+    issue_id: int, res: Optional[dict[str, Any]], attempt: int, wait_rounds: int
+) -> dict[str, Any]:
+    """The dispatch result for a target-level pause — ``outcome: "paused"``
+    is a workflow-level marker, never a FinishIssue outcome."""
+    return {
+        "issue_id": issue_id,
+        "outcome": "paused",
+        "paused": True,
+        "run_id": (res or {}).get("run_id"),
+        "attempts": attempt,
+        "wait_rounds": wait_rounds,
+    }
 
 
 async def _maybe_fire_subissue_barrier(issue_id: int) -> None:

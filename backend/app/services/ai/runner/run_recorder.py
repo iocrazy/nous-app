@@ -521,6 +521,34 @@ class RunRecorder:
             )
         return False
 
+    async def check_paused(self) -> bool:
+        """Poll ``pause_requested`` (phase 2a target-level pause). Same
+        shape as ``check_cancelled``: one SELECT per step boundary, a failed
+        read is "not paused" (the pause is retried at the next boundary; a
+        telemetry blip must never stall a healthy run). Unlike cancel it does
+        NOT flip the finish status — the run ends ``completed`` and the
+        ``turn_end{reason: paused}`` event is the record."""
+        if self.run_id is None:
+            return False
+        try:
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import AgentRuns
+
+            async with read_scope() as session:
+                row = (
+                    await session.execute(
+                        select(AgentRuns.pause_requested)
+                        .where(AgentRuns.id == int(self.run_id))
+                        .limit(1)
+                    )
+                ).first()
+            return bool(row is not None and row[0])
+        except Exception as err:
+            logger.warning(f"[RunRecorder] pause check failed for {self.run_id}: {err}")
+        return False
+
     # -------- internal ---------------------------------------------------
 
     async def _pre_flight_check_paused(self) -> None:

@@ -89,6 +89,7 @@ async def test_run_issue_reply_step_passes_chunk_callback_and_publishes(monkeypa
     )
     assert out == {
         "awaiting_input": False,
+        "stop_reason": None,
         "question": None,
         "options": None,
         "content": "hello",
@@ -136,6 +137,7 @@ async def test_run_issue_reply_step_calls_run_session_turn(monkeypatch):
         "reason": None,
         "run_id": "r1",
         "awaiting_input": False,
+        "stop_reason": None,
         "question": None,
         "options": None,
     }

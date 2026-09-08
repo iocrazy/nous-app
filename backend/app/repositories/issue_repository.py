@@ -118,8 +118,14 @@ _ISSUE_TS_COLS = frozenset(
         "cancelled_at",
         "hidden_at",
         "execution_locked_at",
+        "paused_at",
     }
 )
+
+
+# Terminal statuses that also end a target-level pause (phase 2a §2: "cancel
+# while paused clears paused_at"). Mirrors issue_lifecycle.PREEMPT_STATUSES.
+_PAUSE_CLEARING_STATUSES = frozenset({"cancelled", "done", "closed"})
 
 
 def _coerce_temporal(key: str, value: Any) -> Any:
@@ -233,6 +239,15 @@ class IssueRepository:
             if not row:
                 raise ValueError(f"issue id={issue_id} not found or update no-op")
             return _row(row)
+
+    async def set_paused_at(
+        self, issue_id: int, value: Optional[_dt.datetime]
+    ) -> dict[str, Any]:
+        """Phase 2a target-level pause: ``paused_at`` is the ONLY truth of a
+        paused issue (rollup ``derive_phase`` reads it first; status stays
+        ``in_progress``). ``None`` resumes. Not on the mig-170 immutable list,
+        so this is an ordinary app-role write — no service_role hop."""
+        return await self.update(issue_id, {"paused_at": value})
 
     async def is_team_member(self, user_id: str, team_id: int) -> bool:
         """True when user_id belongs to team_id. Backs the D6.1 visibility
@@ -491,6 +506,11 @@ class IssueRepository:
 
         if dbos_workflow_id is not None:
             patch["dbos_workflow_id"] = dbos_workflow_id
+        if new_status in _PAUSE_CLEARING_STATUSES and (prev or {}).get("paused_at"):
+            # Phase 2a: a pause is a non-terminal state. Landing on a terminal
+            # status ends it too — otherwise the rollup (paused_at wins) keeps
+            # showing a cancelled/closed issue as paused.
+            patch["paused_at"] = None
 
         result = await self.update(issue_id, patch)
         # Post-commit sub-issue barrier hook. Placed at the repository layer (not

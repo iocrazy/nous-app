@@ -578,6 +578,48 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"Failed to request cancel for run {run_id}: {e}")
             return False
 
+    async def request_pause(
+        self, run_id: str, *, user_id: Optional[UUID] = None
+    ) -> bool:
+        """Set pause_requested=true on a RUNNING row (phase 2a target-level
+        pause; ``PauseHook`` observes it at the next step boundary). Same
+        shape as ``request_cancel``, but ``user_id`` is optional: a pause is
+        authorised at the TARGET (issue visibility — a team member may pause
+        a run the issue's owner started), so the row's own owner is not the
+        gate. Pass it only when the caller IS gating on run ownership."""
+        try:
+            async with write_scope() as session:
+                stmt = (
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.status == "running")
+                    .values(pause_requested=True)
+                )
+                if user_id is not None:
+                    stmt = stmt.where(AgentRuns.user_id == user_id)
+                result = await session.execute(stmt)
+                return (result.rowcount or 0) > 0
+        except Exception as e:
+            logger.error(f"Failed to request pause for run {run_id}: {e}")
+            return False
+
+    async def clear_pause_request(self, run_id: str) -> bool:
+        """Withdraw a pause the run has not observed yet (resume landed before
+        the next step boundary): the run simply keeps going. Only a RUNNING
+        row can still observe the flag, so only that is touched."""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.status == "running")
+                    .values(pause_requested=False)
+                )
+                return (result.rowcount or 0) > 0
+        except Exception as e:
+            logger.error(f"Failed to clear pause request for run {run_id}: {e}")
+            return False
+
     async def claim_undo(self, run_id: str, *, user_id: UUID) -> str:
         """Run 级撤销的一次性认领（mig 415）。单条 CAS：undone_at 从 NULL
         置 now() 即认领成功；先 claim 后执行是刻意的——两个并发 undo 把

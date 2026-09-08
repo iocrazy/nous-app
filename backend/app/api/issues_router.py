@@ -8,6 +8,8 @@ Endpoints (under /api/v1/issues):
     PATCH  /{id}             — partial update (title/description/etc)
     POST   /{id}/transition  — status transition (lifecycle ts side-effects)
     POST   /{id}/dispatch    — start execute_issue DBOS workflow + persist wf_id
+    POST   /{id}/pause       — target-level pause (paused_at + pause the root run)
+    POST   /{id}/resume      — clear paused_at; re-dispatch when there is work
     DELETE /{id}             — soft-delete (sets hidden_at)
 
 The dispatch endpoint kicks off `execute_issue` via DBOS and writes
@@ -31,6 +33,8 @@ from app.schemas.issue import (
     Issue,
     IssueCreate,
     IssueListResponse,
+    IssuePauseResponse,
+    IssueResumeResponse,
     IssueStatusTransition,
     IssueUpdate,
     NeedsInputItem,
@@ -397,6 +401,15 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             detail="DBOS not enabled — issue dispatch unavailable",
         )
 
+    await _start_execute_issue(issue_id)
+    row = await issue_repository.get_by_id(issue_id)
+    return Issue.model_validate(_normalise_uuid_strs(row))
+
+
+async def _start_execute_issue(issue_id: int) -> str:
+    """Dispatch ``execute_issue`` under a fresh workflow_id and persist it.
+    Shared by ``/dispatch`` and ``/resume``. Raises the endpoint-shaped
+    HTTPException (500) when DBOS refuses the dispatch."""
     import uuid as _uuid
 
     # Unique per dispatch so an issue can be re-dispatched after a prior run
@@ -414,12 +427,16 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
         ):
             logger.warning(f"[issues] dispatch {issue_id} failed: {e}")
             raise HTTPException(status_code=500, detail=f"DBOS dispatch failed: {e}")
+    await _persist_workflow_id(issue_id, workflow_id)
+    return workflow_id
 
-    # Persist workflow_id so the UI can find it without re-deriving.
-    # dbos_workflow_id is service_role-only (mig-170 allowlist trigger); the
-    # repository writes via the app-role engine and the trigger rejects it —
-    # use the SET LOCAL ROLE service_role helper instead (same pattern as
-    # issue_lifecycle.py execution-field writes).
+
+async def _persist_workflow_id(issue_id: int, workflow_id: str) -> None:
+    """Persist workflow_id so the UI can find it without re-deriving.
+    dbos_workflow_id is service_role-only (mig-170 allowlist trigger); the
+    repository writes via the app-role engine and the trigger rejects it —
+    use the SET LOCAL ROLE service_role helper instead (same pattern as
+    issue_lifecycle.py execution-field writes)."""
     from sqlalchemy import text, update
 
     from app.db.session import write_scope
@@ -432,8 +449,173 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
             .where(Issues.id == issue_id)
             .values(dbos_workflow_id=workflow_id)
         )
-    row = await issue_repository.get_by_id(issue_id)
-    return Issue.model_validate(_normalise_uuid_strs(row))
+
+
+def _conversation_key(row: dict) -> Optional[int]:
+    """The issue's session conversation, the live key for "is a run on this
+    issue" (``agent_runs.issue_id`` is backfilled after the turn). Read-only:
+    an issue without a session has never run — do not create one here."""
+    sid = row.get("ai_session_id")
+    return int(sid) if sid is not None else None
+
+
+async def _load_visible_issue(issue_id: int, auth) -> dict:
+    existing = await issue_repository.get_by_id(issue_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
+        )
+    await _assert_visibility(existing, auth)
+    return existing
+
+
+@router.post("/{issue_id}/pause", response_model=IssuePauseResponse)
+async def pause_issue(issue_id: int, auth: AuthDep) -> IssuePauseResponse:
+    """Target-level pause (phase 2a §2). Two writes, in this order:
+
+    1. ``issues.paused_at`` — the truth. The rollup phase reads it first, the
+       dispatch loop refuses to start a turn while it is set, comments queue
+       on the inbox, the sweeper leaves those queued items alone.
+    2. ``agent_runs.pause_requested`` on the ROOT run in flight, if any —
+       ``PauseHook`` stops it at the next step boundary (``turn_end{reason:
+       paused}``). Order matters: the run observes the flag AFTER the issue
+       is already marked, so the workflow's paused return finds ``paused_at``.
+
+    Authorised at the target (issue visibility), not run ownership."""
+    from datetime import datetime, timezone
+
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    existing = await _load_visible_issue(issue_id, auth)
+    if existing.get("paused_at"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "already_paused", "message": "issue is already paused"},
+        )
+    now = datetime.now(timezone.utc)
+    updated = await issue_repository.set_paused_at(issue_id, now)
+    runs = get_agent_runs_repository()
+    run_id = await runs.running_root_run_id(
+        issue_id=issue_id, conversation_id=_conversation_key(existing)
+    )
+    if run_id is not None:
+        requested = await runs.request_pause(run_id)
+        if not requested:
+            # The run ended between the two reads; paused_at still holds and
+            # the next dispatch refuses to start — say so rather than claim a
+            # run was stopped.
+            logger.info(
+                f"[issues] pause {issue_id}: run {run_id} no longer running "
+                "when the flag was raised"
+            )
+            run_id = None
+    return IssuePauseResponse(
+        issue_id=str(issue_id),
+        paused_at=(updated or {}).get("paused_at") or now,
+        run_id=str(run_id) if run_id is not None else None,
+    )
+
+
+async def _last_run_ended_paused(
+    runs, *, issue_id: int, conversation_id: Optional[int]
+) -> Optional[int]:
+    """The id of the newest ROOT run when it ended on a pause, else None
+    (``metadata_json.view.ended.reason`` is the folded turn_end reason)."""
+    rows = await runs.list_for_issue(
+        issue_id=issue_id, conversation_id=conversation_id, limit=1
+    )
+    if not rows:
+        return None
+    latest = rows[0]
+    ended = (((latest.get("metadata_json") or {}).get("view") or {}).get("ended")) or {}
+    return int(latest["id"]) if ended.get("reason") == "paused" else None
+
+
+@router.post("/{issue_id}/resume", response_model=IssueResumeResponse)
+async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
+    """Resume a paused issue — and the "run the queued comments" button for
+    an idle one. Decision table (``paused`` = ``paused_at`` set, ``pending`` =
+    unclaimed inbox items on the issue, ``last_paused`` = newest root run
+    ended on a pause):
+
+    - neither paused nor pending           → 409 ``not_paused``
+    - paused, a root run still running     → withdraw its pause request; the
+                                             run keeps going (no dispatch)
+    - pending or last_paused               → write
+                                             ``execution_state.resumed_from_run_id``
+                                             then dispatch ``execute_issue``
+    - paused only (e.g. parked on a question) → clear the flag; the parked
+                                             workflow is still waiting
+
+    The flag is cleared right before the re-dispatch (the new workflow reads
+    it) and restored when the dispatch fails, so a failed resume leaves the
+    issue visibly paused instead of silently idle."""
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+    from app.services.infra import dbos_orchestrator
+    from app.services.issues.execution_state import merge_execution_state
+
+    existing = await _load_visible_issue(issue_id, auth)
+    paused = bool(existing.get("paused_at"))
+    pending = await get_agent_run_inbox_repository().pending_count(
+        target_kind="issue", target_id=issue_id
+    )
+    if not paused and pending == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "not_paused", "message": "issue is not paused"},
+        )
+    runs = get_agent_runs_repository()
+    conversation_id = _conversation_key(existing)
+
+    if paused:
+        running = await runs.running_root_run_id(
+            issue_id=issue_id, conversation_id=conversation_id
+        )
+        if running is not None:
+            # The pause was requested but not yet observed: withdraw it and
+            # let the run continue — a second dispatch would only lose on the
+            # execution lock.
+            await runs.clear_pause_request(running)
+            await issue_repository.set_paused_at(issue_id, None)
+            return IssueResumeResponse(
+                issue_id=str(issue_id), dispatched=False, run_id=str(running)
+            )
+
+    last_paused = await _last_run_ended_paused(
+        runs, issue_id=issue_id, conversation_id=conversation_id
+    )
+    if pending == 0 and last_paused is None:
+        await issue_repository.set_paused_at(issue_id, None)
+        return IssueResumeResponse(issue_id=str(issue_id), dispatched=False)
+
+    if not dbos_orchestrator.is_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DBOS not enabled — issue resume unavailable",
+        )
+    # Marker first (a resumed dispatch is distinguishable from a fresh one,
+    # and from which run it continues); then the flag — BEFORE the dispatch,
+    # because the new workflow's first loop iteration reads ``paused_at`` and
+    # would park itself on a stale flag; a failed dispatch restores it so the
+    # issue stays visibly paused instead of silently idle.
+    await merge_execution_state(
+        issue_id,
+        {"resumed_from_run_id": str(last_paused) if last_paused else None},
+    )
+    if paused:
+        await issue_repository.set_paused_at(issue_id, None)
+    try:
+        workflow_id = await _start_execute_issue(issue_id)
+    except Exception:
+        if paused:
+            await issue_repository.set_paused_at(issue_id, existing["paused_at"])
+        raise
+    return IssueResumeResponse(
+        issue_id=str(issue_id), dispatched=True, workflow_id=workflow_id
+    )
 
 
 @router.get("/{issue_id}/pipeline-runs")

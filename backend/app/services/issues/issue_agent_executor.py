@@ -222,6 +222,9 @@ async def run_issue_agent(
             "awaiting_input": parked is not None,
             "question": question,
             "options": extract_issue_options(result.get("tool_calls")),
+            # Phase 2a Task 5: a hook stop ("paused" / "cancelled") — the
+            # workflow reads it BEFORE FinishIssue routing.
+            "stop_reason": result.get("stop_reason"),
         }
     finally:
         await publish_status(iid, "done")

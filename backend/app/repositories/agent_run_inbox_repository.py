@@ -14,7 +14,7 @@ import datetime as dt
 from typing import Any, Optional, Sequence
 
 from loguru import logger
-from sqlalchemy import func, insert, select, tuple_, update
+from sqlalchemy import and_, func, insert, not_, select, tuple_, update
 
 from app.db.session import read_scope, write_scope
 from app.models import AgentRunInbox, ConversationAiMeta, Conversations
@@ -28,6 +28,34 @@ def _row(obj: Any) -> dict[str, Any]:
 
 def _pending():
     return (AgentRunInbox.claimed_at.is_(None), AgentRunInbox.expired_at.is_(None))
+
+
+def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
+    """UPDATE … SET expired_at = now() for pending items older than the
+    cutoff. With ``skip_paused_issues`` the issue targets whose issue has
+    ``paused_at`` set are left alone (``NOT (kind='issue' AND id IN (paused))``
+    — a non-issue target is never excluded). Pure builder: the shape is
+    pinned by a compile test and executed by the schema-drift integration
+    test."""
+    from app.models import Issues
+
+    stmt = (
+        update(AgentRunInbox)
+        .where(*_pending())
+        .where(AgentRunInbox.created_at < older_than)
+        .values(expired_at=dt.datetime.now(dt.timezone.utc))
+    )
+    if skip_paused_issues:
+        paused_issue_ids = select(Issues.id).where(Issues.paused_at.isnot(None))
+        stmt = stmt.where(
+            not_(
+                and_(
+                    AgentRunInbox.target_kind == "issue",
+                    AgentRunInbox.target_id.in_(paused_issue_ids),
+                )
+            )
+        )
+    return stmt
 
 
 def claim_stmt(
@@ -131,16 +159,18 @@ class AgentRunInboxRepository:
                 ).scalar_one()
             )
 
-    async def expire_stale(self, *, older_than: dt.datetime) -> int:
+    async def expire_stale(
+        self, *, older_than: dt.datetime, skip_paused_issues: bool = True
+    ) -> int:
         """Sweeper: a steer nobody claimed for a day is an orphan (its run
-        ended before the next step boundary). Marked, never deleted."""
+        ended before the next step boundary). Marked, never deleted.
+
+        ``skip_paused_issues`` (phase 2a): an item queued on a PAUSED issue is
+        waiting for resume, not orphaned — however old it gets."""
         try:
             async with write_scope() as session:
                 result = await session.execute(
-                    update(AgentRunInbox)
-                    .where(*_pending())
-                    .where(AgentRunInbox.created_at < older_than)
-                    .values(expired_at=dt.datetime.now(dt.timezone.utc))
+                    expire_stale_stmt(older_than, skip_paused_issues=skip_paused_issues)
                 )
                 return result.rowcount or 0
         except Exception as err:  # noqa: BLE001

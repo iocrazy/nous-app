@@ -431,16 +431,18 @@ async def build_agent_runner_stack(
     # visible in one place. Later tasks append pause / inbox / budget hooks.
     from app.services.ai.runner.budget_hook import BudgetGateHook
     from app.services.ai.runner.inbox_hook import InboxClaimHook
+    from app.services.ai.runner.pause_hook import PauseHook
     from app.services.ai.runner.step_hooks import (
         CancelHook,
         HeartbeatHook,
         StepHookChain,
     )
 
-    # heartbeat → cancel → inbox → budget: a cancelled run must not claim a
-    # steer it will never read; the budget is checked on the spend so far.
+    # heartbeat → cancel → pause → inbox → budget: a cancelled or paused run
+    # must not claim a steer it will never read (the steer waits on the inbox
+    # for the resumed run); the budget is checked on the spend so far.
     step_hooks = StepHookChain(
-        [HeartbeatHook(), CancelHook(), InboxClaimHook(), BudgetGateHook()]
+        [HeartbeatHook(), CancelHook(), PauseHook(), InboxClaimHook(), BudgetGateHook()]
     )
 
     runner = AgentRunner(

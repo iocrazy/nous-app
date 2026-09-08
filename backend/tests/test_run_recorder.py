@@ -104,6 +104,15 @@ class _FakeSession:
         if is_select and "ai_model_prices" in sql:
             return _ExecResult(mapping=self._table._price_row)
 
+        if is_select and "pause_requested" in sql:
+            return _ExecResult(
+                first_row=(
+                    _Row((self._table._pause_requested,))
+                    if self._table._pause_requested is not None
+                    else None
+                )
+            )
+
         if is_select and "cancel_requested" in sql:
             return _ExecResult(
                 first_row=(
@@ -142,6 +151,7 @@ class _FakeTable:
         running_count: int = 0,
         cancel_requested: bool | None = False,
         task_metadata: dict | None = None,
+        pause_requested: bool | None = False,
     ) -> None:
         self._paused_reason = paused_reason
         self._price_row = price_row
@@ -155,6 +165,7 @@ class _FakeTable:
         self._max_concurrent_runs = max_concurrent_runs
         self._running_count = running_count
         self._cancel_requested = cancel_requested
+        self._pause_requested = pause_requested
         self._task_metadata = task_metadata if task_metadata is not None else {}
 
         self.insert_calls: list[dict] = []
@@ -285,6 +296,40 @@ async def test_cancel_observed_sets_cancelled_status() -> None:
 
     finish = table.update_calls[-1]
     assert finish["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_pause_observed_does_not_change_the_finish_status() -> None:
+    """Phase 2a: ``check_paused`` reads ``pause_requested``; unlike cancel it
+    is NOT a finish status — the turn_end event is the record, the row
+    completes normally."""
+    table = _FakeTable(pause_requested=True)
+    p_read, p_write = _patched(table)
+
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            assert await rec.check_paused() is True
+            assert await rec.check_cancelled() is False
+
+    finish = table.update_calls[-1]
+    assert finish["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_pause_not_requested_or_unreadable_is_not_paused() -> None:
+    table = _FakeTable(pause_requested=False)
+    p_read, p_write = _patched(table)
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            assert await rec.check_paused() is False
+    table = _FakeTable(pause_requested=None)  # no row → False, never raises
+    p_read, p_write = _patched(table)
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            assert await rec.check_paused() is False
 
 
 @pytest.mark.asyncio

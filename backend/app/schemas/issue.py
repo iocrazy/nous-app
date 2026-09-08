@@ -180,6 +180,29 @@ class DispatchPreview(BaseModel):
     blocked_reason: Optional[DispatchBlockedReason] = None
 
 
+class IssuePauseResponse(BaseModel):
+    """``POST /issues/{id}/pause`` (phase 2a target-level pause). ``run_id``
+    is the ROOT run that was asked to stop at its next step boundary, or
+    None when nothing was running. Ids str-serialized (Snowflake)."""
+
+    issue_id: str
+    paused_at: datetime
+    run_id: Optional[str] = None
+
+
+class IssueResumeResponse(BaseModel):
+    """``POST /issues/{id}/resume``. ``dispatched`` is True when a fresh
+    ``execute_issue`` was started (queued comments to run, or the last run
+    ended paused) and ``workflow_id`` is its id; False when resuming was
+    only clearing the flag — including the case where the paused run had
+    not observed the pause yet and simply keeps going (``run_id``)."""
+
+    issue_id: str
+    dispatched: bool
+    workflow_id: Optional[str] = None
+    run_id: Optional[str] = None
+
+
 class NeedsInputItem(BaseModel):
     """One issue parked at ``needs_followup`` with the agent waiting on a
     human answer (Spec-4 needs_input first-class). Feeds the Task Center
