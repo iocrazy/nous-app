@@ -132,6 +132,9 @@ def _chat_env(
     composed.agent_id = agent_id
     composed.agent_slug = "script_ai"
     composed.model = "qwen-max"
+    # The service model_copy()s composed to add per-turn tools (AskUser on
+    # every turn since phase 2a); the stub must survive that as itself.
+    composed.model_copy = MagicMock(side_effect=lambda *a, **k: composed)
 
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)

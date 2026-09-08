@@ -88,6 +88,9 @@ async def test_run_issue_reply_step_passes_chunk_callback_and_publishes(monkeypa
         reply_text="hi",
     )
     assert out == {
+        "awaiting_input": False,
+        "question": None,
+        "options": None,
         "content": "hello",
         "outcome": None,
         "reason": None,
@@ -127,7 +130,15 @@ async def test_run_issue_reply_step_calls_run_session_turn(monkeypatch):
         reply_text="please continue",
     )
 
-    assert out == {"content": "ok", "outcome": None, "reason": None, "run_id": "r1"}
+    assert out == {
+        "content": "ok",
+        "outcome": None,
+        "reason": None,
+        "run_id": "r1",
+        "awaiting_input": False,
+        "question": None,
+        "options": None,
+    }
     kwargs = fake_chat.run_session_turn.call_args.kwargs
     assert kwargs["content"] == "please continue"
     assert kwargs["trigger"] == "issue_reply"

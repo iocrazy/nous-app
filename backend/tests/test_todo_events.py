@@ -267,5 +267,6 @@ async def test_mirror_failure_is_contained(monkeypatch):
         "todo_write",
         {"todos": [], "counts": {"total": 1, "completed": 0, "in_progress": 0}},
     )  # must not raise
-    assert seq == 1
+    assert seq is None  # phase 2a: no row landed → no seq to name it
+    # ...but the in-process view still folds (readers in this process need it)
     assert writer.views["view"]["step"] == {"done": 0, "total": 1, "label": None}

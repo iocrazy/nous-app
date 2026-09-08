@@ -50,6 +50,46 @@ class QuestionNotRecorded(RuntimeError):
     recorder, no run row, or the recorder refused it)."""
 
 
+class AnswerRejected(Exception):
+    """A kind's ``on_answer`` refused the answer. ``status`` / ``code`` map
+    straight onto the HTTP reply of whichever endpoint received it."""
+
+    def __init__(self, status: int, code: str, message: str = ""):
+        super().__init__(message or code)
+        self.status = status
+        self.code = code
+
+
+@dataclass(frozen=True)
+class AnswerContext:
+    """What ``on_answer`` may look at: the issue (or conversation) row, who
+    answered, and the marker the question was parked with."""
+
+    target: dict
+    user_id: str
+    marker: dict
+
+
+# Model-facing sub-schema for a question's options — ONE object shared by the
+# AskUser tool and FinishIssue.options so the model sees the same shape.
+OPTIONS_JSON_SCHEMA: dict = {
+    "type": "array",
+    "maxItems": MAX_OPTIONS,
+    "description": (
+        f"Up to {MAX_OPTIONS} choices for the human. Labels must be unique and "
+        f"at most {LABEL_MAX} characters; omit when the answer is open-ended."
+    ),
+    "items": {
+        "type": "object",
+        "required": ["label"],
+        "properties": {
+            "label": {"type": "string", "maxLength": LABEL_MAX},
+            "description": {"type": "string", "maxLength": DESC_MAX},
+        },
+    },
+}
+
+
 @dataclass(frozen=True)
 class Question:
     question_id: str
@@ -226,6 +266,9 @@ __all__ = [
     "PROMPT_MAX",
     "QUESTION_ANSWERED",
     "QUESTION_ASKED",
+    "OPTIONS_JSON_SCHEMA",
+    "AnswerContext",
+    "AnswerRejected",
     "OnAnswer",
     "Question",
     "QuestionNotRecorded",

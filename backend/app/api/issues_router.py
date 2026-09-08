@@ -167,29 +167,38 @@ async def list_needs_input(auth: AuthDep) -> NeedsInputListResponse:
     "needs-input" as an int if that route came first.
     """
     rows = await issue_repository.list_needs_input(str(auth.user_id))
-    items = [
-        NeedsInputItem(
-            issue_id=str(r["id"]),
-            title=r["title"],
-            question=(r.get("execution_state") or {}).get("outcome_reason"),
-            project_id=(
-                str(r["project_id"]) if r.get("project_id") is not None else None
-            ),
-            team_id=str(r["team_id"]) if r.get("team_id") is not None else None,
-            asked_at=r["updated_at"],
-            # Already a str off the repo row (_parity sweeps uuid → str), but
-            # str() it anyway so a raw UUID from any other caller can't leak
-            # through as a non-JSON type.
-            assignee_agent_id=(
-                str(r["assignee_agent_id"])
-                if r.get("assignee_agent_id") is not None
-                else None
-            ),
-            identifier=r.get("identifier"),
-        )
-        for r in rows
-    ]
-    return NeedsInputListResponse(items=items)
+    return NeedsInputListResponse(items=[_needs_input_item(r) for r in rows])
+
+
+def _needs_input_item(r: dict) -> NeedsInputItem:
+    """One row → item. Phase 2a: the typed question (if the issue was parked
+    with one) rides along from ``execution_state.awaiting_input`` so the
+    Task Center can render buttons; ``question`` stays the legacy prose.
+    ``assignee_agent_id`` is str()'d so a raw UUID from any caller cannot
+    leak through as a non-JSON type."""
+    state = r.get("execution_state") or {}
+    marker = state.get("awaiting_input") or {}
+    if not isinstance(marker, dict):
+        marker = {}
+    options = marker.get("options") if isinstance(marker.get("options"), list) else []
+    return NeedsInputItem(
+        issue_id=str(r["id"]),
+        title=r["title"],
+        question=state.get("outcome_reason"),
+        project_id=(str(r["project_id"]) if r.get("project_id") is not None else None),
+        team_id=str(r["team_id"]) if r.get("team_id") is not None else None,
+        asked_at=r["updated_at"],
+        assignee_agent_id=(
+            str(r["assignee_agent_id"])
+            if r.get("assignee_agent_id") is not None
+            else None
+        ),
+        identifier=r.get("identifier"),
+        question_id=marker.get("question_id"),
+        kind=marker.get("kind"),
+        options=[o for o in options if isinstance(o, dict)],
+        allow_free_text=bool(marker.get("allow_free_text", True)),
+    )
 
 
 @router.get("/{issue_id}", response_model=Issue)

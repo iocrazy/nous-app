@@ -101,6 +101,12 @@ class IssueMessagePost(BaseModel):
     """
 
     body: str = Field(min_length=1, max_length=50000)
+    # Phase 2a: this comment answers the typed question ``question_id``. The
+    # body must equal one of its labels (or be free text when allowed);
+    # otherwise 400 answer_shape / 409 no_open_question. Answers do not go
+    # through the inbox — the message endpoint validates, records
+    # ``question_answered`` on the asking run and wakes the workflow.
+    answer_to: Optional[str] = Field(default=None, max_length=120)
     # DEPRECATED — never read. The handler routes on issue_row.assignee_agent_id;
     # this field has no effect on dispatch. Kept only so existing clients that
     # send it don't 422. Removing it is an API contract change (separate PR).
