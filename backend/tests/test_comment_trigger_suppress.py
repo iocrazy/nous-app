@@ -27,6 +27,18 @@ _AGENT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 _OWNER = "11111111-1111-1111-1111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def _no_live_root_run(monkeypatch):
+    """Phase 2a Task 5: running_root_run_id now RAISES on a failed read (an
+    empty answer is not a negative result) instead of returning None. These
+    tests have no DB; pin the "nothing running" answer explicitly."""
+    from app.repositories.agent_runs_repository import AgentRunsRepository
+
+    monkeypatch.setattr(
+        AgentRunsRepository, "running_root_run_id", AsyncMock(return_value=None)
+    )
+
+
 def _router_module():
     importlib.import_module("app.api.issue_messages_router")
     return sys.modules["app.api.issue_messages_router"]

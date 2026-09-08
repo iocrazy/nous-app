@@ -408,6 +408,14 @@ def test_chain_order_is_heartbeat_cancel_pause_inbox_budget():
 
 突变：hook 不判 `parent_run_id` → 子 run 测红；`request_pause` 不调 → 端点测红；workflow 在 paused 时仍 `set_status` → 测红；sweeper 去掉子查询 → 集成测红。PR「复用/删除」：复用 `request_cancel` 形状、`_clear_issue_lock`、`_dispatch_execute_issue`、`derive_phase` 的 `paused_at` 优先级（零改动）；删除 §0 表里「pause 只有壳」这一行。
 
+**实施记录（2026-09-08，Task 5 落地）**：
+- 测试位置：sweeper 的真库测试放 `tests/db/test_inbox_expire_skips_paused_integration.py`（挂 `schema-drift.yml`，与其它 `tests/db` 集成测试同款 `orm_dsn`/`pg` fixture），不是 `tests/integration/`；单测层对 `expire_stale_stmt(older_than, *, skip_paused_issues)` 纯构造器做 SQL 编译断言。
+- `stop_reason` 需要从 runner 一路透传到 workflow：`run_session_turn` 返回 `stop_reason`（流式路径从终止 chunk 的 `usage.stop_reason` 取），`run_issue_agent` / `run_issue_reply_step` 原样带回，循环在 FinishIssue 路由**之前**读它。
+- 开新 turn 的分支新增 `paused_at` 检查（计划没写；不能放循环顶，见 spec §2 实施记录）；`/resume` 先清 `paused_at` 再派发、失败恢复；`/resume` 有完整决策表（withdrawn / running / parked / dispatched / cleared，响应带 `reason`），撞上未观察到的 pause 时撤回而不派发（`AgentRunsRepository.clear_pause_request`），撤回落空则重读再判；`request_pause` 的 `user_id` 可选（目标层鉴权）；`resumed_from_run_id` 写 `execution_state`（计划口径），spec §2 原文的 `metadata_json` 落点不可行（run 行尚不存在）；`running_root_run_id` 读失败改为 raise，端点 503。
+- `/dispatch` 与 `/resume` 共用 `_start_execute_issue`（生成 workflow_id → `_dispatch_execute_issue` → `_persist_workflow_id`）；`SET LOCAL ROLE service_role` 只剩 `_persist_workflow_id` 一处。
+- 暂停中 `answer_to` 照常唤醒（评审推翻了一版的 409，spec §2 已回写理由）。
+- 「暂停中 cancel 清 `paused_at`」放在 `issue_repository.transition_status` **与** `issue_lifecycle.set_status` 两处（`PAUSE_CLEARING_STATUSES`）。
+
 ---
 
 ### Task 6: 预算 100% → 三选一（`kind="budget"`）

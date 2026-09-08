@@ -349,3 +349,33 @@ async def test_run_issue_agent_publish_message_survives_realistic_bigint_row(
     assert msg["id"] == str(BIGINT_MESSAGE_ID)
     assert msg["kind"] == "agent_run"
     assert msg["body"] == "done"
+
+
+async def test_run_issue_agent_passes_stop_reason_through(monkeypatch):
+    """Phase 2a Task 5: a hook stop (pause) reaches the workflow as
+    ``stop_reason`` — with empty content the forced-declare fallback stays off."""
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-1")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={
+            "assistant_message": {"content": ""},
+            "run_id": "31",
+            "stop_reason": "paused",
+        }
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    forced = AsyncMock(return_value=(None, None))
+    monkeypatch.setattr(m, "attempt_forced_finish_declaration", forced)
+    out = await m.run_issue_agent(
+        issue={"id": 409, "title": "t", "description": "d"}, agent_id="a", user_id="u"
+    )
+    assert out["stop_reason"] == "paused" and out["outcome"] is None
+    assert out["run_id"] == "31"
+    forced.assert_not_awaited()

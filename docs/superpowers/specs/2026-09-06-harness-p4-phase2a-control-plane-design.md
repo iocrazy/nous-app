@@ -9,7 +9,7 @@
 | 一期假设 | 现状（2026-09-06 实测） | 处置 |
 |---|---|---|
 | 「预算 100% 停下以类型化提问」接三期的类型化提问 | 三期 spec/plan 存在，**Task 1/2 一行未做**（plan 23 个勾 0 个） | 本文 §1 吸收三期 §1，作为 2a 的第一块 |
-| pause 有列有语义 | `agent_runs.pause_requested`、`issues.paused_at`、`conversation_ai_meta.paused_at`、`fork_of_run_id/fork_at_seq` 均在生产库；`TurnEndReason.PAUSED` 已定义；收件箱 CHECK 放行 `pause/resume/budget_reply` | **只有壳**：无 PauseHook、无 `/pause` `/resume` 端点、收件箱 API 只放行 `steer/answer/budget_reply`、rollup 读 `paused_at` 无人写、横条 paused 类恒空、CockpitBlock 只有 cancel |
+| pause 有列有语义 | `agent_runs.pause_requested`、`issues.paused_at`、`conversation_ai_meta.paused_at`、`fork_of_run_id/fork_at_seq` 均在生产库；`TurnEndReason.PAUSED` 已定义；收件箱 CHECK 放行 `pause/resume/budget_reply` | ~~只有壳~~ → **Task 5 已补后端**（PauseHook、`/pause` `/resume`、暂停期间改投、sweeper 跳过已暂停 issue；`issue_repository.transition_status` 到终态时清 `paused_at`）。仍缺：收件箱 API 只放行 `steer/answer/budget_reply`、横条 paused 类恒空、CockpitBlock 只有 cancel（Task 8） |
 | 钩子链可 stop / inject | `StepContext.inject()` 已有；`StepHookChain` 首个 STOP 即停；**所有 STOP 一律记 `turn_end{cancelled}`** | 需加 `stop_reason → TurnEndReason` 映射（§2） |
 | 挂起/唤醒原语 | needs_input 走 `input_gate`（workflow 原地 `DBOS.recv`，回复经 gateway `DBOSClient.send` 唤醒）；approval_gate 同款 | §1 复用，不再造 |
 | 列表级 inbox_pending | issue 列表端点不带 rollup；已有列表级范式 `GET /issues/needs-input` | §4 同范式加 `pending-summary` |
@@ -48,6 +48,16 @@
 **与 cancel 的边界**：cancel 仍是 run 级、不可逆；暂停中 cancel = 清 `paused_at` + 取消挂起。两者都经 `issue_visibility` 鉴权。
 
 **聊天路径不做**（一期 §8：会话续聊即 resume）；`conversation_ai_meta.paused_at` 留列不用。
+
+**实施记录（2026-09-08，Task 5 落地后与本节的偏差）**：
+- 暂停中带 `answer_to` 的回答**照常唤醒**（本节原文成立；一版曾改成 409，对抗评审指出挂起 workflow 的 recv TTL 在暂停期间照样计时，拒答会让长暂停把问题耗死）。唤醒后的那一轮 reply turn 是暂停唯一不拦的 turn（它是新 run 行，pause_requested 到不了它）；它若 `continue`，下一轮在循环里被 `paused_at` 挡住。
+- `resumed_from_run_id` 写在 **`issues.execution_state`**（恢复时新 run 的行还不存在，`metadata_json` 无处可写），值是上一 run 以 paused 收尾时的 id，否则 `null`（有待领条目但上一 run 正常结束）。
+- `/resume` 的决策表（首个命中）：有活 run 且已暂停 → 撤回 `pause_requested`（`reason=withdrawn`；撤回落空说明 run 已结束，重读后按「没在跑」继续判）；有活 run 未暂停 → `running`，不派发（排队条目在它下一个 step 边界被认领）；`execution_locked_at` 持有但无活 run → 挂起在问题上（`parked`，带原 `dbos_workflow_id`）或 turn 之间（`running`），都不派发第二个 workflow（会输在 `atomic_checkout`，还会把 `dbos_workflow_id` 盖成死的）；有待领或上一 run 以 paused 收尾 → `dispatched`；否则 `cleared`。响应新增 `reason` 字段给 UI 原样展示。
+- `running_root_run_id` 读失败不再吞成 None（「空输出不是否定结论」）：仓储 raise，`/pause` `/resume` 回 503 `run_state_unavailable`、什么都不写；评论端点让它冒 500 而不是走唤醒路径。
+- `/resume` **先清 `paused_at` 再派发**（新 workflow 第一轮循环顶就读 `paused_at`，晚清会让它立刻自认暂停），派发失败则恢复原值，issue 仍可见为暂停。
+- dispatch 循环里多一道 `paused_at` 检查，位置在**开新 turn 的分支**而不是循环顶：一版放在循环顶，评审指出它排在 needs_input 挂起之前，暂停落在「turn 返回 needs_input → 循环顶」之间会把挂起整个丢掉（无 needs_followup、无标记、问题丢失）。
+- `request_pause(run_id, *, user_id=None)`：鉴权在目标层（issue visibility），团队成员可暂停别人开的 run，所以不按 run 行的 owner 过滤。
+- 「暂停中 cancel = 清 `paused_at`」落在**两个**状态写入方：`issue_repository.transition_status` 与 `issue_lifecycle.set_status`（agent 自己的终态落地走后者，评审指出只改一处会让 done 的 issue 永远显示 paused）；集合 `PAUSE_CLEARING_STATUSES` 一处定义。
 
 ## 3. 预算 100% → 类型化追问（作者拍板）
 

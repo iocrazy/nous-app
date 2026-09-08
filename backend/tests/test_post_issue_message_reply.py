@@ -5,12 +5,24 @@ from __future__ import annotations
 import importlib
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 
 from app.schemas.issue_message import IssueMessageKind, IssueMessagePost
+
+
+@pytest.fixture(autouse=True)
+def _no_live_root_run(monkeypatch):
+    """Phase 2a Task 5: running_root_run_id now RAISES on a failed read (an
+    empty answer is not a negative result) instead of returning None. These
+    tests have no DB; pin the "nothing running" answer explicitly."""
+    from app.repositories.agent_runs_repository import AgentRunsRepository
+
+    monkeypatch.setattr(
+        AgentRunsRepository, "running_root_run_id", AsyncMock(return_value=None)
+    )
 
 
 def _router_module():

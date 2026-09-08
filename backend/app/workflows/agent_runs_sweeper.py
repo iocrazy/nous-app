@@ -145,7 +145,10 @@ async def expire_orphan_inbox_step() -> int:
     )
 
     older_than = datetime.now(timezone.utc) - timedelta(seconds=INBOX_ORPHAN_SECONDS)
-    return await get_agent_run_inbox_repository().expire_stale(older_than=older_than)
+    # Phase 2a: items queued on a PAUSED issue wait for resume — never orphans.
+    return await get_agent_run_inbox_repository().expire_stale(
+        older_than=older_than, skip_paused_issues=True
+    )
 
 
 @DBOS.step()

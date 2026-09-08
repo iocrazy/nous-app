@@ -105,6 +105,7 @@ async def set_status(
 
     from app.db.session import write_scope
     from app.models import Issues
+    from app.repositories.issue_repository import PAUSE_CLEARING_STATUSES
 
     now_dt = datetime.now(timezone.utc)
     values: dict[str, Any] = {"status": status}
@@ -114,6 +115,11 @@ async def set_status(
         values["completed_at"] = now_dt
     elif status == "cancelled":
         values["cancelled_at"] = now_dt
+    if status in PAUSE_CLEARING_STATUSES:
+        # Phase 2a: a pause is non-terminal. The agent's own terminal landing
+        # ends it too (the rollup reads paused_at first) — same rule as
+        # IssueRepository.transition_status, the other status writer.
+        values["paused_at"] = None
     state: dict[str, Any] = {}
     writes_error = bool(error_code or error_message)
     if writes_error:
@@ -331,6 +337,7 @@ async def run_issue_reply_step(
         "awaiting_input": parked is not None,
         "question": question,
         "options": extract_issue_options(result.get("tool_calls")),
+        "stop_reason": result.get("stop_reason"),
     }
 
 
@@ -967,6 +974,21 @@ async def _run_dispatch_with_continuation(
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_reply(issue_id, payload)
         else:
+            if (fresh or {}).get("paused_at"):
+                # Target-level pause (phase 2a): no FRESH turn starts while
+                # paused. Checked here, not at the loop top, so a pending
+                # needs_input park (branch above) still lands before the
+                # pause returns — otherwise the agent's question is lost.
+                # The status is left as is (in_progress); ``paused_at`` is
+                # the truth and ``/resume`` clears it and re-dispatches.
+                # A reply turn after a wake is deliberately NOT gated: an
+                # answer is a wake (spec §2), and the run it starts is a new
+                # row, so the pause the human requested earlier does not
+                # reach it — the next continuation is where it stops.
+                logger.info(
+                    f"[execute_issue] issue {issue_id} is paused; not starting a turn"
+                )
+                return _paused_result(issue_id, res, attempt, wait_rounds)
             turn_no += 1
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_turn(
@@ -975,6 +997,12 @@ async def _run_dispatch_with_continuation(
                 user_id,
                 is_continuation=(attempt > 0 or wait_rounds > 0),
             )
+        if (res or {}).get("stop_reason") == "paused":
+            # PauseHook stopped the run at a step boundary. Not an outcome:
+            # nothing is routed, no status is written, the lock is released by
+            # execute_issue's finally. ``paused_at`` (stamped by /pause before
+            # the flag was raised) is what the UI and /resume read.
+            return _paused_result(issue_id, res, attempt, wait_rounds)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
         if outcome == "continue" and attempt < max_continuations:
@@ -999,6 +1027,21 @@ async def _run_dispatch_with_continuation(
         run_id=(res or {}).get("run_id"),
     )
     return {"outcome": outcome, "attempts": attempt, "wait_rounds": wait_rounds}
+
+
+def _paused_result(
+    issue_id: int, res: Optional[dict[str, Any]], attempt: int, wait_rounds: int
+) -> dict[str, Any]:
+    """The dispatch result for a target-level pause — ``outcome: "paused"``
+    is a workflow-level marker, never a FinishIssue outcome."""
+    return {
+        "issue_id": issue_id,
+        "outcome": "paused",
+        "paused": True,
+        "run_id": (res or {}).get("run_id"),
+        "attempts": attempt,
+        "wait_rounds": wait_rounds,
+    }
 
 
 async def _maybe_fire_subissue_barrier(issue_id: int) -> None:

@@ -538,11 +538,15 @@ async def _divert_to_inbox_if_running(
     auth: AuthDep,
     body: str,
     attachments_payload: list | None,
+    *,
+    paused: bool = False,
 ) -> Optional[str]:
     """Enqueue the comment on the issue's inbox when a ROOT run is running on
-    it; return the inbox id, or None when nothing is running (caller falls
-    through to the wake path). The comment row is persisted first so a
-    failed enqueue never loses the human's words."""
+    it — or when the issue is PAUSED (phase 2a: the comment waits for the
+    resumed run; a wake would start a turn on a paused target). Return the
+    inbox id, or None when neither holds (caller falls through to the wake
+    path). The comment row is persisted first so a failed enqueue never loses
+    the human's words."""
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
@@ -551,7 +555,7 @@ async def _divert_to_inbox_if_running(
     running = await get_agent_runs_repository().running_root_run_id(
         issue_id=issue_id, conversation_id=int(session_id)
     )
-    if running is None:
+    if running is None and not paused:
         return None
     await ConversationsAiStore().append_user_message(
         session_id=int(session_id),
@@ -566,7 +570,8 @@ async def _divert_to_inbox_if_running(
         kind="steer",
         content={"body": body, "attachments": attachments_payload or []},
     )
-    logger.info(f"[issue_reply] issue {issue_id}: diverted to inbox (run {running})")
+    why = f"run {running}" if running is not None else "issue paused"
+    logger.info(f"[issue_reply] issue {issue_id}: diverted to inbox ({why})")
     return str(row["id"])
 
 
@@ -629,6 +634,12 @@ async def post_issue_message(
     # An answer overrides the note / suppression paths (answering IS a wake),
     # skips inbox diversion (the parked workflow must be the one woken), and
     # is recorded only after delivery succeeded (see _commit_typed_answer).
+    # While the issue is PAUSED an answer still goes through (spec §2: an
+    # answer IS a wake): the parked workflow's recv TTL keeps counting during
+    # a pause, so refusing answers would let a long pause strand the question.
+    # The reply turn it starts is the one turn a pause does not gate; the
+    # dispatch loop stops the next continuation on ``paused_at``.
+    paused = bool(issue_row.get("paused_at"))
     answer = await _validate_typed_answer(
         issue_row, payload.body, payload.answer_to, owner_id
     )
@@ -656,16 +667,23 @@ async def post_issue_message(
             comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
         )
 
-    # ── Inbox diversion (harness p4 §1-③) ────────────────────────────────
-    # A root run is mid-turn on this issue: the comment is a steer, claimed
-    # at its next step boundary, not a second turn queued behind the lock.
+    # ── Inbox diversion (harness p4 §1-③, phase 2a pause) ────────────────
+    # A root run is mid-turn on this issue (or the issue is paused): the
+    # comment is a steer, claimed at the next step boundary of the running /
+    # resumed run, not a second turn queued behind the lock.
     # The comment row is kept (same reducer as the note path) so the thread
     # reads the same whether the run picked it up or not.
     inbox_id = (
         None
         if answer is not None
         else await _divert_to_inbox_if_running(
-            issue_id, session_id, owner_id, auth, payload.body, attachments_payload
+            issue_id,
+            session_id,
+            owner_id,
+            auth,
+            payload.body,
+            attachments_payload,
+            paused=paused,
         )
     )
     if inbox_id is not None:
