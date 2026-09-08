@@ -1352,6 +1352,7 @@ class AILibraryChatService:
                         tool_calls_trace = []
                         stream_cancelled = False
                         stream_awaiting_input = False
+                        stream_stop_reason: Optional[str] = None
                         try:
                             async for chunk in runner.stream_turn(
                                 composed,
@@ -1382,9 +1383,15 @@ class AILibraryChatService:
                                 # lifecycle routing, sub-task cards).
                                 if chunk.tool_call_trace is not None:
                                     tool_calls_trace = chunk.tool_call_trace
-                                if (chunk.usage or {}).get(
-                                    "stop_reason"
-                                ) == "awaiting_input":
+                                # A hook STOP ends the stream with a terminal
+                                # chunk carrying usage.stop_reason (see
+                                # AgentRunner.stream_turn); it is the truth the
+                                # issue workflow routes on (paused / cancelled /
+                                # awaiting_input), so keep it verbatim.
+                                chunk_stop = (chunk.usage or {}).get("stop_reason")
+                                if chunk_stop:
+                                    stream_stop_reason = chunk_stop
+                                if chunk_stop == "awaiting_input":
                                     stream_awaiting_input = True
                         except RunAborted as abort_exc:
                             # User cancel mid-stream. The buffered path
@@ -1438,6 +1445,8 @@ class AILibraryChatService:
                     }
                     if stream_cancelled:
                         result["cancelled"] = True
+                    if stream_stop_reason:
+                        result["stop_reason"] = stream_stop_reason
                     if stream_awaiting_input:
                         from app.services.ai.runner.question import payload_from_view
 
@@ -1717,6 +1726,10 @@ class AILibraryChatService:
             # the assistant message metadata for chat.
             "awaiting_input": bool(result.get("awaiting_input")),
             "question": result.get("question"),
+            # Phase 2a Task 5: the hook STOP reason, verbatim
+            # (turn_end.STOP_REASON_TO_TURN_END), from run_turn's stopped
+            # result or the stream's terminal chunk. None on a normal end.
+            "stop_reason": result.get("stop_reason"),
         }
 
     async def _merge_asset_primaries(

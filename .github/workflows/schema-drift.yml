@@ -67,8 +67,10 @@ on:
       - 'backend/tests/db/test_assets_repository_integration.py'
       - 'backend/tests/db/test_canvas_asset_refs_integration.py'
       - 'backend/tests/db/test_conversations_store_question_integration.py'
+      - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
       # The statements that integration file executes (phase 2a question stamp).
       - 'backend/app/services/ai/chat/conversations_ai_store.py'
+      - 'backend/app/repositories/agent_run_inbox_repository.py'
       # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
       # project-entity migration workflow imported `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module, and the step that
@@ -113,7 +115,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all nine, so it has to re-run
+      # to it changes what "green" means for all ten, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong twice (it said "eight" when there were
       # seven, then "nine" when there were eight — each edit trusted the
@@ -363,6 +365,20 @@ jobs:
           # merge actually lands the answered stamp when an intermediate key
           # is missing (jsonb_set would return the target unchanged, rowcount 1).
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_conversations_store_question_integration.py -v
+
+      - name: Exercise the paused-issue inbox sweep exclusion against the built schema (phase 2a)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place expire_stale_stmt(skip_paused_issues=True) executes.
+          # Its compile test greps the SQL; only Postgres can settle that
+          # NOT (kind='issue' AND id IN (SELECT ... WHERE paused_at IS NOT NULL))
+          # leaves paused-issue items alone while still expiring the other
+          # old orphans (non-issue targets included) and never collapses to
+          # "expire nothing".
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_inbox_expire_skips_paused_integration.py -v
 
       - name: Exercise the chat-uploads folder adoption (mig 450)
         working-directory: backend
