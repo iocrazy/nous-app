@@ -94,8 +94,35 @@ async def signal_user_reply(
         return False
 
 
+_QUESTION_MARKER_KEYS = ("question_id", "kind", "options", "allow_free_text", "run_id")
+
+
+def build_awaiting_marker(
+    *,
+    prompt: str,
+    issue_id: int,
+    now: str,
+    question: Optional[dict] = None,
+) -> dict:
+    """The ``issues.execution_state.awaiting_input`` value. Without a typed
+    question it is exactly the pre-2a shape; with one it adds the fields the
+    reply endpoint needs to validate an answer and the UI needs to render
+    buttons (``NeedsInputCard`` keeps reading ``prompt``)."""
+    marker: dict = {"prompt": prompt, "since": now, "issue_id": issue_id}
+    if question:
+        for key in _QUESTION_MARKER_KEYS:
+            if key in question:
+                marker[key] = question[key]
+    return marker
+
+
 async def mark_awaiting_input(
-    *, workflow_id: str, issue_id: int, user_id: str, prompt: str
+    *,
+    workflow_id: str,
+    issue_id: int,
+    user_id: str,
+    prompt: str,
+    question: Optional[dict] = None,
 ) -> None:
     """写等待标记并投 inbox 通知。任一失败只记日志 —— 标记失败不阻断挂起，
     回复会走旧路径兜底。
@@ -124,7 +151,11 @@ async def mark_awaiting_input(
 
     clipped = (prompt or "")[:_PROMPT_MAX]
     now = datetime.now(timezone.utc).isoformat()
-    marker = json.dumps({"prompt": clipped, "since": now, "issue_id": issue_id})
+    marker = json.dumps(
+        build_awaiting_marker(
+            prompt=clipped, issue_id=issue_id, now=now, question=question
+        )
+    )
     empty_jsonb = cast(literal("{}"), JSONB)
     marker_jsonb = cast(literal(marker), JSONB)
     try:

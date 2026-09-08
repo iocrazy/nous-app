@@ -32,7 +32,11 @@ from loguru import logger
 from app.services.ai.chat.ai_library_chat_service import (  # noqa: F401
     AILibraryChatService,
 )
-from app.services.ai.tools.finish_issue_tool import extract_issue_outcome
+from app.services.ai.tools.ask_user_tool import awaiting_input_outcome
+from app.services.ai.tools.finish_issue_tool import (
+    extract_issue_options,
+    extract_issue_outcome,
+)
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
     publish_message,
@@ -315,11 +319,18 @@ async def run_issue_reply_step(
     await publish_message(issue_id, assistant, session_user_id=None)
     content = assistant.get("content") or ""
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
+    question = None
+    parked = awaiting_input_outcome(result)
+    if parked is not None:
+        outcome, reason, question = parked
     return {
         "content": content,
         "outcome": outcome,
         "reason": reason,
         "run_id": result.get("run_id"),
+        "awaiting_input": parked is not None,
+        "question": question,
+        "options": extract_issue_options(result.get("tool_calls")),
     }
 
 
@@ -792,6 +803,59 @@ async def _safe_mark_turn(
         )
 
 
+async def _event_writer_for_run(run_id: Any):
+    """Seam for tests: a writer that appends to an already-ended run."""
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    return await RunEventWriter.for_run(run_id)
+
+
+async def _question_for_park(
+    res: dict[str, Any], reason: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """The typed question to park the issue with, or None (plain needs_input).
+
+    Two sources, one shape (``Question.to_payload()`` + ``run_id``):
+      * the runner parked on AskUser → ``res["question"]`` as-is;
+      * FinishIssue(needs_input, options=[...]) → build the question here
+        (``q:<run>:0`` — seq 0 never collides with a real event) and append
+        a ``question_asked`` to the run so both roads leave the same
+        transcript trail.
+    """
+    run_id = res.get("run_id")
+    question = res.get("question")
+    if isinstance(question, dict) and question.get("question_id"):
+        return {**question, "run_id": run_id}
+    options = res.get("options")
+    if not options or not run_id:
+        return None
+    from app.services.ai.runner import question as q
+
+    opts, warnings = q.normalize_options(options)
+    if not opts:
+        logger.warning(
+            f"[execute_issue] FinishIssue options ignored for run {run_id}: {warnings}"
+        )
+        return None
+    built = q.Question(
+        question_id=f"q:{run_id}:0",
+        kind="user",
+        prompt=str(reason or "")[: q.PROMPT_MAX],
+        options=tuple(opts),
+        allow_free_text=True,
+        asked_at=q._now_iso(),
+    )
+    payload = built.to_payload()
+    try:
+        writer = await _event_writer_for_run(run_id)
+        await writer.append(q.QUESTION_ASKED, payload)
+    except Exception as exc:  # noqa: BLE001 — the park still happens
+        logger.warning(
+            f"[execute_issue] question_asked for run {run_id} not recorded: {exc!r}"
+        )
+    return {**payload, "run_id": run_id}
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -879,7 +943,11 @@ async def _run_dispatch_with_continuation(
                 content_len=len((res or {}).get("content") or ""),
                 run_id=(res or {}).get("run_id"),
             )
-            await mark_waiting(issue_id, reason or "")
+            question = await _question_for_park(res or {}, reason)
+            if question is not None:
+                await mark_waiting(issue_id, reason or "", question=question)
+            else:
+                await mark_waiting(issue_id, reason or "")
             payload = await wait_for_input(
                 issue_id,
                 ttl_seconds=settings.NEEDS_INPUT_RECV_TTL_HOURS * 3600,
@@ -1017,12 +1085,15 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
                     issue_id_, ttl_seconds=ttl_seconds
                 )
 
-            async def _mark(issue_id_: int, prompt: str):
+            async def _mark(
+                issue_id_: int, prompt: str, *, question: Optional[dict] = None
+            ):
                 await input_gate.mark_awaiting_input(
                     workflow_id=workflow_id,
                     issue_id=issue_id_,
                     user_id=user_id,
                     prompt=prompt,
+                    question=question,
                 )
 
             async def _clear(issue_id_: int):

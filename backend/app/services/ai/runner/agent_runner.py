@@ -42,6 +42,10 @@ from app.services.ai.runner.reasoning import (
     strip_reasoning,
 )
 from app.services.ai.runner.run_recorder import RunRecorder
+from app.services.ai.tools.ask_user_tool import (
+    ASK_USER_TOOL_NAME,
+    ask_user_handler,
+)
 from app.services.ai.runner.step_hooks import (
     StepContext,
     StepDecision,
@@ -120,6 +124,7 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
         "GenerateImage",
         "GenerateVideo",
         *SCREENWRITING_TOOL_NAMES,
+        ASK_USER_TOOL_NAME,  # phase 2a: ask the human, park the turn
     }
 )
 
@@ -848,6 +853,8 @@ class AgentRunner:
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
+                elif tool_name == ASK_USER_TOOL_NAME:
+                    result = await self._dispatch_ask_user(args, recorder, iteration)
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
                 elif tool_name == "GenerateImage":
@@ -1001,6 +1008,17 @@ class AgentRunner:
                         )
                         return
 
+                if tool_name == ASK_USER_TOOL_NAME and result.get("asked"):
+                    # Park: the human has to answer before anything else
+                    # happens. Typed terminal chunk → turn_end{awaiting_input}.
+                    yield StreamChunk(
+                        delta_text=self._awaiting_input_bracket(recorder),
+                        finish_reason="stop",
+                        usage={"stop_reason": "awaiting_input"},
+                        tool_call_trace=tool_call_trace,
+                    )
+                    return
+
                 if loop_guard.is_looping():
                     warning = loop_guard.render_warning()
                     if warning:
@@ -1089,6 +1107,41 @@ class AgentRunner:
             turn=1,
             step=step,
         )
+
+    async def _dispatch_ask_user(
+        self, args: dict, recorder: Optional[RunRecorder], iteration: int
+    ) -> dict:
+        """Phase 2a: AskUser records ``question_asked`` through the shared
+        question primitive. The park itself happens in the ladder right
+        after the tool result is traced (both paths)."""
+        return await ask_user_handler(args, recorder=recorder, turn=1, step=iteration)
+
+    @staticmethod
+    def _parked_question(recorder: Any) -> Optional[dict]:
+        from app.services.ai.runner.question import payload_from_view
+
+        views = getattr(recorder, "views", None) or {}
+        parked = (views.get("view") or {}).get("question")
+        return payload_from_view(parked) if parked else None
+
+    def _awaiting_input_bracket(self, recorder: Any) -> str:
+        q = self._parked_question(recorder) or {}
+        return f"\n\n[awaiting input: {q.get('prompt') or 'question pending'}]"
+
+    def _awaiting_input_response(
+        self, recorder: Any, tool_call_trace: list[dict]
+    ) -> dict[str, Any]:
+        """Mirror of ``_awaiting_approval_response`` for a typed question;
+        carries the trace so FinishIssue / AskUser declarations survive."""
+        return {
+            "content": "",
+            "raw": None,
+            "awaiting_input": True,
+            "stop_reason": "awaiting_input",
+            "cancelled": False,
+            "question": self._parked_question(recorder),
+            "tool_calls": tool_call_trace,
+        }
 
     async def _dispatch_finish_issue(self, args: dict) -> dict:
         """Spec-2: route a FinishIssue call to the per-request handler injected
@@ -1751,6 +1804,8 @@ class AgentRunner:
                             result = {
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
+                elif tool_name == ASK_USER_TOOL_NAME:
+                    result = await self._dispatch_ask_user(args, recorder, iteration)
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
                 elif tool_name == "GenerateImage":
@@ -1918,6 +1973,9 @@ class AgentRunner:
                         return self._aborted_response(post_result)
                     if post_result.decision == "await_approval":
                         return self._awaiting_approval_response(post_result)
+
+                if tool_name == ASK_USER_TOOL_NAME and result.get("asked"):
+                    return self._awaiting_input_response(recorder, tool_call_trace)
 
         return {"content": "", "raw": None, "error": "max_tool_iterations_exceeded"}
 

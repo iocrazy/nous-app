@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from dbos import DBOS, SetWorkflowID
@@ -122,6 +122,103 @@ def _dispatch_respond_to_issue_reply(
             body,
             attachments,
         )
+
+
+async def _event_writer_for_run(run_id: Any):
+    """Seam for tests: a writer that appends to the (ended) asking run."""
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    return await RunEventWriter.for_run(run_id)
+
+
+async def _handle_typed_answer(
+    issue_row: dict, body: str, answer_to: Optional[str], user_id: str
+) -> Optional[str]:
+    """Phase 2a answer channel (spec §1): a comment that answers the parked
+    question. Returns the answered ``question_id`` or None when this comment
+    is not an answer. Order: validate → ``question_answered`` on the asking
+    run → the kind's ``on_answer`` → (caller) the existing wake path.
+
+    ``answer_to`` given: the marker must hold that exact question (409
+    ``no_open_question``) and the body must match (400 ``answer_shape``).
+    ``answer_to`` absent: a body equal to one label still counts (three-phase
+    compat — old clients reply with the bare label)."""
+    from app.services.ai.runner.question import (
+        QUESTION_ANSWERED,
+        AnswerContext,
+        AnswerRejected,
+        answer_matches,
+        on_answer_for,
+    )
+
+    wf_id = issue_row.get("dbos_workflow_id")
+    marker = await _load_awaiting_marker(wf_id) if wf_id else None
+    open_qid = (marker or {}).get("question_id")
+    if answer_to is not None:
+        if not marker or open_qid != answer_to:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "no_open_question",
+                    "message": f"no open question {answer_to!r} on this issue",
+                },
+            )
+        if not answer_matches(marker, body):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "answer_shape",
+                    "message": "answer must equal one of the option labels"
+                    + (" or be free text" if marker.get("allow_free_text") else ""),
+                },
+            )
+    else:
+        labels = {
+            o.get("label")
+            for o in ((marker or {}).get("options") or [])
+            if isinstance(o, dict)
+        }
+        if not open_qid or body not in labels:
+            return None
+
+    run_id = marker.get("run_id")
+    if run_id:
+        try:
+            writer = await _event_writer_for_run(run_id)
+            await writer.append(
+                QUESTION_ANSWERED,
+                {"question_id": open_qid, "value": body, "superseded": False},
+                turn=None,
+                step=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — the answer still travels
+            logger.warning(
+                f"[issue_reply] question_answered for run {run_id} not recorded: {exc!r}"
+            )
+    else:
+        logger.warning(
+            f"[issue_reply] marker for issue {issue_row.get('id')} has no run_id; "
+            "question_answered not recorded"
+        )
+    kind = str(marker.get("kind") or "user")
+    try:
+        handler = on_answer_for(kind)
+    except KeyError:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "unknown_question_kind", "message": kind},
+        )
+    try:
+        await handler(
+            issue_row,
+            body,
+            AnswerContext(target=issue_row, user_id=user_id, marker=marker),
+        )
+    except AnswerRejected as rej:
+        raise HTTPException(
+            status_code=rej.status, detail={"code": rej.code, "message": str(rej)}
+        )
+    return open_qid
 
 
 async def _load_awaiting_marker(workflow_id: str) -> Optional[dict]:
@@ -481,8 +578,14 @@ async def post_issue_message(
         [a.model_dump() for a in payload.attachments] if payload.attachments else None
     )
 
+    # Phase 2a: an answer to a parked typed question is validated and
+    # recorded here, then travels down the ordinary wake path below.
+    answered = await _handle_typed_answer(
+        issue_row, payload.body, payload.answer_to, owner_id
+    )
+
     # ── Note path (suppressed) ────────────────────────────────────────────
-    if not verdict.will_wake:
+    if not verdict.will_wake and answered is None:
         try:
             await ConversationsAiStore().append_user_message(
                 session_id=int(session_id),

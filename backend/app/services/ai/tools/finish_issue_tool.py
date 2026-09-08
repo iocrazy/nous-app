@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from app.services.ai.runner.question import OPTIONS_JSON_SCHEMA
+
 # Allowed self-reported outcomes. Kept as a tuple so it can seed both the JSON
 # schema enum (model-facing) and the orchestrator's validation.
 FINISH_ISSUE_OUTCOMES: tuple[str, ...] = ("completed", "needs_input", "continue")
@@ -71,6 +73,9 @@ def finish_issue_spec() -> dict[str, Any]:
                             "a human, or what remains."
                         ),
                     },
+                    # Phase 2a: a needs_input declaration may offer choices —
+                    # same sub-schema as AskUser.options.
+                    "options": OPTIONS_JSON_SCHEMA,
                 },
                 "required": ["outcome"],
             },
@@ -93,7 +98,11 @@ async def finish_issue_handler(args: dict[str, Any]) -> dict[str, Any]:
             )
         }
     reason = str(args.get("reason") or "").strip()
-    return {"acknowledged": True, "outcome": outcome, "reason": reason}
+    out: dict[str, Any] = {"acknowledged": True, "outcome": outcome, "reason": reason}
+    options = args.get("options")
+    if isinstance(options, list) and options:
+        out["options"] = options
+    return out
 
 
 def extract_issue_outcome(
@@ -125,6 +134,32 @@ def extract_issue_outcome(
     return None, None
 
 
+def extract_issue_options(
+    tool_calls: Optional[list[dict[str, Any]]],
+) -> Optional[list[dict[str, Any]]]:
+    """The ``options`` of the LAST acknowledged ``needs_input`` declaration
+    (raw, not yet normalised), or None. Mirrors ``extract_issue_outcome``."""
+    if not tool_calls:
+        return None
+    for call in reversed(tool_calls):
+        if call.get("name") != FINISH_ISSUE_TOOL_NAME:
+            continue
+        result = call.get("result")
+        args = call.get("args")
+        outcome = None
+        if isinstance(result, dict) and result.get("acknowledged"):
+            outcome = result.get("outcome")
+        elif isinstance(args, dict):
+            outcome = str(args.get("outcome") or "").strip()
+        if outcome != "needs_input":
+            return None
+        for src in (result, args):
+            if isinstance(src, dict) and isinstance(src.get("options"), list):
+                return src["options"] or None
+        return None
+    return None
+
+
 __all__ = [
     "FINISH_ISSUE_OUTCOMES",
     "FINISH_ISSUE_TOOL_NAME",
@@ -132,4 +167,5 @@ __all__ = [
     "finish_issue_spec",
     "finish_issue_handler",
     "extract_issue_outcome",
+    "extract_issue_options",
 ]
