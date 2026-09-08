@@ -48,9 +48,14 @@ async def test_for_run_continues_seq_and_preloads_stored_views(monkeypatch):
     assert w.views["cost"]["spent_cents"] == 12.5
 
 
-async def test_append_that_fails_to_insert_folds_nothing(monkeypatch):
-    """No row, no fold: the mirrored view must never describe an event the
-    transcript does not hold (a late append losing a seq race lands here)."""
+async def test_append_that_fails_to_insert_folds_locally_but_never_mirrors(
+    monkeypatch,
+):
+    """No row → no mirror: metadata_json.view must never describe an event the
+    transcript does not hold (a late append losing a seq race lands here).
+    The in-process view still folds for readers in this process."""
+    from unittest.mock import AsyncMock
+
     from app.db import session as dbs
 
     @contextlib.asynccontextmanager
@@ -60,10 +65,11 @@ async def test_append_that_fails_to_insert_folds_nothing(monkeypatch):
 
     monkeypatch.setattr(dbs, "write_scope", _ws)
     w = rr.RunEventWriter(7, seq_start=3)
-    before = w.views
+    w._mirror = AsyncMock()
     seq = await w.append("question_answered", {"question_id": "q:7:1", "value": "A"})
     assert seq is None
-    assert w.views is before and w.views["view"]["last_answer"] is None
+    assert w.views["view"]["last_answer"]["value"] == "A"
+    w._mirror.assert_not_awaited()
 
 
 async def test_for_run_on_a_run_with_no_events_starts_at_zero(monkeypatch):

@@ -958,7 +958,7 @@ class RunEventWriter:
         step: Optional[int] = None,
     ) -> Optional[int]:
         """Insert the row, fold, mirror. Returns the seq, or None when the
-        insert failed (nothing folded — see below)."""
+        insert failed (folded locally, not mirrored — see below)."""
         self.seq += 1
         seq = self.seq
         try:
@@ -983,9 +983,15 @@ class RunEventWriter:
                 f"[RunEventWriter] insert failed (run={self.run_id} seq={seq} "
                 f"type={event_type}): {err}"
             )
-            # No row, no fold: the mirrored view must never claim an event the
-            # transcript does not hold (replay == view is this writer's one
-            # invariant). A late append losing a seq race lands here too.
+            # No row → no MIRROR: metadata_json.view must never claim an event
+            # the transcript does not hold (a late append losing a seq race
+            # lands here). The in-memory view still folds, because in-process
+            # readers (the park reading view.question, the budget hook reading
+            # cost) must see what happened in this process even with the DB
+            # down. Callers get None instead of a seq that names no row.
+            nxt = apply_projection(self.views, event_type, payload, seq=seq)
+            if nxt is not self.views:
+                self.views = nxt
             return None
         await self._fold_and_mirror(event_type, payload, seq)
         return seq
