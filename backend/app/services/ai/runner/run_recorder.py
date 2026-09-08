@@ -916,6 +916,39 @@ class RunEventWriter:
         self.views: dict[str, Any] = empty_views()
         self._pending_mirror = False
 
+    @classmethod
+    async def for_run(cls, run_id: Any) -> "RunEventWriter":
+        """A writer for a run that already ended (answering a parked question,
+        FinishIssue options → question_asked). Continues the run's seq and
+        folds onto its STORED views — a fresh writer would mirror an empty
+        projection over ``metadata_json.view`` and erase the run's history."""
+        from sqlalchemy import func, select
+
+        from app.db import session as _dbs
+        from app.models.agents import AgentRuns, AgentRunTranscriptEvents
+
+        rid = int(run_id)
+        async with _dbs.read_scope() as session:
+            max_seq = (
+                await session.execute(
+                    select(func.max(AgentRunTranscriptEvents.seq)).where(
+                        AgentRunTranscriptEvents.run_id == rid
+                    )
+                )
+            ).scalar()
+            meta = (
+                await session.execute(
+                    select(AgentRuns.metadata_json).where(AgentRuns.id == rid)
+                )
+            ).scalar_one_or_none()
+        writer = cls(rid, seq_start=int(max_seq or 0))
+        if isinstance(meta, dict):
+            for key in ("view", "cost"):
+                stored = meta.get(key)
+                if isinstance(stored, dict):
+                    writer.views[key] = {**writer.views[key], **stored}
+        return writer
+
     async def append(
         self,
         event_type: str,
@@ -923,7 +956,9 @@ class RunEventWriter:
         *,
         turn: Optional[int] = None,
         step: Optional[int] = None,
-    ) -> int:
+    ) -> Optional[int]:
+        """Insert the row, fold, mirror. Returns the seq, or None when the
+        insert failed (folded locally, not mirrored — see below)."""
         self.seq += 1
         seq = self.seq
         try:
@@ -948,6 +983,16 @@ class RunEventWriter:
                 f"[RunEventWriter] insert failed (run={self.run_id} seq={seq} "
                 f"type={event_type}): {err}"
             )
+            # No row → no MIRROR: metadata_json.view must never claim an event
+            # the transcript does not hold (a late append losing a seq race
+            # lands here). The in-memory view still folds, because in-process
+            # readers (the park reading view.question, the budget hook reading
+            # cost) must see what happened in this process even with the DB
+            # down. Callers get None instead of a seq that names no row.
+            nxt = apply_projection(self.views, event_type, payload, seq=seq)
+            if nxt is not self.views:
+                self.views = nxt
+            return None
         await self._fold_and_mirror(event_type, payload, seq)
         return seq
 

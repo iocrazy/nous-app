@@ -14,7 +14,11 @@ from typing import Any
 from loguru import logger
 
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
-from app.services.ai.tools.finish_issue_tool import extract_issue_outcome
+from app.services.ai.tools.ask_user_tool import awaiting_input_outcome
+from app.services.ai.tools.finish_issue_tool import (
+    extract_issue_options,
+    extract_issue_outcome,
+)
 from app.services.ai.tools.forced_finish_declaration import (
     attempt_forced_finish_declaration,
 )
@@ -157,6 +161,10 @@ async def run_issue_agent(
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""
         outcome, reason = extract_issue_outcome(result.get("tool_calls"))
+        question = None
+        parked = awaiting_input_outcome(result)
+        if parked is not None:
+            outcome, reason, question = parked
 
         # Bounded fallback (production gap, 2026-08-01 E2E probe): agents
         # reliably produce content but almost never call FinishIssue on
@@ -209,6 +217,11 @@ async def run_issue_agent(
             # and, for the zero-content/no-outcome case, type the row's
             # error_code/error_message.
             "run_id": result.get("run_id"),
+            # Phase 2a: parked on a typed question (AskUser) → the workflow
+            # parks the issue with it; FinishIssue options → built there.
+            "awaiting_input": parked is not None,
+            "question": question,
+            "options": extract_issue_options(result.get("tool_calls")),
         }
     finally:
         await publish_status(iid, "done")

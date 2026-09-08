@@ -203,6 +203,12 @@ class NeedsInputItem(BaseModel):
     # Human identifier ("MH-7"). The issue detail route is keyed by it, not by
     # the numeric id, so a "go answer" deep link cannot be built without it.
     identifier: Optional[str] = None
+    # Phase 2a: the typed question the issue was parked with (from
+    # execution_state.awaiting_input). Absent on plain needs_input parks.
+    question_id: Optional[str] = None
+    kind: Optional[str] = None
+    options: list[dict] = Field(default_factory=list)
+    allow_free_text: bool = True
 
 
 class NeedsInputListResponse(BaseModel):

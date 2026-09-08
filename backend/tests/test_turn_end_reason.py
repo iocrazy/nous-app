@@ -36,6 +36,7 @@ EXIT_FUNCTIONS = (
     "_aborted_response",
     "_awaiting_approval_response",
     "_stopped_response",
+    "_awaiting_input_response",
 )
 
 

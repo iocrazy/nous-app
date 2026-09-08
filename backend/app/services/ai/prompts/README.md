@@ -100,6 +100,73 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `tools` 在多数 provider 侧位于系统消息之前的前缀里，所以**改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效**——这是一次性的，之后逐轮不变。本模块不为它计指纹（`_prefix_fingerprint()` 不吃 tools），因为它对所有 agent 恒等，没有跨 agent 串味的问题。
 
+### 工具 schema：`AskUser`（请求的 `tools` 参数，两条路都有）
+
+#### What the model sees
+
+`ask_user_spec()` 产出的完整 function 描述（`json.dumps(ask_user_spec(), indent=1)` 原样），2026-09-08（harness 二期 2a Task 3）起随**每次**请求以 `tools` 参数发出——聊天与 issue 两条触发路径都注入，位置在 `FinishIssue` 之后。稳定字面量：
+
+```json
+{
+ "type": "function",
+ "function": {
+  "name": "AskUser",
+  "description": "Ask the human a question and stop until they answer. Use it when you cannot proceed without a decision. Give up to 6 short options when the choice is between known alternatives; the human may also type a free-text answer unless you set allow_free_text to false. Your turn ends after this call; you will receive the answer as the next user message.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "question": {
+     "type": "string",
+     "maxLength": 500,
+     "description": "The question, one or two sentences."
+    },
+    "options": {
+     "type": "array",
+     "maxItems": 6,
+     "description": "Up to 6 choices for the human. Labels must be unique and at most 80 characters; omit when the answer is open-ended.",
+     "items": {
+      "type": "object",
+      "required": [
+       "label"
+      ],
+      "properties": {
+       "label": {
+        "type": "string",
+        "maxLength": 80
+       },
+       "description": {
+        "type": "string",
+        "maxLength": 200
+       }
+      }
+     }
+    },
+    "allow_free_text": {
+     "type": "boolean",
+     "default": true,
+     "description": "Whether the human may answer with their own text instead of picking an option."
+    }
+   },
+   "required": [
+    "question"
+   ]
+  }
+ }
+}
+```
+
+`options` 的子 schema是 `question.OPTIONS_JSON_SCHEMA` 这**一个**对象，`FinishIssue.options`（同日新增，仅 issue 触发可见）引用的是同一个，所以模型在两处看到的形状永远一致。
+
+模型调用后收到的工具结果是 `{"asked": true, "question_id": "q:<run>:<seq>", "warnings": []}`，随后**本轮立即结束**（`turn_end{awaiting_input}`），模型不会再被调用；回答以下一条用户消息的形式到来，正文就是它自己给出的 label（或自由文本）。不合规的 `options`（重复 / 空 / 超长 label、超过 6 项）不会让调用失败：问题退化为开放问题，`warnings` 里说明原因。
+
+#### Token effect
+
+固定约 262 token（紧凑 JSON 1050 字符），不随 agent 配置或对话增长；每次请求都带（与 `Skill` 同一计费方式）。`FinishIssue.options` 另加约 100 token，只在 issue 触发时存在。
+
+#### KV Cache effect
+
+与 `Skill` 同一段前缀：改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效，之后逐轮不变。本模块不为它计指纹（对所有 agent 恒等）。注意 `AskUser` 出现在 `FinishIssue` **之后**，所以 issue 触发与聊天触发的 `tools` 列表前缀不同——两条路本来就是两个缓存键，这不新增失效。
+
 ### `<available_resources>`（仅当本轮有 @-mention）
 
 #### What the model sees

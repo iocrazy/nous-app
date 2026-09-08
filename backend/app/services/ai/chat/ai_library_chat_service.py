@@ -963,6 +963,14 @@ class AILibraryChatService:
             runner.finish_issue_handler = finish_issue_handler
             logger.info("[chat] FinishIssue tool registered for issue turn")
 
+        # Phase 2a: AskUser on BOTH roads (issue and chat) — the agent's one
+        # verb for "ask the human to pick"; the runner parks the turn after it.
+        from app.services.ai.tools.ask_user_tool import ask_user_spec
+
+        composed = composed.model_copy(
+            update={"tools": list(composed.tools or []) + [ask_user_spec()]}
+        )
+
         # Prepend ref warnings to the user content so the agent sees them.
         effective_content = content
         if ref_warnings:
@@ -1155,6 +1163,7 @@ class AILibraryChatService:
                         accumulated: list[str] = []
                         tool_calls_trace = []
                         stream_cancelled = False
+                        stream_awaiting_input = False
                         try:
                             async for chunk in runner.stream_turn(
                                 composed,
@@ -1185,6 +1194,10 @@ class AILibraryChatService:
                                 # lifecycle routing, sub-task cards).
                                 if chunk.tool_call_trace is not None:
                                     tool_calls_trace = chunk.tool_call_trace
+                                if (chunk.usage or {}).get(
+                                    "stop_reason"
+                                ) == "awaiting_input":
+                                    stream_awaiting_input = True
                         except RunAborted as abort_exc:
                             # User cancel mid-stream. The buffered path
                             # (run_turn) returns {"cancelled": True} instead
@@ -1237,6 +1250,14 @@ class AILibraryChatService:
                     }
                     if stream_cancelled:
                         result["cancelled"] = True
+                    if stream_awaiting_input:
+                        from app.services.ai.runner.question import payload_from_view
+
+                        parked = (recorder.views.get("view") or {}).get("question")
+                        result["awaiting_input"] = True
+                        result["question"] = (
+                            payload_from_view(parked) if parked else None
+                        )
         except AgentPausedError as err:
             logger.warning(f"[ChatService] agent paused: {err}")
             # Mark the user message with a hint so the UI can show "the
@@ -1487,6 +1508,11 @@ class AILibraryChatService:
             # buffered cancel return and the streaming RunAborted handler).
             # Partial content, if any, is still persisted above.
             "cancelled": bool(result.get("cancelled")),
+            # Phase 2a: the turn parked on a typed question (AskUser). The
+            # issue workflow parks the issue with it; Task 4 mirrors it into
+            # the assistant message metadata for chat.
+            "awaiting_input": bool(result.get("awaiting_input")),
+            "question": result.get("question"),
         }
 
     async def _merge_asset_primaries(
