@@ -54,6 +54,9 @@ def fold_question_answered(views, payload):
     qid = payload.get("question_id")
     if not isinstance(qid, str):
         return None
+    current = views["view"].get("question")
+    if isinstance(current, dict) and current.get("id") != qid:
+        return None  # an answer to some other question does not close this one
     views["view"]["question"] = None
     views["view"]["last_answer"] = {
         "id": qid,

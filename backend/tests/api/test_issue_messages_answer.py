@@ -7,7 +7,7 @@ from __future__ import annotations
 import importlib
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -50,7 +50,12 @@ def patched(monkeypatch):
         writer=SimpleNamespace(append=AsyncMock(return_value=9)),
         wake=AsyncMock(return_value=True),
         divert=AsyncMock(return_value=None),
+        dispatch=MagicMock(),
+        mark_answered=AsyncMock(),
+        order=[],
     )
+    p.wake.side_effect = lambda *a, **k: p.order.append("wake") or True
+    p.writer.append.side_effect = lambda *a, **k: p.order.append("append") or 9
 
     async def _for_run(run_id):
         p.writer.run_id = run_id
@@ -62,6 +67,8 @@ def patched(monkeypatch):
     monkeypatch.setattr(r, "_event_writer_for_run", _for_run)
     monkeypatch.setattr(r, "_try_wake_waiting_workflow", p.wake)
     monkeypatch.setattr(r, "_divert_to_inbox_if_running", p.divert)
+    monkeypatch.setattr(r, "_dispatch_respond_to_issue_reply", p.dispatch)
+    monkeypatch.setattr(r.input_gate, "mark_question_answered", p.mark_answered)
     return p
 
 
@@ -106,6 +113,61 @@ async def test_matching_answer_emits_question_answered_then_wakes(patched):
     patched.wake.assert_awaited_once()
     # the answer text is what the workflow receives
     assert patched.wake.await_args.args[2] == "A"
+    # recorded only AFTER delivery, and the marker is stamped so a retry is a 409
+    assert patched.order == ["wake", "append"]
+    patched.mark_answered.assert_awaited_once_with(
+        workflow_id="wf-1", question_id="q:1:2"
+    )
+    patched.divert.assert_not_awaited()  # an answer never goes to the inbox
+
+
+async def test_answer_already_delivered_is_409_on_retry(patched):
+    patched.marker.return_value["answered_at"] = "2026-09-08T00:00:00Z"
+    with pytest.raises(HTTPException) as ei:
+        await _post("A", answer_to="q:1:2")
+    assert ei.value.status_code == 409 and ei.value.detail["code"] == "no_open_question"
+    patched.wake.assert_not_awaited()
+    # and the bare-label compat path no longer treats it as an answer either
+    await _post("A")
+    patched.writer.append.assert_not_awaited()
+
+
+async def test_wake_failure_falls_back_to_dispatch_and_still_records(patched):
+    patched.wake.side_effect = None
+    patched.wake.return_value = False
+    resp = await _post("A", answer_to="q:1:2")
+    assert resp.agent_dispatched is True
+    patched.dispatch.assert_called_once()
+    patched.writer.append.assert_awaited_once()
+    patched.mark_answered.assert_awaited_once()
+
+
+async def test_dispatch_failure_is_500_and_nothing_is_recorded(patched):
+    patched.wake.side_effect = None
+    patched.wake.return_value = False
+    patched.dispatch.side_effect = RuntimeError("dbos down")
+    with pytest.raises(HTTPException) as ei:
+        await _post("A", answer_to="q:1:2")
+    assert ei.value.status_code == 500
+    patched.writer.append.assert_not_awaited()
+    patched.mark_answered.assert_not_awaited()
+
+
+async def test_answer_to_on_an_issue_without_agent_is_409_not_a_legacy_comment(
+    patched, monkeypatch
+):
+    r = _router()
+    monkeypatch.setattr(
+        r,
+        "_assert_issue_visible",
+        AsyncMock(return_value={**ISSUE, "assignee_agent_id": None}),
+    )
+    legacy = AsyncMock()
+    monkeypatch.setattr(r, "_insert_legacy_comment", legacy)
+    with pytest.raises(HTTPException) as ei:
+        await _post("A", answer_to="q:1:2")
+    assert ei.value.status_code == 409 and ei.value.detail["code"] == "no_open_question"
+    legacy.assert_not_awaited()
 
 
 async def test_plain_comment_equal_to_a_label_counts_as_an_answer(patched):
@@ -143,3 +205,4 @@ async def test_on_answer_rejection_maps_to_http(patched, monkeypatch):
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "budget_still_exhausted"
     patched.wake.assert_not_awaited()
+    patched.writer.append.assert_not_awaited()  # on_answer refused → nothing recorded

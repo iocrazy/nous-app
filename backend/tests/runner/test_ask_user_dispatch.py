@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services.ai.adapters.base import StreamChunk
-from app.services.ai.tools.ask_user_tool import ASK_USER_TOOL_NAME
+from app.services.ai.tools.ask_user_tool import ASK_USER_TOOL_NAME, ask_user_spec
 
 pytestmark = pytest.mark.unit
 
@@ -82,10 +82,17 @@ def _composed():
         temperature=0.0,
         max_tokens=16,
         system_message="sys",
-        tools=[],
+        tools=[
+            ask_user_spec()
+        ],  # advertised — the runner only parks on advertised AskUser
         skill_manifest=[],
         cache_fingerprint="f",
     )
+
+
+def _composed_without_ask_user():
+    c = _composed()
+    return c.model_copy(update={"tools": []})
 
 
 def _runner(adapter):
@@ -144,6 +151,72 @@ async def test_run_turn_parks_on_ask_user_and_returns_the_question():
         < types.index("turn_end")
     )
     assert rec.turn_ends()[0]["reason"] == "awaiting_input"
+
+
+_SIBLING = {
+    "id": "call_2",
+    "type": "function",
+    "function": {"name": "Skill", "arguments": '{"skill": "todo", "op": "show"}'},
+}
+
+
+async def test_unadvertised_ask_user_gets_a_typed_refusal_and_never_parks():
+    """A sub-agent (or any runner whose tools never listed AskUser) has nobody
+    who could answer: the call returns an error result, the turn continues."""
+    adapter = AsyncMock()
+    calls = []
+
+    async def _call(composed, messages, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "", "tool_calls": [_ASK]},
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    adapter.call = _call
+    rec = _Rec()
+    out = await _runner(adapter).run_turn(
+        _composed_without_ask_user(), [{"role": "user", "content": "q"}], recorder=rec
+    )
+    assert len(calls) == 2 and out["content"] == "ok"
+    assert "awaiting_input" not in out
+    assert "question_asked" not in [t for t, _ in rec.events]
+    trace = out["tool_calls"][0]
+    assert trace["name"] == ASK_USER_TOOL_NAME and trace["result"]["asked"] is False
+
+
+async def test_sibling_tool_calls_after_ask_user_get_a_paired_skipped_result():
+    adapter = AsyncMock()
+
+    async def _call(composed, messages, **kw):
+        return {
+            "choices": [
+                {
+                    "message": {"content": "", "tool_calls": [_ASK, _SIBLING]},
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+
+    adapter.call = _call
+    rec = _Rec()
+    out = await _runner(adapter).run_turn(
+        _composed(), [{"role": "user", "content": "q"}], recorder=rec
+    )
+    assert out["awaiting_input"] is True
+    names = [t["name"] for t in out["tool_calls"]]
+    assert names == [ASK_USER_TOOL_NAME, "Skill"]
+    assert out["tool_calls"][1]["result"]["skipped"] is True
+    skipped_events = [
+        p for t, p in rec.events if t == "tool_call" and p["tool"] == "Skill"
+    ]
+    assert skipped_events and skipped_events[0]["result"]["skipped"] is True
 
 
 async def test_stream_turn_parks_on_ask_user_with_a_typed_terminal_chunk():

@@ -956,7 +956,9 @@ class RunEventWriter:
         *,
         turn: Optional[int] = None,
         step: Optional[int] = None,
-    ) -> int:
+    ) -> Optional[int]:
+        """Insert the row, fold, mirror. Returns the seq, or None when the
+        insert failed (nothing folded — see below)."""
         self.seq += 1
         seq = self.seq
         try:
@@ -981,6 +983,10 @@ class RunEventWriter:
                 f"[RunEventWriter] insert failed (run={self.run_id} seq={seq} "
                 f"type={event_type}): {err}"
             )
+            # No row, no fold: the mirrored view must never claim an event the
+            # transcript does not hold (replay == view is this writer's one
+            # invariant). A late append losing a seq race lands here too.
+            return None
         await self._fold_and_mirror(event_type, payload, seq)
         return seq
 

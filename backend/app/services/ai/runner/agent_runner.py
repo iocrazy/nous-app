@@ -854,7 +854,9 @@ class AgentRunner:
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
-                    result = await self._dispatch_ask_user(args, recorder, iteration)
+                    result = await self._dispatch_ask_user(
+                        args, recorder, iteration, composed
+                    )
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
                 elif tool_name == "GenerateImage":
@@ -1011,6 +1013,14 @@ class AgentRunner:
                 if tool_name == ASK_USER_TOOL_NAME and result.get("asked"):
                     # Park: the human has to answer before anything else
                     # happens. Typed terminal chunk → turn_end{awaiting_input}.
+                    await self._skip_parked_siblings(
+                        tool_calls_to_run,
+                        call,
+                        tool_call_trace,
+                        recorder,
+                        iteration,
+                        messages,
+                    )
                     yield StreamChunk(
                         delta_text=self._awaiting_input_bracket(recorder),
                         finish_reason="stop",
@@ -1109,12 +1119,82 @@ class AgentRunner:
         )
 
     async def _dispatch_ask_user(
-        self, args: dict, recorder: Optional[RunRecorder], iteration: int
+        self,
+        args: dict,
+        recorder: Optional[RunRecorder],
+        iteration: int,
+        composed: Any = None,
     ) -> dict:
         """Phase 2a: AskUser records ``question_asked`` through the shared
         question primitive. The park itself happens in the ladder right
-        after the tool result is traced (both paths)."""
+        after the tool result is traced (both paths).
+
+        Only a turn that ADVERTISED the tool may park on it: a sub-agent or
+        any runner whose ``composed.tools`` never listed AskUser has nobody
+        who could answer, so the call gets a typed refusal instead of a
+        question parked in the void."""
+        if not self._advertises(composed, ASK_USER_TOOL_NAME):
+            return {
+                "asked": False,
+                "error": (
+                    "AskUser is not available on this turn — nobody is "
+                    "listening for an answer here."
+                ),
+            }
         return await ask_user_handler(args, recorder=recorder, turn=1, step=iteration)
+
+    @staticmethod
+    def _advertises(composed: Any, tool_name: str) -> bool:
+        for spec in getattr(composed, "tools", None) or []:
+            if not isinstance(spec, dict):
+                continue
+            if (spec.get("function") or {}).get("name") == tool_name:
+                return True
+        return False
+
+    async def _skip_parked_siblings(
+        self,
+        calls: list,
+        current: Any,
+        tool_call_trace: list[dict],
+        recorder: Any,
+        iteration: int,
+        messages: list[dict],
+    ) -> None:
+        """The turn parks on AskUser; any tool call the model put AFTER it in
+        the same message is not executed. Give each a paired, self-describing
+        result (trace + transcript + tool message) so nothing is orphaned or
+        silently dropped."""
+        import json as _json
+
+        seen = False
+        for call in calls:
+            if call is current:
+                seen = True
+                continue
+            if not seen:
+                continue
+            name = (call.get("function") or {}).get("name", "")
+            result = {
+                "error": "not executed: the turn parked on AskUser before this call",
+                "skipped": True,
+            }
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call.get("id"),
+                    "name": name,
+                    "content": _json.dumps(result, ensure_ascii=False),
+                }
+            )
+            tool_call_trace.append(
+                {"name": name, "args": {}, "result": result, "iteration": iteration}
+            )
+            await emit_event(
+                recorder,
+                "tool_call",
+                {"tool": name, "args": {}, "result": result, "iteration": iteration},
+            )
 
     @staticmethod
     def _parked_question(recorder: Any) -> Optional[dict]:
@@ -1134,7 +1214,9 @@ class AgentRunner:
         """Mirror of ``_awaiting_approval_response`` for a typed question;
         carries the trace so FinishIssue / AskUser declarations survive."""
         return {
-            "content": "",
+            # Same bracket line the stream path yields, so both paths persist
+            # one shape for the same event.
+            "content": self._awaiting_input_bracket(recorder),
             "raw": None,
             "awaiting_input": True,
             "stop_reason": "awaiting_input",
@@ -1805,7 +1887,9 @@ class AgentRunner:
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
-                    result = await self._dispatch_ask_user(args, recorder, iteration)
+                    result = await self._dispatch_ask_user(
+                        args, recorder, iteration, composed
+                    )
                 elif tool_name == "FinishIssue":
                     result = await self._dispatch_finish_issue(args)
                 elif tool_name == "GenerateImage":
@@ -1975,6 +2059,9 @@ class AgentRunner:
                         return self._awaiting_approval_response(post_result)
 
                 if tool_name == ASK_USER_TOOL_NAME and result.get("asked"):
+                    await self._skip_parked_siblings(
+                        tool_calls, call, tool_call_trace, recorder, iteration, messages
+                    )
                     return self._awaiting_input_response(recorder, tool_call_trace)
 
         return {"content": "", "raw": None, "error": "max_tool_iterations_exceeded"}

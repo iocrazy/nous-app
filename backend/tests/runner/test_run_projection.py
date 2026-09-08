@@ -221,6 +221,16 @@ def test_question_asked_lands_in_view_and_answer_clears_it():
     }
 
 
+def test_answer_to_another_question_does_not_close_the_open_one():
+    v = rp.apply(
+        rp.empty_views(),
+        "question_asked",
+        {"question_id": "q:1:5", "prompt": "open?", "options": []},
+    )
+    same = rp.apply(v, "question_answered", {"question_id": "q:1:0", "value": "x"})
+    assert same is v and same["view"]["question"]["id"] == "q:1:5"
+
+
 def test_question_events_without_an_id_say_nothing():
     v = rp.empty_views()
     assert rp.apply(v, "question_asked", {"prompt": "x"}) is v

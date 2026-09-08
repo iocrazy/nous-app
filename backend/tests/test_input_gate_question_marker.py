@@ -7,6 +7,16 @@ from app.agent_framework.input_gate import build_awaiting_marker
 pytestmark = pytest.mark.unit
 
 
+def test_mark_question_answered_merges_into_the_issue_marker_via_orm():
+    import inspect
+
+    from app.agent_framework import input_gate
+
+    src = inspect.getsource(input_gate.mark_question_answered)
+    assert "update(Issues)" in src and "answered_at" in src
+    assert 'has_key("awaiting_input")' in src
+
+
 def test_marker_without_question_is_the_pre_2a_shape():
     m = build_awaiting_marker(prompt="why?", issue_id=5, now="T")
     assert m == {"prompt": "why?", "since": "T", "issue_id": 5}

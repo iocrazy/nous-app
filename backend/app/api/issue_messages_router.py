@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
@@ -131,20 +132,33 @@ async def _event_writer_for_run(run_id: Any):
     return await RunEventWriter.for_run(run_id)
 
 
-async def _handle_typed_answer(
-    issue_row: dict, body: str, answer_to: Optional[str], user_id: str
-) -> Optional[str]:
-    """Phase 2a answer channel (spec §1): a comment that answers the parked
-    question. Returns the answered ``question_id`` or None when this comment
-    is not an answer. Order: validate → ``question_answered`` on the asking
-    run → the kind's ``on_answer`` → (caller) the existing wake path.
+@dataclass(frozen=True)
+class _PendingAnswer:
+    """A validated answer that has NOT been recorded yet — recording happens
+    only after the reply was actually delivered (woken or dispatched)."""
 
-    ``answer_to`` given: the marker must hold that exact question (409
-    ``no_open_question``) and the body must match (400 ``answer_shape``).
-    ``answer_to`` absent: a body equal to one label still counts (three-phase
-    compat — old clients reply with the bare label)."""
+    question_id: str
+    value: str
+    kind: str
+    run_id: Optional[str]
+    workflow_id: Optional[str]
+
+
+async def _validate_typed_answer(
+    issue_row: dict, body: str, answer_to: Optional[str], user_id: str
+) -> Optional[_PendingAnswer]:
+    """Phase 2a answer channel (spec §1), step 1 of 2: decide whether this
+    comment answers the parked question, and run the kind's ``on_answer``
+    (it may refuse — e.g. budget still exhausted — BEFORE anything is woken).
+    Returns None when the comment is not an answer.
+
+    ``answer_to`` given: the marker must hold that exact, still-open question
+    (409 ``no_open_question`` — also once ``answered_at`` is stamped, so a
+    retry of the same answer cannot wake a second turn) and the body must
+    match (400 ``answer_shape``). ``answer_to`` absent: a body equal to one
+    label still counts (three-phase compat: old clients reply with the bare
+    label)."""
     from app.services.ai.runner.question import (
-        QUESTION_ANSWERED,
         AnswerContext,
         AnswerRejected,
         answer_matches,
@@ -153,6 +167,8 @@ async def _handle_typed_answer(
 
     wf_id = issue_row.get("dbos_workflow_id")
     marker = await _load_awaiting_marker(wf_id) if wf_id else None
+    if marker and marker.get("answered_at"):
+        marker = None  # already answered; the workflow just has not cleared it yet
     open_qid = (marker or {}).get("question_id")
     if answer_to is not None:
         if not marker or open_qid != answer_to:
@@ -181,25 +197,6 @@ async def _handle_typed_answer(
         if not open_qid or body not in labels:
             return None
 
-    run_id = marker.get("run_id")
-    if run_id:
-        try:
-            writer = await _event_writer_for_run(run_id)
-            await writer.append(
-                QUESTION_ANSWERED,
-                {"question_id": open_qid, "value": body, "superseded": False},
-                turn=None,
-                step=None,
-            )
-        except Exception as exc:  # noqa: BLE001 — the answer still travels
-            logger.warning(
-                f"[issue_reply] question_answered for run {run_id} not recorded: {exc!r}"
-            )
-    else:
-        logger.warning(
-            f"[issue_reply] marker for issue {issue_row.get('id')} has no run_id; "
-            "question_answered not recorded"
-        )
     kind = str(marker.get("kind") or "user")
     try:
         handler = on_answer_for(kind)
@@ -218,7 +215,49 @@ async def _handle_typed_answer(
         raise HTTPException(
             status_code=rej.status, detail={"code": rej.code, "message": str(rej)}
         )
-    return open_qid
+    run_id = marker.get("run_id")
+    return _PendingAnswer(
+        question_id=open_qid,
+        value=body,
+        kind=kind,
+        run_id=str(run_id) if run_id else None,
+        workflow_id=str(wf_id) if wf_id else None,
+    )
+
+
+async def _commit_typed_answer(pending: _PendingAnswer) -> None:
+    """Step 2 of 2, after delivery: ``question_answered`` on the asking run
+    and ``answered_at`` on the marker. Both best-effort — the answer already
+    travelled; a missing record is logged, never a failed reply."""
+    from app.services.ai.runner.question import QUESTION_ANSWERED
+
+    if pending.run_id:
+        try:
+            writer = await _event_writer_for_run(pending.run_id)
+            await writer.append(
+                QUESTION_ANSWERED,
+                {
+                    "question_id": pending.question_id,
+                    "value": pending.value,
+                    "superseded": False,
+                },
+                turn=None,
+                step=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[issue_reply] question_answered for run {pending.run_id} "
+                f"not recorded: {exc!r}"
+            )
+    else:
+        logger.warning(
+            f"[issue_reply] marker for question {pending.question_id} has no "
+            "run_id; question_answered not recorded"
+        )
+    if pending.workflow_id:
+        await input_gate.mark_question_answered(
+            workflow_id=pending.workflow_id, question_id=pending.question_id
+        )
 
 
 async def _load_awaiting_marker(workflow_id: str) -> Optional[dict]:
@@ -567,6 +606,15 @@ async def post_issue_message(
 
     # ── Legacy path (nothing to wake) ─────────────────────────────────────
     if verdict.agent_id is None:
+        if payload.answer_to is not None:
+            # A typed answer with nobody to wake is not a comment; say so.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "no_open_question",
+                    "message": "this issue has no agent to answer",
+                },
+            )
         return await _insert_legacy_comment(issue_id, payload, auth)
 
     session_id = await get_or_create_issue_session(issue_id)
@@ -580,12 +628,15 @@ async def post_issue_message(
 
     # Phase 2a: an answer to a parked typed question is validated and
     # recorded here, then travels down the ordinary wake path below.
-    answered = await _handle_typed_answer(
+    # An answer overrides the note / suppression paths (answering IS a wake),
+    # skips inbox diversion (the parked workflow must be the one woken), and
+    # is recorded only after delivery succeeded (see _commit_typed_answer).
+    answer = await _validate_typed_answer(
         issue_row, payload.body, payload.answer_to, owner_id
     )
 
     # ── Note path (suppressed) ────────────────────────────────────────────
-    if not verdict.will_wake and answered is None:
+    if not verdict.will_wake and answer is None:
         try:
             await ConversationsAiStore().append_user_message(
                 session_id=int(session_id),
@@ -612,8 +663,12 @@ async def post_issue_message(
     # at its next step boundary, not a second turn queued behind the lock.
     # The comment row is kept (same reducer as the note path) so the thread
     # reads the same whether the run picked it up or not.
-    inbox_id = await _divert_to_inbox_if_running(
-        issue_id, session_id, owner_id, auth, payload.body, attachments_payload
+    inbox_id = (
+        None
+        if answer is not None
+        else await _divert_to_inbox_if_running(
+            issue_id, session_id, owner_id, auth, payload.body, attachments_payload
+        )
     )
     if inbox_id is not None:
         return IssueMessagePostResponse(
@@ -632,6 +687,8 @@ async def post_issue_message(
         issue_row, owner_id, payload.body, attachments_payload
     ):
         logger.info(f"[issue_reply] issue {issue_id}: delivered to waiting workflow")
+        if answer is not None:
+            await _commit_typed_answer(answer)
         return IssueMessagePostResponse(
             comment=_optimistic_comment(issue_id, payload.body, auth),
             agent_run=None,
@@ -653,6 +710,8 @@ async def post_issue_message(
             f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"
         )
         raise HTTPException(500, "failed to dispatch reply turn")
+    if answer is not None:
+        await _commit_typed_answer(answer)
 
     return IssueMessagePostResponse(
         comment=_optimistic_comment(issue_id, payload.body, auth),

@@ -214,6 +214,49 @@ async def mark_awaiting_input(
     )
 
 
+async def mark_question_answered(*, workflow_id: str, question_id: str) -> None:
+    """Stamp ``awaiting_input.answered_at`` on the issue marker once an answer
+    was DELIVERED (woken or dispatched). Until the workflow clears the marker
+    itself this is what makes a second POST of the same answer a 409 instead
+    of a second wake (phase 2a answer-channel idempotency). Best-effort."""
+    from sqlalchemy import cast, func, literal, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    stamp = json.dumps(
+        {
+            "answered_at": datetime.now(timezone.utc).isoformat(),
+            "answered_question_id": question_id,
+        }
+    )
+    try:
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(
+                    Issues.dbos_workflow_id == workflow_id,
+                    Issues.execution_state.has_key("awaiting_input"),
+                )
+                .values(
+                    execution_state=Issues.execution_state.op("||", return_type=JSONB)(
+                        func.jsonb_build_object(
+                            "awaiting_input",
+                            Issues.execution_state.op("->", return_type=JSONB)(
+                                "awaiting_input"
+                            ).op("||", return_type=JSONB)(cast(literal(stamp), JSONB)),
+                        )
+                    )
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[input_gate] mark answered failed wf={workflow_id} q={question_id}: {exc}"
+        )
+
+
 async def clear_awaiting_input(*, workflow_id: str) -> None:
     """移除等待标记（issues 权威位 + task_tracking 装饰位）。
     inbox 行有意保留（用户稍后仍可从收件箱进入）。"""
