@@ -37,8 +37,8 @@ Spec-1a (Task 5): GET /{issue_id}/messages has a dual read path.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 

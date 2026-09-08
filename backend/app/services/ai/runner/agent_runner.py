@@ -42,10 +42,6 @@ from app.services.ai.runner.reasoning import (
     strip_reasoning,
 )
 from app.services.ai.runner.run_recorder import RunRecorder
-from app.services.ai.tools.ask_user_tool import (
-    ASK_USER_TOOL_NAME,
-    ask_user_handler,
-)
 from app.services.ai.runner.step_hooks import (
     StepContext,
     StepDecision,
@@ -53,6 +49,10 @@ from app.services.ai.runner.step_hooks import (
     default_step_hooks,
 )
 from app.services.ai.skills.skill_tool_service import SkillToolService
+from app.services.ai.tools.ask_user_tool import (
+    ASK_USER_TOOL_NAME,
+    ask_user_handler,
+)
 from app.services.infra.hooks import (
     HookContext,
     HookRegistry,
