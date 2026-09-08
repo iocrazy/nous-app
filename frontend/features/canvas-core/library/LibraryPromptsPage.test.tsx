@@ -238,3 +238,62 @@ describe('LibraryPromptsPage', () => {
     undo();
   });
 });
+
+/**
+ * 「这两个保存当前和新建不像 button，而且这个位置不好」——用户实拍反馈。
+ *
+ * 两个毛病是分开的，测试也分开钉：
+ *
+ * 1. **不像 button**：它们原来带 `border-transparent`，在深色底上就是两行
+ *    纯文字。这个面板里凡是可点的都带 `border-canvas-line`（`chipClass`
+ *    就是这么定的），这两个是唯二的例外。
+ * 2. **位置不好**：它们躺在最底下的状态条里，跟「N 条提示词」挤在一起。
+ *    可它们写入的是 Mine 那个货架，所以归属在分段行，不在计数旁边。
+ *
+ * 加图标带来的真实回归风险是无障碍名被污染——既有用例全靠
+ * `getByRole('button', { name: 'New…' })` 找它们，所以这里正面钉住。
+ */
+describe('LibraryPromptsPage — 创建动作的位置与可点性', () => {
+  beforeEach(() => {
+    fetchPrompts.mockReset().mockResolvedValue(page);
+    fetchPromptCounts.mockReset().mockResolvedValue({ mine: 1, project: null, system: 0 });
+    useLibraryStore.setState({ open: true, page: 'prompts', query: '', promptSegment: 'mine', promptForm: null, promptLang: 'en' } as never);
+  });
+
+  it('两个创建动作在头部动作组里，不在底部状态条里', async () => {
+    mount({});
+    await screen.findByTestId('library-prompt-row');
+
+    const actions = screen.getByTestId('library-prompt-actions');
+    const footer = screen.getByTestId('library-prompts-footer');
+
+    for (const name of ['Save current…', 'New…']) {
+      const btn = screen.getByRole('button', { name });
+      expect(actions).toContainElement(btn);
+      expect(footer).not.toContainElement(btn);
+    }
+    // 状态条只剩计数——它是货架的说明，不是操作区。
+    expect(footer.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('两个创建动作带可见边框，跟面板里其他可点元素一样', async () => {
+    mount({});
+    await screen.findByTestId('library-prompt-row');
+
+    for (const name of ['Save current…', 'New…']) {
+      const btn = screen.getByRole('button', { name });
+      // 这一条就是缺陷本身：透明边框 = 看不出能点。
+      expect(btn.className).not.toMatch(/border-transparent/);
+      expect(btn.className).toContain('border-canvas-line');
+    }
+  });
+
+  it('图标不进无障碍名——既有的按名查询必须继续可用', async () => {
+    mount({});
+    await screen.findByTestId('library-prompt-row');
+
+    // 图标在，但名字仍然只有文字：`getByRole(name)` 是全套测试找它们的唯一途径。
+    expect(screen.getByRole('button', { name: 'New…' }).querySelector('svg')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Save current…' }).querySelector('svg')).not.toBeNull();
+  });
+});
