@@ -20,6 +20,7 @@ up through its parent's ``step_end`` cost, so it must not double-report.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
@@ -30,12 +31,30 @@ from app.services.ai.runner.step_hooks import StepContext, StepDecision
 WARN_PCT = 80
 HALT_PCT = 100
 
-BudgetLoader = Callable[[Any], Awaitable[Optional[tuple[int, float, bool]]]]
-"""recorder → (budget_cents, prior_spent_cents, wrap_up) or None when the run
-has no budgeted issue. Resolved once per run. ``wrap_up`` is True when this
-run holds the one-run grace a "Wrap up" answer granted."""
+
+@dataclass(frozen=True)
+class BudgetInfo:
+    """What the loader resolves once per run."""
+
+    budget_cents: int
+    prior_cents: float
+    #: A "Wrap up" grace is on the issue and not spent by an EARLIER run
+    #: (unconsumed, or consumed by this very run — a DBOS retry). Claiming it
+    #: happens at the halt, not here (``BudgetGateHook._consume``).
+    wrap_up: bool = False
+    issue_id: Optional[int] = None
+
+
+BudgetLoader = Callable[[Any], Awaitable[Optional[BudgetInfo]]]
+"""recorder → BudgetInfo, or None when the run has no budgeted issue."""
+
+WrapUpConsumer = Callable[[Any, BudgetInfo], Awaitable[bool]]
+"""(recorder, info) → True iff this run now holds the one-run grace."""
 
 BUDGET_PROMPT_MAX = 500
+#: Step boundaries a "Wrap up" grace lets through before the gate halts again
+#: (the steer says "finish in one step"; nothing else enforces it).
+WRAP_UP_GRACE_STEPS = 1
 
 
 def budget_prompt(spent: float, budget: int) -> str:
@@ -45,21 +64,20 @@ def budget_prompt(spent: float, budget: int) -> str:
     )[:BUDGET_PROMPT_MAX]
 
 
-def _wrap_up_usable(flag: Any, run_id: Any) -> Optional[bool]:
-    """None → no flag; True → usable by this run (unconsumed, or consumed by
-    THIS run — a DBOS retry of the same run must see the same answer); False →
-    an earlier run already spent the grace."""
+def _wrap_up_available(flag: Any, run_id: Any) -> bool:
+    """The grace is on the issue and an EARLIER run has not spent it."""
     if not isinstance(flag, dict):
-        return None
+        return False
     consumed = flag.get("consumed_by")
     return consumed is None or str(consumed) == str(run_id)
 
 
-async def load_issue_budget(recorder: Any) -> Optional[tuple[int, float, bool]]:
+async def load_issue_budget(recorder: Any) -> Optional[BudgetInfo]:
     """Default loader: the run's issue (directly, or behind its conversation)
-    → ``issues.budget_cents`` + the spend of its earlier runs + whether this
-    run holds the wrap-up grace (consumed here, once, by stamping
-    ``budget_wrap_up.consumed_by = run_id``)."""
+    → ``issues.budget_cents`` + the spend of its earlier runs + whether a
+    wrap-up grace is available. Read-only: the grace is claimed at the halt
+    (``claim_wrap_up_grace``), so a run that never reaches 100 % does not
+    burn it."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
     from app.repositories.issue_repository import issue_repository
     from app.services.ai.runner.inbox import resolve_targets
@@ -87,38 +105,61 @@ async def load_issue_budget(recorder: Any) -> Optional[tuple[int, float, bool]]:
         exclude_run_id=int(run_id) if run_id else None,
     )
     flag = ((row or {}).get("execution_state") or {}).get("budget_wrap_up")
-    usable = _wrap_up_usable(flag, run_id)
-    wrap_up = bool(usable)
-    if usable and flag.get("consumed_by") is None and run_id is not None:
-        # Consume the grace for THIS run. Merge replaces the whole key (jsonb
-        # || is shallow), which is what we want: one object, one owner.
-        from app.services.issues.execution_state import merge_execution_state
+    return BudgetInfo(
+        budget_cents=budget,
+        prior_cents=float(prior),
+        wrap_up=_wrap_up_available(flag, run_id),
+        issue_id=int(issue_id),
+    )
 
-        try:
-            await merge_execution_state(
-                issue_id, {"budget_wrap_up": {**flag, "consumed_by": str(run_id)}}
-            )
-        except Exception as exc:  # noqa: BLE001 — the grace still applies
-            logger.warning(
-                f"[budget.gate] could not stamp budget_wrap_up.consumed_by for "
-                f"issue {issue_id} run {run_id}: {exc}"
-            )
-    return budget, float(prior), wrap_up
+
+async def claim_wrap_up_grace(recorder: Any, info: BudgetInfo) -> bool:
+    """Default consumer: the conditional UPDATE in execution_state — one
+    winner among racing runs, idempotent for the same run."""
+    from app.services.issues.execution_state import claim_budget_wrap_up
+
+    run_id = getattr(recorder, "run_id", None)
+    if info.issue_id is None or run_id is None:
+        return False
+    try:
+        return await claim_budget_wrap_up(info.issue_id, run_id)
+    except Exception as exc:  # noqa: BLE001 — an unclaimable grace is no grace
+        logger.error(
+            f"[budget.gate] could not claim budget_wrap_up for issue "
+            f"{info.issue_id} run {run_id}: {exc}"
+        )
+        return False
 
 
 class BudgetGateHook:
     name = "budget.gate"
 
-    def __init__(self, *, load: Optional[BudgetLoader] = None):
+    def __init__(
+        self,
+        *,
+        load: Optional[BudgetLoader] = None,
+        consume: Optional[WrapUpConsumer] = None,
+    ):
         self._load = load or load_issue_budget
-        self._budget_by_run: dict[int, Optional[tuple[int, float, bool]]] = {}
+        self._consume = consume or claim_wrap_up_grace
+        self._budget_by_run: dict[int, Optional[BudgetInfo]] = {}
         self._reported: dict[int, set[str]] = {}
+        self._grace_steps: dict[int, int] = {}
 
-    async def _budget(
-        self, run_id: int, recorder: Any
-    ) -> Optional[tuple[int, float, bool]]:
+    async def _budget(self, run_id: int, recorder: Any) -> Optional[BudgetInfo]:
         if run_id not in self._budget_by_run:
-            self._budget_by_run[run_id] = await self._load(recorder)
+            try:
+                self._budget_by_run[run_id] = await self._load(recorder)
+            except Exception as exc:  # noqa: BLE001 — decided below, once
+                # Explicit decision: an UNREADABLE budget fails open — a DB
+                # blip must not park every budgeted issue on a question — but
+                # only once per run (cached) and loudly, never re-queried at
+                # every step.
+                logger.error(
+                    f"[budget.gate] budget unreadable for run {run_id}; "
+                    f"gate open for this run: {exc}"
+                )
+                self._budget_by_run[run_id] = None
         return self._budget_by_run[run_id]
 
     async def before_llm_call(self, ctx: StepContext) -> StepDecision:
@@ -128,10 +169,10 @@ class BudgetGateHook:
         run_id = getattr(recorder, "run_id", None)
         if recorder is None or run_id is None:
             return StepDecision.CONTINUE
-        loaded = await self._budget(int(run_id), recorder)
-        if loaded is None:
+        info = await self._budget(int(run_id), recorder)
+        if info is None:
             return StepDecision.CONTINUE
-        budget, prior, wrap_up = loaded
+        budget, prior = info.budget_cents, info.prior_cents
         live = float(
             (getattr(recorder, "views", None) or {}).get("cost", {}).get("spent_cents")
             or 0.0
@@ -145,9 +186,15 @@ class BudgetGateHook:
         action = "halt" if pct >= HALT_PCT else "warn" if pct >= WARN_PCT else None
         if action is None:
             return StepDecision.CONTINUE
-        if action == "halt" and wrap_up:
-            action = "wrap_up"  # the one-run grace: through, recorded as such
         reported = self._reported.setdefault(int(run_id), set())
+        if action == "halt" and "wrap_up" in reported:
+            # The grace: WRAP_UP_GRACE_STEPS boundaries through, then the gate
+            # halts again (a second question) — "one more step" is a promise
+            # the steer alone cannot keep.
+            used = self._grace_steps.get(int(run_id), 0) + 1
+            self._grace_steps[int(run_id)] = used
+            if used <= WRAP_UP_GRACE_STEPS:
+                return StepDecision.CONTINUE
         if action in reported:
             # A halt already asked its question this run: the STOP stands
             # (the runner only re-enters on a retried boundary).
@@ -156,6 +203,10 @@ class BudgetGateHook:
                 if action == "halt"
                 else StepDecision.CONTINUE
             )
+        if action == "halt" and info.wrap_up and "wrap_up" not in reported:
+            if await self._consume(recorder, info):
+                action = "wrap_up"
+                self._grace_steps[int(run_id)] = 1  # this boundary IS step one
         reported.add(action)
         await emit(
             recorder,
@@ -200,8 +251,11 @@ class BudgetGateHook:
 
 __all__ = [
     "BudgetGateHook",
+    "BudgetInfo",
     "HALT_PCT",
     "WARN_PCT",
+    "WRAP_UP_GRACE_STEPS",
     "budget_prompt",
+    "claim_wrap_up_grace",
     "load_issue_budget",
 ]

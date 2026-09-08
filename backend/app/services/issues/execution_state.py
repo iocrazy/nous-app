@@ -42,4 +42,52 @@ async def merge_execution_state(issue_id: int, patch: dict[str, Any]) -> None:
         await session.execute(merge_stmt(issue_id, patch))
 
 
-__all__ = ["merge_execution_state", "merge_stmt"]
+def claim_budget_wrap_up_stmt(issue_id: int, run_id: Any):
+    """Conditional claim of the one-run budget grace (phase 2a §3):
+
+        UPDATE issues SET execution_state = execution_state ||
+            jsonb_build_object('budget_wrap_up',
+                               (execution_state->'budget_wrap_up') || {"consumed_by": run})
+        WHERE id = :issue AND execution_state ? 'budget_wrap_up'
+          AND (execution_state->'budget_wrap_up'->>'consumed_by' IS NULL
+               OR execution_state->'budget_wrap_up'->>'consumed_by' = :run)
+
+    One row updated == this run holds the grace. Two root runs racing for it
+    get one winner (the WHERE is evaluated under the row lock); a DBOS retry
+    of the SAME run matches again via the second disjunct."""
+    from sqlalchemy import Text, or_
+
+    run = str(run_id)
+    flag = Issues.execution_state.op("->", return_type=JSONB)(
+        cast(literal("budget_wrap_up"), Text)
+    )
+    consumed = flag.op("->>", return_type=Text)(cast(literal("consumed_by"), Text))
+    stamped = flag.op("||", return_type=JSONB)(
+        cast(literal(json.dumps({"consumed_by": run})), JSONB)
+    )
+    merged = Issues.execution_state.op("||", return_type=JSONB)(
+        func.jsonb_build_object("budget_wrap_up", stamped)
+    )
+    return (
+        update(Issues)
+        .where(Issues.id == int(issue_id))
+        .where(Issues.execution_state.has_key("budget_wrap_up"))
+        .where(or_(consumed.is_(None), consumed == run))
+        .values(execution_state=merged)
+    )
+
+
+async def claim_budget_wrap_up(issue_id: int, run_id: Any) -> bool:
+    """True iff this run now holds (or already held) the wrap-up grace."""
+    async with write_scope() as session:
+        await session.execute(_AS_SERVICE_ROLE)
+        result = await session.execute(claim_budget_wrap_up_stmt(issue_id, run_id))
+        return (getattr(result, "rowcount", 0) or 0) > 0
+
+
+__all__ = [
+    "claim_budget_wrap_up",
+    "claim_budget_wrap_up_stmt",
+    "merge_execution_state",
+    "merge_stmt",
+]

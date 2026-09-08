@@ -968,6 +968,25 @@ async def _run_dispatch_with_continuation(
                     "attempts": attempt,
                     "wait_rounds": wait_rounds,
                 }
+            # The answer itself may have moved the issue terminal (a budget
+            # "Cancel" runs transition_status before the wake): re-check
+            # BEFORE set_status, or in_progress overwrites the cancel and a
+            # fresh run asks the same question again.
+            woke = await load_issue(issue_id)
+            woke_status = (woke or {}).get("status")
+            if woke_status in PREEMPT_STATUSES:
+                logger.info(
+                    f"[execute_issue] issue {issue_id} is {woke_status!r} at "
+                    "wake; preempting instead of running the reply"
+                )
+                return {
+                    "issue_id": issue_id,
+                    "preempted": True,
+                    "preempted_status": woke_status,
+                    "outcome": outcome,
+                    "attempts": attempt,
+                    "wait_rounds": wait_rounds,
+                }
             wait_rounds += 1
             await set_status(issue_id, "in_progress")
             turn_no += 1

@@ -778,8 +778,11 @@ class AgentRunsRepository(AsyncpgRepository):
             async with read_scope() as session:
                 return float((await session.execute(stmt)).scalar_one() or 0)
         except Exception as e:
+            # A spend gate must not read a failed SUM as "nothing spent":
+            # raise, and let the caller decide (budget hook: fail open once,
+            # logged; Top up answer: typed 503).
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
-            return 0.0
+            raise
 
     async def list_for_issue(
         self,

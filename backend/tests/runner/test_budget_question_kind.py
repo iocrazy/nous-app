@@ -114,3 +114,31 @@ async def test_target_without_an_issue_id_is_a_typed_409(deps):
     with pytest.raises(q.AnswerRejected) as ei:
         await bk.on_answer({"session_id": "5"}, "Top up", _ctx({"session_id": "5"}))
     assert (ei.value.status, ei.value.code) == (409, "no_issue_target")
+
+
+async def test_top_up_with_an_unreadable_spend_is_a_typed_503(deps):
+    """Review F4: a failed SUM is not "nothing spent"."""
+    deps.runs.spent_cents_for_issue.side_effect = RuntimeError("db down")
+    with pytest.raises(q.AnswerRejected) as ei:
+        await bk.on_answer(_issue(), "Top up", _ctx(_issue()))
+    assert (ei.value.status, ei.value.code) == (503, "budget_unreadable")
+
+
+async def test_wrap_up_is_idempotent_for_the_same_question(deps):
+    """Review F7: the double-send window must not queue a second steer or
+    reset the flag."""
+    deps.issues.get_by_id.return_value = _issue(
+        execution_state={"budget_wrap_up": {"run_id": "42", "at": "T"}}
+    )
+    await bk.on_answer(_issue(), "Wrap up", _ctx(_issue(), run_id="42"))
+    deps.merge.assert_not_awaited()
+    deps.inbox.enqueue.assert_not_awaited()
+    # a flag already CONSUMED (an earlier grace) is not the same question
+    deps.issues.get_by_id.return_value = _issue(
+        execution_state={
+            "budget_wrap_up": {"run_id": "42", "at": "T", "consumed_by": "43"}
+        }
+    )
+    await bk.on_answer(_issue(), "Wrap up", _ctx(_issue(), run_id="42"))
+    deps.merge.assert_awaited_once()
+    deps.inbox.enqueue.assert_awaited_once()

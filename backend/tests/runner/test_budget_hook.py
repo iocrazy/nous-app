@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services.ai.runner import run_projection as rp
-from app.services.ai.runner.budget_hook import BudgetGateHook
+from app.services.ai.runner.budget_hook import BudgetGateHook, BudgetInfo
 from app.services.ai.runner.step_hooks import StepContext, StepDecision
 
 pytestmark = pytest.mark.unit
@@ -23,13 +23,22 @@ class _Rec:
         self.events.append((event_type, payload, turn, step))
 
 
-def _hook(budget, prior=0.0, calls=None, wrap_up=False):
+def _hook(budget, prior=0.0, calls=None, wrap_up=False, consume=None, consumed=None):
     async def load(recorder):
         if calls is not None:
             calls.append(recorder.run_id)
-        return None if budget is None else (budget, prior, wrap_up)
+        return (
+            None
+            if budget is None
+            else BudgetInfo(budget, prior, wrap_up=wrap_up, issue_id=7)
+        )
 
-    return BudgetGateHook(load=load)
+    async def _consume(recorder, info):
+        if consumed is not None:
+            consumed.append((recorder.run_id, info.issue_id))
+        return True
+
+    return BudgetGateHook(load=load, consume=consume or _consume)
 
 
 async def _step(hook, rec, step, spent, expect=StepDecision.CONTINUE):
@@ -138,7 +147,7 @@ async def test_default_loader_reads_issue_budget_and_prior_spend(monkeypatch):
     rec = _Rec(run_id=42)
     rec.conversation_id = 9
     rec.issue_id = None
-    assert await bh.load_issue_budget(rec) == (300, 12.5, False)
+    assert await bh.load_issue_budget(rec) == BudgetInfo(300, 12.5, False, issue_id=7)
 
     class _NoBudget(_Issues):
         async def get_by_id(self, issue_id):
@@ -183,7 +192,7 @@ async def test_default_loader_keeps_a_zero_budget(monkeypatch):
     rec = _Rec(run_id=42)
     rec.issue_id = 7
     rec.conversation_id = None
-    assert await bh.load_issue_budget(rec) == (0, 0.0, False)
+    assert await bh.load_issue_budget(rec) == BudgetInfo(0, 0.0, False, issue_id=7)
 
 
 # ── phase 2a Task 6: the halt becomes a typed three-way question ──────────
@@ -222,9 +231,14 @@ async def test_wrap_up_flag_lets_run_through_once():
     assert ctx.stop_reason is None
     assert [e[0] for e in rec.events] == ["budget_check"]
     assert rec.events[-1][1]["action"] == "wrap_up"
-    # later steps of the same run: nothing new, still through
-    await _step(hook, rec, 3, 130.0)
-    assert len(rec.events) == 1
+    # the grace is ONE step: the next boundary halts and asks again
+    ctx2 = await _step(hook, rec, 3, 130.0, expect=StepDecision.STOP)
+    assert ctx2.stop_reason == "awaiting_input"
+    assert [e[0] for e in rec.events] == [
+        "budget_check",
+        "budget_check",
+        "question_asked",
+    ]
 
 
 @pytest.mark.asyncio
@@ -256,7 +270,9 @@ def test_wrap_up_action_folds_into_the_view():
 
 
 @pytest.mark.asyncio
-async def test_default_loader_consumes_the_wrap_up_flag_for_this_run(monkeypatch):
+async def test_default_loader_reports_the_grace_but_does_not_consume_it(monkeypatch):
+    """Review F5: claiming happens at the HALT (a run that never reaches 100 %
+    must not burn the grace), so the loader is read-only."""
     from app.services.ai.runner import budget_hook as bh
 
     class _Issues:
@@ -288,29 +304,146 @@ async def test_default_loader_consumes_the_wrap_up_flag_for_this_run(monkeypatch
     monkeypatch.setattr(es, "merge_execution_state", merge)
     rec = _Rec(run_id=42)
     rec.issue_id, rec.conversation_id = 7, None
+    for flag, expect in (
+        ({"run_id": "41", "at": "T"}, True),  # unconsumed
+        ({"run_id": "41", "at": "T", "consumed_by": "42"}, True),  # mine (retry)
+        ({"run_id": "41", "at": "T", "consumed_by": "40"}, False),  # spent earlier
+        (None, False),
+    ):
+        monkeypatch.setattr(issues_mod, "issue_repository", _Issues(flag))
+        assert (await bh.load_issue_budget(rec)).wrap_up is expect
+    merge.assert_not_awaited()
 
-    # unconsumed flag → usable by this run, stamped consumed_by=42
-    monkeypatch.setattr(
-        issues_mod, "issue_repository", _Issues({"run_id": "41", "at": "T"})
+
+@pytest.mark.asyncio
+async def test_grace_is_claimed_at_the_halt_and_a_lost_claim_halts(monkeypatch):
+    consumed = []
+    rec = _Rec(spent=120.0)
+    hook = _hook(budget=100, wrap_up=True, consumed=consumed)
+    await _step(hook, rec, 1, 50.0)  # under budget: no claim yet
+    assert consumed == []
+    await _step(hook, rec, 2, 120.0)  # halt → claim → through
+    assert consumed == [(42, 7)]
+    assert rec.events[-1][1]["action"] == "wrap_up"
+
+    async def lost(recorder, info):
+        return False  # another run took it
+
+    rec2 = _Rec(run_id=43, spent=120.0)
+    ctx = await _step(
+        _hook(budget=100, wrap_up=True, consume=lost),
+        rec2,
+        2,
+        120.0,
+        expect=StepDecision.STOP,
     )
-    assert await bh.load_issue_budget(rec) == (100, 120.0, True)
-    merge.assert_awaited_once_with(
-        7, {"budget_wrap_up": {"run_id": "41", "at": "T", "consumed_by": "42"}}
+    assert ctx.stop_reason == "awaiting_input"
+    assert [e[0] for e in rec2.events] == ["budget_check", "question_asked"]
+    assert rec2.events[0][1]["action"] == "halt"
+
+
+@pytest.mark.asyncio
+async def test_grace_is_one_step_then_the_gate_halts_again():
+    """Review F6: "finish in one step" is enforced, not merely requested."""
+    from app.services.ai.runner.budget_hook import WRAP_UP_GRACE_STEPS
+
+    rec = _Rec(spent=120.0)
+    hook = _hook(budget=100, wrap_up=True)
+    await _step(hook, rec, 1, 120.0)  # the grace step
+    for extra in range(1, WRAP_UP_GRACE_STEPS):
+        await _step(hook, rec, 1 + extra, 125.0)
+    ctx = await _step(
+        hook, rec, 1 + WRAP_UP_GRACE_STEPS, 130.0, expect=StepDecision.STOP
     )
-    # consumed by THIS run (DBOS retry of the same run) → still usable, no rewrite
-    merge.reset_mock()
-    monkeypatch.setattr(
-        issues_mod,
-        "issue_repository",
-        _Issues({"run_id": "41", "at": "T", "consumed_by": "42"}),
+    assert ctx.stop_reason == "awaiting_input"
+    assert [e[0] for e in rec.events] == [
+        "budget_check",
+        "budget_check",
+        "question_asked",
+    ]
+    assert [e[1].get("action") for e in rec.events[:2]] == ["wrap_up", "halt"]
+
+
+@pytest.mark.asyncio
+async def test_unreadable_budget_fails_open_once_and_is_logged():
+    """Review F3: a loader exception must not re-query every step nor stop the
+    run; it is cached as "no budget" for this run (explicit fail-open)."""
+    calls = []
+
+    async def load(recorder):
+        calls.append(recorder.run_id)
+        raise RuntimeError("db down")
+
+    hook = BudgetGateHook(load=load)
+    rec = _Rec(spent=999.0)
+    for step in (1, 2, 3):
+        await _step(hook, rec, step, 999.0)
+    assert calls == [42] and rec.events == []
+
+
+@pytest.mark.asyncio
+async def test_default_consumer_claims_through_execution_state(monkeypatch):
+    import app.services.issues.execution_state as es
+    from app.services.ai.runner import budget_hook as bh
+
+    claim = AsyncMock(return_value=True)
+    monkeypatch.setattr(es, "claim_budget_wrap_up", claim)
+    rec = _Rec(run_id=42)
+    assert (
+        await bh.claim_wrap_up_grace(rec, BudgetInfo(100, 0.0, True, issue_id=7))
+        is True
     )
-    assert await bh.load_issue_budget(rec) == (100, 120.0, True)
-    merge.assert_not_awaited()
-    # consumed by an EARLIER run → the one-step grace is spent
-    monkeypatch.setattr(
-        issues_mod,
-        "issue_repository",
-        _Issues({"run_id": "41", "at": "T", "consumed_by": "40"}),
+    claim.assert_awaited_once_with(7, 42)
+    claim.side_effect = RuntimeError("db down")
+    assert (
+        await bh.claim_wrap_up_grace(rec, BudgetInfo(100, 0.0, True, issue_id=7))
+        is False
     )
-    assert await bh.load_issue_budget(rec) == (100, 120.0, False)
-    merge.assert_not_awaited()
+    assert (
+        await bh.claim_wrap_up_grace(rec, BudgetInfo(100, 0.0, True, issue_id=None))
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_halt_question_folds_into_a_marker_the_answer_endpoint_accepts():
+    """Review F8: the linkage this task exists for — hook STOP → question_asked
+    → view.question → marker → answer_matches — driven through the REAL fold
+    and marker builder, not a hard-coded view."""
+    from app.agent_framework.input_gate import build_awaiting_marker
+    from app.services.ai.runner.question import answer_matches, payload_from_view
+
+    class _Folding(_Rec):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.views = rp.empty_views()
+            self.views["cost"] = {"spent_cents": kw.get("spent", 0.0)}
+            self.seq = 0
+
+        async def record_event(self, event_type, payload, *, turn=None, step=None):
+            await super().record_event(event_type, payload, turn=turn, step=step)
+            self.seq += 1
+            self.views = rp.apply(self.views, event_type, payload, seq=self.seq)
+
+    rec = _Folding(spent=120.0)
+    ctx = StepContext(turn=1, step=2, recorder=rec, parent_run_id=None)
+    assert await _hook(budget=100).before_llm_call(ctx) is StepDecision.STOP
+    parked = rec.views["view"]["question"]
+    assert parked and parked["id"] == "budget:42"
+    question = payload_from_view(parked)
+    marker = build_awaiting_marker(
+        prompt=question["prompt"], issue_id=7, now="T", question=question
+    )
+    assert marker["question_id"] == "budget:42" and marker["kind"] == "budget"
+    assert answer_matches(marker, "Wrap up") and answer_matches(marker, "Cancel")
+    assert not answer_matches(marker, "whatever")  # allow_free_text is False
+
+
+def test_chain_puts_the_budget_gate_before_the_inbox_claim():
+    """Review F2: the claim is durable, the injection is not — a step that
+    halts on the budget must not have claimed a steer it will never read."""
+    import re
+    from pathlib import Path
+
+    src = Path("app/services/ai/chat/ai_library_chat_wiring.py").read_text()
+    assert re.search(r"BudgetGateHook\(\),\s*InboxClaimHook\(\)", src)

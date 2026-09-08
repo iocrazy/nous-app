@@ -177,3 +177,50 @@ async def test_plain_needs_input_without_options_keeps_the_old_marker_call():
         run_reply=run_reply,
     )
     assert marks == ["why?"]
+
+
+async def test_an_answer_that_cancelled_the_issue_preempts_at_wake(monkeypatch):
+    """Review (Task 6 F1): a budget "Cancel" runs transition_status BEFORE the
+    wake; the loop must re-check PREEMPT_STATUSES after recv, or
+    set_status(in_progress) reverts the cancel and a new run re-asks."""
+    monkeypatch.setattr(il, "_backfill_run_issue_id", AsyncMock())
+    monkeypatch.setattr(il, "_question_for_park", AsyncMock(return_value=None))
+    statuses = []
+    loads = {"n": 0}
+
+    async def load_issue(issue_id):
+        loads["n"] += 1
+        # 1st: loop top; 2nd: loop top again (the park iteration); 3rd: the
+        # re-check at wake — the answer cancelled the issue meanwhile.
+        return {
+            "id": issue_id,
+            "status": "in_progress" if loads["n"] <= 2 else "cancelled",
+        }
+
+    async def set_status(issue_id, status, **kw):
+        statuses.append(status)
+
+    async def wait_for_input(issue_id, *, ttl_seconds):
+        return {"reply_text": "Cancel", "user_id": "u1"}
+
+    async def run_turn(*a, **k):
+        return {"content": "", "outcome": "needs_input", "reason": "Budget exhausted"}
+
+    run_reply = AsyncMock()
+    res = await il._run_dispatch_with_continuation(
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=set_status,
+        load_issue=load_issue,
+        wait_for_input=wait_for_input,
+        mark_waiting=AsyncMock(),
+        clear_waiting=AsyncMock(),
+        run_reply=run_reply,
+    )
+    assert res["preempted"] is True and res["preempted_status"] == "cancelled"
+    assert res["wait_rounds"] == 0 and loads["n"] == 3  # it DID reach the wake
+    run_reply.assert_not_awaited()
+    assert statuses == ["needs_followup"]  # the park only, never in_progress
