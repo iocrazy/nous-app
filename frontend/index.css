@@ -1706,6 +1706,29 @@ body {
   width: 176px;
   height: 114px;
 }
+
+/* The Library panel docks over the bottom-RIGHT corner, which is exactly
+   where the minimap lives — and `ArrangeSelectedButton` positions itself
+   "just above the minimap", so the two have to move together or the pair
+   comes apart. `--canvas-inset-*` is the same reservation the canvas islands
+   read; it is published on the surface root and inherits down to here.
+
+   A transform rather than a margin: React Flow owns the panel's own margin
+   for its 15px gutter, and overriding that would trade one overlap for a
+   different misplacement. Hit-testing follows the transform, so clicking the
+   minimap to navigate keeps working. */
+.mh-canvas .react-flow__minimap,
+.mh-canvas .react-flow__controls {
+  transform: translate(
+    calc(-1 * var(--canvas-inset-right, 0px)),
+    calc(-1 * var(--canvas-inset-bottom, 0px))
+  );
+}
+/* Bottom-LEFT, so a docked panel on the right never reaches it — only the
+   drawer layout does. */
+.mh-canvas .react-flow__controls {
+  transform: translateY(calc(-1 * var(--canvas-inset-bottom, 0px)));
+}
 /* Softer viewport mask: the default RF overlay drew a hard rectangle inside
    the glass card. A lighter fill + hairline stroke reads as a gentle
    viewport hint aligned with the island tone. */

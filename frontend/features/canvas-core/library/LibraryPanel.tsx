@@ -20,7 +20,7 @@
 // the user's hand. The root therefore stops keydown propagation, and lets
 // Escape through on purpose: Escape means "get me out of here" at every level.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
@@ -29,12 +29,11 @@ import { useCanvasReadOnly } from '../smart/nodes/useCanvasReadOnly';
 import type { PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { chipClass, type Label } from './libraryChrome';
+import { DRAWER_HEIGHT, PANEL_GUTTER, useLibraryDrawer } from './libraryInset';
 import { LibraryMediaPage } from './LibraryMediaPage';
 import { LibraryPromptsPage } from './LibraryPromptsPage';
 import { useLibraryStore, type LibraryPage } from './libraryStore';
 import { isMentionTarget } from './libraryTarget';
-
-const DRAWER_BREAKPOINT = 1100;
 
 const PAGE_LABEL: Record<LibraryPage, Label> = {
   media: ['canvas.library.pageMedia', 'Media'],
@@ -58,7 +57,11 @@ export function LibraryPanel(): React.ReactElement | null {
   const focusNonce = useLibraryStore((s) => s.focusNonce);
 
   const rootRef = useRef<HTMLDivElement>(null);
-  const [drawer, setDrawer] = useState(false);
+  // Shared with `libraryInset`, which reserves surface for whichever
+  // layout this returns. Two copies of the breakpoint would let the panel
+  // draw a bottom drawer while the islands still dodged a right dock —
+  // the original bug wearing a different hat.
+  const drawer = useLibraryDrawer();
 
   // ── The target node, re-read from the store every render ────────────────
   // The id is the authority; `target.title` is only what the node was CALLED
@@ -80,18 +83,6 @@ export function LibraryPanel(): React.ReactElement | null {
     useLibraryStore.getState().clearTarget();
     toast?.addToast(t('canvas.library.targetGone', 'Target node was removed'), 'info');
   }, [target, targetData, toast, t]);
-
-  // Below the breakpoint the island becomes a bottom drawer. A missing
-  // `matchMedia` is treated as desktop: guessing "narrow" would hand the
-  // drawer layout to every environment that simply does not implement it.
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
-    const mq = window.matchMedia(`(max-width: ${DRAWER_BREAKPOINT - 1}px)`);
-    const apply = () => setDrawer(mq.matches);
-    apply();
-    mq.addEventListener?.('change', apply);
-    return () => mq.removeEventListener?.('change', apply);
-  }, []);
 
   // A NONCE, not a ref handed down: the search input belongs to LibraryGrid,
   // and threading a ref through it for one caller would put focus plumbing in
@@ -119,8 +110,13 @@ export function LibraryPanel(): React.ReactElement | null {
       className="canvas-island nodrag nowheel nopan pointer-events-auto absolute z-30 flex flex-col overflow-hidden"
       style={
         drawer
-          ? { left: 14, right: 14, bottom: 14, height: '45vh' }
-          : { top: 14, right: 14, bottom: 14, width }
+          ? {
+              left: PANEL_GUTTER,
+              right: PANEL_GUTTER,
+              bottom: PANEL_GUTTER,
+              height: DRAWER_HEIGHT,
+            }
+          : { top: PANEL_GUTTER, right: PANEL_GUTTER, bottom: PANEL_GUTTER, width }
       }
       onKeyDown={(e) => {
         if (e.key === 'Escape') {

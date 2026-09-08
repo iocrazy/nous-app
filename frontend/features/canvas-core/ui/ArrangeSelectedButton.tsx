@@ -32,7 +32,9 @@ export function ArrangeSelectedButton() {
       type="button"
       data-testid="arrange-selected-btn"
       onClick={onArrange}
-      className="canvas-island pointer-events-auto absolute bottom-[9.5rem] right-4 z-30 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-canvas-muted transition-colors hover:text-canvas-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+      // Both anchors carry the Library reservation: this button sits in the
+      // bottom-right corner, which is exactly where the panel docks.
+      className="canvas-island pointer-events-auto absolute bottom-[calc(9.5rem_+_var(--canvas-inset-bottom,0px))] right-[calc(1rem_+_var(--canvas-inset-right,0px))] z-30 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-canvas-muted transition-colors hover:text-canvas-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
     >
       <LayoutGrid size={14} />
       {t('canvas.arrangeSelected', 'Arrange selected')}
