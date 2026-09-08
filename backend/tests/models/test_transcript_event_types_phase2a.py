@@ -32,9 +32,9 @@ _LITERAL = re.compile(r"'([a-z_]+)'::text")
 
 def _literals(sql: str) -> frozenset[str]:
     arrays = _ARRAY.findall(sql)
-    assert len(arrays) == 1, (
-        f"expected exactly one ARRAY[...] literal, got {len(arrays)}"
-    )
+    assert (
+        len(arrays) == 1
+    ), f"expected exactly one ARRAY[...] literal, got {len(arrays)}"
     found = _LITERAL.findall(arrays[0])
     assert len(found) == len(set(found)), "duplicate event type literal"
     return frozenset(found)
