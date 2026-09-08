@@ -12,7 +12,7 @@
 // call sites so the next one cannot quietly do less.
 
 import { persistPendingGenTasks } from './genResume';
-import { beginGenerationSlot } from './genSlots';
+import { beginGenerationSlot, settleRunTerminal } from './genSlots';
 
 /**
  * Show the run on the canvas and make it survive a reload.
@@ -40,4 +40,17 @@ export function onGenerationDispatched(
 ): void {
   beginGenerationSlot(promptId, count, kind, ratio);
   persistPendingGenTasks(promptId, taskIds, kind);
+}
+
+/**
+ * What happens the moment a generation run reaches a terminal status.
+ *
+ * Lives beside `onGenerationDispatched` for the same reason that one does:
+ * the canvas ends runs from more than one place (composer, node Run, resume
+ * after reload), and an entry point that ends a run without this leaves a
+ * shimmer cell pulsing on a finished node. `dispatchEffects.test.ts` scans
+ * the call sites so the next entry point cannot quietly do less.
+ */
+export function onGenerationTerminal(promptId: string): void {
+  settleRunTerminal(promptId);
 }

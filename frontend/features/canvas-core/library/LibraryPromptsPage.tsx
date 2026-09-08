@@ -22,6 +22,7 @@
 // sheet snapshots both when it opens and hands them back to `applyNow`.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { BookmarkPlus, Plus } from 'lucide-react';
 import { useOptionalToast } from '../../../components/Toast';
 import { TemplateForm, type TemplateFormValue } from '../../../components/prompts/TemplateForm';
 import { initialTemplateValue, shownSide } from '../../../components/prompts/SaveAsTemplateDialog';
@@ -30,7 +31,7 @@ import { useCanvasScope } from '../smart/canvasScope';
 import { useCanvasReadOnly } from '../smart/nodes/useCanvasReadOnly';
 import type { PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import { chipClass, type Label } from './libraryChrome';
+import { ACTION_BTN, chipClass, type Label } from './libraryChrome';
 import { LibraryPromptList } from './LibraryPromptList';
 import { LibraryPromptPreview, activeSlide } from './LibraryPromptPreview';
 import { useLibraryStore, type LibraryTarget } from './libraryStore';
@@ -251,6 +252,29 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
         <button type="button" className={chipClass(segment === 'mine')} aria-pressed={segment === 'mine'} onClick={() => useLibraryStore.getState().setPromptSegment('mine')}>{t('canvas.library.segmentMine', 'Mine')}{catalog.counts ? ` ${catalog.counts.mine}` : ''}</button>
         <button type="button" className={chipClass(segment === 'project')} aria-pressed={segment === 'project'} disabled={!projectId} onClick={() => useLibraryStore.getState().setPromptSegment('project')}>{t('canvas.library.segmentProject', 'This project')}{catalog.counts?.project != null ? ` ${catalog.counts.project}` : ''}</button>
         {showSystem && <button type="button" className={chipClass(segment === 'system')} aria-pressed={segment === 'system'} onClick={() => useLibraryStore.getState().setPromptSegment('system')}>{t('canvas.library.segmentSystem', 'System')}</button>}
+        <span className="flex-1" />
+        {/* The two ways to PUT something on this shelf, beside the chips that
+            say which shelf is showing — both write into Mine. They used to sit
+            in the bottom status strip next to the count, which is the row that
+            describes the shelf rather than acts on it (user screenshot).
+
+            `rounded-lg` + a card fill + an icon, so they do not read as two
+            more filter pills: the pills are round, flat and text-only. The
+            border is the load-bearing part — these two carried
+            `border-transparent` and so rendered as two lines of plain text on
+            the dark ground, which is exactly what was reported. */}
+        <div data-testid="library-prompt-actions" className="flex shrink-0 items-center gap-1">
+          <button type="button" className={ACTION_BTN} disabled={!live || !!sheet}
+            title={live ? undefined : t('canvas.library.pickPromptNodeFirst', 'Pick a prompt node first')}
+            onClick={() => openForm('current', null)}>
+            <BookmarkPlus size={11} aria-hidden />
+            {t('canvas.library.saveCurrent', 'Save current…')}
+          </button>
+          <button type="button" className={ACTION_BTN} disabled={readOnly || !!sheet} onClick={() => openForm('new', null)}>
+            <Plus size={11} aria-hidden />
+            {t('canvas.library.newTemplate', 'New…')}
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-1.5 border-b border-canvas-line px-2 py-1.5">
         <input ref={searchRef} data-testid="library-search" aria-label={t('canvas.library.searchPrompts', 'Search prompts')} placeholder={t('canvas.library.searchPrompts', 'Search prompts')} value={query}
@@ -310,10 +334,10 @@ export function LibraryPromptsPage({ target, targetData }: { target: LibraryTarg
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 border-t border-canvas-line px-2 py-1.5 text-[10.5px] text-canvas-muted">
-        <button type="button" className="nodrag rounded-lg border border-transparent px-2 py-0.5 text-[11px] text-canvas-text disabled:opacity-40" disabled={!live || !!sheet} onClick={() => openForm('current', null)}>{t('canvas.library.saveCurrent', 'Save current…')}</button>
-        <button type="button" className="nodrag rounded-lg border border-transparent px-2 py-0.5 text-[11px] text-canvas-text disabled:opacity-40" disabled={readOnly || !!sheet} onClick={() => openForm('new', null)}>{t('canvas.library.newTemplate', 'New…')}</button>
-        <span className="flex-1" />
+      {/* Pure status strip now — it describes the shelf, it does not act on
+          it. Left-aligned because a lone count pushed to the right edge with
+          nothing beside it reads as something that lost its neighbours. */}
+      <div data-testid="library-prompts-footer" className="border-t border-canvas-line px-2 py-1.5 text-[10.5px] text-canvas-muted">
         {catalog.page && t('canvas.library.promptsFooter', { count: catalog.page.total, pictures: fromPictures, defaultValue: '{{count}} prompts · {{pictures}} from pictures' })}
       </div>
     </div>

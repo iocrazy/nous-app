@@ -37,7 +37,7 @@ import {
   clearPendingGenTasks,
   prunePendingGenTask,
 } from './genResume';
-import { onGenerationDispatched } from './dispatchEffects';
+import { onGenerationDispatched, onGenerationTerminal } from './dispatchEffects';
 import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import {
@@ -410,6 +410,10 @@ export function CanvasComposer({
   const handlers: RunHandlers = {
     onStatusChange: (id, status, fields) => {
       patchNode(id, { data: { run_status: status, ...fields } });
+      // Terminal means every dispatched task has already settled, so a cell
+      // still pending is one nothing will ever settle — clear it here rather
+      // than leaving it pulsing until the next reload.
+      if (status === 'succeeded' || status === 'failed') onGenerationTerminal(id);
     },
     onResult: (id, result) => {
       // Generation results now land progressively via onItemSettled (P0-3)

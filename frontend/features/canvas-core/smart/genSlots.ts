@@ -189,6 +189,45 @@ export function appendGenerationResults(
   });
 }
 
+/**
+ * A run reached a terminal status: no cell may still be pending.
+ *
+ * The runner calls `onItemSettled` inside each task's own `.then`, and only
+ * emits the terminal status after `Promise.all` over those tasks resolves —
+ * so by the time this runs, every dispatched task HAS settled. A cell still
+ * pending here is one nothing will ever settle, and it pulses forever.
+ *
+ * `healStaleGenSlots` already clamps this class, but only at LOAD. The
+ * invariant does not break at load; it breaks here, in front of the user —
+ * which is why the shimmer stopped only when someone happened to reload
+ * (reported 2026-09-02, and again 2026-09-08 with the same screenshot: one
+ * delivered image beside one pulsing cell). Load-time stays as the backstop
+ * for a tab that was closed mid-run.
+ *
+ * It WARNS rather than correcting silently. Reserving a cell nothing settles
+ * is an upstream bug that is still unexplained, and a silent correction is
+ * exactly how it stayed that way — the log is the only place it becomes
+ * visible now that the symptom is gone.
+ */
+export function settleRunTerminal(promptId: string): void {
+  const slotId = slotIdFor(promptId);
+  if (!slotId) return; // text runs have no slot — nothing to settle.
+  const store = useCanvasCoreStore.getState();
+  const node = store.nodes.find((n) => asObj(n).id === slotId);
+  const data = (asObj(node).data ?? {}) as { gen_pending?: number };
+  const pending = data.gen_pending ?? 0;
+  // The clean case is every case but one, and it runs on every terminal
+  // status: writing here would churn node identity and dirty the canvas for
+  // a pure runtime no-op.
+  if (pending <= 0) return;
+  console.warn(
+    `[genSlots] run ${promptId} went terminal with ${pending} unsettled cell(s) — ` +
+      'a task was reserved that nothing ever settled. Clearing the shimmer; ' +
+      'the reservation leak upstream is still unexplained.',
+  );
+  store.patchNode(slotId, { data: { gen_pending: 0 } });
+}
+
 // ── Recover marks (P1-13) ───────────────────────────────────────────────────
 // Infinite's imageTaskRecover state: a broken POLL is not a failed TASK —
 // the backend keeps running it. The slot swaps that item's shimmer cell for
