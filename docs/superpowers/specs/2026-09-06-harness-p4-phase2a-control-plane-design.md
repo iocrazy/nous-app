@@ -29,7 +29,7 @@
 - issue：沿用 `issues.execution_state.awaiting_input`，marker 多带 `question_id / options / allow_free_text / kind`；`input_gate` 的挂起原语与 TTL 不动。
 - 聊天：assistant 消息 metadata 的 `awaiting_input = {question_id, prompt, options, allow_free_text, kind}`，与 `awaiting_approval` 同位同形。
 
-**回答通道**：统一为收件箱 `POST /ai-library/inbox {kind: "answer", content: {question_id, value}}`（形状校验已存在）；`value` 必须等于某个 label，或 `allow_free_text` 时任意文本，否则 400 `answer_shape`。issue 侧兼容三期约定：评论正文等于某个 label 即视为回答（`_divert_to_inbox_if_running` 之前先匹配）。聊天侧回答即开始下一回合，InboxClaimHook 在第一步边界注入 `<inbox_message kind="answer">`，模型读到的是它自己给出的选项文字。
+**回答通道（实施计划作者调整，2026-09-07）**：**不走收件箱**。回答 = 一条带 `answer_to: <question_id>` 的普通消息——issue 侧 `POST /issues/{id}/messages`（评论），聊天侧 `POST` 现有发消息端点。label 校验（`value` 必须等于某个 label，或 `allow_free_text` 时任意文本，否则 400 `answer_shape`）、`question_answered` 落行、唤醒都在消息端点完成。理由：issue 侧唤醒本就走消息端点的 `_try_wake_waiting_workflow`，聊天侧「下一条消息续跑」本就是 `awaiting_approval` 的路；再经收件箱会让同一个答案注入两次。收件箱 `answer` kind 保留原语义（运行中插话），不承担对已挂起问题的回答。issue 侧兼容三期约定：评论正文等于某个 label 即视为回答（消息端点内、`_divert_to_inbox_if_running` 之前先匹配）。模型在唤醒后读到的是它自己给出的选项文字。
 
 **过期**：issue 侧沿用 input_gate TTL，到期 needs_followup；聊天侧无 TTL，下一条用户消息到来即作废旧问题并记 `question_answered{value: null, superseded: true}`。
 
@@ -41,7 +41,7 @@
 
 **收尾**：新增 `stop_reason → TurnEndReason` 映射表（`cancelled → CANCELLED`、`paused → PAUSED`、`awaiting_input → AWAITING_INPUT`；穷尽守卫：`StepContext.stop()` 的 reason 必须在表内，否则测试红）。run 以 `turn_end{paused}` 收尾；issue 状态**保持 in_progress**，phase 由 rollup 的 `paused_at` 判出（优先级 paused 最高，已实现）。dispatch workflow 收到 `stop_reason=paused` 正常结束，不写 blocked / needs_followup。
 
-**暂停期间**：`_divert_to_inbox_if_running` 改为「运行中**或已暂停**都改投收件箱」，评论行照旧保留；回答同理排队。收件箱 sweeper 对已暂停目标的条目不标 `expired_at`。
+**暂停期间**：`_divert_to_inbox_if_running` 改为「运行中**或已暂停**都改投收件箱」，评论行照旧保留。带 `answer_to` 的回答不改投：仍走 §1 通道（label 校验、`question_answered` 落行在消息端点完成，且在改投判断之前），唤醒沿既有路径。收件箱 sweeper 对已暂停目标的条目不标 `expired_at`。
 
 **恢复**：`POST /issues/{id}/resume`：清 `paused_at`；有未领条目或上一 run 以 paused 收尾 → 走既有 dispatch 续跑路径（新 run，InboxClaimHook 首步注入全部排队条目 = 「先排空收件箱」）；未暂停且无待领 → 409 `not_paused`。新 run 的 `metadata_json.resumed_from_run_id` 记上一 run（不加列）。
 
@@ -54,8 +54,8 @@
 `BudgetGateHook` 在 `pct ≥ 100` 时不再只记事件：调用 `ask_question(kind="budget", prompt="Budget exhausted: spent X¢ of Y¢.", options=[Top up, Wrap up, Cancel], allow_free_text=False)` 并 `ctx.stop("awaiting_input")`。仍只对**有 issue 的根 run**生效（聊天无预算，一期已定）。80% 仍只 warn。
 
 回答后的动作走一个小注册表 `question_kinds`（`kind → on_answer(issue, value)`；`user` 类什么都不做，只注入）：
-- **Top up**：前端先弹既有 BudgetBlock 的编辑器改 `budget_cents`（PATCH 已有），成功后再投 answer；后端收到 answer 时若预算仍 ≤ 已花，409 `budget_still_exhausted`。然后 resume 续跑。
-- **Wrap up**：投 answer 的同时追加一条 `steer{body: "Budget is exhausted. Finish in one step: summarize what is done and stop."}`，resume；下一回合 BudgetGateHook 对 `kind=budget` 的问题**已回答 wrap-up** 的 run 放行一步（用 `view.question` 的已答记录判断，不加列）。
+- **Top up**：前端先弹既有 BudgetBlock 的编辑器改 `budget_cents`（PATCH 已有），成功后再发带 `answer_to` 的回答（§1 通道）；`on_answer` 复核预算，仍 ≤ 已花则 409 `budget_still_exhausted`。然后续跑。
+- **Wrap up**：回答落地后由 `on_answer` 往收件箱 `enqueue` 一条 `steer{body: "Budget is exhausted. Finish in one step: summarize what is done and stop."}`（回答本身不进收件箱），续跑；下一回合 BudgetGateHook 对 `kind=budget` 的问题**已回答 wrap-up** 的 run 放行一步（用 `view.question` 的已答记录判断，不加列）。
 - **Cancel**：走既有 cancel + issue 状态 `cancelled`。
 
 事件序列：`budget_check{halt}` → `question_asked{kind: budget}` → `turn_end{awaiting_input}`；回答后 `question_answered` → 新 run。一期已落行的 `budget_check{halt}` 语义不变（记录），只是后面多了停下。
@@ -69,9 +69,10 @@
 - **StatusBlock**：补显 blocked / empty_output 的原因（`execution_state.error_message` / `outcome_reason`），关掉「后端写了前端不读」那张旧票。
 - **主页**：行动作 paused → `Resume`、waiting_input → `Reply`（已有）；行芯片新增 `N queued`（来自 pending-summary）；横条第五类 `queued`（有排队且目标 paused 的 issue），与 `paused` 类并列。
 - **任务中心**：issue 型任务卡显示 Paused 态与 Resume；needs-input 区显示「Pick one of N」。
+- **看板**：卡底一行阶段芯片 + `N queued` + 悬停动作，受阻卡带原因芯片。
 - **聊天气泡**：`QuestionCard` 与 ApprovalCard 同挂点；已回答后按钮变为只读高亮所选。
 
-**UI 稿**：在既有「Issue Workbench」画板（https://claude.ai/code/artifact/f256ccc7-363b-425e-b493-1ed51e44c0f1 ）追加 5 页：暂停/恢复态、QuestionCard 三处、预算三选一、主页计数与横条、聊天气泡。**用户只验这 5 页**；本 session 的 design skill 不可用，留给下一 session 画。
+**UI 稿**：在既有「Issue Workbench」画板（https://claude.ai/code/artifact/f256ccc7-363b-425e-b493-1ed51e44c0f1 ）追加 8 页（暂停/恢复、QuestionCard 三处、预算三选一、主页、聊天、看板、任务中心、Progress 卡原因），页「二期 2a · 控制面」。**用户只验这 8 页**（已于实施计划立项前画出并经用户认可）。
 
 ## 5. 数据与接口（迁移先行，单独 PR）
 
@@ -80,7 +81,8 @@
 | mig：`agent_run_transcript_events.event_type` CHECK 放行 `question_asked / question_answered` | 与 mig 443/453 同做法 |
 | 无新列 | `paused_at / pause_requested` 已在；`resumed_from_run_id` 进 metadata；`question_options` 进既有 jsonb |
 | `POST /issues/{id}/pause` / `resume` | 见 §2；409 `not_paused` / `already_paused` |
-| `POST /ai-library/inbox` 放行 `kind ∈ {steer, answer, budget_reply}` 不变；`answer` 校验加 label 匹配 | `budget_reply` 保留给兼容，实际预算回答走 `answer{kind 由 question_id 前缀判}` |
+| `POST /ai-library/inbox` 放行 `kind ∈ {steer, answer, budget_reply}` 不变 | 收件箱不承担对已挂起问题的回答（见 §1 回答通道）：label 校验落在消息端点，消息带 `answer_to`；`budget_reply` 保留给兼容 |
+| `POST /issues/{id}/messages` 与聊天发消息端点加 `answer_to: Optional[str]` | §1 回答通道：有值时正文必须等于某 label 或 `allow_free_text`，否则 400 `answer_shape`；`question_id` 与挂起 marker 不符 409 `no_open_question`；匹配则写 `question_answered`（到提问的那个 run）→ `on_answer` → 既有唤醒/续跑 |
 | `GET /ai-library/inbox/pending-summary` | §4 |
 | `AskUser` 工具 spec 进 `prompt_composer._build_tools()`（两条路都给）；FinishIssue 加 `options` | prompts README 三问同步（模型可见面） |
 | `TurnEndReason` 加 `AWAITING_INPUT`；`folds/turn_end.py` 映射到 `waiting_input`；`folds/question.py` 新增 | 投影注册表新条目 |
@@ -90,7 +92,7 @@
 - 每个钩子 / 折叠 / 端点：单测 + 至少一处突变转红（照一期）。
 - 穷尽守卫：`stop_reason` 表覆盖 `StepContext.stop()` 全部字面量；`question_kinds` 注册表可枚举。
 - 真栈（调试账号）：① issue 派发中 pause → 下一步边界 `turn_end{paused}`、phase paused、评论改投；resume → 新 run 首步 `inbox_claimed` 全部条目；② AskUser 走 issue：`question_asked` 落行、NeedsInputCard 出按钮、点选后 `question_answered` + 续跑读到 label；③ AskUser 走聊天：气泡出按钮、回答后下一回合注入；④ 零预算 issue：`budget_check{halt}` → 三选一卡 → Top up 改预算后续跑 / Wrap up 一步收尾 / Cancel；⑤ pending-summary 与行芯片 `N queued`。
-- 前端 `e2e:prod` 走查后人工点一遍 5 页 UI。
+- 前端 `e2e:prod` 走查后人工点一遍 8 页 UI。
 
 ## 7. 明确不做
 
@@ -102,7 +104,7 @@
 
 ## 9. Hand-off（给下一 session / 另一台机器）
 
-1. **先画 UI 稿**（§4 的 5 页）到 Issue Workbench 画板，请用户验；用户只验 UI，不再过技术节。
-2. UI 认可后 → `superpowers:writing-plans` 出实施计划（建议 T1 迁移 → T2 提问原语后端 → T3 暂停后端 → T4 预算追问 → T5 前端 QuestionCard 三处 → T6 暂停 UI + 计数 → T7 真栈验收 + 完成账）。
+1. **先画 UI 稿**（§4 的 8 页）到 Issue Workbench 画板，请用户验；用户只验 UI，不再过技术节。（已完成：2026-09-07 画出并认可，实施计划见 `docs/superpowers/plans/2026-09-07-harness-p4-phase2a-control-plane.md`。）
+2. UI 认可后 → `superpowers:writing-plans` 出实施计划（已出，9 Task：T1 迁移 → T2 提问原语后端 → T3 AskUser/issue 挂起 → T4 聊天 → T5 暂停恢复 → T6 预算三选一 → T7 QuestionCard → T8 计数与暂停 UI → T9 真栈验收 + 完成账）。
 3. 开工前按一期纪律复核 §0 表（另一会话在密集合并，`IssueReplyBox` / 聊天作曲区可能又变）。
 4. 已知与本文相关的旧记忆：`project-issue-page-tracking-redesign-pending`（详情页重设计已由一期 T8 落地，别另立 spec；残余 blocked 原因显示并入本文 §4）。
