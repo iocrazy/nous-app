@@ -66,6 +66,9 @@ on:
       - 'backend/tests/db/test_schema_drift.py'
       - 'backend/tests/db/test_assets_repository_integration.py'
       - 'backend/tests/db/test_canvas_asset_refs_integration.py'
+      - 'backend/tests/db/test_conversations_store_question_integration.py'
+      # The statements that integration file executes (phase 2a question stamp).
+      - 'backend/app/services/ai/chat/conversations_ai_store.py'
       # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
       # project-entity migration workflow imported `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module, and the step that
@@ -110,7 +113,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all eight, so it has to re-run
+      # to it changes what "green" means for all nine, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong twice (it said "eight" when there were
       # seven, then "nine" when there were eight — each edit trusted the
@@ -347,6 +350,19 @@ jobs:
           # teams — a canvas invisible to its own owner would read as "this
           # asset is used nowhere".
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_canvas_asset_refs_integration.py -v
+
+      - name: Exercise the chat question stamp against the built schema (phase 2a)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place ConversationsAiStore's phase-2a statements execute.
+          # A stubbed session cannot show that the newest-agent-message SELECT
+          # returns the row the store expects, or that the level-by-level ||
+          # merge actually lands the answered stamp when an intermediate key
+          # is missing (jsonb_set would return the target unchanged, rowcount 1).
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_conversations_store_question_integration.py -v
 
       - name: Exercise the chat-uploads folder adoption (mig 450)
         working-directory: backend

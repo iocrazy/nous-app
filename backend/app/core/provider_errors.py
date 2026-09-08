@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.core.exceptions import ErrorResponse, _cors_headers_for, _request_id
@@ -127,6 +127,22 @@ def stream_error_data(exc: BaseException) -> dict:
     if isinstance(exc, (AllModelsFailed, LLMCallError, CodexLocalError)):
         _status, code, message = provider_error_payload(exc)
         return {"error": message, "code": code}
+    if isinstance(exc, HTTPException):
+        # A typed refusal raised inside the turn (phase 2a: 409 no_open_question
+        # / 400 answer_shape) must reach the SSE client with ITS code, not be
+        # flattened into internal_error plus a repr of the exception.
+        detail = exc.detail
+        if isinstance(detail, dict) and detail.get("code"):
+            return {
+                "error": str(detail.get("message") or detail["code"]),
+                "code": str(detail["code"]),
+                "status": exc.status_code,
+            }
+        return {
+            "error": str(detail) if detail else f"HTTP {exc.status_code}",
+            "code": f"http_{exc.status_code}",
+            "status": exc.status_code,
+        }
     return {"error": f"{type(exc).__name__}: {exc}", "code": "internal_error"}
 
 

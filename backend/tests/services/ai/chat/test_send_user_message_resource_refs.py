@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -63,6 +63,14 @@ class _FakeStore:
             "role": "user",
             "content": content,
         }
+
+    async def latest_assistant_open_question(self, *, session_id: Any = None):
+        return None  # phase 2a: no open typed question in this fake
+
+    async def mark_question_answered(
+        self, *, message_id: Any = None, value: Any = None, superseded: bool = False
+    ) -> None:
+        return None
 
     async def append_assistant_message(
         self,

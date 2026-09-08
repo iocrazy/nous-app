@@ -72,6 +72,14 @@ class _FakeStore:
         self.appended.append(row)
         return row
 
+    async def latest_assistant_open_question(self, *, session_id: Any = None):
+        return None  # phase 2a: no open typed question in this fake
+
+    async def mark_question_answered(
+        self, *, message_id: Any = None, value: Any = None, superseded: bool = False
+    ) -> None:
+        return None
+
     async def append_assistant_message(
         self,
         *,

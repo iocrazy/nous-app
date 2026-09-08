@@ -72,6 +72,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from loguru import logger
+
 from app.services.library.resources_service import _resolve_personal_team_id
 
 # public.messages.sender_type -> legacy ai_messages.role
@@ -119,6 +121,26 @@ _DISPLAY_ATTACHMENT_KEYS = (
 
 def _bigint(v: Any) -> int:
     return int(v)
+
+
+def open_question_from_body(body: Any) -> Optional[Dict[str, Any]]:
+    """The still-open typed question parked on an assistant message, read
+    off ``body.meta.awaiting_input`` (phase 2a). None when the message
+    carries no question or it was already ``answered`` / superseded."""
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return None
+    if not isinstance(body, dict):
+        return None
+    meta = body.get("meta") or {}
+    question = meta.get("awaiting_input") if isinstance(meta, dict) else None
+    if not isinstance(question, dict) or not question.get("question_id"):
+        return None
+    if question.get("answered"):
+        return None
+    return question
 
 
 class ConversationsAiStore:
@@ -712,3 +734,109 @@ class ConversationsAiStore:
             "metadata_json": metadata,
             "created_at": row.get("created_at"),
         }
+
+    # ── phase 2a: typed question parked on the latest assistant message ──
+
+    async def latest_assistant_open_question(
+        self, *, session_id: Any
+    ) -> Optional[Dict[str, Any]]:
+        """``{"message_id", "question"}`` when the NEWEST agent message in the
+        conversation still carries an unanswered ``awaiting_input``; else
+        None. Only the newest one counts — a question the conversation has
+        already moved past is not open."""
+        from sqlalchemy import select
+
+        from app.db import session as _dbs
+        from app.models.chat import Messages
+
+        stmt = (
+            select(Messages.id, Messages.body)
+            .where(
+                Messages.conversation_id == _bigint(session_id),
+                Messages.sender_type == "agent",
+                Messages.deleted_at.is_(None),
+            )
+            .order_by(Messages.seq.desc())
+            .limit(1)
+        )
+        async with _dbs.read_scope() as session:
+            row = (await session.execute(stmt)).first()
+        if not row:
+            return None
+        message_id, body = row[0], row[1]
+        question = open_question_from_body(body)
+        if question is None:
+            return None
+        return {"message_id": message_id, "question": question}
+
+    @staticmethod
+    def question_answered_stmt(message_id: Any, answered: Dict[str, Any]):
+        """UPDATE that stamps ``body.meta.awaiting_input.answered`` — a pure
+        builder so the shape can be asserted in tests.
+
+        Merges level by level (``body || {meta: (body->meta) || {awaiting_input:
+        (...) || {answered}}}``) instead of ``jsonb_set``: jsonb_set silently
+        returns the target UNCHANGED when an intermediate key is missing, which
+        would leave the sole re-answer guard unset with rowcount 1."""
+        from sqlalchemy import bindparam, func, update
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        from app.models.chat import Messages
+
+        def _cat(a, b):
+            return a.op("||", return_type=JSONB)(b)
+
+        def _at(obj, key):
+            return obj.op("->", return_type=JSONB)(key)
+
+        # NOT ``cast("{}", JSONB)``: that binds the Python str "{}" through the
+        # JSONB bind processor, i.e. the JSON *string* ``"{}"`` — and Postgres
+        # turns ``scalar || object`` into an ARRAY. Caught by the schema-drift
+        # integration test on the no-path branch.
+        empty = func.jsonb_build_object()
+        meta = func.coalesce(_at(Messages.body, "meta"), empty)
+        question = func.coalesce(
+            _at(_at(Messages.body, "meta"), "awaiting_input"), empty
+        )
+        new_question = _cat(
+            question,
+            func.jsonb_build_object("answered", bindparam(None, answered, type_=JSONB)),
+        )
+        new_meta = _cat(meta, func.jsonb_build_object("awaiting_input", new_question))
+        return (
+            update(Messages)
+            .where(Messages.id == _bigint(message_id))
+            .values(body=_cat(Messages.body, func.jsonb_build_object("meta", new_meta)))
+        )
+
+    async def mark_question_answered(
+        self, *, message_id: Any, value: Optional[str], superseded: bool = False
+    ) -> None:
+        """Stamp the answer (or the supersede) onto the asking message so a
+        reload renders the QuestionCard read-only with the pick highlighted.
+        Best-effort: the answer already travelled as the next user message."""
+        from datetime import datetime, timezone
+
+        from app.db import session as _dbs
+
+        answered = {
+            "value": value,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "superseded": bool(superseded),
+        }
+        try:
+            async with _dbs.write_scope() as session:
+                result = await session.execute(
+                    self.question_answered_stmt(message_id, answered)
+                )
+            if (getattr(result, "rowcount", None) or 0) < 1:
+                # The stamp is the re-answer guard; a miss must be visible.
+                logger.warning(
+                    f"[ConversationsAiStore] mark_question_answered touched no row "
+                    f"(message={message_id}) — the question stays answerable"
+                )
+        except Exception as exc:  # noqa: BLE001 — decoration, never fails the turn
+            logger.warning(
+                f"[ConversationsAiStore] mark_question_answered failed "
+                f"message={message_id}: {exc}"
+            )

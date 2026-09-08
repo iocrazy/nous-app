@@ -114,6 +114,23 @@ class MessageStore(Protocol):
         """Insert a user-role message. Returns the inserted row."""
         ...
 
+    # ── phase 2a: typed question parked on the latest assistant message ──
+
+    async def latest_assistant_open_question(
+        self, *, session_id: Any
+    ) -> Optional[Dict[str, Any]]:
+        """``{"message_id", "question"}`` when the NEWEST assistant message
+        still carries an unanswered ``metadata_json.awaiting_input``; else
+        None."""
+        ...
+
+    async def mark_question_answered(
+        self, *, message_id: Any, value: Optional[str], superseded: bool = False
+    ) -> None:
+        """Stamp ``awaiting_input.answered = {value, at, superseded}`` on that
+        message (best-effort decoration)."""
+        ...
+
     async def append_assistant_message(
         self,
         *,
