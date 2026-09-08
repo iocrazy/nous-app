@@ -1,8 +1,7 @@
 /**
  * Cockpit (zone `cockpit`, top of the article): one glance = where the agent
  * is, how far along, how much context and budget are left, and the one control
- * that exists today (cancel the running run — pause lands with phase 2, so no
- * disabled placeholder is drawn for it). Everything reads the rollup through
+ * set that exists today (pause / resume the issue, cancel the running run). Everything reads the rollup through
  * runView.ts selectors; nothing here touches metadata_json's shape.
  */
 import React, { useState } from 'react';
@@ -20,6 +19,7 @@ import {
   stepProgress,
 } from '../../TaskCenter/runView';
 import { formatElapsed } from '../formatElapsed';
+import { controlErrorText } from '../issueControlErrors';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { QuestionCard } from '../QuestionCard';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
@@ -94,7 +94,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
       ctx.env.onIssueChanged?.();
     } catch (err) {
       console.error('[CockpitBlock] pause failed', err);
-      setControlError(err instanceof Error ? err.message : String(err));
+      setControlError(controlErrorText(err, t));
     } finally {
       setPausing(false);
     }
@@ -108,7 +108,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
       ctx.env.onIssueChanged?.();
     } catch (err) {
       console.error('[CockpitBlock] resume failed', err);
-      setControlError(err instanceof Error ? err.message : String(err));
+      setControlError(controlErrorText(err, t));
     } finally {
       setResuming(false);
     }

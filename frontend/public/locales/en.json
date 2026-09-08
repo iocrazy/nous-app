@@ -32,7 +32,8 @@
     "paused": "Paused",
     "resume": "Resume",
     "pause": "Pause",
-    "resumed": "Resumed"
+    "pauseSent": "Pausing at the next step",
+    "pauseFailed": "Could not pause"
   },
   "nav": {
     "linkParser": "Link Parser",
@@ -1195,8 +1196,7 @@
     "completed": "Done",
     "failed": "Failed",
     "retry": "Retry",
-    "retrying": "Retrying",
-    "queued": "Queued"
+    "retrying": "Retrying"
   },
   "billing": {
     "title": "Billing",
@@ -5593,7 +5593,15 @@
     "pausing": "Pausing…",
     "resume": "Resume",
     "resuming": "Resuming…",
-    "reason": "Reason"
+    "reason": "Reason",
+    "controlError": {
+      "already_paused": "Already paused",
+      "not_paused": "Not paused any more",
+      "run_state_unavailable": "Run state unavailable — try again in a moment",
+      "forbidden": "You cannot control this issue",
+      "not_found": "Issue not found",
+      "generic": "Could not update the issue"
+    }
   },
   "issues": {
     "pageTitle": "Issues",

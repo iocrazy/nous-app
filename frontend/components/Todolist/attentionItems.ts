@@ -12,6 +12,7 @@
 import type { NeedsInputItem } from '../../services/issuesService';
 import type { AILibraryApprovalRequest } from '../../types';
 import type { UiIssue } from './types';
+import { queuedChip, type CountT } from './issueChips';
 
 export type AttentionType = 'question' | 'approval' | 'review' | 'paused' | 'queued';
 
@@ -26,6 +27,9 @@ export interface AttentionItem {
   issueId?: number;
 }
 
+/** Used when the caller has no i18n `t` (pure-function tests). */
+const DEFAULT_T: CountT = (_k, o) => o.defaultValue;
+
 export function buildAttentionItems(
   needsInput: NeedsInputItem[] | null | undefined,
   approvals: AILibraryApprovalRequest[] | null | undefined,
@@ -36,6 +40,7 @@ export function buildAttentionItems(
   /** phase 2a §4: issue id → queued-comment count. A paused issue WITH queued
    *  comments is a `queued` item (resume runs them), not a plain `paused`. */
   pendingSummary: Record<string, { count: number }> | null | undefined = {},
+  t?: CountT,
 ): AttentionItem[] {
   const queuedCount = (id: number) => pendingSummary?.[String(id)]?.count ?? 0;
   // Nullish-tolerant on purpose: this strip sits at the top of a whole page,
@@ -69,7 +74,7 @@ export function buildAttentionItems(
             type: 'queued',
             id: `queued:${i.id}`,
             title: i.title,
-            detail: `${queuedCount(i.id)} queued`,
+            detail: queuedChip(queuedCount(i.id), t ?? DEFAULT_T),
             issueId: i.id,
           }
         : {

@@ -571,6 +571,7 @@ it('answered state renders read-only with the pick highlighted', () => {
 - `ActiveTaskCard` 的 `agent-pause` 带 `data-state`（idle/sending/paused/failed），失败不静默；`PausedSection` resume 失败留在行上。
 - 顺手换掉触碰到的 `IssueListView` `DUE_CLASS`/`creates-in-badge` 与 `IssueBoardView` 的 amber/rose 为 ok/warn/danger。
 - 新增 i18n：`issues.queuedTitle`（芯片 tooltip）。
+- 对抗评审 10 条全修：`N queued` 改走 `issues.queued`（`queuedChip(count, t)`，`buildAttentionItems` 第六参 `t`），删掉死键 `issues.attention.queued` / `taskCenter.resumed`；pause/resume 的失败改为 `IssueControlError{code,status}`（`_controlJson` 解析 `detail.code`），UI 经 `issueControlErrors.controlErrorText` 映射 `issueDetail.controlError.*`，绝不回显原始 HTTP 体；`ActiveTaskCard` 暂停结果用文字三态（`agent-pause-state`）并经 `issuePauseSignal` 通知 `PausedSection` 立刻重拉；`PausedSection` 30s 轮询 + 信号重拉，后端 `GET /paused` 多取一行出 `has_more`，UI 显示 `N+`；看板阶段芯片改用 `PHASE_LABEL_KEY`/`PHASE_FALLBACK` 与列表同源；running 芯片用 `agent` 色而非 `ok`（绿=完成）；看板 `blockedReason` 改按 `issuePhase` 判定；顺手清理注释/文档串位与 info 色对比度。
 
 ---
 

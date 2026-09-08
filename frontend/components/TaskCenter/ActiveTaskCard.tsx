@@ -13,6 +13,8 @@ import { retryProgress, todoProgress } from './agentRunPresentation';
 import { budgetState, contextGauge, currentStep, selectRunView } from './runView';
 import { deliverSteer, InboxTargetEndedError, type InboxTargetKind } from '../../services/agentInboxService';
 import { pauseIssue } from '../../services/issuesService';
+import { controlErrorText } from '../Todolist/issueControlErrors';
+import { notifyIssuePauseChanged } from './issuePauseSignal';
 
 interface ActiveTaskCardProps {
   task: UnifiedTask;
@@ -45,15 +47,21 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
   // Phase 2a §2: target-level pause for issue-backed runs (the issue is the
   // target; conversations have no pause). Typed outcome, never a silent no-op.
   const [pauseState, setPauseState] = useState<'idle' | 'sending' | 'paused' | 'failed'>('idle');
+  const [pauseError, setPauseError] = useState<string | null>(null);
   const pause = async () => {
     if (!steerTarget || steerTarget.kind !== 'issue' || pauseState === 'sending') return;
     setPauseState('sending');
+    setPauseError(null);
+    const issueId = Number(steerTarget.id);
     try {
-      await pauseIssue(Number(steerTarget.id));
+      await pauseIssue(issueId);
       setPauseState('paused');
+      // The Paused section (sibling in the Task Center) refetches on this.
+      notifyIssuePauseChanged(issueId);
     } catch (err) {
       console.error('[ActiveTaskCard] pause failed', err);
       setPauseState('failed');
+      setPauseError(controlErrorText(err, t));
     }
   };
   const [steerOpen, setSteerOpen] = useState(false);
@@ -110,7 +118,7 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
                 data-testid="agent-pause"
                 data-state={pauseState}
                 className={`p-0.5 rounded transition-colors shrink-0 ${pauseState === 'failed' ? 'text-danger' : pauseState === 'paused' ? 'text-info' : 'text-ink-600 hover:text-info'} disabled:opacity-60`}
-                title={pauseState === 'paused' ? t('issueDetail.phase.paused', 'Paused') : t('taskCenter.pause', 'Pause')}
+                title={pauseState === 'paused' ? t('taskCenter.pauseSent', 'Pausing at the next step') : t('taskCenter.pause', 'Pause')}
               >
                 <Pause size={12} />
               </button>
@@ -156,9 +164,14 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
             </div>
           )}
 
+          {/* Pause outcome in words (same triple as steer below): the icon
+              tint alone is not a message. */}
+          {pauseState === 'paused' && <span data-testid="agent-pause-state" className="mt-1 block text-[10px] text-info">{t('taskCenter.pauseSent', 'Pausing at the next step')}</span>}
+          {pauseState === 'failed' && <span data-testid="agent-pause-state" className="mt-1 block text-[10px] text-danger">{t('taskCenter.pauseFailed', 'Could not pause')}{pauseError ? ` — ${pauseError}` : ''}</span>}
+
           {/* Steer (harness P4 §1-③): a line to the running agent, read before
-              its next step. Only when the run has an inbox target. Pause lands
-              with phase 2 — no disabled placeholder for it. */}
+              its next step. Only when the run has an inbox target; the pause
+              button in the header row is the target-level control (phase 2a). */}
           {steerTarget && (
             <div className="mt-1.5" data-testid="agent-steer">
               {steerOpen ? (

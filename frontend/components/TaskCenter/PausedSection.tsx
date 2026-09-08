@@ -2,8 +2,9 @@
  * PausedSection — Task Center "Paused" section (phase 2a §4).
  *
  * Lists the issues a person paused (`GET /issues/paused`), each with a Resume
- * button. Owns its own fetch (mount + after every resume); the row leaves the
- * list when the refetch no longer returns it. Resume is a typed path: the
+ * button. Owns its own fetch (mount, every PAUSED_POLL_MS, and on every
+ * pause/resume signalled from elsewhere); the row leaves the list when the
+ * refetch no longer returns it. Overflow is said ("50+"), not hidden. Resume is a typed path: the
  * server says what it did (`reason`), and a failure stays on the row.
  */
 import React, { useCallback, useEffect, useState } from 'react';
@@ -11,17 +12,25 @@ import { useTranslation } from 'react-i18next';
 import { PauseCircle } from 'lucide-react';
 
 import { listPaused, resumeIssue, type PausedIssueItem } from '../../services/issuesService';
+import { controlErrorText } from '../Todolist/issueControlErrors';
+import { notifyIssuePauseChanged, subscribeIssuePauseChanged } from './issuePauseSignal';
+
+/** Poll cadence; a pause/resume from anywhere in the app also refetches at
+ *  once through issuePauseSignal. */
+export const PAUSED_POLL_MS = 30_000;
 
 export const PausedSection: React.FC = () => {
   const { t } = useTranslation();
   const [items, setItems] = useState<PausedIssueItem[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try {
       const res = await listPaused();
-      setItems(res.items ?? []);
+      setItems(res.items);
+      setHasMore(res.has_more);
     } catch (err) {
       // Non-fatal: the rest of the Task Center still renders.
       console.error('[PausedSection] list paused failed', err);
@@ -30,6 +39,12 @@ export const PausedSection: React.FC = () => {
 
   useEffect(() => {
     void refresh();
+    const id = setInterval(() => void refresh(), PAUSED_POLL_MS);
+    const unsubscribe = subscribeIssuePauseChanged(() => void refresh());
+    return () => {
+      clearInterval(id);
+      unsubscribe();
+    };
   }, [refresh]);
 
   const resume = async (item: PausedIssueItem) => {
@@ -42,10 +57,11 @@ export const PausedSection: React.FC = () => {
     });
     try {
       await resumeIssue(Number(item.issue_id));
+      notifyIssuePauseChanged(Number(item.issue_id));
       await refresh();
     } catch (err) {
       console.error(`[PausedSection] resume failed for issue ${item.issue_id}:`, err);
-      setErrors((prev) => ({ ...prev, [item.issue_id]: err instanceof Error ? err.message : String(err) }));
+      setErrors((prev) => ({ ...prev, [item.issue_id]: controlErrorText(err, t) }));
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
@@ -62,8 +78,8 @@ export const PausedSection: React.FC = () => {
       <div className="flex items-center gap-2 px-4 py-2">
         <PauseCircle size={14} className="text-info" />
         <span className="text-sm font-medium text-info">{t('taskCenter.paused', 'Paused')}</span>
-        <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-info-line text-info text-xs font-semibold">
-          {items.length}
+        <span data-testid="paused-count" className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-info-soft ring-1 ring-info-line text-info text-xs font-semibold">
+          {hasMore ? `${items.length}+` : items.length}
         </span>
       </div>
       <ul className="divide-y divide-info-line">
@@ -79,7 +95,7 @@ export const PausedSection: React.FC = () => {
               onClick={() => void resume(item)}
               disabled={busy.has(item.issue_id)}
               data-testid="paused-resume"
-              className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-md bg-info-line text-info hover:opacity-90 disabled:opacity-50"
+              className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-md bg-info-soft ring-1 ring-info-line text-info hover:brightness-110 disabled:opacity-50"
             >
               {t('taskCenter.resume', 'Resume')}
             </button>

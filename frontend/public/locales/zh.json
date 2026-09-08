@@ -32,7 +32,8 @@
     "paused": "已暂停",
     "resume": "恢复",
     "pause": "暂停",
-    "resumed": "已恢复"
+    "pauseSent": "将在下一步暂停",
+    "pauseFailed": "暂停失败"
   },
   "nav": {
     "linkParser": "链接解析",
@@ -1195,8 +1196,7 @@
     "completed": "已完成",
     "failed": "失败",
     "retry": "重试",
-    "retrying": "重试中",
-    "queued": "排队中"
+    "retrying": "重试中"
   },
   "billing": {
     "title": "账单",
@@ -5593,7 +5593,15 @@
     "pausing": "暂停中…",
     "resume": "恢复",
     "resuming": "恢复中…",
-    "reason": "原因"
+    "reason": "原因",
+    "controlError": {
+      "already_paused": "已经处于暂停",
+      "not_paused": "已不在暂停状态",
+      "run_state_unavailable": "运行状态暂不可读，稍后再试",
+      "forbidden": "你无权控制这个 issue",
+      "not_found": "找不到该 issue",
+      "generic": "无法更新该 issue"
+    }
   },
   "issues": {
     "pageTitle": "待办事项",

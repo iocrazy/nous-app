@@ -208,14 +208,20 @@ def _needs_input_item(r: dict) -> NeedsInputItem:
     )
 
 
+# Page size of GET /paused; the response flags overflow instead of hiding it.
+PAUSED_PAGE = 50
+
+
 @router.get("/paused", response_model=PausedListResponse)
 async def list_paused(auth: AuthDep) -> PausedListResponse:
     """Issues a person paused (phase 2a §2/§4) — the Task Center Paused
     section and the attention strip. Same route-ordering trap as
     /needs-input: declared before GET /{issue_id} or the int converter 422s
     the literal segment."""
-    rows = await issue_repository.list_paused(str(auth.user_id))
+    rows = await issue_repository.list_paused(str(auth.user_id), limit=PAUSED_PAGE + 1)
+    has_more = len(rows) > PAUSED_PAGE
     return PausedListResponse(
+        has_more=has_more,
         items=[
             PausedIssueItem(
                 issue_id=str(r["id"]),
@@ -232,8 +238,8 @@ async def list_paused(auth: AuthDep) -> PausedListResponse:
                     else None
                 ),
             )
-            for r in rows
-        ]
+            for r in rows[:PAUSED_PAGE]
+        ],
     )
 
 

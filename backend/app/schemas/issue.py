@@ -227,6 +227,8 @@ class PausedIssueItem(BaseModel):
 
 class PausedListResponse(BaseModel):
     items: list[PausedIssueItem]
+    # True when more issues are paused than the page holds (the UI says "50+").
+    has_more: bool = False
 
 
 class NeedsInputItem(BaseModel):

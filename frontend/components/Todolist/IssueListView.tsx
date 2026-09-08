@@ -235,7 +235,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
       : phase === 'running' ? t('issues.action.steer', 'Steer')
         : phase === 'paused' ? t('issues.action.resume', 'Resume')
           : null;
-  const queuedLabel = queuedChip(queued);
+  const queuedLabel = queuedChip(queued, t);
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -254,8 +254,8 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
       )}
       <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
       {runningLabel && (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-ok bg-ok-soft shrink-0" title="An agent is working on this">
-          <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-agent bg-agent-soft shrink-0" title="An agent is working on this">
+          <span className="w-1.5 h-1.5 rounded-full bg-agent animate-pulse" />
           {runningLabel}
         </span>
       )}
@@ -571,8 +571,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       scopedIssues.filter((i) => i.status === 'in_review'),
       scopedIssues.filter((i) => issuePhase(i) === 'paused'),
       pendingSummary,
+      t,
     ),
-    [needsInputItems, approvals, scopedIssues, pendingSummary],
+    [needsInputItems, approvals, scopedIssues, pendingSummary, t],
   );
 
   // The needs-input feed carries no identifier, and the detail route is keyed

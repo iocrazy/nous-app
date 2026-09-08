@@ -121,13 +121,21 @@ describe('buildAttentionItems — paused vs queued', () => {
   });
 
   it('turns into a queued card carrying the count when the inbox has mail', () => {
-    const items = buildAttentionItems([], [], [], [paused], { '5005': { count: 2, oldestAt: '2026-09-08T00:00:00Z' } });
+    const items = buildAttentionItems([], [], [], [paused], { '5005': { count: 2 } });
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ type: 'queued', id: 'queued:5005', detail: '2 queued', issueId: 5005 });
   });
 
   it('ignores summary rows for issues that are not paused', () => {
-    const items = buildAttentionItems([], [], [], [], { '5005': { count: 2, oldestAt: '2026-09-08T00:00:00Z' } });
+    const items = buildAttentionItems([], [], [], [], { '5005': { count: 2 } });
     expect(items).toHaveLength(0);
+  });
+});
+
+describe('buildAttentionItems — queued detail goes through t', () => {
+  it('uses the caller\'s t for the queued count', () => {
+    const paused = { id: 5, identifier: 'N-5', title: 'p', status: 'in_progress', raw: { paused_at: 'x' } } as unknown as UiIssue;
+    const items = buildAttentionItems([], [], [], [paused], { '5': { count: 2 } }, (_k, o) => `${o.count} 条排队`);
+    expect(items[0].detail).toBe('2 条排队');
   });
 });

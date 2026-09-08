@@ -4,7 +4,7 @@
  * One column per IssueStatus, each on an island-2 surface with a status-hued
  * hairline across its top so the columns read as a spectrum. Cards are compact
  * — status icon + priority + ID + title + assignee + last activity, plus an
- * amber "running" pulse when an agent is working the issue. Click a card →
+ * agent-tinted "running" pulse when an agent is working the issue. Click a card →
  * navigate to detail (same target as the list rows).
  */
 
@@ -12,7 +12,7 @@ import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
-import { issuePhase } from './issuePhase';
+import { PHASE_FALLBACK, PHASE_LABEL_KEY, issuePhase } from './issuePhase';
 import type { UiIssue } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -28,7 +28,9 @@ interface IssueBoardViewProps {
 /** Why a blocked card is blocked — the full text (the chip clips it, the
  *  tooltip and the detail page's Reason row carry all of it). */
 export function blockedReason(issue: UiIssue): string | null {
-  if (issue.status !== 'blocked') return null;
+  // Same gate as the detail rail (StatusBlock): the derived phase, not the raw
+  // status — a paused issue whose status is still `blocked` reads as paused.
+  if (issuePhase(issue) !== 'blocked') return null;
   const state = (issue.raw?.execution_state as Record<string, unknown> | null) ?? null;
   const text = (state?.error_message as string | null | undefined) ?? (state?.outcome_reason as string | null | undefined) ?? null;
   return text && text.trim() ? text : null;
@@ -58,7 +60,7 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string; queued?: number }> =
   const runningLabel = runningChipLabel(issue, new Date());
   const needsReply = needsReplyChip(issue);
   const phase = issuePhase(issue);
-  const queuedLabel = queuedChip(queued);
+  const queuedLabel = queuedChip(queued, t);
   const reason = blockedReason(issue);
   // Card-level verb, same rule as the list row: Reply when it waits, Steer
   // when it runs, Resume when a person paused it.
@@ -75,8 +77,8 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string; queued?: number }> =
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="font-mono text-[9px] text-ink-500 uppercase tracking-wider">{issue.identifier}</span>
         {runningLabel && (
-          <span className="inline-flex items-center gap-1 text-[9px] text-ok truncate" title="An agent is working on this">
-            <span className="w-1 h-1 rounded-full bg-ok animate-pulse shrink-0" />
+          <span className="inline-flex items-center gap-1 text-[9px] text-agent truncate" title="An agent is working on this">
+            <span className="w-1 h-1 rounded-full bg-agent animate-pulse shrink-0" />
             {runningLabel}
           </span>
         )}
@@ -104,7 +106,7 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string; queued?: number }> =
       <div className="flex items-center gap-1.5 text-[9px] text-ink-500 group">
         {phase !== 'idle' && phase !== 'done' && (
           <span data-testid="board-phase-chip" data-phase={phase} className="inline-flex items-center px-1 py-0.5 rounded bg-ink-800 text-ink-400">
-            {t(`issueDetail.phase.${phase}`, phase.replace(/_/g, ' '))}
+            {t(PHASE_LABEL_KEY[phase], PHASE_FALLBACK[phase])}
           </span>
         )}
         {queuedLabel && (

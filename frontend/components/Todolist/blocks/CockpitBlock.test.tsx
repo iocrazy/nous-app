@@ -6,6 +6,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CockpitBlockView } from './CockpitBlock';
+import { IssueControlError } from '../../../services/issuesService';
 import type { IssueBlockContext } from '../issueBlocks';
 import type { IssueProgress } from '../../../services/issuesService';
 
@@ -65,12 +66,21 @@ describe('CockpitBlockView — pause / resume (phase 2a §2)', () => {
     await waitFor(() => expect(resumeIssue).toHaveBeenCalledWith(5));
   });
 
-  it('shows the failure on the cockpit instead of swallowing it', async () => {
-    resumeIssue.mockRejectedValueOnce(new Error('run_state_unavailable'));
+  it('shows the failure on the cockpit as copy for the code, never the raw body', async () => {
+    // The service's documented rejection: code from detail.code, message = server text.
+    resumeIssue.mockRejectedValueOnce(new IssueControlError('run_state_unavailable', 503, 'run state unavailable'));
     render(<CockpitBlockView ctx={ctx('paused', vi.fn(), false)} />);
     fireEvent.click(screen.getByTestId('cockpit-resume'));
     const err = await screen.findByTestId('cockpit-control-error');
-    expect(err.textContent).toBe('run_state_unavailable');
+    expect(err.textContent).toBe('Run state unavailable — try again in a moment');
+  });
+
+  it('says generic for a network failure instead of leaking the stack', async () => {
+    pauseIssue.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(<CockpitBlockView ctx={ctx('running')} />);
+    fireEvent.click(screen.getByTestId('cockpit-pause'));
+    const err = await screen.findByTestId('cockpit-control-error');
+    expect(err.textContent).toBe('Could not update the issue');
   });
 
   it('draws no controls when the issue is idle', () => {

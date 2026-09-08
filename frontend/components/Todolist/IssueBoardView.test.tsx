@@ -11,7 +11,12 @@ import type { UiIssue } from './types';
 import type { Issue } from '../../services/issuesService';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, fallback?: string) => fallback ?? key }),
+  // i18next-shaped: a string second arg is the fallback, an object carries
+  // count + defaultValue (queuedChip's call).
+  useTranslation: () => ({
+    t: (key: string, arg?: string | { count?: number; defaultValue?: string }) =>
+      typeof arg === 'object' && arg ? (arg.defaultValue ?? key).replace('{{count}}', String(arg.count)) : arg ?? key,
+  }),
 }));
 
 afterEach(cleanup);
@@ -72,6 +77,12 @@ describe('IssueBoardView — phase 2a §4 card footer', () => {
     const chip = screen.getByTestId('board-blocked-reason');
     expect(chip.textContent).toBe(`${'x'.repeat(BOARD_REASON_MAX)}…`);
     expect(chip.getAttribute('title')).toBe(full);
+  });
+
+  it('gates the reason on the derived phase: a paused issue whose status is still blocked reads as paused', () => {
+    renderBoard([mk({ id: 10, identifier: 'MH-10', title: 'Paused but blocked', status: 'blocked' }, { paused_at: '2026-09-08T00:00:00Z', execution_state: { error_message: 'stale' } })]);
+    expect(screen.queryByTestId('board-blocked-reason')).toBeNull();
+    expect(screen.getByTestId('board-phase-chip').getAttribute('data-phase')).toBe('paused');
   });
 
   it('falls back to outcome_reason and stays silent when there is no reason', () => {

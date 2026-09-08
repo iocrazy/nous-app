@@ -6,6 +6,8 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PausedSection } from './PausedSection';
+import { IssueControlError } from '../../services/issuesService';
+import { notifyIssuePauseChanged } from './issuePauseSignal';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, fallback?: string) => fallback ?? key }),
@@ -29,14 +31,14 @@ beforeEach(() => {
 
 describe('PausedSection', () => {
   it('renders nothing when nothing is paused', async () => {
-    listPaused.mockResolvedValue({ items: [] });
+    listPaused.mockResolvedValue({ items: [], has_more: false });
     const { container } = render(<PausedSection />);
     await waitFor(() => expect(listPaused).toHaveBeenCalled());
     expect(container.firstChild).toBeNull();
   });
 
   it('lists paused issues and resumes one, dropping the row once the refetch no longer returns it', async () => {
-    listPaused.mockResolvedValueOnce({ items: [ROW] }).mockResolvedValueOnce({ items: [] });
+    listPaused.mockResolvedValueOnce({ items: [ROW], has_more: false }).mockResolvedValueOnce({ items: [], has_more: false });
     render(<PausedSection />);
     expect(await screen.findByText('Paused with mail')).toBeTruthy();
     fireEvent.click(screen.getByTestId('paused-resume'));
@@ -45,12 +47,28 @@ describe('PausedSection', () => {
   });
 
   it('keeps the row and shows the failure when resume is rejected', async () => {
-    listPaused.mockResolvedValue({ items: [ROW] });
-    resumeIssue.mockRejectedValueOnce(new Error('run_state_unavailable'));
+    listPaused.mockResolvedValue({ items: [ROW], has_more: false });
+    resumeIssue.mockRejectedValueOnce(new IssueControlError('not_paused', 409, 'issue is not paused'));
     render(<PausedSection />);
     await screen.findByText('Paused with mail');
     fireEvent.click(screen.getByTestId('paused-resume'));
-    expect(await screen.findByText('run_state_unavailable')).toBeTruthy();
+    expect(await screen.findByText('Not paused any more')).toBeTruthy();
     expect(screen.getByTestId('paused-row')).toBeTruthy();
+  });
+
+  it('says 50+ when the server flags overflow', async () => {
+    listPaused.mockResolvedValue({ items: [ROW], has_more: true });
+    render(<PausedSection />);
+    await screen.findByText('Paused with mail');
+    expect(screen.getByTestId('paused-count').textContent).toBe('1+');
+  });
+
+  it('refetches at once when a pause is signalled from elsewhere', async () => {
+    listPaused.mockResolvedValueOnce({ items: [], has_more: false }).mockResolvedValueOnce({ items: [ROW], has_more: false });
+    render(<PausedSection />);
+    await waitFor(() => expect(listPaused).toHaveBeenCalledTimes(1));
+    notifyIssuePauseChanged(5);
+    expect(await screen.findByText('Paused with mail')).toBeTruthy();
+    expect(listPaused).toHaveBeenCalledTimes(2);
   });
 });

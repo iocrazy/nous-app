@@ -197,8 +197,6 @@ export async function getIssue(issueId: number): Promise<Issue> {
   return _json<Issue>(res);
 }
 
-/** Issues currently waiting on a human answer — Task Center "Needs your
- * answer" section's data source (Task 3). */
 /** GET /issues/paused — issues a person paused (phase 2a §2/§4). Ids are
  *  strings (Snowflake), same convention as NeedsInputItem. */
 export interface PausedIssueItem {
@@ -211,13 +209,59 @@ export interface PausedIssueItem {
   assignee_agent_id: string | null;
 }
 
-export async function listPaused(): Promise<{ items: PausedIssueItem[] }> {
+export interface PausedListResponse {
+  items: PausedIssueItem[];
+  /** More are paused than the page holds (server page = 50). */
+  has_more: boolean;
+}
+
+export async function listPaused(): Promise<PausedListResponse> {
   const res = await fetch(`${_base}/paused`, { headers: await getAuthHeaders() });
-  return _json<{ items: PausedIssueItem[] }>(res);
+  const out = await _json<Partial<PausedListResponse>>(res);
+  return { items: out.items ?? [], has_more: out.has_more === true };
+}
+
+/** Typed rejection of the pause / resume controls (phase 2a §2). `code` is
+ *  the server's `detail.code` (`already_paused`, `not_paused`,
+ *  `run_state_unavailable`, …) or `http_<status>` when the body carried no
+ *  code — the UI maps codes to copy and never shows the raw body. */
+export class IssueControlError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'IssueControlError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/** Like `_json`, but a non-2xx becomes an IssueControlError carrying the
+ *  server's `detail.code` (FastAPI `{detail: {code, message}}` or a plain
+ *  string detail). */
+async function _controlJson<T>(res: Response): Promise<T> {
+  if (res.ok) return res.status === 204 ? (undefined as unknown as T) : res.json();
+  let code = `http_${res.status}`;
+  let message = `${res.status} ${res.statusText}`;
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    const detail = body?.detail;
+    if (detail && typeof detail === 'object') {
+      const d = detail as { code?: unknown; message?: unknown };
+      if (typeof d.code === 'string' && d.code) code = d.code;
+      if (typeof d.message === 'string' && d.message) message = d.message;
+    } else if (typeof detail === 'string' && detail) {
+      message = detail;
+    }
+  } catch (err) {
+    console.error('[issuesService] control error body was not JSON', err);
+  }
+  throw new IssueControlError(code, res.status, message);
 }
 
 /** POST /issues/{id}/pause (phase 2a §2): stamps paused_at and asks the live
- *  root run to stop at its next step boundary. 409 already_paused. */
+ *  root run to stop at its next step boundary. Rejects with IssueControlError
+ *  (409 already_paused, 503 run_state_unavailable). */
 export async function pauseIssue(
   issueId: number,
 ): Promise<{ issue_id: string; paused_at: string; run_id: string | null }> {
@@ -225,12 +269,12 @@ export async function pauseIssue(
     method: 'POST',
     headers: await getAuthHeaders(),
   });
-  return _json(res);
+  return _controlJson(res);
 }
 
 /** POST /issues/{id}/resume: clears paused_at; re-dispatches when there is
  *  queued work. `reason` says what happened (dispatched / withdrawn / running
- *  / parked / cleared). 409 not_paused. */
+ *  / parked / cleared). Rejects with IssueControlError (409 not_paused). */
 export async function resumeIssue(
   issueId: number,
 ): Promise<{ issue_id: string; dispatched: boolean; reason: string; workflow_id: string | null; run_id: string | null }> {
@@ -238,7 +282,7 @@ export async function resumeIssue(
     method: 'POST',
     headers: await getAuthHeaders(),
   });
-  return _json(res);
+  return _controlJson(res);
 }
 
 export async function listNeedsInput(): Promise<NeedsInputListResponse> {

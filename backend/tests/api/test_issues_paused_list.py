@@ -54,7 +54,8 @@ async def test_list_paused_endpoint_maps_rows(monkeypatch):
             "assignee_agent_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         }
     ]
-    r.issue_repository.list_paused.assert_awaited_once_with(ME)
+    r.issue_repository.list_paused.assert_awaited_once_with(ME, limit=r.PAUSED_PAGE + 1)
+    assert out.has_more is False
 
 
 def test_paused_route_is_declared_before_the_id_route():
@@ -88,3 +89,26 @@ async def test_repository_list_paused_uses_visibility_and_hidden_filters(monkeyp
     assert "paused_at is not null" in sql and "hidden_at is null" in sql
     assert "public.team_members" in sql
     assert "order by public.issues.paused_at desc" in sql
+
+
+async def test_list_paused_flags_overflow_instead_of_hiding_it(monkeypatch):
+    # Repo is asked for one more than a page; the extra row only sets has_more.
+    rows = [
+        {
+            "id": i,
+            "identifier": None,
+            "title": f"t{i}",
+            "paused_at": T0,
+            "team_id": None,
+            "project_id": None,
+            "assignee_agent_id": None,
+        }
+        for i in range(r.PAUSED_PAGE + 1)
+    ]
+    monkeypatch.setattr(
+        r, "issue_repository", SimpleNamespace(list_paused=AsyncMock(return_value=rows))
+    )
+    out = await r.list_paused(AUTH)
+    assert out.has_more is True
+    assert len(out.items) == r.PAUSED_PAGE
+    assert out.items[-1].issue_id == str(r.PAUSED_PAGE - 1)

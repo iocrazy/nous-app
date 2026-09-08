@@ -1,6 +1,8 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTaskCard } from './ActiveTaskCard';
+import { IssueControlError } from '../../services/issuesService';
+import { subscribeIssuePauseChanged } from './issuePauseSignal';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
 vi.mock('react-i18next', () => ({
@@ -155,6 +157,14 @@ describe('ActiveTaskCard — cockpit line + steer (harness P4 T11)', () => {
 });
 
 describe('ActiveTaskCard — target-level pause (phase 2a §2)', () => {
+  const signalled: number[] = [];
+  let off: () => void = () => {};
+  beforeEach(() => {
+    signalled.length = 0;
+    off = subscribeIssuePauseChanged((id) => signalled.push(id));
+  });
+  afterEach(() => off());
+
   it('offers Pause on an issue-backed run and calls pauseIssue with the issue id', async () => {
     pauseIssue.mockReset().mockResolvedValue({ issue_id: '48', paused_at: '2026-09-08T00:00:00Z', run_id: 'r1' });
     const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_issue_id: '48' } }));
@@ -164,15 +174,22 @@ describe('ActiveTaskCard — target-level pause (phase 2a §2)', () => {
     await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith(48));
     await waitFor(() => expect(btn.getAttribute('data-state')).toBe('paused'));
     expect(btn.disabled).toBe(true);
+    // Outcome in words, and the Paused section is told to refetch.
+    expect(container.querySelector('[data-testid="agent-pause-state"]')!.textContent).toBe('taskCenter.pauseSent');
+    expect(signalled).toEqual([48]);
   });
 
   it('marks the button failed when the pause is rejected', async () => {
-    pauseIssue.mockReset().mockRejectedValue(new Error('already_paused'));
+    pauseIssue.mockReset().mockRejectedValue(new IssueControlError('already_paused', 409, 'issue is already paused'));
     const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_issue_id: '48' } }));
     const btn = container.querySelector('[data-testid="agent-pause"]') as HTMLButtonElement;
     fireEvent.click(btn);
     await waitFor(() => expect(btn.getAttribute('data-state')).toBe('failed'));
     expect(btn.disabled).toBe(false);
+    const state = container.querySelector('[data-testid="agent-pause-state"]')!;
+    expect(state.textContent).toContain('taskCenter.pauseFailed');
+    expect(state.textContent).toContain('issueDetail.controlError.already_paused');
+    expect(signalled).toEqual([]);
   });
 
   it('offers no Pause on a conversation-backed run (conversations have no pause)', () => {
