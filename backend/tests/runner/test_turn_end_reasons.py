@@ -226,3 +226,34 @@ async def test_stream_turn_files_the_hook_stop_reason(reason):
     assert chunks[-1].tool_call_trace == []  # carried, like every terminal chunk
     ends = rec.turn_ends()
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends
+
+
+@pytest.mark.parametrize("reason", ["paused", "awaiting_input"])
+async def test_stream_turn_buffered_fallback_carries_the_hook_stop_reason(reason):
+    """Production ALWAYS takes this branch for chunk_callback turns: the chat
+    wiring hands stream_turn an LLMFallbackChain, which has no ``stream``, so
+    stream_turn delegates to run_turn and re-emits ONE terminal chunk. That
+    chunk must carry run_turn's ``stop_reason`` — it is the only thing the
+    chat service and the typed turn_end read. Found on the real stack
+    (2026-09-08, phase 2a Task 9): AskUser parked the run, the budget gate
+    halted it, PauseHook stopped it — and every one of them was filed as
+    ``turn_end{completed}`` with no marker, so the answer route said 409."""
+
+    class _NoStreamAdapter:  # no ``stream`` attribute on purpose
+        async def call(self, *a, **k):
+            raise AssertionError("must not call the model")
+
+    rec = _Rec()
+    chunks = []
+    async for ch in _runner(_NoStreamAdapter(), reason).stream_turn(
+        _composed(),
+        [{"role": "user", "content": "q"}],
+        recorder=rec,
+        auto_recorder=False,
+    ):
+        chunks.append(ch)
+    assert chunks and chunks[-1].finish_reason == "stop"
+    assert (chunks[-1].usage or {}).get("stop_reason") == reason
+    assert chunks[-1].tool_call_trace == []
+    ends = rec.turn_ends()
+    assert len(ends) == 1 and ends[0]["reason"] == reason, ends

@@ -522,6 +522,14 @@ class AgentRunner:
             )
             if _err_code:
                 usage = {**(usage or {}), "error_code": str(_err_code)[:80]}
+            # Phase 2a: a typed stop (paused / awaiting_input) is carried by
+            # run_turn's ``stop_reason`` — the terminal chunk's ``usage`` is
+            # the ONLY thing the chat service and classify_stream_end read,
+            # so forward it or the turn is filed as ``completed`` and the
+            # parked question / pause is lost (real-stack finding, Task 9).
+            _stop = result.get("stop_reason")
+            if _stop:
+                usage = {**(usage or {}), "stop_reason": str(_stop)}
             yield StreamChunk(
                 delta_text=result.get("content") or "",
                 finish_reason=(raw_choices[0].get("finish_reason") or "stop"),
