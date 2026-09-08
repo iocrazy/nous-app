@@ -245,6 +245,13 @@ def test_step_context_rejects_unknown_stop_reason():
 
 突变：删 `folds/question.py` 注册 → 折叠测红；映射表去掉 `paused` → 穷尽守卫红；流式路径改回裸 `return` → 流式分类测红（补一条 `classify_stream_end` 断言）。PR「复用/删除」：复用 `emit()`、`_Rec` 测试模式、`_PHASE_BY_REASON`；删除运行器两处 `"cancelled": True` 硬编码。
 
+**实施记录（2026-09-08，对抗评审后与本节接口的偏差，Task 3/6 按这里对）**：
+- `question_id` 用**事件自己的 transcript seq**（新增 `RunRecorder.next_event_seq`），不是 `step`——同一 step 里两个 AskUser 工具调用 / hook + 工具会撞 id；测试桩没有该属性时才回退 `step`。
+- singleton 是注册属性：`register_kind(kind, on_answer, *, singleton=True)` → id 为 `<kind>:<run>`；Task 6 注册 budget 时带 `singleton=True`，不再有硬编码的 `_SINGLETON_KINDS`。
+- `ask_question` 写入时校验 `kind` 已注册（`ValueError`）；事件没落行（无 recorder / `run_id` None / recorder 拒收）抛 `QuestionNotRecorded`，不再静默返回一个没人看得到的 Question。
+- `StepContext.stop` 的未知理由抛 `UnknownStopReason`，`StepHookChain.run` 对它**不**容纳（其它异常仍容纳），否则拼错理由会退化成静默 CONTINUE。
+- 运行器 `awaiting_input` 的 STOP 结果里 `question` 是 `Question.to_payload()` 形状（`question_id`），经 `question.payload_from_view` 从折叠视图（`id`）转回；流式终止 chunk 带 `tool_call_trace`。
+
 ---
 
 ### Task 3: AskUser 工具 + FinishIssue options + issue 侧挂起与回答

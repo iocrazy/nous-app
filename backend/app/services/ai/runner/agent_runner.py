@@ -615,6 +615,14 @@ class AgentRunner:
             )
             if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:
                 inc_metric("streaming_cancelled_cooperative")
+                # A terminal chunk carrying the stop reason (mirrors the
+                # hook_decision terminal chunks below) so classify_stream_end
+                # files paused / awaiting_input as themselves, not as cancel.
+                yield StreamChunk(
+                    finish_reason="stop",
+                    usage={"stop_reason": _step_ctx.stop_reason},
+                    tool_call_trace=tool_call_trace,
+                )
                 return
             if _step_ctx.injected:
                 messages.extend(_step_ctx.injected)
@@ -1349,6 +1357,33 @@ class AgentRunner:
             if todo_slot:
                 self.skill_tool.recorder = None
 
+    @staticmethod
+    def _stopped_response(step_ctx: "StepContext", recorder: Any) -> dict:
+        """The run_turn result for a hook STOP. ``stop_reason`` is the truth
+        (turn_end.STOP_REASON_TO_TURN_END); ``cancelled`` stays for callers
+        that predate typed stops. ``awaiting_input`` also hands back the
+        parked question in ``Question.to_payload()`` shape (``question_id``,
+        not the view's ``id``) so the dispatcher can build the marker
+        without a second read of the views."""
+        from app.services.ai.runner.question import payload_from_view
+
+        reason = step_ctx.stop_reason
+        base: dict[str, Any] = {
+            "content": "",
+            "raw": None,
+            "stop_reason": reason,
+            "cancelled": reason == "cancelled",
+        }
+        if reason == "awaiting_input":
+            views = getattr(recorder, "views", None) or {}
+            parked = (views.get("view") or {}).get("question")
+            return {
+                **base,
+                "awaiting_input": True,
+                "question": payload_from_view(parked) if parked else None,
+            }
+        return base
+
     async def _run_turn_inner(
         self,
         composed: ComposedSystemPrompt,
@@ -1486,12 +1521,7 @@ class AgentRunner:
                 parent_run_id=self.parent_run_id,
             )
             if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:
-                return {
-                    "content": "",
-                    "raw": None,
-                    "cancelled": True,
-                    "stop_reason": _step_ctx.stop_reason,
-                }
+                return self._stopped_response(_step_ctx, recorder)
             if _step_ctx.injected:
                 messages.extend(_step_ctx.injected)
 

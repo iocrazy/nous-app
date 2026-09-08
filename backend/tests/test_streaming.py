@@ -323,7 +323,12 @@ async def test_stream_turn_cooperative_cancel_stops_before_adapter():
         auto_recorder=False,
     ):
         chunks.append(chunk)
-    assert chunks == []
+    # Phase 2a: a hook STOP yields ONE terminal chunk carrying the reason
+    # (so paused / awaiting_input are not filed as a cancel) — still nothing
+    # from the adapter, no text.
+    assert len(chunks) == 1
+    assert chunks[0].delta_text is None and chunks[0].finish_reason == "stop"
+    assert chunks[0].usage == {"stop_reason": "cancelled"}
 
 
 # ─── #5: streaming path runs Pre/Post hooks (was bypassed entirely) ───

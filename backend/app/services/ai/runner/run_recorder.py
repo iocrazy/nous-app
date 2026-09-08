@@ -428,6 +428,15 @@ class RunRecorder:
         return self._event_writer
 
     @property
+    def next_event_seq(self) -> Optional[int]:
+        """The seq the next ``record_event`` will take — what a caller needs
+        to mint an id that names its own event (``question_id`` = ``q:<run>:<seq>``).
+        ``None`` when this recorder records nothing (no run row)."""
+        if self.run_id is None:
+            return None
+        return self._writer().seq + 1
+
+    @property
     def views(self) -> dict[str, Any]:
         """Current folded views (``view`` / ``cost``) for this run."""
         return self._writer().views if self.run_id is not None else empty_views()

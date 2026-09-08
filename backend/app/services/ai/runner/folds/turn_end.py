@@ -3,6 +3,7 @@ from app.services.ai.runner.run_projection import register
 _PHASE_BY_REASON = {
     "paused": "paused",
     "awaiting_approval": "waiting_input",
+    "awaiting_input": "waiting_input",
 }
 
 

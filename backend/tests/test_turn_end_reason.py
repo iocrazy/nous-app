@@ -35,6 +35,7 @@ EXIT_FUNCTIONS = (
     "_preflight_compact_and_budget",
     "_aborted_response",
     "_awaiting_approval_response",
+    "_stopped_response",
 )
 
 
@@ -438,7 +439,11 @@ def test_every_exit_marker_in_the_runner_source_is_known_to_the_classifier():
         assert m, f"exit function {fn} not found — guard would scan nothing"
         src += m.group(0)
 
-    flags = set(re.findall(r'"(cancelled|aborted|awaiting_approval)":\s*True', src))
+    flags = set(
+        re.findall(
+            r'"(cancelled|aborted|awaiting_approval|awaiting_input)":\s*True', src
+        )
+    )
     error_codes = set(re.findall(r'"error_code":\s*"([a-z_]+)"', src))
     hook_decisions = set(re.findall(r'"hook_decision":\s*"([a-z_]+)"', src))
     warnings = set(re.findall(r'"warning":\s*"([a-z_]+)"', src))

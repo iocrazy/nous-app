@@ -32,6 +32,13 @@ from typing import Any, Optional, Protocol, Sequence
 from loguru import logger
 
 
+class UnknownStopReason(ValueError):
+    """``ctx.stop(reason)`` with a reason ``turn_end.STOP_REASON_TO_TURN_END``
+    does not know. A programming error, never a runtime condition — so the
+    chain lets it escape instead of containing it like a flaky subscriber:
+    containing it would turn the intended STOP into a silent CONTINUE."""
+
+
 class StepDecision(str, Enum):
     CONTINUE = "continue"
     STOP = "stop"
@@ -56,6 +63,14 @@ class StepContext:
         self.injected.append(message)
 
     def stop(self, reason: str) -> StepDecision:
+        # Deferred import: turn_end imports events; keep this module leaf-light.
+        from app.services.ai.runner.turn_end import STOP_REASON_TO_TURN_END
+
+        if reason not in STOP_REASON_TO_TURN_END:
+            raise UnknownStopReason(
+                f"unknown stop reason {reason!r}; add it to "
+                "turn_end.STOP_REASON_TO_TURN_END"
+            )
         self.stop_reason = reason
         return StepDecision.STOP
 
@@ -104,6 +119,8 @@ class StepHookChain:
         for hook in self._hooks:
             try:
                 decision = await hook.before_llm_call(ctx)
+            except UnknownStopReason:
+                raise  # a bug in the hook's vocabulary, not a flaky subscriber
             except Exception as exc:  # noqa: BLE001 — contain, log, continue
                 logger.warning(
                     "[step_hooks] hook {} raised and was skipped: {!r}", hook.name, exc

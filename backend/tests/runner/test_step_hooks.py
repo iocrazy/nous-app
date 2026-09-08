@@ -38,7 +38,7 @@ class _Hook:
         if self._inject:
             ctx.inject(self._inject)
         if self._d is StepDecision.STOP:
-            return ctx.stop(self.name)
+            return ctx.stop("paused")  # any literal in STOP_REASON_TO_TURN_END
         return self._d
 
 
@@ -64,7 +64,7 @@ async def test_first_stop_wins_and_later_hooks_do_not_run():
     a, b, c = _Hook("a"), _Hook("b", StepDecision.STOP), _Hook("c")
     ctx = _ctx()
     assert await StepHookChain([a, b, c]).run(ctx) is StepDecision.STOP
-    assert ctx.stop_reason == "b"
+    assert ctx.stop_reason == "paused"
     assert (a.calls, b.calls, c.calls) == (1, 1, 0)
 
 
