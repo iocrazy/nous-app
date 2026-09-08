@@ -42,6 +42,17 @@ class TurnEndReason(str, Enum):
         "interrupted"  # closed after the fact by the sweeper (crash / lost heartbeat)
     )
     PAUSED = "paused"  # target-level pause (phase 2)
+    AWAITING_INPUT = "awaiting_input"  # parked on a typed question (phase 2a)
+
+
+# ``StepContext.stop(reason)`` literals → the turn-end word. One table, and
+# ``StepContext.stop`` refuses a reason that is not in it, so a hook cannot
+# invent a stop the transcript would misfile.
+STOP_REASON_TO_TURN_END: dict[str, "TurnEndReason"] = {
+    "cancelled": TurnEndReason.CANCELLED,
+    "paused": TurnEndReason.PAUSED,
+    "awaiting_input": TurnEndReason.AWAITING_INPUT,
+}
 
 
 # ── the markers the runner's exits carry, and what each one means ─────────
@@ -50,6 +61,7 @@ FLAG_MARKERS: dict[str, TurnEndReason] = {
     "cancelled": TurnEndReason.CANCELLED,
     "aborted": TurnEndReason.CANCELLED,
     "awaiting_approval": TurnEndReason.AWAITING_APPROVAL,
+    "awaiting_input": TurnEndReason.AWAITING_INPUT,
 }
 # run_turn ``error_code`` / stream ``usage.error_code`` literals.
 ERROR_CODE_MARKERS: dict[str, TurnEndReason] = {
@@ -81,6 +93,9 @@ def _finish_reason_of(raw: Any) -> Optional[str]:
 
 def classify_run_result(result: dict[str, Any]) -> tuple[TurnEndReason, dict[str, Any]]:
     """Reason + extra payload fields for a ``run_turn`` result dict."""
+    stop_reason = result.get("stop_reason")
+    if stop_reason in STOP_REASON_TO_TURN_END:
+        return STOP_REASON_TO_TURN_END[stop_reason], {}
     for key, reason in FLAG_MARKERS.items():
         if result.get(key):
             return reason, {}
@@ -119,6 +134,9 @@ def classify_stream_end(last_terminal: Any) -> tuple[TurnEndReason, dict[str, An
     trace = getattr(last_terminal, "tool_call_trace", None)
     if isinstance(trace, list):
         extra["tool_calls"] = len(trace)
+    stop_reason = usage.get("stop_reason")
+    if stop_reason in STOP_REASON_TO_TURN_END:
+        return STOP_REASON_TO_TURN_END[stop_reason], extra
     code = usage.get("error_code")
     if code in ERROR_CODE_MARKERS:
         return ERROR_CODE_MARKERS[code], {**extra, "error_code": code}
@@ -151,6 +169,7 @@ async def emit_turn_end(
 
 
 __all__ = [
+    "STOP_REASON_TO_TURN_END",
     "TURN_END_EVENT_TYPE",
     "TurnEndReason",
     "classify_exception",

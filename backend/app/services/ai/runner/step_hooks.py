@@ -56,6 +56,14 @@ class StepContext:
         self.injected.append(message)
 
     def stop(self, reason: str) -> StepDecision:
+        # Deferred import: turn_end imports events; keep this module leaf-light.
+        from app.services.ai.runner.turn_end import STOP_REASON_TO_TURN_END
+
+        if reason not in STOP_REASON_TO_TURN_END:
+            raise ValueError(
+                f"unknown stop reason {reason!r}; add it to "
+                "turn_end.STOP_REASON_TO_TURN_END"
+            )
         self.stop_reason = reason
         return StepDecision.STOP
 

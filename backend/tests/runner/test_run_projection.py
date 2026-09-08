@@ -188,3 +188,61 @@ def test_legacy_todos_mirror_carries_the_items_from_view():
     assert out["counts"] == {"total": 2, "completed": 1, "in_progress": 1}
     assert [t["id"] for t in out["todos"]] == [1, 2]
     assert _legacy_todos({}) is None
+
+
+# ── phase 2a: typed question (folds/question.py) ─────────────────────────
+
+
+def test_question_asked_lands_in_view_and_answer_clears_it():
+    v = rp.empty_views()
+    assert v["view"]["question"] is None and v["view"]["last_answer"] is None
+    q = {
+        "question_id": "q:7:3",
+        "kind": "user",
+        "prompt": "Which ending?",
+        "options": [{"label": "Twist", "description": None}],
+        "allow_free_text": True,
+        "asked_at": "2026-09-07T00:00:00Z",
+    }
+    v = rp.apply(v, "question_asked", q)
+    assert v["view"]["question"]["id"] == "q:7:3"
+    assert v["view"]["question"]["options"][0]["label"] == "Twist"
+    assert v["view"]["question"]["kind"] == "user"
+    v = rp.apply(
+        v,
+        "question_answered",
+        {"question_id": "q:7:3", "value": "Twist", "superseded": False},
+    )
+    assert v["view"]["question"] is None
+    assert v["view"]["last_answer"] == {
+        "id": "q:7:3",
+        "value": "Twist",
+        "superseded": False,
+    }
+
+
+def test_question_events_without_an_id_say_nothing():
+    v = rp.empty_views()
+    assert rp.apply(v, "question_asked", {"prompt": "x"}) is v
+    assert rp.apply(v, "question_answered", {"value": "x"}) is v
+
+
+def test_question_asked_drops_malformed_options_and_caps_lengths():
+    v = rp.apply(
+        rp.empty_views(),
+        "question_asked",
+        {
+            "question_id": "q:1:1",
+            "prompt": "p" * 900,
+            "options": [{"label": "ok"}, {"nope": 1}, "str", {"label": 3}],
+        },
+    )
+    qv = v["view"]["question"]
+    assert [o["label"] for o in qv["options"]] == ["ok"]
+    assert len(qv["prompt"]) == 500
+    assert qv["allow_free_text"] is True
+
+
+def test_turn_end_awaiting_input_maps_to_waiting_input():
+    v = rp.apply(rp.empty_views(), "turn_end", {"reason": "awaiting_input"})
+    assert v["view"]["phase"] == "waiting_input"

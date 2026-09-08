@@ -45,6 +45,8 @@ def empty_views() -> Views:
             "ended": None,
             "inbox_pending": 0,
             "budget": None,
+            "question": None,
+            "last_answer": None,
             "revision": 0,
         },
         "cost": {
@@ -104,6 +106,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     compaction,
     context,
     inbox,
+    question,
     retry,
     step,
     todo,
