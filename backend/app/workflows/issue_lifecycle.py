@@ -105,6 +105,7 @@ async def set_status(
 
     from app.db.session import write_scope
     from app.models import Issues
+    from app.repositories.issue_repository import PAUSE_CLEARING_STATUSES
 
     now_dt = datetime.now(timezone.utc)
     values: dict[str, Any] = {"status": status}
@@ -114,6 +115,11 @@ async def set_status(
         values["completed_at"] = now_dt
     elif status == "cancelled":
         values["cancelled_at"] = now_dt
+    if status in PAUSE_CLEARING_STATUSES:
+        # Phase 2a: a pause is non-terminal. The agent's own terminal landing
+        # ends it too (the rollup reads paused_at first) — same rule as
+        # IssueRepository.transition_status, the other status writer.
+        values["paused_at"] = None
     state: dict[str, Any] = {}
     writes_error = bool(error_code or error_message)
     if writes_error:
@@ -918,14 +924,6 @@ async def _run_dispatch_with_continuation(
         # too — a human may have closed the issue while the agent was waiting.
         fresh = await load_issue(issue_id)
         fresh_status = (fresh or {}).get("status")
-        if (fresh or {}).get("paused_at"):
-            # Target-level pause (phase 2a): no turn starts while paused. The
-            # status is left as is (in_progress) — ``paused_at`` is the truth
-            # and ``/resume`` clears it and re-dispatches.
-            logger.info(
-                f"[execute_issue] issue {issue_id} is paused; not starting a turn"
-            )
-            return _paused_result(issue_id, res, attempt, wait_rounds)
         if fresh_status in PREEMPT_STATUSES:
             logger.info(
                 f"[execute_issue] issue {issue_id} externally set to "
@@ -976,6 +974,21 @@ async def _run_dispatch_with_continuation(
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_reply(issue_id, payload)
         else:
+            if (fresh or {}).get("paused_at"):
+                # Target-level pause (phase 2a): no FRESH turn starts while
+                # paused. Checked here, not at the loop top, so a pending
+                # needs_input park (branch above) still lands before the
+                # pause returns — otherwise the agent's question is lost.
+                # The status is left as is (in_progress); ``paused_at`` is
+                # the truth and ``/resume`` clears it and re-dispatches.
+                # A reply turn after a wake is deliberately NOT gated: an
+                # answer is a wake (spec §2), and the run it starts is a new
+                # row, so the pause the human requested earlier does not
+                # reach it — the next continuation is where it stops.
+                logger.info(
+                    f"[execute_issue] issue {issue_id} is paused; not starting a turn"
+                )
+                return _paused_result(issue_id, res, attempt, wait_rounds)
             turn_no += 1
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_turn(

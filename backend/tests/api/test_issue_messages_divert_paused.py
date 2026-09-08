@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
 
 from app.schemas.issue_message import IssueMessagePost
 
@@ -86,15 +85,41 @@ async def test_comment_on_an_unpaused_idle_issue_still_wakes(monkeypatch):
     dispatch.assert_called_once()
 
 
-async def test_typed_answer_while_paused_is_409_issue_paused(monkeypatch):
+async def test_typed_answer_while_paused_wakes_the_parked_workflow(monkeypatch):
+    """Spec §2: an answer IS a wake. It is neither refused nor queued while
+    paused — the parked workflow's recv TTL keeps counting during a pause, so
+    a refusal could strand the question."""
     r, inbox_repo, store, wake, dispatch = _wire(
         monkeypatch, running=None, paused_at="2026-09-08T00:00:00+00:00"
     )
-    with pytest.raises(HTTPException) as ei:
-        await r.post_issue_message(
-            5, IssueMessagePost(body="A", answer_to="q:1:2"), AUTH
-        )
-    assert ei.value.status_code == 409
-    assert ei.value.detail["code"] == "issue_paused"
+    pending = SimpleNamespace(
+        question_id="q:1:2", value="A", kind="user", run_id="1", workflow_id="wf"
+    )
+    monkeypatch.setattr(r, "_validate_typed_answer", AsyncMock(return_value=pending))
+    commit = AsyncMock()
+    monkeypatch.setattr(r, "_commit_typed_answer", commit)
+    wake.return_value = True
+    resp = await r.post_issue_message(
+        5, IssueMessagePost(body="A", answer_to="q:1:2"), AUTH
+    )
+    assert resp.diverted_to_inbox is False and resp.agent_dispatched is True
     inbox_repo.enqueue.assert_not_awaited()
-    store.append_user_message.assert_not_awaited()
+    wake.assert_awaited_once()
+    commit.assert_awaited_once_with(pending)
+
+
+async def test_run_state_read_failure_is_not_treated_as_idle(monkeypatch):
+    """A failed running_root_run_id read must not fall through to the wake
+    path (that would start a second turn behind a live one)."""
+    r, inbox_repo, store, wake, dispatch = _wire(
+        monkeypatch, running=None, paused_at=None
+    )
+    import app.repositories.agent_runs_repository as runs_repo_mod
+
+    runs_repo_mod.get_agent_runs_repository().running_root_run_id.side_effect = (
+        RuntimeError("db down")
+    )
+    with pytest.raises(RuntimeError):
+        await r.post_issue_message(5, IssueMessagePost(body="go"), AUTH)
+    wake.assert_not_awaited()
+    dispatch.assert_not_called()

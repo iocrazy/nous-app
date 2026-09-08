@@ -744,8 +744,10 @@ class AgentRunsRepository(AsyncpgRepository):
                 ).scalar_one_or_none()
             return int(row) if row is not None else None
         except Exception as e:
+            # A failed read must not read as "nothing running": callers pause,
+            # resume or divert on this answer. Raise; they type the failure.
             logger.error(f"[agent_runs] running_root_run_id failed: {e}")
-            return None
+            raise
 
     async def spent_cents_for_issue(
         self,

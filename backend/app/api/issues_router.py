@@ -492,12 +492,10 @@ async def pause_issue(issue_id: int, auth: AuthDep) -> IssuePauseResponse:
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "already_paused", "message": "issue is already paused"},
         )
+    runs = get_agent_runs_repository()
+    run_id = await _running_root_run(runs, issue_id, _conversation_key(existing))
     now = datetime.now(timezone.utc)
     updated = await issue_repository.set_paused_at(issue_id, now)
-    runs = get_agent_runs_repository()
-    run_id = await runs.running_root_run_id(
-        issue_id=issue_id, conversation_id=_conversation_key(existing)
-    )
     if run_id is not None:
         requested = await runs.request_pause(run_id)
         if not requested:
@@ -536,18 +534,29 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
     """Resume a paused issue — and the "run the queued comments" button for
     an idle one. Decision table (``paused`` = ``paused_at`` set, ``pending`` =
     unclaimed inbox items on the issue, ``last_paused`` = newest root run
-    ended on a pause):
+    ended on a pause), first match wins:
 
-    - neither paused nor pending           → 409 ``not_paused``
-    - paused, a root run still running     → withdraw its pause request; the
-                                             run keeps going (no dispatch)
-    - pending or last_paused               → write
-                                             ``execution_state.resumed_from_run_id``
-                                             then dispatch ``execute_issue``
-    - paused only (e.g. parked on a question) → clear the flag; the parked
-                                             workflow is still waiting
+    - neither paused nor pending                → 409 ``not_paused``
+    - a root run is live, paused                → withdraw its pause request;
+                                                  it keeps going (``withdrawn``).
+                                                  If the withdrawal finds the
+                                                  run already ended, fall
+                                                  through as "not running".
+    - a root run is live, not paused            → nothing to dispatch: the run
+                                                  claims the queue at its next
+                                                  step boundary (``running``)
+    - execution lock held, no live run          → a workflow is parked on a
+                                                  question (``parked``) or is
+                                                  between turns (``running``);
+                                                  a second dispatch would only
+                                                  lose on ``atomic_checkout``
+    - pending or last_paused                    → write
+                                                  ``execution_state.resumed_from_run_id``,
+                                                  clear the flag, dispatch
+                                                  (``dispatched``)
+    - otherwise (e.g. paused while idle)        → clear the flag (``cleared``)
 
-    The flag is cleared right before the re-dispatch (the new workflow reads
+    The flag is cleared right before a re-dispatch (the new workflow reads
     it) and restored when the dispatch fails, so a failed resume leaves the
     issue visibly paused instead of silently idle."""
     from app.repositories.agent_run_inbox_repository import (
@@ -569,27 +578,56 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
         )
     runs = get_agent_runs_repository()
     conversation_id = _conversation_key(existing)
+    running = await _running_root_run(runs, issue_id, conversation_id)
 
-    if paused:
-        running = await runs.running_root_run_id(
-            issue_id=issue_id, conversation_id=conversation_id
-        )
-        if running is not None:
-            # The pause was requested but not yet observed: withdraw it and
-            # let the run continue — a second dispatch would only lose on the
-            # execution lock.
-            await runs.clear_pause_request(running)
+    if running is not None:
+        if not paused:
+            return IssueResumeResponse(
+                issue_id=str(issue_id),
+                dispatched=False,
+                reason="running",
+                run_id=str(running),
+            )
+        if await runs.clear_pause_request(running):
             await issue_repository.set_paused_at(issue_id, None)
             return IssueResumeResponse(
-                issue_id=str(issue_id), dispatched=False, run_id=str(running)
+                issue_id=str(issue_id),
+                dispatched=False,
+                reason="withdrawn",
+                run_id=str(running),
             )
+        # The run ended between the two reads (PauseHook fired, or it finished):
+        # "keeps going" would be a lie. Re-read and decide as if nothing ran.
+        logger.info(
+            f"[issues] resume {issue_id}: run {running} ended before the pause "
+            "could be withdrawn"
+        )
+        existing = await _load_visible_issue(issue_id, auth)
+
+    if existing.get("execution_locked_at"):
+        marker = (existing.get("execution_state") or {}).get("awaiting_input") or {}
+        parked = bool(marker) and not marker.get("answered_at")
+        if paused:
+            await issue_repository.set_paused_at(issue_id, None)
+        return IssueResumeResponse(
+            issue_id=str(issue_id),
+            dispatched=False,
+            reason="parked" if parked else "running",
+            workflow_id=(
+                str(existing["dbos_workflow_id"])
+                if existing.get("dbos_workflow_id")
+                else None
+            ),
+        )
 
     last_paused = await _last_run_ended_paused(
         runs, issue_id=issue_id, conversation_id=conversation_id
     )
     if pending == 0 and last_paused is None:
         await issue_repository.set_paused_at(issue_id, None)
-        return IssueResumeResponse(issue_id=str(issue_id), dispatched=False)
+        return IssueResumeResponse(
+            issue_id=str(issue_id), dispatched=False, reason="cleared"
+        )
 
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(
@@ -614,8 +652,30 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
             await issue_repository.set_paused_at(issue_id, existing["paused_at"])
         raise
     return IssueResumeResponse(
-        issue_id=str(issue_id), dispatched=True, workflow_id=workflow_id
+        issue_id=str(issue_id),
+        dispatched=True,
+        reason="dispatched",
+        workflow_id=workflow_id,
     )
+
+
+async def _running_root_run(runs, issue_id: int, conversation_id: Optional[int]):
+    """The live ROOT run on the issue, or None. A failed read is NOT "nothing
+    running" (CLAUDE.md: an empty answer is not a negative result) — it is a
+    503 the caller can retry, never a silent pause/resume of the wrong thing."""
+    try:
+        return await runs.running_root_run_id(
+            issue_id=issue_id, conversation_id=conversation_id
+        )
+    except Exception as exc:  # noqa: BLE001 — typed at the boundary
+        logger.error(f"[issues] run-state read failed for issue {issue_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "run_state_unavailable",
+                "message": "could not read the issue's run state; retry",
+            },
+        )
 
 
 @router.get("/{issue_id}/pipeline-runs")

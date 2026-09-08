@@ -50,13 +50,14 @@
 **聊天路径不做**（一期 §8：会话续聊即 resume）；`conversation_ai_meta.paused_at` 留列不用。
 
 **实施记录（2026-09-08，Task 5 落地后与本节的偏差）**：
-- 暂停中带 `answer_to` 的回答 **不**沿 §1 通道唤醒，而是 409 `issue_paused`：唤醒挂起的 workflow 会在暂停目标上跑一轮 reply turn，改投收件箱又会丢掉回答语义；恢复后再答。上一段「带 `answer_to` 的回答不改投」只对未暂停的 issue 成立。
+- 暂停中带 `answer_to` 的回答**照常唤醒**（本节原文成立；一版曾改成 409，对抗评审指出挂起 workflow 的 recv TTL 在暂停期间照样计时，拒答会让长暂停把问题耗死）。唤醒后的那一轮 reply turn 是暂停唯一不拦的 turn（它是新 run 行，pause_requested 到不了它）；它若 `continue`，下一轮在循环里被 `paused_at` 挡住。
 - `resumed_from_run_id` 写在 **`issues.execution_state`**（恢复时新 run 的行还不存在，`metadata_json` 无处可写），值是上一 run 以 paused 收尾时的 id，否则 `null`（有待领条目但上一 run 正常结束）。
-- `/resume` 撞上「pause 已请求、run 还没到下一个 step 边界」：撤回 `pause_requested`、run 继续，不再派发第二个 run（会输在 execution lock 上）；响应 `dispatched=false, run_id=<那个 run>`。
+- `/resume` 的决策表（首个命中）：有活 run 且已暂停 → 撤回 `pause_requested`（`reason=withdrawn`；撤回落空说明 run 已结束，重读后按「没在跑」继续判）；有活 run 未暂停 → `running`，不派发（排队条目在它下一个 step 边界被认领）；`execution_locked_at` 持有但无活 run → 挂起在问题上（`parked`，带原 `dbos_workflow_id`）或 turn 之间（`running`），都不派发第二个 workflow（会输在 `atomic_checkout`，还会把 `dbos_workflow_id` 盖成死的）；有待领或上一 run 以 paused 收尾 → `dispatched`；否则 `cleared`。响应新增 `reason` 字段给 UI 原样展示。
+- `running_root_run_id` 读失败不再吞成 None（「空输出不是否定结论」）：仓储 raise，`/pause` `/resume` 回 503 `run_state_unavailable`、什么都不写；评论端点让它冒 500 而不是走唤醒路径。
 - `/resume` **先清 `paused_at` 再派发**（新 workflow 第一轮循环顶就读 `paused_at`，晚清会让它立刻自认暂停），派发失败则恢复原值，issue 仍可见为暂停。
-- dispatch 循环顶多一道 `paused_at` 检查：暂停中的 issue 不开新 turn（含 continuation / 唤醒后的 reply turn 之外的所有入口），status 不动。
+- dispatch 循环里多一道 `paused_at` 检查，位置在**开新 turn 的分支**而不是循环顶：一版放在循环顶，评审指出它排在 needs_input 挂起之前，暂停落在「turn 返回 needs_input → 循环顶」之间会把挂起整个丢掉（无 needs_followup、无标记、问题丢失）。
 - `request_pause(run_id, *, user_id=None)`：鉴权在目标层（issue visibility），团队成员可暂停别人开的 run，所以不按 run 行的 owner 过滤。
-- 「暂停中 cancel = 清 `paused_at`」落在 `issue_repository.transition_status`：进入 `cancelled/done/closed` 时一并清空，避免 rollup 把已取消的 issue 判成 paused。
+- 「暂停中 cancel = 清 `paused_at`」落在**两个**状态写入方：`issue_repository.transition_status` 与 `issue_lifecycle.set_status`（agent 自己的终态落地走后者，评审指出只改一处会让 done 的 issue 永远显示 paused）；集合 `PAUSE_CLEARING_STATUSES` 一处定义。
 
 ## 3. 预算 100% → 类型化追问（作者拍板）
 

@@ -634,18 +634,12 @@ async def post_issue_message(
     # An answer overrides the note / suppression paths (answering IS a wake),
     # skips inbox diversion (the parked workflow must be the one woken), and
     # is recorded only after delivery succeeded (see _commit_typed_answer).
-    # While the issue is PAUSED an answer is refused rather than queued: a
-    # steer on the inbox would lose its answer semantics, and waking the
-    # parked workflow would run a reply turn on a paused target.
+    # While the issue is PAUSED an answer still goes through (spec §2: an
+    # answer IS a wake): the parked workflow's recv TTL keeps counting during
+    # a pause, so refusing answers would let a long pause strand the question.
+    # The reply turn it starts is the one turn a pause does not gate; the
+    # dispatch loop stops the next continuation on ``paused_at``.
     paused = bool(issue_row.get("paused_at"))
-    if paused and payload.answer_to is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "issue_paused",
-                "message": "this issue is paused — resume it before answering",
-            },
-        )
     answer = await _validate_typed_answer(
         issue_row, payload.body, payload.answer_to, owner_id
     )

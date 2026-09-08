@@ -125,7 +125,7 @@ _ISSUE_TS_COLS = frozenset(
 
 # Terminal statuses that also end a target-level pause (phase 2a §2: "cancel
 # while paused clears paused_at"). Mirrors issue_lifecycle.PREEMPT_STATUSES.
-_PAUSE_CLEARING_STATUSES = frozenset({"cancelled", "done", "closed"})
+PAUSE_CLEARING_STATUSES = frozenset({"cancelled", "done", "closed"})
 
 
 def _coerce_temporal(key: str, value: Any) -> Any:
@@ -506,7 +506,7 @@ class IssueRepository:
 
         if dbos_workflow_id is not None:
             patch["dbos_workflow_id"] = dbos_workflow_id
-        if new_status in _PAUSE_CLEARING_STATUSES and (prev or {}).get("paused_at"):
+        if new_status in PAUSE_CLEARING_STATUSES and (prev or {}).get("paused_at"):
             # Phase 2a: a pause is a non-terminal state. Landing on a terminal
             # status ends it too — otherwise the rollup (paused_at wins) keeps
             # showing a cancelled/closed issue as paused.

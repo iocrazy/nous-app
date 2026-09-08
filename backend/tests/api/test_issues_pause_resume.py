@@ -33,6 +33,8 @@ def _issue(**kw):
         "ai_session_id": 55,
         "paused_at": None,
         "execution_state": {},
+        "execution_locked_at": None,
+        "dbos_workflow_id": "issue-7-old",
     }
     base.update(kw)
     return base
@@ -134,6 +136,7 @@ async def test_resume_with_pending_inbox_items_redispatches(wired):
     wired.inbox.pending_count.return_value = 2
     out = await r.resume_issue(7, AUTH)
     assert out.issue_id == "7" and out.dispatched is True
+    assert out.reason == "dispatched"
     assert out.workflow_id and out.workflow_id.startswith("issue-7-")
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
     wired.inbox.pending_count.assert_awaited_once_with(target_kind="issue", target_id=7)
@@ -171,6 +174,7 @@ async def test_resume_of_a_paused_but_idle_issue_just_clears_the_flag(wired):
     ]
     out = await r.resume_issue(7, AUTH)
     assert out.dispatched is False and out.workflow_id is None
+    assert out.reason == "cleared"
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
     wired.dispatch.assert_not_called()
     wired.merge.assert_not_awaited()
@@ -184,7 +188,7 @@ async def test_resume_while_the_run_has_not_observed_the_pause_withdraws_it(wire
     wired.inbox.pending_count.return_value = 1
     out = await r.resume_issue(7, AUTH)
     assert out.dispatched is False and out.workflow_id is None
-    assert out.run_id == "31"
+    assert out.run_id == "31" and out.reason == "withdrawn"
     wired.runs.clear_pause_request.assert_awaited_once_with(31)
     wired.dispatch.assert_not_called()
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
@@ -274,3 +278,76 @@ def test_dispatch_endpoint_reuses_the_shared_workflow_id_persist():
     start = inspect.getsource(r._start_execute_issue)
     assert "_persist_workflow_id(" in start and "SET LOCAL ROLE" not in start
     assert "SET LOCAL ROLE service_role" in inspect.getsource(r._persist_workflow_id)
+
+
+# ── review findings (2026-09-08) ───────────────────────────────────────────
+
+
+async def test_withdrawal_that_finds_the_run_gone_falls_through_to_dispatch(wired):
+    """PauseHook fired between the two reads: "keeps going" would be a lie.
+    Re-read and decide as if nothing ran — here the last run ended paused."""
+    wired.issue_repo.get_by_id.return_value = _issue(paused_at=NOW)
+    wired.runs.running_root_run_id.return_value = 31
+    wired.runs.clear_pause_request.return_value = False
+    wired.runs.list_for_issue.return_value = [
+        {"id": 31, "metadata_json": {"view": {"ended": {"reason": "paused"}}}}
+    ]
+    out = await r.resume_issue(7, AUTH)
+    assert out.dispatched is True and out.reason == "dispatched"
+    wired.merge.assert_awaited_once_with(7, {"resumed_from_run_id": "31"})
+    assert wired.issue_repo.get_by_id.await_count == 2  # re-read after the miss
+
+
+async def test_resume_with_a_parked_workflow_does_not_dispatch_a_second_one(wired):
+    """Parked on a question (lock held by the suspended workflow, no live
+    run): a fresh execute_issue would lose on atomic_checkout and the UI would
+    subscribe to a workflow that did nothing."""
+    wired.issue_repo.get_by_id.return_value = _issue(
+        paused_at=NOW,
+        execution_locked_at=NOW,
+        execution_state={"awaiting_input": {"question_id": "q:1:2"}},
+    )
+    wired.inbox.pending_count.return_value = 2
+    out = await r.resume_issue(7, AUTH)
+    assert out.dispatched is False and out.reason == "parked"
+    assert out.workflow_id == "issue-7-old"
+    wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
+    wired.dispatch.assert_not_called()
+    wired.persist.assert_not_awaited()
+
+
+async def test_resume_with_a_lock_but_no_marker_reports_running(wired):
+    wired.issue_repo.get_by_id.return_value = _issue(execution_locked_at=NOW)
+    wired.inbox.pending_count.return_value = 1
+    out = await r.resume_issue(7, AUTH)
+    assert out.dispatched is False and out.reason == "running"
+    wired.dispatch.assert_not_called()
+
+
+async def test_resume_of_an_unpaused_issue_with_a_live_run_does_not_dispatch(wired):
+    """Queued comments are claimed at the live run's next step boundary; a
+    second dispatch would clobber dbos_workflow_id with a dead one."""
+    wired.inbox.pending_count.return_value = 1
+    wired.runs.running_root_run_id.return_value = 31
+    out = await r.resume_issue(7, AUTH)
+    assert out.dispatched is False and out.reason == "running"
+    assert out.run_id == "31"
+    wired.runs.clear_pause_request.assert_not_awaited()
+    wired.dispatch.assert_not_called()
+    wired.issue_repo.set_paused_at.assert_not_awaited()
+
+
+@pytest.mark.parametrize("endpoint", ["pause_issue", "resume_issue"])
+async def test_run_state_read_failure_is_503_and_changes_nothing(wired, endpoint):
+    """A failed running_root_run_id read is not "nothing running"."""
+    wired.issue_repo.get_by_id.return_value = _issue(
+        paused_at=NOW if endpoint == "resume_issue" else None
+    )
+    wired.runs.running_root_run_id.side_effect = RuntimeError("db down")
+    with pytest.raises(HTTPException) as ei:
+        await getattr(r, endpoint)(7, AUTH)
+    assert ei.value.status_code == 503
+    assert ei.value.detail["code"] == "run_state_unavailable"
+    wired.issue_repo.set_paused_at.assert_not_awaited()
+    wired.runs.request_pause.assert_not_awaited()
+    wired.dispatch.assert_not_called()

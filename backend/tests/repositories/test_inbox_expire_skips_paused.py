@@ -26,7 +26,11 @@ def test_expire_stmt_excludes_items_targeting_paused_issues():
     assert "claimed_at is null" in sql and "expired_at is null" in sql
     # a correlated exclusion on issues.paused_at, keyed by the issue target
     assert "paused_at is not null" in sql
-    assert "target_kind" in sql and "not (" in sql or "not exists" in sql
+    # both halves of the guard: the kind AND the id subquery, under one NOT —
+    # without the kind, a conversation target sharing a paused issue's id
+    # would be spared too
+    assert "target_kind = " in sql
+    assert "not (" in sql
 
 
 def test_expire_stmt_without_the_flag_is_the_plain_sweep():

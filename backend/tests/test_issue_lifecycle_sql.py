@@ -465,3 +465,27 @@ async def test_set_status_survives_a_failing_stage_node_projection(monkeypatch):
 
     with patch("app.repositories.issue_repository.fire_stage_node_sync", boom):
         await il.set_status(7, "in_review")  # must not raise
+
+
+@pytest.mark.parametrize("terminal", ["done", "cancelled", "closed"])
+async def test_set_status_terminal_clears_paused_at(monkeypatch, terminal):
+    """Phase 2a: the agent's own terminal landing ends a target-level pause
+    (the rollup reads paused_at first — a done issue must not show paused)."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+    await il.set_status(7, terminal)
+    sql, binds = _last_update_call(session)
+    assert "paused_at=" in sql
+    assert binds["paused_at"] is None
+
+
+async def test_set_status_non_terminal_leaves_paused_at_alone(monkeypatch):
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+    await il.set_status(7, "in_progress")
+    sql, _ = _last_update_call(session)
+    assert "paused_at" not in sql

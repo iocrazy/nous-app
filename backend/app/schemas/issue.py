@@ -199,6 +199,15 @@ class IssueResumeResponse(BaseModel):
 
     issue_id: str
     dispatched: bool
+    # Why the resume did what it did — the UI (Task 8) shows it verbatim:
+    #   dispatched — a fresh execute_issue was started (workflow_id is its id)
+    #   withdrawn  — the pause had not been observed; the run keeps going (run_id)
+    #   running    — not paused, a run is live: queued comments are claimed at
+    #                its next step boundary, nothing to dispatch
+    #   parked     — the workflow holds the lock waiting on a question; the
+    #                answer wakes it (workflow_id is the parked one)
+    #   cleared    — nothing to run; only the flag was cleared
+    reason: str
     workflow_id: Optional[str] = None
     run_id: Optional[str] = None
 
