@@ -101,3 +101,33 @@ describe('buildAttentionItems — paused issues (harness P4)', () => {
     expect(buildAttentionItems([], [], [])).toEqual([]);
   });
 });
+
+// Phase 2a §4: a paused issue is a `paused` card; a paused issue WITH queued
+// comments becomes a `queued` card (resume is what runs them), never both.
+describe('buildAttentionItems — paused vs queued', () => {
+  const paused = {
+    id: 5005,
+    identifier: 'NOUS-9',
+    title: 'Paused with mail',
+    status: 'in_progress',
+    raw: { paused_at: '2026-09-08T00:00:00Z' },
+  } as unknown as UiIssue;
+
+  it('is a paused card when nothing is queued', () => {
+    const items = buildAttentionItems([], [], [], [paused]);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('paused');
+    expect(items[0].issueId).toBe(5005);
+  });
+
+  it('turns into a queued card carrying the count when the inbox has mail', () => {
+    const items = buildAttentionItems([], [], [], [paused], { '5005': { count: 2, oldestAt: '2026-09-08T00:00:00Z' } });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'queued', id: 'queued:5005', detail: '2 queued', issueId: 5005 });
+  });
+
+  it('ignores summary rows for issues that are not paused', () => {
+    const items = buildAttentionItems([], [], [], [], { '5005': { count: 2, oldestAt: '2026-09-08T00:00:00Z' } });
+    expect(items).toHaveLength(0);
+  });
+});

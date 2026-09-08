@@ -14,7 +14,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, HelpCircle, PauseCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, HelpCircle, PauseCircle, ShieldCheck, CheckCircle2, Layers } from 'lucide-react';
 
 import type { AttentionItem, AttentionType } from './attentionItems';
 
@@ -43,6 +43,7 @@ const CARD_STYLE: Record<AttentionType, string> = {
   approval: 'border-info-line bg-info-soft',
   review: 'border-ok-line bg-ok-soft',
   paused: 'border-info-line bg-info-soft',
+  queued: 'border-info-line bg-info-soft',
 };
 
 const CARD_ICON: Record<AttentionType, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -50,6 +51,7 @@ const CARD_ICON: Record<AttentionType, React.ComponentType<{ size?: number; clas
   approval: ShieldCheck,
   review: CheckCircle2,
   paused: PauseCircle,
+  queued: Layers,
 };
 
 const ICON_TINT: Record<AttentionType, string> = {
@@ -57,6 +59,7 @@ const ICON_TINT: Record<AttentionType, string> = {
   approval: 'text-info',
   review: 'text-ok',
   paused: 'text-info',
+  queued: 'text-info',
 };
 
 interface AttentionStripProps {

@@ -199,6 +199,48 @@ export async function getIssue(issueId: number): Promise<Issue> {
 
 /** Issues currently waiting on a human answer — Task Center "Needs your
  * answer" section's data source (Task 3). */
+/** GET /issues/paused — issues a person paused (phase 2a §2/§4). Ids are
+ *  strings (Snowflake), same convention as NeedsInputItem. */
+export interface PausedIssueItem {
+  issue_id: string;
+  identifier: string | null;
+  title: string;
+  paused_at: string;
+  team_id: string | null;
+  project_id: string | null;
+  assignee_agent_id: string | null;
+}
+
+export async function listPaused(): Promise<{ items: PausedIssueItem[] }> {
+  const res = await fetch(`${_base}/paused`, { headers: await getAuthHeaders() });
+  return _json<{ items: PausedIssueItem[] }>(res);
+}
+
+/** POST /issues/{id}/pause (phase 2a §2): stamps paused_at and asks the live
+ *  root run to stop at its next step boundary. 409 already_paused. */
+export async function pauseIssue(
+  issueId: number,
+): Promise<{ issue_id: string; paused_at: string; run_id: string | null }> {
+  const res = await fetch(`${_base}/${issueId}/pause`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  return _json(res);
+}
+
+/** POST /issues/{id}/resume: clears paused_at; re-dispatches when there is
+ *  queued work. `reason` says what happened (dispatched / withdrawn / running
+ *  / parked / cleared). 409 not_paused. */
+export async function resumeIssue(
+  issueId: number,
+): Promise<{ issue_id: string; dispatched: boolean; reason: string; workflow_id: string | null; run_id: string | null }> {
+  const res = await fetch(`${_base}/${issueId}/resume`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  return _json(res);
+}
+
 export async function listNeedsInput(): Promise<NeedsInputListResponse> {
   const res = await fetch(`${_base}/needs-input`, {
     headers: await getAuthHeaders(),

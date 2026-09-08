@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquarePlus, X } from 'lucide-react';
+import { MessageSquarePlus, Pause, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   formatSpeed,
@@ -12,6 +12,7 @@ import { formatElapsed } from './taskElapsed';
 import { retryProgress, todoProgress } from './agentRunPresentation';
 import { budgetState, contextGauge, currentStep, selectRunView } from './runView';
 import { deliverSteer, InboxTargetEndedError, type InboxTargetKind } from '../../services/agentInboxService';
+import { pauseIssue } from '../../services/issuesService';
 
 interface ActiveTaskCardProps {
   task: UnifiedTask;
@@ -41,6 +42,20 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
   const gauge = contextGauge(view);
   const budget = budgetState(view);
   const steerTarget = steerTargetOf(task);
+  // Phase 2a §2: target-level pause for issue-backed runs (the issue is the
+  // target; conversations have no pause). Typed outcome, never a silent no-op.
+  const [pauseState, setPauseState] = useState<'idle' | 'sending' | 'paused' | 'failed'>('idle');
+  const pause = async () => {
+    if (!steerTarget || steerTarget.kind !== 'issue' || pauseState === 'sending') return;
+    setPauseState('sending');
+    try {
+      await pauseIssue(Number(steerTarget.id));
+      setPauseState('paused');
+    } catch (err) {
+      console.error('[ActiveTaskCard] pause failed', err);
+      setPauseState('failed');
+    }
+  };
   const [steerOpen, setSteerOpen] = useState(false);
   const [steerText, setSteerText] = useState('');
   const [steerState, setSteerState] = useState<'idle' | 'sending' | 'sent' | 'ended' | 'failed'>('idle');
@@ -87,9 +102,22 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
               <span className="text-[10px] text-ink-500 truncate">{task.subtitle}</span>
             )}
             <span className="text-[10px] text-emerald-500/80 ml-auto shrink-0 tabular-nums">{elapsed}</span>
+            {steerTarget?.kind === 'issue' && (
+              <button
+                type="button"
+                onClick={() => void pause()}
+                disabled={pauseState === 'sending' || pauseState === 'paused'}
+                data-testid="agent-pause"
+                data-state={pauseState}
+                className={`p-0.5 rounded transition-colors shrink-0 ${pauseState === 'failed' ? 'text-danger' : pauseState === 'paused' ? 'text-info' : 'text-ink-600 hover:text-info'} disabled:opacity-60`}
+                title={pauseState === 'paused' ? t('issueDetail.phase.paused', 'Paused') : t('taskCenter.pause', 'Pause')}
+              >
+                <Pause size={12} />
+              </button>
+            )}
             <button
               onClick={() => onCancel(task.id)}
-              className="p-0.5 rounded text-ink-600 hover:text-red-400 transition-colors shrink-0"
+              className="p-0.5 rounded text-ink-600 hover:text-danger transition-colors shrink-0"
               title={t('common.cancel')}
             >
               <X size={12} />

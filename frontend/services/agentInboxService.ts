@@ -62,3 +62,19 @@ export async function listInbox(
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<InboxItem[]>;
 }
+
+/** Phase 2a §4: per-issue count of unclaimed steers for the issues the caller
+ *  can see — the "N queued" chips. Keyed by issue id (string, Snowflake). */
+export interface PendingSummaryEntry {
+  count: number;
+  oldestAt: string;
+}
+
+export async function fetchPendingSummary(): Promise<Record<string, PendingSummaryEntry>> {
+  const res = await fetch(`${base()}/pending-summary?target_kind=issue`, { headers: await getAuthHeaders() });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const rows = (await res.json()) as { target_id: string; count: number; oldest_at: string }[];
+  const out: Record<string, PendingSummaryEntry> = {};
+  for (const r of rows) out[String(r.target_id)] = { count: Number(r.count), oldestAt: r.oldest_at };
+  return out;
+}

@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Issue } from '../../services/issuesService';
 import type { UiIssue } from './types';
-import { runningChipLabel, needsReplyChip } from './issueChips';
+import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
 
 const NOW = new Date('2026-08-03T00:10:00Z');
 
@@ -98,5 +98,21 @@ describe('needsReplyChip', () => {
       { execution_state: { agent_outcome: 'needs_input' } },
       'in_progress',
     ))).toBeNull();
+  });
+});
+
+// Phase 2a §4: the queued chip is a count of comments waiting in the inbox.
+// Zero is silence, not "0 queued" — a chip that is always there is a chip
+// nobody reads.
+describe('queuedChip', () => {
+  it('is null for zero, undefined and null', () => {
+    expect(queuedChip(0)).toBeNull();
+    expect(queuedChip(undefined)).toBeNull();
+    expect(queuedChip(null)).toBeNull();
+  });
+
+  it('counts when something is waiting', () => {
+    expect(queuedChip(1)).toBe('1 queued');
+    expect(queuedChip(2)).toBe('2 queued');
   });
 });

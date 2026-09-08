@@ -28,7 +28,11 @@
     "viewConversation": "View conversation",
     "answerPlaceholder": "Type your answer…",
     "answerButton": "Answer",
-    "answerNotDispatched": "Answer posted, but the agent could not be triggered — open the conversation to follow up."
+    "answerNotDispatched": "Answer posted, but the agent could not be triggered — open the conversation to follow up.",
+    "paused": "Paused",
+    "resume": "Resume",
+    "pause": "Pause",
+    "resumed": "Resumed"
   },
   "nav": {
     "linkParser": "Link Parser",
@@ -5584,7 +5588,12 @@
       "blocked": "Blocked",
       "done": "Done",
       "idle": "Idle"
-    }
+    },
+    "pause": "Pause",
+    "pausing": "Pausing…",
+    "resume": "Resume",
+    "resuming": "Resuming…",
+    "reason": "Reason"
   },
   "issues": {
     "pageTitle": "Issues",
@@ -5602,10 +5611,16 @@
     },
     "action": {
       "reply": "Reply",
-      "steer": "Steer"
+      "steer": "Steer",
+      "resume": "Resume"
     },
     "openFull": "Open full page",
-    "closeDetail": "Close"
+    "closeDetail": "Close",
+    "queued": "{{count}} queued",
+    "queuedTitle": "Comments waiting for the agent to pick up",
+    "attention": {
+      "queued": "Queued"
+    }
   },
   "moduleDisabled": {
     "title": "Feature Unavailable",

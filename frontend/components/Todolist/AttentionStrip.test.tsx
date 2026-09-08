@@ -98,3 +98,11 @@ describe('AttentionStrip collapse persistence', () => {
     expect(loadAttentionCollapsed('team:8')).toBe(true);
   });
 });
+
+describe('AttentionStrip — queued card (phase 2a §4)', () => {
+  it('renders a queued item with its count as the detail', () => {
+    renderStrip({ items: [{ type: 'queued', id: 'queued:5', title: 'Paused with mail', detail: '2 queued', issueId: 5 }] });
+    expect(screen.getByText('Paused with mail')).toBeTruthy();
+    expect(screen.getByText('2 queued')).toBeTruthy();
+  });
+});

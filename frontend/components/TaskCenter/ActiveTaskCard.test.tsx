@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTaskCard } from './ActiveTaskCard';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
@@ -12,6 +12,12 @@ const deliverSteer = vi.fn();
 vi.mock('../../services/agentInboxService', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../services/agentInboxService')>();
   return { ...mod, deliverSteer: (...args: unknown[]) => deliverSteer(...args) };
+});
+
+const pauseIssue = vi.fn();
+vi.mock('../../services/issuesService', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../services/issuesService')>();
+  return { ...mod, pauseIssue: (...args: unknown[]) => pauseIssue(...args) };
 });
 
 afterEach(cleanup);
@@ -145,5 +151,32 @@ describe('ActiveTaskCard — cockpit line + steer (harness P4 T11)', () => {
     cleanup();
     const done = renderCard(runningAgentTask({ status: 'completed', metadata: { agent_conversation_id: '9' } }));
     expect(done.container.querySelector('[data-testid="agent-steer"]')).toBeNull();
+  });
+});
+
+describe('ActiveTaskCard — target-level pause (phase 2a §2)', () => {
+  it('offers Pause on an issue-backed run and calls pauseIssue with the issue id', async () => {
+    pauseIssue.mockReset().mockResolvedValue({ issue_id: '48', paused_at: '2026-09-08T00:00:00Z', run_id: 'r1' });
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_issue_id: '48' } }));
+    const btn = container.querySelector('[data-testid="agent-pause"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    fireEvent.click(btn);
+    await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith(48));
+    await waitFor(() => expect(btn.getAttribute('data-state')).toBe('paused'));
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('marks the button failed when the pause is rejected', async () => {
+    pauseIssue.mockReset().mockRejectedValue(new Error('already_paused'));
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_issue_id: '48' } }));
+    const btn = container.querySelector('[data-testid="agent-pause"]') as HTMLButtonElement;
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn.getAttribute('data-state')).toBe('failed'));
+    expect(btn.disabled).toBe(false);
+  });
+
+  it('offers no Pause on a conversation-backed run (conversations have no pause)', () => {
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', agent_conversation_id: '9' } }));
+    expect(container.querySelector('[data-testid="agent-pause"]')).toBeNull();
   });
 });

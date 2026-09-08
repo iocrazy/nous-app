@@ -13,7 +13,7 @@ import type { NeedsInputItem } from '../../services/issuesService';
 import type { AILibraryApprovalRequest } from '../../types';
 import type { UiIssue } from './types';
 
-export type AttentionType = 'question' | 'approval' | 'review' | 'paused';
+export type AttentionType = 'question' | 'approval' | 'review' | 'paused' | 'queued';
 
 export interface AttentionItem {
   type: AttentionType;
@@ -33,7 +33,11 @@ export function buildAttentionItems(
   /** harness P4: issues a person paused (`issues.paused_at`) — they wait for a
    *  resume, which is on the person, not the agent. */
   pausedIssues: UiIssue[] | null | undefined = [],
+  /** phase 2a §4: issue id → queued-comment count. A paused issue WITH queued
+   *  comments is a `queued` item (resume runs them), not a plain `paused`. */
+  pendingSummary: Record<string, { count: number }> | null | undefined = {},
 ): AttentionItem[] {
+  const queuedCount = (id: number) => pendingSummary?.[String(id)]?.count ?? 0;
   // Nullish-tolerant on purpose: this strip sits at the top of a whole page,
   // so one upstream feed returning a malformed body must degrade to "nothing
   // waiting", never take the Issues page down with it.
@@ -59,12 +63,22 @@ export function buildAttentionItems(
       detail: i.identifier ?? null,
       issueId: i.id,
     })),
-    ...(pausedIssues ?? []).map((i): AttentionItem => ({
-      type: 'paused',
-      id: `paused:${i.id}`,
-      title: i.title,
-      detail: i.identifier ?? null,
-      issueId: i.id,
-    })),
+    ...(pausedIssues ?? []).map((i): AttentionItem =>
+      queuedCount(i.id) > 0
+        ? {
+            type: 'queued',
+            id: `queued:${i.id}`,
+            title: i.title,
+            detail: `${queuedCount(i.id)} queued`,
+            issueId: i.id,
+          }
+        : {
+            type: 'paused',
+            id: `paused:${i.id}`,
+            title: i.title,
+            detail: i.identifier ?? null,
+            issueId: i.id,
+          },
+    ),
   ];
 }

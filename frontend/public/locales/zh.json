@@ -28,7 +28,11 @@
     "viewConversation": "查看对话",
     "answerPlaceholder": "输入你的回复…",
     "answerButton": "回复",
-    "answerNotDispatched": "回复已提交，但未能触发 agent —— 请打开对话进行跟进。"
+    "answerNotDispatched": "回复已提交，但未能触发 agent —— 请打开对话进行跟进。",
+    "paused": "已暂停",
+    "resume": "恢复",
+    "pause": "暂停",
+    "resumed": "已恢复"
   },
   "nav": {
     "linkParser": "链接解析",
@@ -5584,7 +5588,12 @@
       "blocked": "受阻",
       "done": "已完成",
       "idle": "空闲"
-    }
+    },
+    "pause": "暂停",
+    "pausing": "暂停中…",
+    "resume": "恢复",
+    "resuming": "恢复中…",
+    "reason": "原因"
   },
   "issues": {
     "pageTitle": "待办事项",
@@ -5602,10 +5611,16 @@
     },
     "action": {
       "reply": "回复",
-      "steer": "插一句"
+      "steer": "插一句",
+      "resume": "恢复"
     },
     "openFull": "全屏打开",
-    "closeDetail": "关闭"
+    "closeDetail": "关闭",
+    "queued": "{{count}} 条排队",
+    "queuedTitle": "等待 agent 接手的评论",
+    "attention": {
+      "queued": "排队中"
+    }
   },
   "moduleDisabled": {
     "title": "功能不可用",

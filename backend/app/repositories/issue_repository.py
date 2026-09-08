@@ -82,6 +82,12 @@ def needs_input_predicate():
     )
 
 
+def paused_predicate():
+    """Phase 2a §2: a target-level pause is ``paused_at IS NOT NULL`` — the
+    only truth of a paused issue (status stays in_progress)."""
+    return Issues.paused_at.isnot(None)
+
+
 def visibility_predicate(user_id: str):
     """The D6.1 issue-visibility WHERE clause, extracted for testability.
 
@@ -335,6 +341,26 @@ class IssueRepository:
                 .where(needs_input_predicate())
                 .where(Issues.hidden_at.is_(None))
                 .order_by(Issues.updated_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [_row(r) for r in result.scalars().all()]
+
+    async def list_paused(
+        self, user_id: str, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Issues visible to user_id that a person paused (``paused_at`` set),
+        newest pause first; hidden rows excluded (same family as
+        ``list_needs_input``). Feeds GET /issues/paused → the Task Center
+        Paused section and the attention strip."""
+        _uuid.UUID(user_id)
+        async with read_scope() as session:
+            stmt = (
+                select(Issues)
+                .where(visibility_predicate(user_id))
+                .where(paused_predicate())
+                .where(Issues.hidden_at.is_(None))
+                .order_by(Issues.paused_at.desc())
                 .limit(limit)
             )
             result = await session.execute(stmt)

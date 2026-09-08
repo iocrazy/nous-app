@@ -212,6 +212,23 @@ class IssueResumeResponse(BaseModel):
     run_id: Optional[str] = None
 
 
+class PausedIssueItem(BaseModel):
+    """One issue a person paused (``issues.paused_at``), for GET /issues/paused.
+    Ids str-serialized (Snowflake), same convention as NeedsInputItem."""
+
+    issue_id: str
+    identifier: Optional[str] = None
+    title: str
+    paused_at: datetime
+    team_id: Optional[str] = None
+    project_id: Optional[str] = None
+    assignee_agent_id: Optional[str] = None
+
+
+class PausedListResponse(BaseModel):
+    items: list[PausedIssueItem]
+
+
 class NeedsInputItem(BaseModel):
     """One issue parked at ``needs_followup`` with the agent waiting on a
     human answer (Spec-4 needs_input first-class). Feeds the Task Center

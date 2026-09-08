@@ -8,6 +8,7 @@ Endpoints (under /api/v1/issues):
     PATCH  /{id}             — partial update (title/description/etc)
     POST   /{id}/transition  — status transition (lifecycle ts side-effects)
     POST   /{id}/dispatch    — start execute_issue DBOS workflow + persist wf_id
+    GET    /paused           — the caller's paused issues (phase 2a §4)
     POST   /{id}/pause       — target-level pause (paused_at + pause the root run)
     POST   /{id}/resume      — clear paused_at; re-dispatch when there is work
     DELETE /{id}             — soft-delete (sets hidden_at)
@@ -39,6 +40,8 @@ from app.schemas.issue import (
     IssueUpdate,
     NeedsInputItem,
     NeedsInputListResponse,
+    PausedIssueItem,
+    PausedListResponse,
 )
 from app.services.issues.issue_visibility import is_issue_visible
 from app.services.modules.gate import require_module
@@ -202,6 +205,35 @@ def _needs_input_item(r: dict) -> NeedsInputItem:
         kind=marker.get("kind"),
         options=[o for o in options if isinstance(o, dict)],
         allow_free_text=bool(marker.get("allow_free_text", True)),
+    )
+
+
+@router.get("/paused", response_model=PausedListResponse)
+async def list_paused(auth: AuthDep) -> PausedListResponse:
+    """Issues a person paused (phase 2a §2/§4) — the Task Center Paused
+    section and the attention strip. Same route-ordering trap as
+    /needs-input: declared before GET /{issue_id} or the int converter 422s
+    the literal segment."""
+    rows = await issue_repository.list_paused(str(auth.user_id))
+    return PausedListResponse(
+        items=[
+            PausedIssueItem(
+                issue_id=str(r["id"]),
+                identifier=r.get("identifier"),
+                title=r["title"],
+                paused_at=r["paused_at"],
+                team_id=str(r["team_id"]) if r.get("team_id") is not None else None,
+                project_id=(
+                    str(r["project_id"]) if r.get("project_id") is not None else None
+                ),
+                assignee_agent_id=(
+                    str(r["assignee_agent_id"])
+                    if r.get("assignee_agent_id") is not None
+                    else None
+                ),
+            )
+            for r in rows
+        ]
     )
 
 
