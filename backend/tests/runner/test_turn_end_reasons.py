@@ -70,6 +70,21 @@ def test_classify_stream_end_reads_stop_reason_from_the_terminal_chunk():
 def test_step_context_rejects_unknown_stop_reason():
     with pytest.raises(ValueError):
         StepContext(turn=1, step=1).stop("nonsense")
+
+
+async def test_unknown_stop_reason_escapes_the_chain_instead_of_continuing():
+    """The chain contains flaky subscribers; a hook that stops with a word the
+    table does not know is a bug and must not degrade into a silent CONTINUE."""
+    from app.services.ai.runner.step_hooks import StepHookChain, UnknownStopReason
+
+    class _Typo:
+        name = "typo"
+
+        async def before_llm_call(self, ctx):
+            return ctx.stop("awaiting_inptu")
+
+    with pytest.raises(UnknownStopReason):
+        await StepHookChain([_Typo()]).run(StepContext(turn=1, step=1))
     ctx = StepContext(turn=1, step=1)
     ctx.stop("paused")
     assert ctx.stop_reason == "paused"
@@ -81,7 +96,18 @@ def test_step_context_rejects_unknown_stop_reason():
 class _Rec:
     def __init__(self):
         self.events = []
-        self.views = {"view": {"question": {"id": "q:1:1", "kind": "user"}}}
+        self.views = {
+            "view": {
+                "question": {
+                    "id": "q:1:1",
+                    "kind": "user",
+                    "prompt": "Which?",
+                    "options": [{"label": "A", "description": None}],
+                    "allow_free_text": False,
+                    "asked_at": "2026-09-07T00:00:00Z",
+                }
+            }
+        }
 
     async def record_event(self, event_type, payload, *, turn=None, step=None):
         self.events.append((event_type, payload))
@@ -163,7 +189,14 @@ async def test_run_turn_files_the_hook_stop_reason(reason):
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends
     if reason == "awaiting_input":
         assert out["awaiting_input"] is True
-        assert out["question"] == {"id": "q:1:1", "kind": "user"}
+        assert out["question"] == {
+            "question_id": "q:1:1",
+            "kind": "user",
+            "prompt": "Which?",
+            "options": [{"label": "A", "description": None}],
+            "allow_free_text": False,
+            "asked_at": "2026-09-07T00:00:00Z",
+        }
     else:
         assert "awaiting_input" not in out
 
@@ -190,5 +223,6 @@ async def test_stream_turn_files_the_hook_stop_reason(reason):
         chunks.append(ch)
     assert chunks and chunks[-1].finish_reason == "stop"
     assert chunks[-1].usage == {"stop_reason": reason}
+    assert chunks[-1].tool_call_trace == []  # carried, like every terminal chunk
     ends = rec.turn_ends()
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends

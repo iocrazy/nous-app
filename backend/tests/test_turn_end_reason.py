@@ -35,6 +35,7 @@ EXIT_FUNCTIONS = (
     "_preflight_compact_and_budget",
     "_aborted_response",
     "_awaiting_approval_response",
+    "_stopped_response",
 )
 
 

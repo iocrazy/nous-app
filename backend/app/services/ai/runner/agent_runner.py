@@ -621,6 +621,7 @@ class AgentRunner:
                 yield StreamChunk(
                     finish_reason="stop",
                     usage={"stop_reason": _step_ctx.stop_reason},
+                    tool_call_trace=tool_call_trace,
                 )
                 return
             if _step_ctx.injected:
@@ -1361,10 +1362,13 @@ class AgentRunner:
         """The run_turn result for a hook STOP. ``stop_reason`` is the truth
         (turn_end.STOP_REASON_TO_TURN_END); ``cancelled`` stays for callers
         that predate typed stops. ``awaiting_input`` also hands back the
-        parked question so the dispatcher can build the marker without a
-        second read of the views."""
+        parked question in ``Question.to_payload()`` shape (``question_id``,
+        not the view's ``id``) so the dispatcher can build the marker
+        without a second read of the views."""
+        from app.services.ai.runner.question import payload_from_view
+
         reason = step_ctx.stop_reason
-        out: dict[str, Any] = {
+        base: dict[str, Any] = {
             "content": "",
             "raw": None,
             "stop_reason": reason,
@@ -1372,9 +1376,13 @@ class AgentRunner:
         }
         if reason == "awaiting_input":
             views = getattr(recorder, "views", None) or {}
-            out["awaiting_input"] = True
-            out["question"] = (views.get("view") or {}).get("question")
-        return out
+            parked = (views.get("view") or {}).get("question")
+            return {
+                **base,
+                "awaiting_input": True,
+                "question": payload_from_view(parked) if parked else None,
+            }
+        return base
 
     async def _run_turn_inner(
         self,

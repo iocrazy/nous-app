@@ -3,16 +3,18 @@
 ``question_asked`` parks the open question on ``view.question`` — the one
 place the issue detail card, the chat bubble and the Task Center read it
 from. ``question_answered`` clears it and leaves ``view.last_answer`` so a
-replay to any seq still shows what was picked. Shape and caps mirror
-``question.Question`` (PROMPT_MAX / LABEL_MAX / MAX_OPTIONS) so a payload
-written by a future version cannot grow the view unboundedly.
+replay to any seq still shows what was picked. Caps are imported from
+``question`` (one source) so a payload written by a future version cannot
+grow the view unboundedly.
 """
 
+from app.services.ai.runner.question import (
+    DESC_MAX,
+    LABEL_MAX,
+    MAX_OPTIONS,
+    PROMPT_MAX,
+)
 from app.services.ai.runner.run_projection import register
-
-_PROMPT_MAX = 500
-_LABEL_MAX = 80
-_MAX_OPTIONS = 6
 
 
 @register("question_asked")
@@ -29,13 +31,17 @@ def fold_question_asked(views, payload):
     views["view"]["question"] = {
         "id": qid,
         "kind": str(payload.get("kind") or "user"),
-        "prompt": str(payload.get("prompt") or "")[:_PROMPT_MAX],
+        "prompt": str(payload.get("prompt") or "")[:PROMPT_MAX],
         "options": [
             {
-                "label": o["label"][:_LABEL_MAX],
-                "description": (o.get("description") or None),
+                "label": o["label"][:LABEL_MAX],
+                "description": (
+                    o["description"][:DESC_MAX]
+                    if isinstance(o.get("description"), str) and o["description"]
+                    else None
+                ),
             }
-            for o in opts[:_MAX_OPTIONS]
+            for o in opts[:MAX_OPTIONS]
         ],
         "allow_free_text": bool(payload.get("allow_free_text", True)),
         "asked_at": payload.get("asked_at"),

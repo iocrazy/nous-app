@@ -4,7 +4,9 @@ The agent's one verb for "ask a human to pick": ``ask_question`` writes a
 ``question_asked`` event through the single ``emit()`` entry and returns
 the frozen ``Question`` whose ``to_payload()`` is the ONE shape shared by
 the transcript event, the DBOS ``input_gate`` marker (issue path) and the
-assistant-message metadata (chat path). Three readers, one shape, no drift.
+assistant-message metadata (chat path). Three readers, one shape, no drift;
+``payload_from_view`` converts the folded ``view.question`` back into it
+for the fourth reader (the runner's STOP result).
 
 Degradation rule: any malformed option set (duplicate / empty / too long
 labels, too many options, not a list) turns the question into an open one
@@ -12,11 +14,18 @@ labels, too many options, not a list) turns the question into an open one
 model's attempt to ask is never lost to a schema nit, and the human can
 always answer with free text.
 
+Failure rule (CLAUDE.md 「触发路径必须类型化失败回显」): a question that
+did not reach the transcript is not a question — ``ask_question`` raises
+``QuestionNotRecorded`` instead of handing back a ``Question`` nobody will
+ever see.
+
 ``question_kinds`` is a tiny registry: what happens after a label is picked
 is per ``kind`` (``user`` does nothing — the answer text is simply injected;
 ``budget`` — Task 6 — re-checks the budget, enqueues a wrap-up steer, or
-cancels). Enumerable, duplicate registration raises (CLAUDE.md: registries
-must be enumerable, no magic).
+cancels). Enumerable, duplicate registration raises, and ``ask_question``
+refuses an unregistered kind at write time so a typo cannot park a question
+that explodes when answered. A kind registered ``singleton=True`` gets one
+id per run (``<kind>:<run>``); the rest get ``q:<run>:<seq>``.
 """
 
 from __future__ import annotations
@@ -35,8 +44,10 @@ LABEL_MAX = 80
 DESC_MAX = 200
 MAX_OPTIONS = 6
 
-# Kinds whose question_id is one-per-run (a second ask replaces the first).
-_SINGLETON_KINDS = frozenset({"budget"})
+
+class QuestionNotRecorded(RuntimeError):
+    """The ``question_asked`` event did not reach the transcript (no
+    recorder, no run row, or the recorder refused it)."""
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,19 @@ class Question:
             "allow_free_text": self.allow_free_text,
             "asked_at": self.asked_at,
         }
+
+
+def payload_from_view(view_question: dict) -> dict:
+    """The folded ``view.question`` (key ``id``) back into payload shape
+    (key ``question_id``) — same six fields, nothing else."""
+    return {
+        "question_id": view_question.get("id"),
+        "kind": view_question.get("kind"),
+        "prompt": view_question.get("prompt"),
+        "options": list(view_question.get("options") or []),
+        "allow_free_text": bool(view_question.get("allow_free_text", True)),
+        "asked_at": view_question.get("asked_at"),
+    }
 
 
 def normalize_options(raw: Any) -> tuple[list[dict], list[str]]:
@@ -90,9 +114,11 @@ def normalize_options(raw: Any) -> tuple[list[dict], list[str]]:
     return out, []
 
 
-def question_id_for(kind: str, run_id: int, seq: int) -> str:
-    """``budget:<run>`` (one per run) or ``q:<run>:<seq>``."""
-    if kind in _SINGLETON_KINDS:
+def question_id_for(kind: str, run_id: Any, seq: int) -> str:
+    """``<kind>:<run>`` for singleton kinds (one per run, a later ask
+    replaces the earlier), else ``q:<run>:<seq>`` where ``seq`` is the
+    transcript seq of the ``question_asked`` event itself."""
+    if _SINGLETON.get(kind, False):
         return f"{kind}:{run_id}"
     return f"q:{run_id}:{seq}"
 
@@ -111,16 +137,26 @@ async def ask_question(
     turn: int,
     step: int,
 ) -> Question:
-    """Record ``question_asked`` and return the parked question. ``step`` is
-    the seq component of the id — one question per step is all a hook or a
-    tool call can ask."""
+    """Record ``question_asked`` and return the parked question.
+
+    The id names the event's own transcript seq (``recorder.next_event_seq``);
+    a recorder without that property (test doubles) falls back to ``step``.
+    Raises ``ValueError`` for an unregistered kind and
+    ``QuestionNotRecorded`` when the event did not land.
+    """
+    if kind not in _KINDS:
+        raise ValueError(
+            f"unknown question kind {kind!r}; registered: {registered_kinds()}"
+        )
+    run_id = getattr(recorder, "run_id", None) if recorder is not None else None
+    if run_id is None:
+        raise QuestionNotRecorded("no recorder / run row — the question would be lost")
     opts, warnings = normalize_options(options)
     # No options left means the human has nothing to click — keep it answerable.
     free = bool(allow_free_text) or not opts
+    seq = getattr(recorder, "next_event_seq", None)
     question = Question(
-        question_id=question_id_for(
-            kind, int(getattr(recorder, "run_id", 0) or 0), step
-        ),
+        question_id=question_id_for(kind, run_id, seq if seq is not None else step),
         kind=str(kind),
         prompt=str(prompt or "")[:PROMPT_MAX],
         options=tuple(opts),
@@ -130,7 +166,8 @@ async def ask_question(
     payload = question.to_payload()
     if warnings:
         payload["warnings"] = warnings
-    await emit(recorder, QUESTION_ASKED, payload, turn=turn, step=step)
+    if not await emit(recorder, QUESTION_ASKED, payload, turn=turn, step=step):
+        raise QuestionNotRecorded(f"recorder refused {QUESTION_ASKED}")
     return question
 
 
@@ -153,12 +190,14 @@ def answer_matches(question: dict, value: Any) -> bool:
 OnAnswer = Callable[[dict, str, Any], Awaitable[None]]
 
 _KINDS: dict[str, OnAnswer] = {}
+_SINGLETON: dict[str, bool] = {}
 
 
-def register_kind(kind: str, on_answer: OnAnswer) -> None:
+def register_kind(kind: str, on_answer: OnAnswer, *, singleton: bool = False) -> None:
     if kind in _KINDS:
         raise ValueError(f"question kind already registered: {kind!r}")
     _KINDS[kind] = on_answer
+    _SINGLETON[kind] = singleton
 
 
 def on_answer_for(kind: str) -> OnAnswer:
@@ -171,6 +210,7 @@ def registered_kinds() -> list[str]:
 
 def _unregister_kind_for_tests(kind: str) -> None:
     _KINDS.pop(kind, None)
+    _SINGLETON.pop(kind, None)
 
 
 async def _noop_on_answer(issue: dict, value: str, ctx: Any) -> None:
@@ -188,10 +228,12 @@ __all__ = [
     "QUESTION_ASKED",
     "OnAnswer",
     "Question",
+    "QuestionNotRecorded",
     "answer_matches",
     "ask_question",
     "normalize_options",
     "on_answer_for",
+    "payload_from_view",
     "question_id_for",
     "register_kind",
     "registered_kinds",

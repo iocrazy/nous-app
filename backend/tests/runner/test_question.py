@@ -13,10 +13,12 @@ pytestmark = pytest.mark.unit
 
 
 class _Rec:
-    def __init__(self, run_id=42):
+    def __init__(self, run_id=42, next_seq=None):
         self.run_id = run_id
         self.events = []
         self.views = {"view": {"question": None}}
+        if next_seq is not None:
+            self.next_event_seq = next_seq
 
     async def record_event(self, event_type, payload, *, turn=None, step=None):
         self.events.append((event_type, payload, turn, step))
@@ -61,17 +63,69 @@ async def test_ask_question_emits_event_with_id_scheme():
     assert isinstance(payload["asked_at"], str) and payload["asked_at"].endswith("Z")
     assert (turn, step) == (1, 3)
     assert payload == qu.to_payload()
-    b = await q.ask_question(
-        rec,
-        kind="budget",
-        prompt="Budget exhausted",
-        options=[{"label": "Top up"}],
-        allow_free_text=False,
-        turn=1,
-        step=4,
-    )
+
+    async def _noop(issue, value, ctx): ...
+
+    q.register_kind("budget", _noop, singleton=True)  # Task 6 registers the real one
+    try:
+        b = await q.ask_question(
+            rec,
+            kind="budget",
+            prompt="Budget exhausted",
+            options=[{"label": "Top up"}],
+            allow_free_text=False,
+            turn=1,
+            step=4,
+        )
+    finally:
+        q._unregister_kind_for_tests("budget")
     assert b.question_id == "budget:42"
     assert rec.events[-1][1]["allow_free_text"] is False
+
+
+async def test_question_id_names_the_events_own_seq_when_the_recorder_knows_it():
+    rec = _Rec(run_id="9001", next_seq=17)
+    qu = await q.ask_question(rec, kind="user", prompt="?", options=[], turn=1, step=2)
+    assert qu.question_id == "q:9001:17"
+
+
+async def test_ask_question_refuses_an_unregistered_kind_at_write_time():
+    rec = _Rec()
+    with pytest.raises(ValueError, match="unknown question kind"):
+        await q.ask_question(rec, kind="typo", prompt="?", options=[], turn=1, step=1)
+    assert rec.events == []
+
+
+async def test_ask_question_raises_when_the_event_cannot_land():
+    with pytest.raises(q.QuestionNotRecorded):
+        await q.ask_question(None, kind="user", prompt="?", options=[], turn=1, step=1)
+    with pytest.raises(q.QuestionNotRecorded):
+        await q.ask_question(
+            _Rec(run_id=None), kind="user", prompt="?", options=[], turn=1, step=1
+        )
+
+    class _Deaf:  # has a run row but no record_event → emit returns False
+        run_id = 5
+
+    with pytest.raises(q.QuestionNotRecorded):
+        await q.ask_question(
+            _Deaf(), kind="user", prompt="?", options=[], turn=1, step=1
+        )
+
+
+def test_payload_from_view_round_trips_the_fold_shape():
+    from app.services.ai.runner import run_projection as rp
+
+    qu = q.Question(
+        question_id="q:1:2",
+        kind="user",
+        prompt="p",
+        options=({"label": "A", "description": None},),
+        allow_free_text=False,
+        asked_at="2026-09-07T00:00:00Z",
+    )
+    view = rp.apply(rp.empty_views(), "question_asked", qu.to_payload())
+    assert q.payload_from_view(view["view"]["question"]) == qu.to_payload()
 
 
 async def test_ask_question_truncates_prompt_and_falls_open_on_bad_options():

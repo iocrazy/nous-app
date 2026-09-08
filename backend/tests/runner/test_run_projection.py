@@ -234,11 +234,19 @@ def test_question_asked_drops_malformed_options_and_caps_lengths():
         {
             "question_id": "q:1:1",
             "prompt": "p" * 900,
-            "options": [{"label": "ok"}, {"nope": 1}, "str", {"label": 3}],
+            "options": [
+                {"label": "ok", "description": "d" * 900},
+                {"label": "typed", "description": {"not": "a string"}},
+                {"nope": 1},
+                "str",
+                {"label": 3},
+            ],
         },
     )
     qv = v["view"]["question"]
-    assert [o["label"] for o in qv["options"]] == ["ok"]
+    assert [o["label"] for o in qv["options"]] == ["ok", "typed"]
+    assert len(qv["options"][0]["description"]) == 200
+    assert qv["options"][1]["description"] is None
     assert len(qv["prompt"]) == 500
     assert qv["allow_free_text"] is True
 
