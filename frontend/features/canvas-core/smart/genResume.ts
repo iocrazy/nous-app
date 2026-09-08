@@ -38,6 +38,7 @@ import {
 } from '../services/canvasGenerationService';
 import { ApiError } from '../../../services/apiClient';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { onGenerationTerminal } from './dispatchEffects';
 import { markDroppedKnobs } from './droppedKnobs';
 import type { DroppedRef } from './types';
 import {
@@ -294,6 +295,10 @@ async function resumePromptTasks(
       run_detail: firstDetail,
     });
   }
+  // A resumed batch ends the same way a live one does, so it owes the slot
+  // the same settlement. Recover marks are NOT pending cells (they were
+  // decremented when the mark was made) and keep their own re-query UI.
+  onGenerationTerminal(promptId);
 }
 
 /**

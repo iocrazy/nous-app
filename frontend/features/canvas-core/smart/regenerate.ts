@@ -14,7 +14,7 @@ import {
   clearPendingGenTasks,
   prunePendingGenTask,
 } from './genResume';
-import { onGenerationDispatched } from './dispatchEffects';
+import { onGenerationDispatched, onGenerationTerminal } from './dispatchEffects';
 import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
@@ -129,6 +129,7 @@ export async function rerunPrompt(
       onStatusChange: (id, status, fields) => {
         if (!sameCanvas()) return;
         patchNode(id, { data: { run_status: status, ...fields } });
+        if (status === 'succeeded' || status === 'failed') onGenerationTerminal(id);
       },
     });
     if (sameCanvas() && result.media_kind) clearPendingGenTasks(promptId);
