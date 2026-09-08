@@ -20,6 +20,8 @@ import {
 } from '../../TaskCenter/runView';
 import { formatElapsed } from '../formatElapsed';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
+import { QuestionCard } from '../QuestionCard';
+import { questionFromMarker, questionFromRunView } from '../questionTypes';
 import { formatCents } from './BudgetBlock';
 
 const PHASE_TONE: Record<string, string> = {
@@ -62,6 +64,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const retry = retryState(view, Date.now());
   const runBudget = budgetState(view);
   const budget = rollup.budget;
+  // Phase 2a: the parked typed question — the run view first (the live
+  // fold), the issue marker as the fallback once the run row has ended.
+  const question =
+    phase === 'waiting_input' && ctx.env.onAnswerQuestion
+      ? questionFromRunView(view) ?? questionFromMarker(rollup.execution_state)
+      : null;
   const startedMs = rollup.current_run?.started_at ? Date.parse(rollup.current_run.started_at) : NaN;
   const elapsed = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : null;
 
@@ -105,6 +113,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         )}
       </div>
+
+      {question && ctx.env.onAnswerQuestion && (
+        <div data-testid="cockpit-question">
+          <QuestionCard question={question} onAnswer={ctx.env.onAnswerQuestion} />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>

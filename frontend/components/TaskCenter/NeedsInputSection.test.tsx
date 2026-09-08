@@ -181,3 +181,40 @@ describe('NeedsInputSection', () => {
     expect(screen.queryByText('taskCenter.answerNotDispatched')).toBeNull();
   });
 });
+
+
+describe('NeedsInputSection — typed question rows (phase 2a)', () => {
+  const typedItem = () =>
+    item({
+      question_id: 'q:1:2',
+      kind: 'user',
+      options: [{ label: 'Monday' }, { label: 'Wednesday', description: 'Mid-week' }],
+      allow_free_text: false,
+    });
+
+  it('shows the Pick one of N chip and answers with the label + question id', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    renderSection([typedItem()], onAnswer);
+    expect(screen.getByTestId('needs-input-pick-one').textContent).toBe('question.pickOne');
+    expect(screen.queryByPlaceholderText('taskCenter.answerPlaceholder')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('1001', 'Wednesday', 'q:1:2'));
+    // pending until the row leaves items
+    expect(screen.getByRole('button', { name: 'Monday' })).toBeDisabled();
+  });
+
+  it('a plain row keeps the textarea and no chip', () => {
+    renderSection([item()]);
+    expect(screen.queryByTestId('needs-input-pick-one')).toBeNull();
+    expect(screen.getByPlaceholderText('taskCenter.answerPlaceholder')).toBeTruthy();
+  });
+
+  it('not-dispatched on a typed answer shows the row warning, not the card error', async () => {
+    const onAnswer = vi.fn().mockRejectedValue(new AgentNotDispatchedError());
+    renderSection([typedItem()], onAnswer);
+    fireEvent.click(screen.getByRole('button', { name: 'Monday' }));
+    await waitFor(() => expect(screen.getByText('taskCenter.answerNotDispatched')).toBeTruthy());
+    expect(screen.queryByTestId('question-error')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Monday' })).not.toBeDisabled();
+  });
+});

@@ -5693,5 +5693,13 @@
     "turnEnd": "Turn ended · {{reason}}",
     "steps": "{{count}} steps",
     "denied": "Blocked: {{tool}}"
+  },
+  "question": {
+    "pickOne": "Pick one of {{count}}",
+    "orType": "Or type your own answer…",
+    "answer": "Answer",
+    "answered": "Answered",
+    "superseded": "No longer waiting",
+    "waiting": "The agent is waiting for your answer"
   }
 }

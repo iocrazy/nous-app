@@ -515,6 +515,15 @@ it('answered state renders read-only with the pick highlighted', () => {
 
 突变：按钮 value 改成 index → 第 1 条红；`answered` 不禁用 → 第 3 条红；i18n 删一个 zh key → parity 红。PR「复用/删除」：复用 `NeedsInputCard` 的 `AgentNotDispatchedError` 处理、`ApprovalCard` 的挂点；不碰 `IssueReplyBox` 作曲区。
 
+**实施记录（2026-09-08，Task 7 落地）**：
+- `NeedsInputCard` 的新 prop 叫 `typed`（不是计划里的 `question`——那个名字已被现有的 prompt 字符串 prop 占用，改名会牵动一堆测试）；有 options 且给了 `onAnswer` 才挂 `QuestionCard`，否则老 textarea；prompt 只由卡头显示一次。
+- `questionTypes.ts` 多一个 `questionFromNeedsInputItem(item)`（feed 行的扁平字段）；三个解析器的夹具照抄后端真实 wire 形状。
+- `QuestionCard` 多一个 `disabled` prop：Task Center 行的 pending 由「行离开 items」清除，卡片自身的 pending 在 `onAnswer` resolve 后就结束，需要外部把行 pending 压进来。
+- Cockpit：`phase === 'waiting_input'` 时先读 run view 的 `question`，没有再回退到 issue marker（run 行结束后视图里的问题也在，但 marker 更权威）；只在 `ctx.env.onAnswerQuestion` 存在时挂载。
+- `runView.RunBudget.state` 加 `'wrap_up'`（Task 6 的折叠值），`budgetState` 不再把它过滤掉。
+- 聊天：`MessageBubble` 新 props `awaitingInput` / `onAnswerQuestion`；`AIChatPanel.handleSend` 第三参 `{ answerTo }` → `opts.answer_to`；`sendChatMessage` / `streamChatMessage` 都收 `answer_to`。
+- `npm run typecheck` 在 master 上本来就有 56 个错，本任务前后数量与集合一致（不是本任务引入，也不在本任务修）。
+
 ---
 
 ### Task 8: 暂停 UI + `pending-summary` + 主页/看板/任务中心芯片 + Progress 卡 Reason

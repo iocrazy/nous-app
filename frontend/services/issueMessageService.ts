@@ -91,6 +91,11 @@ export interface IssueMessagePostPayload {
    *  who would wake and can only drop from that set, never add. Omit the key
    *  entirely when nothing is suppressed. */
   suppress_agent_ids?: string[];
+  /** Phase 2a: this comment answers the parked typed question with that id.
+   *  The body must equal one of its option labels (or be free text when the
+   *  question allows it) — the server validates (409 no_open_question / 400
+   *  answer_shape) and records `question_answered` after delivery. */
+  answer_to?: string;
 }
 
 /** What posting a comment would start — the server's own verdict.

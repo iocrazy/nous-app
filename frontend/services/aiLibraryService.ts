@@ -952,10 +952,13 @@ export const aiLibraryService = {
       plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
       attachments?: ChatAttachmentInput[];
       script_context?: ChatScriptContextInput;
+      /** Phase 2a: answers the assistant's parked typed question (its id). */
+      answer_to?: string;
     } = {},
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = { content };
     if (options.plan_mode) body.plan_mode = options.plan_mode;
+    if (options.answer_to) body.answer_to = options.answer_to;
     if (options.attachments && options.attachments.length > 0) {
       body.attachments = options.attachments;
     }
@@ -1000,10 +1003,13 @@ export const aiLibraryService = {
       attachments?: ChatAttachmentInput[];
       script_context?: ChatScriptContextInput;
       signal?: AbortSignal;
+      /** Phase 2a: answers the assistant's parked typed question (its id). */
+      answer_to?: string;
     } = {},
   ): AsyncGenerator<{ type: string; data: any }> {
     const body: Record<string, unknown> = { content };
     if (options.plan_mode) body.plan_mode = options.plan_mode;
+    if (options.answer_to) body.answer_to = options.answer_to;
     if (options.attachments?.length) body.attachments = options.attachments;
     if (options.script_context) body.script_context = options.script_context;
     const resp = await fetch(

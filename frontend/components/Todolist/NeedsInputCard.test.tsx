@@ -75,3 +75,47 @@ describe('NeedsInputCard', () => {
     expect(container.querySelector('[data-testid="needs-input-card"]')).not.toBeNull();
   });
 });
+
+
+describe('NeedsInputCard — typed question (phase 2a)', () => {
+  const typed = {
+    id: 'q:1:2',
+    kind: 'user',
+    prompt: QUESTION,
+    options: [{ label: 'Cold open' }, { label: 'Teaser' }],
+    allowFreeText: false,
+  };
+
+  it('mounts QuestionCard instead of the textarea when the question has options', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <NeedsInputCard question={QUESTION} onSubmit={vi.fn()} typed={typed} onAnswer={onAnswer} />,
+    );
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[data-testid="question-card"]')).not.toBeNull();
+    // the prompt is shown once (by the card header), not twice
+    expect(container.textContent?.split(QUESTION).length).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Teaser' }));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('Teaser', 'q:1:2'));
+  });
+
+  it('keeps the textarea for a plain needs_input park (no typed question)', () => {
+    const { container } = render(
+      <NeedsInputCard question={QUESTION} onSubmit={vi.fn()} typed={null} />,
+    );
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('[data-testid="question-card"]')).toBeNull();
+  });
+
+  it('shows the not-dispatched notice when the typed answer was saved but nothing started', async () => {
+    const onAnswer = vi.fn().mockRejectedValue(new AgentNotDispatchedError());
+    const { container } = render(
+      <NeedsInputCard question={QUESTION} onSubmit={vi.fn()} typed={typed} onAnswer={onAnswer} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Teaser' }));
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="needs-input-not-dispatched"]')).not.toBeNull();
+    });
+    expect(container.querySelector('[data-testid="question-error"]')).toBeNull();
+  });
+});

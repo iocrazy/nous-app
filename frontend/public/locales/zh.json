@@ -5693,5 +5693,13 @@
     "turnEnd": "本轮结束 · {{reason}}",
     "steps": "{{count}} 步",
     "denied": "已拦截：{{tool}}"
+  },
+  "question": {
+    "pickOne": "{{count}} 选一",
+    "orType": "或输入你自己的回答…",
+    "answer": "回答",
+    "answered": "已回答",
+    "superseded": "不再等待",
+    "waiting": "agent 正在等你的回答"
   }
 }

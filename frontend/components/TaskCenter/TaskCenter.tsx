@@ -63,8 +63,11 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   // sit "pending" forever waiting for a status flip that will never come,
   // with zero feedback. Throwing here routes it into NeedsInputSection's
   // existing catch, which it distinguishes from a network failure.
-  const handleAnswerNeedsInput = async (issueId: string, text: string) => {
-    const res = await postIssueMessage(Number(issueId), { body: text });
+  const handleAnswerNeedsInput = async (issueId: string, text: string, answerTo?: string) => {
+    const res = await postIssueMessage(
+      Number(issueId),
+      answerTo ? { body: text, answer_to: answerTo } : { body: text },
+    );
     if (!res.agent_dispatched) {
       throw new AgentNotDispatchedError();
     }

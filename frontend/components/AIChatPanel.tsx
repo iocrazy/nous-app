@@ -42,6 +42,7 @@ import {
 } from './agentActivity/QuickActions';
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
+import { questionFromChatMetadata, type TypedQuestion } from './Todolist/questionTypes';
 import { ChatTrajectoryView } from './chat/ChatTrajectoryView';
 import { chatRunId } from './chat/chatMessageMeta';
 import { deliverSteer, InboxTargetEndedError } from '../services/agentInboxService';
@@ -144,6 +145,15 @@ function extractAwaitingApproval(
     reason: typeof entry.reason === 'string' ? entry.reason : '',
     hook: typeof entry.hook === 'string' ? entry.hook : undefined,
   };
+}
+
+/**
+ * Phase 2a: the typed question an assistant turn parked on. Backend folds it
+ * into ``metadata_json.awaiting_input`` (Task 4) and stamps ``answered`` /
+ * ``superseded`` there once resolved; absent on the common turn.
+ */
+function extractAwaitingInput(msg: AIChatMessage): TypedQuestion | undefined {
+  return questionFromChatMetadata(msg.metadata_json) ?? undefined;
 }
 
 /** Validate the project id (digits-only) but KEEP it a string — project ids
@@ -765,7 +775,13 @@ export function AIChatPanel({
   );
 
   const handleSend = useCallback(
-    async (rawText: string, refAttachments: ResourceRefAttachment[] = []) => {
+    async (
+      rawText: string,
+      refAttachments: ResourceRefAttachment[] = [],
+      // Phase 2a: set when the text answers the assistant's parked question
+      // (QuestionCard in the bubble) — sent as `answer_to`.
+      extra: { answerTo?: string } = {},
+    ) => {
       if (!activeSessionId || sending) return;
 
       // Fold the context capsule into the outgoing message and clear it — one
@@ -855,6 +871,7 @@ export function AIChatPanel({
         // B: send staged attachments + resource_ref attachments alongside.
         const opts: Parameters<typeof aiLibraryService.streamChatMessage>[2] = {};
         if (planMode !== 'auto') opts.plan_mode = planMode;
+        if (extra.answerTo) opts.answer_to = extra.answerTo;
         const allAttachments = [
           ...sentAttachments.map((a) => ({
             kind: a.kind,
@@ -1347,6 +1364,10 @@ export function AIChatPanel({
                     ? extractAwaitingApproval(msg)
                     : undefined
                 }
+                awaitingInput={
+                  msg.role === 'assistant' ? extractAwaitingInput(msg) : undefined
+                }
+                onAnswerQuestion={(value, answerTo) => handleSend(value, [], { answerTo })}
                 runId={msg.role === 'assistant' ? chatRunId(msg) : undefined}
                 onApply={
                   msg.role === 'assistant' && onApplyContent

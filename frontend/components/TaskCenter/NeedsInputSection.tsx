@@ -15,10 +15,14 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { getIssue, type NeedsInputItem } from '../../services/issuesService';
 import { AgentNotDispatchedError } from '../../services/issueMessageService';
+import { QuestionCard } from '../Todolist/QuestionCard';
+import { questionFromNeedsInputItem } from '../Todolist/questionTypes';
 
 interface NeedsInputSectionProps {
   items: NeedsInputItem[];
-  onAnswer: (issueId: string, text: string) => Promise<void> | void;
+  /** `answerTo` (phase 2a) is the typed question's id when the row carries
+   *  one — the caller sends it as `answer_to`. */
+  onAnswer: (issueId: string, text: string, answerTo?: string) => Promise<void> | void;
 }
 
 export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onAnswer }) => {
@@ -140,6 +144,8 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
         {items.map((item) => {
           const pending = pendingIds.has(item.issue_id);
           const draft = drafts[item.issue_id] ?? '';
+          const typed = questionFromNeedsInputItem(item);
+          const hasOptions = !!typed && typed.options.length > 0;
           return (
             <li key={item.issue_id} className="px-4 py-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
@@ -147,6 +153,14 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
                   <p className="text-sm font-medium text-ink-100 truncate">{item.title}</p>
                   {item.question && (
                     <p className="text-sm text-ink-300 mt-0.5">{item.question}</p>
+                  )}
+                  {hasOptions && (
+                    <span
+                      data-testid="needs-input-pick-one"
+                      className="mt-1 inline-flex items-center rounded-full border border-warn-line px-2 py-0.5 text-[11px] text-warn"
+                    >
+                      {t('question.pickOne', { count: typed!.options.length })}
+                    </span>
                   )}
                 </div>
                 <button
@@ -157,6 +171,38 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
                   {t('taskCenter.viewConversation')}
                 </button>
               </div>
+              {hasOptions && typed ? (
+                <QuestionCard
+                  compact
+                  disabled={pending}
+                  question={typed}
+                  onAnswer={async (value, answerTo) => {
+                    if (pendingIds.has(item.issue_id)) return;
+                    setPendingIds((prev) => new Set(prev).add(item.issue_id));
+                    setDispatchErrors((prev) => {
+                      if (!(item.issue_id in prev)) return prev;
+                      const next = { ...prev };
+                      delete next[item.issue_id];
+                      return next;
+                    });
+                    try {
+                      await onAnswer(item.issue_id, value, answerTo);
+                      // pending clears when the row leaves `items` (see above)
+                    } catch (err) {
+                      setPendingIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(item.issue_id);
+                        return next;
+                      });
+                      if (err instanceof AgentNotDispatchedError) {
+                        setDispatchErrors((prev) => ({ ...prev, [item.issue_id]: true }));
+                        return;
+                      }
+                      throw err; // QuestionCard shows the typed error inline
+                    }
+                  }}
+                />
+              ) : (
               <div className="flex items-center gap-2">
                 <textarea
                   value={draft}
@@ -177,6 +223,7 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
                   {t('taskCenter.answerButton')}
                 </button>
               </div>
+              )}
               {dispatchErrors[item.issue_id] && (
                 <p className="text-xs text-warn">{t('taskCenter.answerNotDispatched')}</p>
               )}
