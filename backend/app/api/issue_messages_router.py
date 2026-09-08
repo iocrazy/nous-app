@@ -273,7 +273,9 @@ async def _commit_typed_answer(pending: _PendingAnswer) -> None:
         )
     if pending.workflow_id:
         await input_gate.mark_question_answered(
-            workflow_id=pending.workflow_id, question_id=pending.question_id
+            workflow_id=pending.workflow_id,
+            question_id=pending.question_id,
+            value=pending.value,
         )
 
 

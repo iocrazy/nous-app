@@ -23,6 +23,10 @@ export interface IssueBlockEnv {
   teamId?: string;
   /** Ask the page to re-read the issue + rollup (after a PATCH, a cancel …). */
   onIssueChanged?: () => void;
+  /** Phase 2a: answer the parked typed question (label or free text +
+   *  question id). Provided by the detail page; the cockpit only mounts the
+   *  card when it is there. */
+  onAnswerQuestion?: (value: string, answerTo: string) => Promise<void>;
 }
 
 /** What `match` sees. Kept structural so blocks can be tested with literals. */

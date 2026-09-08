@@ -33,7 +33,8 @@ export interface RunContext {
 
 export interface RunBudget {
   pct: number;
-  state: 'warn' | 'over';
+  /** wrap_up (phase 2a): the one-step grace a "Wrap up" answer granted. */
+  state: 'warn' | 'over' | 'wrap_up';
   spent_cents: number | null;
 }
 
@@ -54,6 +55,9 @@ export interface RunView {
   ended: RunEnded | null;
   inbox_pending: number;
   budget: RunBudget | null;
+  /** Phase 2a: the open typed question (folded from question_asked, cleared
+   *  by question_answered). Read through questionFromRunView. */
+  question?: Record<string, unknown> | null;
   revision: number;
 }
 
@@ -144,7 +148,8 @@ export function contextGauge(view: RunView | null): RunContext | null {
 
 export function budgetState(view: RunView | null): RunBudget | null {
   const b = view?.budget;
-  if (!b || typeof b.pct !== 'number' || (b.state !== 'warn' && b.state !== 'over')) return null;
+  if (!b || typeof b.pct !== 'number') return null;
+  if (b.state !== 'warn' && b.state !== 'over' && b.state !== 'wrap_up') return null;
   return { pct: b.pct, state: b.state, spent_cents: typeof b.spent_cents === 'number' ? b.spent_cents : null };
 }
 

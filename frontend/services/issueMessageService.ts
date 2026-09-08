@@ -91,6 +91,11 @@ export interface IssueMessagePostPayload {
    *  who would wake and can only drop from that set, never add. Omit the key
    *  entirely when nothing is suppressed. */
   suppress_agent_ids?: string[];
+  /** Phase 2a: this comment answers the parked typed question with that id.
+   *  The body must equal one of its option labels (or be free text when the
+   *  question allows it) — the server validates (409 no_open_question / 400
+   *  answer_shape) and records `question_answered` after delivery. */
+  answer_to?: string;
 }
 
 /** What posting a comment would start — the server's own verdict.
@@ -136,9 +141,37 @@ export class AgentNotDispatchedError extends Error {
 
 const _base = `${getApiUrl()}/api/v1/issues`;
 
+/**
+ * A typed 4xx from the answer channel (phase 2a): the backend's
+ * `{detail: {code, message}}` — `no_open_question` / `answer_shape` (409/400
+ * from the endpoint), or a kind's own rejection (`budget_still_exhausted`,
+ * `budget_unreadable`, `no_issue_target`). QuestionCard maps `code` to copy.
+ */
+export class IssueAnswerRejectedError extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message || code);
+    this.name = 'IssueAnswerRejectedError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function _json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    try {
+      const parsed = JSON.parse(text) as { detail?: { code?: unknown; message?: unknown } };
+      const code = parsed?.detail?.code;
+      if (typeof code === 'string' && code) {
+        const message = typeof parsed.detail?.message === 'string' ? parsed.detail.message : '';
+        throw new IssueAnswerRejectedError(res.status, code, message);
+      }
+    } catch (err) {
+      if (err instanceof IssueAnswerRejectedError) throw err;
+      // not the typed shape — fall through to the generic error below
+    }
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
   if (res.status === 204) return undefined as unknown as T;

@@ -9,6 +9,8 @@ import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ResourceThumb } from './ResourceThumb';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
+import { QuestionCard } from '../Todolist/QuestionCard';
+import type { TypedQuestion } from '../Todolist/questionTypes';
 import { SubTaskList } from './SubTaskCard';
 import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
 import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
@@ -45,6 +47,15 @@ export interface MessageBubbleProps {
    * Renders an inline Approve/Reject card above the prose body.
    */
   awaitingApproval?: AwaitingApproval;
+  /**
+   * Phase 2a: the turn parked on a typed question (AskUser). Renders the
+   * QuestionCard under the prose; answered/superseded stamps come with it.
+   */
+  awaitingInput?: TypedQuestion;
+  /** Answer the parked question — sends a message with `answer_to`. */
+  onAnswerQuestion?: (value: string, answerTo: string) => Promise<void>;
+  /** Read-only card (an older assistant message: only the newest is open). */
+  awaitingInputDisabled?: boolean;
   /** The agent_runs id that backed this turn (metadata_json.run_id). Threaded
    *  to TurnWriteSummary so its Undo button knows what to undo. */
   runId?: string | null;
@@ -326,6 +337,9 @@ export function MessageBubble({
   attachments,
   toolCalls,
   awaitingApproval,
+  awaitingInput,
+  onAnswerQuestion,
+  awaitingInputDisabled = false,
   runId,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
@@ -418,6 +432,16 @@ export function MessageBubble({
             {content}
           </ReactMarkdown>
         </div>
+
+        {awaitingInput && (
+          <div className="px-3 pb-2" data-testid="bubble-question">
+            <QuestionCard
+              question={awaitingInput}
+              disabled={awaitingInputDisabled}
+              onAnswer={onAnswerQuestion ?? (async () => undefined)}
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-ink-700/50">
           {tokens !== undefined && (

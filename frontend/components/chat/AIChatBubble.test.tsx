@@ -297,3 +297,62 @@ describe('AIChatBubble — user bubble resource references', () => {
     expect(screen.getByText('plain text turn')).toBeInTheDocument();
   });
 });
+
+
+describe('AIChatBubble — awaiting_input question card (phase 2a)', () => {
+  const question = {
+    id: 'q:77:4',
+    kind: 'user',
+    prompt: 'Which ending?',
+    options: [{ label: 'Open ending' }, { label: 'Twist' }],
+    allowFreeText: true,
+  };
+
+  it('mounts QuestionCard under the prose and answers through onAnswerQuestion', async () => {
+    const onAnswerQuestion = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          role="assistant"
+          content="Let me ask."
+          awaitingInput={question}
+          onAnswerQuestion={onAnswerQuestion}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('bubble-question')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Twist' }));
+    await vi.waitFor(() => expect(onAnswerQuestion).toHaveBeenCalledWith('Twist', 'q:77:4'));
+  });
+
+  it('renders an answered question read-only', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble
+          role="assistant"
+          content="Let me ask."
+          awaitingInput={{ ...question, answered: { value: 'Twist' } }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Twist' })).toBeDisabled();
+  });
+
+  it('an older message renders its card read-only (awaitingInputDisabled)', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble role="assistant" content="old ask" awaitingInput={question} awaitingInputDisabled />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Twist' })).toBeDisabled();
+  });
+
+  it('draws nothing extra without awaitingInput', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble role="assistant" content="plain" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('bubble-question')).toBeNull();
+  });
+});

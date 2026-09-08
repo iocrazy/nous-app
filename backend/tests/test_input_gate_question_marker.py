@@ -14,6 +14,9 @@ def test_mark_question_answered_merges_into_the_issue_marker_via_orm():
 
     src = inspect.getsource(input_gate.mark_question_answered)
     assert "update(Issues)" in src and "answered_at" in src
+    # Task 7 review F7: the value is stamped too, so a reload can highlight
+    # the pick (the marker path has no other record of it).
+    assert '"answered_value": value' in src
     assert 'has_key("awaiting_input")' in src
 
 

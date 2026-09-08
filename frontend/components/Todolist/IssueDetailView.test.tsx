@@ -5,7 +5,7 @@
  * 不断言栅格布局本身 —— 布局用 CSS 媒体查询表达，jsdom 里没有意义。
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UiIssue, AgentRef } from './types';
@@ -309,5 +309,96 @@ describe('IssueDetailView — cockpit + 区块注册表 (harness P4 T8)', () => 
     fireEvent.change(input, { target: { value: '500' } });
     fireEvent.submit(input.closest('form')!);
     await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(1, { budget_cents: 500 }));
+  });
+});
+
+
+describe('IssueDetailView — typed question (phase 2a)', () => {
+  const MARKER = {
+    prompt: 'Cold open or teaser?',
+    since: '2026-09-08T00:00:00Z',
+    issue_id: 1,
+    question_id: 'q:9:2',
+    kind: 'user',
+    options: [{ label: 'Cold open', description: null }, { label: 'Teaser', description: null }],
+    allow_free_text: false,
+    run_id: '9',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress({ phase: 'waiting_input', current_run: null, runs: [] });
+  });
+
+  it('answers a typed marker with the label and answer_to', async () => {
+    const { postIssueMessage } = await import('../../services/issueMessageService');
+    (postIssueMessage as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ agent_dispatched: true });
+    renderDetail(mkIssue({
+      status: 'needs_followup',
+      raw: {
+        status: 'needs_followup',
+        execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?', awaiting_input: MARKER },
+      } as never,
+    }));
+    const btn = await waitFor(() => screen.getByRole('button', { name: 'Teaser' }));
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(postIssueMessage).toHaveBeenCalledWith(expect.anything(), { body: 'Teaser', answer_to: 'q:9:2' }),
+    );
+    expect(document.querySelector('[data-testid="needs-input-card"] textarea')).toBeNull();
+  });
+
+  it('the cockpit shows the question from the run view while waiting for input', async () => {
+    progressState.value = mkProgress({
+      phase: 'waiting_input',
+      current_run: {
+        id: '501',
+        status: 'running',
+        started_at: '2026-08-03T00:00:00Z',
+        model: 'm',
+        view: {
+          v: 1, phase: 'waiting_input', step: null, current: null, retry: null, context: null, blocked: null,
+          children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, revision: 3,
+          question: { id: 'budget:501', kind: 'budget', prompt: 'Budget exhausted', options: [{ label: 'Top up' }, { label: 'Wrap up' }, { label: 'Cancel' }], allow_free_text: false, asked_at: 'T' },
+        },
+        cost: { spent_cents: 120 },
+      },
+    });
+    const { container } = renderDetail(mkIssue());
+    const q = await waitFor(() => {
+      const el = container.querySelector('[data-testid="cockpit-question"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    const card = q.querySelector('[data-testid="question-card"]') as HTMLElement;
+    expect(card.getAttribute('data-question-kind')).toBe('budget');
+    expect(card.textContent).toContain('Wrap up');
+  });
+
+  it('a parked issue draws ONE card: the detail card, never a second one in the cockpit', async () => {
+    progressState.value = mkProgress({
+      phase: 'waiting_input',
+      execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?', awaiting_input: MARKER },
+      current_run: {
+        id: '9', status: 'completed', started_at: '2026-08-03T00:00:00Z', model: 'm',
+        view: {
+          v: 1, phase: 'waiting_input', step: null, current: null, retry: null, context: null, blocked: null,
+          children: { total: 0, done: 0 }, ended: { reason: 'awaiting_input' }, inbox_pending: 0, budget: null, revision: 3,
+          question: { id: 'q:9:2', kind: 'user', prompt: 'Cold open or teaser?', options: MARKER.options, allow_free_text: false, asked_at: 'T' },
+        },
+        cost: { spent_cents: 1 },
+      },
+    });
+    const { container } = renderDetail(mkIssue({
+      status: 'needs_followup',
+      raw: {
+        status: 'needs_followup',
+        execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?', awaiting_input: MARKER },
+      } as never,
+    }));
+    await waitFor(() => expect(container.querySelector('[data-testid="needs-input-card"]')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('[data-testid="issue-cockpit"]')).not.toBeNull());
+    expect(container.querySelectorAll('[data-testid="question-card"]').length).toBe(1);
+    expect(container.querySelector('[data-testid="cockpit-question"]')).toBeNull();
   });
 });

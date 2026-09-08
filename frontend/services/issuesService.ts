@@ -139,6 +139,12 @@ export interface NeedsInputItem {
   assignee_agent_id: string | null;
   /** Human identifier ("MH-7"); the detail route is keyed by it, not by id. */
   identifier: string | null;
+  /** Phase 2a: the typed question the issue was parked with (from
+   *  execution_state.awaiting_input). Absent on plain needs_input parks. */
+  question_id?: string | null;
+  kind?: string | null;
+  options?: { label: string; description?: string | null }[];
+  allow_free_text?: boolean;
 }
 
 export interface NeedsInputListResponse {

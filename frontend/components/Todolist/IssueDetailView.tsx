@@ -30,6 +30,7 @@ import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { NeedsInputCard } from './NeedsInputCard';
+import { questionFromMarker } from './questionTypes';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import type { SubtaskCount } from './issueFlow';
@@ -312,12 +313,21 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // `agent_dispatched` is the only way to tell. Throwing the typed error lets
   // the card show "saved but nothing started" instead of silently pretending
   // the agent picked it up.
-  const handleAnswerQuestion = async (body: string) => {
-    const res = await postIssueMessage(issue.id, { body });
-    await refresh();
-    if (!res.agent_dispatched) throw new AgentNotDispatchedError();
-    onIssueDispatched?.();
-  };
+  const handleAnswerQuestion = useCallback(
+    async (body: string, answerTo?: string) => {
+      const res = await postIssueMessage(
+        issue.id,
+        answerTo ? { body, answer_to: answerTo } : { body },
+      );
+      await refresh();
+      if (!res.agent_dispatched) throw new AgentNotDispatchedError();
+      onIssueDispatched?.();
+    },
+    [issue.id, refresh, onIssueDispatched],
+  );
+  // Phase 2a: the typed question the issue was parked with (buttons), or
+  // null for a plain needs_input park (textarea). Parsed once per row.
+  const typedQuestion = questionFromMarker(execState);
 
   const handleDispatch = async () => {
     if (!issue?.id) return;
@@ -366,9 +376,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             void refreshProgress();
             onIssueDispatched?.();
           },
+          onAnswerQuestion: (value: string, answerTo: string) =>
+            handleAnswerQuestion(value, answerTo),
         },
       ),
-    [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched],
+    [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched, handleAnswerQuestion],
   );
   const cockpitBlocks = blocksFor('cockpit', blockCtx);
   const contextBlocks = blocksFor('context', blockCtx);
@@ -465,6 +477,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               question={agentQuestion}
               agentName={issue.assignee?.name}
               onSubmit={handleAnswerQuestion}
+              typed={typedQuestion}
+              onAnswer={(value, answerTo) => handleAnswerQuestion(value, answerTo)}
             />
           )}
 

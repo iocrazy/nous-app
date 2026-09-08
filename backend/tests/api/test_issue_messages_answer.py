@@ -116,7 +116,7 @@ async def test_matching_answer_emits_question_answered_then_wakes(patched):
     # recorded only AFTER delivery, and the marker is stamped so a retry is a 409
     assert patched.order == ["wake", "append"]
     patched.mark_answered.assert_awaited_once_with(
-        workflow_id="wf-1", question_id="q:1:2"
+        workflow_id="wf-1", question_id="q:1:2", value="A"
     )
     patched.divert.assert_not_awaited()  # an answer never goes to the inbox
 

@@ -19,6 +19,8 @@ import { useTranslation } from 'react-i18next';
 import { HelpCircle } from 'lucide-react';
 
 import { AgentNotDispatchedError } from '../../services/issueMessageService';
+import { QuestionCard } from './QuestionCard';
+import type { TypedQuestion } from './questionTypes';
 
 interface NeedsInputCardProps {
   /** The agent's stated reason for stopping (`execution_state.outcome_reason`). */
@@ -27,9 +29,23 @@ interface NeedsInputCardProps {
   /** Posts the reply. Rejecting with AgentNotDispatchedError selects the
    *  "saved but nothing started" branch. */
   onSubmit: (body: string) => Promise<void>;
+  /** Phase 2a: the typed question from the marker. Any typed question —
+   *  buttons or open-ended — mounts QuestionCard instead of the textarea, so
+   *  the reply always carries `answer_to` (a bare textarea reply would leave
+   *  the question open: no `question_answered`, phase stuck at
+   *  waiting_input). The prompt is still `question` above. */
+  typed?: TypedQuestion | null;
+  /** Answer the typed question (label or free text + its id). */
+  onAnswer?: (value: string, answerTo: string) => Promise<void>;
 }
 
-export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({ question, agentName, onSubmit }) => {
+export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({
+  question,
+  agentName,
+  onSubmit,
+  typed = null,
+  onAnswer,
+}) => {
   const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState(false);
@@ -70,6 +86,23 @@ export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({ question, agentN
           {question}
         </p>
       )}
+      {typed && onAnswer ? (
+        <QuestionCard
+          question={{ ...typed, prompt: question ? '' : typed.prompt }}
+          onAnswer={async (value, answerTo) => {
+            setNotDispatched(false);
+            try {
+              await onAnswer(value, answerTo);
+            } catch (err) {
+              if (err instanceof AgentNotDispatchedError) {
+                setNotDispatched(true);
+                return;
+              }
+              throw err;
+            }
+          }}
+        />
+      ) : (
       <textarea
         value={draft}
         disabled={pending}
@@ -78,21 +111,24 @@ export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({ question, agentN
         rows={2}
         className="w-full rounded border border-ink-800 bg-ink-900/60 px-2 py-1.5 text-[14px] text-ink-200 placeholder:text-ink-600 focus:outline-none focus:border-warn-line disabled:opacity-60"
       />
+      )}
       {notDispatched && (
         <p data-testid="needs-input-not-dispatched" className="text-[12px] text-warn">
           {t('taskCenter.answerNotDispatched')}
         </p>
       )}
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={pending}
-          className="px-3 py-1.5 text-[13px] rounded border border-warn-line text-warn hover:bg-warn-soft disabled:opacity-50"
-        >
-          {pending ? t('issueDetail.replying', 'Replying…') : t('issueDetail.reply', 'Reply')}
-        </button>
-      </div>
+      {!(typed && onAnswer) && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending}
+            className="px-3 py-1.5 text-[13px] rounded border border-warn-line text-warn hover:bg-warn-soft disabled:opacity-50"
+          >
+            {pending ? t('issueDetail.replying', 'Replying…') : t('issueDetail.reply', 'Reply')}
+          </button>
+        </div>
+      )}
     </section>
   );
 };
