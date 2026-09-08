@@ -93,7 +93,12 @@ async def test_typed_answer_while_paused_wakes_the_parked_workflow(monkeypatch):
         monkeypatch, running=None, paused_at="2026-09-08T00:00:00+00:00"
     )
     pending = SimpleNamespace(
-        question_id="q:1:2", value="A", kind="user", run_id="1", workflow_id="wf"
+        question_id="q:1:2",
+        value="A",
+        kind="user",
+        run_id="1",
+        workflow_id="wf",
+        wake=True,
     )
     monkeypatch.setattr(r, "_validate_typed_answer", AsyncMock(return_value=pending))
     commit = AsyncMock()
