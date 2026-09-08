@@ -581,14 +581,35 @@ it('answered state renders read-only with the pick highlighted', () => {
 - Modify: `docs/superpowers/plans/2026-09-07-harness-p4-phase2a-control-plane.md`（本文末尾追加「完成账」）
 - Modify: `CLAUDE.md`（若新增了值得后人知道的陷阱才写；否则不动）
 
-- [ ] **Step 1: 部署确认** — 全部 PR 合并后 `gh run watch` 最近一次 `deploy-gpu`；`ssh heygo@10.0.0.10 'docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz'`；容器内 `grep -c "class PauseHook" /app/app/services/ai/runner/pause_hook.py`。
-- [ ] **Step 2: ① 暂停/恢复** — 调试账号建 issue（英文标题）并派发；运行中 `POST /issues/{id}/pause` → 断言下一条 `turn_end` 事件 `reason=paused`、`GET /progress` `phase=paused`；暂停期间发评论 → 响应 `diverted_to_inbox=true`；`POST /resume` → 新 run 首个 `inbox_claimed` 领到那条评论；前端详情页不刷新即从 Pause 变 Resume 再变运行。
-- [ ] **Step 3: ② AskUser 走 issue** — 用一个会调用 AskUser 的提示（在评论里直接要求 "Ask me to pick between A and B before continuing"）→ 事件 `question_asked` 落行、`NeedsInputCard` 出两个按钮、点 A → `question_answered{value: "A"}` 落在提问 run，下一 run 的首条 user 消息正文为 "A"。
-- [ ] **Step 4: ③ AskUser 走聊天** — 同样提示在聊天面板 → 气泡出按钮，回答后气泡变只读高亮，下一回合模型读到 label；再发一条普通消息 → 旧问题 `superseded`。
-- [ ] **Step 5: ④ 零预算** — `budget_cents=0` 的 issue 派发 → `budget_check{halt}` → `question_asked{kind: budget}` → 三选一卡；分三次 issue 各验 Top up（改预算后续跑）、Wrap up（下一 run `budget_check{action: wrap_up}`、一步收尾）、Cancel（issue `cancelled`）。
-- [ ] **Step 6: ⑤ 计数** — 两条排队评论 → `pending-summary` 返 `count=2`；主页行 `2 queued`、看板卡底同数、横条出「queued」类。
-- [ ] **Step 7: 前端** — `cd frontend && npm run e2e:prod`；真机按 8 页 UI 稿逐页对照，截图留 PR。
-- [ ] **Step 8: 完成账** — 表格记每条验收的证据（事件 id / 截图 / 命令输出），未验项写明原因；记忆文件 `project-harness-p4-phase2a-spec-in-progress` 改名为 shipped 并写下期入口（2b：回放 + fork、schedule、continuable、逐工具超时）。
+- [x] **Step 1: 部署确认** — 全部 PR 合并后 `gh run watch` 最近一次 `deploy-gpu`；`ssh heygo@10.0.0.10 'docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz'`；容器内 `grep -c "class PauseHook" /app/app/services/ai/runner/pause_hook.py`。
+- [x] **Step 2: ① 暂停/恢复** — 调试账号建 issue（英文标题）并派发；运行中 `POST /issues/{id}/pause` → 断言下一条 `turn_end` 事件 `reason=paused`、`GET /progress` `phase=paused`；暂停期间发评论 → 响应 `diverted_to_inbox=true`；`POST /resume` → 新 run 首个 `inbox_claimed` 领到那条评论；前端详情页不刷新即从 Pause 变 Resume 再变运行。
+- [x] **Step 3: ② AskUser 走 issue** — 用一个会调用 AskUser 的提示（在评论里直接要求 "Ask me to pick between A and B before continuing"）→ 事件 `question_asked` 落行、`NeedsInputCard` 出两个按钮、点 A → `question_answered{value: "A"}` 落在提问 run，下一 run 的首条 user 消息正文为 "A"。
+- [x] **Step 4: ③ AskUser 走聊天** — 同样提示在聊天面板 → 气泡出按钮，回答后气泡变只读高亮，下一回合模型读到 label；再发一条普通消息 → 旧问题 `superseded`。
+- [x] **Step 5: ④ 零预算** — `budget_cents=0` 的 issue 派发 → `budget_check{halt}` → `question_asked{kind: budget}` → 三选一卡；分三次 issue 各验 Top up（改预算后续跑）、Wrap up（下一 run `budget_check{action: wrap_up}`、一步收尾）、Cancel（issue `cancelled`）。
+- [x] **Step 6: ⑤ 计数** — 两条排队评论 → `pending-summary` 返 `count=2`；主页行 `2 queued`、看板卡底同数、横条出「queued」类。
+- [x] **Step 7: 前端** — `cd frontend && npm run e2e:prod`；真机按 8 页 UI 稿逐页对照，截图留 PR。
+- [x] **Step 8: 完成账** — 表格记每条验收的证据（事件 id / 截图 / 命令输出），未验项写明原因；记忆文件 `project-harness-p4-phase2a-spec-in-progress` 改名为 shipped 并写下期入口（2b：回放 + fork、schedule、continuable、逐工具超时）。
+
+**完成账（2026-09-08，Task 9 真栈验收）**
+
+全部在生产栈（gpupc `nous-worker` / `app.nous.ink`，调试账号 `claude.debug`，team 331438215859255）用 API 与 Playwright 真跑；模型 `doubao-seed-2-0-lite`。验收脚本（`acc.py` + step1–5）留在会话 scratchpad 未入库——它们创建真实 issue、花真钱，不适合当门禁。
+
+部署确认：T4 #2182→f03ce8ca、T5 #2184→aabaa548、T6 #2185→5fc54133、T7 #2186→6ab7d880、T8 #2187→e295790b、修复 #2188→23663832，每次 merge 都盯 `deploy-gpu.yml` 到 `completed success`，随后 `readyz` `{"status":"ready","dbos":"enabled"}` 且容器内 grep 到该 PR 的标识符（`budget.py`、`answered_value`、`pending_summary_stmt`、`PAUSED_PAGE`、`_stop = result.get("stop_reason")`）；前端 `deploy-pages.yml` success，`app.nous.ink/version.json` `commitSha=e295790`，`npm run e2e:prod` 3 passed / 1 skipped。
+
+| # | 项 | 结果 | 证据 |
+|---|---|---|---|
+| ① | 暂停 / 恢复 | ✅ | MH-67（347474243723822）：第一个 `tool_call` 后 `POST /pause` 200；run 347474259567172 事件 8 = `turn_end{reason:"paused"}`（前一步 step_end 后、下一步未开）；`GET /progress` `phase=paused`，status 保持 `in_progress`、无 `awaiting_input`；暂停期评论 → `diverted_to_inbox=true` `inbox_id=347474312204986`；`POST /resume` → `{dispatched:true, reason:"dispatched"}`；新 run 347474370708256 事件 2 = `inbox_claimed{kind:"steer", inbox_id:347474312204986}`。无排队时 `/resume` → `reason:"cleared"`（MH-62）。 |
+| ② | AskUser 走 issue | ✅ | MH-68（347474255413822）：run 347474269385290 `question_asked{q:…:4}` → `turn_end{reason:"awaiting_input"}`；`execution_state.awaiting_input` 与 `GET /issues/needs-input` 都带 `question_id/options/allow_free_text`；错答 "C" → 400 `answer_shape`；答 "A (a comedy)" → 201 `agent_dispatched=true`，提问 run 落 `question_answered{value:"A (a comedy)", superseded:false}`；下一 run 347474692248624 首条 `user` 正文 = `"A (a comedy)"`，模型按喜剧写 logline → `in_review`，标记随新 run 清空。 |
+| ③ | AskUser 走聊天 | ✅ | 非流式 `/chat`（session 347469882404872）：assistant `metadata_json.awaiting_input{question_id, options, allow_free_text:false}`；错答 → 400 `answer_shape`；答对 → 200，提问消息 metadata `answered{at, value}`；再问一次后发普通消息 → 旧问题 `answered{superseded:true}`。流式 `/chat-stream`（聊天面板真实路径，session 347474299212453）：终止 chunk 含 `[awaiting input: …]` 与 AskUser tool_call，assistant metadata 同形；经 `answer_to` 流式作答 → `answered{value:"B (a thriller)", superseded:false}`。 |
+| ④ | 零预算三选一 | ✅ | `budget_cents=0` 经 PATCH（`IssueCreate` 无该字段）。Cancel（MH-69）：`budget_check{pct:100, action:"halt"}` → `question_asked{kind:"budget", question_id:"budget:<run>"}` → `turn_end{awaiting_input}`；标记与 needs-input 带 kind=budget；答 "Cancel" → 201，`question_answered{value:"Cancel"}`，issue `cancelled`、`outcome_reason=budget_exhausted`、标记盖 `answered_*`、needs-input 不再列出。Top up（MH-70）：预算仍 0 时 → 409 `budget_still_exhausted`；PATCH 500 后 → 201 派发，下一 run 无 halt、`completed` → `in_review`。Wrap up（MH-71）：→ 201 派发；下一 run 347474705544274 `budget_check{action:"wrap_up"}` 放一步、`execution_state.budget_wrap_up{consumed_by:<run>}`，模型一步内未 FinishIssue → 闸门再次 `halt` 重新提问（设计：宽限恰好一个边界，之后仍由人选）。 |
+| ⑤ | 计数 | ✅ | MH-66（347469360799030）暂停后两条评论均 `diverted_to_inbox=true`；`GET /ai-library/inbox/pending-summary?target_kind=issue` → `[{target_id:"347469360799030", count:2, oldest_at}]`；`GET /issues/paused` → `{has_more:false, items:[MH-66]}`；`/progress` `inbox_pending=2`。 |
+| 前端 | UI 走查 | ✅ | Playwright 对生产截图 5 张并以 `toBeVisible` 断言：列表 paused 行 `2 queued` 芯片 + hover `Resume`、横条第五类 `queued` 卡（"2 queued"）、看板卡底芯片、详情 Cockpit `Paused` + `Resume` + 收件箱行、Settings → Task Center `Paused` 区 + `Resume`。 |
+
+发现并修的缺陷（#2188）：`AgentRunner.stream_turn` 的缓冲回退分支——生产 chunk_callback 轮次的**唯一**路径（chat wiring 给的是 `LLMFallbackChain`，没有 `stream`）——把 `run_turn` 结果的 `stop_reason` / `hook_decision` 丢掉，AskUser、预算停机、PauseHook 三条链在真栈上全被记成 `turn_end{completed}`，executor 走强制 FinishIssue 兜底写出旧形状标记，回答一律 409。单测此前只覆盖 `run_turn` 直连与真流式两条路径。已回写 CLAUDE.md 已知陷阱。
+
+顺手：`issueDetail.inboxPending` 缺复数形（截图里 "2 message waiting"）→ `_one/_other`（本 PR）。
+
+未验：① 的「详情页不刷新即 Pause→Resume→运行」只截了静态态，未录实时切换；Wrap up 分支里"模型一步内真的收尾"取决于模型，本次它没收尾（闸门行为正确）。
 
 ---
 
