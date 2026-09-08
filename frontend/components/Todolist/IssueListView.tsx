@@ -66,7 +66,7 @@ import {
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
-import { runningChipLabel, needsReplyChip } from './issueChips';
+import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
 import { buildAttentionItems } from './attentionItems';
 import { PHASE_FALLBACK, PHASE_LABEL_KEY, PHASE_ORDER, PHASE_TONE, QUICK_PHASES, isIssueLive, issuePhase, type IssuePhase } from './issuePhase';
 import {
@@ -76,6 +76,7 @@ import {
 } from './AttentionStrip';
 import { useTaskManager } from '../../contexts/TaskManagerContext';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { fetchPendingSummary, type PendingSummaryEntry } from '../../services/agentInboxService';
 import type { AILibraryApprovalRequest } from '../../types';
 import {
   computeSubtaskCounts,
@@ -173,8 +174,8 @@ const StageRing: React.FC<{ current: number; total: number }> = ({ current, tota
 
 const DUE_CLASS: Record<'normal' | 'soon' | 'overdue', string> = {
   normal: 'text-ink-500',
-  soon: 'text-amber-400 font-semibold',
-  overdue: 'text-rose-400 font-semibold',
+  soon: 'text-warn font-semibold',
+  overdue: 'text-danger font-semibold',
 };
 
 /**
@@ -203,9 +204,11 @@ interface IssueRowProps {
   hideProjectPill?: boolean;
   /** Sub-issue done/total for this row, or undefined when it has no children. */
   subtaskCount?: SubtaskCount;
+  /** phase 2a §4: queued-comment count for this issue (inbox summary). */
+  queued?: number;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount, selected = false }) => {
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount, selected = false, queued }) => {
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
@@ -224,9 +227,15 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   const needsReply = needsReplyChip(issue);
   const phase = issuePhase(issue);
   // The one hover action that fits the phase: answer when it waits, steer when
-  // it runs. Both land on the detail page's composer — the row only names the
-  // verb so the list reads as "what can I do here" instead of "what is it".
-  const rowAction = phase === 'waiting_input' ? t('issues.action.reply', 'Reply') : phase === 'running' ? t('issues.action.steer', 'Steer') : null;
+  // it runs, resume when a person paused it. All land on the detail page — the
+  // row only names the verb so the list reads as "what can I do here" instead
+  // of "what is it".
+  const rowAction =
+    phase === 'waiting_input' ? t('issues.action.reply', 'Reply')
+      : phase === 'running' ? t('issues.action.steer', 'Steer')
+        : phase === 'paused' ? t('issues.action.resume', 'Resume')
+          : null;
+  const queuedLabel = queuedChip(queued, t);
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -245,9 +254,18 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
       )}
       <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
       {runningLabel && (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-amber-400 bg-amber-500/10 shrink-0" title="An agent is working on this">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-agent bg-agent-soft shrink-0" title="An agent is working on this">
+          <span className="w-1.5 h-1.5 rounded-full bg-agent animate-pulse" />
           {runningLabel}
+        </span>
+      )}
+      {queuedLabel && (
+        <span
+          data-testid="queued-chip"
+          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] text-info bg-info-soft ring-1 ring-info-line shrink-0"
+          title={t('issues.queuedTitle', 'Comments waiting for the agent to pick up')}
+        >
+          {queuedLabel}
         </span>
       )}
       {needsReply && (
@@ -450,6 +468,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   // in_review issues are already in `scopedIssues`, no fetch at all.
   const { needsInputItems } = useTaskManager();
   const [approvals, setApprovals] = useState<AILibraryApprovalRequest[]>([]);
+  // Phase 2a §4: queued-comment counts per issue, one grouped query on the
+  // same 60s cadence as approvals. Feeds the row chip, the board card and the
+  // "queued" attention card for paused issues.
+  const [pendingSummary, setPendingSummary] = useState<Record<string, PendingSummaryEntry>>({});
   const attentionScopeKey = `${scope.type}:${teamId ?? 'none'}`;
   const [attentionCollapsed, setAttentionCollapsed] = useState(() =>
     loadAttentionCollapsed(attentionScopeKey));
@@ -461,6 +483,12 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     } catch (err) {
       // Non-fatal: the other two attention sources still render.
       console.error('[IssueListView] approval requests load failed', err);
+    }
+    try {
+      setPendingSummary(await fetchPendingSummary());
+    } catch (err) {
+      // Non-fatal: rows render without the queued chip.
+      console.error('[IssueListView] pending summary load failed', err);
     }
   }, []);
 
@@ -542,8 +570,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       approvals,
       scopedIssues.filter((i) => i.status === 'in_review'),
       scopedIssues.filter((i) => issuePhase(i) === 'paused'),
+      pendingSummary,
+      t,
     ),
-    [needsInputItems, approvals, scopedIssues],
+    [needsInputItems, approvals, scopedIssues, pendingSummary, t],
   );
 
   // The needs-input feed carries no identifier, and the detail route is keyed
@@ -736,7 +766,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           data-testid="creates-in-badge"
           className={`hidden sm:inline-flex items-center gap-1.5 px-2 py-1 text-[12px] rounded shrink-0 ${
             readOnly
-              ? 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30'
+              ? 'bg-warn-soft text-warn ring-1 ring-warn-line'
               : 'bg-ink-900/80 text-ink-400 ring-1 ring-ink-800'
           }`}
           title={readOnly ? 'This is a filtered, read-only view' : 'Where a new issue will be created'}
@@ -980,7 +1010,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             Loading issues…
           </div>
         ) : viewMode === 'board' ? (
-          <IssueBoardView issues={flatSorted} />
+          <IssueBoardView issues={flatSorted} pendingSummary={pendingSummary} />
         ) : projectGrouped ? (
           <div>
             {onCreateProject && (
@@ -1087,6 +1117,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                             hideProjectPill
                             subtaskCount={subtaskCounts.get(issue.id)}
                             selected={selectedIssueId === issue.id}
+                            queued={pendingSummary[String(issue.id)]?.count}
                           />
                         ))}
                       </div>
@@ -1116,6 +1147,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                   parentLookup={parentLookup}
                   subtaskCount={subtaskCounts.get(issue.id)}
                   selected={selectedIssueId === issue.id}
+                  queued={pendingSummary[String(issue.id)]?.count}
                 />
               ))}
             </div>
@@ -1162,6 +1194,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                   parentLookup={parentLookup}
                   subtaskCount={subtaskCounts.get(issue.id)}
                   selected={selectedIssueId === issue.id}
+                  queued={pendingSummary[String(issue.id)]?.count}
                 />
               ))}
             </div>

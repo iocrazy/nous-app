@@ -160,6 +160,38 @@ async def deliver(payload: InboxPost, auth: AuthDep) -> InboxItemOut:
     return InboxItemOut.from_row(row)
 
 
+class PendingSummaryOut(BaseModel):
+    """One visible issue with unclaimed steers. ``target_id`` str (Snowflake)."""
+
+    target_id: str
+    count: int
+    oldest_at: datetime
+
+
+@router.get("/pending-summary", response_model=list[PendingSummaryOut])
+async def pending_summary(
+    auth: AuthDep,
+    target_kind: Literal["issue"] = Query(
+        ..., description="only issue targets are summarised (phase 2a §4)"
+    ),
+) -> list[PendingSummaryOut]:
+    """Queued-comment counts per issue for the list / board / Task Center
+    chips. Visibility is folded into the query (issue_repository
+    .visibility_predicate), so a count never names an issue the caller
+    cannot open. ``target_kind`` is required and only ``issue`` is accepted:
+    conversation inboxes have no list surface."""
+    del target_kind  # validated by the Literal; one value today
+    rows = await get_agent_run_inbox_repository().pending_summary(str(auth.user_id))
+    return [
+        PendingSummaryOut(
+            target_id=str(r["target_id"]),
+            count=int(r["count"]),
+            oldest_at=r["oldest_at"],
+        )
+        for r in rows
+    ]
+
+
 @router.get("", response_model=list[InboxItemOut])
 async def list_items(
     auth: AuthDep,

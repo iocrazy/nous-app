@@ -101,3 +101,41 @@ describe('buildAttentionItems — paused issues (harness P4)', () => {
     expect(buildAttentionItems([], [], [])).toEqual([]);
   });
 });
+
+// Phase 2a §4: a paused issue is a `paused` card; a paused issue WITH queued
+// comments becomes a `queued` card (resume is what runs them), never both.
+describe('buildAttentionItems — paused vs queued', () => {
+  const paused = {
+    id: 5005,
+    identifier: 'NOUS-9',
+    title: 'Paused with mail',
+    status: 'in_progress',
+    raw: { paused_at: '2026-09-08T00:00:00Z' },
+  } as unknown as UiIssue;
+
+  it('is a paused card when nothing is queued', () => {
+    const items = buildAttentionItems([], [], [], [paused]);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe('paused');
+    expect(items[0].issueId).toBe(5005);
+  });
+
+  it('turns into a queued card carrying the count when the inbox has mail', () => {
+    const items = buildAttentionItems([], [], [], [paused], { '5005': { count: 2 } });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'queued', id: 'queued:5005', detail: '2 queued', issueId: 5005 });
+  });
+
+  it('ignores summary rows for issues that are not paused', () => {
+    const items = buildAttentionItems([], [], [], [], { '5005': { count: 2 } });
+    expect(items).toHaveLength(0);
+  });
+});
+
+describe('buildAttentionItems — queued detail goes through t', () => {
+  it('uses the caller\'s t for the queued count', () => {
+    const paused = { id: 5, identifier: 'N-5', title: 'p', status: 'in_progress', raw: { paused_at: 'x' } } as unknown as UiIssue;
+    const items = buildAttentionItems([], [], [], [paused], { '5': { count: 2 } }, (_k, o) => `${o.count} 条排队`);
+    expect(items[0].detail).toBe('2 条排队');
+  });
+});

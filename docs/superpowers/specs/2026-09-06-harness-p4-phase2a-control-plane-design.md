@@ -9,7 +9,7 @@
 | 一期假设 | 现状（2026-09-06 实测） | 处置 |
 |---|---|---|
 | 「预算 100% 停下以类型化提问」接三期的类型化提问 | 三期 spec/plan 存在，**Task 1/2 一行未做**（plan 23 个勾 0 个） | 本文 §1 吸收三期 §1，作为 2a 的第一块 |
-| pause 有列有语义 | `agent_runs.pause_requested`、`issues.paused_at`、`conversation_ai_meta.paused_at`、`fork_of_run_id/fork_at_seq` 均在生产库；`TurnEndReason.PAUSED` 已定义；收件箱 CHECK 放行 `pause/resume/budget_reply` | ~~只有壳~~ → **Task 5 已补后端**（PauseHook、`/pause` `/resume`、暂停期间改投、sweeper 跳过已暂停 issue；`issue_repository.transition_status` 到终态时清 `paused_at`）。仍缺：收件箱 API 只放行 `steer/answer/budget_reply`、横条 paused 类恒空、CockpitBlock 只有 cancel（Task 8） |
+| pause 有列有语义 | `agent_runs.pause_requested`、`issues.paused_at`、`conversation_ai_meta.paused_at`、`fork_of_run_id/fork_at_seq` 均在生产库；`TurnEndReason.PAUSED` 已定义；收件箱 CHECK 放行 `pause/resume/budget_reply` | ~~只有壳~~ → **Task 5 已补后端**（PauseHook、`/pause` `/resume`、暂停期间改投、sweeper 跳过已暂停 issue；`issue_repository.transition_status` 到终态时清 `paused_at`）。~~横条 paused 类恒空、CockpitBlock 只有 cancel~~ → **Task 8 已补**（`GET /issues/paused` + `pending-summary`、横条第五类 `queued`、Cockpit Pause/Resume、Task Center Paused 区、行/看板 `N queued`）。仍缺：收件箱 API 只放行 `steer/answer/budget_reply`（`pause/resume` 走 `/issues/{id}/pause|resume`，不经收件箱） |
 | 钩子链可 stop / inject | `StepContext.inject()` 已有；`StepHookChain` 首个 STOP 即停；**所有 STOP 一律记 `turn_end{cancelled}`** | 需加 `stop_reason → TurnEndReason` 映射（§2） |
 | 挂起/唤醒原语 | needs_input 走 `input_gate`（workflow 原地 `DBOS.recv`，回复经 gateway `DBOSClient.send` 唤醒）；approval_gate 同款 | §1 复用，不再造 |
 | 列表级 inbox_pending | issue 列表端点不带 rollup；已有列表级范式 `GET /issues/needs-input` | §4 同范式加 `pending-summary` |

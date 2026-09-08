@@ -1,15 +1,15 @@
 /**
  * Cockpit (zone `cockpit`, top of the article): one glance = where the agent
  * is, how far along, how much context and budget are left, and the one control
- * that exists today (cancel the running run — pause lands with phase 2, so no
- * disabled placeholder is drawn for it). Everything reads the rollup through
+ * set that exists today (pause / resume the issue, cancel the running run). Everything reads the rollup through
  * runView.ts selectors; nothing here touches metadata_json's shape.
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Square } from 'lucide-react';
+import { Pause, Play, Square } from 'lucide-react';
 
 import { aiLibraryService } from '../../../services/aiLibraryService';
+import { pauseIssue, resumeIssue } from '../../../services/issuesService';
 import {
   budgetState,
   contextGauge,
@@ -19,6 +19,7 @@ import {
   stepProgress,
 } from '../../TaskCenter/runView';
 import { formatElapsed } from '../formatElapsed';
+import { controlErrorText } from '../issueControlErrors';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { QuestionCard } from '../QuestionCard';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
@@ -54,6 +55,9 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const { t } = useTranslation();
   const rollup = ctx.rollup;
   const [cancelling, setCancelling] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
   if (!rollup) return null;
 
   const phase = rollup.phase;
@@ -76,6 +80,39 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
       : null;
   const startedMs = rollup.current_run?.started_at ? Date.parse(rollup.current_run.started_at) : NaN;
   const elapsed = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : null;
+
+  // Target-level pause / resume (phase 2a §2). Both re-read the issue +
+  // rollup afterwards; a failure is shown on the cockpit (typed path, never a
+  // silent no-op).
+  const issueId = Number(ctx.issue.id);
+  const pause = async () => {
+    if (pausing) return;
+    setPausing(true);
+    setControlError(null);
+    try {
+      await pauseIssue(issueId);
+      ctx.env.onIssueChanged?.();
+    } catch (err) {
+      console.error('[CockpitBlock] pause failed', err);
+      setControlError(controlErrorText(err, t));
+    } finally {
+      setPausing(false);
+    }
+  };
+  const resume = async () => {
+    if (resuming) return;
+    setResuming(true);
+    setControlError(null);
+    try {
+      await resumeIssue(issueId);
+      ctx.env.onIssueChanged?.();
+    } catch (err) {
+      console.error('[CockpitBlock] resume failed', err);
+      setControlError(controlErrorText(err, t));
+    } finally {
+      setResuming(false);
+    }
+  };
 
   const cancel = async () => {
     if (!rollup.current_run || cancelling) return;
@@ -105,18 +142,49 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             <span className="text-ink-100">{step.label}</span>
           </span>
         )}
-        {phase === 'running' && rollup.current_run && (
-          <button
-            type="button"
-            onClick={() => void cancel()}
-            disabled={cancelling}
-            data-testid="cockpit-cancel"
-            className="ml-auto inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-danger-line hover:text-danger disabled:opacity-50"
-          >
-            <Square size={11} /> {cancelling ? t('issueDetail.cancelling', 'Cancelling…') : t('common.cancel', 'Cancel')}
-          </button>
+        {(phase === 'running' || phase === 'paused') && (
+          <span className="ml-auto inline-flex items-center gap-1.5">
+            {phase === 'running' && (
+              <button
+                type="button"
+                onClick={() => void pause()}
+                disabled={pausing}
+                data-testid="cockpit-pause"
+                className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-info-line hover:text-info disabled:opacity-50"
+              >
+                <Pause size={11} /> {pausing ? t('issueDetail.pausing', 'Pausing…') : t('issueDetail.pause', 'Pause')}
+              </button>
+            )}
+            {phase === 'paused' && (
+              <button
+                type="button"
+                onClick={() => void resume()}
+                disabled={resuming}
+                data-testid="cockpit-resume"
+                className="inline-flex items-center gap-1 rounded border border-info-line bg-info-soft px-2 py-0.5 text-[12px] text-info hover:brightness-110 disabled:opacity-50"
+              >
+                <Play size={11} /> {resuming ? t('issueDetail.resuming', 'Resuming…') : t('issueDetail.resume', 'Resume')}
+              </button>
+            )}
+            {rollup.current_run && (
+              <button
+                type="button"
+                onClick={() => void cancel()}
+                disabled={cancelling}
+                data-testid="cockpit-cancel"
+                className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-danger-line hover:text-danger disabled:opacity-50"
+              >
+                <Square size={11} /> {cancelling ? t('issueDetail.cancelling', 'Cancelling…') : t('common.cancel', 'Cancel')}
+              </button>
+            )}
+          </span>
         )}
       </div>
+      {controlError && (
+        <p data-testid="cockpit-control-error" className="text-[12px] text-danger break-words">
+          {controlError}
+        </p>
+      )}
 
       {question && ctx.env.onAnswerQuestion && (
         <div data-testid="cockpit-question">

@@ -60,3 +60,18 @@ export function needsReplyChip(issue: UiIssue): NeedsReplyChip | null {
   if (state?.agent_outcome !== 'needs_input') return null;
   return { question: (state.outcome_reason as string | null | undefined) ?? null };
 }
+
+/**
+ * "2 queued" — comments waiting on the issue's inbox for its next run (phase
+ * 2a §4). Null for 0 / undefined: a chip that says "0 queued" is noise.
+ */
+/** The translate function shape `queuedChip` needs: i18next's `t` with a
+ *  count option. */
+export type CountT = (key: string, opts: { count: number; defaultValue: string }) => string;
+
+export function queuedChip(count: number | undefined | null, t: CountT): string | null {
+  if (!count || count <= 0) return null;
+  // react-i18next without an instance (unit tests) hands defaultValue back
+  // verbatim; once i18next has interpolated, the replace is a no-op.
+  return t('issues.queued', { count, defaultValue: '{{count}} queued' }).replace('{{count}}', String(count));
+}

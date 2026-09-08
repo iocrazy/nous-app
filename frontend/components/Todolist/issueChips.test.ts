@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Issue } from '../../services/issuesService';
 import type { UiIssue } from './types';
-import { runningChipLabel, needsReplyChip } from './issueChips';
+import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
 
 const NOW = new Date('2026-08-03T00:10:00Z');
 
@@ -98,5 +98,38 @@ describe('needsReplyChip', () => {
       { execution_state: { agent_outcome: 'needs_input' } },
       'in_progress',
     ))).toBeNull();
+  });
+});
+
+// Phase 2a §4: the queued chip is a count of comments waiting in the inbox.
+// Zero is silence, not "0 queued" — a chip that is always there is a chip
+// nobody reads.
+describe('queuedChip', () => {
+  // i18next-shaped t: records the key, interpolates like the real thing.
+  const calls: string[] = [];
+  const t = (key: string, o: { count: number; defaultValue: string }) => {
+    calls.push(key);
+    return o.defaultValue.replace('{{count}}', String(o.count));
+  };
+
+  it('is null for zero, undefined and null', () => {
+    expect(queuedChip(0, t)).toBeNull();
+    expect(queuedChip(undefined, t)).toBeNull();
+    expect(queuedChip(null, t)).toBeNull();
+  });
+
+  it('counts through the issues.queued key when something is waiting', () => {
+    calls.length = 0;
+    expect(queuedChip(1, t)).toBe('1 queued');
+    expect(queuedChip(2, t)).toBe('2 queued');
+    expect(calls).toEqual(['issues.queued', 'issues.queued']);
+  });
+
+  it('interpolates itself when t hands defaultValue back verbatim (no i18n instance)', () => {
+    expect(queuedChip(3, (_k, o) => o.defaultValue)).toBe('3 queued');
+  });
+
+  it('honours a translated template', () => {
+    expect(queuedChip(2, (_k, o) => `${o.count} 条排队`)).toBe('2 条排队');
   });
 });

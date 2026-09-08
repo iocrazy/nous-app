@@ -22,6 +22,7 @@ import { TaskKanbanView } from './TaskKanbanView';
 import { BatchActionBar } from './BatchActionBar';
 import { TaskPagination } from './TaskPagination';
 import { NeedsInputSection } from './NeedsInputSection';
+import { PausedSection } from './PausedSection';
 import { useTaskPage } from './useTaskPage';
 import { postIssueMessage, AgentNotDispatchedError } from '../../services/issueMessageService';
 import { useToast } from '../Toast';
@@ -285,6 +286,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
   return (
     <div className={containerClass}>
       <NeedsInputSection items={needsInputItems} onAnswer={handleAnswerNeedsInput} />
+      <PausedSection />
       {showStaleBanner && (
         <button
           type="button"

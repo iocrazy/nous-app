@@ -30,6 +30,32 @@ def _pending():
     return (AgentRunInbox.claimed_at.is_(None), AgentRunInbox.expired_at.is_(None))
 
 
+def pending_summary_stmt(user_id: str):
+    """SELECT target_id, count(*), min(created_at) FROM agent_run_inbox
+    WHERE target_kind = 'issue' AND pending AND target_id IN (visible, unhidden
+    issues) GROUP BY target_id. Visibility is the issue lists' own predicate —
+    a queued count must never leak an issue the caller cannot open."""
+    from app.models import Issues
+    from app.repositories.issue_repository import visibility_predicate
+
+    visible = (
+        select(Issues.id)
+        .where(visibility_predicate(user_id))
+        .where(Issues.hidden_at.is_(None))
+    )
+    return (
+        select(
+            AgentRunInbox.target_id,
+            func.count().label("count"),
+            func.min(AgentRunInbox.created_at).label("oldest_at"),
+        )
+        .where(AgentRunInbox.target_kind == "issue")
+        .where(*_pending())
+        .where(AgentRunInbox.target_id.in_(visible))
+        .group_by(AgentRunInbox.target_id)
+    )
+
+
 def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
     """UPDATE … SET expired_at = now() for pending items older than the
     cutoff. With ``skip_paused_issues`` the issue targets whose issue has
@@ -158,6 +184,17 @@ class AgentRunInboxRepository:
                     )
                 ).scalar_one()
             )
+
+    async def pending_summary(self, user_id: str) -> list[dict[str, Any]]:
+        """Per-issue count of unclaimed items for the issues ``user_id`` can
+        see (phase 2a §4: the "2 queued" chips). ``target_id`` stays int here;
+        the router stringifies (Snowflake)."""
+        async with read_scope() as session:
+            rows = (await session.execute(pending_summary_stmt(user_id))).all()
+        return [
+            {"target_id": int(tid), "count": int(n), "oldest_at": oldest}
+            for tid, n, oldest in rows
+        ]
 
     async def expire_stale(
         self, *, older_than: dt.datetime, skip_paused_issues: bool = True

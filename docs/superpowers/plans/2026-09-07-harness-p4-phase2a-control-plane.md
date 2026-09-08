@@ -564,6 +564,15 @@ it('answered state renders read-only with the pick highlighted', () => {
 
 突变：`pending_summary` 去掉可见性子查询 → 端点测红；`queuedChip` 对 0 返回 `'0 queued'` → 红；StatusBlock 截断原因 → 完整文本断言红。PR「复用/删除」：复用 `issueChips` / `attentionItems` / 块注册表 / `steerTargetOf`；删除 §0 表「横条 paused 类恒空」这一行的成因（`listPaused` 首次给横条真数据）。
 
+**实施记录（2026-09-08，Task 8 落地）**：
+- `pendingSummary` 不在 `TodolistPage` 拉，而在 `IssueListView` 的注意力 effect 里与审批同频（60s）拉一次并同时喂行芯片、`IssueBoardView`（props）与横条——`TodolistPage` 并不持有横条数据，放那里要多穿一层 props 且 list/board 切换时重复拉；`listPaused()` 只喂 Task Center 的 `PausedSection`（自拉自刷），横条的 `paused`/`queued` 类仍由 `scopedIssues.filter(paused_at)` 出，不再"恒空"是因为 Task 5 起 `paused_at` 真有值。
+- `attentionItems.buildAttentionItems` 第五参 `pendingSummary`：paused 且 `count>0` → `queued:<id>`（不再同时出 `paused:<id>`）；`AttentionStrip` 三张表补 `queued`（info 色、`Layers` 图标）。
+- `IssueBoardView.blockedReason(issue)` 回全文，`clipReason` 截 `BOARD_REASON_MAX=60` 只用于芯片文字，`title` 挂全文；`outcome_reason` 兜底。
+- `ActiveTaskCard` 的 `agent-pause` 带 `data-state`（idle/sending/paused/failed），失败不静默；`PausedSection` resume 失败留在行上。
+- 顺手换掉触碰到的 `IssueListView` `DUE_CLASS`/`creates-in-badge` 与 `IssueBoardView` 的 amber/rose 为 ok/warn/danger。
+- 新增 i18n：`issues.queuedTitle`（芯片 tooltip）。
+- 对抗评审 10 条全修：`N queued` 改走 `issues.queued`（`queuedChip(count, t)`，`buildAttentionItems` 第六参 `t`），删掉死键 `issues.attention.queued` / `taskCenter.resumed`；pause/resume 的失败改为 `IssueControlError{code,status}`（`_controlJson` 解析 `detail.code`），UI 经 `issueControlErrors.controlErrorText` 映射 `issueDetail.controlError.*`，绝不回显原始 HTTP 体；`ActiveTaskCard` 暂停结果用文字三态（`agent-pause-state`）并经 `issuePauseSignal` 通知 `PausedSection` 立刻重拉；`PausedSection` 30s 轮询 + 信号重拉，后端 `GET /paused` 多取一行出 `has_more`，UI 显示 `N+`；看板阶段芯片改用 `PHASE_LABEL_KEY`/`PHASE_FALLBACK` 与列表同源；running 芯片用 `agent` 色而非 `ok`（绿=完成）；看板 `blockedReason` 改按 `issuePhase` 判定；顺手清理注释/文档串位与 info 色对比度。
+
 ---
 
 ### Task 9: 真栈验收 + 完成账

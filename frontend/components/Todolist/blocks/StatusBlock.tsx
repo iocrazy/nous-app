@@ -72,6 +72,16 @@ const StatusBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const endMs = live ? nowMs : new Date(String(issue.updated_at)).getTime();
   const elapsed = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.floor((endMs - startMs) / 1000)) : null;
   const runCount = rollup ? rollup.runs.length : usage?.run_count ?? 0;
+  // Phase 2a §4: WHY the issue is blocked / stalled, in full — a truncated
+  // reason is the one line the user came here to read.
+  const execState = (raw.execution_state ?? null) as Record<string, unknown> | null;
+  const stalled = ctx.phase === 'blocked' || execState?.agent_outcome === 'empty_output';
+  const reasonText = stalled
+    ? ((execState?.error_message as string | null | undefined) ??
+      (execState?.outcome_reason as string | null | undefined) ??
+      null)
+    : null;
+  const reasonTone = ctx.phase === 'blocked' ? 'text-danger' : 'text-warn';
   const currentStep = rollup?.current_run?.view?.current as { turn?: number; step?: number } | undefined;
 
   return (
@@ -99,6 +109,12 @@ const StatusBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         <RailRow label={t('issueDetail.elapsed', 'Elapsed')}>
           <span className="tabular-nums">{formatElapsed(elapsed)}</span>
         </RailRow>
+      )}
+      {reasonText && (
+        <div className="text-[13px]" data-testid="status-reason">
+          <span className="text-[11px] uppercase tracking-wider text-ink-500">{t('issueDetail.reason', 'Reason')}</span>
+          <p className={`mt-0.5 whitespace-pre-wrap break-words leading-relaxed ${reasonTone}`}>{reasonText}</p>
+        </div>
       )}
       {ctx.env.assigneeName && <RailRow label={t('issueDetail.assignee', 'Assignee')}>{ctx.env.assigneeName}</RailRow>}
       {usage && usage.total_tokens > 0 && (

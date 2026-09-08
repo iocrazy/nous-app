@@ -6,6 +6,13 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../contexts/TaskManagerContext', () => ({
   useTaskManager: () => ({ needsInputItems: [] }),
 }));
+// Phase 2a §4: the queued-comment summary is its own endpoint; the mock is the
+// wire shape (string ids), not the UiIssue shape.
+const fetchPendingSummary = vi.fn(async (): Promise<Record<string, { count: number; oldestAt: string }>> => ({}));
+vi.mock('../../services/agentInboxService', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../services/agentInboxService')>();
+  return { ...mod, fetchPendingSummary: () => fetchPendingSummary() };
+});
 vi.mock('../../services/aiLibraryService', () => ({
   aiLibraryService: {
     listApprovalRequests: vi.fn(async () => ({ items: [], count: 0 })),
@@ -234,5 +241,36 @@ describe('IssueListView — Phase 分组 / 阶段芯片 / 行动作 (harness P4 
     expect(container.querySelector('[data-testid="attention-strip"]')?.textContent).toMatch(/Paused one/);
     const selected = container.querySelector('a[aria-current="true"]');
     expect(selected?.textContent).toMatch(/Plain one/);
+  });
+});
+
+describe('IssueListView — paused rows (phase 2a §4)', () => {
+  it('offers Resume as the row action on a paused issue and shows the queued count', async () => {
+    fetchPendingSummary.mockResolvedValueOnce({ '5': { count: 2, oldestAt: '2026-09-08T00:00:00Z' } });
+    renderList([
+      mkIssue({
+        id: 5, identifier: 'MH-5', title: 'Paused with mail', status: 'in_progress',
+        raw: { dbos_workflow_id: 'wf-5', paused_at: '2026-09-08T00:00:00Z' } as Issue,
+      }),
+    ]);
+    // The attention strip also names the issue (paused card) — pick the list row.
+    const row = screen.getAllByText('Paused with mail').map((el) => el.closest('a[data-phase]')).find(Boolean) as HTMLElement;
+    expect(row.getAttribute('data-phase')).toBe('paused');
+    expect(row.querySelector('[data-testid="row-action"]')!.textContent).toBe('Resume');
+    const chip = await screen.findByTestId('queued-chip');
+    expect(chip.textContent).toBe('2 queued');
+  });
+
+  it('draws no queued chip when nothing is waiting', async () => {
+    fetchPendingSummary.mockResolvedValueOnce({ '5': { count: 0, oldestAt: '2026-09-08T00:00:00Z' } });
+    renderList([
+      mkIssue({
+        id: 5, identifier: 'MH-5', title: 'Paused, quiet', status: 'in_progress',
+        raw: { dbos_workflow_id: 'wf-5', paused_at: '2026-09-08T00:00:00Z' } as Issue,
+      }),
+    ]);
+    await screen.findAllByText('Paused, quiet');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('queued-chip')).toBeNull();
   });
 });
