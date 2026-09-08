@@ -140,6 +140,24 @@ class _PendingAnswer:
     kind: str
     run_id: Optional[str]
     workflow_id: Optional[str]
+    #: False when ``on_answer`` itself ended the issue (budget "Cancel" →
+    #: cancelled): nothing to wake, the answer is just recorded.
+    wake: bool = True
+
+
+async def _still_runnable(issue_row: dict) -> bool:
+    """Re-read the issue after ``on_answer``: a kind may have ended it (budget
+    "Cancel" → cancelled). Waking then would let the loop overwrite the
+    terminal status with in_progress. Unreadable → assume runnable (the loop
+    re-checks PREEMPT_STATUSES at wake as well)."""
+    from app.workflows.issue_lifecycle import PREEMPT_STATUSES
+
+    try:
+        fresh = await issue_repository.get_by_id(int(issue_row["id"]))
+    except Exception as exc:  # noqa: BLE001 — the loop has its own guard
+        logger.warning(f"[issue_reply] post-answer status read failed: {exc}")
+        return True
+    return (fresh or {}).get("status") not in PREEMPT_STATUSES
 
 
 async def _validate_typed_answer(
@@ -220,6 +238,7 @@ async def _validate_typed_answer(
         kind=kind,
         run_id=str(run_id) if run_id else None,
         workflow_id=str(wf_id) if wf_id else None,
+        wake=await _still_runnable(issue_row),
     )
 
 
@@ -643,6 +662,15 @@ async def post_issue_message(
     answer = await _validate_typed_answer(
         issue_row, payload.body, payload.answer_to, owner_id
     )
+    if answer is not None and not answer.wake:
+        # The answer ended the issue (e.g. budget Cancel): record it, wake
+        # nothing — a reply turn on a cancelled issue is a pointless run.
+        await _commit_typed_answer(answer)
+        return IssueMessagePostResponse(
+            comment=_optimistic_comment(issue_id, payload.body, auth),
+            agent_run=None,
+            agent_dispatched=False,
+        )
 
     # ── Note path (suppressed) ────────────────────────────────────────────
     if not verdict.will_wake and answer is None:

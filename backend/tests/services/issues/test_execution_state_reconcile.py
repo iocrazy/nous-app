@@ -100,3 +100,19 @@ def test_tick_calls_the_reconcile_step():
     assert "reconcile_issue_execution_state_step()" in inspect.getsource(
         sw.agent_runs_sweeper_workflow
     )
+
+
+def test_claim_budget_wrap_up_stmt_is_a_conditional_update():
+    """Phase 2a Task 6 (review F5): one winner among racing runs, idempotent
+    for the same run — the WHERE carries both."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.services.issues.execution_state import claim_budget_wrap_up_stmt
+
+    compiled = claim_budget_wrap_up_stmt(7, 42).compile(dialect=postgresql.dialect())
+    sql = str(compiled).lower()
+    assert "update public.issues" in sql
+    assert "execution_state ? " in sql  # the flag must exist
+    assert "->>" in sql and " is null" in sql and " or " in sql
+    assert "jsonb_build_object" in sql and sql.count("||") == 2
+    assert "42" in map(str, compiled.params.values())

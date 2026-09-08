@@ -206,3 +206,46 @@ async def test_on_answer_rejection_maps_to_http(patched, monkeypatch):
     assert ei.value.detail["code"] == "budget_still_exhausted"
     patched.wake.assert_not_awaited()
     patched.writer.append.assert_not_awaited()  # on_answer refused → nothing recorded
+
+
+async def test_an_answer_that_ends_the_issue_is_recorded_but_wakes_nothing(
+    patched, monkeypatch
+):
+    """Review (Task 6 F1): budget "Cancel" moves the issue to cancelled inside
+    on_answer; waking the parked workflow would only run a pointless turn (and
+    the loop would have to preempt it). The answer is still recorded."""
+    from app.services.ai.runner import question as q
+
+    async def cancelling(issue, value, ctx):
+        pass
+
+    q.register_kind("cancelling_kind", cancelling)
+    try:
+        patched.marker.return_value = {
+            **patched.marker.return_value,
+            "kind": "cancelling_kind",
+        }
+        r = _router()
+        monkeypatch.setattr(
+            r.issue_repository,
+            "get_by_id",
+            AsyncMock(return_value={**ISSUE, "status": "cancelled"}),
+        )
+        resp = await _post("A", answer_to="q:1:2")
+    finally:
+        q._unregister_kind_for_tests("cancelling_kind")
+    assert resp.agent_dispatched is False and resp.diverted_to_inbox is False
+    patched.wake.assert_not_awaited()
+    patched.dispatch.assert_not_called()
+    patched.writer.append.assert_awaited_once()
+    patched.mark_answered.assert_awaited_once()
+
+
+async def test_a_post_answer_status_read_failure_still_wakes(patched, monkeypatch):
+    r = _router()
+    monkeypatch.setattr(
+        r.issue_repository, "get_by_id", AsyncMock(side_effect=RuntimeError("db"))
+    )
+    resp = await _post("A", answer_to="q:1:2")
+    assert resp.agent_dispatched is True
+    patched.wake.assert_awaited_once()

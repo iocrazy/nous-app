@@ -37,7 +37,7 @@
 
 ## 2. 暂停与恢复（issue 目标级；用户已认可，细节委托）
 
-**语义**（一期拍板「pause = cancel keepInbox」）：暂停是目标级状态，不杀 run。`POST /issues/{id}/pause`：写 `issues.paused_at = now()`，并把该 issue 运行中的根 run `pause_requested = true`。runner 新 `PauseHook`（链序：Heartbeat → Cancel → **Pause** → InboxClaim → BudgetGate）在下一个 step 边界读到即 `ctx.stop("paused")`；正在跑的那一步跑完才停，最坏延迟一步。
+**语义**（一期拍板「pause = cancel keepInbox」）：暂停是目标级状态，不杀 run。`POST /issues/{id}/pause`：写 `issues.paused_at = now()`，并把该 issue 运行中的根 run `pause_requested = true`。runner 新 `PauseHook`（链序：Heartbeat → Cancel → **Pause** → BudgetGate → InboxClaim；Budget 先于 InboxClaim 是 Task 6 评审改的，见 §3 实施记录）在下一个 step 边界读到即 `ctx.stop("paused")`；正在跑的那一步跑完才停，最坏延迟一步。
 
 **收尾**：新增 `stop_reason → TurnEndReason` 映射表（`cancelled → CANCELLED`、`paused → PAUSED`、`awaiting_input → AWAITING_INPUT`；穷尽守卫：`StepContext.stop()` 的 reason 必须在表内，否则测试红）。run 以 `turn_end{paused}` 收尾；issue 状态**保持 in_progress**，phase 由 rollup 的 `paused_at` 判出（优先级 paused 最高，已实现）。dispatch workflow 收到 `stop_reason=paused` 正常结束，不写 blocked / needs_followup。
 
@@ -69,6 +69,17 @@
 - **Cancel**：走既有 cancel + issue 状态 `cancelled`。
 
 事件序列：`budget_check{halt}` → `question_asked{kind: budget}` → `turn_end{awaiting_input}`；回答后 `question_answered` → 新 run。一期已落行的 `budget_check{halt}` 语义不变（记录），只是后面多了停下。
+
+**实施记录（2026-09-08，Task 6 落地后与本节的偏差）**：
+- Wrap up 的「放行一步」不靠 `view.question` 的已答记录判断（那在旧 run 的视图里，新 run 读不到），而是 `on_answer` 写 `issues.execution_state.budget_wrap_up{run_id, at}`（plan 口径，不加列）。宽限在**下一个 run 撞到 100% 的那个 step 边界**被认领（`execution_state.claim_budget_wrap_up`：条件 UPDATE，`consumed_by IS NULL OR = 本 run` 才命中——并发两个根 run 只有一个赢，同 run 的 DBOS 重试仍命中；评审指出在 loader 里读时就消费会让没跑到 100% 的 run 白白烧掉宽限）。宽限只放 `WRAP_UP_GRACE_STEPS = 1` 个 step 边界，之后再 halt 再提问——「一步收尾」是被执行的，不只是 steer 里的一句请求。放行的 run 记 `budget_check{action: "wrap_up"}`，折叠成 `view.budget.state = "wrap_up"`。
+- 链序改为 Heartbeat → Cancel → Pause → **Budget → InboxClaim**（§2 原文是 Pause → InboxClaim → Budget）：认领是持久的（`claimed_at`），注入不是——BudgetGate 在同一步 STOP 时，前面已认领的 steer 随 `ctx.injected` 一起丢，评论永远到不了模型。预算门在任何认领之前判定。
+- Cancel 之后不唤醒：`on_answer` 把 issue 转 cancelled 后端点重读状态（`_PendingAnswer.wake=false`），只记 `question_answered` 不 `DBOS.send`；dispatch 循环在 recv 返回后也重查 `PREEMPT_STATUSES`（原来只在循环顶查，唤醒后直接 `set_status(in_progress)` 会把 cancel 覆盖回去并再问一遍）。
+- 预算读不到（loader 抛错）：**显式 fail-open**，本 run 缓存为「无预算」并记 error，不再每步重查；Top up 时 `spent_cents_for_issue` 读失败 → 503 `budget_unreadable`（仓储改为 raise，不再把失败 SUM 当 0）。
+- Wrap up 幂等：flag 已在且是同一个问题（`run_id` 同、未消费）→ 不重写、不重复入队 steer（双发窗口）。
+- Cancel 走 `issue_repository.transition_status(issue, "cancelled")` 再 merge `execution_state.outcome_reason = "budget_exhausted"`（`transition_status` 没有 reason 参数）。
+- `on_answer` 对 `target` 无 `id`（聊天路径的 `{"session_id"}` 形状）回 409 `no_issue_target`——预算只对有 issue 的根 run 生效，聊天永远问不出这个 kind，但注册表允许任何 kind 被任何通道调到。
+- 提问落行失败（`QuestionNotRecorded`）时 run **仍然停**：无按钮地挂起（旧 needs_input 形态）好过继续烧预算。
+- `question_kinds/budget.py` 在 `question.py` 底部 import 完成注册，`registered_kinds() == ["budget", "user"]` 被测试钉死。
 
 ## 4. 列表级排队计数与 UI（作者拍板；UI 稿待用户验）
 

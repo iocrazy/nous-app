@@ -53,10 +53,13 @@ def test_hook_name_is_pause():
     assert PauseHook.name == "pause"
 
 
-def test_chain_order_is_heartbeat_cancel_pause_inbox_budget():
+def test_chain_order_is_heartbeat_cancel_pause_budget_inbox():
+    """Budget BEFORE inbox (Task 6 review F2): the claim is durable, the
+    injection is not — a step that halts on the budget question must not have
+    claimed a steer it will never read."""
     src = WIRING_SRC.read_text()
     assert re.search(
         r"HeartbeatHook\(\),\s*CancelHook\(\),\s*PauseHook\(\),\s*"
-        r"InboxClaimHook\(\),\s*BudgetGateHook\(\)",
+        r"BudgetGateHook\(\),\s*InboxClaimHook\(\)",
         src,
-    ), "chain must be heartbeat → cancel → pause → inbox → budget"
+    ), "chain must be heartbeat → cancel → pause → budget → inbox"

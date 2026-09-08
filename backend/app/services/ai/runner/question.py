@@ -267,6 +267,10 @@ async def _noop_on_answer(issue: dict, value: str, ctx: Any) -> None:
 
 register_kind("user", _noop_on_answer)
 
+# Kinds with server-side handlers register themselves on import. Bottom of the
+# module on purpose: they import register_kind from here.
+import app.services.ai.runner.question_kinds.budget  # noqa: E402,F401  (registers "budget")
+
 __all__ = [
     "DESC_MAX",
     "LABEL_MAX",

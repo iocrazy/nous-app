@@ -438,11 +438,19 @@ async def build_agent_runner_stack(
         StepHookChain,
     )
 
-    # heartbeat → cancel → pause → inbox → budget: a cancelled or paused run
-    # must not claim a steer it will never read (the steer waits on the inbox
-    # for the resumed run); the budget is checked on the spend so far.
+    # heartbeat → cancel → pause → budget → inbox: a run that is about to
+    # STOP (cancelled, paused, or halted on the budget question) must not
+    # claim a steer it will never read — the claim is durable, the injection
+    # is not, so the steer must stay on the inbox for the resumed run. The
+    # budget is checked on the spend so far, before anything is claimed.
     step_hooks = StepHookChain(
-        [HeartbeatHook(), CancelHook(), PauseHook(), InboxClaimHook(), BudgetGateHook()]
+        [
+            HeartbeatHook(),
+            CancelHook(),
+            PauseHook(),
+            BudgetGateHook(),
+            InboxClaimHook(),
+        ]
     )
 
     runner = AgentRunner(
