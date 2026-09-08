@@ -778,7 +778,7 @@ class ConversationsAiStore:
         (...) || {answered}}}``) instead of ``jsonb_set``: jsonb_set silently
         returns the target UNCHANGED when an intermediate key is missing, which
         would leave the sole re-answer guard unset with rowcount 1."""
-        from sqlalchemy import bindparam, cast, func, update
+        from sqlalchemy import bindparam, func, update
         from sqlalchemy.dialects.postgresql import JSONB
 
         from app.models.chat import Messages
@@ -789,7 +789,11 @@ class ConversationsAiStore:
         def _at(obj, key):
             return obj.op("->", return_type=JSONB)(key)
 
-        empty = cast("{}", JSONB)
+        # NOT ``cast("{}", JSONB)``: that binds the Python str "{}" through the
+        # JSONB bind processor, i.e. the JSON *string* ``"{}"`` — and Postgres
+        # turns ``scalar || object`` into an ARRAY. Caught by the schema-drift
+        # integration test on the no-path branch.
+        empty = func.jsonb_build_object()
         meta = func.coalesce(_at(Messages.body, "meta"), empty)
         question = func.coalesce(
             _at(_at(Messages.body, "meta"), "awaiting_input"), empty

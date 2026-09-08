@@ -86,3 +86,8 @@ def test_question_answered_stmt_sets_the_answered_key_only():
     params = compiled.params
     assert {"meta", "awaiting_input", "answered"} <= set(map(str, params.values()))
     assert {"value": "A", "at": "T", "superseded": False} in params.values()
+    # The missing-path fallback must be a real empty OBJECT. ``cast("{}", JSONB)``
+    # binds the Python str "{}" -> JSON string "{}" -> Postgres makes
+    # ``scalar || object`` an ARRAY (schema-drift caught it on a real DB).
+    assert "{}" not in params.values()
+    assert "jsonb_build_object()" in sql
