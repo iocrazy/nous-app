@@ -89,14 +89,36 @@ describe('NeedsInputCard — typed question (phase 2a)', () => {
   it('mounts QuestionCard instead of the textarea when the question has options', async () => {
     const onAnswer = vi.fn().mockResolvedValue(undefined);
     const { container } = render(
-      <NeedsInputCard question={QUESTION} onSubmit={vi.fn()} typed={typed} onAnswer={onAnswer} />,
+      <NeedsInputCard
+        question={QUESTION}
+        onSubmit={vi.fn()}
+        typed={{ ...typed, prompt: QUESTION.slice(0, 20) }}
+        onAnswer={onAnswer}
+      />,
     );
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.querySelector('[data-testid="question-card"]')).not.toBeNull();
-    // the prompt is shown once (by the card header), not twice
+    // the prompt is shown once (by the card header), not twice — even when
+    // the marker's clipped prompt differs from the outcome_reason text
     expect(container.textContent?.split(QUESTION).length).toBe(2);
     fireEvent.click(screen.getByRole('button', { name: 'Teaser' }));
     await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('Teaser', 'q:1:2'));
+  });
+
+  it('an OPEN-ENDED typed question still answers through the card (answer_to travels)', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <NeedsInputCard
+        question={QUESTION}
+        onSubmit={vi.fn()}
+        typed={{ ...typed, options: [], allowFreeText: true }}
+        onAnswer={onAnswer}
+      />,
+    );
+    expect(container.querySelector('textarea')).toBeNull();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Cold open, then a title card' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('Cold open, then a title card', 'q:1:2'));
   });
 
   it('keeps the textarea for a plain needs_input park (no typed question)', () => {

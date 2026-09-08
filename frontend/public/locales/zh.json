@@ -5700,6 +5700,16 @@
     "answer": "回答",
     "answered": "已回答",
     "superseded": "不再等待",
-    "waiting": "agent 正在等你的回答"
+    "waiting": "agent 正在等你的回答",
+    "busy": "另一条消息还在发送中。",
+    "error": {
+      "answer_shape": "回答与任一选项不匹配。",
+      "no_open_question": "这个问题已经不再等待回答。",
+      "issue_paused": "issue 已暂停，先恢复再回答。",
+      "use_issue_thread": "请在 issue 的对话里回答。",
+      "budget_still_exhausted": "预算仍已用尽，先提高预算。",
+      "budget_unreadable": "读不到预算，请重试。",
+      "no_issue_target": "这个问题没有关联的 issue。"
+    }
   }
 }

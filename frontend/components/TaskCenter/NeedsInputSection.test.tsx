@@ -203,6 +203,16 @@ describe('NeedsInputSection — typed question rows (phase 2a)', () => {
     expect(screen.getByRole('button', { name: 'Monday' })).toBeDisabled();
   });
 
+  it('an open-ended typed row answers through the card (no chip, no textarea)', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    renderSection([item({ question_id: 'q:1:3', kind: 'user', options: [], allow_free_text: true })], onAnswer);
+    expect(screen.queryByTestId('needs-input-pick-one')).toBeNull();
+    expect(screen.queryByPlaceholderText('taskCenter.answerPlaceholder')).toBeNull();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Wednesday' } });
+    fireEvent.click(screen.getByRole('button', { name: 'question.answer' }));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('1001', 'Wednesday', 'q:1:3'));
+  });
+
   it('a plain row keeps the textarea and no chip', () => {
     renderSection([item()]);
     expect(screen.queryByTestId('needs-input-pick-one')).toBeNull();

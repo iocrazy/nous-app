@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { questionFromChatMetadata, questionFromMarker, questionFromRunView } from './questionTypes';
+import { answerErrorText, questionFromChatMetadata, questionFromMarker, questionFromRunView } from './questionTypes';
 
 const OPTIONS = [
   { label: 'Open ending', description: null },
@@ -45,11 +45,15 @@ describe('questionFromMarker', () => {
     expect(questionFromMarker({})).toBeNull();
   });
 
-  it('marks an already-answered marker (answered_at) as answered', () => {
+  it('marks an already-answered marker (answered_at) as answered, with the value when stamped', () => {
     const q = questionFromMarker({
       awaiting_input: { prompt: 'p', question_id: 'q:1:2', kind: 'user', options: OPTIONS, allow_free_text: true, answered_at: 'T' },
     });
     expect(q?.answered).toEqual({ value: null });
+    const withValue = questionFromMarker({
+      awaiting_input: { prompt: 'p', question_id: 'q:1:2', kind: 'user', options: OPTIONS, allow_free_text: true, answered_at: 'T', answered_value: 'Twist' },
+    });
+    expect(withValue?.answered).toEqual({ value: 'Twist' });
   });
 });
 
@@ -98,5 +102,18 @@ describe('questionFromChatMetadata', () => {
     expect(questionFromChatMetadata({ awaiting_input: 'nope' })).toBeNull();
     expect(questionFromChatMetadata(null)).toBeNull();
     expect(questionFromChatMetadata({ awaiting_input: { kind: 'user' } })).toBeNull();
+  });
+});
+
+describe('answerErrorText', () => {
+  const t = (key: string, fallback: string) => (key === 'question.error.answer_shape' ? 'Pick one of the options.' : fallback);
+  it('maps a known typed code to copy', () => {
+    const err = Object.assign(new Error('server said no'), { code: 'answer_shape' });
+    expect(answerErrorText(err, t)).toBe('Pick one of the options.');
+  });
+  it('falls back to the server message for an unknown code, and to the message for untyped errors', () => {
+    expect(answerErrorText(Object.assign(new Error('nope'), { code: 'brand_new' }), t)).toBe('nope');
+    expect(answerErrorText(new Error('network down'), t)).toBe('network down');
+    expect(answerErrorText('plain string', t)).toBe('plain string');
   });
 });

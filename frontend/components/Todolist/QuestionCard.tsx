@@ -16,7 +16,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { TypedQuestion } from './questionTypes';
+import { answerErrorText, type TypedQuestion } from './questionTypes';
 
 export interface QuestionCardProps {
   question: TypedQuestion;
@@ -39,10 +39,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, onAnswer, 
   const superseded = answered?.superseded === true;
   const locked = pending || disabled || !!answered;
 
-  const submit = async (value: string) => {
+  // Option labels go out VERBATIM (the backend compares exactly; a label the
+  // model wrote with a trailing space is still that label); only free text is
+  // trimmed.
+  const submit = async (value: string, { verbatim = false } = {}) => {
     if (locked) return;
-    const v = value.trim();
-    if (!v) return;
+    const v = verbatim ? value : value.trim();
+    if (!v.trim()) return;
     setPending(true);
     setError(null);
     try {
@@ -50,7 +53,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, onAnswer, 
       setDraft('');
     } catch (err) {
       console.error('[QuestionCard] answer failed', err);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(answerErrorText(err, (k, f) => t(k, f)));
     } finally {
       setPending(false);
     }
@@ -83,7 +86,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, onAnswer, 
                 data-testid="question-option"
                 title={o.description}
                 disabled={locked}
-                onClick={() => void submit(o.label)}
+                onClick={() => void submit(o.label, { verbatim: true })}
                 className={`rounded border px-2.5 py-1 text-[13px] disabled:cursor-not-allowed disabled:opacity-80 ${tone}`}
               >
                 {o.label}

@@ -29,9 +29,11 @@ interface NeedsInputCardProps {
   /** Posts the reply. Rejecting with AgentNotDispatchedError selects the
    *  "saved but nothing started" branch. */
   onSubmit: (body: string) => Promise<void>;
-  /** Phase 2a: the typed question from the marker. With options the card
-   *  mounts QuestionCard (buttons) instead of the textarea; the prompt is
-   *  still `question` above. */
+  /** Phase 2a: the typed question from the marker. Any typed question —
+   *  buttons or open-ended — mounts QuestionCard instead of the textarea, so
+   *  the reply always carries `answer_to` (a bare textarea reply would leave
+   *  the question open: no `question_answered`, phase stuck at
+   *  waiting_input). The prompt is still `question` above. */
   typed?: TypedQuestion | null;
   /** Answer the typed question (label or free text + its id). */
   onAnswer?: (value: string, answerTo: string) => Promise<void>;
@@ -84,9 +86,9 @@ export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({
           {question}
         </p>
       )}
-      {typed && typed.options.length > 0 && onAnswer ? (
+      {typed && onAnswer ? (
         <QuestionCard
-          question={{ ...typed, prompt: typed.prompt === question ? '' : typed.prompt }}
+          question={{ ...typed, prompt: question ? '' : typed.prompt }}
           onAnswer={async (value, answerTo) => {
             setNotDispatched(false);
             try {
@@ -115,7 +117,7 @@ export const NeedsInputCard: React.FC<NeedsInputCardProps> = ({
           {t('taskCenter.answerNotDispatched')}
         </p>
       )}
-      {!(typed && typed.options.length > 0 && onAnswer) && (
+      {!(typed && onAnswer) && (
         <div className="flex justify-end">
           <button
             type="button"

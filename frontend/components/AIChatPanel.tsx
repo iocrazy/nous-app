@@ -782,12 +782,20 @@ export function AIChatPanel({
       // (QuestionCard in the bubble) — sent as `answer_to`.
       extra: { answerTo?: string } = {},
     ) => {
-      if (!activeSessionId || sending) return;
+      // Answering a parked question: the body IS the answer (the backend
+      // compares it to the option labels verbatim), so no capsule fold and
+      // no staged attachments ride along; failures are thrown to the card,
+      // never swallowed into a toast.
+      const answering = !!extra.answerTo;
+      if (!activeSessionId || sending) {
+        if (answering) throw new Error(t('question.busy', 'Another message is still being sent.'));
+        return;
+      }
 
       // Fold the context capsule into the outgoing message and clear it — one
       // selection travels with one turn, exactly like the blockquote it
       // replaced, but the user could see and drop it first.
-      const capsule = contextCapsule;
+      const capsule = answering ? null : contextCapsule;
       const text = capsule
         ? `${
             capsule.sceneLabel
@@ -806,15 +814,15 @@ export function AIChatPanel({
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
       // attachments render immediately via their local preview data URL.
-      const sentAttachments = stagedAttachments;
+      const sentAttachments = answering ? [] : stagedAttachments;
       // Union of both sources, deduped by resource id: chips still sitting
       // in a restored draft AND everything staged in the attachment row.
-      const sentResources = stagedResources;
+      const sentResources = answering ? [] : stagedResources;
       const sentRefs = mergeRefAttachments(refAttachments, sentResources);
       // Assets have one source (the staged row — there is no inline asset
       // node), but the dedup still matters: two entries for one asset would
       // be resolved, rendered and billed twice.
-      const sentAssets = stagedAssets;
+      const sentAssets = answering ? [] : stagedAssets;
       const sentAssetRefs = mergeAssetAttachments(sentAssets);
       // Both halves, in the shape the reducer will persist. The refs used to
       // be left out here, so a just-sent turn showed no chip until the
@@ -927,10 +935,15 @@ export function AIChatPanel({
             }
           } else if (evt.type === 'error') {
             const mapped = providerErrorMessage(evt.data?.code, (k, f) => t(k, f));
-            throw new Error(
+            const streamErr = new Error(
               mapped ??
                 (typeof evt.data?.error === 'string' ? evt.data.error : 'stream error'),
-            );
+            ) as Error & { code?: string; status?: number };
+            // Typed 4xx from the answer channel (Task 4: `{error, code,
+            // status}`) — the card maps `code` to copy.
+            if (typeof evt.data?.code === 'string') streamErr.code = evt.data.code;
+            if (typeof evt.data?.status === 'number') streamErr.status = evt.data.status;
+            throw streamErr;
           } else if (evt.type === 'done') {
             // G2: backend resolves attachments best-effort and reports
             // per-attachment failures instead of failing the whole turn —
@@ -951,6 +964,13 @@ export function AIChatPanel({
       } catch (err) {
         console.error('[AIChatPanel] chat stream failed:', err);
         const msg = err instanceof Error ? err.message : String(err);
+        if (answering) {
+          // The card shows the typed rejection inline; keep the optimistic
+          // bubbles honest by reloading, then hand the error back.
+          setSending(false);
+          await loadSessionMessages(activeSessionId);
+          throw err;
+        }
         addToast(`Send failed: ${msg}`, 'error');
         // "Send failed" here often means the CONNECTION died mid-turn
         // (proxy timeout on a long AI reply), not that the message was
@@ -995,6 +1015,18 @@ export function AIChatPanel({
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
      addToast, planMode, stagedAttachments, stagedResources, stagedAssets,
      contextCapsule, t],
+  );
+
+  // Phase 2a chat answer surface: the newest assistant message is the only
+  // answerable one, and issue-context sessions answer on the issue thread
+  // (the chat endpoint 409s `use_issue_thread`).
+  const lastAssistantMessageId = useMemo(
+    () => [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? null,
+    [messages],
+  );
+  const issueContextSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId)?.context_type === 'issue',
+    [sessions, activeSessionId],
   );
 
   const handleSuggest = useCallback(
@@ -1365,8 +1397,14 @@ export function AIChatPanel({
                     : undefined
                 }
                 awaitingInput={
-                  msg.role === 'assistant' ? extractAwaitingInput(msg) : undefined
+                  msg.role === 'assistant' && !issueContextSession
+                    ? extractAwaitingInput(msg)
+                    : undefined
                 }
+                // Only the NEWEST assistant message is answerable (the
+                // backend's latest_assistant_open_question rule); older
+                // cards render read-only.
+                awaitingInputDisabled={msg.id !== lastAssistantMessageId}
                 onAnswerQuestion={(value, answerTo) => handleSend(value, [], { answerTo })}
                 runId={msg.role === 'assistant' ? chatRunId(msg) : undefined}
                 onApply={

@@ -27,8 +27,8 @@ export interface TypedQuestion {
   options: QuestionOption[];
   allowFreeText: boolean;
   /** Present once answered (or superseded by a later plain message). `value`
-   *  is null when the wire shape carries no value (the issue marker only
-   *  stamps `answered_at`). */
+   *  is null when the wire shape carries no value (a marker stamped before
+   *  `answered_value` existed). */
   answered?: { value: string | null; superseded?: boolean };
 }
 
@@ -68,7 +68,12 @@ export function questionFromMarker(execState: unknown): TypedQuestion | null {
   const marker = execState.awaiting_input;
   const q = core(marker, 'question_id');
   if (!q) return null;
-  if (isRecord(marker) && marker.answered_at) return { ...q, answered: { value: null } };
+  if (isRecord(marker) && marker.answered_at) {
+    return {
+      ...q,
+      answered: { value: typeof marker.answered_value === 'string' ? marker.answered_value : null },
+    };
+  }
   return q;
 }
 
@@ -111,4 +116,16 @@ export function questionFromNeedsInputItem(item: {
     options: options(item.options),
     allowFreeText: item.allow_free_text !== false,
   };
+}
+
+/** The copy for a rejected answer: a typed code maps to `question.error.<code>`
+ *  (falling back to the server message), anything else is shown as-is. */
+export function answerErrorText(
+  err: unknown,
+  t: (key: string, fallback: string) => string,
+): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err);
+  if (typeof code === 'string' && code) return t(`question.error.${code}`, message || code);
+  return message;
 }

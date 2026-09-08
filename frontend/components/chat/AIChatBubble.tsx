@@ -54,6 +54,8 @@ export interface MessageBubbleProps {
   awaitingInput?: TypedQuestion;
   /** Answer the parked question — sends a message with `answer_to`. */
   onAnswerQuestion?: (value: string, answerTo: string) => Promise<void>;
+  /** Read-only card (an older assistant message: only the newest is open). */
+  awaitingInputDisabled?: boolean;
   /** The agent_runs id that backed this turn (metadata_json.run_id). Threaded
    *  to TurnWriteSummary so its Undo button knows what to undo. */
   runId?: string | null;
@@ -337,6 +339,7 @@ export function MessageBubble({
   awaitingApproval,
   awaitingInput,
   onAnswerQuestion,
+  awaitingInputDisabled = false,
   runId,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
@@ -434,6 +437,7 @@ export function MessageBubble({
           <div className="px-3 pb-2" data-testid="bubble-question">
             <QuestionCard
               question={awaitingInput}
+              disabled={awaitingInputDisabled}
               onAnswer={onAnswerQuestion ?? (async () => undefined)}
             />
           </div>

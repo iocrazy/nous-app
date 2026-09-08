@@ -338,6 +338,15 @@ describe('AIChatBubble — awaiting_input question card (phase 2a)', () => {
     expect(screen.getByRole('button', { name: 'Twist' })).toBeDisabled();
   });
 
+  it('an older message renders its card read-only (awaitingInputDisabled)', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble role="assistant" content="old ask" awaitingInput={question} awaitingInputDisabled />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Twist' })).toBeDisabled();
+  });
+
   it('draws nothing extra without awaitingInput', () => {
     render(
       <MemoryRouter>

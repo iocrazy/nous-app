@@ -214,11 +214,14 @@ async def mark_awaiting_input(
     )
 
 
-async def mark_question_answered(*, workflow_id: str, question_id: str) -> None:
-    """Stamp ``awaiting_input.answered_at`` on the issue marker once an answer
-    was DELIVERED (woken or dispatched). Until the workflow clears the marker
-    itself this is what makes a second POST of the same answer a 409 instead
-    of a second wake (phase 2a answer-channel idempotency). Best-effort."""
+async def mark_question_answered(
+    *, workflow_id: str, question_id: str, value: Optional[str] = None
+) -> None:
+    """Stamp ``awaiting_input.answered_at`` (+ ``answered_value``) on the issue
+    marker once an answer was DELIVERED (woken or dispatched). Until the
+    workflow clears the marker itself this is what makes a second POST of the
+    same answer a 409 instead of a second wake (phase 2a answer-channel
+    idempotency); the value lets a reload highlight the pick. Best-effort."""
     from sqlalchemy import cast, func, literal, text, update
     from sqlalchemy.dialects.postgresql import JSONB
 
@@ -229,6 +232,7 @@ async def mark_question_answered(*, workflow_id: str, question_id: str) -> None:
         {
             "answered_at": datetime.now(timezone.utc).isoformat(),
             "answered_question_id": question_id,
+            "answered_value": value,
         }
     )
     try:

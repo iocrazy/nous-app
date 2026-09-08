@@ -5700,6 +5700,16 @@
     "answer": "Answer",
     "answered": "Answered",
     "superseded": "No longer waiting",
-    "waiting": "The agent is waiting for your answer"
+    "waiting": "The agent is waiting for your answer",
+    "busy": "Another message is still being sent.",
+    "error": {
+      "answer_shape": "That answer does not match one of the options.",
+      "no_open_question": "This question is no longer open.",
+      "issue_paused": "The issue is paused — resume it before answering.",
+      "use_issue_thread": "Answer this on the issue's thread.",
+      "budget_still_exhausted": "The budget is still spent — raise it first.",
+      "budget_unreadable": "Could not read the budget; try again.",
+      "no_issue_target": "This question is not tied to an issue."
+    }
   }
 }

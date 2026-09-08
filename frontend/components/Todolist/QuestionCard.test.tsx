@@ -15,7 +15,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, arg2?: unknown, arg3?: unknown) => {
       const vars = (typeof arg2 === 'object' && arg2) || (typeof arg3 === 'object' && arg3) || null;
-      const fallback = typeof arg2 === 'string' ? arg2 : key;
+      const fallback = key.startsWith('question.error.') ? key : typeof arg2 === 'string' ? arg2 : key;
       return vars ? `${fallback}:${Object.values(vars as Record<string, unknown>).join(',')}` : fallback;
     },
   }),
@@ -92,12 +92,44 @@ describe('QuestionCard', () => {
     expect(screen.getByTestId('question-card').className).toMatch(/opacity/);
   });
 
-  it('shows a typed error and re-enables when the answer is rejected', async () => {
-    const onAnswer = vi.fn().mockRejectedValue(new Error('budget_still_exhausted'));
+  it('maps a typed rejection code to copy and re-enables', async () => {
+    const { IssueAnswerRejectedError } = await import('../../services/issueMessageService');
+    const onAnswer = vi
+      .fn()
+      .mockRejectedValue(new IssueAnswerRejectedError(409, 'budget_still_exhausted', 'server text'));
     render(<QuestionCard question={q} onAnswer={onAnswer} />);
     fireEvent.click(screen.getByRole('button', { name: 'Twist' }));
-    await waitFor(() => expect(screen.getByTestId('question-error').textContent).toContain('budget_still_exhausted'));
+    // the i18n mock echoes the key, so the mapped key is what we see — never
+    // the raw "409 Conflict: {...}" blob
+    await waitFor(() =>
+      expect(screen.getByTestId('question-error').textContent).toBe('question.error.budget_still_exhausted'),
+    );
     expect(screen.getByRole('button', { name: 'Twist' })).not.toBeDisabled();
+  });
+
+  it('an untyped failure shows its message as-is', async () => {
+    const onAnswer = vi.fn().mockRejectedValue(new Error('network down'));
+    render(<QuestionCard question={q} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Twist' }));
+    await waitFor(() => expect(screen.getByTestId('question-error').textContent).toBe('network down'));
+  });
+
+  it('sends an option label verbatim (trailing space and all) and trims only free text', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QuestionCard question={{ ...q, options: [{ label: 'Twist ' }] }} onAnswer={onAnswer} />,
+    );
+    fireEvent.click(screen.getByTestId('question-option'));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('Twist ', 'q:1:2'));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '  cliffhanger  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }));
+    await waitFor(() => expect(onAnswer).toHaveBeenCalledWith('cliffhanger', 'q:1:2'));
+  });
+
+  it('renders read-only when externally disabled', () => {
+    render(<QuestionCard question={q} onAnswer={vi.fn()} disabled />);
+    expect(screen.getByRole('button', { name: 'Twist' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Answer' })).toBeDisabled();
   });
 
   it('uses only semantic colour tokens', () => {

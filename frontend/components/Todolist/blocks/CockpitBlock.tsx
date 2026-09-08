@@ -64,11 +64,15 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const retry = retryState(view, Date.now());
   const runBudget = budgetState(view);
   const budget = rollup.budget;
-  // Phase 2a: the parked typed question — the run view first (the live
-  // fold), the issue marker as the fallback once the run row has ended.
+  // Phase 2a: the parked typed question from the live run view — and ONLY
+  // while the issue marker is absent. A parked issue (marker present) draws
+  // its card in NeedsInputCard below; a second, always-enabled copy here
+  // would answer twice (the second POST is a 409).
   const question =
-    phase === 'waiting_input' && ctx.env.onAnswerQuestion
-      ? questionFromRunView(view) ?? questionFromMarker(rollup.execution_state)
+    phase === 'waiting_input' &&
+    ctx.env.onAnswerQuestion &&
+    !questionFromMarker(rollup.execution_state)
+      ? questionFromRunView(view)
       : null;
   const startedMs = rollup.current_run?.started_at ? Date.parse(rollup.current_run.started_at) : NaN;
   const elapsed = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : null;

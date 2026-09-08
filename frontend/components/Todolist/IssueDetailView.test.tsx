@@ -370,7 +370,35 @@ describe('IssueDetailView — typed question (phase 2a)', () => {
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });
-    expect(q.getAttribute('data-question-kind') ?? q.querySelector('[data-question-kind]')?.getAttribute('data-question-kind')).toBe('budget');
-    expect(q.textContent).toContain('Wrap up');
+    const card = q.querySelector('[data-testid="question-card"]') as HTMLElement;
+    expect(card.getAttribute('data-question-kind')).toBe('budget');
+    expect(card.textContent).toContain('Wrap up');
+  });
+
+  it('a parked issue draws ONE card: the detail card, never a second one in the cockpit', async () => {
+    progressState.value = mkProgress({
+      phase: 'waiting_input',
+      execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?', awaiting_input: MARKER },
+      current_run: {
+        id: '9', status: 'completed', started_at: '2026-08-03T00:00:00Z', model: 'm',
+        view: {
+          v: 1, phase: 'waiting_input', step: null, current: null, retry: null, context: null, blocked: null,
+          children: { total: 0, done: 0 }, ended: { reason: 'awaiting_input' }, inbox_pending: 0, budget: null, revision: 3,
+          question: { id: 'q:9:2', kind: 'user', prompt: 'Cold open or teaser?', options: MARKER.options, allow_free_text: false, asked_at: 'T' },
+        },
+        cost: { spent_cents: 1 },
+      },
+    });
+    const { container } = renderDetail(mkIssue({
+      status: 'needs_followup',
+      raw: {
+        status: 'needs_followup',
+        execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?', awaiting_input: MARKER },
+      } as never,
+    }));
+    await waitFor(() => expect(container.querySelector('[data-testid="needs-input-card"]')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('[data-testid="issue-cockpit"]')).not.toBeNull());
+    expect(container.querySelectorAll('[data-testid="question-card"]').length).toBe(1);
+    expect(container.querySelector('[data-testid="cockpit-question"]')).toBeNull();
   });
 });

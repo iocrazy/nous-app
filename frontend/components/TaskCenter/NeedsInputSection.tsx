@@ -144,6 +144,8 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
         {items.map((item) => {
           const pending = pendingIds.has(item.issue_id);
           const draft = drafts[item.issue_id] ?? '';
+          // Any typed question (buttons or open-ended) answers through the
+          // card so `answer_to` always travels; the chip only counts options.
           const typed = questionFromNeedsInputItem(item);
           const hasOptions = !!typed && typed.options.length > 0;
           return (
@@ -171,7 +173,7 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
                   {t('taskCenter.viewConversation')}
                 </button>
               </div>
-              {hasOptions && typed ? (
+              {typed ? (
                 <QuestionCard
                   compact
                   disabled={pending}

@@ -523,6 +523,7 @@ it('answered state renders read-only with the pick highlighted', () => {
 - `runView.RunBudget.state` 加 `'wrap_up'`（Task 6 的折叠值），`budgetState` 不再把它过滤掉。
 - 聊天：`MessageBubble` 新 props `awaitingInput` / `onAnswerQuestion`；`AIChatPanel.handleSend` 第三参 `{ answerTo }` → `opts.answer_to`；`sendChatMessage` / `streamChatMessage` 都收 `answer_to`。
 - `npm run typecheck` 在 master 上本来就有 56 个错，本任务前后数量与集合一致（不是本任务引入，也不在本任务修）。
+- 对抗评审 10 条全部处理：① 无选项的类型化问题也走卡片（textarea 回复不带 `answer_to`，问题永远不关、phase 卡在 waiting_input）；② 聊天里回答时不折叠上下文胶囊、不带附件（body 要与 label 逐字相等）；③ 聊天路径的 409/400 不再吞成 toast，SSE error 事件的 `code` 挂到 Error 上抛给卡片；④ 详情页只画一张卡——cockpit 只在 marker 不存在时才从 run view 挂卡；⑤ `issueMessageService._json` 把 `{detail:{code,message}}` 解析成 `IssueAnswerRejectedError`，`answerErrorText` 映射到 `question.error.<code>`；⑥ 选项 label 逐字发送、只 trim 自由文本；⑦ 后端 `mark_question_answered` 加 `answered_value`，marker 路径的已答卡能高亮所选；⑧ 聊天只有最新一条 assistant 消息的卡可答，旧卡只读，issue 上下文会话不挂卡；⑨ 分支已 rebase 到含 Task 4/5 的 master；⑩ 三处弱断言换掉、补双卡与开放式问题测试。
 
 ---
 
