@@ -62,8 +62,16 @@ class AnswerRejected(Exception):
 
 @dataclass(frozen=True)
 class AnswerContext:
-    """What ``on_answer`` may look at: the issue (or conversation) row, who
-    answered, and the marker the question was parked with."""
+    """What ``on_answer`` may look at.
+
+    ``target`` differs by path and a kind must not assume fields beyond the
+    common ``marker``:
+      * issue path (``POST /issues/{id}/messages``): the full issue row;
+      * chat path (``POST /ai-library/sessions/{id}/chat``): ``{"session_id"}``.
+    Anything a kind needs (budget, run) it derives from ``marker`` (which
+    carries ``run_id`` and the question) or re-reads by id. ``on_answer`` may
+    be invoked more than once for the same answer (two requests racing the
+    answered stamp) — keep it idempotent."""
 
     target: dict
     user_id: str

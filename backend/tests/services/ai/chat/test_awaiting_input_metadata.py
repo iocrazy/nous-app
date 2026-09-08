@@ -239,6 +239,56 @@ async def test_on_answer_rejection_blocks_the_turn():
     assert store.appended == []
 
 
+async def test_issue_sessions_are_fenced_off_from_the_chat_answer_channel():
+    """The issue thread owns its answers (marker + /issues/{id}/messages);
+    hitting the chat endpoint on an issue session must not answer twice."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id, agent_id = uuid4(), uuid4()
+    row = {**_session_row(user_id, agent_id), "context_type": "issue"}
+    store = _QStore(row, open_question=OPEN)
+    with _chat_env(
+        run_turn_result={"content": "ok", "tool_calls": []}, agent_id=agent_id
+    ):
+        svc = AILibraryChatService(store=store)
+        with pytest.raises(HTTPException) as ei:
+            await svc.chat(
+                uuid4(), user_id=user_id, content="Twist", answer_to="q:77:4"
+            )
+        assert ei.value.status_code == 409
+        assert ei.value.detail["code"] == "use_issue_thread"
+        # a plain message on an issue session is just a message: no lookup, no stamp
+        await svc.chat(uuid4(), user_id=user_id, content="Twist")
+    assert store.lookups == 0 and store.answered == []
+
+
+async def test_open_ended_question_is_answered_by_the_next_message():
+    """No options + free text: the next non-blank message IS the answer (the
+    label-set rule would otherwise supersede every open-ended question)."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id, agent_id = uuid4(), uuid4()
+    open_ended = {
+        "message_id": 7,
+        "question": {**QUESTION, "options": [], "allow_free_text": True},
+    }
+    store = _QStore(_session_row(user_id, agent_id), open_question=open_ended)
+    appended: list = []
+    with (
+        _chat_env(
+            run_turn_result={"content": "ok", "tool_calls": []}, agent_id=agent_id
+        ),
+        _writer_patch(appended),
+    ):
+        svc = AILibraryChatService(store=store)
+        await svc.chat(uuid4(), user_id=user_id, content="make it bittersweet")
+    assert appended[-1][1] == {
+        "question_id": "q:77:4",
+        "value": "make it bittersweet",
+        "superseded": False,
+    }
+
+
 async def test_issue_triggers_leave_the_chat_answer_channel_alone():
     """Issue turns answer through the marker + message endpoint (Task 3);
     running the chat-side detection there would record every answer twice."""

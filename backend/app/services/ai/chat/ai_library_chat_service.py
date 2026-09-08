@@ -110,11 +110,9 @@ class _ChatAnswer:
     superseded: bool
 
 
-async def _event_writer_for_run(run_id: Any):
-    """Seam for tests: a writer that appends to the (ended) asking run."""
-    from app.services.ai.runner.run_recorder import RunEventWriter
-
-    return await RunEventWriter.for_run(run_id)
+from app.services.ai.runner.run_recorder import (  # noqa: E402 — test seam
+    event_writer_for_run as _event_writer_for_run,
+)
 
 
 class AILibraryChatService:
@@ -366,18 +364,42 @@ class AILibraryChatService:
         user_id: UUID,
         content: str,
         answer_to: Optional[str],
+        *,
+        session: Optional[dict] = None,
     ) -> Optional["_ChatAnswer"]:
         """Decide whether ``content`` answers / supersedes the open question
         on the latest assistant message. Raises 409 ``no_open_question`` or
         400 ``answer_shape`` for a bad ``answer_to``; runs the kind's
         ``on_answer`` (it may refuse) for a real answer. None = ordinary
-        message on a conversation with no open question."""
+        message on a conversation with no open question.
+
+        An ISSUE session (``context_type == "issue"``) is fenced off entirely:
+        its questions are answered through the issue thread (marker +
+        ``POST /issues/{id}/messages``, Task 3); answering them here as well
+        would run ``on_answer`` twice and leave the issue marker open.
+
+        Known window: two requests answering the same question before the
+        first ``mark_question_answered`` lands both pass this check (the
+        per-user concurrency gate admits more than one turn). Same shape as
+        the issue path's ``answered_at`` stamp; kinds must therefore make
+        ``on_answer`` idempotent."""
         from app.services.ai.runner.question import (
             AnswerContext,
             AnswerRejected,
             answer_matches,
             on_answer_for,
         )
+
+        if (session or {}).get("context_type") == "issue":
+            if answer_to is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "use_issue_thread",
+                        "message": "answer this question on the issue thread",
+                    },
+                )
+            return None
 
         open_q = await self._store.latest_assistant_open_question(session_id=session_id)
         question = (open_q or {}).get("question") or {}
@@ -413,7 +435,14 @@ class AILibraryChatService:
                 for o in (question.get("options") or [])
                 if isinstance(o, dict)
             }
-            superseded = content not in labels  # a plain next message moves on
+            if labels:
+                superseded = content not in labels  # a plain next message moves on
+            else:
+                # An open-ended question (no options): the next message IS the
+                # answer when it has any text; a blank one moves on.
+                superseded = not (
+                    question.get("allow_free_text", True) and content.strip()
+                )
         if not superseded:
             kind = str(question.get("kind") or "user")
             try:
@@ -633,7 +662,9 @@ class AILibraryChatService:
         # persisted (409 / 400 leave no trace); recorded right after the
         # user message lands, because that message IS the delivery.
         chat_answer = (
-            await self._resolve_chat_answer(session_id, user_id, content, answer_to)
+            await self._resolve_chat_answer(
+                session_id, user_id, content, answer_to, session=session
+            )
             if trigger == "chat"
             else None
         )
@@ -1484,11 +1515,19 @@ class AILibraryChatService:
         # Phase 2a: same seat for a typed question — the payload shape from
         # question.Question.to_payload() plus the asking run, so a reload
         # re-renders the QuestionCard and the answer can name the run.
-        if result.get("awaiting_input") and isinstance(result.get("question"), dict):
-            asst_metadata["awaiting_input"] = {
-                **result["question"],
-                "run_id": str(run_id) if run_id else None,
-            }
+        if result.get("awaiting_input"):
+            if isinstance(result.get("question"), dict):
+                asst_metadata["awaiting_input"] = {
+                    **result["question"],
+                    "run_id": str(run_id) if run_id else None,
+                }
+            else:
+                # The turn parked but the question never reached the view —
+                # the card cannot render and nobody can answer. Say so.
+                logger.error(
+                    f"[chat] run {run_id} parked on awaiting_input without a "
+                    "question payload; the QuestionCard cannot be rendered"
+                )
         asst_msg = await self._store.append_assistant_message(
             session_id=session_id,
             agent_id=composed.agent_id,

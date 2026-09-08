@@ -772,23 +772,37 @@ class ConversationsAiStore:
     @staticmethod
     def question_answered_stmt(message_id: Any, answered: Dict[str, Any]):
         """UPDATE that stamps ``body.meta.awaiting_input.answered`` — a pure
-        builder so the jsonb path can be asserted in tests."""
-        from sqlalchemy import ARRAY, Text, bindparam, cast, func, update
-        from sqlalchemy.dialects.postgresql import JSONB, array
+        builder so the shape can be asserted in tests.
+
+        Merges level by level (``body || {meta: (body->meta) || {awaiting_input:
+        (...) || {answered}}}``) instead of ``jsonb_set``: jsonb_set silently
+        returns the target UNCHANGED when an intermediate key is missing, which
+        would leave the sole re-answer guard unset with rowcount 1."""
+        from sqlalchemy import bindparam, cast, func, update
+        from sqlalchemy.dialects.postgresql import JSONB
 
         from app.models.chat import Messages
 
+        def _cat(a, b):
+            return a.op("||", return_type=JSONB)(b)
+
+        def _at(obj, key):
+            return obj.op("->", return_type=JSONB)(key)
+
+        empty = cast("{}", JSONB)
+        meta = func.coalesce(_at(Messages.body, "meta"), empty)
+        question = func.coalesce(
+            _at(_at(Messages.body, "meta"), "awaiting_input"), empty
+        )
+        new_question = _cat(
+            question,
+            func.jsonb_build_object("answered", bindparam(None, answered, type_=JSONB)),
+        )
+        new_meta = _cat(meta, func.jsonb_build_object("awaiting_input", new_question))
         return (
             update(Messages)
             .where(Messages.id == _bigint(message_id))
-            .values(
-                body=func.jsonb_set(
-                    Messages.body,
-                    cast(array(["meta", "awaiting_input", "answered"]), ARRAY(Text)),
-                    bindparam(None, answered, type_=JSONB),
-                    True,
-                )
-            )
+            .values(body=_cat(Messages.body, func.jsonb_build_object("meta", new_meta)))
         )
 
     async def mark_question_answered(
@@ -808,7 +822,15 @@ class ConversationsAiStore:
         }
         try:
             async with _dbs.write_scope() as session:
-                await session.execute(self.question_answered_stmt(message_id, answered))
+                result = await session.execute(
+                    self.question_answered_stmt(message_id, answered)
+                )
+            if (getattr(result, "rowcount", None) or 0) < 1:
+                # The stamp is the re-answer guard; a miss must be visible.
+                logger.warning(
+                    f"[ConversationsAiStore] mark_question_answered touched no row "
+                    f"(message={message_id}) — the question stays answerable"
+                )
         except Exception as exc:  # noqa: BLE001 — decoration, never fails the turn
             logger.warning(
                 f"[ConversationsAiStore] mark_question_answered failed "

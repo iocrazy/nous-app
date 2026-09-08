@@ -894,6 +894,13 @@ def _truncate_payload(payload: dict[str, Any], max_chars: int) -> dict[str, Any]
     return out
 
 
+async def event_writer_for_run(run_id: Any) -> "RunEventWriter":
+    """Module-level entry for the late-append case (answering a parked
+    question, FinishIssue options → question_asked). Callers import it under
+    a private name so their tests can patch the seam per module."""
+    return await RunEventWriter.for_run(run_id)
+
+
 class RunEventWriter:
     """The one write path onto a run's transcript + its folded views.
 

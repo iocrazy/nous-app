@@ -79,8 +79,10 @@ def test_question_answered_stmt_sets_the_answered_key_only():
     )
     compiled = stmt.compile(dialect=postgresql.dialect())
     sql = str(compiled)
-    assert "UPDATE public.messages" in sql and "jsonb_set" in sql
+    assert "UPDATE public.messages" in sql
+    # level-by-level merge, never jsonb_set (which no-ops on a missing path)
+    assert "jsonb_set" not in sql and sql.count("||") == 3
+    assert "jsonb_build_object" in sql and "coalesce" in sql
     params = compiled.params
-    path = [params["param_1"], params["param_2"], params["param_3"]]
-    assert path == ["meta", "awaiting_input", "answered"]
-    assert params["param_4"] == {"value": "A", "at": "T", "superseded": False}
+    assert {"meta", "awaiting_input", "answered"} <= set(map(str, params.values()))
+    assert {"value": "A", "at": "T", "superseded": False} in params.values()

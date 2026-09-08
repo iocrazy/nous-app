@@ -39,7 +39,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 from dbos import DBOS, SetWorkflowID
@@ -125,11 +125,9 @@ def _dispatch_respond_to_issue_reply(
         )
 
 
-async def _event_writer_for_run(run_id: Any):
-    """Seam for tests: a writer that appends to the (ended) asking run."""
-    from app.services.ai.runner.run_recorder import RunEventWriter
-
-    return await RunEventWriter.for_run(run_id)
+from app.services.ai.runner.run_recorder import (  # noqa: E402 — test seam
+    event_writer_for_run as _event_writer_for_run,
+)
 
 
 @dataclass(frozen=True)
