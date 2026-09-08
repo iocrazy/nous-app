@@ -64,21 +64,17 @@ async def test_ask_question_emits_event_with_id_scheme():
     assert (turn, step) == (1, 3)
     assert payload == qu.to_payload()
 
-    async def _noop(issue, value, ctx): ...
-
-    q.register_kind("budget", _noop, singleton=True)  # Task 6 registers the real one
-    try:
-        b = await q.ask_question(
-            rec,
-            kind="budget",
-            prompt="Budget exhausted",
-            options=[{"label": "Top up"}],
-            allow_free_text=False,
-            turn=1,
-            step=4,
-        )
-    finally:
-        q._unregister_kind_for_tests("budget")
+    # The real "budget" kind (Task 6) is registered by the module; the
+    # singleton id scheme is what this asserts.
+    b = await q.ask_question(
+        rec,
+        kind="budget",
+        prompt="Budget exhausted",
+        options=[{"label": "Top up"}],
+        allow_free_text=False,
+        turn=1,
+        step=4,
+    )
     assert b.question_id == "budget:42"
     assert rec.events[-1][1]["allow_free_text"] is False
 
@@ -174,6 +170,7 @@ def test_kind_registry_is_enumerable_and_rejects_duplicates():
 
 
 def test_user_kind_is_registered_by_default_and_unknown_kind_raises():
-    assert "user" in q.registered_kinds()
+    # exact: the module registers "user" itself and imports question_kinds.budget
+    assert q.registered_kinds() == ["budget", "user"]
     with pytest.raises(KeyError):
         q.on_answer_for("nope")

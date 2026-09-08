@@ -70,6 +70,13 @@
 
 事件序列：`budget_check{halt}` → `question_asked{kind: budget}` → `turn_end{awaiting_input}`；回答后 `question_answered` → 新 run。一期已落行的 `budget_check{halt}` 语义不变（记录），只是后面多了停下。
 
+**实施记录（2026-09-08，Task 6 落地后与本节的偏差）**：
+- Wrap up 的「放行一步」不靠 `view.question` 的已答记录判断（那在旧 run 的视图里，新 run 读不到），而是 `on_answer` 写 `issues.execution_state.budget_wrap_up{run_id, at}`（plan 口径，不加列）；默认 loader 在**下一个** run 首次读预算时把它消费掉——打上 `consumed_by = <本 run id>`，同一 run 的 DBOS 重试仍读到宽限，更晚的 run 读到已消费 → 再次 halt 再次提问。放行的 run 记 `budget_check{action: "wrap_up"}`，折叠成 `view.budget.state = "wrap_up"`。
+- Cancel 走 `issue_repository.transition_status(issue, "cancelled")` 再 merge `execution_state.outcome_reason = "budget_exhausted"`（`transition_status` 没有 reason 参数）。
+- `on_answer` 对 `target` 无 `id`（聊天路径的 `{"session_id"}` 形状）回 409 `no_issue_target`——预算只对有 issue 的根 run 生效，聊天永远问不出这个 kind，但注册表允许任何 kind 被任何通道调到。
+- 提问落行失败（`QuestionNotRecorded`）时 run **仍然停**：无按钮地挂起（旧 needs_input 形态）好过继续烧预算。
+- `question_kinds/budget.py` 在 `question.py` 底部 import 完成注册，`registered_kinds() == ["budget", "user"]` 被测试钉死。
+
 ## 4. 列表级排队计数与 UI（作者拍板；UI 稿待用户验）
 
 **数据**：`GET /ai-library/inbox/pending-summary?target_kind=issue` → `[{target_id, count, oldest_at}]`，只含调用者可见的 issue（复用 `issue_visibility`），与 `GET /issues/needs-input` 同范式。列表页拿到后并进行 model；不进 issues 列表端点（保持列表查询单表）。

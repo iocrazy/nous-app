@@ -459,6 +459,13 @@ async def test_wrap_up_flag_lets_run_through_once():
 
 突变：halt 分支不 `stop` → 测红；`Top up` 不复核预算 → 409 测红；`wrap_up` 不放行 → 测红。PR「复用/删除」：复用 `ask_question`、收件箱 `enqueue`、`transition_status`；`budget_reply` inbox kind 不再有生产者（留 CHECK 不删，下期清）。
 
+**实施记录（2026-09-08，Task 6 落地）**：
+- `BudgetLoader` 返回 `(budget, prior, wrap_up)`；`load_issue_budget` 读 `execution_state.budget_wrap_up` 并在本 run 首次读时消费（`consumed_by`），见 spec §3 实施记录。
+- halt 已提问后同一 run 再到 step 边界（重试）→ 直接再 STOP，不再问第二次（`_reported` 集合）。
+- `ask_question` 抛 `QuestionNotRecorded` → 记 error 仍 STOP。
+- Cancel = `transition_status(cancelled)` + merge `outcome_reason=budget_exhausted`；`target` 无 `id` → 409 `no_issue_target`；未知 value → 400 `answer_shape`。
+- T2 里那条自己注册临时 `budget` kind 的测试改为直接用真 kind。
+
 ---
 
 ### Task 7: 前端 QuestionCard 三处 + 聊天 metadata selector
