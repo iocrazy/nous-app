@@ -21,6 +21,7 @@ Only the execution path moved; the row shape a caller sees is unchanged
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
@@ -95,6 +96,25 @@ MAX_ASSET_REF_ATTACHMENTS: int = 8
 # HERE rather than in the resolver because the resolver is handed a list that
 # has already been capped — it cannot see what was refused.
 ATTACHMENT_LIMIT_REASON: str = "attachment_limit_exceeded"
+
+
+@dataclass(frozen=True)
+class _ChatAnswer:
+    """A validated chat-side answer (or supersede), recorded once the user
+    message that carries it has been persisted."""
+
+    message_id: Any
+    question_id: str
+    run_id: Optional[str]
+    value: Optional[str]
+    superseded: bool
+
+
+async def _event_writer_for_run(run_id: Any):
+    """Seam for tests: a writer that appends to the (ended) asking run."""
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    return await RunEventWriter.for_run(run_id)
 
 
 class AILibraryChatService:
@@ -237,6 +257,7 @@ class AILibraryChatService:
         plan_mode: Optional[str] = None,
         attachments: Optional[list] = None,
         script_context: Optional[dict] = None,
+        answer_to: Optional[str] = None,
     ):
         """P2: real streaming variant of chat.
 
@@ -274,6 +295,7 @@ class AILibraryChatService:
                 chunk_callback=_on_chunk,
                 attachments=attachments,
                 script_context=script_context,
+                answer_to=answer_to,
             ),
             name=f"chat-stream-{session_id}",
         )
@@ -338,6 +360,121 @@ class AILibraryChatService:
             },
         }
 
+    async def _resolve_chat_answer(
+        self,
+        session_id: str,
+        user_id: UUID,
+        content: str,
+        answer_to: Optional[str],
+    ) -> Optional["_ChatAnswer"]:
+        """Decide whether ``content`` answers / supersedes the open question
+        on the latest assistant message. Raises 409 ``no_open_question`` or
+        400 ``answer_shape`` for a bad ``answer_to``; runs the kind's
+        ``on_answer`` (it may refuse) for a real answer. None = ordinary
+        message on a conversation with no open question."""
+        from app.services.ai.runner.question import (
+            AnswerContext,
+            AnswerRejected,
+            answer_matches,
+            on_answer_for,
+        )
+
+        open_q = await self._store.latest_assistant_open_question(session_id=session_id)
+        question = (open_q or {}).get("question") or {}
+        open_qid = question.get("question_id")
+        if answer_to is not None:
+            if not open_q or open_qid != answer_to:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "no_open_question",
+                        "message": f"no open question {answer_to!r} in this chat",
+                    },
+                )
+            if not answer_matches(question, content):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "answer_shape",
+                        "message": "answer must equal one of the option labels"
+                        + (
+                            " or be free text"
+                            if question.get("allow_free_text")
+                            else ""
+                        ),
+                    },
+                )
+            superseded = False
+        elif not open_q:
+            return None
+        else:
+            labels = {
+                o.get("label")
+                for o in (question.get("options") or [])
+                if isinstance(o, dict)
+            }
+            superseded = content not in labels  # a plain next message moves on
+        if not superseded:
+            kind = str(question.get("kind") or "user")
+            try:
+                handler = on_answer_for(kind)
+            except KeyError:
+                raise HTTPException(
+                    status_code=500,
+                    detail={"code": "unknown_question_kind", "message": kind},
+                )
+            try:
+                await handler(
+                    {"session_id": str(session_id)},
+                    content,
+                    AnswerContext(
+                        target={"session_id": str(session_id)},
+                        user_id=str(user_id),
+                        marker=question,
+                    ),
+                )
+            except AnswerRejected as rej:
+                raise HTTPException(
+                    status_code=rej.status,
+                    detail={"code": rej.code, "message": str(rej)},
+                )
+        return _ChatAnswer(
+            message_id=open_q["message_id"],
+            question_id=str(open_qid),
+            run_id=(str(question["run_id"]) if question.get("run_id") else None),
+            value=None if superseded else content,
+            superseded=superseded,
+        )
+
+    async def _commit_chat_answer(self, answer: "_ChatAnswer") -> None:
+        """After the user message landed: ``question_answered`` on the asking
+        run + ``answered`` stamped on the asking message. Both best-effort."""
+        from app.services.ai.runner.question import QUESTION_ANSWERED
+
+        payload = {
+            "question_id": answer.question_id,
+            "value": answer.value,
+            "superseded": answer.superseded,
+        }
+        if answer.run_id:
+            try:
+                writer = await _event_writer_for_run(answer.run_id)
+                await writer.append(QUESTION_ANSWERED, payload, turn=None, step=None)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[chat] question_answered for run {answer.run_id} not recorded: {exc!r}"
+                )
+        else:
+            logger.warning(
+                f"[chat] open question {answer.question_id} has no run_id; "
+                "question_answered not recorded"
+            )
+        await self._store.mark_question_answered(
+            message_id=answer.message_id,
+            value=answer.value,
+            superseded=answer.superseded,
+        )
+
     async def chat(
         self,
         session_id: str,  # ai_sessions.id BIGINT Snowflake (mig 231)
@@ -348,6 +485,7 @@ class AILibraryChatService:
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
         script_context: Optional[dict] = None,
+        answer_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -379,6 +517,7 @@ class AILibraryChatService:
             chunk_callback=chunk_callback,
             attachments=attachments,
             script_context=script_context,
+            answer_to=answer_to,
         )
 
     async def run_session_turn(
@@ -393,6 +532,7 @@ class AILibraryChatService:
         attachments: Optional[list] = None,
         attribution: Optional[str] = None,
         script_context: Optional[dict] = None,
+        answer_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -414,6 +554,7 @@ class AILibraryChatService:
                 attachments=attachments,
                 attribution=attribution,
                 script_context=script_context,
+                answer_to=answer_to,
             )
 
     async def _run_session_turn_inner(
@@ -428,6 +569,7 @@ class AILibraryChatService:
         attachments: Optional[list] = None,
         attribution: Optional[str] = None,
         script_context: Optional[dict] = None,
+        answer_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -483,12 +625,27 @@ class AILibraryChatService:
         # what the user tried to ask. Attachment display metadata rides
         # along (kind/resource_id/mime/alt_text — never data_url bytes)
         # so history reloads can re-render the image in the bubble.
+        # Phase 2a chat answer channel (spec §1): does this message answer
+        # (or supersede) a typed question parked on the latest assistant
+        # message? Chat turns only — issue turns answer through the issue
+        # marker + message endpoint (Task 3); detecting here as well would
+        # record every issue answer twice. Validated BEFORE anything is
+        # persisted (409 / 400 leave no trace); recorded right after the
+        # user message lands, because that message IS the delivery.
+        chat_answer = (
+            await self._resolve_chat_answer(session_id, user_id, content, answer_to)
+            if trigger == "chat"
+            else None
+        )
+
         user_msg = await self._store.append_user_message(
             session_id=session_id,
             user_id=str(user_id),
             content=content,
             attachments=ConversationsAiStore.display_attachments(_att_dicts),
         )
+        if chat_answer is not None:
+            await self._commit_chat_answer(chat_answer)
 
         # M1.5 wiring: load agent record so we can read budget/fallback,
         # then build the full runner stack (HookRegistry pre-populated,
@@ -1323,6 +1480,14 @@ class AILibraryChatService:
                 "approval_id": approval_row_id,
                 "hook": str(result.get("hook_name") or ""),
                 "reason": str(result.get("approval_reason") or ""),
+            }
+        # Phase 2a: same seat for a typed question — the payload shape from
+        # question.Question.to_payload() plus the asking run, so a reload
+        # re-renders the QuestionCard and the answer can name the run.
+        if result.get("awaiting_input") and isinstance(result.get("question"), dict):
+            asst_metadata["awaiting_input"] = {
+                **result["question"],
+                "run_id": str(run_id) if run_id else None,
             }
         asst_msg = await self._store.append_assistant_message(
             session_id=session_id,

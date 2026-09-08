@@ -233,6 +233,12 @@ class ChatRequest(BaseModel):
     # where the attachments are never even looked at.
     # The real rule is "a turn must carry something", enforced below.
     content: str = ""
+    # Phase 2a: this message answers the typed question parked on the latest
+    # assistant message (metadata_json.awaiting_input.question_id). The body
+    # must equal one of its labels or be free text when allowed — otherwise
+    # 400 answer_shape / 409 no_open_question. Sending a plain message
+    # without answer_to while a question is open supersedes the question.
+    answer_to: Optional[str] = Field(default=None, max_length=120)
 
     # §5.3: structured selection handle (scene_id / element_ids) alongside
     # the folded-text content — lets the agent target the exact scene/
