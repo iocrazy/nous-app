@@ -530,8 +530,27 @@ class AgentRunner:
             _stop = result.get("stop_reason")
             if _stop:
                 usage = {**(usage or {}), "stop_reason": str(_stop)}
+            # Same for a hook decision: the true-stream path files
+            # ``usage.hook_decision`` plus a bracket line; run_turn hands
+            # back ``aborted`` / ``awaiting_approval`` flags with empty
+            # content. Mirror the stream shape so classify_stream_end and
+            # the chat service's approval-row persistence see the same thing
+            # on both routes.
+            _text = result.get("content") or ""
+            if result.get("aborted"):
+                _reason = result.get("abort_reason") or "hook_aborted"
+                usage = {**(usage or {}), "hook_decision": "abort"}
+                _text = _text or f"\n\n[blocked: {_reason}]"
+            elif result.get("awaiting_approval"):
+                _reason = result.get("approval_reason") or "approval required"
+                usage = {
+                    **(usage or {}),
+                    "hook_decision": "await_approval",
+                    "approval_reason": str(_reason),
+                }
+                _text = _text or f"\n\n[awaiting approval: {_reason}]"
             yield StreamChunk(
-                delta_text=result.get("content") or "",
+                delta_text=_text,
                 finish_reason=(raw_choices[0].get("finish_reason") or "stop"),
                 usage=usage,
                 tool_call_trace=result.get("tool_calls") or [],

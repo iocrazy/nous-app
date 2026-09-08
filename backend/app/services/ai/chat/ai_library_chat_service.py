@@ -1353,6 +1353,8 @@ class AILibraryChatService:
                         stream_cancelled = False
                         stream_awaiting_input = False
                         stream_stop_reason: Optional[str] = None
+                        stream_hook_decision: Optional[str] = None
+                        stream_approval_reason: str = ""
                         try:
                             async for chunk in runner.stream_turn(
                                 composed,
@@ -1393,6 +1395,16 @@ class AILibraryChatService:
                                     stream_stop_reason = chunk_stop
                                 if chunk_stop == "awaiting_input":
                                     stream_awaiting_input = True
+                                # A hook decision rides the same terminal
+                                # chunk (both stream routes file it); without
+                                # this the approval row below is never
+                                # written on a chunk_callback turn.
+                                chunk_hook = (chunk.usage or {}).get("hook_decision")
+                                if chunk_hook:
+                                    stream_hook_decision = chunk_hook
+                                    stream_approval_reason = str(
+                                        (chunk.usage or {}).get("approval_reason") or ""
+                                    )
                         except RunAborted as abort_exc:
                             # User cancel mid-stream. The buffered path
                             # (run_turn) returns {"cancelled": True} instead
@@ -1447,6 +1459,11 @@ class AILibraryChatService:
                         result["cancelled"] = True
                     if stream_stop_reason:
                         result["stop_reason"] = stream_stop_reason
+                    if stream_hook_decision == "await_approval":
+                        result["awaiting_approval"] = True
+                        result["approval_reason"] = stream_approval_reason
+                    elif stream_hook_decision == "abort":
+                        result["aborted"] = True
                     if stream_awaiting_input:
                         from app.services.ai.runner.question import payload_from_view
 

@@ -74,3 +74,48 @@ async def test_stream_terminal_chunk_stop_reason_is_returned():
     assert out["stop_reason"] == "paused"
     assert out["awaiting_input"] is False and out["cancelled"] is False
     assert out["assistant_message"]["content"] == "half "
+
+
+async def test_stream_terminal_chunk_hook_decision_becomes_awaiting_approval():
+    """The terminal chunk's ``usage.hook_decision`` (both stream routes file
+    it) must rebuild ``awaiting_approval`` / ``approval_reason`` on the
+    result — that is what persists the approval row and the message
+    metadata; before this the chunk_callback route never wrote either."""
+    from unittest.mock import MagicMock
+
+    user_id, agent_id = uuid4(), uuid4()
+    store = _FakeStore(_session_row(user_id, agent_id))
+    repo = MagicMock()
+    repo.create = AsyncMock(return_value={"id": "ap-1"})
+    with _chat_env(
+        run_turn_result={"content": ""}, agent_id=agent_id, approval_repo=repo
+    ):
+        runner = svc_mod.build_agent_runner_stack.return_value.runner
+
+        async def stream_turn(*a, **k):
+            yield StreamChunk(
+                delta_text="\n\n[awaiting approval: publish live]",
+                finish_reason="stop",
+                usage={
+                    "hook_decision": "await_approval",
+                    "approval_reason": "publish live",
+                },
+                tool_call_trace=[],
+            )
+
+        runner.stream_turn = stream_turn
+        out = await svc_mod.AILibraryChatService(store=store).run_session_turn(
+            uuid4(),
+            user_id=user_id,
+            content="go",
+            trigger="issue_dispatch",
+            chunk_callback=AsyncMock(),
+        )
+    # The row is persisted and the message carries the card's seat.
+    repo.create.assert_awaited_once()
+    assert repo.create.await_args.kwargs["reason"] == "publish live"
+    assert (
+        out["assistant_message"]["metadata_json"]["awaiting_approval"]["reason"]
+        == "publish live"
+    )
+    assert out["stop_reason"] is None

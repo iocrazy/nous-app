@@ -228,6 +228,11 @@ async def test_stream_turn_files_the_hook_stop_reason(reason):
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends
 
 
+class _NoStreamAdapter:  # no ``stream`` attribute on purpose
+    async def call(self, *a, **k):
+        raise AssertionError("must not call the model")
+
+
 @pytest.mark.parametrize("reason", ["paused", "awaiting_input"])
 async def test_stream_turn_buffered_fallback_carries_the_hook_stop_reason(reason):
     """Production ALWAYS takes this branch for chunk_callback turns: the chat
@@ -238,10 +243,6 @@ async def test_stream_turn_buffered_fallback_carries_the_hook_stop_reason(reason
     (2026-09-08, phase 2a Task 9): AskUser parked the run, the budget gate
     halted it, PauseHook stopped it — and every one of them was filed as
     ``turn_end{completed}`` with no marker, so the answer route said 409."""
-
-    class _NoStreamAdapter:  # no ``stream`` attribute on purpose
-        async def call(self, *a, **k):
-            raise AssertionError("must not call the model")
 
     rec = _Rec()
     chunks = []
@@ -257,3 +258,75 @@ async def test_stream_turn_buffered_fallback_carries_the_hook_stop_reason(reason
     assert chunks[-1].tool_call_trace == []
     ends = rec.turn_ends()
     assert len(ends) == 1 and ends[0]["reason"] == reason, ends
+
+
+async def test_stream_turn_buffered_fallback_files_cancelled_without_a_chunk():
+    """The cancelled stop returns before any terminal chunk (pre-existing
+    contract); the wrapper still files exactly one ``turn_end{cancelled}``."""
+    rec = _Rec()
+    chunks = []
+    async for ch in _runner(_NoStreamAdapter(), "cancelled").stream_turn(
+        _composed(),
+        [{"role": "user", "content": "q"}],
+        recorder=rec,
+        auto_recorder=False,
+    ):
+        chunks.append(ch)
+    assert chunks == []
+    ends = rec.turn_ends()
+    assert len(ends) == 1 and ends[0]["reason"] == "cancelled", ends
+
+
+@pytest.mark.parametrize(
+    "run_result, decision, text",
+    [
+        (
+            {"content": "", "raw": None, "aborted": True, "abort_reason": "policy"},
+            "abort",
+            "[blocked: policy]",
+        ),
+        (
+            {
+                "content": "",
+                "raw": None,
+                "awaiting_approval": True,
+                "approval_reason": "publish live",
+                "approval_payload": {},
+            },
+            "await_approval",
+            "[awaiting approval: publish live]",
+        ),
+    ],
+)
+async def test_stream_turn_buffered_fallback_carries_the_hook_decision(
+    run_result, decision, text, monkeypatch
+):
+    """Same seam, other flag family: run_turn's abort / await_approval results
+    must come out as the stream shape (``usage.hook_decision`` + bracket
+    line) so classify_stream_end and the chat service's approval row see
+    them on the production route."""
+    from unittest.mock import AsyncMock
+
+    runner = _runner(_NoStreamAdapter(), "paused")
+    monkeypatch.setattr(runner, "run_turn", AsyncMock(return_value=run_result))
+    rec = _Rec()
+    chunks = []
+    async for ch in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "q"}],
+        recorder=rec,
+        auto_recorder=False,
+    ):
+        chunks.append(ch)
+    assert chunks and chunks[-1].finish_reason == "stop"
+    assert (chunks[-1].usage or {}).get("hook_decision") == decision
+    assert text in chunks[-1].delta_text
+    if decision == "await_approval":
+        assert chunks[-1].usage["approval_reason"] == "publish live"
+    ends = rec.turn_ends()
+    assert len(ends) == 1, ends
+    # HOOK_DECISION_MARKERS: abort files as ``cancelled`` (same as the true
+    # stream path), await_approval as ``awaiting_approval``.
+    assert ends[0]["reason"] == (
+        "cancelled" if decision == "abort" else "awaiting_approval"
+    ), ends
