@@ -29,6 +29,7 @@ import { ArrowLeft } from 'lucide-react';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 import { LibraryPanel } from '../library/LibraryPanel';
+import { insetStyle, useLibraryInset } from '../library/libraryInset';
 import { useLibraryStore } from '../library/libraryStore';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
@@ -180,6 +181,12 @@ export function CanvasView({
   const { t } = useTranslation();
   const toast = useOptionalToast();
   const [searchParams] = useSearchParams();
+  // How much of this surface the Library panel is standing on. Read here,
+  // above every early return, because it is published on the surface root
+  // for EVERY kind — a board with no Library still has to define the
+  // variables its islands read, or the fallback in each declaration becomes
+  // the only thing holding the layout together.
+  const inset = useLibraryInset();
 
   // Cmd+K palette + ? help — canvas-only scope, active only when ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -781,8 +788,13 @@ export function CanvasView({
 
   // The smart family renders the React Flow surface plus the node composer
   // palette overlay.
+  //
+  // `insetStyle` publishes how much of this surface the Library panel is
+  // standing on. Every island that centres itself or anchors to the right
+  // edge reads it from here; without it they lay themselves out against the
+  // full width and slide underneath the open panel (see `libraryInset`).
   return (
-    <div ref={surfaceRef} className="relative h-full w-full">
+    <div ref={surfaceRef} className="relative h-full w-full" style={insetStyle(inset)}>
       <CanvasSurface onInit={handleCanvasInit} />
       {/* Back-to-list pill + canvas name (Infinite parity) — top-left, above
           the surface. Only rendered for the real route (`onBack` provided);
@@ -923,7 +935,9 @@ function CanvasStatus({
   );
 }
 
-const BADGE_BASE = 'absolute right-4 top-4 rounded-md px-3 py-1 text-xs font-medium shadow';
+/** Top-RIGHT, so it too has to stop where the Library panel starts. */
+const BADGE_BASE =
+  'absolute right-[calc(1rem_+_var(--canvas-inset-right,0px))] top-4 rounded-md px-3 py-1 text-xs font-medium shadow';
 /** Neutral chrome (saving / read-only) — the canvas's own panel treatment. */
 const BADGE_NEUTRAL = 'canvas-island text-canvas-text';
 const BADGE_WARN = 'border border-warn-line bg-warn-soft text-warn';

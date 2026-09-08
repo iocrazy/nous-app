@@ -646,7 +646,13 @@ export function CanvasComposer({
       // max-w + x-scroll: the island must never push its tail buttons off
       // screen (the Stop key made the long-standing narrow-viewport
       // overflow visible at 1280px).
-      className="canvas-island pointer-events-auto absolute inset-x-0 bottom-4 mx-auto flex w-fit max-w-[calc(100%-2rem)] gap-1 overflow-x-auto p-1.5"
+      // `left-0` + `right-[inset]` + `mx-auto`, NOT `inset-x-0`: the island
+      // centres in what the Library panel leaves, so opening the panel
+      // slides it out from under instead of hiding it. `max-w` is a
+      // percentage of the SURFACE, not of that band, so it has to subtract
+      // the reservation a second time. The bottom var is the drawer layout
+      // below 1100px, where the panel takes the bottom edge instead.
+      className="canvas-island pointer-events-auto absolute left-0 right-[var(--canvas-inset-right,0px)] bottom-[calc(1rem_+_var(--canvas-inset-bottom,0px))] mx-auto flex w-fit max-w-[calc(100%_-_var(--canvas-inset-right,0px)_-_2rem)] gap-1 overflow-x-auto p-1.5"
     >
       {/* Standard canvases add nodes from the TOP node bar (Phase 2.2) —
           duplicating them here made two menu rows. Only the lite canvas,

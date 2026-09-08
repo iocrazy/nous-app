@@ -155,7 +155,11 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
       role="toolbar"
       aria-label="Canvas node bar"
       data-testid="top-node-bar"
-      className="canvas-island pointer-events-auto absolute left-1/2 top-4 z-30 flex max-w-[calc(100%-24rem)] -translate-x-1/2 gap-1 overflow-x-auto p-1.5"
+      // Centred by `mx-auto` inside a band that ends where the Library
+      // panel begins — a `-translate-x-1/2` centres on the full width by
+      // definition, which no reservation can reach. The 24rem keeps clear
+      // of the back pill and the save badge, as before.
+      className="canvas-island pointer-events-auto absolute left-0 right-[var(--canvas-inset-right,0px)] top-4 z-30 mx-auto flex w-fit max-w-[calc(100%_-_var(--canvas-inset-right,0px)_-_24rem)] gap-1 overflow-x-auto p-1.5"
     >
       {CHIPS.map((chip) => {
         const Icon = chip.icon;
