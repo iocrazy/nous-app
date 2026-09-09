@@ -735,6 +735,39 @@ class ConversationsAiStore:
             "created_at": row.get("created_at"),
         }
 
+    async def append_system_message(
+        self, *, session_id: int, content: str, metadata: dict
+    ) -> Dict[str, Any]:
+        """Insert a system-role message (``sender_type='system'``, allowed by
+        mig 327's CHECK; ``_ROLE_MAP`` reads it back as ``system`` and
+        ``build_history_messages`` replays it). Phase 2b-1: a forked session
+        carries the origin's compaction summary this way."""
+        from app.repositories.conversation_repository import (
+            get_conversation_repository,
+        )
+
+        reserved = set(_META_DECORATION_KEYS) & set((metadata or {}).keys())
+        if reserved:
+            raise ValueError(
+                f"metadata keys {sorted(reserved)} are reserved for message decoration"
+            )
+        row = await get_conversation_repository().send_message(
+            conversation_id=_bigint(session_id),
+            sender_id=None,
+            sender_type="system",
+            type="text",
+            body={"text": content, "meta": dict(metadata or {})},
+            parent_id=None,
+        )
+        return {
+            "id": row["id"],
+            "session_id": row.get("conversation_id"),
+            "role": "system",
+            "content": content,
+            "metadata_json": metadata,
+            "created_at": row.get("created_at"),
+        }
+
     # ── phase 2a: typed question parked on the latest assistant message ──
 
     async def latest_assistant_open_question(

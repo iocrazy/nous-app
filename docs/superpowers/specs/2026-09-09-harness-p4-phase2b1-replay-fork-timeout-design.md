@@ -75,6 +75,11 @@
 > - `compaction_summary` 事件从本 Task 起带 `summary` 文本（仅 LLM 摘要被接受的那条；emergency-cap 行仍只有指标）。`replay.messages_from_events` 遇到没有文本的压缩行**保留**已有消息而不是清空——旧 run 与紧急截断都不能让分叉起点空白。
 > - run 的 transcript 只有**本轮**的 `user`（最后一条用户文本）与终态 `assistant`；此前各轮在原会话的 `ai_messages` 里。所以 Task 3 建新会话时先复制原会话中早于该 run 的消息，再叠 `messages_from_events(events_upto(events, at_seq))`；run 内的工具往返不重放——在第 N 步分叉 ≈ 带 steer 重跑这一轮，这是 §1「重建不含工具消息」的直接后果。
 > - `events_upto(events, at_seq)` 按 **seq** 切片而非列表下标，Task 3 只许用它。
+> **实施记录（Task 3，2026-09-09）**
+> - 多一个错误码 `not_found` 404（run 不属于本人 / issue 已 hidden），与既有 run 端点的"陌生 run 读作 404"一致。`GET /runs/{id}/forks` → `{items: [{run_id: str, at_seq, created_at, status}]}`。
+> - 新会话的种子 = 原会话中 `created_at < run.started_at` 的消息 ＋ `messages_from_events(events_upto(events, at_seq))`，接缝处若原会话最后一条与 run 的 seq-1 `user` 事件同文则只留一份；压缩摘要以 `sender_type='system'` 写入（mig 327 允许，`ConversationsAiStore.append_system_message` 新增）。原会话、原 run 一字不改，唯一落在原 run 上的是 `question_answered{superseded:true}`（仅当 `awaiting_input` 属于它）。
+> - `_start_execute_issue` 的本体搬到 `services/issues/issue_dispatch.start_execute_issue`（抛 `DispatchFailed`），router 保留同名薄包装把它映射成 500；DBOS 派发器与 workflow_id 持久化仍留在 router 模块、运行时解析，既有 monkeypatch 缝不变。
+> - transcript 读统一为 `AgentRunsRepository.list_transcript_events(run_id, upto_seq=, event_types=)`，fork 服务与 `view-at` 共用，不再手写第三份查询。
 > - **steer 不走 inbox**（偏离 §2 第 3 条）：fork 时 run 尚未开始，inbox 注入会叠在一份已经含它的历史上；改为印记带 `steer_text`，executor 把它当作分叉那一轮的**用户消息**（`run_session_turn(content=steer_text)`，进 `ai_messages` 可见、进上下文一次），没有 steer 就发既有的 `CONTINUATION_NUDGE`——分叉 run 绝不重发完整任务文本，历史里已经有了。`fork{steer: bool}` 事件不变。
 
 失败回滚：步骤 1–2 在同一事务；派发失败则把 `ai_session_id` 指回原会话并 503 `dispatch_failed`（与 2a `/resume` 失败恢复同款）。
