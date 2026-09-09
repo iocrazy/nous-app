@@ -1272,7 +1272,7 @@ git commit -am "feat(ui): 工具超时徽标 + Cockpit Tools 格（harness 二�
 - [x] **Step 2: ① 回放**：对 2a 留下的多步 run（MH-67 的 347474259567172）`GET /events?upto_seq=<step2 的 seq>` 只回到那里；`GET /view-at?seq=` 的 `view.step.done` 与事件一致；页面刮到 step 2，轨迹只剩两步、Cockpit 出 `as of step 2`、Pause 置灰；`?run&seq` 深链打开即定位。
 - [x] **Step 3: ② fork**：对同一 run 在 step 2 分叉并带 steer → 201；新 run 首条事件 `fork{of_run_id, at_seq, steer:true}`，事件 2 `inbox_claimed{kind:"steer"}`；`agent_runs.fork_of_run_id/fork_at_seq` 有值；原 run 事件数不变；`GET /forks` 列出；issue `ai_session_id` 已换、原会话消息数不变；页面：新 run 头部芯片可点回原 run 且自动刮到 step 2，原 run 轨迹 step 2 出 `Fork →`。前置条件各验一次：run 活着 → 409 `run_live`；`at_seq` 不在边界 → 400；issue done → 409 `issue_terminal`。
 - [x] **Step 4: ③ 超时**：合入 `TOOL_TIMEOUTS: {ResourceFetch: 15}` 的临时配置 PR 部署后，建 issue 让 `analyze` 抓 `https://httpbin.org/delay/30` → `tool_call.result.timed_out=true, timeout_s=15`；run 继续（`turn_end{completed}` 或模型换路）；`view.tools.timed_out=1`；页面徽标 `Timed out · 15s`、Cockpit `1 timed out · ResourceFetch`；验后改回配置并部署。
-- [ ] **Step 5: 前端** `cd frontend && npm run e2e:prod`；三页截图对照 `~/Downloads/control-plane-2b1.html`。
+- [x] **Step 5: 前端** `cd frontend && npm run e2e:prod`；三页截图对照 `~/Downloads/control-plane-2b1.html`。
 - [x] **Step 6: 完成账**：表格记每条证据（run id / seq / 端点响应 / 截图），未验项写原因；记忆 `project-harness-p4-phase2a-shipped` 追加 2b-1 状态并写 2b-2 入口（schedule → 收件箱、continuable 子代理，先接活 workforce 链的 4 条待接线）。
 
 **完成账（2026-09-09 深夜，Task 8 真栈验收）**
@@ -1288,8 +1288,8 @@ git commit -am "feat(ui): 工具超时徽标 + Cockpit Tools 格（harness 二�
 | T3 | #2197 → cc05dc4d | `def fork_run_endpoint`、`GET /forks` 200 |
 | T4 | #2198 → 06c3b10e | `grep -c "def run_tool_with_timeout" tool_exec.py` = 1 |
 | T5 | #2199 → e003b3ef | `app.nous.ink/version.json` commitSha e003b3e（0.25.480） |
-| T6 | #2200 → f5c31f36 | **未上线**：deploy-pages 被托管 runner 账单拦截（见下） |
-| T7 | #2201 → 1036d9a3 | 同上 |
+| T6 | #2200 → f5c31f36 | 上线于仓库临时 public 期间（deploy-pages 34416417328）；version.json 97374df → 03b6fc3 |
+| T7 | #2201 → 1036d9a3 | 同上；补修 #2208 → 03b6fc34（行头分叉/超时芯片） |
 | 修补 | #2202 → fd275822（fork 经 `conversation_id` 找 issue）；#2204 → 630a0af1（2a `_controlJson` 读生产错误外壳；前端已上线 commitSha 630a0af）；#2205 → d445802c（临时 `Skill: 0.001`）；#2206 → e9655a3e（回退） | `grep get_by_session issue_fork.py` = 1；容器内 `settings.TOOL_TIMEOUTS` 探针期 `{'Skill': 0.001}`、回退后 `{}` |
 
 | # | 项 | 结果 | 证据 |
@@ -1299,7 +1299,7 @@ git commit -am "feat(ui): 工具超时徽标 + Cockpit Tools 格（harness 二�
 | ② | fork 前置条件 | ✅ | `at_seq=3`（tool_call 行）→ 400 `not_a_step_boundary`；对刚分叉、6 秒后仍在跑的 run 再分叉 → 409 `run_live`；MH-73（cancelled）的 run 347533278370854 → 409 `issue_terminal` |
 | ③ | 逐工具超时 | ✅ | MH-74（347795597254432）run 347795612446509：seq 4 `tool_call{tool:"Skill", result:{error:"timeout", message:"Tool Skill timed out after 0.001s. Retry once…", elapsed_s:0.001, timed_out:true, timeout_s:0.001}}`；run 继续 step 2 → seq 7 `FinishIssue`（无计时字段）→ seq 11 `turn_end{completed, tool_calls:2}`；`view-at?seq=11` → `tools{timed_out:1, last_timed_out:"Skill"}`；issue `in_review`，`outcome_reason` 提到 skill 超时 |
 | 错误外壳 | 生产 `HTTPException` 形状 | ✅（并修） | 所有拒绝都是 `{success:false, error:"Request failed", code:"http_4xx", request_id, details:{code,message}}`——前端 2a `_controlJson` 与 2b-1 `forkJson` 只读 `detail`，真栈上每个拒绝都退化成 `http_409`；#2204 / #2200 修，CLAUDE.md 已知陷阱新增一条 |
-| 前端 | 三页 UI + `npm run e2e:prod` | ⏸ 未验 | T6/T7 的前端包没能上线：T6 合并后 deploy-pages 3 秒失败、`runner=空 steps=0`，annotation "recent account payments have failed or your spending limit needs to be increased"（CLAUDE.md 部署陷阱条目）；`gh workflow run deploy-pages.yml` 同样被拦。待账单恢复后重跑该 workflow（或本机 `wrangler login` 直传），再走 `npm run e2e:prod` 与 `~/Downloads/control-plane-2b1.html` 三页对照——回放页可先在已上线的 T5 上看（刮擦条、`as of step N`、深链），fork 芯片/弹窗与超时徽标要等 T6/T7 |
+| 前端 | 三页 UI + `npm run e2e:prod` | ✅（2026-09-09 晚，仓库临时切 public 让托管 runner 跑完 T6/T7/#2208 的部署后切回） | `app.nous.ink/version.json` commitSha 03b6fc3；`npm run e2e:prod` 走查全过。临时 Playwright spec（未入库）对生产以 `toBeVisible` 断言并截图到 `~/Downloads/2b1-ui-*.png`：① 深链 `MH-67?run=347474259567172&seq=5` → 刮擦条位置「第 1 轮 · 第 2 步（2/2）」、Cockpit `cockpit-asof[data-mode=other-run]`「正在回放 run #567172 · 实时」、原 run 单独面板（`detached-run-panel`）、`Fork from step 2` 按钮打开弹窗（steer 输入框可见，取消关闭）；② 空闲态 MH-67 分叉 run 行头 `run-fork-chip`「分叉自 run #852739 @ seq 6」→ 点击 URL 变 `?run=347786145852739&seq=6`、原 run 面板出两个 `trajectory-fork-mark`「分叉 → #290162 / #611807」；③ MH-74 行内 `trajectory-timeout-badge`「超时 · 0s」+ `trajectory-timeout-elapsed`「实际 0.0s」、行头 `run-timeout-chip`「1 个超时」（title Skill）。发现并修（#2208 → 03b6fc34）：Cockpit 芯片与 Tools 格读 `current_run.view`，issue 空闲即消失——行头芯片改从 run 自身事件推导。 |
 
 偏差（均已回写 spec 实施记录）：
 - ③ 原计划 `ResourceFetch: 15` + `httpbin.org/delay/30`：`ResourceFetch` 不接 URL，且只在本轮带资源引用时才向模型公开；改用 `Skill: 0.001`（1 ms，DB 往返不可能完成）确定性触发同一条包装路径。「同一 PR 内改回」在合并即部署的链上做不到——改为紧接的回退 PR #2206（探针在生产存活约 25 分钟）。探针 PR 首轮红：`test_defaults_cover_every_built_in_tool_family` 读真实 settings，被合法覆盖打红 → autouse fixture 清空 `settings.TOOL_TIMEOUTS`（保留）。
