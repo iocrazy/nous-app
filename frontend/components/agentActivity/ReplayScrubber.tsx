@@ -15,7 +15,7 @@ export interface ReplayScrubberProps {
   seq: number | null;
   isRunning: boolean;
   onSeek: (seq: number | null) => void;
-  onFork?: (seq: number) => void;
+  onFork?: (seq: number, label: string) => void;
   loading?: boolean;
 }
 
@@ -101,7 +101,7 @@ export const ReplayScrubber: React.FC<ReplayScrubberProps> = ({ ticks, seq, isRu
             <button
               type="button"
               data-testid="replay-fork"
-              onClick={() => onFork(seq as number)}
+              onClick={() => onFork(seq as number, position)}
               className="inline-flex items-center gap-1 rounded border border-info-line px-1.5 py-0.5 hover:brightness-110"
             >
               <GitFork size={11} /> {t('replay.fork', 'Fork from step {{n}}', { n: stepIdx + 1 })}

@@ -28,6 +28,7 @@ import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
 import { ReplayScrubber } from '../agentActivity/ReplayScrubber';
 import { replayTicks } from '../agentActivity/replayTicks';
 import { isReplaying, useReplay } from './replayContext';
+import { forkMarksFor, useRunForks } from '../agentActivity/useRunForks';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -185,7 +186,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
     }
   };
   return (
-    <div className="my-3">
+    <div className="my-3" id={msg.agent_run_id ? `run-${msg.agent_run_id}` : undefined} data-testid="agent-run-row">
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
         <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'}</span>
@@ -240,7 +241,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
  * `agent_run_transcript_events` — an IssueMessage carries only `agent_run_id`.
  * Renders once per run; a capability denial keeps its own notice above.
  */
-const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
+export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
   const { events, denials } = useRunToolActivity(runId, isRunning);
   // Replay (harness 2b-1 §1): the scrubber sits on the issue's NEWEST run
   // only; in the past the trajectory is events[:seq], frozen (no live step).
@@ -252,6 +253,10 @@ const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({
     () => (replaying ? events.filter((e) => e.seq <= (replay?.seq as number)) : events),
     [replaying, events, replay?.seq],
   );
+  // Fork points (harness 2b-1 §2): runs forked from this one, drawn on the
+  // step they branched at.
+  const forks = useRunForks(runId, isRunning);
+  const forkMarks = useMemo(() => forkMarksFor(events, forks), [events, forks]);
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
@@ -266,7 +271,29 @@ const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({
         />
       )}
       {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
-      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} />
+      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} forkMarks={forkMarks} />
+    </div>
+  );
+};
+
+/**
+ * A run that is being replayed but has no row in this thread — the ORIGIN of
+ * a fork lives in the issue's previous conversation (harness 2b-1 §2). It is
+ * drawn above the thread with its own scrubber and fork marks, so the fork
+ * chip and a `?run=&seq=` link to it have somewhere to land.
+ */
+export const DetachedRunPanel: React.FC<{ runId: string }> = ({ runId }) => {
+  const { t } = useTranslation();
+  const ref = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [runId]);
+  return (
+    <div ref={ref} id={`run-${runId}`} data-testid="detached-run-panel" className="mx-4 mt-3 rounded-lg border border-info-line bg-info-soft/30 p-2">
+      <div className="mb-1 text-[12px] text-info">
+        {t('replay.originRun', 'Original run #{{run}} (from an earlier conversation of this issue)', { run: runId.slice(-6) })}
+      </div>
+      <RunTrajectory runId={runId} isRunning={false} />
     </div>
   );
 };

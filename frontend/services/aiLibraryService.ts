@@ -143,6 +143,46 @@ export interface AgentStatsItem {
   interrupted_reason: 'restart' | null;
 }
 
+/** A fork refusal: the server's `detail.code` + status, message = server text. */
+export class RunForkRejectedError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'RunForkRejectedError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/** Like `handle`, but a non-2xx becomes a RunForkRejectedError carrying the
+ *  server's typed code. Production wraps every HTTPException in the
+ *  ErrorResponse envelope (`app/core/exceptions.py`):
+ *  `{error, code: "http_<status>", request_id, details: <exc.detail | null>}`
+ *  — so the typed `{code, message}` lives under `details`; a bare FastAPI
+ *  `{detail: …}` (tests, unwrapped routers) is accepted too. Never the raw body. */
+async function forkJson<T>(res: Response): Promise<T> {
+  if (res.ok) return res.json();
+  let code = `http_${res.status}`;
+  let message = `${res.status} ${res.statusText}`;
+  try {
+    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
+    const detail = body?.details ?? body?.detail;
+    if (detail && typeof detail === 'object') {
+      const d = detail as { code?: unknown; message?: unknown };
+      if (typeof d.code === 'string' && d.code) code = d.code;
+      if (typeof d.message === 'string' && d.message) message = d.message;
+    } else if (typeof detail === 'string' && detail) {
+      message = detail;
+    } else if (typeof body?.error === 'string' && body.error) {
+      message = body.error;
+    }
+  } catch (err) {
+    console.error('[aiLibraryService] fork error body unreadable', err);
+  }
+  throw new RunForkRejectedError(code, res.status, message);
+}
+
 export const aiLibraryService = {
   // ─── Agents ────────────────────────────────────────────────────────────────
 
@@ -340,6 +380,42 @@ export const aiLibraryService = {
       `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}${q}`,
       { headers: await getAuthHeaders() },
     );
+    return handle(resp);
+  },
+
+  /**
+   * Fork an issue run at a step boundary (harness 2b-1 §2). 201 → the new
+   * session / workflow; the run row is opened by the workflow (`run_id`
+   * null). A refusal is a RunForkRejectedError carrying the server's
+   * `detail.code` (run_live / issue_busy / not_a_step_boundary /
+   * not_an_issue_run / issue_terminal / run_state_unavailable /
+   * dispatch_failed / not_found).
+   */
+  async forkRun(
+    runId: string,
+    body: { at_seq: number; steer?: string },
+  ): Promise<{
+    run_id: string | null;
+    session_id: string;
+    workflow_id: string;
+    issue_id: number;
+    forked_from: { run_id: number; at_seq: number };
+  }> {
+    const resp = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/fork`, {
+      method: 'POST',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return forkJson(resp);
+  },
+
+  /** Runs forked from this run, oldest first (harness 2b-1 §2). */
+  async getRunForks(
+    runId: string,
+  ): Promise<{ items: { run_id: string; at_seq: number; created_at: string; status: string }[] }> {
+    const resp = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/forks`, {
+      headers: await getAuthHeaders(),
+    });
     return handle(resp);
   },
 

@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pause, Play, Square } from 'lucide-react';
+import { GitFork, Pause, Play, Square } from 'lucide-react';
 
 import { aiLibraryService } from '../../../services/aiLibraryService';
 import { pauseIssue, resumeIssue } from '../../../services/issuesService';
@@ -73,6 +73,15 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // Spend as of that step comes from the frozen run cost; the cap stays the
   // issue's. Without a frozen cost the cell reads "—", never the live number.
   const frozenSpent = frozen ? replay?.cost?.spent_cents ?? null : null;
+  // Phase 2b-1 §2: a forked run says where it branched from; clicking scrubs
+  // the ORIGINAL run (same timeline) to that seq.
+  const forkedFrom = liveView?.fork ?? null;
+  // The origin row (or the detached panel) scrolls itself into view once it
+  // is attached; nothing here depends on the DOM.
+  const showFork = (of: number, seq: number) => replay?.seekRun(String(of), seq);
+  // Replaying some OTHER run of this issue (fork origin): the panel is not
+  // frozen, but the way back to Live must still be one click away.
+  const replayingOther = !!replay && replay.seq != null && !frozen;
   const step = stepProgress(view);
   const gauge = contextGauge(view);
   const cur = currentStep(view);
@@ -149,6 +158,18 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           {phase === 'running' && <span className="h-1.5 w-1.5 rounded-full bg-ok animate-pulse" />}
           {t(`issueDetail.phase.${phase}`, phase.replace(/_/g, ' '))}
         </span>
+        {forkedFrom && (
+          <button
+            type="button"
+            data-testid="cockpit-fork-chip"
+            onClick={() => showFork(forkedFrom.of_run_id, forkedFrom.at_seq)}
+            className="inline-flex items-center gap-1 rounded-full border border-info-line bg-info-soft px-2 py-0.5 text-[11px] text-info hover:brightness-110"
+            title={t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: String(forkedFrom.of_run_id).slice(-6), seq: forkedFrom.at_seq })}
+          >
+            <GitFork size={11} />
+            {t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: String(forkedFrom.of_run_id).slice(-6), seq: forkedFrom.at_seq })}
+          </button>
+        )}
         {step?.label && (
           <span className="text-[13px] text-ink-300 truncate">
             <span className="text-ink-500">{t('issueDetail.now', 'Now')}: </span>
@@ -205,16 +226,19 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         </div>
       )}
 
-      {frozen && replay && (
+      {replay && (frozen || replayingOther) && (
         <div className="flex items-center justify-end">
           <button
             type="button"
             data-testid="cockpit-asof"
+            data-mode={frozen ? 'frozen' : 'other-run'}
             onClick={() => replay.seek(null)}
             title={t('replay.backToLive', 'Back to live')}
             className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info hover:brightness-110"
           >
-            {t('replay.asOf', 'as of turn {{turn}} · step {{step}}', { turn: asOf?.turn ?? '?', step: asOf?.step ?? '?' })}
+            {frozen
+              ? t('replay.asOf', 'as of turn {{turn}} · step {{step}}', { turn: asOf?.turn ?? '?', step: asOf?.step ?? '?' })
+              : t('replay.viewingRun', 'Replaying run #{{run}}', { run: (replay.runId ?? '').slice(-6) })}
             {' · '}
             {t('replay.live', 'Live')}
           </button>

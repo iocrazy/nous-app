@@ -14,8 +14,12 @@ export interface ReplayState {
   cost: RunCost | null;
   loading: boolean;
   seek: (seq: number | null) => void;
-  /** Phase 2b-1 §2 (Task 6): fork from this seq; absent when not an issue run. */
-  fork?: (seq: number) => void;
+  /** Attach to (and seek) some other run of the same issue — the fork chip's
+   *  "scrub the original run to step N". */
+  seekRun: (runId: string, seq: number) => void;
+  /** Phase 2b-1 §2 (Task 6): fork from this seq; absent when not an issue run.
+   *  `label` is the scrubber's own position text, for the dialog title. */
+  fork?: (seq: number, label: string) => void;
 }
 
 export const ReplayContext = createContext<ReplayState | null>(null);

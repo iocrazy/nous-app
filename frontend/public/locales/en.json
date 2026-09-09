@@ -5718,7 +5718,31 @@
     "steps": "{{count}} steps",
     "denied": "Blocked: {{tool}}"
   },
+  "fork": {
+    "title": "Fork from {{step}}",
+    "body": "A new run starts from this point with the same history. The original run and its conversation are kept as they are.",
+    "steerLabel": "From here, do this instead (optional)",
+    "steerPlaceholder": "e.g. Make act two darker; keep the ending.",
+    "confirm": "Fork",
+    "forking": "Forking…",
+    "chipSeq": "Forked from run #{{run}} @ seq {{seq}}",
+    "mark": "Fork → #{{run}}",
+    "started": "Forked — the new run is starting.",
+    "error": {
+      "run_live": "The run is still going — pause or cancel it first",
+      "issue_busy": "The issue is still being worked on — wait for it to settle",
+      "issue_terminal": "The issue is closed — reopen it before forking",
+      "not_a_step_boundary": "Pick a step boundary to fork from",
+      "not_an_issue_run": "Only issue runs can be forked",
+      "run_state_unavailable": "Run state unavailable — try again in a moment",
+      "dispatch_failed": "Could not start the forked run — the issue was left as it was",
+      "not_found": "Run not found",
+      "generic": "Could not fork the run"
+    }
+  },
   "replay": {
+    "viewingRun": "Replaying run #{{run}}",
+    "originRun": "Original run #{{run}} (from an earlier conversation of this issue)",
     "live": "Live",
     "asOf": "as of turn {{turn}} · step {{step}}",
     "backToLive": "Back to live",

@@ -6,17 +6,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Inbox,
-  MessageSquare,
-  RotateCw,
-  ShieldOff,
-  Wallet,
-  Wrench,
-} from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Inbox, MessageSquare, RotateCw, ShieldOff, Wallet, Wrench, GitFork } from 'lucide-react';
 
 import type {
   BudgetNode,
@@ -89,7 +79,13 @@ function summaryText(node: StepNode, t: (k: string, o?: Record<string, unknown>)
   return parts.join(' · ');
 }
 
-export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, onToggle }) => {
+/** Jump to the forked run's bubble in the same timeline (IssueChatThread gives each run row `id="run-<id>"`). */
+function scrollToRun(runId: string): void {
+  if (typeof document === 'undefined') return;
+  document.getElementById(`run-${runId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, onToggle, marks }) => {
   const { t } = useTranslation();
   const open = node.live || expanded;
   const tail = [fmtMs(node.summary.durationMs), fmtCents(node.summary.costCents)].filter(Boolean).join(' · ');
@@ -119,6 +115,25 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
         {!open && <span className="truncate text-ink-400">{summaryText(node, t)}</span>}
         <span className="ml-auto shrink-0 tabular-nums text-[11px] text-ink-600">{tail}</span>
       </button>
+      {marks && marks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1" data-testid="trajectory-fork-marks">
+          {marks.map((runId) => (
+            <button
+              key={runId}
+              type="button"
+              data-testid="trajectory-fork-mark"
+              data-run={runId}
+              onClick={(e) => {
+                e.stopPropagation();
+                scrollToRun(runId);
+              }}
+              className="inline-flex items-center gap-1 rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info hover:brightness-110"
+            >
+              <GitFork size={10} /> {t('fork.mark', 'Fork → #{{run}}', { run: runId.slice(-6) })}
+            </button>
+          ))}
+        </div>
+      )}
       {open && (
         <div className="flex flex-col gap-0.5 pb-1.5 pl-7 pr-2.5" data-testid="traj-step-lines">
           {node.lines.map((line) => (

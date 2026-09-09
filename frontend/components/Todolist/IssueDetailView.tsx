@@ -25,7 +25,7 @@ import { blocksFor, issueBlockContext } from './issueBlocks';
 import './blocks';
 import { useIssueProgress } from './useIssueProgress';
 import { isIssueLive } from './issuePhase';
-import { IssueChatThread } from './IssueChatThread';
+import { DetachedRunPanel, IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
@@ -41,6 +41,8 @@ import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { selectRunCost, selectRunView } from '../TaskCenter/runView';
 import { ReplayContext, type ReplayState } from './replayContext';
+import { ForkRunDialog } from './ForkRunDialog';
+import { forkErrorText } from './forkErrors';
 
 interface IssueDetailViewProps {
   issue: UiIssue;
@@ -173,40 +175,87 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     },
     [setSearchParams, addToast, t],
   );
-  // Deep link: `?run=&seq=` — honoured once, when the rollup has loaded (so
-  // the newest run is known, not guessed from an older thread row) and the
-  // link names that run. A link to some other run is simply not a replay.
+  // Deep link: `?run=&seq=` — honoured once, after the rollup has loaded. Any
+  // run of the issue may be named: the newest one (scrubber on its row) or an
+  // older one, e.g. a fork's origin (drawn in the detached panel).
   const deepLinked = useRef(false);
   useEffect(() => {
-    if (deepLinked.current || !latestRunId || !progressLoaded) return;
+    if (deepLinked.current || !progressLoaded) return;
     const run = searchParams.get('run');
     const seq = Number(searchParams.get('seq'));
-    if (!run) { deepLinked.current = true; return; }
-    if (run === latestRunId) {
-      deepLinked.current = true;
-      if (Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
-    }
-  }, [latestRunId, progressLoaded, searchParams, seekReplay]);
-  // A newer run appeared: the old position (and its URL) is no longer a replay of anything shown.
+    deepLinked.current = true;
+    if (run && Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
+  }, [progressLoaded, searchParams, seekReplay]);
+  // A STRICTLY NEWER run appeared while replaying the previously-newest one:
+  // that position (and its URL) is stale. A replay of an older run (fork
+  // chip / link) survives, and so does the position when `latestRunId` merely
+  // flips back to an older row (current_run goes null at run end).
+  const prevLatest = useRef<string | null>(null);
   useEffect(() => {
-    if (replayPos && latestRunId && replayPos.runId !== latestRunId) {
+    const before = prevLatest.current;
+    prevLatest.current = latestRunId;
+    const newer = (a: string, b: string) => (a.length === b.length ? a > b : a.length > b.length); // snowflakes: monotonic
+    if (replayPos && before && latestRunId && newer(latestRunId, before) && replayPos.runId === before) {
       setReplayPos(null);
       setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
     }
   }, [replayPos, latestRunId, setSearchParams]);
+  // The run being replayed is not in this thread (a fork's origin lives in
+  // the issue's previous conversation): draw it above the thread.
+  const detachedRunId = useMemo(() => {
+    if (!replayPos) return null;
+    const inThread = messages.some((m) => m.kind === 'agent_run' && m.agent_run_id && String(m.agent_run_id) === replayPos.runId);
+    return inThread || replayPos.runId === progress?.current_run?.id ? null : replayPos.runId;
+  }, [replayPos, messages, progress?.current_run?.id]);
+  // ── Fork (harness 2b-1 §2) ─────────────────────────────────────────────
+  const [forkAt, setForkAt] = useState<{ runId: string; seq: number; label: string } | null>(null);
+  const [forkPending, setForkPending] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  // `refresh` (the thread re-read) is declared further down; reach it by ref.
+  const refreshMessagesRef = useRef<() => Promise<void>>(async () => undefined);
+  const confirmFork = useCallback(
+    async (steer: string | undefined) => {
+      if (!forkAt || forkPending) return;
+      setForkPending(true);
+      setForkError(null);
+      try {
+        await aiLibraryService.forkRun(forkAt.runId, { at_seq: forkAt.seq, steer });
+        setForkAt(null);
+        setReplayPos(null);
+        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
+        addToast(t('fork.started', 'Forked — the new run is starting.'), 'success');
+        void refreshProgress();
+        void refreshMessagesRef.current();
+      } catch (err) {
+        console.error('[IssueDetailView] fork failed', err);
+        setForkError(forkErrorText(err, t));
+      } finally {
+        setForkPending(false);
+      }
+    },
+    [forkAt, forkPending, setSearchParams, addToast, t, refreshProgress],
+  );
+  // The scrubber attaches to the run being replayed (a fork chip can point it
+  // at an older run of the same issue); at rest, the newest run.
+  const attachedRunId = replayPos?.runId ?? latestRunId;
   const replay = useMemo<ReplayState | null>(
     () =>
-      latestRunId
+      attachedRunId
         ? {
-            runId: latestRunId,
-            seq: replayPos && replayPos.runId === latestRunId ? replayPos.seq : null,
-            view: replayPos && replayPos.runId === latestRunId ? replayPos.view : null,
-            cost: replayPos && replayPos.runId === latestRunId ? replayPos.cost : null,
+            runId: attachedRunId,
+            seq: replayPos && replayPos.runId === attachedRunId ? replayPos.seq : null,
+            view: replayPos && replayPos.runId === attachedRunId ? replayPos.view : null,
+            cost: replayPos && replayPos.runId === attachedRunId ? replayPos.cost : null,
             loading: replayLoading,
-            seek: (seq) => void seekReplay(latestRunId, seq),
+            seek: (seq) => void seekReplay(attachedRunId, seq),
+            seekRun: (runId, seq) => void seekReplay(runId, seq),
+            fork: (seq, label) => {
+              setForkError(null);
+              setForkAt({ runId: attachedRunId, seq, label });
+            },
           }
         : null,
-    [latestRunId, replayPos, replayLoading, seekReplay],
+    [attachedRunId, replayPos, replayLoading, seekReplay],
   );
 
   // Stable ref so the WS event handler always reads the latest messages
@@ -465,6 +514,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched, handleAnswerQuestion],
   );
   const cockpitBlocks = blocksFor('cockpit', blockCtx);
+  useEffect(() => {
+    refreshMessagesRef.current = refresh;
+  }, [refresh]);
   const contextBlocks = blocksFor('context', blockCtx);
   const agentLive = isAgentWorking || phase === 'running';
 
@@ -515,6 +567,15 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               <b.component key={b.id} ctx={blockCtx} />
             ))}
           </ReplayContext.Provider>
+          {forkAt && (
+            <ForkRunDialog
+              stepLabel={forkAt.label}
+              pending={forkPending}
+              error={forkError}
+              onConfirm={(steer) => void confirmFork(steer)}
+              onCancel={() => { if (!forkPending) setForkAt(null); }}
+            />
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button
@@ -600,6 +661,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
                   <ReplayContext.Provider value={replay}>
+                    {detachedRunId && <DetachedRunPanel runId={detachedRunId} />}
                     <IssueChatThread
                       messages={messages}
                       agentsById={agentsById}

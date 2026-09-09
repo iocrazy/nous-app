@@ -15,6 +15,8 @@ export interface NodeProps<N extends TrajectoryNode = TrajectoryNode> {
   /** Steps the user opened by hand; the live step is open regardless. */
   expanded: boolean;
   onToggle?: (node: N) => void;
+  /** Phase 2b-1 §2: runs forked at this node (run ids) — a step boundary. */
+  marks?: string[];
 }
 
 type AnyNodeComponent = ComponentType<NodeProps<TrajectoryNode>>;
