@@ -239,77 +239,18 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 
 不要把投影改成 `asdict(self)` 直通：调度元数据（超时、并发安全性、所需权限）告诉模型的是"有什么可以试着绕过"。
 
-## 项目结构
+## 目录与命令
 
-```
-nous/
-├── backend/                    # 后端服务（FastAPI + Supabase）
-│   ├── app/
-│   │   ├── api/              # API 路由
-│   │   │   ├── media_router.py       # 解析/下载（parsed_media）
-│   │   │   ├── resources_router.py   # 资源库 CRUD
-│   │   │   ├── tags_router.py        # 标签系统
-│   │   │   ├── projects_router.py    # 项目管理
-│   │   │   ├── teams_router.py       # 团队管理
-│   │   │   └── auth_router.py        # 认证
-│   │   ├── core/             # 核心配置 + 依赖注入
-│   │   ├── db/               # Supabase 客户端（同步/异步）
-│   │   ├── repositories/     # 数据访问层（Repository Pattern）
-│   │   ├── schemas/          # Pydantic 模型
-│   │   ├── services/         # 业务逻辑层
-│   │   │   └── task_tracker.py       # unified_tasks 任务追踪
-│   │   ├── tasks/            # 残留 helper 模块（utils / download_progress / download_strategies / download_helpers）— Celery decorators 已删
-│   │   └── workflows/        # DBOS workflow 定义（@DBOS.workflow + @DBOS.scheduled）
-│   ├── config.yml            # 业务配置
-│   └── pyproject.toml        # 后端依赖（uv 管理）
-├── frontend/                   # 前端应用（React 19 + Vite 7）
-│   ├── components/            # React 组件
-│   ├── contexts/              # React Context（TaskManager, Toast 等）
-│   ├── pages/                 # 页面组件（PlayerPage 等）
-│   ├── services/              # API 服务层
-│   │   ├── parserService.ts          # 解析/下载 API
-│   │   ├── resourceService.ts        # 资源库 API
-│   │   ├── unifiedTagService.ts      # 统一标签服务（Resources + Media）
-│   │   ├── tagsService.ts            # 旧版标签服务（仅 media）
-│   │   ├── teamService.ts            # 团队 API
-│   │   └── projectService.ts         # 项目 API
-│   ├── public/locales/        # i18n 翻译文件（en.json, zh.json）
-│   ├── App.tsx               # 主应用 + 路由
-│   ├── types.ts              # TypeScript 类型定义
-│   └── supabaseClient.ts     # Supabase 客户端（含 bigIntSafeFetch）
-├── supabase/
-│   └── migrations/            # SQL 迁移（001-077+）
-└── scripts/
-    └── worktree-manager.sh    # Worktree 管理工具
-```
+目录结构直接 `ls` / `find` 看，依赖看 `backend/pyproject.toml` 与 `frontend/package.json`，
+命令看 `package.json` 的 scripts —— 都是标准调用（`uv sync` / `uv run pytest` /
+`npm run dev` / `npm run build` / `supabase db push`），不在这里重复。
 
-## 常用命令
+只记一条目录名会骗人的：
 
-### 后端
-
-```bash
-cd backend
-uv sync                                    # 同步依赖
-uv run uvicorn app.main:app --reload       # 启动开发服务器
-uv run pytest                              # 运行测试
-```
-
-### 前端
-
-```bash
-cd frontend
-npm install                                # 安装依赖
-npm run dev                                # 启动开发服务器
-npm run build                              # 构建生产版本
-```
-
-### Supabase
-
-```bash
-# 通过 Supabase 控制台执行 supabase/migrations/*.sql
-# 或使用 Supabase CLI
-supabase db push
-```
+- **`backend/app/tasks/` 里已经没有 Celery 任务了**。decorator 全删完，剩下的是
+  helper 模块（`utils` / `download_progress` / `download_strategies` /
+  `download_helpers`）。执行引擎是 `backend/app/workflows/` 下的 DBOS
+  （`@DBOS.workflow` + `@DBOS.scheduled`）。照目录名去找任务定义会扑空。
 
 ## 架构设计
 
@@ -377,15 +318,6 @@ supabase db push
    - `manager.start()` / `update_progress()` / `complete()` / `fail()` 都通过 manager API（绝不直接 PATCH phase 列）
    - 失败路径用 `raise`，不用 `return {"status":"failed"}`
    - 任何额外业务字段写到 metadata jsonb，不写 DBOS workflow input/output（DBOS input freeze 后不可改）
-
-### 前端技术栈
-
-- **React 19** + **TypeScript** + **Vite 7**
-- **TailwindCSS** 样式
-- **Recharts** 数据可视化
-- **Lucide React** 图标库
-- **Supabase JS** 客户端（含 `bigIntSafeFetch` 处理 BIGINT 精度）
-- **i18next** 多语言支持
 
 ### 前后端对接
 
@@ -487,110 +419,23 @@ WHERE level='ERROR' AND logged_at >= NOW() - INTERVAL '7 days'
 GROUP BY module, message ORDER BY count DESC;
 ```
 
-## Supabase 配置
+## Supabase 密钥格式
 
-### 1. 创建项目
+Supabase 同时接受两种格式，**且它们是不同的字符串**——别以为「同一个实例必然同一个 key」：
 
-在 [Supabase](https://supabase.com) 创建新项目，获取：
-- Project URL
-- Publishable Key（公开密钥，前端使用）
-- Secret Key（私密密钥，后端使用）
+- 新格式：`sb_publishable_...`（前端）/ `sb_secret_...`（后端）← **全站口径**
+- 旧版 JWT：`eyJhbGciOiJIUzI1NiIs...`（anon key / service_role key）
 
-**注意**: Supabase 同时支持新格式密钥和旧版 JWT 格式密钥：
-- 新格式: `sb_publishable_...` / `sb_secret_...`
-- 旧格式: `eyJhbGciOiJIUzI1NiIs...`（anon key / service_role key）
+2026-09-07 把前端从旧版 JWT 切到新格式（#2174）时实测过：新 key 在 REST / Auth /
+Storage / Realtime 四个面都与旧 key 等价（每个都带垃圾 key 负向对照），Realtime 真实
+订阅拿到 `SUBSCRIBED`。⚠️ 但 `/realtime/v1/api/tenants/<t>/health` 这个**租户管理
+API** 上新 key 拿 403 而旧 key 200 —— 那个面浏览器客户端从不碰，按它下结论会白白
+否掉切换。**探针要探客户端真实走的那条路径。**
 
-### 2. 执行数据库迁移
+其余配置（建项目、跑 migration、env 变量模板）是标准流程，看
+`backend/.env.example` 与 `frontend/.env.production` 即可，不在这里重复。
 
-在 Supabase SQL Editor 中依次执行：
-1. `supabase/migrations/001_initial_schema.sql`
-2. `supabase/migrations/002_optimize_schema.sql`
-
-### 3. 配置环境变量
-
-```bash
-# backend/.env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=sb_publishable_xxx      # Publishable Key
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_xxx   # Secret Key（绝不暴露到前端！）
-
-# frontend/.env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=sb_publishable_xxx # Publishable Key（可以安全暴露）
-VITE_API_URL=http://localhost:8080
-```
-
-### 4. MCP 连接（可选）
-
-通过 PostgreSQL MCP 服务器连接 Supabase：
-
-```bash
-claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
-  --dsn "postgresql://postgres:[密码]@[项目].supabase.co:5432/postgres"
-```
-
-## API 端点
-
-所有端点前缀：`/api/v1`
-
-### 认证 (`/auth`)
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/auth/signup` | POST | 用户注册 |
-| `/auth/signin` | POST | 用户登录 |
-| `/auth/signout` | POST | 用户登出 |
-| `/auth/me` | GET | 获取当前用户 |
-| `/auth/refresh` | POST | 刷新令牌 |
-
-### 媒体解析/下载 (`/media`)
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/media/fetch` | POST | 解析并下载媒体 |
-| `/media/fetch/batch` | POST | 批量解析 |
-| `/media` | GET | 获取 parsed_media 列表 |
-| `/media/{id}` | GET | 获取 parsed_media 详情 |
-| `/media/{id}` | DELETE | 删除 |
-| `/media/search` | POST | 搜索 |
-| `/media/{id}/slides` | GET | 获取图集 slides 列表 |
-| `/media/{id}/slides/{filename}` | GET | 获取单张 slide 文件 |
-| `/media/{id}/audio` | GET | 获取背景音频 |
-
-### 资源库 (`/resources`)
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/resources` | GET | 资源列表（支持 folder_id 筛选） |
-| `/resources/{id}` | GET | 资源详情 |
-| `/resources/{id}` | PATCH | 更新资源（filename/notes/url/rating） |
-| `/resources/{id}` | DELETE | 删除（软删除/is_trashed） |
-| `/resources/{id}/tags` | GET/POST | 资源标签关联 |
-| `/resources/{id}/tags/{tag_id}` | DELETE | 移除标签 |
-| `/resources/folders` | GET/POST | 文件夹 CRUD |
-| `/resources/upload` | POST | 上传文件 |
-
-### 标签 (`/tags`)
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/tags` | GET | 所有标签列表 |
-| `/tags` | POST | 创建标签 |
-| `/tags/{id}` | PUT/DELETE | 更新/删除标签 |
-| `/tags/media/{media_id}/tags` | GET/POST | Media 标签关联（自动解析 media_id → resource_id） |
-| `/tags/media/{media_id}/tags/{tag_id}` | DELETE | 移除 media 标签 |
-| `/tags/statistics` | GET | 标签使用统计 |
-
-### 团队 (`/teams`) 和项目 (`/projects`)
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/teams` | GET/POST | 团队列表/创建 |
-| `/teams/{id}` | GET/PATCH/DELETE | 团队 CRUD |
-| `/teams/{id}/members` | GET/POST | 团队成员 |
-| `/projects` | GET/POST | 项目列表/创建 |
-| `/projects/{id}` | GET/PATCH/DELETE | 项目 CRUD |
-| `/projects/{id}/files` | GET/POST | 项目文件 |
+API 端点看 `backend/app/api/*_router.py`，前缀统一 `/api/v1`。
 
 ## Asset Library (P0 数据层) — mig 445/446
 
@@ -646,7 +491,6 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 1. 在 `supabase/migrations/` 创建新的 SQL 文件（按序号命名）
 2. 本地执行：`psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -f migrations/xxx.sql`
 3. 更新 `frontend/types.ts` 中对应的 TypeScript 接口
-
 
 
 ## CI/CD 部署
@@ -746,52 +590,12 @@ CI 里那步用的是 `docker://rhysd/actionlint:latest`，本机 docker pull �
 
    ⚠️ 版本文件的路径相对 **workspace 根**（写 `.python-version`），`defaults.run.working-directory` 只作用于 `run` 步骤，不影响 action 输入。
 
-### 环境版本一览（怀疑"是不是被人偷偷改了"时先看这张表）
+### 查阅型资料已移出（2026-09-08）
 
-| 位置 | 版本 | 谁决定 |
-|------|------|--------|
-| `.python-version` | **3.13** | 我们（唯一真相，CI 三处都读它） |
-| `backend/pyproject.toml` | **>=3.13** | 我们 |
-| `nous-core/pyproject.toml` | **>=3.13** | 我们（pyo3 无 abi3，wheel 钉死 cp313） |
-| `Dockerfile`（pin 的 digest） | **3.13**-slim | 我们 |
-| `browser/pyproject.toml` | **3.12** | ⚠️ **上游** —— 见下 |
-| `.nvmrc` | **22** | 我们（CI 与 `deploy-pages` 都读它） |
-| `frontend/` `admin/` Dockerfile | node **22** | 我们 |
+环境版本一览表、红 CI 的诊断顺序、已退役的 NAS 老线、容器配置来源对照表
+已迁到 [`docs/runbook/deploy-reference.md`](docs/runbook/deploy-reference.md)。需要时读那个文件。
 
-⚠️ **`browser/` 是 3.12，这是刻意的，不是漂移**：它的基础镜像是 `mcr.microsoft.com/playwright/python:v1.52.0-noble`，noble 自带 **Python 3.12.3**，版本由上游 playwright 镜像决定，而那个 tag 又必须跟 `dependencies` 里的 `playwright` pin 一起动。2026-08-07 曾把它"统一"成 `>=3.13`，结果 uv 找不到 3.13 就下载一个装进 **root 家目录**，而 Dockerfile 只 `chown /app` 后切 `USER pwuser` —— 容器起不来（`bad interpreter: Permission denied`），生产 smoke 拦下自动回滚。要真统一，是换基础镜像（自建 python:3.13 + 自装 chromium），不是改这一行。
-
-⚠️ **gpupc 的系统 python 是 3.14**（`/usr/bin/python3`），跟本项目无关 —— uv 管的项目一律看 `.python-version`。但它会从 PATH 漏进构建：pyo3 的 build script 就是这么抓到 3.14 并报 "newer than PyO3's maximum supported version (3.13)" 的，所以 `ci.yml` 的 rust job 显式钉 `PYO3_PYTHON`。**诊断时别拿 `python3 -V` 当项目环境**。
-
-### 红 CI 的诊断顺序（先读日志，再谈假设）
-
-同一批红 CI 曾被连着误诊两次（先判"计费假红"、再判"要迁 self-hosted"），真相是第三种。**第一步永远是 `gh run view --job <id> --log-failed` 看首个 error**，再套下面的表：
-
-| 首个 error | 含义 | 处置 |
-|---|---|---|
-| `runner_name` 为空 + `steps=0` + 2 秒 fail | 账户计费失败（托管 runner 被拦） | 临时走 self-hosted（不计费）。⚠️ 别指望"切 public"，见下。**2026-09-07 实测计费已恢复**，托管 runner 正常 |
-| `Failed to resolve action download info: Service Unavailable` | **GitHub Actions 侧 outage**，job 死在准备阶段 | 只能等 + 重跑。**迁 self-hosted 无效** —— runner 一样要向 GitHub API 取 action 元数据 |
-| 有真实步骤日志与耗时 | 代码/配置真的挂了 | 正常修 |
-
-中间那档最容易误判成前一档：两者都是"一行业务代码没跑"，但一个是计费、一个是 GitHub 故障，处置**完全相反**（一个换 runner 有用，一个换了也没用）。区别在**有没有真实耗时** —— 计费拦截 2 秒就死，outage 会重试到几分钟甚至十几分钟。
-
-⚠️ **「切 public 就能解」已被推翻**（2026-08-06）：repo 当时**已经是 public**，托管 runner 仍被全部拦下。那条旧经验（2026-07-26）适用的是**免费额度用尽**触发的强制回退；付款方式本身失败时公私有无关。所以判断顺序是先 `gh repo view --json visibility` 确认可见性，**如果已经是 public 还被拦，就不是额度问题，只能换 runner 或修账单**。
-
-### 已退役的 NAS 老线（⚠️ 扳手当前是坏的）
-
-`deploy-backend.yml`（ACR + watchtower → `mediahub-app-backend/worker`）与 `deploy-admin.yml` 已去掉 push 自动触发，只留 `workflow_dispatch`。
-
-⚠️ **2026-07-26 起 `gh workflow run deploy-backend.yml` 已不能真正部署**，别把它当可用的回滚扳手。它在两个层面都断了：
-
-1. **落地端不存在**：NAS 老栈已整体拆除，`mediahub-app-backend` / `worker` 连 `docker ps -a` 里都没有了。
-2. **触发链已关闭**：nas-A 的 Watchtower HTTP API（token + 8083 端口）已整块移除，轮询改 24h，且没有任何容器带 `watchtower.enable` 标签（日志每轮 `Scanned=0`）。workflow 里那步 "Trigger Watchtower update" 现在必然打空，而它的兜底提示"will auto-poll in 5min"是错的。
-
-起因：仓库切 public 后，旧版 `scripts/deploy.sh` 里硬编码的 `WATCHTOWER_TOKEN` 变成世界可读（git 历史永久）。只删 token 而保留 `HTTP_API_UPDATE=true` 会留下无鉴权端点，所以整条路径拆掉。
-
-保留这两个 workflow 只是为了将来真要恢复 NAS 双轨时不用从零重写。恢复步骤见 [`docs/runbook/watchtower-config.md`](docs/runbook/watchtower-config.md) 的「若将来要恢复 NAS 作为回滚锚点」。
-
-⚠️ 若真要恢复双轨，注意两边连的是**不同的 Supabase**，`backend/**` 一次改动会同时部署到两套互不相干的数据库；且 NAS supabase 容器 force-recreate 会让烙在容器里的 legacy JWT key 失效。
-
-**当前真正的回滚手段**是 `deploy-gpu.yml` 的 smoke 失败自动回滚（`nous-backend:rollback` 镜像），见上方「后端链的关键设计」。
+⚠️ **禁令没有迁走**，仍在本节其余部分——安全约束不能放进按需加载的内容里。
 
 ### 验收纪律（2026-07-22 血泪）
 
@@ -906,22 +710,6 @@ cd "$D" && docker compose up -d db     # 挑业务空窗；restart 不重读 com
 ```
 
 ⚠️ **不要照 #1964 commit message 里那条 `cd deploy/gpu-server/supabase && docker compose up -d db`**：仓库那个目录没有 `.env`（只有 `.env.example`），项目名会变成 `supabase` 而非 `mediahub-sb-prod`，而 compose 里 PGDATA 是硬编码绝对路径 —— 等于对同一个数据目录再起一个 postmaster，靠 `postmaster.pid` 自保而不是靠命令正确。
-
-### 容器的配置来源不止一处（查"改了为什么没生效"时先看这张表）
-
-```bash
-docker inspect <容器> --format '{{index .Config.Labels "com.docker.compose.project"}} | {{index .Config.Labels "com.docker.compose.project.config_files"}}'
-```
-
-2026-08-22 实测：
-
-| 容器 | 项目 | 配置来自 | 漂移风险 |
-|---|---|---|---|
-| `nous-db` 及整个 supabase 栈 | `mediahub-sb-prod` | datahub 活目录（不在 git） | 有，靠上面的 drift 检查兜 |
-| `nous-backend` / `worker` / `browser` / `gateway` | `gpu-server` | **runner 工作区 checkout** | 无——每次部署从 git 重出 |
-| `nous-admin` | `gpu-server` | **runner 工作区 checkout**（2026-09-07 起） | 无——每次部署从 git 重出 |
-
-`nous-admin` 曾经是从**开发工作树**构建的，那是个真缺口：那棵树可以挂在任意分支上，而它与另外四个容器共用项目名 `gpu-server` 却指向不同的 compose 文件，从开发树 `up` 有可能顺带影响生产容器。2026-09-07 已接进 `deploy-gpu.yml`（paths / 回滚锚点 / `up.sh --build` 清单 / smoke 探针 / 回滚清单五处同改），与另外四个容器同源。
 
 ### 已知缺口
 
