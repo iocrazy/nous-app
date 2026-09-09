@@ -11,7 +11,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
   MessageSquare, Link2, Bot,
@@ -38,6 +38,9 @@ import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
+import { aiLibraryService } from '../../services/aiLibraryService';
+import { selectRunCost, selectRunView } from '../TaskCenter/runView';
+import { ReplayContext, type ReplayState } from './replayContext';
 
 interface IssueDetailViewProps {
   issue: UiIssue;
@@ -124,8 +127,87 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   // issue.rollup (harness P4): phase / current run / budget / children, derived
   // server-side from the runs. Polls while live, nudged by agent_runs Realtime.
-  const { progress, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
+  const { progress, loaded: progressLoaded, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
   const phase = progress?.phase ?? null;
+
+  // ── Replay (harness 2b-1 §1) ───────────────────────────────────────────
+  // The scrubber attaches to the issue's newest run: the live one, else the
+  // last run that posted to the thread. Position lives in `?run&seq` so a
+  // link opens the page as of that step.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [replayPos, setReplayPos] = useState<{ runId: string; seq: number; view: ReplayState['view']; cost: ReplayState['cost'] } | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const latestRunId = useMemo(() => {
+    if (progress?.current_run?.id) return String(progress.current_run.id);
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (m.kind === 'agent_run' && m.agent_run_id) return String(m.agent_run_id);
+    }
+    return null;
+  }, [progress?.current_run?.id, messages]);
+  const seekReplay = useCallback(
+    async (runId: string, seq: number | null) => {
+      if (seq == null) {
+        setReplayPos(null);
+        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
+        return;
+      }
+      setReplayLoading(true);
+      try {
+        const at = await aiLibraryService.getRunViewAt(runId, seq);
+        const view = selectRunView({ view: at.view });
+        if (!view) {
+          // A row that predates the folded view: nothing to freeze on — say so
+          // instead of a panel of dashes wearing an "as of" badge.
+          addToast(t('replay.unavailable', 'Replay is not available for that step.'), 'error');
+          return;
+        }
+        setReplayPos({ runId, seq, view, cost: selectRunCost({ cost: at.cost }) });
+        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('run', runId); n.set('seq', String(seq)); return n; }, { replace: true });
+      } catch (err) {
+        console.error('[IssueDetailView] replay seek failed', err);
+        addToast(err instanceof Error ? err.message : 'Replay failed', 'error');
+      } finally {
+        setReplayLoading(false);
+      }
+    },
+    [setSearchParams, addToast, t],
+  );
+  // Deep link: `?run=&seq=` — honoured once, when the rollup has loaded (so
+  // the newest run is known, not guessed from an older thread row) and the
+  // link names that run. A link to some other run is simply not a replay.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || !latestRunId || !progressLoaded) return;
+    const run = searchParams.get('run');
+    const seq = Number(searchParams.get('seq'));
+    if (!run) { deepLinked.current = true; return; }
+    if (run === latestRunId) {
+      deepLinked.current = true;
+      if (Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
+    }
+  }, [latestRunId, progressLoaded, searchParams, seekReplay]);
+  // A newer run appeared: the old position (and its URL) is no longer a replay of anything shown.
+  useEffect(() => {
+    if (replayPos && latestRunId && replayPos.runId !== latestRunId) {
+      setReplayPos(null);
+      setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
+    }
+  }, [replayPos, latestRunId, setSearchParams]);
+  const replay = useMemo<ReplayState | null>(
+    () =>
+      latestRunId
+        ? {
+            runId: latestRunId,
+            seq: replayPos && replayPos.runId === latestRunId ? replayPos.seq : null,
+            view: replayPos && replayPos.runId === latestRunId ? replayPos.view : null,
+            cost: replayPos && replayPos.runId === latestRunId ? replayPos.cost : null,
+            loading: replayLoading,
+            seek: (seq) => void seekReplay(latestRunId, seq),
+          }
+        : null,
+    [latestRunId, replayPos, replayLoading, seekReplay],
+  );
 
   // Stable ref so the WS event handler always reads the latest messages
   // without needing to re-open the socket.
@@ -428,9 +510,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
           {/* Zone: cockpit — registered blocks (issueBlocks.ts); today one block
               reading the rollup through runView selectors. */}
-          {cockpitBlocks.map((b) => (
-            <b.component key={b.id} ctx={blockCtx} />
-          ))}
+          <ReplayContext.Provider value={replay}>
+            {cockpitBlocks.map((b) => (
+              <b.component key={b.id} ctx={blockCtx} />
+            ))}
+          </ReplayContext.Provider>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button
@@ -515,14 +599,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
-                  <IssueChatThread
-                    messages={messages}
-                    agentsById={agentsById}
-                    selfUserId={selfUserId}
-                    streamingText={streamingText}
-                    teamId={teamId}
-                    aiSessionId={issue.raw.ai_session_id}
-                  />
+                  <ReplayContext.Provider value={replay}>
+                    <IssueChatThread
+                      messages={messages}
+                      agentsById={agentsById}
+                      selfUserId={selfUserId}
+                      streamingText={streamingText}
+                      teamId={teamId}
+                      aiSessionId={issue.raw.ai_session_id}
+                    />
+                  </ReplayContext.Provider>
                 )}
               {agentLive && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">

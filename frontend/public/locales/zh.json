@@ -5718,6 +5718,17 @@
     "steps": "{{count}} 步",
     "denied": "已拦截：{{tool}}"
   },
+  "replay": {
+    "live": "实时",
+    "asOf": "截至第 {{turn}} 轮 · 第 {{step}} 步",
+    "backToLive": "回到实时",
+    "stepOf": "第 {{turn}} 轮 · 第 {{step}} 步（{{n}}/{{total}}）",
+    "turnEnd": "轮次结束",
+    "fork": "从第 {{n}} 步分叉",
+    "scrubber": "回放",
+    "loading": "加载中…",
+    "unavailable": "这一步没有可用的回放视图。"
+  },
   "question": {
     "pickOne": "{{count}} 选一",
     "orType": "或输入你自己的回答…",

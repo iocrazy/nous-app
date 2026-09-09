@@ -118,6 +118,14 @@
 
 **实施记录（2026-09-09，Task 1 勘察）**：第 2 页的「issue 时间线一条系统行」不写——`issue_messages.kind='system_status'` 行由 DB trigger 写、无 body。时间线入口 = 分叉 run 自己的气泡头部 `Forked from run #… @ step N` 芯片（可点回原 run 并自动刮到该 step）。
 
+> **实施记录（Task 5，2026-09-09）**
+> - 刮擦条位置文案是 `turn T · step S (n/total)`（tick 自带的坐标 + 全局步序），Cockpit 角标是 `as of turn T · step S`（冻结视图的 `view.current`）——两处坐标同源，不用 `step.done`（那是 todo 进度，不是步序）。
+> - 刮擦条只挂在 issue **最新** run 上（`rollup.current_run`，无则线程最后一条 agent_run）；已结束的 run 打开时停在 Live 而不是最后一个刻度。Task 6 的「点分叉芯片 → 原 run 刮到第 N 步」需要放宽到指定 run。
+> - 回放态 Cockpit：四格读冻结 `view`，花费读冻结 `cost.spent_cents`（缺则 `—`，绝不显示实时数），预算上限仍取 issue；提问卡永远取**实时**视图（过去某步的问题现在不开放，现在开放的问题刮擦时也必须能答）；角标本身是「回到实时」按钮——折叠的 run 组会把刮擦条藏起来，角标是随时可见的出口；含最新 run 的 run 组自动展开。
+> - 深链 `?run&seq` 只在 rollup 加载完且 run 等于最新 run 时消费一次；新 run 出现时旧位置与 URL 一并清掉；`view-at` 回来的 view 折不出（旧行）→ toast「这一步没有可用的回放视图」而不是一片 `—`。
+> - `useRunToolActivity` 按 `has_more` 用 `after_seq` 翻页读完整个 transcript（此前只取一页 500 条，回放让「完整」成为硬需求）。
+> - 刮擦条 `role=group`（不是带子按钮的 `slider`）；←/→/Home/End 键盘可用。
+
 ## 5. 数据与端点汇总
 
 | 项 | 变更 |

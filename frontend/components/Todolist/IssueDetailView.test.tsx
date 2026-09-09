@@ -69,7 +69,14 @@ vi.mock('../../services/issuesService', async (importOriginal) => {
     updateIssue: vi.fn(async () => ({})),
   };
 });
-vi.mock('../../services/aiLibraryService', () => ({ aiLibraryService: { cancelRun: vi.fn(async () => undefined) } }));
+const getRunViewAt = vi.fn(async (_runId: string, seq: number) => ({
+  seq,
+  view: { v: 1, phase: 'running', step: { done: 2, total: 7, label: 'Scene 2' }, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, question: null, last_answer: null, revision: seq },
+  cost: { spent_cents: 0.2, by_step: [], by_model: {}, budget_cents: null, pct: null },
+}));
+vi.mock('../../services/aiLibraryService', () => ({
+  aiLibraryService: { cancelRun: vi.fn(async () => undefined), getRunViewAt: (...a: [string, number]) => getRunViewAt(...a) },
+}));
 
 function mkProgress(over: Record<string, unknown> = {}) {
   return {
@@ -400,5 +407,51 @@ describe('IssueDetailView — typed question (phase 2a)', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="issue-cockpit"]')).not.toBeNull());
     expect(container.querySelectorAll('[data-testid="question-card"]').length).toBe(1);
     expect(container.querySelector('[data-testid="cockpit-question"]')).toBeNull();
+  });
+});
+
+
+// ── harness 2b-1 §1: replay deep link ───────────────────────────────────────
+describe('IssueDetailView — replay deep link (?run&seq)', () => {
+  beforeEach(() => { getRunViewAt.mockClear(); });
+
+  function renderAt(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route
+            path="/team/:teamId/todolist/:identifier"
+            element={
+              <IssueDetailView
+                issue={mkIssue()}
+                agents={[AGENT]}
+                agentsById={{ a1: AGENT }}
+                selfUserId="u1"
+                onCreateSubIssue={vi.fn()}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('seeks the live run to the linked seq and freezes the cockpit as of it', async () => {
+    progressState.value = mkProgress();
+    renderAt('/team/9/todolist/NOUS-1?run=501&seq=4');
+    await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('501', 4));
+    await waitFor(() => expect(screen.getByTestId('cockpit-asof')).toBeTruthy());
+    // the frozen view (2 / 7), not the live rollup (3 / 7)
+    expect(screen.getByTestId('cockpit-steps').textContent).toContain('2');
+    expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('ignores a link to a run that is not the newest one', async () => {
+    progressState.value = mkProgress();
+    renderAt('/team/9/todolist/NOUS-1?run=499&seq=4');
+    await waitFor(() => expect(screen.getByTestId('issue-cockpit')).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getRunViewAt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('cockpit-asof')).toBeNull();
   });
 });

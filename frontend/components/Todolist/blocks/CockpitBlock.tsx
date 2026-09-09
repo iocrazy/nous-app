@@ -22,6 +22,7 @@ import { formatElapsed } from '../formatElapsed';
 import { controlErrorText } from '../issueControlErrors';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { QuestionCard } from '../QuestionCard';
+import { isReplaying, useReplay } from '../replayContext';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
 import { formatCents } from './BudgetBlock';
 
@@ -58,10 +59,20 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [controlError, setControlError] = useState<string | null>(null);
+  // Replay (harness 2b-1 §1): viewing the live run as of a past step — the
+  // four cells read the folded view of that moment and controls are off
+  // (you cannot pause the past).
+  const replay = useReplay();
+  const frozen = !!rollup && isReplaying(replay, rollup.current_run?.id);
   if (!rollup) return null;
 
   const phase = rollup.phase;
-  const view = selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
+  const liveView = selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
+  const view = frozen ? replay?.view ?? null : liveView;
+  const asOf = frozen ? replay?.view?.current ?? null : null;
+  // Spend as of that step comes from the frozen run cost; the cap stays the
+  // issue's. Without a frozen cost the cell reads "—", never the live number.
+  const frozenSpent = frozen ? replay?.cost?.spent_cents ?? null : null;
   const step = stepProgress(view);
   const gauge = contextGauge(view);
   const cur = currentStep(view);
@@ -72,11 +83,13 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // while the issue marker is absent. A parked issue (marker present) draws
   // its card in NeedsInputCard below; a second, always-enabled copy here
   // would answer twice (the second POST is a 409).
+  // Always the LIVE view: a question folded at some past step is not open
+  // now, and the one open now must stay answerable while scrubbing.
   const question =
     phase === 'waiting_input' &&
     ctx.env.onAnswerQuestion &&
     !questionFromMarker(rollup.execution_state)
-      ? questionFromRunView(view)
+      ? questionFromRunView(liveView)
       : null;
   const startedMs = rollup.current_run?.started_at ? Date.parse(rollup.current_run.started_at) : NaN;
   const elapsed = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : null;
@@ -148,7 +161,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void pause()}
-                disabled={pausing}
+                disabled={pausing || frozen}
                 data-testid="cockpit-pause"
                 className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-info-line hover:text-info disabled:opacity-50"
               >
@@ -159,7 +172,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void resume()}
-                disabled={resuming}
+                disabled={resuming || frozen}
                 data-testid="cockpit-resume"
                 className="inline-flex items-center gap-1 rounded border border-info-line bg-info-soft px-2 py-0.5 text-[12px] text-info hover:brightness-110 disabled:opacity-50"
               >
@@ -170,7 +183,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void cancel()}
-                disabled={cancelling}
+                disabled={cancelling || frozen}
                 data-testid="cockpit-cancel"
                 className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-danger-line hover:text-danger disabled:opacity-50"
               >
@@ -192,6 +205,21 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         </div>
       )}
 
+      {frozen && replay && (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            data-testid="cockpit-asof"
+            onClick={() => replay.seek(null)}
+            title={t('replay.backToLive', 'Back to live')}
+            className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info hover:brightness-110"
+          >
+            {t('replay.asOf', 'as of turn {{turn}} · step {{step}}', { turn: asOf?.turn ?? '?', step: asOf?.step ?? '?' })}
+            {' · '}
+            {t('replay.live', 'Live')}
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
@@ -213,8 +241,16 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             <span className="text-ink-600 text-[12px]">—</span>
           )}
         </Cell>
-        <Cell label={t('issueDetail.budget', 'Budget')} testId="cockpit-budget" bar={budget.budget_cents != null ? { pct: budget.pct ?? 0, tone: budgetTone } : undefined}>
-          {formatCents(budget.spent_cents)}
+        <Cell
+          label={t('issueDetail.budget', 'Budget')}
+          testId="cockpit-budget"
+          bar={
+            budget.budget_cents != null
+              ? { pct: frozen ? (frozenSpent != null ? (frozenSpent / Math.max(1, budget.budget_cents)) * 100 : 0) : budget.pct ?? 0, tone: budgetTone }
+              : undefined
+          }
+        >
+          {formatCents(frozen ? frozenSpent : budget.spent_cents)}
           <span className="text-ink-500 text-[12px]"> / {budget.budget_cents != null ? formatCents(budget.budget_cents) : '∞'}</span>
         </Cell>
         <Cell label={t('issueDetail.runs', 'Runs')} testId="cockpit-runs">
