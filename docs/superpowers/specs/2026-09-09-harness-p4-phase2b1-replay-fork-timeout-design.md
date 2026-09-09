@@ -123,6 +123,8 @@
 > - 分叉点标记只画在 `step_start` 对应的步骤节点上（`forkMarksFor`：`at_seq` → `step:<turn>:<step>`）；`turn_end` 处的分叉暂不画标记（TurnEndNode 没有可挂的行，留待需要时补）。
 > - 分叉成功后：清回放位置与 URL、toast「已分叉」、重拉 rollup 与线程；不做「自动刮到新 run」——新 run 行由 workflow 打开，前端按 rollup 轮询自然出现。
 > - 弹窗标题用刮擦条自己的位置文案（`turn T · step S (n/total)`），弹窗不重新计算步序。
+> - **原 run 不在 issue 线程里**（评审 P1）：fork 把 `issues.ai_session_id` 指向新会话，线程只读当前会话的消息，原 run 的行不会出现。回放的 run 不在线程中（也不是 `current_run`）时，线程上方单独画「原 run 面板」（`DetachedRunPanel`：自带刮擦条、分叉标记、`id=run-<id>`，挂上即滚入视野）；深链 `?run&seq` 放开到任意 run；Cockpit 只要处于回放态（冻结或回放别的 run）都给「回到实时」按钮。「更新 run 出现即清旧位置」改为只在**严格更新**（snowflake 更大）的 run 出现时清，`current_run` 归零导致最新 run 回退到旧行不清。
+> - `useRunForks`：已结束 run 的分叉列表页内只读一次（模块级缓存 + 去重），运行中的 15s 轮询；弹窗照 `DispatchConfirmDialog` 做窗口级 Esc、蒙层点击关闭、关闭后焦点还给打开它的按钮，pending 期间都不关。
 
 > **实施记录（Task 5，2026-09-09）**
 > - 刮擦条位置文案是 `turn T · step S (n/total)`（tick 自带的坐标 + 全局步序），Cockpit 角标是 `as of turn T · step S`（冻结视图的 `view.current`）——两处坐标同源，不用 `step.done`（那是 todo 进度，不是步序）。

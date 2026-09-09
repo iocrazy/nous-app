@@ -17,19 +17,47 @@ export interface RunFork {
 }
 
 const LIVE_POLL_MS = 15_000;
+// Settled runs are read once per page life; a remount (group expand /
+// collapse) must not refetch a list that only a fork can change.
+const settledForks = new Map<string, RunFork[]>();
+const inFlight = new Map<string, Promise<RunFork[]>>();
+
+/** Exposed for tests — module-level caches otherwise leak between cases. */
+export function __clearRunForksCache(): void {
+  settledForks.clear();
+  inFlight.clear();
+}
+
+async function readForks(runId: string): Promise<RunFork[]> {
+  const pending = inFlight.get(runId);
+  if (pending) return pending;
+  const p = aiLibraryService
+    .getRunForks(runId)
+    .then((resp) => resp.items ?? [])
+    .finally(() => inFlight.delete(runId));
+  inFlight.set(runId, p);
+  return p;
+}
 
 export function useRunForks(runId: string | null | undefined, isRunning = false): RunFork[] {
-  const [forks, setForks] = useState<RunFork[]>([]);
+  const [forks, setForks] = useState<RunFork[]>(() => (runId ? settledForks.get(runId) ?? [] : []));
   useEffect(() => {
     if (!runId) {
       setForks([]);
       return;
     }
     let cancelled = false;
+    const cached = settledForks.get(runId);
+    if (cached && !isRunning) {
+      setForks(cached);
+      return () => { cancelled = true; };
+    }
     const fetchOnce = async () => {
       try {
-        const resp = await aiLibraryService.getRunForks(runId);
-        if (!cancelled) setForks(resp.items ?? []);
+        const items = await readForks(runId);
+        if (cancelled) return;
+        if (!isRunning) settledForks.set(runId, items);
+        setForks(items);
       } catch (err) {
         if (!cancelled) console.error('[useRunForks] fetch failed:', err);
       }

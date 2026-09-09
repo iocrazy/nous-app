@@ -5725,7 +5725,6 @@
     "steerPlaceholder": "例如：第二幕更黑暗一点；结局保留。",
     "confirm": "分叉",
     "forking": "分叉中…",
-    "chip": "分叉自 run #{{run}} @ 第 {{step}} 步",
     "chipSeq": "分叉自 run #{{run}} @ seq {{seq}}",
     "mark": "分叉 → #{{run}}",
     "started": "已分叉，新 run 正在启动。",
@@ -5742,6 +5741,8 @@
     }
   },
   "replay": {
+    "viewingRun": "正在回放 run #{{run}}",
+    "originRun": "原 run #{{run}}（来自本 issue 更早的会话）",
     "live": "实时",
     "asOf": "截至第 {{turn}} 轮 · 第 {{step}} 步",
     "backToLive": "回到实时",

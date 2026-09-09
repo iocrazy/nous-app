@@ -5725,7 +5725,6 @@
     "steerPlaceholder": "e.g. Make act two darker; keep the ending.",
     "confirm": "Fork",
     "forking": "Forking…",
-    "chip": "Forked from run #{{run}} @ step {{step}}",
     "chipSeq": "Forked from run #{{run}} @ seq {{seq}}",
     "mark": "Fork → #{{run}}",
     "started": "Forked — the new run is starting.",
@@ -5742,6 +5741,8 @@
     }
   },
   "replay": {
+    "viewingRun": "Replaying run #{{run}}",
+    "originRun": "Original run #{{run}} (from an earlier conversation of this issue)",
     "live": "Live",
     "asOf": "as of turn {{turn}} · step {{step}}",
     "backToLive": "Back to live",

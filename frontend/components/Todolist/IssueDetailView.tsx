@@ -25,7 +25,7 @@ import { blocksFor, issueBlockContext } from './issueBlocks';
 import './blocks';
 import { useIssueProgress } from './useIssueProgress';
 import { isIssueLive } from './issuePhase';
-import { IssueChatThread } from './IssueChatThread';
+import { DetachedRunPanel, IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
@@ -175,32 +175,38 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     },
     [setSearchParams, addToast, t],
   );
-  // Deep link: `?run=&seq=` — honoured once, when the rollup has loaded (so
-  // the newest run is known, not guessed from an older thread row) and the
-  // link names that run. A link to some other run is simply not a replay.
+  // Deep link: `?run=&seq=` — honoured once, after the rollup has loaded. Any
+  // run of the issue may be named: the newest one (scrubber on its row) or an
+  // older one, e.g. a fork's origin (drawn in the detached panel).
   const deepLinked = useRef(false);
   useEffect(() => {
-    if (deepLinked.current || !latestRunId || !progressLoaded) return;
+    if (deepLinked.current || !progressLoaded) return;
     const run = searchParams.get('run');
     const seq = Number(searchParams.get('seq'));
-    if (!run) { deepLinked.current = true; return; }
-    if (run === latestRunId) {
-      deepLinked.current = true;
-      if (Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
-    }
-  }, [latestRunId, progressLoaded, searchParams, seekReplay]);
-  // A newer run appeared while replaying the previously-newest one: that
-  // position (and its URL) is stale. A deliberate replay of an older run
-  // (fork chip) survives — it names its run explicitly.
+    deepLinked.current = true;
+    if (run && Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
+  }, [progressLoaded, searchParams, seekReplay]);
+  // A STRICTLY NEWER run appeared while replaying the previously-newest one:
+  // that position (and its URL) is stale. A replay of an older run (fork
+  // chip / link) survives, and so does the position when `latestRunId` merely
+  // flips back to an older row (current_run goes null at run end).
   const prevLatest = useRef<string | null>(null);
   useEffect(() => {
     const before = prevLatest.current;
     prevLatest.current = latestRunId;
-    if (replayPos && before && latestRunId && latestRunId !== before && replayPos.runId === before) {
+    const newer = (a: string, b: string) => (a.length === b.length ? a > b : a.length > b.length); // snowflakes: monotonic
+    if (replayPos && before && latestRunId && newer(latestRunId, before) && replayPos.runId === before) {
       setReplayPos(null);
       setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
     }
   }, [replayPos, latestRunId, setSearchParams]);
+  // The run being replayed is not in this thread (a fork's origin lives in
+  // the issue's previous conversation): draw it above the thread.
+  const detachedRunId = useMemo(() => {
+    if (!replayPos) return null;
+    const inThread = messages.some((m) => m.kind === 'agent_run' && m.agent_run_id && String(m.agent_run_id) === replayPos.runId);
+    return inThread || replayPos.runId === progress?.current_run?.id ? null : replayPos.runId;
+  }, [replayPos, messages, progress?.current_run?.id]);
   // ── Fork (harness 2b-1 §2) ─────────────────────────────────────────────
   const [forkAt, setForkAt] = useState<{ runId: string; seq: number; label: string } | null>(null);
   const [forkPending, setForkPending] = useState(false);
@@ -655,6 +661,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
                   <ReplayContext.Provider value={replay}>
+                    {detachedRunId && <DetachedRunPanel runId={detachedRunId} />}
                     <IssueChatThread
                       messages={messages}
                       agentsById={agentsById}

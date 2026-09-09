@@ -38,11 +38,29 @@ describe('ForkRunDialog', () => {
     expect(screen.getByTestId('fork-error').textContent).toBe('The run is still going');
   });
 
-  it('Escape and Cancel both close', () => {
+  it('Escape (window-level), backdrop and Cancel all close; none while pending', () => {
     const onCancel = vi.fn();
     render(<ForkRunDialog stepLabel="step 7" pending={false} error={null} onConfirm={vi.fn()} onCancel={onCancel} />);
-    fireEvent.keyDown(screen.getByTestId('fork-steer'), { key: 'Escape' });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('fork-backdrop'));
     fireEvent.click(screen.getByTestId('fork-cancel'));
-    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onCancel).toHaveBeenCalledTimes(3);
+    cleanup();
+    const onCancel2 = vi.fn();
+    render(<ForkRunDialog stepLabel="step 7" pending error={null} onConfirm={vi.fn()} onCancel={onCancel2} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('fork-backdrop'));
+    expect(onCancel2).not.toHaveBeenCalled();
+  });
+
+  it('focuses the steer box on open and hands focus back on close', () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    const { unmount } = render(<ForkRunDialog stepLabel="step 7" pending={false} error={null} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByTestId('fork-steer'));
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
   });
 });

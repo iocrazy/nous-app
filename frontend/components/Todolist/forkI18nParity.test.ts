@@ -27,11 +27,11 @@ function at(tree: Record<string, unknown>, key: string): unknown {
 describe('fork.* locale parity', () => {
   const keys = new Set<string>();
   for (const f of new Set(ROOTS.flatMap(sources))) {
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(/t\(\s*'(fork\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/'(fork\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
   }
   const en = JSON.parse(fs.readFileSync(path.join(LOCALES, 'en.json'), 'utf8'));
   const zh = JSON.parse(fs.readFileSync(path.join(LOCALES, 'zh.json'), 'utf8'));
-  it('finds keys to check', () => expect(keys.size).toBeGreaterThanOrEqual(8));
+  it('finds keys to check', () => expect(keys.size).toBeGreaterThanOrEqual(16));
   it.each([...keys])('%s exists in en and zh', (key) => {
     expect(typeof at(en, key), `en ${key}`).toBe('string');
     expect(typeof at(zh, key), `zh ${key}`).toBe('string');

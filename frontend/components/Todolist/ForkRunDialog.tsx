@@ -20,9 +20,21 @@ export const ForkRunDialog: React.FC<ForkRunDialogProps> = ({ stepLabel, pending
   const { t } = useTranslation();
   const [steer, setSteer] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
+  // Focus the steer box; give focus back to the opener when the dialog goes.
   useEffect(() => {
+    const opener = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
     box.current?.focus();
+    return () => opener?.focus?.();
   }, []);
+  // Escape closes from anywhere (window-level, like DispatchConfirmDialog),
+  // but not while the POST is in flight — it cannot be recalled.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !pending) onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel, pending]);
   const submit = () => {
     if (pending) return;
     const text = steer.trim();
@@ -31,9 +43,8 @@ export const ForkRunDialog: React.FC<ForkRunDialogProps> = ({ stepLabel, pending
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/70"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') onCancel();
-      }}
+      data-testid="fork-backdrop"
+      onClick={() => { if (!pending) onCancel(); }}
     >
       <div
         role="dialog"
@@ -41,6 +52,7 @@ export const ForkRunDialog: React.FC<ForkRunDialogProps> = ({ stepLabel, pending
         aria-labelledby="fork-dialog-title"
         data-testid="fork-dialog"
         className="w-[min(520px,92vw)] rounded-lg border border-info-line bg-ink-950 p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2">
           <GitFork size={14} className="text-info" />

@@ -463,13 +463,17 @@ describe('IssueDetailView — replay deep link (?run&seq)', () => {
     expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('ignores a link to a run that is not the newest one', async () => {
+  it('a link to an older run (a fork origin) replays it in the detached panel, cockpit stays live with a Live exit', async () => {
     progressState.value = mkProgress();
     renderAt('/team/9/todolist/NOUS-1?run=499&seq=4');
-    await waitFor(() => expect(screen.getByTestId('issue-cockpit')).toBeTruthy());
-    await new Promise((r) => setTimeout(r, 20));
-    expect(getRunViewAt).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('cockpit-asof')).toBeNull();
+    await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('499', 4));
+    await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
+    expect(document.getElementById('run-499')).not.toBeNull();
+    expect(screen.getByTestId('cockpit-asof').getAttribute('data-mode')).toBe('other-run');
+    // the live cockpit is not frozen by an older run's replay
+    expect(screen.getByTestId('cockpit-steps').textContent).toContain('3');
+    fireEvent.click(screen.getByTestId('cockpit-asof'));
+    await waitFor(() => expect(screen.queryByTestId('detached-run-panel')).toBeNull());
   });
 });
 
@@ -495,10 +499,39 @@ describe('IssueDetailView — fork flow', () => {
     await waitFor(() => expect(screen.getByTestId('replay-fork')).toBeTruthy());
     fireEvent.click(screen.getByTestId('replay-fork'));
     expect(screen.getByTestId('fork-dialog')).toBeTruthy();
+    // the dialog title carries the scrubber's own position (this file's t mock
+    // echoes the template; the wiring itself is asserted in ForkRunDialog.test)
+    expect(screen.getByTestId('fork-dialog').textContent).toContain('Fork from');
     fireEvent.change(screen.getByTestId('fork-steer'), { target: { value: 'darker' } });
     fireEvent.click(screen.getByTestId('fork-confirm'));
     await waitFor(() => expect(forkRun).toHaveBeenCalledWith('501', { at_seq: 4, steer: 'darker' }));
     await waitFor(() => expect(screen.queryByTestId('fork-dialog')).toBeNull());
     await waitFor(() => expect(screen.queryByTestId('cockpit-asof')).toBeNull());
+  });
+});
+
+
+describe('IssueDetailView — fork refusal', () => {
+  it('a typed refusal stays in the dialog as copy for its code', async () => {
+    const { RunForkRejectedError } = await import('../../services/aiLibraryService');
+    forkRun.mockRejectedValueOnce(new RunForkRejectedError('run_live', 409, 'pause or cancel the running run first'));
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [{ id: 'm-run', issue_id: 1, kind: 'agent_run', author_user_id: null, author_agent_id: 'a1', agent_run_id: '501', content: null, body: null, created_at: '2026-08-03T00:00:00Z', meta: { status: 'running' } }],
+    });
+    render(
+      <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1?run=501&seq=4']}>
+        <Routes>
+          <Route path="/team/:teamId/todolist/:identifier" element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('replay-fork')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('replay-fork'));
+    fireEvent.click(screen.getByTestId('fork-confirm'));
+    await waitFor(() => expect(screen.getByTestId('fork-error')).toBeTruthy());
+    // copy for the code (fallback echoed by this file's t mock), never the raw message
+    expect(screen.getByTestId('fork-error').textContent).toContain('still going');
+    expect(screen.getByTestId('fork-dialog')).toBeTruthy();
   });
 });

@@ -138,13 +138,14 @@ describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
     expect(screen.getByTestId('cockpit-budget').textContent).not.toContain('$9.00');
   });
 
-  it('ignores a replay of some other run and stays live', () => {
+  it('a replay of some other run does not freeze the live panel (but keeps the Live exit)', () => {
     render(
       <ReplayContext.Provider value={{ runId: 'r-other', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() }}>
         <CockpitBlockView ctx={ctx('running')} />
       </ReplayContext.Provider>,
     );
-    expect(screen.queryByTestId('cockpit-asof')).toBeNull();
+    expect(screen.getByTestId('cockpit-asof').getAttribute('data-mode')).toBe('other-run');
+    expect(screen.getByTestId('cockpit-budget').textContent).not.toContain('$2.50');
     expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -164,9 +165,6 @@ describe('CockpitBlockView — fork chip (harness 2b-1 §2)', () => {
     const seekRun = vi.fn();
     const c = ctx('running');
     c.rollup!.current_run!.view = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 1, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, fork: { of_run_id: 310819108761481, at_seq: 4 }, revision: 3 };
-    const scrolled: string[] = [];
-    document.body.innerHTML = '<div id="run-310819108761481"></div>';
-    document.getElementById('run-310819108761481')!.scrollIntoView = (() => scrolled.push('origin')) as never;
     render(
       <ReplayContext.Provider value={{ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn(), seekRun }}>
         <CockpitBlockView ctx={c} />
@@ -175,8 +173,24 @@ describe('CockpitBlockView — fork chip (harness 2b-1 §2)', () => {
     const chip = screen.getByTestId('cockpit-fork-chip');
     expect(chip.textContent).toContain('Forked from run #761481 @ seq 4');
     fireEvent.click(chip);
+    // the origin row / detached panel scrolls itself into view once attached
     expect(seekRun).toHaveBeenCalledWith('310819108761481', 4);
-    expect(scrolled).toEqual(['origin']);
+  });
+
+  it('replaying some other run (fork origin) keeps a way back to Live on the cockpit', () => {
+    const seek = vi.fn();
+    render(
+      <ReplayContext.Provider value={{ runId: '310819108761481', seq: 4, view: null, cost: null, loading: false, seek, seekRun: vi.fn() }}>
+        <CockpitBlockView ctx={ctx('running')} />
+      </ReplayContext.Provider>,
+    );
+    const btn = screen.getByTestId('cockpit-asof');
+    expect(btn.getAttribute('data-mode')).toBe('other-run');
+    expect(btn.textContent).toContain('Replaying run #761481');
+    // not frozen: the live controls stay usable
+    expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(seek).toHaveBeenCalledWith(null);
   });
 
   it('no chip on a run that is not a fork', () => {

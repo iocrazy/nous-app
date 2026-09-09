@@ -129,7 +129,7 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
               }}
               className="inline-flex items-center gap-1 rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info hover:brightness-110"
             >
-              <GitFork size={10} /> {t('fork.mark', { run: runId.slice(-6) })}
+              <GitFork size={10} /> {t('fork.mark', 'Fork → #{{run}}', { run: runId.slice(-6) })}
             </button>
           ))}
         </div>
