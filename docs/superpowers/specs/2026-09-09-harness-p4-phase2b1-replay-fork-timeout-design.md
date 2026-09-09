@@ -173,6 +173,13 @@
 - 真栈：对 2a 留下的 MH-67（多步 run）刮擦到 step 2 分叉并带 steer → 新 run `fork` 事件、`inbox_claimed{steer}`、原 run 不变、`/forks` 列出；超时：`config.yml` 把 `ResourceFetch` 设 15s、让 agent 抓 `httpbin.org/delay/30` → `tool_call.result.timed_out=true`、run 继续、Cockpit 出 `1 timed out`（验收后把配置改回）。
 - 前端：`npm run e2e:prod` + 三页对照截图。
 
+> **实施记录（Task 8，2026-09-09）**
+> - 真栈超时验收改用 `Skill: 0.001` 而非 `ResourceFetch: 15` + httpbin：`ResourceFetch` 不接 URL、且只在本轮带资源引用时才向模型公开；1 ms 让 DB 往返必然超时，走的是同一条 `run_tool_with_timeout` 包装。配置经 #2205 上线、#2206 回退（合并即部署的链上做不到"同一 PR 内改回"）。证据：MH-74 run 347795612446509 seq 4 `result{error:"timeout", timed_out:true, timeout_s:0.001, elapsed_s}`，run 继续到 `turn_end{completed}`，`view.tools{timed_out:1,last_timed_out:"Skill"}`。
+> - fork 的 `inbox_claimed{kind:"steer"}` 不存在——按 Task 3 记录，steer 是分叉轮的用户消息（新 run 事件 2 `user`）。三个前置条件在真栈各拿到一次：400 `not_a_step_boundary`、409 `run_live`、409 `issue_terminal`。
+> - 生产 `agent_runs.issue_id` 在 issue run 上为 NULL，fork 经 `conversation_id` 反查 issue（#2202）。
+> - 生产错误体是 `ErrorResponse` 外壳（`details.code`），前端 `forkJson` / 2a `_controlJson` 据此修正（#2200 / #2204）。
+> - 前端三页与 `e2e:prod` 未验：T6/T7 合并后托管 runner 被账单拦截，前端包未上线；恢复后补验。
+
 ## 7. 明确不做
 
 聊天会话的分叉；fork 正在跑的 run（要先 pause/cancel）；跨 issue fork；回放的服务端快照缓存；工具超时后自动重试；per-agent 时限覆盖（config 全局即可）。
