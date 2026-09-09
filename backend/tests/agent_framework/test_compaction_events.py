@@ -110,6 +110,8 @@ async def test_success_path_lands_all_three_events_in_order():
     assert summary["path"] == "legacy"
     assert summary["attempts"] == 1
     assert summary["summary_tokens"] == 50 and summary["head_tokens"] > 50
+    # phase 2b-1: replay rebuilds post-compaction history from this text
+    assert summary["summary"] == "short summary"
     end = rec.payload("compaction_end")
     assert end["tokens_saved"] == stats.tokens_saved > 0
     assert end["tokens_after"] == stats.tokens_after

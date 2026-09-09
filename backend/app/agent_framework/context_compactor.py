@@ -380,6 +380,10 @@ class ContextCompactor:
                         "head_tokens": head_tokens,
                         "attempts": attempt,
                         "path": summary_path,
+                        # phase 2b-1: replay.messages_from_events rebuilds
+                        # the post-compaction history from this text; the
+                        # emergency-cap row above stays metrics-only.
+                        "summary": summary_text,
                     },
                 )
                 if attempt > 1:

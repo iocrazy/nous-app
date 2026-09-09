@@ -65,10 +65,17 @@
 ### 2.3 落地流程（`services/issues/issue_fork.py`，DBOS 之外的一次事务 + 一次派发）
 
 1. 新建会话（`conversations`/`conversation_ai_meta`，与 `issue_session.ensure_session` 同一建法），把重建消息按顺序写成 `ai_messages`，每行 `metadata_json.forked_from = {run_id, seq}`。
-2. `issues.ai_session_id` 指向新会话；`execution_state.forked_from_run_id = <run_id>`；清 `paused_at`、`awaiting_input`（分叉是明确的人为「从这里走」）。原 run 若停在提问上（`awaiting_input.question_id` 属于它），标 `answered{superseded:true}` 并落 `question_answered{superseded:true}`。
+2. `issues.ai_session_id` 指向新会话；`execution_state.forked_from = {run_id, at_seq, steer: bool}`；清 `paused_at`、`awaiting_input`（分叉是明确的人为「从这里走」）。原 run 若停在提问上（`awaiting_input.question_id` 属于它），标 `answered{superseded:true}` 并落 `question_answered{superseded:true}`。
 3. 若带 `steer`：写一条收件箱 `kind=steer`（现有 `agent_run_inbox` 路径），第一步 `InboxClaimHook` 领取——不另造注入通道。
-4. 派发：`_start_execute_issue(issue_id)`（2a 的同一入口）；新 run 行落地时写 `fork_of_run_id / fork_at_seq`（executor 从 `execution_state.forked_from_run_id` 读，再清掉它），并在 seq 1 之前 emit `fork{of_run_id, at_seq, steer: bool}`。
+4. 派发：`_start_execute_issue(issue_id)`（2a 的同一入口）；新 run 行落地时写 `fork_of_run_id / fork_at_seq`（executor 从 `execution_state.forked_from` 读，先把它 merge 成 `null` 再起 turn），并在 seq 1 之前 emit `fork{of_run_id, at_seq, steer: bool}`。
 5. 响应带 `workflow_id` 与新 `session_id`；前端据此切详情页。
+
+> **实施记录（Task 2，2026-09-09）**
+> - 印记形状是 dict `forked_from = {run_id, at_seq, steer}`（不是原文的标量 `forked_from_run_id`）：`at_seq` 要落进 `agent_runs.fork_at_seq`，标量放不下。executor 读到后先 `merge_execution_state(issue_id, {"forked_from": null})` 再起 turn——merge 写法只能置 null 不能删键，读方一律 `.get("forked_from") or None`。畸形印记记 warning 当普通 run 跑，不炸。
+> - `compaction_summary` 事件从本 Task 起带 `summary` 文本（仅 LLM 摘要被接受的那条；emergency-cap 行仍只有指标）。`replay.messages_from_events` 遇到没有文本的压缩行**保留**已有消息而不是清空——旧 run 与紧急截断都不能让分叉起点空白。
+> - run 的 transcript 只有**本轮**的 `user`（最后一条用户文本）与终态 `assistant`；此前各轮在原会话的 `ai_messages` 里。所以 Task 3 建新会话时先复制原会话中早于该 run 的消息，再叠 `messages_from_events(events_upto(events, at_seq))`；run 内的工具往返不重放——在第 N 步分叉 ≈ 带 steer 重跑这一轮，这是 §1「重建不含工具消息」的直接后果。
+> - `events_upto(events, at_seq)` 按 **seq** 切片而非列表下标，Task 3 只许用它。
+> - **steer 不走 inbox**（偏离 §2 第 3 条）：fork 时 run 尚未开始，inbox 注入会叠在一份已经含它的历史上；改为印记带 `steer_text`，executor 把它当作分叉那一轮的**用户消息**（`run_session_turn(content=steer_text)`，进 `ai_messages` 可见、进上下文一次），没有 steer 就发既有的 `CONTINUATION_NUDGE`——分叉 run 绝不重发完整任务文本，历史里已经有了。`fork{steer: bool}` 事件不变。
 
 失败回滚：步骤 1–2 在同一事务；派发失败则把 `ai_session_id` 指回原会话并 503 `dispatch_failed`（与 2a `/resume` 失败恢复同款）。
 

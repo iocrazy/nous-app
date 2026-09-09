@@ -562,6 +562,8 @@ class AILibraryChatService:
         attribution: Optional[str] = None,
         script_context: Optional[dict] = None,
         answer_to: Optional[str] = None,
+        fork_of: Optional[tuple[int, int]] = None,
+        fork_steer: bool = False,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -584,6 +586,8 @@ class AILibraryChatService:
                 attribution=attribution,
                 script_context=script_context,
                 answer_to=answer_to,
+                fork_of=fork_of,
+                fork_steer=fork_steer,
             )
 
     async def _run_session_turn_inner(
@@ -599,6 +603,8 @@ class AILibraryChatService:
         attribution: Optional[str] = None,
         script_context: Optional[dict] = None,
         answer_to: Optional[str] = None,
+        fork_of: Optional[tuple[int, int]] = None,
+        fork_steer: bool = False,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -1335,7 +1341,24 @@ class AILibraryChatService:
                 input_summary=content,
                 attribution=attribution,
                 metadata={"full_input": content},
+                # phase 2b-1 §2.3: a forked run points back at its origin
+                fork_of_run_id=int(fork_of[0]) if fork_of else None,
+                fork_at_seq=int(fork_of[1]) if fork_of else None,
             ) as recorder:
+                if fork_of is not None:
+                    # First event of a forked run — before user / step_start —
+                    # so replay / the UI see the branch point at seq 1.
+                    from app.services.ai.runner.events import emit
+
+                    await emit(
+                        recorder,
+                        "fork",
+                        {
+                            "of_run_id": int(fork_of[0]),
+                            "at_seq": int(fork_of[1]),
+                            "steer": bool(fork_steer),
+                        },
+                    )
                 try:
                     if chunk_callback is None:
                         # Buffered path — unchanged

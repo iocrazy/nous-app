@@ -47,6 +47,8 @@ def empty_views() -> Views:
             "budget": None,
             "question": None,
             "last_answer": None,
+            # phase 2b-1: {of_run_id, at_seq} on a forked run, else None
+            "fork": None,
             "revision": 0,
         },
         "cost": {
@@ -57,6 +59,13 @@ def empty_views() -> Views:
             "pct": None,
         },
     }
+
+
+# Folds fed ONLY by ``RunEventWriter.fold_local`` (a measurement, no event row,
+# so no CHECK allowlist entry). Everything else registered here must be a
+# transcript event type the DB accepts — tests/runner/test_fold_fork.py pins
+# ``registered_types() - LOCAL_FOLD_TYPES ⊆ ORM CHECK literal``.
+LOCAL_FOLD_TYPES: frozenset[str] = frozenset({"context_measured"})
 
 
 def register(event_type: str) -> Callable[[Fold], Fold]:
@@ -105,6 +114,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     budget,
     compaction,
     context,
+    fork,
     inbox,
     question,
     retry,
