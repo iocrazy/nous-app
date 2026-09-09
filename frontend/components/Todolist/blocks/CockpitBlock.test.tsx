@@ -13,8 +13,11 @@ import type { IssueProgress } from '../../../services/issuesService';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     // fallback template + interpolation, so as-of numbers are assertable
-    t: (key: string, fallback?: string, vars?: Record<string, unknown>) =>
-      (fallback ?? key).replace(/\{\{(\w+)\}\}/g, (_, n) => String(vars?.[n] ?? `{{${n}}}`)),
+    t: (key: string, fallback?: unknown, vars?: Record<string, unknown>) => {
+      const tpl = typeof fallback === 'string' ? fallback : key;
+      const v = (typeof fallback === 'object' && fallback ? fallback : vars) as Record<string, unknown> | undefined;
+      return tpl.replace(/\{\{(\w+)\}\}/g, (_, n) => String(v?.[n] ?? `{{${n}}}`));
+    },
   }),
 }));
 const pauseIssue = vi.fn();
@@ -196,5 +199,25 @@ describe('CockpitBlockView — fork chip (harness 2b-1 §2)', () => {
   it('no chip on a run that is not a fork', () => {
     render(<CockpitBlockView ctx={ctx('running')} />);
     expect(screen.queryByTestId('cockpit-fork-chip')).toBeNull();
+  });
+});
+
+
+// ── harness 2b-1 §3: Tools cell ─────────────────────────────────────────────
+describe('CockpitBlockView — tools timed out (harness 2b-1 §3)', () => {
+  const base = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
+  it('shows the cell with the count and the last tool once something timed out', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, tools: { timed_out: 1, last_timed_out: 'ResourceFetch' } };
+    render(<CockpitBlockView ctx={c} />);
+    const cell = screen.getByTestId('cockpit-tools');
+    expect(cell.textContent).toContain('1 timed out');
+    expect(cell.textContent).toContain('ResourceFetch');
+  });
+  it('no cell while nothing has timed out', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, tools: { timed_out: 0, last_timed_out: null } };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.queryByTestId('cockpit-tools')).toBeNull();
   });
 });

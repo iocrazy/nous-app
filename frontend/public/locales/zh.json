@@ -5551,6 +5551,9 @@
     }
   },
   "issueDetail": {
+    "tools": "工具",
+    "toolsTimedOut_one": "{{count}} 个超时",
+    "toolsTimedOut_other": "{{count}} 个超时",
     "openConversation": "展开对话流",
     "progress": "进度",
     "links": "关联",
@@ -5699,6 +5702,8 @@
     "malformed": "响应格式异常"
   },
   "trajectory": {
+    "timedOut": "超时 · {{s}}s",
+    "elapsed": "实际 {{s}}s",
     "you": "你",
     "step": "第 {{n}} 步",
     "live": "进行中",

@@ -163,6 +163,13 @@ export function endedReason(view: RunView | null): string | null {
 }
 
 /** What the run is doing right now, for the one-line cockpit. */
+/** Phase 2b-1 §3: the run's tool-timeout gauge; null before any timeout is known. */
+export function toolsState(view: RunView | null): { timed_out: number; last_timed_out: string | null } | null {
+  const t = view?.tools;
+  if (!t || typeof t.timed_out !== 'number') return null;
+  return { timed_out: t.timed_out, last_timed_out: typeof t.last_timed_out === 'string' ? t.last_timed_out : null };
+}
+
 export function currentStep(view: RunView | null): { turn: number | null; step: number | null; model: string | null } | null {
   const c = view?.current;
   if (!c) return null;

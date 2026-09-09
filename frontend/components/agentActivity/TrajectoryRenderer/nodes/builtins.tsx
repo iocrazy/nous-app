@@ -144,7 +144,13 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
                 <Wrench size={11} className={`shrink-0 ${line.ok ? 'text-agent' : 'text-danger'}`} />
               )}
               <span className="truncate">{lineLabel(line, t)}</span>
-              {line.type === 'tool' && !line.ok && <span className="text-danger">{t('trajectory.failed')}</span>}
+              {line.type === 'tool' && line.detail?.timedOut === true ? (
+                <span className="text-danger" data-testid="trajectory-timeout-badge" title={t('trajectory.elapsed', { s: line.detail?.elapsedS ?? '?' })}>
+                  {t('trajectory.timedOut', { s: line.detail?.timeoutS ?? '?' })}
+                </span>
+              ) : (
+                line.type === 'tool' && !line.ok && <span className="text-danger">{t('trajectory.failed')}</span>
+              )}
               <span className="ml-auto shrink-0 tabular-nums text-[11px] text-ink-600">{fmtMs(line.durationMs)}</span>
             </div>
           ))}

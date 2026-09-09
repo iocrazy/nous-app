@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress } from './runView';
+import { budgetState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState } from './runView';
 
 const view = {
   v: 1,
@@ -60,5 +60,16 @@ describe('runView selectors — double-encoded rows (pre 2026-09-05 mirror fix)'
     expect(stepProgress(selectRunView(meta))).toEqual({ done: 3, total: 7, label: 'Drafting scene 3' });
     expect(selectRunCost(meta)?.spent_cents).toBe(0.5);
     expect(selectRunView({ view: '{not json' })).toBeNull();
+  });
+});
+
+
+describe('toolsState (harness 2b-1 §3)', () => {
+  it('reads the gauge; null when absent or malformed', () => {
+    expect(toolsState({ tools: { timed_out: 2, last_timed_out: 'ResourceFetch' } } as never)).toEqual({ timed_out: 2, last_timed_out: 'ResourceFetch' });
+    expect(toolsState({ tools: { timed_out: 0, last_timed_out: null } } as never)).toEqual({ timed_out: 0, last_timed_out: null });
+    expect(toolsState({} as never)).toBeNull();
+    expect(toolsState({ tools: { timed_out: 'x' } } as never)).toBeNull();
+    expect(toolsState(null)).toBeNull();
   });
 });

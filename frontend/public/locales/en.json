@@ -5551,6 +5551,9 @@
     }
   },
   "issueDetail": {
+    "tools": "Tools",
+    "toolsTimedOut_one": "{{count}} timed out",
+    "toolsTimedOut_other": "{{count}} timed out",
     "openConversation": "Open conversation",
     "progress": "Progress",
     "links": "Links",
@@ -5699,6 +5702,8 @@
     "malformed": "malformed response"
   },
   "trajectory": {
+    "timedOut": "Timed out · {{s}}s",
+    "elapsed": "elapsed {{s}}s",
     "you": "You",
     "step": "Step {{n}}",
     "live": "In progress",
