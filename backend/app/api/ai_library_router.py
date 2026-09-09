@@ -2451,30 +2451,16 @@ async def get_run_view_at(
     call. ``view.context`` is always null here: replay() has no live
     context window, so the scrubber must not render it.
     """
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
-    from app.models import AgentRunTranscriptEvents as TE
     from app.services.ai.runner.run_projection import registered_types, replay
 
     runs_repo = get_agent_runs_repository()
     row = await runs_repo.get_by_id(run_id, user_id=_coerce_user_uuid(auth.user_id))
     if not row:
         raise HTTPException(status_code=404, detail="run not found")
-    async with read_scope() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(TE.seq, TE.event_type, TE.payload)
-                    .where(TE.run_id == int(run_id))
-                    .where(TE.seq <= seq)
-                    .where(TE.event_type.in_(list(registered_types())))
-                    .order_by(TE.seq.asc())
-                )
-            )
-            .mappings()
-            .all()
-        )
+    # The one transcript read (phase 2b-1 Task 3) shared with the fork service.
+    rows = await runs_repo.list_transcript_events(
+        int(run_id), upto_seq=seq, event_types=list(registered_types())
+    )
     views = replay(
         [(r["event_type"], r["payload"] or {}) for r in rows],
         seqs=[int(r["seq"]) for r in rows],

@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 router_mod = importlib.import_module("app.api.ai_library_router")
+from app.repositories.agent_runs_repository import AgentRunsRepository  # noqa: E402
+
 pytestmark = pytest.mark.unit
 USER_ID = "11111111-1111-1111-1111-111111111111"
 RUN_ID = "310819108761481"
@@ -96,9 +98,15 @@ def test_view_at_binds_seq_as_the_inclusive_bound_and_filters_to_folded_types():
     captured: list = []
     with (
         patch.object(router_mod, "get_agent_runs_repository") as g,
-        patch("app.db.session.read_scope", _rows_scope(EVENTS, captured)),
+        patch(
+            "app.repositories.agent_runs_repository.read_scope",
+            _rows_scope(EVENTS, captured),
+        ),
     ):
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        g.return_value.list_transcript_events = (
+            AgentRunsRepository().list_transcript_events
+        )
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=3")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -118,9 +126,12 @@ def test_view_at_folds_exactly_the_rows_it_gets():
     # the DB does the bounding; given rows 1-4 the fold must include seq 4
     with (
         patch.object(router_mod, "get_agent_runs_repository") as g,
-        patch("app.db.session.read_scope", _rows_scope(EVENTS)),
+        patch("app.repositories.agent_runs_repository.read_scope", _rows_scope(EVENTS)),
     ):
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        g.return_value.list_transcript_events = (
+            AgentRunsRepository().list_transcript_events
+        )
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=4")
     assert r.json()["view"]["budget"] == {"pct": 90, "state": "warn", "spent_cents": 9}
 
@@ -129,9 +140,12 @@ def test_view_at_tolerates_a_null_payload_row():
     rows = [{"seq": 1, "event_type": "step_start", "payload": None}]
     with (
         patch.object(router_mod, "get_agent_runs_repository") as g,
-        patch("app.db.session.read_scope", _rows_scope(rows)),
+        patch("app.repositories.agent_runs_repository.read_scope", _rows_scope(rows)),
     ):
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        g.return_value.list_transcript_events = (
+            AgentRunsRepository().list_transcript_events
+        )
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=1")
     assert r.status_code == 200
 
@@ -143,6 +157,9 @@ def test_view_at_requires_seq_and_404s_foreign_runs():
     assert r.status_code == 404
     with patch.object(router_mod, "get_agent_runs_repository") as g:
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        g.return_value.list_transcript_events = (
+            AgentRunsRepository().list_transcript_events
+        )
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at")
         assert r.status_code == 422
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=-1")
