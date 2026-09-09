@@ -29,6 +29,7 @@ from app.db.scope import Scope, request_scope
 from app.repositories.media_repository import MediaRepository
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.infra.unified_task_manager import get_task_manager
+from app.services.library.transit_upload import upload_transit_file
 from app.services.media.parsers.soda_music.cookie_source import get_soda_cookie
 from app.services.media.parsers.soda_music.soda_downloader import download_and_decrypt
 
@@ -165,6 +166,11 @@ async def _download_cover(
     full.parent.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(full, mode="wb") as f:
         await f.write(data)
+    # The transit dir is not durable (2026-09-07): the cover leaves for the
+    # object store and ``rel`` becomes its sb:// value (flag off: unchanged).
+    rel = await upload_transit_file(
+        user_id=user_id, local_path=str(full), relative_path=rel, mime="image/jpeg"
+    )
 
     await MediaRepository().update(
         platform_id,
@@ -303,6 +309,15 @@ async def soda_download_workflow(
     )
 
     await manager.update_progress(wf_id, 80, subtitle="Saving to library")
+
+    # The decrypted track leaves the transit dir for the object store; ``rel``
+    # becomes the sb:// value every row below persists (flag off: unchanged).
+    rel = await upload_transit_file(
+        user_id=user_id,
+        local_path=str(full),
+        relative_path=rel,
+        mime=MIME_BY_EXT.get(plan.ext, "audio/mpeg"),
+    )
 
     # 5. Persist on parsed_media + link the file to the resource row.
     #    PARSE already created the resource row (with file_path NULL); the

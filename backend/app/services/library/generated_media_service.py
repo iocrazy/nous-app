@@ -441,15 +441,16 @@ async def register_uploaded_media(
 ) -> dict:
     """Write uploaded bytes into the staged store and insert one row. Returns it.
 
-    Object-store path (flag on + image): content-addressed upload to the
-    chat-media bucket. A storage error is a HARD, typed failure
-    (ObjectStoreWriteFailed, 2026-09-07) — the filesystem under
-    DOWNLOAD_PATH is a transit dir, not a place to keep a user's upload.
-    Videos and non-image uploads still stay on the filesystem (object store
-    is for small images).
+    Object-store path (flag on + image or video): content-addressed upload
+    to the chat-media bucket, same as ``register_generated_media``. A storage
+    error is a HARD, typed failure (ObjectStoreWriteFailed, 2026-09-07) — the
+    filesystem under DOWNLOAD_PATH is a transit dir on local NVMe, wiped on
+    deploy, not a place to keep a user's upload. Videos joined images on
+    2026-09-10 for exactly that reason. Other kinds still land on the
+    filesystem.
     """
     kind = media_kind_from_mime(mime)
-    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind == "image":
+    if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind in ("image", "video"):
         try:
             return await _register_uploaded_to_object_store(
                 user_id=user_id,

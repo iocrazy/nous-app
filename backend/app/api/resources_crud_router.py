@@ -950,6 +950,17 @@ async def upload_resource_cover(
     data = await file.read()
     cover_abs.write_bytes(data)
     rel = str(cover_abs.relative_to(Path(settings.DOWNLOAD_PATH)))
+    # DOWNLOAD_PATH is a transit dir (2026-09-07): with unified storage on,
+    # the cover leaves for the object store and the staged file is discarded;
+    # ``rel`` becomes the sb:// value. Flag off keeps the filesystem behavior.
+    from app.services.library.transit_upload import upload_transit_file
+
+    rel = await upload_transit_file(
+        user_id=auth.user_id,
+        local_path=str(cover_abs),
+        relative_path=rel,
+        mime=file.content_type or "image/jpeg",
+    )
 
     result = await repo.update_resource(resource_id, {"cover_image_path": rel})
     return {"success": True, "data": result}

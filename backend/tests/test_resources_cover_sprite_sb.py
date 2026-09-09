@@ -261,3 +261,63 @@ async def test_preview_sprite_sb_row_served_from_object_store(tmp_path, monkeypa
         resp = await serve_preview_sprite(_RID)
 
     assert isinstance(resp, StreamingResponse)
+
+
+# ── the cover itself goes to the object store (2026-09-10) ───────────────────
+# DOWNLOAD_PATH is a transit dir on the server's local NVMe since 2026-09-07,
+# not a place to keep a user's cover: writing ``derived/covers/{rid}/cover.png``
+# there and persisting that relative path made the cover a local-only artefact
+# (unshared between backend/worker, wiped on the next deploy). With unified
+# storage ON the bytes are staged in the transit dir, content-addressed into
+# the library bucket, the staging file is discarded, and ``cover_image_path``
+# is the sb:// value. The flag-OFF tests above keep the legacy filesystem
+# behavior byte-identical.
+
+
+class FakeCoverStore:
+    bucket = "library"
+
+    def __init__(self):
+        self.puts: list = []
+
+    async def exists(self, key):
+        return False
+
+    async def put_file(self, key, path, mime):
+        self.puts.append((key, path, mime))
+
+
+async def test_cover_upload_goes_to_object_store_when_unified_storage_on(
+    tmp_path, monkeypatch
+):
+    from app.core.config import settings as app_settings
+    from app.services.library import media_storage, resources_service, storage_flag
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+
+    async def _on():
+        return True
+
+    async def _team(_uid):
+        return "42"
+
+    store = FakeCoverStore()
+    monkeypatch.setattr(storage_flag, "unified_storage_enabled", _on)
+    monkeypatch.setattr(resources_service, "_resolve_personal_team_id", _team)
+    monkeypatch.setattr(media_storage, "library_store", lambda: store)
+
+    resource = {"id": _RID, "file_path": SB_PATH, "mime_type": "video/mp4"}
+    repo = _repo(resource)
+    p1, p2 = _patches(repo)
+    with p1, p2:
+        out = await upload_resource_cover(
+            _RID,
+            SimpleNamespace(user_id="u1"),
+            None,
+            file=FakeUploadFile("my-cover.png", b"cover-bytes", "image/png"),
+        )
+    assert out["success"] is True
+    assert resource["cover_image_path"].startswith("sb://library/t42/")
+    assert len(store.puts) == 1 and store.puts[0][2] == "image/png"
+    # The staging file was discarded: nothing durable left in the transit dir.
+    assert [p for p in Path(tmp_path).rglob("*") if p.is_file()] == []

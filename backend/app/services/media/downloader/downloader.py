@@ -96,43 +96,14 @@ async def _upload_downloaded_video_to_s3(
     relative_path: str,
     mime: str = "video/mp4",
 ) -> str:
-    """成品落盘后补传对象存储(止血,新下载不再增长文件系统债务)。
+    """成品落盘后补传对象存储 — 实现已抽到 ``library/transit_upload``
+    (2026-09-10),与汽水音频/UGC/封面上传共用同一条路;这里只保留名字,
+    既有调用点与测试不动。语义见那边的模块文档。"""
+    from app.services.library.transit_upload import upload_transit_file
 
-    只做「接线」不做「迁移」——存量文件本函数不碰。开关关闭、或
-    ``user_id`` 缺失(系统/孤儿触发的下载,无法解析 scope,参见 CLAUDE.md
-    的 user_id=None 陷阱)时原样返回 ``relative_path``,保持旧的文件系统
-    落盘行为,方便随时回退。
-
-    上传失败故意不吞掉、直接上抛:调用方(download_video_by_platform_id）
-    外层已有"写失败即报 FAILED,不留幽灵态"的语义（对齐 persist_video_download
-    的 2026-07-05 教训），存储写失败理应同等对待,而不是静默留在本地却让
-    UI 看见指向对象存储、实际并不存在的 sb:// 路径。
-    """
-    from app.services.library.storage_flag import unified_storage_enabled
-
-    if not user_id or not await unified_storage_enabled():
-        return relative_path
-
-    from app.services.library.media_storage import (
-        discard_local_source,
-        library_store,
-        store_local_file,
+    return await upload_transit_file(
+        user_id=user_id, local_path=local_path, relative_path=relative_path, mime=mime
     )
-    from app.services.library.resources_service import _resolve_personal_team_id
-
-    scope_id = int(await _resolve_personal_team_id(user_id))
-    stored = await store_local_file(
-        scope_id=scope_id,
-        source_path=local_path,
-        mime=mime,
-        filename=os.path.basename(relative_path),
-        store=library_store(),
-    )
-    # 成品已在 S3 → 回收本地工作副本。旧注释说"本地文件留给转码链路
-    # materialize 读取"——该前提已失效:materialize 对 sb:// 走 S3 + 本地
-    # 读通缓存,没有代码再按本地路径读它,留着就是每次下载白涨一份。
-    discard_local_source(local_path, stored.file_path)
-    return stored.file_path
 
 
 async def _upload_album_to_s3(
