@@ -126,3 +126,21 @@ describe('foldEvents — real wire shape: nested payload fields are JSON strings
     expect(step.summary.durationMs).toBe(16903);
   });
 });
+
+
+describe('foldEvents — tool timeouts (harness 2b-1 §3)', () => {
+  it('a timed-out tool result is a failed line with the timeout detail', () => {
+    const nodes = foldEvents([
+      ev('step_start', { turn: 1, step: 1, model: 'm' }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ResourceFetch', iteration: 1, result: { error: 'timeout', timed_out: true, timeout_s: 60, elapsed_s: 60.004, tool: 'ResourceFetch' } }),
+      ev('tool_call', { tool: 'Skill', iteration: 1, result: { ok: false, error: 'nope' } }),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    expect(step?.kind).toBe('step');
+    const [timed, failed] = (step as { lines: { ok: boolean; detail: Record<string, unknown> | null }[] }).lines;
+    expect(timed.ok).toBe(false);
+    expect(timed.detail).toMatchObject({ timedOut: true, timeoutS: 60, elapsedS: 60.004 });
+    expect(failed.ok).toBe(false);
+    expect(failed.detail?.timedOut).toBe(false);
+  });
+});

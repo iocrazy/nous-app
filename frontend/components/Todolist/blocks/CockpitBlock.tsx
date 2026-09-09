@@ -17,6 +17,7 @@ import {
   retryState,
   selectRunView,
   stepProgress,
+  toolsState,
 } from '../../TaskCenter/runView';
 import { formatElapsed } from '../formatElapsed';
 import { controlErrorText } from '../issueControlErrors';
@@ -87,6 +88,8 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const cur = currentStep(view);
   const retry = retryState(view, Date.now());
   const runBudget = budgetState(view);
+  // Phase 2b-1 §3: a fifth cell only when a tool actually timed out.
+  const tools = toolsState(view);
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
   // while the issue marker is absent. A parked issue (marker present) draws
@@ -244,7 +247,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         </div>
       )}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className={`grid grid-cols-2 gap-2 ${tools && tools.timed_out > 0 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -286,6 +289,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             </span>
           )}
         </Cell>
+        {tools && tools.timed_out > 0 && (
+          <Cell label={t('issueDetail.tools', 'Tools')} testId="cockpit-tools">
+            <span className="text-danger">{t('issueDetail.toolsTimedOut', '{{count}} timed out', { count: tools.timed_out })}</span>
+            {tools.last_timed_out && <div className="text-[11px] text-ink-500 truncate">{tools.last_timed_out}</div>}
+          </Cell>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-500" data-testid="cockpit-subline">

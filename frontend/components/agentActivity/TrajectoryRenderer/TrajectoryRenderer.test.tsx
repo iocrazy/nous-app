@@ -76,8 +76,34 @@ describe('TrajectoryRenderer — fork marks (harness 2b-1 §2)', () => {
     fireEvent.click(marks[0]);
     expect(jumped).toEqual(['701']);
   });
+  it('long limits read in minutes', () => {
+    const evs = [
+      ev('step_start', { turn: 1, step: 4, model: 'm' }, 4),
+      ev('tool_call', { tool: 'GenerateVideo', iteration: 4, result: { error: 'timeout', timed_out: true, timeout_s: 600, elapsed_s: 600.02 } }),
+    ];
+    render(<TrajectoryRenderer events={evs} isRunning />);
+    expect(screen.getByTestId('trajectory-timeout-badge').textContent).toBe('trajectory.timedOut:10 min');
+    expect(screen.getByTestId('trajectory-timeout-elapsed').textContent).toBe('trajectory.elapsed:10.0 min');
+  });
+
   it('no marks without forks', () => {
     render(<TrajectoryRenderer events={events} isRunning />);
     expect(screen.queryByTestId('trajectory-fork-mark')).toBeNull();
+  });
+});
+
+
+describe('TrajectoryRenderer — timeout badge (harness 2b-1 §3)', () => {
+  it('a timed-out tool shows the timeout badge instead of the generic failed word', () => {
+    const evs = [
+      ev('step_start', { turn: 1, step: 3, model: 'm' }, 3),
+      ev('tool_call', { tool: 'ResourceFetch', iteration: 3, result: { error: 'timeout', timed_out: true, timeout_s: 60, elapsed_s: 60.1 } }),
+    ];
+    render(<TrajectoryRenderer events={evs} isRunning />);
+    const badge = screen.getByTestId('trajectory-timeout-badge');
+    expect(badge.textContent).toBe('trajectory.timedOut:60s');
+    // elapsed is visible text, not hover-only
+    expect(screen.getByTestId('trajectory-timeout-elapsed').textContent).toBe('trajectory.elapsed:60.1s');
+    expect(screen.queryByText('trajectory.failed')).toBeNull();
   });
 });

@@ -135,6 +135,10 @@
 
 **实施记录（2026-09-09，Task 1 勘察）**：第 2 页的「issue 时间线一条系统行」不写——`issue_messages.kind='system_status'` 行由 DB trigger 写、无 body。时间线入口 = 分叉 run 自己的气泡头部 `Forked from run #… @ step N` 芯片（可点回原 run 并自动刮到该 step）。
 
+> **实施记录（Task 7，2026-09-09，§3 前端）**
+> - `foldEvents` 把 `result.timed_out === true` 折成 `ok=false` 的工具行并带 `detail.{timedOut, timeoutS, elapsedS}`；步骤行显示 `Timed out · Ns`（danger 语义色，title 里给实际耗时），不再显示通用的 `failed`。
+> - Cockpit 第五格 `Tools` 只在 `view.tools.timed_out > 0` 时出现（`runView.toolsState` 选择器），显示计数（`issueDetail.toolsTimedOut_one/_other`）与最后超时的工具名。
+
 > **实施记录（Task 6，2026-09-09）**
 > - Cockpit 的分叉芯片显示 `Forked from run #<后 6 位> @ seq N`（Cockpit 手里没有原 run 的事件，换不成步序）；点击 → `replay.seekRun(原 run, seq)`——刮擦条改为挂在「正在回放的 run」上（无回放时才是最新 run），并滚动到原 run 的气泡（每个 run 行有 `id="run-<id>"`）。深链 `?run&seq` 仍只认最新 run。
 > - 分叉点标记只画在 `step_start` 对应的步骤节点上（`forkMarksFor`：`at_seq` → `step:<turn>:<step>`）；`turn_end` 处的分叉暂不画标记（TurnEndNode 没有可挂的行，留待需要时补）。

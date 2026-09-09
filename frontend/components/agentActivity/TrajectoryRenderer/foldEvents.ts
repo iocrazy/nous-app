@@ -261,13 +261,23 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         const node = ensureStep(ev, num(p.iteration));
         const tool = str(p.tool) ?? 'tool';
         const result = obj(p.result);
-        const ok = !(result !== null && result.ok === false);
+        // Phase 2b-1 §3: a wall-clock timeout is a typed tool result
+        // ({error:"timeout", timed_out:true, timeout_s, elapsed_s}) — a
+        // failure with its own badge, never a generic "failed".
+        const timedOut = result !== null && result.timed_out === true;
+        const ok = !(result !== null && (result.ok === false || timedOut));
         upsertLine(node, `tool:${ev.seq}`, () => ({
           type: 'tool',
           label: tool,
           ok,
           durationMs: null,
-          detail: { tool, iteration: num(p.iteration) },
+          detail: {
+            tool,
+            iteration: num(p.iteration),
+            timedOut,
+            timeoutS: timedOut ? num(result?.timeout_s) : null,
+            elapsedS: timedOut ? num(result?.elapsed_s) : null,
+          },
         }));
         node.summary.tools += 1;
         break;

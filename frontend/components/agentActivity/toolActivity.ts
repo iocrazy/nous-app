@@ -157,7 +157,9 @@ function buildActivity(
   // ``ok`` is an explicit field on every screenwriting tool result. Absent
   // (or unparseable) is treated as success: the runner only records a
   // tool_call event for a call it actually executed.
-  const ok = result?.ok !== false;
+  // Phase 2b-1 §3: a wall-clock timeout ({error:"timeout", timed_out:true})
+  // carries no `ok` key — it is a failure on every surface, chips included.
+  const ok = result?.ok !== false && result?.timed_out !== true;
   return {
     key,
     tool,
