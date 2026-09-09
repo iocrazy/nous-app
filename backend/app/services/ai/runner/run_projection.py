@@ -49,6 +49,8 @@ def empty_views() -> Views:
             "last_answer": None,
             # phase 2b-1: {of_run_id, at_seq} on a forked run, else None
             "fork": None,
+            # phase 2b-1 §3: per-run tool timeout gauge
+            "tools": {"timed_out": 0, "last_timed_out": None},
             "revision": 0,
         },
         "cost": {
@@ -120,6 +122,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     retry,
     step,
     todo,
+    tools,
     turn_end,
 )
 

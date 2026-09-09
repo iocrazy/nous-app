@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # CORS 设置
     # ============================================
     CORS_ORIGINS: list[str] = Field(default=["*"], description="允许的跨域来源")
+    # harness 二期 2b-1 §3：逐工具墙钟秒数，键是工具名（家族默认值与解析规则见
+    # app/services/ai/runner/tool_timeouts.py；超时是模型可见的工具结果，不停 run）
+    TOOL_TIMEOUTS: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-tool wall-clock seconds; keys are tool names (runner/tool_timeouts.py)",
+    )
     CORS_CREDENTIALS: bool = Field(default=True, description="是否允许凭证")
 
     # ============================================

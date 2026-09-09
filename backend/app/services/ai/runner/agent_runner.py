@@ -859,7 +859,7 @@ class AgentRunner:
                 if tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
-                    result = await self.skill_tool.execute(args)
+                    result = await self._timed(tool_name, self.skill_tool.execute(args))
                 elif tool_name == "ResourceFetch":
                     # S4-T6: per-request handler injected by the chat service.
                     if self.resource_fetch_handler is None:
@@ -872,7 +872,9 @@ class AgentRunner:
                         }
                     else:
                         try:
-                            result = await self.resource_fetch_handler(args)
+                            result = await self._timed(
+                                tool_name, self.resource_fetch_handler(args)
+                            )
                         except Exception as rf_exc:
                             logger.warning(
                                 f"[AgentRunner] ResourceFetch handler raised: {rf_exc!r}"
@@ -881,11 +883,14 @@ class AgentRunner:
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
-                    result = await self._dispatch_ask_user(
-                        args, recorder, iteration, composed
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_ask_user(args, recorder, iteration, composed),
                     )
                 elif tool_name == "FinishIssue":
-                    result = await self._dispatch_finish_issue(args)
+                    result = await self._timed(
+                        tool_name, self._dispatch_finish_issue(args)
+                    )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:
                         result = {
@@ -893,9 +898,12 @@ class AgentRunner:
                             "error": "GenerateImage not configured",
                         }
                     else:
-                        result = await self.generate_image_handler(
-                            args,
-                            self._media_run_context(recorder, composed),
+                        result = await self._timed(
+                            tool_name,
+                            self.generate_image_handler(
+                                args,
+                                self._media_run_context(recorder, composed),
+                            ),
                         )
                 elif tool_name == "GenerateVideo":
                     if self.generate_video_handler is None:
@@ -904,20 +912,28 @@ class AgentRunner:
                             "error": "GenerateVideo not configured",
                         }
                     else:
-                        result = await self.generate_video_handler(
-                            args,
-                            self._media_run_context(recorder, composed),
+                        result = await self._timed(
+                            tool_name,
+                            self.generate_video_handler(
+                                args,
+                                self._media_run_context(recorder, composed),
+                            ),
                         )
                 elif tool_name in SCREENWRITING_TOOL_NAMES:
-                    result = await self._dispatch_screenwriting(
-                        tool_name, args, recorder, composed
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_screenwriting(
+                            tool_name, args, recorder, composed
+                        ),
                     )
                 elif is_mcp:
                     # G3: route to outbound MCP server. Mirrors run_turn
                     # error handling — transport errors → tool result
                     # dict, not raise.
                     try:
-                        result = await self.mcp_registry.call(tool_name, args)
+                        result = await self._timed(
+                            tool_name, self.mcp_registry.call(tool_name, args)
+                        )
                         inc_metric("mcp_tool_call")
                         if isinstance(result, dict) and result.get("isError"):
                             inc_metric("mcp_tool_call_error")
@@ -931,7 +947,9 @@ class AgentRunner:
                     if self.delegate_tool is None:
                         result = {"error": "Delegate tool not configured"}
                     else:
-                        result = await self.delegate_tool.execute(args)
+                        result = await self._timed(
+                            tool_name, self.delegate_tool.execute(args)
+                        )
 
                 # Image promotion: vision models only see images in user
                 # messages — lift image blocks out of the tool result and
@@ -1251,6 +1269,14 @@ class AgentRunner:
             "question": self._parked_question(recorder),
             "tool_calls": tool_call_trace,
         }
+
+    async def _timed(self, tool_name: str, coro):
+        """All tool handlers go through here (phase 2b-1 §3): the per-tool
+        wall-clock limit; a timeout is a tool RESULT the model reads
+        (``{error: "timeout", timed_out: true, ...}``), never a run stop."""
+        from app.services.ai.runner.tool_exec import run_tool_with_timeout
+
+        return await run_tool_with_timeout(tool_name, coro)
 
     async def _dispatch_finish_issue(self, args: dict) -> dict:
         """Spec-2: route a FinishIssue call to the per-request handler injected
@@ -1884,7 +1910,7 @@ class AgentRunner:
                 elif tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
-                    result = await self.skill_tool.execute(args)
+                    result = await self._timed(tool_name, self.skill_tool.execute(args))
                     # Cache result if this skill is idempotent
                     if (
                         cache_key is not None
@@ -1905,7 +1931,9 @@ class AgentRunner:
                         }
                     else:
                         try:
-                            result = await self.resource_fetch_handler(args)
+                            result = await self._timed(
+                                tool_name, self.resource_fetch_handler(args)
+                            )
                         except Exception as rf_exc:
                             logger.warning(
                                 f"[AgentRunner] ResourceFetch handler raised: {rf_exc!r}"
@@ -1914,11 +1942,14 @@ class AgentRunner:
                                 "error": f"ResourceFetch failed: {rf_exc.__class__.__name__}"
                             }
                 elif tool_name == ASK_USER_TOOL_NAME:
-                    result = await self._dispatch_ask_user(
-                        args, recorder, iteration, composed
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_ask_user(args, recorder, iteration, composed),
                     )
                 elif tool_name == "FinishIssue":
-                    result = await self._dispatch_finish_issue(args)
+                    result = await self._timed(
+                        tool_name, self._dispatch_finish_issue(args)
+                    )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:
                         result = {
@@ -1926,9 +1957,12 @@ class AgentRunner:
                             "error": "GenerateImage not configured",
                         }
                     else:
-                        result = await self.generate_image_handler(
-                            args,
-                            self._media_run_context(recorder, composed),
+                        result = await self._timed(
+                            tool_name,
+                            self.generate_image_handler(
+                                args,
+                                self._media_run_context(recorder, composed),
+                            ),
                         )
                 elif tool_name == "GenerateVideo":
                     if self.generate_video_handler is None:
@@ -1937,13 +1971,19 @@ class AgentRunner:
                             "error": "GenerateVideo not configured",
                         }
                     else:
-                        result = await self.generate_video_handler(
-                            args,
-                            self._media_run_context(recorder, composed),
+                        result = await self._timed(
+                            tool_name,
+                            self.generate_video_handler(
+                                args,
+                                self._media_run_context(recorder, composed),
+                            ),
                         )
                 elif tool_name in SCREENWRITING_TOOL_NAMES:
-                    result = await self._dispatch_screenwriting(
-                        tool_name, args, recorder, composed
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_screenwriting(
+                            tool_name, args, recorder, composed
+                        ),
                     )
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
@@ -1955,7 +1995,9 @@ class AgentRunner:
                     from app.agent_framework._metrics_helper import inc_metric
 
                     try:
-                        result = await self.mcp_registry.call(tool_name, args)
+                        result = await self._timed(
+                            tool_name, self.mcp_registry.call(tool_name, args)
+                        )
                         inc_metric("mcp_tool_call")
                         if result.get("isError"):
                             inc_metric("mcp_tool_call_error")
@@ -1976,7 +2018,9 @@ class AgentRunner:
                             )
                         }
                     else:
-                        result = await self.delegate_tool.execute(args)
+                        result = await self._timed(
+                            tool_name, self.delegate_tool.execute(args)
+                        )
 
                 # Image promotion (mirrors stream_turn): strip base64 BEFORE
                 # the trace/recorder capture the result; the pixels ride only
