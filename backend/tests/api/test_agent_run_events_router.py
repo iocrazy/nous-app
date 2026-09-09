@@ -135,3 +135,21 @@ def test_foreign_run_is_still_404(client):
     router_mod.get_agent_runs_repository().get_by_id.return_value = None
     r = client.get(f"/api/v1/ai-library/runs/{RUN_ID}/events?types=todo_write")
     assert r.status_code == 404
+
+
+# ── phase 2b-1 replay: upto_seq is an inclusive upper bound ─────────────────
+
+
+def test_upto_seq_adds_an_inclusive_upper_bound(client):
+    captured: list = []
+    _get(client, captured, "?after_seq=3&upto_seq=9")
+    sql, params = _compiled(captured[0])
+    assert "seq > " in sql and "seq <= " in sql, sql
+    assert 3 in params.values() and 9 in params.values(), params
+
+
+def test_upto_seq_absent_keeps_the_old_query_shape(client):
+    captured: list = []
+    _get(client, captured)
+    sql, _ = _compiled(captured[0])
+    assert "seq <= " not in sql, sql

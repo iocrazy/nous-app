@@ -2374,6 +2374,7 @@ async def list_run_events(
     after_seq: int = 0,
     limit: int = 500,
     types: str = "",
+    upto_seq: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Ordered agent_run_events for the Runs detail Transcript section.
 
@@ -2383,6 +2384,8 @@ async def list_run_events(
     ``todo_write,llm_retry``) so a progress poller does not drag every
     assistant body along; empty means all — the consumers that predate it
     keep working unchanged. An unknown type is an empty result, never 500.
+    ``upto_seq`` (phase 2b-1 replay) is an INCLUSIVE upper bound — the
+    scrubber reads ``events[:seq]`` with it; absent means no bound.
     """
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2399,23 +2402,26 @@ async def list_run_events(
     from app.db.session import read_scope
     from app.models import AgentRunTranscriptEvents as TE
 
+    stmt = (
+        select(
+            TE.seq,
+            TE.event_type,
+            TE.payload,
+            TE.created_at,
+            TE.turn,
+            TE.step,
+        )
+        .where(TE.run_id == int(run_id))
+        .where(TE.seq > after_seq)
+        .where(*_event_type_filter(TE, types))
+    )
+    if upto_seq is not None:
+        stmt = stmt.where(TE.seq <= upto_seq)
     async with read_scope() as session:
         rows = (
             (
                 await session.execute(
-                    select(
-                        TE.seq,
-                        TE.event_type,
-                        TE.payload,
-                        TE.created_at,
-                        TE.turn,
-                        TE.step,
-                    )
-                    .where(TE.run_id == int(run_id))
-                    .where(TE.seq > after_seq)
-                    .where(*_event_type_filter(TE, types))
-                    .order_by(TE.seq.asc())
-                    .limit(max(1, min(limit, 1000)))
+                    stmt.order_by(TE.seq.asc()).limit(max(1, min(limit, 1000)))
                 )
             )
             .mappings()
@@ -2423,6 +2429,44 @@ async def list_run_events(
         )
     items = [_serialize_row(r) for r in rows]
     return {"items": items, "count": len(items)}
+
+
+@router.get(
+    "/runs/{run_id}/view-at",
+    summary="Folded run.view / run.cost AS OF seq (phase 2b-1 replay)",
+)
+async def get_run_view_at(run_id: str, auth: AuthDep, seq: int) -> Dict[str, Any]:
+    """The same fold registry the recorder runs live, applied to
+    ``events[:seq]`` — one fold, never copied to TS. The scrubber calls this
+    per tick (steps are few; no cache). Foreign run_id reads as 404."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRunTranscriptEvents as TE
+    from app.services.ai.runner.run_projection import replay
+
+    runs_repo = get_agent_runs_repository()
+    row = await runs_repo.get_by_id(run_id, user_id=_coerce_user_uuid(auth.user_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(TE.seq, TE.event_type, TE.payload)
+                    .where(TE.run_id == int(run_id))
+                    .where(TE.seq <= seq)
+                    .order_by(TE.seq.asc())
+                )
+            )
+            .mappings()
+            .all()
+        )
+    views = replay(
+        [(r["event_type"], r["payload"] or {}) for r in rows],
+        seqs=[int(r["seq"]) for r in rows],
+    )
+    return {"seq": seq, "view": views["view"], "cost": views["cost"]}
 
 
 @router.get(
