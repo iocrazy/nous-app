@@ -285,3 +285,15 @@ describe('denialsFromTranscriptEvents', () => {
     expect(denials).toHaveLength(1);
   });
 });
+
+
+describe('toolActivity — timeouts (harness 2b-1 §3)', () => {
+  it('a timed-out result is not a success on the chips either', async () => {
+    const { fromTranscriptEvents } = await import('./toolActivity');
+    const acts = fromTranscriptEvents([
+      { seq: 1, event_type: 'tool_call', payload: { tool: 'ReadScene', iteration: 1, result: { error: 'timeout', timed_out: true, timeout_s: 60, elapsed_s: 60 } }, created_at: '' },
+    ] as never);
+    expect(acts).toHaveLength(1);
+    expect(acts[0].ok).toBe(false);
+  });
+});

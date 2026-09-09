@@ -5702,8 +5702,8 @@
     "malformed": "malformed response"
   },
   "trajectory": {
-    "timedOut": "Timed out · {{s}}s",
-    "elapsed": "elapsed {{s}}s",
+    "timedOut": "Timed out · {{s}}",
+    "elapsed": "elapsed {{s}}",
     "you": "You",
     "step": "Step {{n}}",
     "live": "In progress",

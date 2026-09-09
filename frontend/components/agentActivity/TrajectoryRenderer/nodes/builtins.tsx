@@ -85,6 +85,13 @@ function scrollToRun(runId: string): void {
   document.getElementById(`run-${runId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+/** `60` → "60s", `60.004` → "60.0s" (decimals=1), `600` → "10 min", `600.02` → "10.0 min". */
+function fmtSeconds(s: number | null | undefined, decimals = 0): string {
+  if (typeof s !== 'number' || !Number.isFinite(s)) return '?';
+  if (s >= 120) return `${decimals > 0 ? (s / 60).toFixed(1) : String(Math.round((s / 60) * 100) / 100)} min`;
+  return `${decimals > 0 ? s.toFixed(decimals) : String(Math.round(s * 100) / 100)}s`;
+}
+
 export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, onToggle, marks }) => {
   const { t } = useTranslation();
   const open = node.live || expanded;
@@ -145,9 +152,14 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
               )}
               <span className="truncate">{lineLabel(line, t)}</span>
               {line.type === 'tool' && line.detail?.timedOut === true ? (
-                <span className="text-danger" data-testid="trajectory-timeout-badge" title={t('trajectory.elapsed', { s: line.detail?.elapsedS ?? '?' })}>
-                  {t('trajectory.timedOut', { s: line.detail?.timeoutS ?? '?' })}
-                </span>
+                <>
+                  <span className="text-danger" data-testid="trajectory-timeout-badge">
+                    {t('trajectory.timedOut', { s: fmtSeconds(line.detail?.timeoutS as number | null) })}
+                  </span>
+                  <span className="text-ink-600" data-testid="trajectory-timeout-elapsed">
+                    {t('trajectory.elapsed', { s: fmtSeconds(line.detail?.elapsedS as number | null, 1) })}
+                  </span>
+                </>
               ) : (
                 line.type === 'tool' && !line.ok && <span className="text-danger">{t('trajectory.failed')}</span>
               )}
