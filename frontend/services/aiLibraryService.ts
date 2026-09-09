@@ -155,22 +155,27 @@ export class RunForkRejectedError extends Error {
   }
 }
 
-/** Like `handle`, but a non-2xx becomes a RunForkRejectedError carrying
- *  `detail.code` (FastAPI `{detail: {code, message}}`, or a plain string
- *  detail → `http_<status>`). Never the raw body. */
+/** Like `handle`, but a non-2xx becomes a RunForkRejectedError carrying the
+ *  server's typed code. Production wraps every HTTPException in the
+ *  ErrorResponse envelope (`app/core/exceptions.py`):
+ *  `{error, code: "http_<status>", request_id, details: <exc.detail | null>}`
+ *  — so the typed `{code, message}` lives under `details`; a bare FastAPI
+ *  `{detail: …}` (tests, unwrapped routers) is accepted too. Never the raw body. */
 async function forkJson<T>(res: Response): Promise<T> {
   if (res.ok) return res.json();
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    const detail = body?.detail;
+    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
+    const detail = body?.details ?? body?.detail;
     if (detail && typeof detail === 'object') {
       const d = detail as { code?: unknown; message?: unknown };
       if (typeof d.code === 'string' && d.code) code = d.code;
       if (typeof d.message === 'string' && d.message) message = d.message;
     } else if (typeof detail === 'string' && detail) {
       message = detail;
+    } else if (typeof body?.error === 'string' && body.error) {
+      message = body.error;
     }
   } catch (err) {
     console.error('[aiLibraryService] fork error body unreadable', err);
