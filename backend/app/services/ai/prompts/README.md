@@ -171,17 +171,17 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 #### What the model sees
 
-2026-09-09（harness 二期 2b-1 Task 4）起每个工具调用都有墙钟上限（`runner/tool_timeouts.py`：Skill 30s / FinishIssue、AskUser 10s / ResourceFetch 60s / GenerateImage、GenerateVideo 600s / Delegate 900s / MCP 名 120s / 其余 60s，`config.yml TOOL_TIMEOUTS` 按工具名覆盖）。超时**不是** run 停止：模型收到的是那次调用的工具结果，正文是这一行 JSON（`timeout_s` / `elapsed_s` / `tool` 随实际值变化，其余字面量固定）：
+2026-09-09（harness 二期 2b-1 Task 4）起每个工具调用都有墙钟上限（`runner/tool_timeouts.py`：Skill 30s / ResourceFetch 200s（高于其自身 180s 的抽帧截止，让它自己的「frame extraction timed out」结果仍可达）/ GenerateImage、GenerateVideo 600s / Delegate 900s / `skill.*` 同 Skill、`agent.*` 同 Delegate、其余 MCP 名 120s / 其他 60s；**AskUser、FinishIssue 不计时**——它们只写一行 transcript，切断会留下 runner 没看见的停靠问题；`config.yml TOOL_TIMEOUTS` 按工具名覆盖）。超时**不是** run 停止：模型收到的是那次调用的工具结果，正文是这一行 JSON（`timeout_s` / `elapsed_s` / `tool` / `message` 里的数值随实际值变化，其余字面量固定）：
 
 ```json
-{"error": "timeout", "timed_out": true, "timeout_s": 60.0, "elapsed_s": 60.004, "tool": "ResourceFetch"}
+{"error": "timeout", "timed_out": true, "timeout_s": 200.0, "elapsed_s": 200.004, "tool": "ResourceFetch", "message": "Tool ResourceFetch timed out after 200s. Retry once with a narrower request, or choose another way."}
 ```
 
-然后本轮照常继续——模型自己决定重试、换工具还是告知用户。工具自己抛异常不经过这层：各调用点既有的类型化错误结果（如 `ResourceFetch failed: …` / `MCP transport failure: …`）原样不变。
+然后本轮照常继续——模型自己决定重试、换工具还是告知用户。工具自己抛异常（包括它内部 `wait_for` 抛的 `TimeoutError`）不经过这层：各调用点既有的类型化错误结果（如 `ResourceFetch failed: …` / `MCP transport failure: …`）原样不变。⚠️ Delegate 只是**入队**（`delegate_tool` 自己 180s 内等一次回执）：超时发生在入队之后时任务其实已派出，模型若据此重试会重复派发——`dedup_key` 可选，README 记录此风险，Task 8 真栈验收覆盖。
 
 #### Token effect
 
-一次超时一条 ≤120 字符（约 40 token）的工具消息，与任何工具结果同样进入本轮对话并随历史压缩；不随 agent 配置增长。
+一次超时一条 ≤220 字符（约 60 token）的工具消息，与任何工具结果同样进入本轮对话并随历史压缩；不随 agent 配置增长。
 
 #### KV Cache effect
 

@@ -108,6 +108,14 @@
 - 两条循环各接一次；穷尽守卫测试同 step hooks：给 `run_turn` / `stream_turn` 各喂一个永不返回的假工具，断言两边都在 `timeout_s` 内拿到 `timed_out:true` 且 turn 继续到下一步。
 - 模型侧提示：工具错误消息正文 `Tool <name> timed out after <n>s. Retry once with a narrower request, or choose another way.`（进 `prompts/README.md` 的 What the model sees）。
 
+> **实施记录（Task 4，2026-09-09）**
+> - **AskUser / FinishIssue 不计时**（偏离上表的 10s）：它们只写一行 transcript 就返回；10s 截断在「行已写、结果没回」的窗口里会留下 `view.question` 已设而 runner 没看见 `asked` 的悬空问题（异步状态不是同步状态）。`config.yml TOOL_TIMEOUTS` 显式给它们数值仍可强制计时。
+> - **ResourceFetch 200s**（偏离 60s）：工具自己的抽帧总截止是 180s（`FRAMES_TOTAL_DEADLINE_SECONDS`），60s 会让它那条优雅的「frame extraction timed out」结果永远不可达并把 ffmpeg 腰斩。
+> - `skill.*` 按 Skill（30s）、`agent.*` 按 Delegate（900s），其余带点的 MCP 名 120s。
+> - **handler 自己的异常原样抛出**（不转成 `{error, timed_out:false}`）：包法只管墙钟，各调用点既有的类型化 `except`（ResourceFetch / MCP 传输）先于任何通用兜底；内层 `wait_for` 抛的 `TimeoutError` 因此是 handler 的错，不是我们的超时（用 `asyncio.wait` 而不是 `wait_for` 判定，避免被它冒充）。
+> - handler 吞掉 CancelledError 晚返回的值丢弃、仍报超时；取消后的清理等待有上限 `CLEANUP_GRACE_S = 5s`（超过记 error 并放手，不让一个卡死的清理拖住整轮）；run 自身被取消时同样先给 handler 这段宽限再传播。
+> - 超时结果多带 `message` 字段承载上面那句模型侧提示（同一条工具消息，不另起一条）。
+
 ## 4. UI（三页稿，用户验）
 
 1. **回放刮擦条**（issue 详情 → 轨迹区顶部）：一条水平轨道，刻度 = step，当前刻度高亮并标 `step 7 / 12 · turn 2`；右侧 `Live` 胶囊（正在跑且未拖离时亮）；拖离后轨迹只显示到该 step，Cockpit 四格显示该时刻的值并加灰色角标「as of step 7」。键盘 ←/→。
