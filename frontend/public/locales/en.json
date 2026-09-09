@@ -5718,6 +5718,17 @@
     "steps": "{{count}} steps",
     "denied": "Blocked: {{tool}}"
   },
+  "replay": {
+    "live": "Live",
+    "asOf": "as of step {{n}}",
+    "stepOf": "step {{n}} / {{total}}",
+    "turnEnd": "turn end",
+    "prev": "Previous step",
+    "next": "Next step",
+    "fork": "Fork from step {{n}}",
+    "scrubber": "Replay",
+    "loading": "Loading…"
+  },
   "question": {
     "pickOne": "Pick one of {{count}}",
     "orType": "Or type your own answer…",

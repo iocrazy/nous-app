@@ -22,6 +22,7 @@ import { formatElapsed } from '../formatElapsed';
 import { controlErrorText } from '../issueControlErrors';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { QuestionCard } from '../QuestionCard';
+import { isReplaying, useReplay } from '../replayContext';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
 import { formatCents } from './BudgetBlock';
 
@@ -58,10 +59,18 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [controlError, setControlError] = useState<string | null>(null);
+  // Replay (harness 2b-1 §1): viewing the live run as of a past step — the
+  // four cells read the folded view of that moment and controls are off
+  // (you cannot pause the past).
+  const replay = useReplay();
+  const frozen = !!rollup && isReplaying(replay, rollup.current_run?.id);
   if (!rollup) return null;
 
   const phase = rollup.phase;
-  const view = selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
+  const view = frozen
+    ? replay?.view ?? null
+    : selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
+  const asOfStep = frozen ? replay?.view?.step?.done ?? replay?.view?.current?.step ?? null : null;
   const step = stepProgress(view);
   const gauge = contextGauge(view);
   const cur = currentStep(view);
@@ -148,7 +157,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void pause()}
-                disabled={pausing}
+                disabled={pausing || frozen}
                 data-testid="cockpit-pause"
                 className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-info-line hover:text-info disabled:opacity-50"
               >
@@ -159,7 +168,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void resume()}
-                disabled={resuming}
+                disabled={resuming || frozen}
                 data-testid="cockpit-resume"
                 className="inline-flex items-center gap-1 rounded border border-info-line bg-info-soft px-2 py-0.5 text-[12px] text-info hover:brightness-110 disabled:opacity-50"
               >
@@ -170,7 +179,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <button
                 type="button"
                 onClick={() => void cancel()}
-                disabled={cancelling}
+                disabled={cancelling || frozen}
                 data-testid="cockpit-cancel"
                 className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-0.5 text-[12px] text-ink-300 hover:border-danger-line hover:text-danger disabled:opacity-50"
               >
@@ -192,6 +201,13 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         </div>
       )}
 
+      {frozen && (
+        <div className="flex items-center justify-end">
+          <span data-testid="cockpit-asof" className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info">
+            {t('replay.asOf', 'as of step {{n}}', { n: asOfStep ?? '?' })}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (

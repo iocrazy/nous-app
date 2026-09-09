@@ -89,3 +89,43 @@ describe('CockpitBlockView — pause / resume (phase 2a §2)', () => {
     expect(screen.queryByTestId('cockpit-resume')).toBeNull();
   });
 });
+
+// ── harness 2b-1 §1: replay "as of step N" ──────────────────────────────────
+import { ReplayContext } from '../replayContext';
+
+describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
+  const frozenView = { v: 1, phase: 'running', step: { done: 7, total: 12, label: 'Scene 7' }, current: { turn: 1, step: 7, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, question: null, last_answer: null, revision: 30 } as never;
+
+  it('reads the frozen view, shows the badge and disables the controls', () => {
+    render(
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
+        <CockpitBlockView ctx={ctx('running')} />
+      </ReplayContext.Provider>,
+    );
+    expect(screen.getByTestId('cockpit-steps').textContent).toContain('7');
+    expect(screen.getByTestId('cockpit-steps').textContent).toContain('12');
+    // the file's t() mock echoes the fallback template — interpolation is i18next's job
+    expect(screen.getByTestId('cockpit-asof').textContent).toContain('as of step');
+    expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('cockpit-cancel') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('ignores a replay of some other run and stays live', () => {
+    render(
+      <ReplayContext.Provider value={{ runId: 'r-other', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
+        <CockpitBlockView ctx={ctx('running')} />
+      </ReplayContext.Provider>,
+    );
+    expect(screen.queryByTestId('cockpit-asof')).toBeNull();
+    expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('seq null (Live) is not frozen even when attached', () => {
+    render(
+      <ReplayContext.Provider value={{ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn() }}>
+        <CockpitBlockView ctx={ctx('running')} />
+      </ReplayContext.Provider>,
+    );
+    expect(screen.queryByTestId('cockpit-asof')).toBeNull();
+  });
+});

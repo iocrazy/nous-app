@@ -25,6 +25,9 @@ import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
 import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
 import { TrajectoryRenderer } from '../agentActivity/TrajectoryRenderer';
 import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
+import { ReplayScrubber } from '../agentActivity/ReplayScrubber';
+import { replayTicks } from '../agentActivity/replayTicks';
+import { isReplaying, useReplay } from './replayContext';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -239,11 +242,31 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
  */
 const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
   const { events, denials } = useRunToolActivity(runId, isRunning);
+  // Replay (harness 2b-1 §1): the scrubber sits on the issue's NEWEST run
+  // only; in the past the trajectory is events[:seq], frozen (no live step).
+  const replay = useReplay();
+  const attached = !!replay && !!runId && replay.runId === runId;
+  const replaying = isReplaying(replay, runId);
+  const ticks = useMemo(() => (attached ? replayTicks(events) : []), [attached, events]);
+  const shown = useMemo(
+    () => (replaying ? events.filter((e) => e.seq <= (replay?.seq as number)) : events),
+    [replaying, events, replay?.seq],
+  );
   if (events.length === 0 && denials.length === 0) return null;
   return (
-    <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory">
+    <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
+      {attached && replay && (
+        <ReplayScrubber
+          ticks={ticks}
+          seq={replay.seq}
+          isRunning={isRunning}
+          onSeek={replay.seek}
+          onFork={replay.fork}
+          loading={replay.loading}
+        />
+      )}
       {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
-      <TrajectoryRenderer events={events} isRunning={isRunning} />
+      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} />
     </div>
   );
 };

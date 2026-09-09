@@ -325,13 +325,35 @@ export const aiLibraryService = {
     return handle(resp);
   },
 
-  /** Transcript event stream for one run (mig 285). after_seq = incremental poll. */
+  /**
+   * Transcript event stream for one run (mig 285). after_seq = incremental
+   * poll; upto_seq (harness 2b-1 replay) = INCLUSIVE upper bound. `has_more`
+   * flags a page that filled `limit` — page with after_seq before folding.
+   */
   async getRunEvents(
     runId: string,
     afterSeq = 0,
-  ): Promise<{ items: AgentRunEvent[]; count: number }> {
+    uptoSeq?: number,
+  ): Promise<{ items: AgentRunEvent[]; count: number; has_more?: boolean }> {
+    const q = uptoSeq == null ? '' : `&upto_seq=${uptoSeq}`;
     const resp = await fetch(
-      `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}`,
+      `${base()}/runs/${encodeURIComponent(runId)}/events?after_seq=${afterSeq}${q}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle(resp);
+  },
+
+  /**
+   * The folded run.view / run.cost AS OF `seq` (harness 2b-1 §1) — the same
+   * fold registry the recorder runs live, applied server-side to
+   * events[:seq]. `view.context` is always null here (no live window).
+   */
+  async getRunViewAt(
+    runId: string,
+    seq: number,
+  ): Promise<{ seq: number; view: unknown; cost: unknown }> {
+    const resp = await fetch(
+      `${base()}/runs/${encodeURIComponent(runId)}/view-at?seq=${seq}`,
       { headers: await getAuthHeaders() },
     );
     return handle(resp);
