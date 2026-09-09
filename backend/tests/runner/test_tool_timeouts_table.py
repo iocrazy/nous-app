@@ -8,6 +8,15 @@ from app.services.ai.runner import tool_timeouts as tt
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_config_overrides(monkeypatch):
+    """The table tests describe the BUILT-IN defaults; they must not read
+    whatever ``config.yml`` happens to carry (a legitimate production
+    override — e.g. the 2b-1 acceptance probe — turned this file red).
+    Override tests set their own dict explicitly."""
+    monkeypatch.setattr(tt.settings, "TOOL_TIMEOUTS", {})
+
+
 def test_defaults_cover_every_built_in_tool_family():
     assert tt.resolve_timeout("Skill") == 30
     assert tt.resolve_timeout("ResourceFetch") == 200  # > frames deadline 180
