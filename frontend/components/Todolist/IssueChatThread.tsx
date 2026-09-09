@@ -10,7 +10,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
+import { Zap, ChevronRight, ChevronDown, Paperclip, GitFork } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { simulateAgentRunComplete } from '../../services/issueMessageService';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
@@ -29,6 +29,7 @@ import { ReplayScrubber } from '../agentActivity/ReplayScrubber';
 import { replayTicks } from '../agentActivity/replayTicks';
 import { isReplaying, useReplay } from './replayContext';
 import { forkMarksFor, useRunForks } from '../agentActivity/useRunForks';
+import { forkOrigin, timedOutTools } from '../agentActivity/runHeader';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -242,6 +243,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
  * Renders once per run; a capability denial keeps its own notice above.
  */
 export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
+  const { t } = useTranslation();
   const { events, denials } = useRunToolActivity(runId, isRunning);
   // Replay (harness 2b-1 §1): the scrubber sits on the issue's NEWEST run
   // only; in the past the trajectory is events[:seq], frozen (no live step).
@@ -257,9 +259,40 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean 
   // step they branched at.
   const forks = useRunForks(runId, isRunning);
   const forkMarks = useMemo(() => forkMarksFor(events, forks), [events, forks]);
+  // The run's own facts (harness 2b-1 §2/§3): where it was forked from and
+  // how many tools timed out — read from its events, so they stay on the row
+  // after the run ends (the Cockpit's live view is gone by then).
+  const origin = useMemo(() => forkOrigin(events), [events]);
+  const timedOut = useMemo(() => timedOutTools(events), [events]);
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
+      {(origin || timedOut.count > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="run-header-chips">
+          {origin && (
+            <button
+              type="button"
+              data-testid="run-fork-chip"
+              onClick={() => replay?.seekRun(origin.ofRunId, origin.atSeq)}
+              disabled={!replay}
+              className="inline-flex items-center gap-1 rounded-full border border-info-line bg-info-soft/40 px-2 py-0.5 text-[11px] text-info hover:bg-info-soft disabled:cursor-default"
+              title={t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: origin.ofRunId, seq: origin.atSeq })}
+            >
+              <GitFork size={10} />
+              {t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: origin.ofRunId.slice(-6), seq: origin.atSeq })}
+            </button>
+          )}
+          {timedOut.count > 0 && (
+            <span
+              data-testid="run-timeout-chip"
+              className="inline-flex items-center rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-[11px] text-danger"
+              title={timedOut.last ?? undefined}
+            >
+              {t('issueDetail.toolsTimedOut', '{{count}} timed out', { count: timedOut.count })}
+            </span>
+          )}
+        </div>
+      )}
       {attached && replay && (
         <ReplayScrubber
           ticks={ticks}
