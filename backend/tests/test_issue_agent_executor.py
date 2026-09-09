@@ -439,6 +439,28 @@ async def test_run_issue_agent_passes_fork_of_from_execution_state(monkeypatch):
     assert kw["fork_of"] is None and kw["fork_steer"] is False
     clear.assert_not_awaited()
 
+    # A continuation turn re-uses the pre-turn-1 issue dict (stamp still on
+    # it) — it must NOT be recorded as a fork again nor re-send the steer.
+    chat_svc.run_session_turn.reset_mock()
+    clear.reset_mock()
+    await m.run_issue_agent(
+        issue={
+            "id": 409,
+            "title": "Fork probe",
+            "description": "x",
+            "execution_state": {
+                "forked_from": {"run_id": 42, "at_seq": 7, "steer_text": "again?"}
+            },
+        },
+        agent_id="a",
+        user_id="u",
+        is_continuation=True,
+    )
+    kw = chat_svc.run_session_turn.await_args.kwargs
+    assert kw["fork_of"] is None and kw["fork_steer"] is False
+    assert kw["content"] == m.CONTINUATION_NUDGE
+    clear.assert_not_awaited()
+
     # load_issue may hand execution_state back as a raw JSON string
     chat_svc.run_session_turn.reset_mock()
     await m.run_issue_agent(

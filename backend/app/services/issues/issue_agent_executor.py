@@ -168,7 +168,12 @@ async def run_issue_agent(
     # a first `fork` event. Consumed here: the stamp is nulled before the
     # turn runs so a later resume / retry / reply on the same issue is not
     # mislabelled a fork. Malformed stamps are logged and treated as none.
-    fork_of, steer_text = _read_forked_from(iid, issue)
+    # Only the FIRST turn of a dispatch honours the stamp: the continuation
+    # loop re-uses the issue dict it loaded before turn 1 (the DB copy was
+    # nulled below), so turns 2..N must not be recorded as forks again.
+    fork_of, steer_text = (
+        _read_forked_from(iid, issue) if not is_continuation else (None, None)
+    )
     if fork_of is not None:
         try:
             await merge_execution_state(iid, {"forked_from": None})
