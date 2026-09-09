@@ -214,6 +214,18 @@ class IssueRepository:
             row = result.scalars().first()
             return _row(row) if row else None
 
+    async def get_by_session(self, session_id: int) -> Optional[dict[str, Any]]:
+        """The issue whose agent conversation is ``session_id`` (issues.ai_session_id).
+        Phase 2b-1: a run's ``issue_id`` is backfilled after its turn and is
+        NULL on rows where that never happened; the conversation is the
+        durable link (agent_runs.conversation_id == issues.ai_session_id)."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(Issues).where(Issues.ai_session_id == int(session_id)).limit(1)
+            )
+            row = result.scalars().first()
+            return _row(row) if row else None
+
     async def get_by_identifier(self, identifier: str) -> Optional[dict[str, Any]]:
         async with read_scope() as session:
             result = await session.execute(

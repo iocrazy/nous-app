@@ -194,3 +194,13 @@ async def test_dispatch_binds_to_the_shared_start_execute_issue():
     with patch("app.services.issues.issue_dispatch.start_execute_issue", start):
         assert await f.default_deps().dispatch(9) == "wf-9"
     start.assert_awaited_once_with(9)
+
+
+async def test_get_issue_by_session_binds_to_the_repository():
+    repo = AsyncMock()
+    repo.get_by_session = AsyncMock(return_value={"id": 9})
+    with patch(
+        "app.repositories.issue_repository.get_issue_repository", return_value=repo
+    ):
+        assert await f.default_deps().get_issue_by_session(100) == {"id": 9}
+    repo.get_by_session.assert_awaited_once_with(100)
