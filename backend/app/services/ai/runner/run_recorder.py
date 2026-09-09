@@ -121,6 +121,10 @@ class RunRecorder:
     # issue-dispatch path from the issue origin_kind; interactive chat/script
     # leave it None (human).
     attribution: Optional[str] = None
+    # Phase 2b-1 §2.3: set only on a forked run (mig 453 columns). The
+    # original run is never written; this row points back at it.
+    fork_of_run_id: Optional[int] = None
+    fork_at_seq: Optional[int] = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # Internal state (populated by start / methods; not caller-facing)
@@ -662,6 +666,9 @@ class RunRecorder:
             "prompt_cents_per_1k_snapshot": self._prompt_rate,
             "completion_cents_per_1k_snapshot": self._completion_rate,
             "metadata_json": self.metadata or {},
+            # phase 2b-1: None → dropped by the filter below (ordinary runs)
+            "fork_of_run_id": self.fork_of_run_id,
+            "fork_at_seq": self.fork_at_seq,
         }
         # Drop None values so DB defaults (e.g., now()) apply.
         payload = {k: v for k, v in payload.items() if v is not None}

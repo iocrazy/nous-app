@@ -9,7 +9,8 @@ by the turn flow; the issue chat surface reads ai_messages (Task 5).
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -22,6 +23,7 @@ from app.services.ai.tools.finish_issue_tool import (
 from app.services.ai.tools.forced_finish_declaration import (
     attempt_forced_finish_declaration,
 )
+from app.services.issues.execution_state import merge_execution_state
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
     publish_message,
@@ -84,6 +86,34 @@ CONTINUATION_NUDGE = (
 )
 
 
+def _read_forked_from(
+    issue_id: Any, issue: dict[str, Any]
+) -> tuple[Optional[tuple[int, int]], Optional[str]]:
+    """``execution_state.forked_from`` → ``(fork_of, steer_text)``; ``(None,
+    None)`` when absent, null, or malformed (logged — a bad stamp must not
+    kill the run). ``steer_text`` is the human's "from here, do this" — it
+    becomes the forked turn's user message (spec §2 实施记录: not the inbox,
+    which would inject it on top of a history that already shows it)."""
+    state = issue.get("execution_state")
+    if isinstance(state, str):  # load_issue may hand jsonb back as raw JSON
+        try:
+            state = json.loads(state)
+        except (TypeError, ValueError):
+            state = None
+    forked = state.get("forked_from") if isinstance(state, dict) else None
+    if not forked:
+        return None, None
+    try:
+        steer_text = str(forked.get("steer_text") or "").strip() or None
+        return (int(forked["run_id"]), int(forked["at_seq"])), steer_text
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        logger.warning(
+            f"[issue_agent] issue={issue_id} malformed execution_state.forked_from "
+            f"{forked!r}: {exc!r}; running as a plain (non-fork) run"
+        )
+        return None, None
+
+
 async def run_issue_agent(
     *,
     issue: dict[str, Any],
@@ -133,7 +163,27 @@ async def run_issue_agent(
 
     trigger = "issue_dispatch_auto" if auto else "issue_dispatch"
 
-    if is_continuation:
+    # Phase 2b-1 §2.3: the fork endpoint stamps execution_state.forked_from
+    # = {run_id, at_seq, steer}; the new run opens with the fork columns and
+    # a first `fork` event. Consumed here: the stamp is nulled before the
+    # turn runs so a later resume / retry / reply on the same issue is not
+    # mislabelled a fork. Malformed stamps are logged and treated as none.
+    fork_of, steer_text = _read_forked_from(iid, issue)
+    if fork_of is not None:
+        try:
+            await merge_execution_state(iid, {"forked_from": None})
+        except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+            logger.error(
+                f"[issue_agent] issue={iid} could not clear forked_from: {exc!r}; "
+                f"the next run on this issue would be recorded as a fork"
+            )
+
+    if fork_of is not None:
+        # A forked run starts from the seeded history (task text included);
+        # re-sending the full task would duplicate it. The human's steer, if
+        # any, IS this turn's user message; otherwise the continuation nudge.
+        content_in = steer_text or CONTINUATION_NUDGE
+    elif is_continuation:
         content_in = CONTINUATION_NUDGE
     else:
         brief = await _resolve_stage_brief(issue)
@@ -156,6 +206,8 @@ async def run_issue_agent(
             trigger=trigger,
             chunk_callback=_cb,
             attribution=attribution,
+            fork_of=fork_of,
+            fork_steer=steer_text is not None,
         )
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)

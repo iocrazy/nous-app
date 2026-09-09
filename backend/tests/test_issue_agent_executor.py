@@ -379,3 +379,97 @@ async def test_run_issue_agent_passes_stop_reason_through(monkeypatch):
     assert out["stop_reason"] == "paused" and out["outcome"] is None
     assert out["run_id"] == "31"
     forced.assert_not_awaited()
+
+
+async def test_run_issue_agent_passes_fork_of_from_execution_state(monkeypatch):
+    """Phase 2b-1: execution_state.forked_from → run_session_turn(fork_of=…)."""
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-1")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={"assistant_message": {"content": "essay"}, "run_id": "r"}
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
+    clear = AsyncMock()
+    monkeypatch.setattr(m, "merge_execution_state", clear)
+    await m.run_issue_agent(
+        issue={
+            "id": 409,
+            "title": "Fork probe",
+            "description": "x",
+            "execution_state": {
+                "forked_from": {
+                    "run_id": 42,
+                    "at_seq": 7,
+                    "steer": True,
+                    "steer_text": "make act 2 darker",
+                }
+            },
+        },
+        agent_id="a",
+        user_id="u",
+    )
+    kw = chat_svc.run_session_turn.await_args.kwargs
+    assert kw["fork_of"] == (42, 7) and kw["fork_steer"] is True
+    # The seeded history already holds the task text: the steer IS the
+    # forked turn's user message, never the full task again.
+    assert kw["content"] == "make act 2 darker"
+    # The stamp is consumed BEFORE the turn: a later resume / retry / reply
+    # on this issue must not be recorded as a fork.
+    clear.assert_awaited_once_with(409, {"forked_from": None})
+    assert clear.await_args_list[0] and chat_svc.run_session_turn.await_count == 1
+
+    chat_svc.run_session_turn.reset_mock()
+    clear.reset_mock()
+    await m.run_issue_agent(
+        issue={"id": 410, "title": "Plain", "description": "x"},
+        agent_id="a",
+        user_id="u",
+    )
+    kw = chat_svc.run_session_turn.await_args.kwargs
+    assert kw["fork_of"] is None and kw["fork_steer"] is False
+    clear.assert_not_awaited()
+
+    # load_issue may hand execution_state back as a raw JSON string
+    chat_svc.run_session_turn.reset_mock()
+    await m.run_issue_agent(
+        issue={
+            "id": 412,
+            "title": "String state",
+            "description": "x",
+            "execution_state": '{"forked_from": {"run_id": 5, "at_seq": 2}}',
+        },
+        agent_id="a",
+        user_id="u",
+    )
+    kw = chat_svc.run_session_turn.await_args.kwargs
+    assert kw["fork_of"] == (5, 2) and kw["fork_steer"] is False
+    # No steer → the continuation nudge (the history already has the task)
+    assert kw["content"] == m.CONTINUATION_NUDGE
+    clear.assert_awaited_once_with(412, {"forked_from": None})
+    clear.reset_mock()
+
+    # Malformed stamp → plain run, logged, never an exception
+    chat_svc.run_session_turn.reset_mock()
+    await m.run_issue_agent(
+        issue={
+            "id": 411,
+            "title": "Bad stamp",
+            "description": "x",
+            "execution_state": {"forked_from": {"run_id": "abc"}},
+        },
+        agent_id="a",
+        user_id="u",
+    )
+    kw = chat_svc.run_session_turn.await_args.kwargs
+    assert kw["fork_of"] is None and kw["fork_steer"] is False
+    clear.assert_not_awaited()
