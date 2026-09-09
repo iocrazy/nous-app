@@ -88,22 +88,52 @@ EVENTS = [
 ]
 
 
-def test_view_at_folds_only_events_up_to_seq():
+def _binds(stmt) -> dict:
+    return dict(stmt.compile().params)
+
+
+def test_view_at_binds_seq_as_the_inclusive_bound_and_filters_to_folded_types():
     captured: list = []
     with (
         patch.object(router_mod, "get_agent_runs_repository") as g,
-        patch("app.db.session.read_scope", _rows_scope(EVENTS[:3], captured)),
+        patch("app.db.session.read_scope", _rows_scope(EVENTS, captured)),
     ):
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=3")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["seq"] == 3
-    assert body["view"]["budget"] is None  # seq 4 not folded
-    assert body["cost"]["spent_cents"] == 0.5
-    # the query itself is bounded — not "fetch everything then slice"
+    assert body["seq"] == 3 and body["cost"]["spent_cents"] == 0.5
     sql = str(captured[0].compile())
-    assert "seq <= " in sql, sql
+    binds = _binds(captured[0])
+    # the bound is a bind of exactly 3 (an off-by-one would bind 2 or 4)
+    assert "seq <= " in sql and 3 in binds.values(), (sql, binds)
+    # only registered fold types are fetched — assistant/tool_call bodies stay home
+    from app.services.ai.runner.run_projection import registered_types
+
+    in_values = [v for v in binds.values() if isinstance(v, (list, tuple))]
+    assert in_values and set(in_values[0]) == set(registered_types()), binds
+
+
+def test_view_at_folds_exactly_the_rows_it_gets():
+    # the DB does the bounding; given rows 1-4 the fold must include seq 4
+    with (
+        patch.object(router_mod, "get_agent_runs_repository") as g,
+        patch("app.db.session.read_scope", _rows_scope(EVENTS)),
+    ):
+        g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=4")
+    assert r.json()["view"]["budget"] == {"pct": 90, "state": "warn", "spent_cents": 9}
+
+
+def test_view_at_tolerates_a_null_payload_row():
+    rows = [{"seq": 1, "event_type": "step_start", "payload": None}]
+    with (
+        patch.object(router_mod, "get_agent_runs_repository") as g,
+        patch("app.db.session.read_scope", _rows_scope(rows)),
+    ):
+        g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
+        r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=1")
+    assert r.status_code == 200
 
 
 def test_view_at_requires_seq_and_404s_foreign_runs():
@@ -114,4 +144,6 @@ def test_view_at_requires_seq_and_404s_foreign_runs():
     with patch.object(router_mod, "get_agent_runs_repository") as g:
         g.return_value.get_by_id = AsyncMock(return_value={"id": RUN_ID})
         r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at")
-    assert r.status_code == 422
+        assert r.status_code == 422
+        r = TestClient(_app()).get(f"/api/v1/ai-library/runs/{RUN_ID}/view-at?seq=-1")
+        assert r.status_code == 422
