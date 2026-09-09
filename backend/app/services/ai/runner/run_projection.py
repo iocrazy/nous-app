@@ -61,6 +61,13 @@ def empty_views() -> Views:
     }
 
 
+# Folds fed ONLY by ``RunEventWriter.fold_local`` (a measurement, no event row,
+# so no CHECK allowlist entry). Everything else registered here must be a
+# transcript event type the DB accepts — tests/runner/test_fold_fork.py pins
+# ``registered_types() - LOCAL_FOLD_TYPES ⊆ ORM CHECK literal``.
+LOCAL_FOLD_TYPES: frozenset[str] = frozenset({"context_measured"})
+
+
 def register(event_type: str) -> Callable[[Fold], Fold]:
     def deco(fn: Fold) -> Fold:
         if event_type in _REGISTRY:

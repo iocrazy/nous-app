@@ -24,11 +24,15 @@ def test_every_registered_fold_type_is_in_the_orm_check_allowlist():
     swallows the CHECK violation with a warning, so view.fork would stay
     None forever with no error surfacing. The ORM literal mirrors the
     latest migration (tests/models/test_transcript_event_types_phase2a)."""
-    from app.services.ai.runner.run_projection import registered_types
+    from app.services.ai.runner.run_projection import (
+        LOCAL_FOLD_TYPES,
+        registered_types,
+    )
     from tests.models.test_transcript_event_types_phase2a import (
         _literals,
         _orm_check_sql,
     )
 
-    missing = set(registered_types()) - _literals(_orm_check_sql())
+    # Local folds (fold_local, no event row) are the one legitimate exception.
+    missing = set(registered_types()) - LOCAL_FOLD_TYPES - _literals(_orm_check_sql())
     assert not missing, f"fold registered for non-allowlisted types: {missing}"
