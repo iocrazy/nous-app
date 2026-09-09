@@ -167,6 +167,26 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 与 `Skill` 同一段前缀：改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效，之后逐轮不变。本模块不为它计指纹（对所有 agent 恒等）。注意 `AskUser` 出现在 `FinishIssue` **之后**，所以 issue 触发与聊天触发的 `tools` 列表前缀不同——两条路本来就是两个缓存键，这不新增失效。
 
+### 工具结果：超时（任何工具，两条路都有）
+
+#### What the model sees
+
+2026-09-09（harness 二期 2b-1 Task 4）起每个工具调用都有墙钟上限（`runner/tool_timeouts.py`：Skill 30s / ResourceFetch 200s（高于其自身 180s 的抽帧截止，让它自己的「frame extraction timed out」结果仍可达）/ GenerateImage、GenerateVideo 600s / Delegate 900s / `skill.*` 同 Skill、`agent.*` 同 Delegate、其余 MCP 名 120s / 其他 60s；**AskUser、FinishIssue 不计时**——它们只写一行 transcript，切断会留下 runner 没看见的停靠问题；`config.yml TOOL_TIMEOUTS` 按工具名覆盖）。超时**不是** run 停止：模型收到的是那次调用的工具结果，正文是这一行 JSON（`timeout_s` / `elapsed_s` / `tool` / `message` 里的数值随实际值变化，其余字面量固定）：
+
+```json
+{"error": "timeout", "timed_out": true, "timeout_s": 200.0, "elapsed_s": 200.004, "tool": "ResourceFetch", "message": "Tool ResourceFetch timed out after 200s. Retry once with a narrower request, or choose another way."}
+```
+
+然后本轮照常继续——模型自己决定重试、换工具还是告知用户。工具自己抛异常（包括它内部 `wait_for` 抛的 `TimeoutError`）不经过这层：各调用点既有的类型化错误结果（如 `ResourceFetch failed: …` / `MCP transport failure: …`）原样不变。⚠️ Delegate 只是**入队**（`delegate_tool` 自己 180s 内等一次回执）：超时发生在入队之后时任务其实已派出，模型若据此重试会重复派发——`dedup_key` 可选，README 记录此风险，Task 8 真栈验收覆盖。
+
+#### Token effect
+
+一次超时一条 ≤220 字符（约 60 token）的工具消息，与任何工具结果同样进入本轮对话并随历史压缩；不随 agent 配置增长。
+
+#### KV Cache effect
+
+append-only：它是一条普通的 tool 角色消息，接在该次 tool_call 之后，不改动此前任何 token。本模块的时限表与 `TOOL_TIMEOUTS` 只影响是否产生这条消息，不影响前缀。
+
 ### `<available_resources>`（仅当本轮有 @-mention）
 
 #### What the model sees
