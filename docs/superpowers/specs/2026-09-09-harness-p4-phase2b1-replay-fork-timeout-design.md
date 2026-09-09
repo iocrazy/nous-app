@@ -118,6 +118,12 @@
 
 **实施记录（2026-09-09，Task 1 勘察）**：第 2 页的「issue 时间线一条系统行」不写——`issue_messages.kind='system_status'` 行由 DB trigger 写、无 body。时间线入口 = 分叉 run 自己的气泡头部 `Forked from run #… @ step N` 芯片（可点回原 run 并自动刮到该 step）。
 
+> **实施记录（Task 6，2026-09-09）**
+> - Cockpit 的分叉芯片显示 `Forked from run #<后 6 位> @ seq N`（Cockpit 手里没有原 run 的事件，换不成步序）；点击 → `replay.seekRun(原 run, seq)`——刮擦条改为挂在「正在回放的 run」上（无回放时才是最新 run），并滚动到原 run 的气泡（每个 run 行有 `id="run-<id>"`）。深链 `?run&seq` 仍只认最新 run。
+> - 分叉点标记只画在 `step_start` 对应的步骤节点上（`forkMarksFor`：`at_seq` → `step:<turn>:<step>`）；`turn_end` 处的分叉暂不画标记（TurnEndNode 没有可挂的行，留待需要时补）。
+> - 分叉成功后：清回放位置与 URL、toast「已分叉」、重拉 rollup 与线程；不做「自动刮到新 run」——新 run 行由 workflow 打开，前端按 rollup 轮询自然出现。
+> - 弹窗标题用刮擦条自己的位置文案（`turn T · step S (n/total)`），弹窗不重新计算步序。
+
 > **实施记录（Task 5，2026-09-09）**
 > - 刮擦条位置文案是 `turn T · step S (n/total)`（tick 自带的坐标 + 全局步序），Cockpit 角标是 `as of turn T · step S`（冻结视图的 `view.current`）——两处坐标同源，不用 `step.done`（那是 todo 进度，不是步序）。
 > - 刮擦条只挂在 issue **最新** run 上（`rollup.current_run`，无则线程最后一条 agent_run）；已结束的 run 打开时停在 Live 而不是最后一个刻度。Task 6 的「点分叉芯片 → 原 run 刮到第 N 步」需要放宽到指定 run。

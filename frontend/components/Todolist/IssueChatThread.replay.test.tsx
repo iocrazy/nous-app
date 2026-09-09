@@ -30,10 +30,14 @@ vi.mock('../agentActivity/useRunToolActivity', () => ({
 }));
 // The renderer's own folding is tested elsewhere; here only WHAT it receives.
 vi.mock('../agentActivity/TrajectoryRenderer', () => ({
-  TrajectoryRenderer: ({ events, isRunning }: { events: unknown[]; isRunning?: boolean }) => (
-    <div data-testid="traj" data-count={events.length} data-running={String(!!isRunning)} />
+  TrajectoryRenderer: ({ events, isRunning, forkMarks }: { events: unknown[]; isRunning?: boolean; forkMarks?: Record<string, string[]> }) => (
+    <div data-testid="traj" data-count={events.length} data-running={String(!!isRunning)} data-marks={JSON.stringify(forkMarks ?? {})} />
   ),
 }));
+vi.mock('../agentActivity/useRunForks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../agentActivity/useRunForks')>();
+  return { ...actual, useRunForks: () => [{ run_id: '701', at_seq: 4, created_at: '', status: 'completed' }] };
+});
 afterEach(cleanup);
 
 const runMsg = (id: string) =>
@@ -62,14 +66,14 @@ function mount(replay: React.ContextType<typeof ReplayContext>) {
 
 describe('IssueChatThread — replay (harness 2b-1 §1)', () => {
   it('Live: scrubber attached, all events, live step kept', () => {
-    mount({ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn() });
+    mount({ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() });
     expect(screen.getAllByTestId('replay-tick')).toHaveLength(3);
     expect(screen.getByTestId('traj').getAttribute('data-count')).toBe('6');
     expect(screen.getByTestId('traj').getAttribute('data-running')).toBe('true');
   });
 
   it('in the past: events[:seq] and the trajectory is frozen', () => {
-    mount({ runId: 'r1', seq: 4, view: null, cost: null, loading: false, seek: vi.fn() });
+    mount({ runId: 'r1', seq: 4, view: null, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() });
     expect(screen.getByTestId('traj').getAttribute('data-count')).toBe('4');
     expect(screen.getByTestId('traj').getAttribute('data-running')).toBe('false');
     expect(screen.getByTestId('run-trajectory').getAttribute('data-replay-seq')).toBe('4');
@@ -77,13 +81,13 @@ describe('IssueChatThread — replay (harness 2b-1 §1)', () => {
 
   it('a tick click seeks through the context', () => {
     const seek = vi.fn();
-    mount({ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek });
+    mount({ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek, seekRun: vi.fn() });
     fireEvent.click(screen.getAllByTestId('replay-tick')[1]);
     expect(seek).toHaveBeenCalledWith(4);
   });
 
   it('another run (not the newest) gets no scrubber and no slicing', () => {
-    mount({ runId: 'r-newer', seq: 4, view: null, cost: null, loading: false, seek: vi.fn() });
+    mount({ runId: 'r-newer', seq: 4, view: null, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() });
     expect(screen.queryByTestId('replay-scrubber')).toBeNull();
     expect(screen.getByTestId('traj').getAttribute('data-count')).toBe('6');
   });
@@ -92,5 +96,18 @@ describe('IssueChatThread — replay (harness 2b-1 §1)', () => {
     mount(null);
     expect(screen.queryByTestId('replay-scrubber')).toBeNull();
     expect(screen.getByTestId('traj').getAttribute('data-count')).toBe('6');
+  });
+
+  it('forks of this run become marks on the step they branched at; the row is addressable', () => {
+    mount(null);
+    expect(JSON.parse(screen.getByTestId('traj').getAttribute('data-marks') ?? '{}')).toEqual({ 'step:1:2': ['701'] });
+    expect(document.getElementById('run-r1')).not.toBeNull();
+  });
+
+  it('Fork on the scrubber hands seq + label to the context', () => {
+    const fork = vi.fn();
+    mount({ runId: 'r1', seq: 4, view: null, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn(), fork });
+    fireEvent.click(screen.getByTestId('replay-fork'));
+    expect(fork).toHaveBeenCalledWith(4, expect.stringContaining('step'));
   });
 });

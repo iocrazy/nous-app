@@ -62,3 +62,22 @@ describe('TrajectoryRenderer', () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+describe('TrajectoryRenderer — fork marks (harness 2b-1 §2)', () => {
+  it('draws a mark on the step a fork branched at, and jumps to that run', () => {
+    document.body.innerHTML = '<div id="run-701"></div>';
+    const jumped: string[] = [];
+    document.getElementById('run-701')!.scrollIntoView = (() => jumped.push('701')) as never;
+    render(<TrajectoryRenderer events={events} isRunning forkMarks={{ 'step:1:2': ['701'] }} />);
+    const marks = screen.getAllByTestId('trajectory-fork-mark');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].getAttribute('data-run')).toBe('701');
+    expect(marks[0].closest('[data-testid="traj-step-live"]')).not.toBeNull(); // step 2 is the live one here
+    fireEvent.click(marks[0]);
+    expect(jumped).toEqual(['701']);
+  });
+  it('no marks without forks', () => {
+    render(<TrajectoryRenderer events={events} isRunning />);
+    expect(screen.queryByTestId('trajectory-fork-mark')).toBeNull();
+  });
+});

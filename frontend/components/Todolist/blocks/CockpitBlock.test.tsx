@@ -108,7 +108,7 @@ describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
     const c = ctx('running');
     c.rollup!.budget = { budget_cents: 1000, spent_cents: 900, pct: 90, state: 'warn' };
     render(
-      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: frozenCost, loading: false, seek }}>
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: frozenCost, loading: false, seek, seekRun: vi.fn() }}>
         <CockpitBlockView ctx={c} />
       </ReplayContext.Provider>,
     );
@@ -130,7 +130,7 @@ describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
     const c = ctx('running');
     c.rollup!.budget = { budget_cents: 1000, spent_cents: 900, pct: 90, state: 'warn' };
     render(
-      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() }}>
         <CockpitBlockView ctx={c} />
       </ReplayContext.Provider>,
     );
@@ -140,7 +140,7 @@ describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
 
   it('ignores a replay of some other run and stays live', () => {
     render(
-      <ReplayContext.Provider value={{ runId: 'r-other', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
+      <ReplayContext.Provider value={{ runId: 'r-other', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() }}>
         <CockpitBlockView ctx={ctx('running')} />
       </ReplayContext.Provider>,
     );
@@ -150,10 +150,37 @@ describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
 
   it('seq null (Live) is not frozen even when attached', () => {
     render(
-      <ReplayContext.Provider value={{ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn() }}>
+      <ReplayContext.Provider value={{ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() }}>
         <CockpitBlockView ctx={ctx('running')} />
       </ReplayContext.Provider>,
     );
     expect(screen.queryByTestId('cockpit-asof')).toBeNull();
+  });
+});
+
+// ── harness 2b-1 §2: forked-from chip ──────────────────────────────────────
+describe('CockpitBlockView — fork chip (harness 2b-1 §2)', () => {
+  it('a forked run shows where it came from; clicking scrubs the original run to that seq', () => {
+    const seekRun = vi.fn();
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 1, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, fork: { of_run_id: 310819108761481, at_seq: 4 }, revision: 3 };
+    const scrolled: string[] = [];
+    document.body.innerHTML = '<div id="run-310819108761481"></div>';
+    document.getElementById('run-310819108761481')!.scrollIntoView = (() => scrolled.push('origin')) as never;
+    render(
+      <ReplayContext.Provider value={{ runId: 'r1', seq: null, view: null, cost: null, loading: false, seek: vi.fn(), seekRun }}>
+        <CockpitBlockView ctx={c} />
+      </ReplayContext.Provider>,
+    );
+    const chip = screen.getByTestId('cockpit-fork-chip');
+    expect(chip.textContent).toContain('Forked from run #761481 @ seq 4');
+    fireEvent.click(chip);
+    expect(seekRun).toHaveBeenCalledWith('310819108761481', 4);
+    expect(scrolled).toEqual(['origin']);
+  });
+
+  it('no chip on a run that is not a fork', () => {
+    render(<CockpitBlockView ctx={ctx('running')} />);
+    expect(screen.queryByTestId('cockpit-fork-chip')).toBeNull();
   });
 });

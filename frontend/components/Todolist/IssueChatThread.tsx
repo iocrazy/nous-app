@@ -28,6 +28,7 @@ import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
 import { ReplayScrubber } from '../agentActivity/ReplayScrubber';
 import { replayTicks } from '../agentActivity/replayTicks';
 import { isReplaying, useReplay } from './replayContext';
+import { forkMarksFor, useRunForks } from '../agentActivity/useRunForks';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -185,7 +186,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
     }
   };
   return (
-    <div className="my-3">
+    <div className="my-3" id={msg.agent_run_id ? `run-${msg.agent_run_id}` : undefined} data-testid="agent-run-row">
       <div className="flex items-center gap-2 mb-1.5">
         <AgentAvatar initials={initials} color={agent?.avatar_color} />
         <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'}</span>
@@ -252,6 +253,10 @@ const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({
     () => (replaying ? events.filter((e) => e.seq <= (replay?.seq as number)) : events),
     [replaying, events, replay?.seq],
   );
+  // Fork points (harness 2b-1 §2): runs forked from this one, drawn on the
+  // step they branched at.
+  const forks = useRunForks(runId, isRunning);
+  const forkMarks = useMemo(() => forkMarksFor(events, forks), [events, forks]);
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
@@ -266,7 +271,7 @@ const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({
         />
       )}
       {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
-      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} />
+      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} forkMarks={forkMarks} />
     </div>
   );
 };

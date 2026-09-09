@@ -5718,6 +5718,29 @@
     "steps": "{{count}} 步",
     "denied": "已拦截：{{tool}}"
   },
+  "fork": {
+    "title": "从{{step}}分叉",
+    "body": "从这一步起新开一个 run，历史与此处一致。原 run 与原会话原样保留。",
+    "steerLabel": "从这里开始改做什么（可选）",
+    "steerPlaceholder": "例如：第二幕更黑暗一点；结局保留。",
+    "confirm": "分叉",
+    "forking": "分叉中…",
+    "chip": "分叉自 run #{{run}} @ 第 {{step}} 步",
+    "chipSeq": "分叉自 run #{{run}} @ seq {{seq}}",
+    "mark": "分叉 → #{{run}}",
+    "started": "已分叉，新 run 正在启动。",
+    "error": {
+      "run_live": "run 还在跑，先暂停或取消",
+      "issue_busy": "issue 还在处理中，等它停下来",
+      "issue_terminal": "issue 已关闭，先重新打开再分叉",
+      "not_a_step_boundary": "请选一个步骤边界作为分叉点",
+      "not_an_issue_run": "只有 issue 的 run 可以分叉",
+      "run_state_unavailable": "读不到 run 状态，稍后再试",
+      "dispatch_failed": "分叉的 run 没能启动，issue 保持原状",
+      "not_found": "找不到这个 run",
+      "generic": "分叉失败"
+    }
+  },
   "replay": {
     "live": "实时",
     "asOf": "截至第 {{turn}} 轮 · 第 {{step}} 步",

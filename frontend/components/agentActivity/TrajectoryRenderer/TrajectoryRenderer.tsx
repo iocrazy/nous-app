@@ -19,6 +19,8 @@ export interface TrajectoryRendererProps {
   className?: string;
   /** Render nothing (not an empty frame) when there are no nodes. */
   hideWhenEmpty?: boolean;
+  /** Phase 2b-1 §2: node.key → ids of runs forked at that boundary. */
+  forkMarks?: Record<string, string[]>;
 }
 
 export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
@@ -26,6 +28,7 @@ export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
   isRunning = false,
   className = '',
   hideWhenEmpty = true,
+  forkMarks,
 }) => {
   const nodes = useMemo(() => foldEvents(events, { isRunning }), [events, isRunning]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -44,7 +47,9 @@ export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
       {nodes.map((node) => {
         const View = trajectoryNodeFor(node.kind);
         if (!View) return null;
-        return <View key={node.key} node={node} expanded={expanded.has(node.key)} onToggle={toggle} />;
+        return (
+          <View key={node.key} node={node} expanded={expanded.has(node.key)} onToggle={toggle} marks={forkMarks?.[node.key]} />
+        );
       })}
     </div>
   );

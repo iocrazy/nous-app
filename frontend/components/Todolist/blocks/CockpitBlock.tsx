@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pause, Play, Square } from 'lucide-react';
+import { GitFork, Pause, Play, Square } from 'lucide-react';
 
 import { aiLibraryService } from '../../../services/aiLibraryService';
 import { pauseIssue, resumeIssue } from '../../../services/issuesService';
@@ -73,6 +73,16 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // Spend as of that step comes from the frozen run cost; the cap stays the
   // issue's. Without a frozen cost the cell reads "—", never the live number.
   const frozenSpent = frozen ? replay?.cost?.spent_cents ?? null : null;
+  // Phase 2b-1 §2: a forked run says where it branched from; clicking scrubs
+  // the ORIGINAL run (same timeline) to that seq.
+  const forkedFrom = liveView?.fork ?? null;
+  const showFork = (of: number, seq: number) => {
+    const originId = String(of);
+    replay?.seekRun(originId, seq);
+    if (typeof document !== 'undefined') {
+      document.getElementById(`run-${originId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
   const step = stepProgress(view);
   const gauge = contextGauge(view);
   const cur = currentStep(view);
@@ -149,6 +159,18 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           {phase === 'running' && <span className="h-1.5 w-1.5 rounded-full bg-ok animate-pulse" />}
           {t(`issueDetail.phase.${phase}`, phase.replace(/_/g, ' '))}
         </span>
+        {forkedFrom && (
+          <button
+            type="button"
+            data-testid="cockpit-fork-chip"
+            onClick={() => showFork(forkedFrom.of_run_id, forkedFrom.at_seq)}
+            className="inline-flex items-center gap-1 rounded-full border border-info-line bg-info-soft px-2 py-0.5 text-[11px] text-info hover:brightness-110"
+            title={t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: String(forkedFrom.of_run_id).slice(-6), seq: forkedFrom.at_seq })}
+          >
+            <GitFork size={11} />
+            {t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: String(forkedFrom.of_run_id).slice(-6), seq: forkedFrom.at_seq })}
+          </button>
+        )}
         {step?.label && (
           <span className="text-[13px] text-ink-300 truncate">
             <span className="text-ink-500">{t('issueDetail.now', 'Now')}: </span>

@@ -41,6 +41,8 @@ import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { selectRunCost, selectRunView } from '../TaskCenter/runView';
 import { ReplayContext, type ReplayState } from './replayContext';
+import { ForkRunDialog } from './ForkRunDialog';
+import { forkErrorText } from './forkErrors';
 
 interface IssueDetailViewProps {
   issue: UiIssue;
@@ -187,26 +189,67 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       if (Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
     }
   }, [latestRunId, progressLoaded, searchParams, seekReplay]);
-  // A newer run appeared: the old position (and its URL) is no longer a replay of anything shown.
+  // A newer run appeared while replaying the previously-newest one: that
+  // position (and its URL) is stale. A deliberate replay of an older run
+  // (fork chip) survives — it names its run explicitly.
+  const prevLatest = useRef<string | null>(null);
   useEffect(() => {
-    if (replayPos && latestRunId && replayPos.runId !== latestRunId) {
+    const before = prevLatest.current;
+    prevLatest.current = latestRunId;
+    if (replayPos && before && latestRunId && latestRunId !== before && replayPos.runId === before) {
       setReplayPos(null);
       setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
     }
   }, [replayPos, latestRunId, setSearchParams]);
+  // ── Fork (harness 2b-1 §2) ─────────────────────────────────────────────
+  const [forkAt, setForkAt] = useState<{ runId: string; seq: number; label: string } | null>(null);
+  const [forkPending, setForkPending] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  // `refresh` (the thread re-read) is declared further down; reach it by ref.
+  const refreshMessagesRef = useRef<() => Promise<void>>(async () => undefined);
+  const confirmFork = useCallback(
+    async (steer: string | undefined) => {
+      if (!forkAt || forkPending) return;
+      setForkPending(true);
+      setForkError(null);
+      try {
+        await aiLibraryService.forkRun(forkAt.runId, { at_seq: forkAt.seq, steer });
+        setForkAt(null);
+        setReplayPos(null);
+        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
+        addToast(t('fork.started', 'Forked — the new run is starting.'), 'success');
+        void refreshProgress();
+        void refreshMessagesRef.current();
+      } catch (err) {
+        console.error('[IssueDetailView] fork failed', err);
+        setForkError(forkErrorText(err, t));
+      } finally {
+        setForkPending(false);
+      }
+    },
+    [forkAt, forkPending, setSearchParams, addToast, t, refreshProgress],
+  );
+  // The scrubber attaches to the run being replayed (a fork chip can point it
+  // at an older run of the same issue); at rest, the newest run.
+  const attachedRunId = replayPos?.runId ?? latestRunId;
   const replay = useMemo<ReplayState | null>(
     () =>
-      latestRunId
+      attachedRunId
         ? {
-            runId: latestRunId,
-            seq: replayPos && replayPos.runId === latestRunId ? replayPos.seq : null,
-            view: replayPos && replayPos.runId === latestRunId ? replayPos.view : null,
-            cost: replayPos && replayPos.runId === latestRunId ? replayPos.cost : null,
+            runId: attachedRunId,
+            seq: replayPos && replayPos.runId === attachedRunId ? replayPos.seq : null,
+            view: replayPos && replayPos.runId === attachedRunId ? replayPos.view : null,
+            cost: replayPos && replayPos.runId === attachedRunId ? replayPos.cost : null,
             loading: replayLoading,
-            seek: (seq) => void seekReplay(latestRunId, seq),
+            seek: (seq) => void seekReplay(attachedRunId, seq),
+            seekRun: (runId, seq) => void seekReplay(runId, seq),
+            fork: (seq, label) => {
+              setForkError(null);
+              setForkAt({ runId: attachedRunId, seq, label });
+            },
           }
         : null,
-    [latestRunId, replayPos, replayLoading, seekReplay],
+    [attachedRunId, replayPos, replayLoading, seekReplay],
   );
 
   // Stable ref so the WS event handler always reads the latest messages
@@ -465,6 +508,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched, handleAnswerQuestion],
   );
   const cockpitBlocks = blocksFor('cockpit', blockCtx);
+  useEffect(() => {
+    refreshMessagesRef.current = refresh;
+  }, [refresh]);
   const contextBlocks = blocksFor('context', blockCtx);
   const agentLive = isAgentWorking || phase === 'running';
 
@@ -515,6 +561,15 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               <b.component key={b.id} ctx={blockCtx} />
             ))}
           </ReplayContext.Provider>
+          {forkAt && (
+            <ForkRunDialog
+              stepLabel={forkAt.label}
+              pending={forkPending}
+              error={forkError}
+              onConfirm={(steer) => void confirmFork(steer)}
+              onCancel={() => { if (!forkPending) setForkAt(null); }}
+            />
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button

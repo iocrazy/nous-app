@@ -72,7 +72,7 @@ describe('ReplayScrubber', () => {
     const onFork = vi.fn();
     render(<ReplayScrubber ticks={TICKS} seq={4} isRunning={false} onSeek={vi.fn()} onFork={onFork} />);
     fireEvent.click(screen.getByTestId('replay-fork'));
-    expect(onFork).toHaveBeenCalledWith(4);
+    expect(onFork).toHaveBeenCalledWith(4, 'turn 1 · step 2 (2/3)');
     expect(screen.getByTestId('replay-fork').textContent).toContain('Fork from step 2');
     cleanup();
     render(<ReplayScrubber ticks={TICKS} seq={9} isRunning={false} onSeek={vi.fn()} onFork={onFork} />);

@@ -58,6 +58,10 @@ export interface RunView {
   /** Phase 2a: the open typed question (folded from question_asked, cleared
    *  by question_answered). Read through questionFromRunView. */
   question?: Record<string, unknown> | null;
+  /** Phase 2b-1 §2: set only on a forked run — where it branched from. */
+  fork?: { of_run_id: number; at_seq: number } | null;
+  /** Phase 2b-1 §3: per-run tool timeout gauge. */
+  tools?: { timed_out: number; last_timed_out: string | null } | null;
   revision: number;
 }
 
