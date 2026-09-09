@@ -67,10 +67,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   if (!rollup) return null;
 
   const phase = rollup.phase;
-  const view = frozen
-    ? replay?.view ?? null
-    : selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
-  const asOfStep = frozen ? replay?.view?.step?.done ?? replay?.view?.current?.step ?? null : null;
+  const liveView = selectRunView(rollup.current_run ? { view: rollup.current_run.view } : null);
+  const view = frozen ? replay?.view ?? null : liveView;
+  const asOf = frozen ? replay?.view?.current ?? null : null;
+  // Spend as of that step comes from the frozen run cost; the cap stays the
+  // issue's. Without a frozen cost the cell reads "—", never the live number.
+  const frozenSpent = frozen ? replay?.cost?.spent_cents ?? null : null;
   const step = stepProgress(view);
   const gauge = contextGauge(view);
   const cur = currentStep(view);
@@ -81,11 +83,13 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // while the issue marker is absent. A parked issue (marker present) draws
   // its card in NeedsInputCard below; a second, always-enabled copy here
   // would answer twice (the second POST is a 409).
+  // Always the LIVE view: a question folded at some past step is not open
+  // now, and the one open now must stay answerable while scrubbing.
   const question =
     phase === 'waiting_input' &&
     ctx.env.onAnswerQuestion &&
     !questionFromMarker(rollup.execution_state)
-      ? questionFromRunView(view)
+      ? questionFromRunView(liveView)
       : null;
   const startedMs = rollup.current_run?.started_at ? Date.parse(rollup.current_run.started_at) : NaN;
   const elapsed = Number.isFinite(startedMs) ? Math.max(0, Math.floor((Date.now() - startedMs) / 1000)) : null;
@@ -201,11 +205,19 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         </div>
       )}
 
-      {frozen && (
+      {frozen && replay && (
         <div className="flex items-center justify-end">
-          <span data-testid="cockpit-asof" className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info">
-            {t('replay.asOf', 'as of step {{n}}', { n: asOfStep ?? '?' })}
-          </span>
+          <button
+            type="button"
+            data-testid="cockpit-asof"
+            onClick={() => replay.seek(null)}
+            title={t('replay.backToLive', 'Back to live')}
+            className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info hover:brightness-110"
+          >
+            {t('replay.asOf', 'as of turn {{turn}} · step {{step}}', { turn: asOf?.turn ?? '?', step: asOf?.step ?? '?' })}
+            {' · '}
+            {t('replay.live', 'Live')}
+          </button>
         </div>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -229,8 +241,16 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             <span className="text-ink-600 text-[12px]">—</span>
           )}
         </Cell>
-        <Cell label={t('issueDetail.budget', 'Budget')} testId="cockpit-budget" bar={budget.budget_cents != null ? { pct: budget.pct ?? 0, tone: budgetTone } : undefined}>
-          {formatCents(budget.spent_cents)}
+        <Cell
+          label={t('issueDetail.budget', 'Budget')}
+          testId="cockpit-budget"
+          bar={
+            budget.budget_cents != null
+              ? { pct: frozen ? (frozenSpent != null ? (frozenSpent / Math.max(1, budget.budget_cents)) * 100 : 0) : budget.pct ?? 0, tone: budgetTone }
+              : undefined
+          }
+        >
+          {formatCents(frozen ? frozenSpent : budget.spent_cents)}
           <span className="text-ink-500 text-[12px]"> / {budget.budget_cents != null ? formatCents(budget.budget_cents) : '∞'}</span>
         </Cell>
         <Cell label={t('issueDetail.runs', 'Runs')} testId="cockpit-runs">

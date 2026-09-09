@@ -127,7 +127,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   // issue.rollup (harness P4): phase / current run / budget / children, derived
   // server-side from the runs. Polls while live, nudged by agent_runs Realtime.
-  const { progress, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
+  const { progress, loaded: progressLoaded, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
   const phase = progress?.phase ?? null;
 
   // ── Replay (harness 2b-1 §1) ───────────────────────────────────────────
@@ -155,7 +155,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       setReplayLoading(true);
       try {
         const at = await aiLibraryService.getRunViewAt(runId, seq);
-        setReplayPos({ runId, seq, view: selectRunView({ view: at.view }), cost: selectRunCost({ cost: at.cost }) });
+        const view = selectRunView({ view: at.view });
+        if (!view) {
+          // A row that predates the folded view: nothing to freeze on — say so
+          // instead of a panel of dashes wearing an "as of" badge.
+          addToast(t('replay.unavailable', 'Replay is not available for that step.'), 'error');
+          return;
+        }
+        setReplayPos({ runId, seq, view, cost: selectRunCost({ cost: at.cost }) });
         setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('run', runId); n.set('seq', String(seq)); return n; }, { replace: true });
       } catch (err) {
         console.error('[IssueDetailView] replay seek failed', err);
@@ -164,17 +171,29 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         setReplayLoading(false);
       }
     },
-    [setSearchParams, addToast],
+    [setSearchParams, addToast, t],
   );
-  // Deep link: `?run=&seq=` on mount (once), only for the run the scrubber can attach to.
+  // Deep link: `?run=&seq=` — honoured once, when the rollup has loaded (so
+  // the newest run is known, not guessed from an older thread row) and the
+  // link names that run. A link to some other run is simply not a replay.
   const deepLinked = useRef(false);
   useEffect(() => {
-    if (deepLinked.current || !latestRunId) return;
+    if (deepLinked.current || !latestRunId || !progressLoaded) return;
     const run = searchParams.get('run');
     const seq = Number(searchParams.get('seq'));
-    deepLinked.current = true;
-    if (run && run === latestRunId && Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
-  }, [latestRunId, searchParams, seekReplay]);
+    if (!run) { deepLinked.current = true; return; }
+    if (run === latestRunId) {
+      deepLinked.current = true;
+      if (Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
+    }
+  }, [latestRunId, progressLoaded, searchParams, seekReplay]);
+  // A newer run appeared: the old position (and its URL) is no longer a replay of anything shown.
+  useEffect(() => {
+    if (replayPos && latestRunId && replayPos.runId !== latestRunId) {
+      setReplayPos(null);
+      setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('run'); n.delete('seq'); return n; }, { replace: true });
+    }
+  }, [replayPos, latestRunId, setSearchParams]);
   const replay = useMemo<ReplayState | null>(
     () =>
       latestRunId

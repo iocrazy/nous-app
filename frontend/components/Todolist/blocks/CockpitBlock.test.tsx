@@ -11,7 +11,11 @@ import type { IssueBlockContext } from '../issueBlocks';
 import type { IssueProgress } from '../../../services/issuesService';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, fallback?: string) => fallback ?? key }),
+  useTranslation: () => ({
+    // fallback template + interpolation, so as-of numbers are assertable
+    t: (key: string, fallback?: string, vars?: Record<string, unknown>) =>
+      (fallback ?? key).replace(/\{\{(\w+)\}\}/g, (_, n) => String(vars?.[n] ?? `{{${n}}}`)),
+  }),
 }));
 const pauseIssue = vi.fn();
 const resumeIssue = vi.fn();
@@ -94,20 +98,44 @@ describe('CockpitBlockView — pause / resume (phase 2a §2)', () => {
 import { ReplayContext } from '../replayContext';
 
 describe('CockpitBlockView — replay as-of (harness 2b-1 §1)', () => {
-  const frozenView = { v: 1, phase: 'running', step: { done: 7, total: 12, label: 'Scene 7' }, current: { turn: 1, step: 7, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, question: null, last_answer: null, revision: 30 } as never;
+  // step.done (todo progress 7/12) deliberately differs from current.step (5):
+  // the badge must show the STEP COORDINATE, not the todo count.
+  const frozenView = { v: 1, phase: 'running', step: { done: 7, total: 12, label: 'Scene 7' }, current: { turn: 2, step: 5, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, question: null, last_answer: null, revision: 30 } as never;
+  const frozenCost = { spent_cents: 250, by_step: [], by_model: {}, budget_cents: null, pct: null } as never;
 
-  it('reads the frozen view, shows the badge and disables the controls', () => {
+  it('reads the frozen view + cost, shows the as-of coordinates and disables the controls', () => {
+    const seek = vi.fn();
+    const c = ctx('running');
+    c.rollup!.budget = { budget_cents: 1000, spent_cents: 900, pct: 90, state: 'warn' };
     render(
-      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
-        <CockpitBlockView ctx={ctx('running')} />
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: frozenCost, loading: false, seek }}>
+        <CockpitBlockView ctx={c} />
       </ReplayContext.Provider>,
     );
     expect(screen.getByTestId('cockpit-steps').textContent).toContain('7');
     expect(screen.getByTestId('cockpit-steps').textContent).toContain('12');
-    // the file's t() mock echoes the fallback template — interpolation is i18next's job
-    expect(screen.getByTestId('cockpit-asof').textContent).toContain('as of step');
+    expect(screen.getByTestId('cockpit-asof').textContent).toContain('as of turn 2 · step 5');
+    // spend as of that step ($2.50), not the live issue spend ($9.00); cap stays
+    expect(screen.getByTestId('cockpit-budget').textContent).toContain('$2.50');
+    expect(screen.getByTestId('cockpit-budget').textContent).not.toContain('$9.00');
+    expect(screen.getByTestId('cockpit-budget').textContent).toContain('$10.00');
     expect((screen.getByTestId('cockpit-pause') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('cockpit-cancel') as HTMLButtonElement).disabled).toBe(true);
+    // the badge is the way back to Live even when the scrubber is out of view
+    fireEvent.click(screen.getByTestId('cockpit-asof'));
+    expect(seek).toHaveBeenCalledWith(null);
+  });
+
+  it('a frozen view without a cost shows — for spend, never the live number', () => {
+    const c = ctx('running');
+    c.rollup!.budget = { budget_cents: 1000, spent_cents: 900, pct: 90, state: 'warn' };
+    render(
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn() }}>
+        <CockpitBlockView ctx={c} />
+      </ReplayContext.Provider>,
+    );
+    expect(screen.getByTestId('cockpit-budget').textContent).toContain('—');
+    expect(screen.getByTestId('cockpit-budget').textContent).not.toContain('$9.00');
   });
 
   it('ignores a replay of some other run and stays live', () => {

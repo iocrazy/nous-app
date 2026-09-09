@@ -23,6 +23,8 @@ import {
 } from './toolActivity';
 
 const LIVE_POLL_MS = 5_000;
+// 500 events per page × 40 = 20k events — far beyond any real run.
+const MAX_PAGES = 40;
 
 interface CachedRunToolActivity {
   activities: ToolActivity[];
@@ -91,9 +93,20 @@ export function useRunToolActivity(
         // run's events) and a full rebuild through fromTranscriptEvents —
         // which dedupes on the DB's UNIQUE(run_id, seq) — cannot double-count
         // the way an append-on-poll accumulator can.
-        const resp = await aiLibraryService.getRunEvents(runId, 0);
-        if (cancelled) return;
-        const items = resp.items ?? [];
+        // …paging with after_seq until the server says there is no more:
+        // the endpoint caps a page at `limit` (500) and a truncated
+        // transcript would silently fold a truncated prefix (replay makes
+        // completeness load-bearing — harness 2b-1 §1).
+        const items: AgentRunEvent[] = [];
+        let after = 0;
+        for (let page = 0; page < MAX_PAGES; page += 1) {
+          const resp = await aiLibraryService.getRunEvents(runId, after);
+          if (cancelled) return;
+          const got = resp.items ?? [];
+          items.push(...got);
+          if (!resp.has_more || got.length === 0) break;
+          after = got[got.length - 1].seq;
+        }
         const nextActivities = fromTranscriptEvents(items);
         const nextDenials = denialsFromTranscriptEvents(items);
         if (!isRunning) {

@@ -7,7 +7,7 @@
  * agentsMap / userLabel passed in by the parent page.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
@@ -310,6 +310,13 @@ const RunGroupCard: React.FC<{
 }> = ({ entry, agentsById, selfUserId, conversationHref }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  // Replay (harness 2b-1 §1): the scrubber lives on the newest run's row —
+  // a collapsed group would hide it (and the only way back to Live).
+  const replay = useReplay();
+  const holdsReplayRun = !!replay?.runId && entry.runs.some((r) => r.agent_run_id === replay.runId);
+  useEffect(() => {
+    if (holdsReplayRun) setExpanded(true);
+  }, [holdsReplayRun]);
   const agentId = entry.runs[0]?.author_agent_id;
   const agent = agentId ? agentsById[agentId] : null;
   const summary = [

@@ -34,9 +34,11 @@ describe('ReplayScrubber', () => {
 
   it('shows the step position (turn_end not counted) and marks the current tick', () => {
     render(<ReplayScrubber ticks={TICKS} seq={4} isRunning={false} onSeek={vi.fn()} />);
-    expect(screen.getByTestId('replay-position').textContent).toBe('step 2 / 3');
+    expect(screen.getByTestId('replay-position').textContent).toBe('turn 1 · step 2 (2/3)');
     expect(screen.getAllByTestId('replay-tick')[1].getAttribute('data-current')).toBe('true');
-    expect(screen.getByTestId('replay-scrubber').getAttribute('aria-valuenow')).toBe('4');
+    expect(screen.getByTestId('replay-scrubber').getAttribute('data-seq')).toBe('4');
+    // real buttons must stay in the a11y tree: not a slider with children
+    expect(screen.getByTestId('replay-scrubber').getAttribute('role')).toBe('group');
   });
 
   it('arrow keys step through boundaries; past the last one returns to Live', () => {
@@ -51,6 +53,8 @@ describe('ReplayScrubber', () => {
     render(<ReplayScrubber ticks={TICKS} seq={9} isRunning={false} onSeek={onSeek} />);
     fireEvent.keyDown(screen.getByTestId('replay-scrubber'), { key: 'ArrowRight' });
     expect(onSeek).toHaveBeenLastCalledWith(null);
+    fireEvent.keyDown(screen.getByTestId('replay-scrubber'), { key: 'Home' });
+    expect(onSeek).toHaveBeenLastCalledWith(2);
   });
 
   it('Live is on while at the present; clicking Live from the past seeks null', () => {

@@ -5720,14 +5720,14 @@
   },
   "replay": {
     "live": "Live",
-    "asOf": "as of step {{n}}",
-    "stepOf": "step {{n}} / {{total}}",
+    "asOf": "as of turn {{turn}} · step {{step}}",
+    "backToLive": "Back to live",
+    "stepOf": "turn {{turn}} · step {{step}} ({{n}}/{{total}})",
     "turnEnd": "turn end",
-    "prev": "Previous step",
-    "next": "Next step",
     "fork": "Fork from step {{n}}",
     "scrubber": "Replay",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "unavailable": "Replay is not available for that step."
   },
   "question": {
     "pickOne": "Pick one of {{count}}",

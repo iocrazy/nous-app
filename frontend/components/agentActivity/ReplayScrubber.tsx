@@ -38,6 +38,9 @@ export const ReplayScrubber: React.FC<ReplayScrubberProps> = ({ ticks, seq, isRu
         if (idx === -1) return;
         if (idx >= ticks.length - 1) onSeek(null);
         else onSeek(ticks[idx + 1].seq);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        onSeek(ticks[0].seq);
       } else if (e.key === 'End') {
         e.preventDefault();
         onSeek(null);
@@ -52,17 +55,19 @@ export const ReplayScrubber: React.FC<ReplayScrubberProps> = ({ ticks, seq, isRu
     ? t('replay.live', 'Live')
     : current?.kind === 'turn_end'
       ? t('replay.turnEnd', 'turn end')
-      : t('replay.stepOf', 'step {{n}} / {{total}}', { n: stepIdx + 1, total: steps.length });
+      : t('replay.stepOf', 'turn {{turn}} · step {{step}} ({{n}}/{{total}})', {
+          turn: current?.turn ?? '?',
+          step: current?.step ?? '?',
+          n: stepIdx + 1,
+          total: steps.length,
+        });
 
   return (
     <div
       data-testid="replay-scrubber"
-      role="slider"
-      aria-valuemin={ticks[0]?.seq}
-      aria-valuemax={ticks[ticks.length - 1]?.seq}
-      aria-valuenow={seq ?? undefined}
-      aria-valuetext={position}
-      aria-label={t('replay.scrubber', 'Replay')}
+      role="group"
+      aria-label={`${t('replay.scrubber', 'Replay')}: ${position}`}
+      data-seq={seq ?? ''}
       tabIndex={0}
       onKeyDown={onKeyDown}
       className={`flex items-center gap-2 rounded-md border px-2 py-1 text-[12px] ${live ? 'border-ink-800 bg-ink-900/40 text-ink-400' : 'border-info-line bg-info-soft text-info'}`}

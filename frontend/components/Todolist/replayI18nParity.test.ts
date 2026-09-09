@@ -1,4 +1,4 @@
-// en/zh parity for the `replay.*` namespace (ReplayScrubber, cockpit as-of, and their mounts),
+// en/zh parity for the `replay.*` namespace (ReplayScrubber / cockpit as-of and their mounts),
 // scanned from source like prompts/promptsI18nParity.test.ts — a key added in
 // one locale file only is invisible to English machines and silently English
 // for zh users.
@@ -27,7 +27,7 @@ function at(tree: Record<string, unknown>, key: string): unknown {
 describe('replay.* locale parity', () => {
   const keys = new Set<string>();
   for (const f of new Set(ROOTS.flatMap(sources))) {
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(/t\(\s*'(question\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/t\(\s*'(replay\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
   }
   const en = JSON.parse(fs.readFileSync(path.join(LOCALES, 'en.json'), 'utf8'));
   const zh = JSON.parse(fs.readFileSync(path.join(LOCALES, 'zh.json'), 'utf8'));
