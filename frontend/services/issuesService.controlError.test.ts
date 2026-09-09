@@ -31,6 +31,29 @@ describe('pauseIssue / resumeIssue — typed control errors', () => {
     expect(err.message).not.toContain('{');
   });
 
+  it('reads the PRODUCTION envelope {error, code: http_409, details: {code, message}} (real stack 2026-09-09)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json(409, {
+        success: false,
+        error: 'Request failed',
+        code: 'http_409',
+        request_id: '048e5f13-65f1-4d38-8461-bf3808dc7029',
+        details: { code: 'already_paused', message: 'issue is already paused' },
+      }),
+    );
+    const err = await pauseIssue(5).catch((e) => e);
+    expect(err).toBeInstanceOf(IssueControlError);
+    expect(err.code).toBe('already_paused');
+    expect(err.message).toBe('issue is already paused');
+  });
+
+  it('an envelope with null details keeps http_<status> and the error text', async () => {
+    fetchMock.mockResolvedValueOnce(json(404, { success: false, error: 'Issue not found', code: 'http_404', request_id: 'x', details: null }));
+    const err = await resumeIssue(5).catch((e) => e);
+    expect(err.code).toBe('http_404');
+    expect(err.message).toBe('Issue not found');
+  });
+
   it('maps a plain-string detail to http_<status> with the detail as message', async () => {
     fetchMock.mockResolvedValueOnce(json(404, { detail: 'Issue not found' }));
     const err = await resumeIssue(5).catch((e) => e);

@@ -237,21 +237,28 @@ export class IssueControlError extends Error {
 }
 
 /** Like `_json`, but a non-2xx becomes an IssueControlError carrying the
- *  server's `detail.code` (FastAPI `{detail: {code, message}}` or a plain
- *  string detail). */
+ *  server's typed code. Production wraps every HTTPException in the
+ *  ErrorResponse envelope (`backend/app/core/exceptions.py`):
+ *  `{error, code: "http_<status>", request_id, details: <exc.detail | null>}`
+ *  — the typed `{code, message}` lives under `details`. A bare FastAPI
+ *  `{detail: …}` (unwrapped routers, tests) is accepted too. Found on the
+ *  real stack 2026-09-09: reading only `detail` made every refusal
+ *  `http_409` with "409 Conflict" as its copy. */
 async function _controlJson<T>(res: Response): Promise<T> {
   if (res.ok) return res.status === 204 ? (undefined as unknown as T) : res.json();
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    const detail = body?.detail;
+    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
+    const detail = body?.details ?? body?.detail;
     if (detail && typeof detail === 'object') {
       const d = detail as { code?: unknown; message?: unknown };
       if (typeof d.code === 'string' && d.code) code = d.code;
       if (typeof d.message === 'string' && d.message) message = d.message;
     } else if (typeof detail === 'string' && detail) {
       message = detail;
+    } else if (typeof body?.error === 'string' && body.error) {
+      message = body.error;
     }
   } catch (err) {
     console.error('[issuesService] control error body was not JSON', err);
