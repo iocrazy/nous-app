@@ -275,8 +275,11 @@ def test_dispatch_endpoint_reuses_the_shared_workflow_id_persist():
     # service_role hop lives in exactly one place.
     assert "_start_execute_issue(" in inspect.getsource(r.dispatch_issue)
     assert "_start_execute_issue(" in inspect.getsource(r.resume_issue)
-    start = inspect.getsource(r._start_execute_issue)
+    from app.services.issues import issue_dispatch
+
+    start = inspect.getsource(issue_dispatch.start_execute_issue)
     assert "_persist_workflow_id(" in start and "SET LOCAL ROLE" not in start
+    assert "start_execute_issue(" in inspect.getsource(r._start_execute_issue)
     assert "SET LOCAL ROLE service_role" in inspect.getsource(r._persist_workflow_id)
 
 

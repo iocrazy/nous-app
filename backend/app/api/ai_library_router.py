@@ -2451,35 +2451,87 @@ async def get_run_view_at(
     call. ``view.context`` is always null here: replay() has no live
     context window, so the scrubber must not render it.
     """
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
-    from app.models import AgentRunTranscriptEvents as TE
     from app.services.ai.runner.run_projection import registered_types, replay
 
     runs_repo = get_agent_runs_repository()
     row = await runs_repo.get_by_id(run_id, user_id=_coerce_user_uuid(auth.user_id))
     if not row:
         raise HTTPException(status_code=404, detail="run not found")
-    async with read_scope() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(TE.seq, TE.event_type, TE.payload)
-                    .where(TE.run_id == int(run_id))
-                    .where(TE.seq <= seq)
-                    .where(TE.event_type.in_(list(registered_types())))
-                    .order_by(TE.seq.asc())
-                )
-            )
-            .mappings()
-            .all()
-        )
+    # The one transcript read (phase 2b-1 Task 3) shared with the fork service.
+    rows = await runs_repo.list_transcript_events(
+        int(run_id), upto_seq=seq, event_types=list(registered_types())
+    )
     views = replay(
         [(r["event_type"], r["payload"] or {}) for r in rows],
         seqs=[int(r["seq"]) for r in rows],
     )
     return {"seq": seq, "view": views["view"], "cost": views["cost"]}
+
+
+class ForkRunRequest(BaseModel):
+    """Phase 2b-1 §2: fork an issue run at a step boundary."""
+
+    at_seq: int = Field(ge=1, description="seq of a step_start / turn_end event")
+    steer: Optional[str] = Field(
+        default=None, max_length=4000, description="the forked turn's user message"
+    )
+
+
+@router.post(
+    "/runs/{run_id}/fork",
+    status_code=status.HTTP_201_CREATED,
+    summary="Fork an issue run at a step boundary (phase 2b-1)",
+)
+async def fork_run_endpoint(
+    run_id: str, body: ForkRunRequest, auth: AuthDep
+) -> Dict[str, Any]:
+    """New session seeded from the origin conversation + ``events[:at_seq]``,
+    the issue re-pointed and re-dispatched. The original run is never
+    written. Refusals are typed: ``detail = {code, message}`` with
+    ``not_an_issue_run`` 409 / ``run_live`` 409 / ``issue_terminal`` 409 /
+    ``not_a_step_boundary`` 400 / ``run_state_unavailable`` 503 /
+    ``dispatch_failed`` 503. ``run_id`` in the response is null — the run
+    row is opened by the workflow; poll the issue's progress."""
+    from app.services.issues.issue_fork import ForkRejected, default_deps, fork_run
+
+    try:
+        run_key = int(run_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        return await fork_run(
+            run_key,
+            at_seq=body.at_seq,
+            steer=body.steer,
+            user_id=str(auth.user_id),
+            deps=default_deps(),
+        )
+    except ForkRejected as rej:
+        raise HTTPException(
+            status_code=rej.status, detail={"code": rej.code, "message": str(rej)}
+        ) from rej
+
+
+@router.get(
+    "/runs/{run_id}/forks",
+    summary="Runs forked from this run (phase 2b-1)",
+)
+async def list_run_forks(run_id: str, auth: AuthDep) -> Dict[str, Any]:
+    runs_repo = get_agent_runs_repository()
+    if not await runs_repo.get_by_id(run_id, user_id=_coerce_user_uuid(auth.user_id)):
+        raise HTTPException(status_code=404, detail="run not found")
+    rows = await runs_repo.list_forks(int(run_id))
+    return {
+        "items": [
+            {
+                "run_id": str(r["id"]),
+                "at_seq": r.get("fork_at_seq"),
+                "created_at": r.get("created_at"),
+                "status": r.get("status"),
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.get(

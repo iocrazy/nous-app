@@ -347,6 +347,17 @@ async def _clear_issue_lock(workflow_id: str) -> None:
         )
 
 
+async def release_parked_workflow(workflow_id: str) -> None:
+    """Abandon a workflow parked on ``await_user_input``: clear the marker,
+    cancel the workflow, release the issue execution lock it holds. The
+    stale-wait reaper and the fork endpoint (phase 2b-1 §2 — "from here,
+    do this instead") are the two callers; a parked workflow never reaches
+    ``execute_issue``'s ``finally: clear_lock`` on its own."""
+    await clear_awaiting_input(workflow_id=workflow_id)
+    await _cancel_workflow(workflow_id)
+    await _clear_issue_lock(workflow_id)
+
+
 async def reap_stale_input_waits(*, current_version: str) -> int:
     """部署换版本后,旧版本挂起的 workflow 无 worker 认领 —— 假活。
     清标记 + cancel + 释放 issue 执行锁,使回复自动走旧路径;issue 停在
@@ -360,9 +371,7 @@ async def reap_stale_input_waits(*, current_version: str) -> int:
             continue
         wf = row["dbos_workflow_id"]
         try:
-            await clear_awaiting_input(workflow_id=wf)
-            await _cancel_workflow(wf)
-            await _clear_issue_lock(wf)
+            await release_parked_workflow(wf)
             cleaned += 1
             logger.info(f"[input_gate] reaped stale wait wf={wf}")
         except Exception as exc:  # noqa: BLE001
@@ -376,5 +385,6 @@ __all__ = [
     "signal_user_reply",
     "mark_awaiting_input",
     "clear_awaiting_input",
+    "release_parked_workflow",
     "reap_stale_input_waits",
 ]

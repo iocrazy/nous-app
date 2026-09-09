@@ -445,28 +445,15 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
 
 
 async def _start_execute_issue(issue_id: int) -> str:
-    """Dispatch ``execute_issue`` under a fresh workflow_id and persist it.
-    Shared by ``/dispatch`` and ``/resume``. Raises the endpoint-shaped
-    HTTPException (500) when DBOS refuses the dispatch."""
-    import uuid as _uuid
+    """Shared by ``/dispatch`` and ``/resume`` (and, via the service, the
+    fork endpoint): ``issue_dispatch.start_execute_issue`` with the DBOS
+    refusal mapped to the endpoint-shaped HTTPException (500)."""
+    from app.services.issues.issue_dispatch import DispatchFailed, start_execute_issue
 
-    # Unique per dispatch so an issue can be re-dispatched after a prior run
-    # finished or errored — a fixed `issue-{id}` id would dedup in DBOS → the
-    # re-dispatch becomes a silent no-op. The atomic_checkout CAS lock
-    # (execution_locked_at) still prevents concurrent double-runs.
-    workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
     try:
-        _dispatch_execute_issue(issue_id, workflow_id)
-    except Exception as e:
-        # Duplicate workflow_id is a soft success — DBOS already has it.
-        if (
-            "already exists" not in repr(e).lower()
-            and "duplicate" not in repr(e).lower()
-        ):
-            logger.warning(f"[issues] dispatch {issue_id} failed: {e}")
-            raise HTTPException(status_code=500, detail=f"DBOS dispatch failed: {e}")
-    await _persist_workflow_id(issue_id, workflow_id)
-    return workflow_id
+        return await start_execute_issue(issue_id)
+    except DispatchFailed as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 async def _persist_workflow_id(issue_id: int, workflow_id: str) -> None:

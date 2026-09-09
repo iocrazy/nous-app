@@ -749,6 +749,62 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] running_root_run_id failed: {e}")
             raise
 
+    async def list_transcript_events(
+        self,
+        run_id: int,
+        *,
+        upto_seq: Optional[int] = None,
+        event_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """``{seq, event_type, payload}`` rows of one run in seq order (mig
+        397 ``agent_run_transcript_events``). ``upto_seq`` is INCLUSIVE;
+        ``event_types`` narrows to those types. Phase 2b-1: the one read the
+        fork service and the ``view-at`` endpoint share — do not write a
+        third copy of this query."""
+        from app.models import AgentRunTranscriptEvents as TE
+
+        stmt = (
+            select(TE.seq, TE.event_type, TE.payload)
+            .where(TE.run_id == int(run_id))
+            .order_by(TE.seq.asc())
+        )
+        if upto_seq is not None:
+            stmt = stmt.where(TE.seq <= int(upto_seq))
+        if event_types:
+            stmt = stmt.where(TE.event_type.in_(list(event_types)))
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [
+            {
+                "seq": int(r["seq"]),
+                "event_type": r["event_type"],
+                "payload": r["payload"],
+            }
+            for r in rows
+        ]
+
+    async def list_forks(self, run_id: int) -> List[Dict[str, Any]]:
+        """Runs whose ``fork_of_run_id`` is this run (mig 453), oldest first.
+        Phase 2b-1 ``GET /runs/{id}/forks``."""
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            AgentRuns.id,
+                            AgentRuns.fork_at_seq,
+                            AgentRuns.created_at,
+                            AgentRuns.status,
+                        )
+                        .where(AgentRuns.fork_of_run_id == int(run_id))
+                        .order_by(AgentRuns.created_at.asc())
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [dict(r) for r in rows]
+
     async def spent_cents_for_issue(
         self,
         *,
