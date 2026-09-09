@@ -63,6 +63,10 @@ class _Deps:
     async def get_issue(self, issue_id):
         return self.issue
 
+    async def get_issue_by_session(self, session_id):
+        self.reads = getattr(self, "reads", []) + [("issue_by_session", session_id)]
+        return self.issue if session_id == 100 else None
+
     async def list_events(self, run_id, at_seq):
         self.reads = getattr(self, "reads", []) + [("events", run_id, at_seq)]
         return self.events
@@ -240,10 +244,29 @@ async def test_no_origin_session_means_events_only():
     assert [m["content"] for m in msgs] == ["go", "act 1"]
 
 
+async def test_a_run_without_a_backfilled_issue_id_is_resolved_through_its_conversation():
+    """agent_runs.issue_id is NULL on runs whose backfill never happened (the
+    2a acceptance run on prod); conversation_id == issues.ai_session_id."""
+    d = _Deps()
+    d.run.update(issue_id=None, conversation_id=100)
+    out = await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert out["issue_id"] == 9
+    assert ("issue_by_session", 100) in d.reads
+
+
 @pytest.mark.parametrize(
     "mutate, code, status",
     [
-        (lambda d: d.run.update(issue_id=None), "not_an_issue_run", 409),
+        (
+            lambda d: d.run.update(issue_id=None, conversation_id=None),
+            "not_an_issue_run",
+            409,
+        ),
+        (
+            lambda d: d.run.update(issue_id=None, conversation_id=555),
+            "not_an_issue_run",
+            409,
+        ),
         (lambda d: setattr(d, "run", None), "not_found", 404),
         (lambda d: d.issue.update(hidden_at="x"), "not_found", 404),
         (lambda d: setattr(d, "live", 43), "run_live", 409),

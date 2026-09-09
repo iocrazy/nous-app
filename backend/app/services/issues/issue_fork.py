@@ -56,6 +56,8 @@ class ForkDeps(Protocol):
 
     async def get_issue(self, issue_id: int) -> Optional[dict]: ...
 
+    async def get_issue_by_session(self, session_id: int) -> Optional[dict]: ...
+
     async def list_events(self, run_id: int, at_seq: int) -> list[dict]: ...
 
     async def running_root_run_id(
@@ -120,11 +122,21 @@ async def fork_run(
     run = await deps.get_run(int(run_id), user_id)
     if not run:
         raise ForkRejected("not_found", 404, "run not found")
+    # agent_runs.issue_id is backfilled after the turn and is NULL on rows
+    # where that never happened (2a-era runs, interrupted turns); the run's
+    # conversation is the durable link to its issue.
+    issue: Optional[dict] = None
     issue_id = run.get("issue_id")
-    if not issue_id:
+    if issue_id:
+        issue = await deps.get_issue(int(issue_id))
+    elif run.get("conversation_id"):
+        issue = await deps.get_issue_by_session(int(run["conversation_id"]))
+        issue_id = issue.get("id") if issue else None
+    if not issue_id or not issue:
+        if issue_id and not issue:
+            raise ForkRejected("not_found", 404, "issue not found")
         raise ForkRejected("not_an_issue_run", 409, "only issue runs can be forked")
-    issue = await deps.get_issue(int(issue_id))
-    if not issue or issue.get("hidden_at"):
+    if issue.get("hidden_at"):
         raise ForkRejected("not_found", 404, "issue not found")
     if issue.get("status") in TERMINAL:
         raise ForkRejected("issue_terminal", 409, "reopen the issue before forking")
@@ -259,6 +271,11 @@ class _RealDeps:
         from app.repositories.issue_repository import get_issue_repository
 
         return await get_issue_repository().get_by_id(int(issue_id))
+
+    async def get_issue_by_session(self, session_id: int) -> Optional[dict]:
+        from app.repositories.issue_repository import get_issue_repository
+
+        return await get_issue_repository().get_by_session(int(session_id))
 
     async def list_events(self, run_id: int, at_seq: int) -> list[dict]:
         from app.repositories.agent_runs_repository import get_agent_runs_repository
