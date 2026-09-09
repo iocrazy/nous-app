@@ -126,6 +126,16 @@ def test_forks_lists_the_repository_rows_with_string_run_ids():
     repo.list_forks.assert_awaited_once_with(int(RUN_ID))
 
 
+def test_fork_of_a_non_numeric_run_id_is_404_not_500():
+    fork = AsyncMock()
+    with patch.object(fork_mod, "fork_run", fork):
+        r = TestClient(_app()).post(
+            "/api/v1/ai-library/runs/not-a-run/fork", json={"at_seq": 4}
+        )
+    assert r.status_code == 404
+    fork.assert_not_awaited()
+
+
 def test_forks_of_a_foreign_run_is_404():
     repo = AsyncMock()
     repo.get_by_id = AsyncMock(return_value=None)

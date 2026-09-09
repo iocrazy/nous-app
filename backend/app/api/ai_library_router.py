@@ -2509,8 +2509,12 @@ async def fork_run_endpoint(
     from app.services.issues.issue_fork import ForkRejected, default_deps, fork_run
 
     try:
+        run_key = int(run_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
         return await fork_run(
-            int(run_id),
+            run_key,
             at_seq=body.at_seq,
             steer=body.steer,
             user_id=str(auth.user_id),

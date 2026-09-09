@@ -80,6 +80,10 @@
 > - 新会话的种子 = 原会话中 `created_at < run.started_at` 的消息 ＋ `messages_from_events(events_upto(events, at_seq))`，接缝处若原会话最后一条与 run 的 seq-1 `user` 事件同文则只留一份；压缩摘要以 `sender_type='system'` 写入（mig 327 允许，`ConversationsAiStore.append_system_message` 新增）。原会话、原 run 一字不改，唯一落在原 run 上的是 `question_answered{superseded:true}`（仅当 `awaiting_input` 属于它）。
 > - `_start_execute_issue` 的本体搬到 `services/issues/issue_dispatch.start_execute_issue`（抛 `DispatchFailed`），router 保留同名薄包装把它映射成 500；DBOS 派发器与 workflow_id 持久化仍留在 router 模块、运行时解析，既有 monkeypatch 缝不变。
 > - transcript 读统一为 `AgentRunsRepository.list_transcript_events(run_id, upto_seq=, event_types=)`，fork 服务与 `view-at` 共用，不再手写第三份查询。
+> - **停在提问上的 issue 可以 fork**（评审 P0）：`execute_issue` 在停靠期间仍持有 `execution_locked_at`（run 行已关闭，`run_live` 看不见），直接派发会被 `atomic_checkout` 静默跳过。fork 对「锁被持有 + `awaiting_input` 未回答」的 issue 主动做收割器同款三步 `input_gate.release_parked_workflow(wf)`（清标记 → cancel → 释放锁）再派发；锁被持有但不是停靠（真在跑 / 已回答在续跑）→ `issue_busy` 409。
+> - 顺序：… → 释放停靠 → 切指针 → 派发 → **成功后**才在被放弃的那个 run 上落 `question_answered{superseded:true}`（不限于被 fork 的 run，谁问的记谁）；派发失败一笔事务恢复 `ai_session_id` / `paused_at` / 去掉 `forked_from`，已 cancel 的停靠 workflow 不可复活，issue 留在与收割器相同的「无锁无标记」态。
+> - 历史来源优先取 run 自己的 `conversation_id`（早先 fork 出的 run 所在会话已不是 issue 当前指针），无则回退 `issues.ai_session_id`；run 窗口以压缩摘要开头时不再前置原会话（摘要就是替换）。
+> - executor 只在派发的第一轮读印记：续跑循环复用轮前加载的 issue dict（DB 里已置 null），否则每一轮都会被记成 fork 并重发 steer。
 > - **steer 不走 inbox**（偏离 §2 第 3 条）：fork 时 run 尚未开始，inbox 注入会叠在一份已经含它的历史上；改为印记带 `steer_text`，executor 把它当作分叉那一轮的**用户消息**（`run_session_turn(content=steer_text)`，进 `ai_messages` 可见、进上下文一次），没有 steer 就发既有的 `CONTINUATION_NUDGE`——分叉 run 绝不重发完整任务文本，历史里已经有了。`fork{steer: bool}` 事件不变。
 
 失败回滚：步骤 1–2 在同一事务；派发失败则把 `ai_session_id` 指回原会话并 503 `dispatch_failed`（与 2a `/resume` 失败恢复同款）。

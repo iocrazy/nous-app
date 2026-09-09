@@ -20,6 +20,7 @@ class _Deps:
             "issue_id": 9,
             "user_id": "u",
             "agent_id": "a",
+            "conversation_id": 100,
             "started_at": RUN_STARTED,
         }
         self.issue = {
@@ -36,6 +37,8 @@ class _Deps:
                 "awaiting_input": {"question_id": "q:42:4", "run_id": "42"}
             },
             "paused_at": "x",
+            "execution_locked_at": None,
+            "dbos_workflow_id": "wf-old",
         }
         # The run's own transcript: only THIS turn's user text + steps.
         self.events = [
@@ -60,7 +63,8 @@ class _Deps:
     async def get_issue(self, issue_id):
         return self.issue
 
-    async def list_events(self, run_id):
+    async def list_events(self, run_id, at_seq):
+        self.reads = getattr(self, "reads", []) + [("events", run_id, at_seq)]
         return self.events
 
     async def running_root_run_id(self, issue_id, conversation_id):
@@ -82,6 +86,9 @@ class _Deps:
     async def switch_session_and_mark(self, issue_id, session_id, forked_from):
         self.calls.append(("switch", issue_id, session_id, forked_from))
 
+    async def release_parked(self, workflow_id):
+        self.calls.append(("release", workflow_id))
+
     async def supersede_question(self, run_id, question_id):
         self.calls.append(("supersede", run_id, question_id))
 
@@ -89,15 +96,18 @@ class _Deps:
         self.calls.append(("dispatch", issue_id))
         return "wf-1"
 
-    async def restore_session(self, issue_id, session_id):
-        self.calls.append(("restore", issue_id, session_id))
+    async def restore_session(self, issue_id, session_id, paused_at):
+        self.calls.append(("restore", issue_id, session_id, paused_at))
 
 
 async def test_happy_path_records_every_side_effect_in_order():
     d = _Deps()
     out = await f.fork_run(42, at_seq=4, steer="be darker", user_id="u", deps=d)
     kinds = [c[0] for c in d.calls]
-    assert kinds == ["origin", "session", "messages", "switch", "supersede", "dispatch"]
+    # supersede comes AFTER a successful dispatch — a 503 must not leave the
+    # origin's question marked superseded with nothing replacing it.
+    assert kinds == ["origin", "session", "messages", "switch", "dispatch", "supersede"]
+    assert d.reads == [("events", 42, 4)]
     assert d.calls[0] == ("origin", 100, RUN_STARTED)
     assert d.calls[1][1]["context_id"] == "9" and d.calls[1][1]["user_id"] == "u"
     # origin turns + this run's events up to at_seq, seam de-duplicated
@@ -114,7 +124,7 @@ async def test_happy_path_records_every_side_effect_in_order():
         "200",
         {"run_id": 42, "at_seq": 4, "steer": True, "steer_text": "be darker"},
     )
-    assert d.calls[4] == ("supersede", 42, "q:42:4")
+    assert d.calls[5] == ("supersede", 42, "q:42:4")
     assert out == {
         "run_id": None,
         "session_id": "200",
@@ -124,16 +134,91 @@ async def test_happy_path_records_every_side_effect_in_order():
     }
 
 
-async def test_no_steer_and_a_question_of_another_run_are_both_left_alone():
+async def test_blank_steer_is_no_steer_and_another_runs_question_is_superseded_on_that_run():
     d = _Deps()
     d.issue["execution_state"] = {
         "awaiting_input": {"question_id": "q:41:4", "run_id": "41"}
     }
     await f.fork_run(42, at_seq=4, steer="   ", user_id="u", deps=d)
-    kinds = [c[0] for c in d.calls]
-    assert "supersede" not in kinds
+    # the fork abandons whatever question the issue was parked on
+    assert d.calls[-1] == ("supersede", 41, "q:41:4")
     switch = next(c for c in d.calls if c[0] == "switch")
     assert switch[3] == {"run_id": 42, "at_seq": 4, "steer": False, "steer_text": None}
+
+
+async def test_no_open_question_means_no_supersede():
+    d = _Deps()
+    d.issue["execution_state"] = {}
+    await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert "supersede" not in [c[0] for c in d.calls]
+
+
+async def test_parked_issue_is_released_before_the_switch_then_dispatched():
+    """execute_issue holds execution_locked_at while PARKED on a question (its
+    agent_runs row is closed, so run_live cannot see it): the fork releases
+    the parked workflow — marker, cancel, lock — before dispatching."""
+    d = _Deps()
+    d.issue["execution_locked_at"] = "2026-09-09T10:05:00+00:00"
+    await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    kinds = [c[0] for c in d.calls]
+    assert kinds == [
+        "origin",
+        "session",
+        "messages",
+        "release",
+        "switch",
+        "dispatch",
+        "supersede",
+    ]
+    assert ("release", "wf-old") in d.calls
+
+
+async def test_locked_but_not_parked_is_issue_busy():
+    d = _Deps()
+    d.issue["execution_locked_at"] = "2026-09-09T10:05:00+00:00"
+    d.issue["execution_state"] = {}  # no open question → a real running workflow
+    with pytest.raises(f.ForkRejected) as ei:
+        await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert (ei.value.code, ei.value.status) == ("issue_busy", 409)
+    assert d.calls == []
+
+
+async def test_locked_with_an_answered_question_is_issue_busy_too():
+    d = _Deps()
+    d.issue["execution_locked_at"] = "x"
+    d.issue["execution_state"]["awaiting_input"]["answered_at"] = "y"
+    with pytest.raises(f.ForkRejected) as ei:
+        await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert ei.value.code == "issue_busy" and d.calls == []
+
+
+async def test_history_comes_from_the_runs_own_conversation_not_the_issue_pointer():
+    """A run forked earlier lives in a session the issue no longer points at."""
+    d = _Deps()
+    d.run["conversation_id"] = 77
+    d.issue["ai_session_id"] = 100
+    await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert d.calls[0] == ("origin", 77, RUN_STARTED)
+
+
+async def test_a_run_window_opening_with_a_summary_replaces_the_origin_entirely():
+    d = _Deps()
+    d.events = [
+        {
+            "seq": 1,
+            "event_type": "compaction_summary",
+            "payload": {"summary": "S", "path": "legacy", "attempts": 1},
+        },
+        {"seq": 2, "event_type": "step_start", "payload": {}},
+        {"seq": 3, "event_type": "assistant", "payload": {"content": "act 1"}},
+        {"seq": 4, "event_type": "step_start", "payload": {}},
+    ]
+    await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    msgs = next(c for c in d.calls if c[0] == "messages")[2]
+    assert msgs == [
+        {"role": "system", "content": f.SUMMARY_PREFIX + "S"},
+        {"role": "assistant", "content": "act 1"},
+    ]
 
 
 async def test_seam_is_not_deduplicated_when_the_texts_differ():
@@ -147,6 +232,7 @@ async def test_seam_is_not_deduplicated_when_the_texts_differ():
 async def test_no_origin_session_means_events_only():
     d = _Deps()
     d.issue["ai_session_id"] = None
+    d.run["conversation_id"] = None
     await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
     kinds = [c[0] for c in d.calls]
     assert "origin" not in kinds
@@ -192,4 +278,5 @@ async def test_dispatch_failure_restores_the_session_pointer():
     with pytest.raises(f.ForkRejected) as ei:
         await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
     assert (ei.value.code, ei.value.status) == ("dispatch_failed", 503)
-    assert d.calls[-1] == ("restore", 9, 100)
+    assert d.calls[-1] == ("restore", 9, 100, "x")
+    assert "supersede" not in [c[0] for c in d.calls]

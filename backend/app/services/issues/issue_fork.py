@@ -22,9 +22,19 @@ from typing import Any, Optional, Protocol
 from loguru import logger
 
 from app.services.ai.runner.replay import (
+    SUMMARY_PREFIX,
     events_upto,
     is_step_boundary,
     messages_from_events,
+)
+
+# What the rebuild reads; tool_call bodies (the bulk) never leave the DB.
+REPLAY_EVENT_TYPES = (
+    "user",
+    "assistant",
+    "compaction_summary",
+    "step_start",
+    "turn_end",
 )
 
 TERMINAL = frozenset({"done", "cancelled", "closed"})
@@ -43,7 +53,7 @@ class ForkRejected(Exception):
 class ForkDeps(Protocol):
     async def get_run(self, run_id: int, user_id: str) -> Optional[dict]: ...
     async def get_issue(self, issue_id: int) -> Optional[dict]: ...
-    async def list_events(self, run_id: int) -> list[dict]: ...
+    async def list_events(self, run_id: int, at_seq: int) -> list[dict]: ...
     async def running_root_run_id(
         self, issue_id: int, conversation_id: Optional[int]
     ) -> Optional[int]: ...
@@ -57,10 +67,11 @@ class ForkDeps(Protocol):
     async def switch_session_and_mark(
         self, issue_id: int, session_id: str, forked_from: dict
     ) -> None: ...
+    async def release_parked(self, workflow_id: str) -> None: ...
     async def supersede_question(self, run_id: int, question_id: str) -> None: ...
     async def dispatch(self, issue_id: int) -> str: ...
     async def restore_session(
-        self, issue_id: int, session_id: Optional[int]
+        self, issue_id: int, session_id: Optional[int], paused_at: Any
     ) -> None: ...
 
 
@@ -72,7 +83,15 @@ def _clean_steer(steer: Optional[str]) -> Optional[str]:
 def _seed(origin: list[dict], run_messages: list[dict]) -> list[dict]:
     """Origin turns + this run's rebuilt messages; the seam collapses one
     identical (role, content) pair — the run's first ``user`` event is the
-    text the conversation appended just before the run started."""
+    text the conversation appended just before the run started. A run
+    window that opens with a compaction summary already REPLACED everything
+    before it — the origin is not prepended in front of its own summary."""
+    if (
+        run_messages
+        and run_messages[0].get("role") == "system"
+        and str(run_messages[0].get("content", "")).startswith(SUMMARY_PREFIX)
+    ):
+        return list(run_messages)
     seed = [
         {"role": m["role"], "content": m["content"]}
         for m in origin
@@ -106,17 +125,39 @@ async def fork_run(
         raise ForkRejected("run_state_unavailable", 503, str(exc)) from exc
     if live:
         raise ForkRejected("run_live", 409, "pause or cancel the running run first")
-    events = await deps.list_events(int(run_id))
+    # execute_issue holds execution_locked_at for its whole lifetime — also
+    # while PARKED on a question (the agent_runs row is closed then, so the
+    # check above cannot see it). A parked workflow is released deliberately
+    # below (marker, cancel, lock — the reaper's recipe); any other holder
+    # means the issue is busy and the fork would be skipped by atomic_checkout.
+    awaiting = (issue.get("execution_state") or {}).get("awaiting_input") or {}
+    parked_wf: Optional[str] = None
+    if issue.get("execution_locked_at"):
+        if (
+            awaiting
+            and not awaiting.get("answered_at")
+            and issue.get("dbos_workflow_id")
+        ):
+            parked_wf = str(issue["dbos_workflow_id"])
+        else:
+            raise ForkRejected(
+                "issue_busy", 409, "the issue's workflow is still running"
+            )
+    events = await deps.list_events(int(run_id), int(at_seq))
     if not is_step_boundary(events, at_seq):
         raise ForkRejected(
             "not_a_step_boundary", 400, "at_seq must be a step_start or turn_end seq"
         )
 
     run_messages = messages_from_events(events_upto(events, at_seq))
+    # The run's own conversation first (a run forked earlier lives in a
+    # session the issue no longer points at); the issue pointer is the
+    # fallback for rows recorded before conversation_id was stamped.
+    history_session = run.get("conversation_id") or origin_session
     origin: list[dict] = []
-    if origin_session:
+    if history_session:
         origin = await deps.list_origin_messages(
-            int(origin_session), run.get("started_at")
+            int(history_session), run.get("started_at")
         )
     messages = _seed(origin, run_messages)
 
@@ -144,17 +185,27 @@ async def fork_run(
         messages,
         {"forked_from": {"run_id": int(run_id), "at_seq": int(at_seq)}},
     )
+    if parked_wf is not None:
+        await deps.release_parked(parked_wf)
     await deps.switch_session_and_mark(int(issue_id), session_id, forked_from)
-    awaiting = (issue.get("execution_state") or {}).get("awaiting_input") or {}
-    if str(awaiting.get("run_id") or "") == str(run_id) and awaiting.get("question_id"):
-        await deps.supersede_question(int(run_id), str(awaiting["question_id"]))
     try:
         workflow_id = await deps.dispatch(int(issue_id))
     except Exception as exc:  # noqa: BLE001
+        # The pointer and paused_at go back in one transaction; a released
+        # parked workflow cannot be revived — the issue is then in the same
+        # state the stale-wait reaper leaves (unlocked, no marker).
         await deps.restore_session(
-            int(issue_id), int(origin_session) if origin_session else None
+            int(issue_id),
+            int(origin_session) if origin_session else None,
+            issue.get("paused_at"),
         )
         raise ForkRejected("dispatch_failed", 503, str(exc)) from exc
+    # Only after the replacement is really dispatched: the abandoned question
+    # (whichever run asked it) is recorded as superseded.
+    if awaiting.get("question_id") and awaiting.get("run_id"):
+        await deps.supersede_question(
+            int(awaiting["run_id"]), str(awaiting["question_id"])
+        )
     logger.info(
         f"[issue_fork] run {run_id} @seq {at_seq} → issue {issue_id} "
         f"session {session_id} wf {workflow_id} steer={steer_text is not None}"
@@ -197,10 +248,17 @@ class _RealDeps:
 
         return await get_issue_repository().get_by_id(int(issue_id))
 
-    async def list_events(self, run_id: int) -> list[dict]:
+    async def list_events(self, run_id: int, at_seq: int) -> list[dict]:
         from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-        return await get_agent_runs_repository().list_transcript_events(int(run_id))
+        return await get_agent_runs_repository().list_transcript_events(
+            int(run_id), upto_seq=int(at_seq), event_types=list(REPLAY_EVENT_TYPES)
+        )
+
+    async def release_parked(self, workflow_id: str) -> None:
+        from app.agent_framework.input_gate import release_parked_workflow
+
+        await release_parked_workflow(workflow_id)
 
     async def running_root_run_id(
         self, issue_id: int, conversation_id: Optional[int]
@@ -338,21 +396,29 @@ class _RealDeps:
 
         return await start_execute_issue(int(issue_id))
 
-    async def restore_session(self, issue_id: int, session_id: Optional[int]) -> None:
-        from sqlalchemy import text, update
+    async def restore_session(
+        self, issue_id: int, session_id: Optional[int], paused_at: Any
+    ) -> None:
+        from sqlalchemy import Text, cast, func, literal, text, update
+        from sqlalchemy.dialects.postgresql import JSONB
 
         from app.db.session import write_scope
         from app.models import Issues
-        from app.services.issues.execution_state import merge_execution_state
 
+        # One transaction: pointer, paused_at and the stamp go back together.
+        state = func.coalesce(Issues.execution_state, cast(literal("{}"), JSONB))
+        unstamped = state.op("-", return_type=JSONB)(cast(literal("forked_from"), Text))
         async with write_scope() as session:
             await session.execute(text("SET LOCAL ROLE service_role"))
             await session.execute(
                 update(Issues)
                 .where(Issues.id == int(issue_id))
-                .values(ai_session_id=session_id)
+                .values(
+                    ai_session_id=session_id,
+                    paused_at=_ts(paused_at),
+                    execution_state=unstamped,
+                )
             )
-        await merge_execution_state(int(issue_id), {"forked_from": None})
 
 
 def default_deps() -> ForkDeps:

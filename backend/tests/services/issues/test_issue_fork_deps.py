@@ -73,16 +73,35 @@ async def test_switch_repoints_clears_markers_and_stamps_forked_from_as_service_
     assert "jsonb_build_object('forked_from'" in sql and '"run_id": 42' in sql
 
 
-async def test_restore_puts_the_pointer_back_and_nulls_the_stamp():
+async def test_restore_puts_pointer_paused_at_and_stamp_back_in_one_transaction():
     sess = _Session()
-    clear = AsyncMock()
-    with (
-        patch("app.db.session.write_scope", _scope(sess)),
-        patch("app.services.issues.execution_state.merge_execution_state", clear),
+    with patch("app.db.session.write_scope", _scope(sess)):
+        await f.default_deps().restore_session(9, 100, "2026-09-09T09:00:00+00:00")
+    assert len(sess.stmts) == 2 and "SET LOCAL ROLE service_role" in _sql(sess.stmts[0])
+    sql = _sql(sess.stmts[1])
+    assert "ai_session_id=100" in sql.replace(" ", "")
+    assert "paused_at='2026-09-09 09:00:00+00:00'" in sql
+    assert "- CAST('forked_from'" in sql, "the stamp must go with the pointer"
+
+
+async def test_release_parked_binds_to_the_input_gate_recipe():
+    rel = AsyncMock()
+    with patch("app.agent_framework.input_gate.release_parked_workflow", rel):
+        await f.default_deps().release_parked("wf-old")
+    rel.assert_awaited_once_with("wf-old")
+
+
+async def test_list_events_reads_only_the_replayable_types_up_to_at_seq():
+    repo = AsyncMock()
+    repo.list_transcript_events = AsyncMock(return_value=[])
+    with patch(
+        "app.repositories.agent_runs_repository.get_agent_runs_repository",
+        return_value=repo,
     ):
-        await f.default_deps().restore_session(9, 100)
-    assert "ai_session_id=100" in _sql(sess.stmts[1]).replace(" ", "")
-    clear.assert_awaited_once_with(9, {"forked_from": None})
+        await f.default_deps().list_events(42, 4)
+    repo.list_transcript_events.assert_awaited_once_with(
+        42, upto_seq=4, event_types=list(f.REPLAY_EVENT_TYPES)
+    )
 
 
 async def test_origin_messages_stop_at_the_run_start_and_keep_only_replayable_roles():
