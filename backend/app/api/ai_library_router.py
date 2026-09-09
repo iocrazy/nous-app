@@ -2374,6 +2374,7 @@ async def list_run_events(
     after_seq: int = 0,
     limit: int = 500,
     types: str = "",
+    upto_seq: Optional[int] = Query(default=None, ge=0),
 ) -> Dict[str, Any]:
     """Ordered agent_run_events for the Runs detail Transcript section.
 
@@ -2383,6 +2384,11 @@ async def list_run_events(
     ``todo_write,llm_retry``) so a progress poller does not drag every
     assistant body along; empty means all — the consumers that predate it
     keep working unchanged. An unknown type is an empty result, never 500.
+    ``upto_seq`` (phase 2b-1 replay) is an INCLUSIVE upper bound — the
+    scrubber reads ``events[:seq]`` with it; absent means no bound.
+    ``has_more`` is True when the page filled ``limit`` — a bounded replay
+    read that hits it must page with ``after_seq`` or it silently folds a
+    truncated prefix.
     """
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2399,30 +2405,81 @@ async def list_run_events(
     from app.db.session import read_scope
     from app.models import AgentRunTranscriptEvents as TE
 
+    stmt = (
+        select(
+            TE.seq,
+            TE.event_type,
+            TE.payload,
+            TE.created_at,
+            TE.turn,
+            TE.step,
+        )
+        .where(TE.run_id == int(run_id))
+        .where(TE.seq > after_seq)
+        .where(*_event_type_filter(TE, types))
+    )
+    if upto_seq is not None:
+        stmt = stmt.where(TE.seq <= upto_seq)
+    effective_limit = max(1, min(limit, 1000))
+    async with read_scope() as session:
+        rows = (
+            (await session.execute(stmt.order_by(TE.seq.asc()).limit(effective_limit)))
+            .mappings()
+            .all()
+        )
+    items = [_serialize_row(r) for r in rows]
+    return {
+        "items": items,
+        "count": len(items),
+        "has_more": len(items) >= effective_limit,
+    }
+
+
+@router.get(
+    "/runs/{run_id}/view-at",
+    summary="Folded run.view / run.cost AS OF seq (phase 2b-1 replay)",
+)
+async def get_run_view_at(
+    run_id: str, auth: AuthDep, seq: int = Query(..., ge=0)
+) -> Dict[str, Any]:
+    """The same fold registry the recorder runs live, applied to
+    ``events[:seq]`` — one fold, never copied to TS. The scrubber calls this
+    per tick (steps are few; no cache). Foreign run_id reads as 404.
+
+    Only event types a fold is registered for are fetched — assistant /
+    tool bodies (the bulk of a transcript) never leave the DB for this
+    call. ``view.context`` is always null here: replay() has no live
+    context window, so the scrubber must not render it.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRunTranscriptEvents as TE
+    from app.services.ai.runner.run_projection import registered_types, replay
+
+    runs_repo = get_agent_runs_repository()
+    row = await runs_repo.get_by_id(run_id, user_id=_coerce_user_uuid(auth.user_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
     async with read_scope() as session:
         rows = (
             (
                 await session.execute(
-                    select(
-                        TE.seq,
-                        TE.event_type,
-                        TE.payload,
-                        TE.created_at,
-                        TE.turn,
-                        TE.step,
-                    )
+                    select(TE.seq, TE.event_type, TE.payload)
                     .where(TE.run_id == int(run_id))
-                    .where(TE.seq > after_seq)
-                    .where(*_event_type_filter(TE, types))
+                    .where(TE.seq <= seq)
+                    .where(TE.event_type.in_(list(registered_types())))
                     .order_by(TE.seq.asc())
-                    .limit(max(1, min(limit, 1000)))
                 )
             )
             .mappings()
             .all()
         )
-    items = [_serialize_row(r) for r in rows]
-    return {"items": items, "count": len(items)}
+    views = replay(
+        [(r["event_type"], r["payload"] or {}) for r in rows],
+        seqs=[int(r["seq"]) for r in rows],
+    )
+    return {"seq": seq, "view": views["view"], "cost": views["cost"]}
 
 
 @router.get(

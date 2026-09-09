@@ -26,6 +26,9 @@ MIGRATION = (
     / "migrations"
     / "459_transcript_event_types_phase2a.sql"
 )
+# The allowlist is re-declared whole by each migration that touches it; the
+# ORM literal must equal the LATEST one (460 admitted fork, phase 2b-1).
+LATEST_MIGRATION = MIGRATION.parent / "460_transcript_event_type_fork.sql"
 _ARRAY = re.compile(r"ARRAY\[(.*?)\]", re.DOTALL)
 _LITERAL = re.compile(r"'([a-z_]+)'::text")
 
@@ -79,8 +82,12 @@ def test_migration_459_admits_latent_capability_denied():
 
 
 def test_migration_and_orm_event_type_sets_are_identical():
-    """Either side gaining or losing a literal is drift; nothing else checks it."""
-    assert _literals(_migration_body()) == _literals(_orm_check_sql())
+    """Either side gaining or losing a literal is drift; nothing else checks it.
+    Compares the LATEST allowlist migration (each one re-declares the whole
+    CHECK), not 459."""
+    assert _literals(LATEST_MIGRATION.read_text(encoding="utf-8")) == _literals(
+        _orm_check_sql()
+    )
 
 
 def test_migration_459_does_not_set_role():

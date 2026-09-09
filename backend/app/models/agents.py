@@ -530,7 +530,7 @@ class AgentRunTranscriptEvents(Base):
             " 'step_start'::text, 'step_end'::text, 'inbox_claimed'::text,"
             " 'deliverable'::text, 'budget_check'::text,"
             " 'question_asked'::text, 'question_answered'::text,"
-            " 'capability_denied'::text])",
+            " 'capability_denied'::text, 'fork'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(

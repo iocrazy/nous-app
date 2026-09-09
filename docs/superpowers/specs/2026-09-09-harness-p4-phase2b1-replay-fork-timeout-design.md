@@ -28,6 +28,8 @@
   - 正在跑的 run：一旦用户拖离最新，进入「冻结」态，新事件继续入本地数组但不推进显示；「回到最新」（Live）一键恢复。结束的 run 默认停在最后一个刻度。
   - 深链：`?run=<id>&seq=<n>` 打开即定位，方便在 PR / 消息里贴「看第 7 步」。
 
+**实施记录（2026-09-09，Task 1）**：前端不再自己折 `viewAtSeq`。改为后端 `GET /ai-library/runs/{id}/view-at?seq=N` 直接调 `run_projection.replay(events[:seq])`——一个折叠注册表，不复制到 TS；刮擦条每个刻度请求一次（step 数量级，不缓存）。`upto_seq` 是含上界。
+
 ## 2. Fork（只做 issue 的 run）
 
 **语义**：人的「从这一步重来」。原 run、原会话一字不改；新 run 在同一 issue 下、以 `events[:at_seq]` 重建的上下文起跑。
@@ -75,6 +77,8 @@
 - 新事件类型 `fork`（mig 460 放行）：`{of_run_id, at_seq, steer}`。
 - `folds/fork.py`：`view.fork = {of_run_id, at_seq}`（只在分叉 run 上有）。原 run 侧不落事件——它已结束、不可写；「分叉点」由前端反查得来：`GET /ai-library/runs/{id}/forks` → `[{run_id, at_seq, created_at}]`（一个 `WHERE fork_of_run_id = :id` 的读）。
 
+**实施记录（2026-09-09，Task 1 勘察）**：§2.2 的 `tool_call → tool 消息`不做——`build_history_messages` 只保留 user / assistant / system，tool 结果本来就不在跨轮上下文里，重建只做 user / assistant / compaction_summary（compaction 替换其前全部）。§2.4 的 `fork` 事件已由迁移 460 放行。
+
 ## 3. 逐工具超时
 
 **原则**：超时是**工具结果**，不是 run 结果。模型看到、run 继续；`timed_out` 与 `error` 各自独立上报（防御模式「正交的结果各自独立上报」）。
@@ -104,6 +108,8 @@
 3. **超时**：轨迹里超时的工具行：名字后 `Timed out · 60s` 红字徽标（tone danger），展开可见 `elapsed 60.0s`；Cockpit 第五格 `Tools` 显示 `1 timed out`（有则显示，无则该格不出现）；Reason 行不出现（run 没停）。
 
 配色沿用语义 token（回放/分叉用 info，超时用 danger）。
+
+**实施记录（2026-09-09，Task 1 勘察）**：第 2 页的「issue 时间线一条系统行」不写——`issue_messages.kind='system_status'` 行由 DB trigger 写、无 body。时间线入口 = 分叉 run 自己的气泡头部 `Forked from run #… @ step N` 芯片（可点回原 run 并自动刮到该 step）。
 
 ## 5. 数据与端点汇总
 

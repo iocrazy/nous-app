@@ -128,10 +128,61 @@ def test_whitespace_and_empty_tokens_are_dropped(client):
 def test_unknown_type_is_a_quiet_empty_set_not_a_500(client):
     captured: list = []
     body = _get(client, captured, "?types=no_such_event")
-    assert body == {"items": [], "count": 0}
+    assert body == {"items": [], "count": 0, "has_more": False}
 
 
 def test_foreign_run_is_still_404(client):
     router_mod.get_agent_runs_repository().get_by_id.return_value = None
     r = client.get(f"/api/v1/ai-library/runs/{RUN_ID}/events?types=todo_write")
     assert r.status_code == 404
+
+
+# ── phase 2b-1 replay: upto_seq is an inclusive upper bound ─────────────────
+
+
+def test_upto_seq_adds_an_inclusive_upper_bound(client):
+    captured: list = []
+    _get(client, captured, "?after_seq=3&upto_seq=9")
+    sql, params = _compiled(captured[0])
+    assert "seq > " in sql and "seq <= " in sql, sql
+    assert 3 in params.values() and 9 in params.values(), params
+
+
+def test_upto_seq_absent_keeps_the_old_query_shape(client):
+    captured: list = []
+    _get(client, captured)
+    sql, _ = _compiled(captured[0])
+    assert "seq <= " not in sql, sql
+
+
+def test_negative_upto_seq_is_422(client):
+    with patch("app.db.session.read_scope", _capturing_read_scope([])):
+        r = client.get(f"/api/v1/ai-library/runs/{RUN_ID}/events?upto_seq=-1")
+    assert r.status_code == 422
+
+
+def test_has_more_flags_a_full_page(client):
+    class _Full:
+        async def execute(self, stmt):
+            return _Result(
+                [
+                    {
+                        "seq": 1,
+                        "event_type": "user",
+                        "payload": {},
+                        "created_at": None,
+                        "turn": None,
+                        "step": None,
+                    }
+                ]
+            )
+
+    @contextlib.asynccontextmanager
+    async def _rs():
+        yield _Full()
+
+    with patch("app.db.session.read_scope", _rs):
+        r = client.get(f"/api/v1/ai-library/runs/{RUN_ID}/events?limit=1")
+    assert r.status_code == 200 and r.json()["has_more"] is True
+    body = _get(client, [], "?limit=1")
+    assert body["has_more"] is False
