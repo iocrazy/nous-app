@@ -1268,12 +1268,47 @@ git commit -am "feat(ui): 工具超时徽标 + Cockpit Tools 格（harness 二�
 - Modify: 本计划（末尾「完成账」）；`backend/config.yml`（验收期间临时 `TOOL_TIMEOUTS: {ResourceFetch: 15}`，验收后**同一 PR 内改回**——不许把 15s 留在生产）
 - Modify: `CLAUDE.md`（仅当发现新陷阱）
 
-- [ ] **Step 1: 部署确认**：最后一个 PR 合并后 `gh run list --workflow=deploy-gpu.yml` 到 success；`ssh -i ~/.ssh/id_macmini heygo@10.0.0.10 'docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz'`；容器内 `grep -c "def run_tool_with_timeout" /app/app/services/ai/runner/tool_exec.py`；`app.nous.ink/version.json` 的 `commitSha` = 前端 merge SHA。
-- [ ] **Step 2: ① 回放**：对 2a 留下的多步 run（MH-67 的 347474259567172）`GET /events?upto_seq=<step2 的 seq>` 只回到那里；`GET /view-at?seq=` 的 `view.step.done` 与事件一致；页面刮到 step 2，轨迹只剩两步、Cockpit 出 `as of step 2`、Pause 置灰；`?run&seq` 深链打开即定位。
-- [ ] **Step 3: ② fork**：对同一 run 在 step 2 分叉并带 steer → 201；新 run 首条事件 `fork{of_run_id, at_seq, steer:true}`，事件 2 `inbox_claimed{kind:"steer"}`；`agent_runs.fork_of_run_id/fork_at_seq` 有值；原 run 事件数不变；`GET /forks` 列出；issue `ai_session_id` 已换、原会话消息数不变；页面：新 run 头部芯片可点回原 run 且自动刮到 step 2，原 run 轨迹 step 2 出 `Fork →`。前置条件各验一次：run 活着 → 409 `run_live`；`at_seq` 不在边界 → 400；issue done → 409 `issue_terminal`。
-- [ ] **Step 4: ③ 超时**：合入 `TOOL_TIMEOUTS: {ResourceFetch: 15}` 的临时配置 PR 部署后，建 issue 让 `analyze` 抓 `https://httpbin.org/delay/30` → `tool_call.result.timed_out=true, timeout_s=15`；run 继续（`turn_end{completed}` 或模型换路）；`view.tools.timed_out=1`；页面徽标 `Timed out · 15s`、Cockpit `1 timed out · ResourceFetch`；验后改回配置并部署。
+- [x] **Step 1: 部署确认**：最后一个 PR 合并后 `gh run list --workflow=deploy-gpu.yml` 到 success；`ssh -i ~/.ssh/id_macmini heygo@10.0.0.10 'docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz'`；容器内 `grep -c "def run_tool_with_timeout" /app/app/services/ai/runner/tool_exec.py`；`app.nous.ink/version.json` 的 `commitSha` = 前端 merge SHA。
+- [x] **Step 2: ① 回放**：对 2a 留下的多步 run（MH-67 的 347474259567172）`GET /events?upto_seq=<step2 的 seq>` 只回到那里；`GET /view-at?seq=` 的 `view.step.done` 与事件一致；页面刮到 step 2，轨迹只剩两步、Cockpit 出 `as of step 2`、Pause 置灰；`?run&seq` 深链打开即定位。
+- [x] **Step 3: ② fork**：对同一 run 在 step 2 分叉并带 steer → 201；新 run 首条事件 `fork{of_run_id, at_seq, steer:true}`，事件 2 `inbox_claimed{kind:"steer"}`；`agent_runs.fork_of_run_id/fork_at_seq` 有值；原 run 事件数不变；`GET /forks` 列出；issue `ai_session_id` 已换、原会话消息数不变；页面：新 run 头部芯片可点回原 run 且自动刮到 step 2，原 run 轨迹 step 2 出 `Fork →`。前置条件各验一次：run 活着 → 409 `run_live`；`at_seq` 不在边界 → 400；issue done → 409 `issue_terminal`。
+- [x] **Step 4: ③ 超时**：合入 `TOOL_TIMEOUTS: {ResourceFetch: 15}` 的临时配置 PR 部署后，建 issue 让 `analyze` 抓 `https://httpbin.org/delay/30` → `tool_call.result.timed_out=true, timeout_s=15`；run 继续（`turn_end{completed}` 或模型换路）；`view.tools.timed_out=1`；页面徽标 `Timed out · 15s`、Cockpit `1 timed out · ResourceFetch`；验后改回配置并部署。
 - [ ] **Step 5: 前端** `cd frontend && npm run e2e:prod`；三页截图对照 `~/Downloads/control-plane-2b1.html`。
-- [ ] **Step 6: 完成账**：表格记每条证据（run id / seq / 端点响应 / 截图），未验项写原因；记忆 `project-harness-p4-phase2a-shipped` 追加 2b-1 状态并写 2b-2 入口（schedule → 收件箱、continuable 子代理，先接活 workforce 链的 4 条待接线）。
+- [x] **Step 6: 完成账**：表格记每条证据（run id / seq / 端点响应 / 截图），未验项写原因；记忆 `project-harness-p4-phase2a-shipped` 追加 2b-1 状态并写 2b-2 入口（schedule → 收件箱、continuable 子代理，先接活 workforce 链的 4 条待接线）。
+
+**完成账（2026-09-09 深夜，Task 8 真栈验收）**
+
+全部在生产栈（gpupc `nous-worker` / `cn.nous.ink:88` API，调试账号 `claude.debug`，team 331438215859255，agent `script_ai`，模型 `doubao-seed-2-0-lite`）用 API 与 DB 真跑。验收脚本 `/tmp/accept_fork.sh`、`/tmp/accept_timeout.sh` 与证据流水 `/tmp/accept_2b1.md` 留在会话 scratchpad 未入库——它们创建真实 issue、花真钱，不适合当门禁。
+
+部署确认（每次 merge 都盯 `deploy-gpu.yml` 到 `completed success`，随后 `readyz` `{"status":"ready","dbos":"enabled"}` 且容器内 grep 到该 PR 的标识符）：
+
+| Task | PR → merge | 上线证据 |
+|---|---|---|
+| T1 | #2195 → 91e2ce8e | mig 460、`upto_seq`、`view-at` |
+| T2 | #2196 → 62cd0a3c | `replay.py`、fork 折叠、recorder 列 |
+| T3 | #2197 → cc05dc4d | `def fork_run_endpoint`、`GET /forks` 200 |
+| T4 | #2198 → 06c3b10e | `grep -c "def run_tool_with_timeout" tool_exec.py` = 1 |
+| T5 | #2199 → e003b3ef | `app.nous.ink/version.json` commitSha e003b3e（0.25.480） |
+| T6 | #2200 → f5c31f36 | **未上线**：deploy-pages 被托管 runner 账单拦截（见下） |
+| T7 | #2201 → 1036d9a3 | 同上 |
+| 修补 | #2202 → fd275822（fork 经 `conversation_id` 找 issue）；#2204 → 630a0af1（2a `_controlJson` 读生产错误外壳；前端已上线 commitSha 630a0af）；#2205 → d445802c（临时 `Skill: 0.001`）；#2206 → e9655a3e（回退） | `grep get_by_session issue_fork.py` = 1；容器内 `settings.TOOL_TIMEOUTS` 探针期 `{'Skill': 0.001}`、回退后 `{}` |
+
+| # | 项 | 结果 | 证据 |
+|---|---|---|---|
+| ① | 回放 API | ✅ | run 347474259567172（MH-67）：`GET /events?upto_seq=5` → count 5 / has_more false，seq 1..5；全量 8 条，边界 seq 2 / 5（step_start）、8（turn_end）；`GET /view-at?seq=5` → `current{turn 1, step 2}`、phase running、cost 0.0438¢ |
+| ② | fork 主链 | ✅ | `POST /runs/347474259567172/fork {at_seq:5, steer}` → 201 `{run_id:null, session_id:347786129149237, workflow_id:issue-347474243723822-8910936794dc, forked_from:{run_id, at_seq:5}}`（run 由 workflow 异步建，`run_id` 为 null 是接口形状）；原 run 事件 8 → 8 不变；`GET /forks` → `[{run_id:347786145852739, at_seq:5}]`；新 run 事件 1 `fork{of_run_id, at_seq:5, steer:true}`、事件 2 `user{<steer>}`（偏差②：steer 作分叉轮用户消息，不是 `inbox_claimed`）；`agent_runs.fork_of_run_id=347474259567172, fork_at_seq=5`；`view-at?seq=6` → `fork{of_run_id, at_seq}`；issue `ai_session_id` 347474246337075 → 347786129149237，原会话 `messages` 5 条不变 |
+| ② | fork 前置条件 | ✅ | `at_seq=3`（tool_call 行）→ 400 `not_a_step_boundary`；对刚分叉、6 秒后仍在跑的 run 再分叉 → 409 `run_live`；MH-73（cancelled）的 run 347533278370854 → 409 `issue_terminal` |
+| ③ | 逐工具超时 | ✅ | MH-74（347795597254432）run 347795612446509：seq 4 `tool_call{tool:"Skill", result:{error:"timeout", message:"Tool Skill timed out after 0.001s. Retry once…", elapsed_s:0.001, timed_out:true, timeout_s:0.001}}`；run 继续 step 2 → seq 7 `FinishIssue`（无计时字段）→ seq 11 `turn_end{completed, tool_calls:2}`；`view-at?seq=11` → `tools{timed_out:1, last_timed_out:"Skill"}`；issue `in_review`，`outcome_reason` 提到 skill 超时 |
+| 错误外壳 | 生产 `HTTPException` 形状 | ✅（并修） | 所有拒绝都是 `{success:false, error:"Request failed", code:"http_4xx", request_id, details:{code,message}}`——前端 2a `_controlJson` 与 2b-1 `forkJson` 只读 `detail`，真栈上每个拒绝都退化成 `http_409`；#2204 / #2200 修，CLAUDE.md 已知陷阱新增一条 |
+| 前端 | 三页 UI + `npm run e2e:prod` | ⏸ 未验 | T6/T7 的前端包没能上线：T6 合并后 deploy-pages 3 秒失败、`runner=空 steps=0`，annotation "recent account payments have failed or your spending limit needs to be increased"（CLAUDE.md 部署陷阱条目）；`gh workflow run deploy-pages.yml` 同样被拦。待账单恢复后重跑该 workflow（或本机 `wrangler login` 直传），再走 `npm run e2e:prod` 与 `~/Downloads/control-plane-2b1.html` 三页对照——回放页可先在已上线的 T5 上看（刮擦条、`as of step N`、深链），fork 芯片/弹窗与超时徽标要等 T6/T7 |
+
+偏差（均已回写 spec 实施记录）：
+- ③ 原计划 `ResourceFetch: 15` + `httpbin.org/delay/30`：`ResourceFetch` 不接 URL，且只在本轮带资源引用时才向模型公开；改用 `Skill: 0.001`（1 ms，DB 往返不可能完成）确定性触发同一条包装路径。「同一 PR 内改回」在合并即部署的链上做不到——改为紧接的回退 PR #2206（探针在生产存活约 25 分钟）。探针 PR 首轮红：`test_defaults_cover_every_built_in_tool_family` 读真实 settings，被合法覆盖打红 → autouse fixture 清空 `settings.TOOL_TIMEOUTS`（保留）。
+- ② 第一次探 `run_live` 时目标 run 已在 30 秒内跑完，拿到合法 201（多产生 fork 347786368290162）；重做时先分叉再 6 秒内二次分叉才拿到 409。观察：派发到 `agent_runs` 行落库之间约 3 秒窗口内，第二次 fork 既不撞 `run_live` 也不撞 `issue_busy`，靠 `atomic_checkout` 让后来的 workflow 跳过——2b-2 若做 fork 并发守卫从这里起。
+- 生产 `agent_runs.issue_id` 在 issue run 上为 NULL（原 run 与分叉 run 都是）：fork 起初 409 `not_an_issue_run`，#2202 改经 `conversation_id` 反查。回填 `issue_id` 的路径值得 2b-2 顺手查。
+
+CI 中断与替代门禁：#2205 / #2201 / #2206 在托管 runner 被拦期间以本地全量替代——后端 `flake8 app tests` 零告警、`pytest` 11704 过 / 724 跳过 / 1 失败（`test_migrate_web_resource_files_row_migrates_qishui_audio`：macOS mimetypes 把 .m4a 判成 `audio/mp4a-latm`，平台差异，文件未改；distribution 组是本机沙箱假红，跳过）；前端 t7 `vitest run` 847 文件 / 8662 测试全绿、`tsc` 只剩 master 既有的 `SharedPage`/`settingsStore` 报错。两次 Frontend Build 抖动（`AISettings.codexDaemon.test.tsx` 拆环境 `EnvironmentTeardownError`，8570/8662 测试全过）靠重跑过，值得单独修。
+
+运维附注：并行 Bash 的 cwd 串扰在本 Task 又发生一次（worktree-manager 在 t6 工作树里建了嵌套 worktree，误开的 #2203 是 #2200 的复制品，已关闭清理）；主 checkout 本地 `master` 仍指向功能分支头（aeeabe39），需 `git -C <主 checkout> reset --hard origin/master`。
 
 ---
 
