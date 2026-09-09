@@ -1,7 +1,12 @@
 # 存量全量迁 S3（下载链路 + HLS）设计
 
 - 日期：2026-07-28
-- 状态：设计完成，待实施
+- 状态：**数据迁移已完成（2026-09 核实）**；簿记项部分未做——见下方「实施状态」
+- 实施状态（2026-09-10 核实，勿再按「待实施」读）：
+  - 生产库 `resources` / `resource_versions` / `parsed_media` 全部路径列零本地路径；下载链（含封面、图集）、HLS、缩略图/sprite、画布派生、聊天附件（图+视频）、汽水音频/UGC、封面上传均写 `sb://`
+  - 中转区 `/app/downloads` 自 2026-09-07 起在 gpupc 本机 NVMe（`/media/heygo/cache/nous-cache`），三容器都不再挂 CIFS；`up.sh` marker + 容器内 `work_dir_probe`（fatal gate）拒绝影子目录
+  - gateway `/f/` 签名直出与 `nginx_direct` 已退役（#2169）；sideload 已退役（#2171）
+  - 未做：`storage_status` 列（实为 mig 394）没有代码写 `source_missing`（生产 10 行为手工 SQL）；`file_type` 存量回填无代码；两条 2026-07-05 的悬空 `generated_media` 行（各被一条聊天消息引用）未处置
 - 前置：`2026-07-27-storage-rust-io-consolidation-design.md`（PR1/PR2 已合入，PR3 前提被证伪未合并）
 
 ## 指导思想：存储分层（大厂通行做法）

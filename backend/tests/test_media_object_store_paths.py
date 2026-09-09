@@ -136,29 +136,11 @@ async def test_upload_storage_error_is_a_hard_failure(tmp_path, monkeypatch):
     assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
 
 
-@pytest.mark.asyncio
-async def test_video_never_routes_to_object_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
-    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
-    inserted = {}
-
-    async def fake_insert(**kw):
-        inserted.update(kw)
-        return {"id": 1}
-
-    monkeypatch.setattr(gm_svc, "_insert_uploaded_row", fake_insert)
-    store = AsyncMock()
-    with patch.object(gm_svc, "chat_media_store", return_value=store):
-        await gm_svc.register_uploaded_media(
-            user_id="u",
-            scope_id=7,
-            file_bytes=b"MP4",
-            filename="v.mp4",
-            mime="video/mp4",
-            origin=_origin(),
-        )
-    store.put_bytes.assert_not_awaited()
-    assert "sb://" not in inserted["file_path"]
+# ``test_video_never_routes_to_object_store`` was retired on 2026-09-10: the
+# contract it pinned (videos stay on the filesystem) is exactly what changed —
+# see ``test_video_upload_routes_to_object_store_too`` below. With only two
+# kinds (image / video) the filesystem branch is unreachable while the flag
+# is on; it remains the flag-OFF path.
 
 
 # ── reader: agent vision for object-store images ─────────────────────────────
@@ -396,3 +378,33 @@ async def test_generated_image_raises_on_storage_error(tmp_path, monkeypatch):
                 origin=gm_svc.GenerationOrigin(kind="canvas_run"),
             )
     session_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_video_upload_routes_to_object_store_too(monkeypatch):
+    """Videos went to the filesystem under DOWNLOAD_PATH while images went to
+    the bucket — the sibling ``register_generated_media`` already treats
+    image and video alike. Since 2026-09-07 the transit dir is local NVMe
+    and wiped on deploy, so a filesystem video is a lost video."""
+    captured = {}
+
+    async def fake_insert(**kw):
+        captured.update(kw)
+        return {"id": 1, **kw}
+
+    store = AsyncMock()
+    store.exists.return_value = False
+    monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
+    monkeypatch.setattr(gm_svc, "_insert_uploaded_row", fake_insert)
+    with patch.object(gm_svc, "chat_media_store", return_value=store):
+        await gm_svc.register_uploaded_media(
+            user_id="u",
+            scope_id=42,
+            file_bytes=b"MP4DATA",
+            filename="clip.mp4",
+            mime="video/mp4",
+            origin=_origin(),
+        )
+    store.put_bytes.assert_awaited_once()
+    assert captured["file_path"].startswith("sb://chat-media/t42/")
+    assert captured["kind"] == "video"
