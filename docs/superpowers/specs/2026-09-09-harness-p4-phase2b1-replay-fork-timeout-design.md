@@ -179,6 +179,7 @@
 > - 生产 `agent_runs.issue_id` 在 issue run 上为 NULL，fork 经 `conversation_id` 反查 issue（#2202）。
 > - 生产错误体是 `ErrorResponse` 外壳（`details.code`），前端 `forkJson` / 2a `_controlJson` 据此修正（#2200 / #2204）。
 > - 前端三页与 `e2e:prod` 未验：T6/T7 合并后托管 runner 被账单拦截，前端包未上线；恢复后补验。
+> - 前端上线后真机走查（2026-09-09 晚）：回放页与原 run 的分叉标记正常；但 Cockpit 的分叉芯片与 `Tools` 格都读 `rollup.current_run.view`，issue 空闲时 `current_run` 为 null，30 秒跑完的分叉 run 没有任何「Forked from」入口、MH-74 的「1 timed out」也随 run 结束消失。修法回到本节「时间线入口 = 分叉 run 自己的气泡头部」：`RunTrajectory` 头部从 run **自己的事件**推导 `run-fork-chip`（`fork` 事件 → 点击 `seekRun(原 run, at_seq)`）与 `run-timeout-chip`（`result.timed_out` 计数）——事件比实时视图长寿，run 结束后仍在；Cockpit 的芯片与格保留为运行中的实时视角。
 
 ## 7. 明确不做
 
