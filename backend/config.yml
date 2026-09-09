@@ -10,12 +10,6 @@ APP_NAME: "抖音推送下载app_yml"
 HTTP_TIMEOUT: 30.0
 DOWNLOAD_TIMEOUT: 60.0
 
-# TEMPORARY — harness 2b-1 Task 8 step 4 acceptance probe. Forces every Skill
-# call to hit the per-tool wall clock (1 ms; a DB round trip cannot finish in
-# time) so the timed_out tool-result path is exercised on the real stack.
-# Reverted by the follow-up PR the moment the evidence is captured.
-TOOL_TIMEOUTS:
-  Skill: 0.001
 
 # Douyin-specific UA pool (Chrome-family only).
 # One UA is picked per parse task and threaded through the entire pipeline
