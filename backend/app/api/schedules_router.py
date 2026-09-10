@@ -31,6 +31,21 @@ from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import UserSchedules
 
+# How far ahead a one-shot wake-up may be armed (30 days). Imported, not
+# re-typed: the agent-facing tool states this ceiling in its own description,
+# and two numbers would mean one path silently allowing what the other
+# refuses. A year-out wake-up is far more likely to be a typo than an
+# intention, and the row would sit enabled — invisible — until then.
+from app.services.ai.tools.schedule_wakeup_tool import MAX_WAKEUP_HORIZON
+from app.services.issues.issue_visibility import assert_issue_visible
+
+# The engine decides what a schedule may be. Importing the set instead of
+# re-typing it is what keeps the API from accepting a task_type the master
+# scheduler then skips every minute in silence (and from rejecting one it can
+# actually fire). tests/test_schedules_router_autopilot.py pins the equality
+# in both directions.
+from app.workflows.scheduled_master import SUPPORTED_TASK_TYPES as _ALLOWED_TASK_TYPES
+
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
 
@@ -49,19 +64,17 @@ def _serialize_schedule(row: Mapping[str, Any]) -> Dict[str, Any]:
     return out
 
 
-_ALLOWED_TASK_TYPES = {
-    "parse",
-    "download",
-    "transcode",
-    "ai_summary",
-    "ai_transcription",
-    "ai_visual_analysis",
-    # paperclip R1: routine fires create an issue assigned to an agent
-    # (origin_kind='routine') and dispatch execute_issue — see
-    # scheduled_master._fire_agent_routine. Payload contract validated in
-    # _validate_agent_routine_payload.
-    "agent_routine",
-}
+def _bad_request(code: str, message: str) -> HTTPException:
+    """A 400 whose reason the caller can BRANCH on.
+
+    ``app/core/exceptions.py`` wraps every HTTPException into the
+    ``ErrorResponse`` envelope and only carries ``exc.detail`` through to
+    ``details`` when it is a dict — a string detail arrives at the browser as
+    ``code: "http_400"`` and nothing else. The scheduling UI has to tell
+    "pick another time" apart from "say something in the note", so every
+    rejection here is a dict."""
+    return HTTPException(400, {"code": code, "message": message})
+
 
 _ROUTINE_DELIVERY_POLICIES = {"skip_if_active", "always"}
 
@@ -73,25 +86,40 @@ def _validate_agent_routine_payload(payload: Dict[str, Any]) -> None:
     slug = (payload.get("agent_slug") or "").strip()
     prompt = (payload.get("prompt_md") or "").strip()
     if not slug:
-        raise HTTPException(400, "agent_routine payload requires agent_slug")
+        raise _bad_request(
+            "agent_slug_required", "agent_routine payload requires agent_slug"
+        )
     if not prompt:
-        raise HTTPException(400, "agent_routine payload requires prompt_md")
+        raise _bad_request(
+            "prompt_md_required", "agent_routine payload requires prompt_md"
+        )
     policy = payload.get("delivery_policy") or "skip_if_active"
     if policy not in _ROUTINE_DELIVERY_POLICIES:
-        raise HTTPException(
-            400,
+        raise _bad_request(
+            "invalid_delivery_policy",
             f"delivery_policy must be one of {sorted(_ROUTINE_DELIVERY_POLICIES)}",
         )
 
 
 class ScheduleCreatePayload(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    cron_expr: str = Field(..., min_length=1, max_length=100)
+    """Two shapes behind one endpoint.
+
+    RECURRING (every task_type but ``issue_wakeup``): ``name`` + ``cron_expr``
+    are required and ``next_fire_at`` is computed from them.
+    ONE-SHOT (``issue_wakeup``, mig 461): no cron at all — ``fire_at`` IS the
+    fire time, and the row disables itself once it has fired. Both fields are
+    therefore Optional at the schema level and required by the branch that
+    needs them, with a typed code the UI can act on."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    cron_expr: Optional[str] = Field(None, min_length=1, max_length=100)
     task_type: str
     payload: Dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     # IANA tz name the cron is interpreted in (default UTC — old behavior).
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    # One-shot only: an absolute, timezone-aware instant.
+    fire_at: Optional[datetime] = None
 
 
 class ScheduleUpdatePayload(BaseModel):
@@ -100,13 +128,18 @@ class ScheduleUpdatePayload(BaseModel):
     payload: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
     timezone: Optional[str] = Field(None, min_length=1, max_length=64)
+    # One-shot rows only: move the wake-up. Without it the only way to
+    # reschedule "remind me later" is delete-and-recreate.
+    fire_at: Optional[datetime] = None
 
 
 class ScheduleResponse(BaseModel):
     id: str
     user_id: Optional[str]
     name: str
-    cron_expr: str
+    # NULL on a one-shot wake-up (mig 461). Typed ``str`` here used to make
+    # the LIST endpoint 500 on the whole page because of one such row.
+    cron_expr: Optional[str]
     task_type: str
     payload: Dict[str, Any]
     lane: str
@@ -135,7 +168,7 @@ def _validate_timezone(tz_name: str) -> Any:
 
         return ZoneInfo(tz_name)
     except Exception:
-        raise HTTPException(400, f"invalid timezone: {tz_name!r}")
+        raise _bad_request("invalid_timezone", f"invalid timezone: {tz_name!r}")
 
 
 def _validate_cron(cron_expr: str, tz_name: str = "UTC") -> datetime:
@@ -152,33 +185,106 @@ def _validate_cron(cron_expr: str, tz_name: str = "UTC") -> datetime:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(400, f"invalid cron expression: {exc}")
+        raise _bad_request("invalid_cron", f"invalid cron expression: {exc}")
 
 
 def _validate_task_type(task_type: str) -> None:
     if task_type not in _ALLOWED_TASK_TYPES:
-        raise HTTPException(
-            400,
-            f"task_type must be one of {sorted(_ALLOWED_TASK_TYPES)}, got {task_type!r}",
+        raise _bad_request(
+            "unsupported_task_type",
+            f"task_type must be one of {sorted(_ALLOWED_TASK_TYPES)}, "
+            f"got {task_type!r}",
         )
 
 
-@router.post("", response_model=ScheduleResponse)
+def _validate_fire_at_window(fire_at: datetime) -> None:
+    """The wake-up time must be ahead of now and inside the horizon. Shared by
+    create and PATCH so the two cannot disagree about what "too far" means."""
+    if fire_at.tzinfo is None:
+        raise _bad_request(
+            "fire_at_timezone_required", "fire_at must carry a timezone offset"
+        )
+    now = datetime.now(timezone.utc)
+    if not (now < fire_at <= now + MAX_WAKEUP_HORIZON):
+        raise _bad_request(
+            "fire_at_out_of_range",
+            f"fire_at must be in the future and within "
+            f"{MAX_WAKEUP_HORIZON.days} days",
+        )
+
+
+def _validate_wakeup_payload_fields(body: Dict[str, Any]) -> str:
+    """The two fields the fire path cannot work without, plus the ``once``
+    marker the mig-461 CHECK reads. Returns the text.
+
+    PATCH replaces ``payload`` wholesale, so a caller that drops ``once``
+    would otherwise hit the CHECK and get a 500 out of the driver — the
+    validation is here so it is a typed 400 instead."""
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise _bad_request("text_required", "issue_wakeup payload requires text")
+    issue_id = body.get("issue_id")
+    if not issue_id:
+        raise _bad_request(
+            "issue_id_required", "issue_wakeup payload requires issue_id"
+        )
+    body["text"] = text
+    body["issue_id"] = int(issue_id)
+    body["once"] = True
+    return text
+
+
+async def _validate_issue_wakeup_payload(
+    payload: "ScheduleCreatePayload", body: Dict[str, Any], auth: Any
+) -> str:
+    """Validate a one-shot wake-up and return its text. Mutates ``body`` with
+    the two defaults the CHECK constraint and the fire path rely on.
+
+    The issue is resolved through the SHARED visibility rule, so arming a
+    wake-up on someone else's issue 404s exactly like reading it would —
+    existence never leaks."""
+    fire_at = payload.fire_at
+    if fire_at is None:
+        raise _bad_request("fire_at_required", "issue_wakeup requires fire_at")
+    # The window check owns the tz-aware rule too, and gives it its OWN code:
+    # `fire_at_required` on a time the user DID pick would make the UI say
+    # "pick a time" to someone who just did.
+    _validate_fire_at_window(fire_at)
+
+    text = _validate_wakeup_payload_fields(body)
+    await assert_issue_visible(int(body["issue_id"]), auth)
+    body.setdefault("created_by", "user")
+    return text
+
+
+@router.post("", response_model=ScheduleResponse, status_code=201)
 async def create_schedule(
     payload: ScheduleCreatePayload, auth: AuthDep
 ) -> ScheduleResponse:
-    """Create a new schedule. Validates cron expression and task_type."""
+    """Create a schedule — recurring (cron) or one-shot (issue wake-up)."""
     _validate_task_type(payload.task_type)
-    next_at = _validate_cron(payload.cron_expr, payload.timezone)
-    if payload.task_type == "agent_routine":
-        _validate_agent_routine_payload(payload.payload)
+    body = dict(payload.payload)
+    if payload.task_type == "issue_wakeup":
+        text = await _validate_issue_wakeup_payload(payload, body, auth)
+        name: Optional[str] = (payload.name or text)[:200]
+        cron_expr: Optional[str] = None
+        next_at = payload.fire_at
+    else:
+        if not payload.name or not payload.cron_expr:
+            raise _bad_request(
+                "cron_required", "name and cron_expr are required for this task_type"
+            )
+        name, cron_expr = payload.name, payload.cron_expr
+        next_at = _validate_cron(payload.cron_expr, payload.timezone)
+        if payload.task_type == "agent_routine":
+            _validate_agent_routine_payload(body)
 
     row = {
         "user_id": str(auth.user_id),
-        "name": payload.name,
-        "cron_expr": payload.cron_expr,
+        "name": name,
+        "cron_expr": cron_expr,
         "task_type": payload.task_type,
-        "payload": payload.payload,
+        "payload": body,
         "enabled": payload.enabled,
         "timezone": payload.timezone,
         "next_fire_at": next_at,
@@ -262,9 +368,7 @@ async def update_schedule(
     # validate agent_routine payload edits and (b) recompute next_fire_at when
     # either cron_expr OR timezone changes (each depends on the other's
     # effective value). One read covers both.
-    needs_existing = (
-        ("payload" in fields) or ("cron_expr" in fields) or ("timezone" in fields)
-    )
+    needs_existing = bool({"payload", "cron_expr", "timezone", "fire_at"} & set(fields))
     existing_row: Optional[Mapping[str, Any]] = None
     if needs_existing:
         async with read_scope() as session:
@@ -295,14 +399,43 @@ async def update_schedule(
     ):
         _validate_agent_routine_payload(fields["payload"])
 
+    # An id we could not read is 404 — answering it by describing the shape of
+    # a row the caller cannot see would both mislead and leak that it exists.
+    if needs_existing and existing_row is None:
+        raise HTTPException(404, "schedule not found")
+
+    # A one-shot and a recurring row take different edits, and mixing them is
+    # a typed 400 rather than a CHECK violation surfacing as a 500.
+    is_once = existing_row is not None and not existing_row["cron_expr"]
+    if is_once:
+        if "cron_expr" in fields:
+            raise _bad_request(
+                "once_row_has_no_cron",
+                "a one-time wake-up has no cron; change fire_at instead",
+            )
+        if "payload" in fields and isinstance(fields["payload"], dict):
+            _validate_wakeup_payload_fields(fields["payload"])
+        if "fire_at" in fields:
+            _validate_fire_at_window(fields["fire_at"])
+            fields["next_fire_at"] = fields.pop("fire_at")
+    elif "fire_at" in fields:
+        raise _bad_request(
+            "cron_row_has_no_fire_at",
+            "a recurring schedule fires from its cron; change cron_expr instead",
+        )
+
     if "cron_expr" in fields or "timezone" in fields:
         effective_cron = fields.get("cron_expr") or (
-            existing_row["cron_expr"] if existing_row else "* * * * *"
+            existing_row["cron_expr"] if existing_row else None
         )
         effective_tz = fields.get("timezone") or (
             existing_row["timezone"] if existing_row else "UTC"
         )
-        fields["next_fire_at"] = _validate_cron(effective_cron, effective_tz)
+        # A one-shot has no cron to recompute from. The old fallback invented
+        # "* * * * *" here, which would have re-armed it every minute forever;
+        # its fire time is whatever fire_at set and stays put.
+        if effective_cron:
+            fields["next_fire_at"] = _validate_cron(effective_cron, effective_tz)
 
     try:
         async with write_scope() as session:
@@ -397,7 +530,14 @@ async def resume_schedule(schedule_id: str, auth: AuthDep) -> ScheduleResponse:
     if existing is None:
         raise HTTPException(404, "schedule not found")
 
-    next_at = _validate_cron(existing["cron_expr"], existing["timezone"] or "UTC")
+    # A one-shot carries no cron: resuming it means "wake me now" (the master
+    # picks it up on the next tick). Feeding None to croniter would 400 the
+    # only way a user has to revive a wake-up that was disabled.
+    next_at = (
+        _validate_cron(existing["cron_expr"], existing["timezone"] or "UTC")
+        if existing["cron_expr"]
+        else datetime.now(timezone.utc)
+    )
     try:
         async with write_scope() as session:
             rows = (

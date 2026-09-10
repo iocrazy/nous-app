@@ -53,6 +53,7 @@ from app.services.ai.tools.ask_user_tool import (
     ASK_USER_TOOL_NAME,
     ask_user_handler,
 )
+from app.services.ai.tools.schedule_wakeup_tool import SCHEDULE_WAKEUP_TOOL_NAME
 from app.services.infra.hooks import (
     HookContext,
     HookRegistry,
@@ -125,6 +126,9 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
         "GenerateVideo",
         *SCREENWRITING_TOOL_NAMES,
         ASK_USER_TOOL_NAME,  # phase 2a: ask the human, park the turn
+        # phase 2b-2: arm a one-time wake-up on this issue (issue root runs
+        # only; the handler is injected per turn, like FinishIssue).
+        SCHEDULE_WAKEUP_TOOL_NAME,
     }
 )
 
@@ -299,6 +303,11 @@ class AgentRunner:
         # turn — calls return a clear error instead of crashing.
         self.generate_image_handler: Optional[Any] = None
         self.generate_video_handler: Optional[Any] = None
+        # phase 2b-2 §3: per-request ScheduleWakeup handler, injected by the
+        # chat service on an issue ROOT run only. None everywhere else, so a
+        # stray call gets a clear "not available" result rather than arming a
+        # wake-up on a conversation the caller does not own.
+        self.schedule_wakeup_handler: Optional[Any] = None
         # Task 5 (Agent 权限页梳理立项, 2026-08-10): tool names already
         # reported via a "capability_denied" transcript event THIS turn.
         # One AgentRunner instance == one turn (see build_agent_runner_stack
@@ -891,6 +900,11 @@ class AgentRunner:
                     result = await self._timed(
                         tool_name, self._dispatch_finish_issue(args)
                     )
+                elif tool_name == SCHEDULE_WAKEUP_TOOL_NAME:
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_schedule_wakeup(args, recorder),
+                    )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:
                         result = {
@@ -1294,6 +1308,25 @@ class AgentRunner:
         except Exception as fi_exc:  # noqa: BLE001
             logger.warning(f"[AgentRunner] FinishIssue handler raised: {fi_exc!r}")
             return {"error": f"FinishIssue failed: {fi_exc.__class__.__name__}"}
+
+    async def _dispatch_schedule_wakeup(self, args: dict, recorder: Any) -> dict:
+        """Route a ScheduleWakeup call to the per-request handler injected by
+        the chat service. ``recorder`` is passed through because the run it
+        represents is what the row is stamped with and what the
+        ``schedule_set`` event is written to — neither exists when the tool is
+        registered. Mirrors the FinishIssue contract: never raises."""
+        if self.schedule_wakeup_handler is None:
+            return {
+                "error": (
+                    "ScheduleWakeup is not available on this turn — it only "
+                    "applies while working an assigned issue."
+                )
+            }
+        try:
+            return await self.schedule_wakeup_handler(args, recorder)
+        except Exception as sw_exc:  # noqa: BLE001
+            logger.warning(f"[AgentRunner] ScheduleWakeup handler raised: {sw_exc!r}")
+            return {"error": f"ScheduleWakeup failed: {sw_exc.__class__.__name__}"}
 
     def _high_risk_gate_registered(self) -> bool:
         """True when ``HighRiskCapabilityGateHook`` is actually installed in
@@ -1949,6 +1982,11 @@ class AgentRunner:
                 elif tool_name == "FinishIssue":
                     result = await self._timed(
                         tool_name, self._dispatch_finish_issue(args)
+                    )
+                elif tool_name == SCHEDULE_WAKEUP_TOOL_NAME:
+                    result = await self._timed(
+                        tool_name,
+                        self._dispatch_schedule_wakeup(args, recorder),
                     )
                 elif tool_name == "GenerateImage":
                     if self.generate_image_handler is None:

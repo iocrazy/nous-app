@@ -201,6 +201,54 @@ found three docs
 
 与 `Skill` 同一段前缀：改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效，之后逐轮不变。本模块不为它计指纹（对所有 agent 恒等）。注意 `AskUser` 出现在 `FinishIssue` **之后**，所以 issue 触发与聊天触发的 `tools` 列表前缀不同——两条路本来就是两个缓存键，这不新增失效。
 
+### 工具 schema：`ScheduleWakeup`（仅 issue 根 run）
+
+#### What the model sees
+
+`schedule_wakeup_spec()` 产出的 function 描述，2026-09-10（harness 二期 2b-2 Task 5）起注入，位置在 `FinishIssue` 之后、`AskUser` 之前。**只在 issue 根 run 上存在**——聊天触发与后台子代理 run（`trigger="workforce"`，走 workforce worker，根本不经过这段注入）都看不到它。稳定字面量：
+
+```json
+{
+ "type": "function",
+ "function": {
+  "name": "ScheduleWakeup",
+  "description": "Schedule a one-time wake-up for this issue; when it fires you will receive the note as a message. Use it to wait for long external work instead of polling.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "at": {
+     "type": "string",
+     "description": "Absolute time to wake up, ISO-8601 (e.g. 2026-09-11T09:00:00+00:00). Takes precedence over delay_minutes."
+    },
+    "delay_minutes": {
+     "type": "integer",
+     "description": "Wake up this many minutes from now."
+    },
+    "note": {
+     "type": "string",
+     "description": "What you want to be told when it fires — you will receive this text as a message."
+    }
+   },
+   "required": [
+    "note"
+   ]
+  }
+ }
+}
+```
+
+调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
+
+到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑）——正文就是 `note` 原文。
+
+#### Token effect
+
+紧凑 JSON 约 480 字符、约 120 token，恒定，不随 agent 配置或对话增长。只在 issue 根 run 的 `tools` 数组里；聊天路与子代理 run 上完全不存在，那两条路的请求体一个字节都不变。
+
+#### KV Cache effect
+
+`tools` 数组是稳定前缀的一部分，issue run 与 chat run 因而是两个前缀族——**本模块任何改动（描述、参数名、参数顺序）都会让 issue 路的前缀复用一次性失效，chat 路不受影响**。本模块不为它计指纹（对所有 agent 恒等）。⚠️ provider 端是否真的命中缓存不在本模块契约内。
+
 ### 工具结果：超时（任何工具，两条路都有）
 
 #### What the model sees

@@ -61,6 +61,7 @@ async def deliver_or_dispatch(
     message_body: Optional[str] = None,
     source: Optional[dict[str, Any]] = None,
     already_enqueued: bool = False,
+    dedupe_key: Optional[str] = None,
 ) -> DeliverResult:
     """Deliver ``content`` to an issue: onto its inbox while the issue is
     busy, or as a fresh agent turn while it is idle.
@@ -70,6 +71,13 @@ async def deliver_or_dispatch(
     that begins first would answer a message nobody can see) and handed to
     that turn as the reply body. ``source`` is its provenance, e.g.
     ``{"kind": "schedule", "schedule_id": …, "created_by": "agent"}``.
+
+    ``dedupe_key`` makes the delivery idempotent on BOTH arms, for a caller
+    whose delivery can be REPLAYED — a DBOS workflow BODY resumed after a
+    crash re-runs its own writes, which no step record covers. The inbox arm
+    reuses an existing live item with that key; the dispatch arm pins it as
+    the workflow id so DBOS collapses the second start. Callers that cannot
+    be replayed pass nothing and keep a unique id per dispatch.
     """
     # Read the row and the session ONCE and hand both to the busy half: the
     # composed path would otherwise ask the database the same two questions
@@ -87,6 +95,7 @@ async def deliver_or_dispatch(
         row=issue,
         session_id=session_id,
         already_enqueued=already_enqueued,
+        dedupe_key=dedupe_key,
     )
     if diverted.mode != "skipped" or diverted.reason != "idle":
         return diverted
@@ -103,6 +112,7 @@ async def deliver_or_dispatch(
         issue_id,
         user_id=_owner_of(issue) or user_id,
         body=message_body or "",
+        workflow_id=dedupe_key,
     )
 
 
@@ -169,6 +179,7 @@ async def _decide(
     paused: Optional[bool] = None,
     check_terminal: bool = True,
     already_enqueued: bool = False,
+    dedupe_key: Optional[str] = None,
 ) -> DeliverResult:
     """The busy decision on a row and session the caller already read."""
     if check_terminal and (
@@ -200,6 +211,7 @@ async def _decide(
         user_id=str(user_id),
         kind=kind,
         content=content,
+        dedupe_key=dedupe_key,
     )
     logger.info(f"[deliver] issue {issue_id}: {kind} diverted to inbox ({why})")
     return DeliverResult("inbox", inbox_id=int(enqueued["id"]))
@@ -211,9 +223,13 @@ async def dispatch_issue_reply(
     user_id: str,
     body: str = "",
     attachments: Optional[list] = None,
+    workflow_id: Optional[str] = None,
 ) -> DeliverResult:
-    """The idle half. A unique workflow id per dispatch — a fixed one would
-    dedup in DBOS and the re-dispatch would become a silent no-op.
+    """The idle half. A unique workflow id per dispatch by DEFAULT — a fixed
+    one would dedup in DBOS and the re-dispatch would become a silent no-op.
+
+    ``workflow_id`` opts into exactly that dedup, for the one caller that
+    wants it: a delivery whose caller may replay it (see ``dedupe_key``).
 
     An EMPTY ``body`` is not dispatchable. ``respond_to_issue_reply`` appends
     its body as the turn's user message, and neither ``_run_reply_turns`` nor
@@ -228,7 +244,7 @@ async def dispatch_issue_reply(
         dispatch_respond_to_issue_reply,
     )
 
-    wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
+    wf_id = workflow_id or f"issue-reply-{issue_id}-{uuid.uuid4()}"
     try:
         dispatch_respond_to_issue_reply(
             issue_id, user_id, body or CONTINUATION_NUDGE, attachments, wf_id

@@ -289,7 +289,8 @@ def test_schedules_create_validates_cron_and_returns_next_fire_at() -> None:
                 "task_type": "ai_summary",
             },
         )
-        assert resp.status_code == 200, resp.text
+        # 201: creating a schedule creates a resource (phase 2b-2 Task 5).
+        assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["cron_expr"] == "0 9 * * *"
         assert body["enabled"] is True
