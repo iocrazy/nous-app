@@ -43,6 +43,12 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_status,
 )
 
+# Task 7a defect 2: extra turns a dispatch may run purely to drain items that
+# landed on the inbox after its last step boundary. Bounded on purpose — a
+# steady stream of steers must not keep ONE dispatch alive indefinitely; past
+# this bound the minute-ly sweeper's idle-drain picks the issue up instead.
+MAX_INBOX_DRAIN_TURNS = 3
+
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
@@ -892,6 +898,31 @@ async def _question_for_park(
     return {**payload, "run_id": run_id}
 
 
+async def _pending_inbox_count(issue_id: int) -> int:
+    """How many unclaimed, unexpired items this issue's inbox still holds.
+
+    A sharpening, not a dependency: an unreadable inbox reads as zero (with a
+    warning) so a database hiccup can never turn into an extra billed turn or
+    a dispatch that refuses to end.
+    """
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    try:
+        return int(
+            await get_agent_run_inbox_repository().pending_count(
+                target_kind="issue", target_id=int(issue_id)
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — logged, never fatal
+        logger.warning(
+            f"[execute_issue] issue {issue_id}: inbox probe failed ({exc!r}); "
+            "treating as empty — the sweeper's idle-drain remains the backstop"
+        )
+        return 0
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -908,6 +939,7 @@ async def _run_dispatch_with_continuation(
     clear_waiting: Optional[Callable[..., Awaitable[None]]] = None,
     run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     mark_turn: Optional[Callable[..., Awaitable[None]]] = None,
+    pending_inbox: Optional[Callable[[int], Awaitable[int]]] = None,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -936,12 +968,21 @@ async def _run_dispatch_with_continuation(
     agent turn (initial, continuation and post-resume reply alike) with the
     1-based turn number, so the list page can show "turn N" while the dispatch
     is still running. It is decoration only: any failure is swallowed.
+
+    Inbox drain (Task 7a defect 2): before the loop ends it asks
+    ``pending_inbox`` (default: the repository-backed ``_pending_inbox_count``)
+    whether anything landed on this issue's inbox after the last step boundary,
+    and buys up to ``MAX_INBOX_DRAIN_TURNS`` extra turns so it can be claimed.
+    Bounded on purpose — the sweeper's minute-ly idle-drain is the backstop for
+    a stream that outlasts the bound.
     """
     from app.core.config import settings
 
     attempt = 0
     wait_rounds = 0
+    drains = 0
     turn_no = 0
+    inbox_probe = pending_inbox or _pending_inbox_count
     outcome: Optional[str] = None
     reason: Optional[str] = None
     res: Optional[dict[str, Any]] = None
@@ -1043,7 +1084,7 @@ async def _run_dispatch_with_continuation(
                 issue_row,
                 agent_id,
                 user_id,
-                is_continuation=(attempt > 0 or wait_rounds > 0),
+                is_continuation=(attempt > 0 or wait_rounds > 0 or drains > 0),
             )
         if (res or {}).get("stop_reason") == "paused":
             # PauseHook stopped the run at a step boundary. Not an outcome:
@@ -1062,6 +1103,20 @@ async def _run_dispatch_with_continuation(
             and wait_rounds < settings.NEEDS_INPUT_MAX_WAIT_ROUNDS
         ):
             continue  # back to loop top: preempt re-check → park + suspend
+        # Task 7a defect 2: items are claimed at STEP boundaries, and this
+        # turn's last boundary is already behind us — anything that landed
+        # since (a scheduled steer, a background sub-agent's result) would sit
+        # unclaimed until the day-old expiry threw it away. One more turn gives
+        # it a boundary; the InboxClaimHook claims it at that turn's first
+        # step. The loop top re-checks preempt + paused, so this cannot revive
+        # an issue a human just closed.
+        if drains < MAX_INBOX_DRAIN_TURNS and await inbox_probe(issue_id):
+            drains += 1
+            logger.info(
+                f"[execute_issue] issue {issue_id}: inbox item arrived after the "
+                f"last step boundary; draining turn {drains}/{MAX_INBOX_DRAIN_TURNS}"
+            )
+            continue
         break
 
     content_len = len((res or {}).get("content") or "")
@@ -1074,7 +1129,12 @@ async def _run_dispatch_with_continuation(
         content_len=content_len,
         run_id=(res or {}).get("run_id"),
     )
-    return {"outcome": outcome, "attempts": attempt, "wait_rounds": wait_rounds}
+    return {
+        "outcome": outcome,
+        "attempts": attempt,
+        "wait_rounds": wait_rounds,
+        "inbox_drains": drains,
+    }
 
 
 def _paused_result(
