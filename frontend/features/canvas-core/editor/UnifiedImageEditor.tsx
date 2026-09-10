@@ -73,6 +73,11 @@ export interface UnifiedImageEditorProps {
   onBrushCommit?(composite: Blob): void;
   onResizeCommit?(scale: number): void;
   committing?: boolean;
+  /**
+   * Error from the caller's commit handler, shown inside the editor so it is
+   * visible above the overlay.
+   */
+  commitError?: string | null;
 }
 
 const MODE_META: Array<{
@@ -116,6 +121,7 @@ export function UnifiedImageEditor({
   onBrushCommit,
   onResizeCommit,
   committing = false,
+  commitError = null,
 }: UnifiedImageEditorProps) {
   const [mode, setMode] = useState<EditorMode>(initialMode);
   const [region, setRegion] = useState<CropRegion>(FULL_REGION);
@@ -652,6 +658,15 @@ export function UnifiedImageEditor({
             className="text-xs font-medium text-danger"
           >
             {applyError}
+          </p>
+        )}
+        {commitError && (
+          <p
+            role="alert"
+            data-testid="editor-commit-error"
+            className="text-xs font-medium text-danger"
+          >
+            {commitError}
           </p>
         )}
         <button

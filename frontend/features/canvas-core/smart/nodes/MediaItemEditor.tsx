@@ -73,79 +73,69 @@ export function MediaItemEditor({
   };
 
   return (
-    <>
-      <UnifiedImageEditor
-        open
-        src={item.url}
-        alt={item.name ?? ''}
-        initialMode={mode}
-        onClose={onClose}
-        committing={committing}
-        onCropCommit={
-          canvasId
-            ? (region) =>
-                run(async () => {
-                  appendDerived(
-                    await deriveCanvasCrop(canvasId, item.url, region, { nodeId }),
-                  );
-                })
-            : undefined
-        }
-        onOutpaintCommit={
-          canvasId
-            ? (padding, prompt) =>
-                run(async () => {
-                  appendDerived(
-                    await deriveCanvasOutpaint(canvasId, item.url, padding, {
-                      nodeId,
-                      prompt,
-                    }),
-                  );
-                })
-            : undefined
-        }
-        onSplitCommit={
-          canvasId
-            ? (lines) =>
-                run(async () => {
-                  const tiles = await deriveCanvasGrid(canvasId, item.url, lines, {
+    <UnifiedImageEditor
+      open
+      src={item.url}
+      alt={item.name ?? ''}
+      initialMode={mode}
+      onClose={onClose}
+      committing={committing}
+      commitError={error}
+      onCropCommit={
+        canvasId
+          ? (region) =>
+              run(async () => {
+                appendDerived(
+                  await deriveCanvasCrop(canvasId, item.url, region, { nodeId }),
+                );
+              })
+          : undefined
+      }
+      onOutpaintCommit={
+        canvasId
+          ? (padding, prompt) =>
+              run(async () => {
+                appendDerived(
+                  await deriveCanvasOutpaint(canvasId, item.url, padding, {
                     nodeId,
-                  });
-                  tiles.forEach(appendDerived);
-                })
-            : undefined
-        }
-        onMaskCommit={(strokes, size) =>
-          run(async () => {
-            // IC 生成遮罩节点: the black/white mask itself becomes a new item.
-            const b64 = strokesToMaskPngBase64(strokes, size.width, size.height);
-            const bin = atob(b64.split(',').pop() ?? b64);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            await appendBlob(new Blob([bytes], { type: 'image/png' }), 'mask.png', 'mask');
-          })
-        }
-        onBrushCommit={(composite: Blob) =>
-          run(async () => {
-            await appendBlob(composite, 'brush.png', 'brush');
-          })
-        }
-        onResizeCommit={(scale: number) =>
-          run(async () => {
-            const blob = await bakeResize(item.url, scale);
-            await appendBlob(blob, 'resized.png', 'derived');
-          })
-        }
-      />
-      {error && (
-        <div
-          data-testid="media-edit-error"
-          role="alert"
-          className="fixed left-1/2 top-6 z-[60] -translate-x-1/2 rounded bg-danger px-3 py-1.5 text-xs font-medium text-white shadow-lg"
-        >
-          {error}
-        </div>
-      )}
-    </>
+                    prompt,
+                  }),
+                );
+              })
+          : undefined
+      }
+      onSplitCommit={
+        canvasId
+          ? (lines) =>
+              run(async () => {
+                const tiles = await deriveCanvasGrid(canvasId, item.url, lines, {
+                  nodeId,
+                });
+                tiles.forEach(appendDerived);
+              })
+          : undefined
+      }
+      onMaskCommit={(strokes, size) =>
+        run(async () => {
+          // IC 生成遮罩节点: the black/white mask itself becomes a new item.
+          const b64 = strokesToMaskPngBase64(strokes, size.width, size.height);
+          const bin = atob(b64.split(',').pop() ?? b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          await appendBlob(new Blob([bytes], { type: 'image/png' }), 'mask.png', 'mask');
+        })
+      }
+      onBrushCommit={(composite: Blob) =>
+        run(async () => {
+          await appendBlob(composite, 'brush.png', 'brush');
+        })
+      }
+      onResizeCommit={(scale: number) =>
+        run(async () => {
+          const blob = await bakeResize(item.url, scale);
+          await appendBlob(blob, 'resized.png', 'derived');
+        })
+      }
+    />
   );
 }

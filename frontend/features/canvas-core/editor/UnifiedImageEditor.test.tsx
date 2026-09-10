@@ -3,7 +3,7 @@
  * channels hide their tabs; Apply routes to the active mode's channel.
  */
 
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { UnifiedImageEditor } from './UnifiedImageEditor';
@@ -99,5 +99,34 @@ describe('UnifiedImageEditor', () => {
     });
     fireEvent.click(screen.getByTestId('editor-apply'));
     expect(onResizeCommit).toHaveBeenCalledWith(0.25);
+  });
+});
+
+describe('UnifiedImageEditor — commit error', () => {
+  // The editor portals to body as a full-screen overlay, so a caller's error
+  // rendered OUTSIDE it sits beneath the scrim (or inside a transformed React
+  // Flow node) and is unreadable. The reason must render inside the dialog.
+  it('renders commitError inside the editor dialog', () => {
+    render(
+      <UnifiedImageEditor
+        open
+        src={SRC}
+        initialMode="crop"
+        onClose={() => {}}
+        onCropCommit={() => {}}
+        commitError="source image not found"
+      />,
+    );
+    const dialog = screen.getByTestId('unified-image-editor');
+    expect(within(dialog).getByTestId('editor-commit-error').textContent).toBe(
+      'source image not found',
+    );
+  });
+
+  it('renders no commit error when none is given', () => {
+    render(
+      <UnifiedImageEditor open src={SRC} onClose={() => {}} onCropCommit={() => {}} />,
+    );
+    expect(screen.queryByTestId('editor-commit-error')).toBeNull();
   });
 });

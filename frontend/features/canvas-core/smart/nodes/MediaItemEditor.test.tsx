@@ -4,7 +4,7 @@
  * they work on any image; brush / mask / resize bake client-side.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../services/canvasService', async (importOriginal) => {
@@ -95,8 +95,12 @@ describe('MediaItemEditor', () => {
     );
     const { onAppend, onClose } = renderEditor('4242');
     fireEvent.click(screen.getByTestId('editor-apply'));
-    const banner = await screen.findByTestId('media-edit-error');
+    const banner = await screen.findByTestId('editor-commit-error');
     expect(banner.textContent).toBe('source image not found');
+    // Inside the portalled dialog, so it is visible above the overlay.
+    expect(
+      within(screen.getByTestId('unified-image-editor')).getByTestId('editor-commit-error'),
+    ).toBe(banner);
     expect(onAppend).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
