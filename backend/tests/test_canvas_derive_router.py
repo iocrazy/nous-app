@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from loguru import logger
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
@@ -206,6 +207,32 @@ async def test_unexpected_failure_is_500(
     )
     assert resp.status_code == 500
     assert "disk on fire" not in resp.text
+
+
+async def test_unexpected_failure_is_logged_with_its_traceback(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def boom(**kwargs: Any) -> cds.CanvasDerivedImage:
+        raise ValueError("disk on fire")
+
+    records: list[dict[str, Any]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="ERROR")
+    monkeypatch.setattr(cds, "derive_canvas_crop", boom)
+    try:
+        resp = await client.post(
+            "/api/v1/canvases/123/derive-crop",
+            json={
+                "source_url": "/api/v1/generated-media/5/cover",
+                "region": {"x": 0, "y": 0, "width": 0.5, "height": 0.5},
+            },
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert resp.status_code == 500
+    [record] = [r for r in records if "derive-crop" in r["message"]]
+    assert record["exception"] is not None
+    assert isinstance(record["exception"].value, ValueError)
 
 
 @pytest.mark.parametrize(

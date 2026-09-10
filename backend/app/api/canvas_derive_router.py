@@ -72,7 +72,9 @@ async def _run(
         except HTTPException:
             raise
         except Exception as exc:
-            logger.error(f"canvas {canvas_id} derive-{op} failed: {exc!r}")
+            logger.opt(exception=exc).error(
+                f"canvas {canvas_id} derive-{op} failed: {exc!r}"
+            )
             raise HTTPException(
                 status_code=500, detail=f"Failed to derive {op}"
             ) from exc

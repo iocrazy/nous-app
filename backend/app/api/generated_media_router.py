@@ -579,8 +579,11 @@ async def upscale_generation(
         new_id = row.get("id")
         if new_id is None:
             raise HTTPException(status_code=500, detail="upscale registration failed")
+    # /cover, not /file: the canvas paints this in a bare <img src>, which
+    # carries no Bearer header, and /file is scoped to the caller's personal
+    # team — a team board's upscale would 404 there. Same URL import/derive use.
     return {
-        "data": {"id": str(new_id), "url": f"/api/v1/generated-media/{new_id}/file"}
+        "data": {"id": str(new_id), "url": f"/api/v1/generated-media/{new_id}/cover"}
     }
 
 
