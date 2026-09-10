@@ -31,6 +31,7 @@ from app.services.library.generated_roles import (
     UPSCALE_RESULT,
     normalize_role,
 )
+from app.services.library.generation_access import can_read_generation_scope
 from app.services.library.media_preview import ensure_preview
 from app.services.library.media_serving import (
     filesystem_response,
@@ -457,6 +458,13 @@ async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
     return {"data": {"deleted": ok}}
 
 
+def _membership():
+    """Seam: the team-membership lookup (patched in tests)."""
+    from app.repositories.conversation_repository import get_conversation_repository
+
+    return get_conversation_repository()
+
+
 def _upscale_provider():
     """Seam: the jimeng CLI provider (patched in tests)."""
     from app.services.media.parsers.video_providers.jimeng_cli import (
@@ -505,7 +513,18 @@ async def upscale_generation(
 ) -> dict:
     """IC 放大: run jimeng ``image_upscale`` on this generation and register
     the result as a NEW generated-media row (the source stays)."""
-    scope_id = await _scope(auth)
+    # Read gate on the SOURCE, then file the result where the source lives —
+    # the caller's personal team is the wrong home for a team board's image
+    # (the promote fix in #2212 settled the same question).
+    source = await GeneratedMediaRepository().get_by_id(gen_id)
+    if source is None or not await can_read_generation_scope(
+        source,
+        user_id=str(auth.user_id),
+        personal_team_id=await _scope(auth),
+        membership=_membership(),
+    ):
+        raise HTTPException(status_code=404, detail="generation not found")
+    scope_id = int(source["scope_id"])
     async with request_scope(Scope(user_id=str(auth.user_id))):
         async with _materialize_gen_file(gen_id) as src:
             if src is None:
