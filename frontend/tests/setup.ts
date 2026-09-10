@@ -2,7 +2,7 @@
 // so services under test don't accidentally talk to the real network.
 
 import '@testing-library/jest-dom';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 
 // Storage polyfill — vitest 4.1.x + jsdom 29.x gives us an empty `{}`
 // (null prototype) for `localStorage`/`sessionStorage` instead of a real
@@ -83,6 +83,27 @@ for (const proto of [Range.prototype, Element.prototype] as const) {
     });
   }
 }
+
+// A unit test touching the network is itself the bug. An un-mocked fetch
+// rejects SYNCHRONOUSLY so the failure lands in the test that started it,
+// instead of settling after jsdom is gone and surfacing as an
+// EnvironmentTeardownError attributed to a file with nothing failing in it
+// (2026-09-10, AISettings.codexDaemon). Tests that install their own fetch
+// mock simply overwrite this.
+const disabledFetch = (): typeof fetch =>
+  vi.fn((input: RequestInfo | URL) =>
+    Promise.reject(new Error(`fetch is disabled in unit tests: ${String(input)}`)),
+  ) as unknown as typeof fetch;
+
+// Per test, not once: the afterEach below runs vi.restoreAllMocks(), which
+// would hand the native fetch back to whichever test ran next.
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'fetch', {
+    value: disabledFetch(),
+    writable: true,
+    configurable: true,
+  });
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
