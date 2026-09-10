@@ -153,17 +153,14 @@ async def derive_outpaint_resource(
     repo = repo or ResourcesRepository()
 
     source = await load_source_image(repo, source_resource_id)
-
-    image_bytes: bytes
-    if prompt and mode == "ai":
-        image_bytes = await _fill_via_ai_or_fallback(source, padding, prompt)
-    else:
-        try:
-            image_bytes = extend_canvas(
-                source.file_bytes, padding, mime_type=source.mime_type
-            )
-        except OutpaintError as exc:
-            raise OutpaintDeriveError(status_code=400, detail=str(exc)) from exc
+    image_bytes = await extend_image(
+        source.file_bytes,
+        source.mime_type,
+        padding,
+        prompt=prompt,
+        mode=mode,
+        label=str(source.resource.get("id")),
+    )
 
     new_resource = await persist_derived_image(
         repo,
@@ -178,10 +175,42 @@ async def derive_outpaint_resource(
     return OutpaintDeriveResult(resource=new_resource)
 
 
+async def extend_image(
+    file_bytes: bytes,
+    mime_type: str | None,
+    padding: Padding,
+    *,
+    prompt: str | None = None,
+    mode: str = "deterministic",
+    label: str = "",
+) -> bytes:
+    """Extend encoded image bytes by ``padding``.
+
+    ``mode='ai'`` with a prompt tries nous-center and falls back to the
+    deterministic blur fill on any failure; ``label`` only feeds the log line.
+    """
+    if prompt and mode == "ai":
+        return await _fill_via_ai_or_fallback(
+            file_bytes, mime_type, padding, prompt, label
+        )
+    return _deterministic_fill(file_bytes, mime_type, padding)
+
+
+def _deterministic_fill(
+    file_bytes: bytes, mime_type: str | None, padding: Padding
+) -> bytes:
+    try:
+        return extend_canvas(file_bytes, padding, mime_type=mime_type)
+    except OutpaintError as exc:
+        raise OutpaintDeriveError(status_code=400, detail=str(exc)) from exc
+
+
 async def _fill_via_ai_or_fallback(
-    source: Any,
+    file_bytes: bytes,
+    mime_type: str | None,
     padding: Padding,
     prompt: str,
+    label: str,
 ) -> bytes:
     """Try AI fill; fall back silently to deterministic on any failure."""
     from app.core.config import settings
@@ -190,22 +219,19 @@ async def _fill_via_ai_or_fallback(
         image_bytes = await run_outpaint_via_nous(
             settings=settings,
             prompt=prompt,
-            source_bytes=source.file_bytes,
+            source_bytes=file_bytes,
             padding=padding,
-            mime_type=source.mime_type or "image/png",
+            mime_type=mime_type or "image/png",
         )
         logger.info(
-            f"outpaint AI path succeeded source={source.resource.get('id')} "
+            f"outpaint AI path succeeded source={label} "
             f"slug_key={_OUTPAINT_SLUG_KEY}"
         )
         return image_bytes
     except Exception as exc:
         logger.info(
             f"outpaint AI unavailable, falling back to deterministic fill "
-            f"source={source.resource.get('id')} reason={exc!r}"
+            f"source={label} reason={exc!r}"
         )
 
-    try:
-        return extend_canvas(source.file_bytes, padding, mime_type=source.mime_type)
-    except OutpaintError as exc:
-        raise OutpaintDeriveError(status_code=400, detail=str(exc)) from exc
+    return _deterministic_fill(file_bytes, mime_type, padding)
