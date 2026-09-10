@@ -90,7 +90,9 @@ url_allowlist:
 # sb:// 走 StreamingResponse、文件系统走 FileResponse,新旧产物都能播。
 HLS_OBJECT_STORE: true
 
-# Workforce Delegate tool gate. Off until the chain has had a real-stack run
-# (harness phase 2b-2 T7): a truthy flag over a chain that cannot execute
-# hands the model status="queued" for work nobody will ever do.
-FEATURE_WORKFORCE_DELEGATE: false
+# Workforce Delegate tool gate. Flipped on in harness phase 2b-2 T7 after the
+# chain was wired end-to-end (#2218: tick step shapes, workflow body enqueues,
+# attempt-suffixed workflow ids, CAS claim with same-workflow re-entry) and
+# verified by the chain test + the real-Postgres integration suite. Set back to
+# false to hide Delegate from the model and fail-close its execute().
+FEATURE_WORKFORCE_DELEGATE: true
