@@ -425,20 +425,28 @@ async def _run_subagent_task(
         "tokens_used": envelope.get("tokens_used") or 0,
     }
 
+    # A malformed reply_to must not raise out of the worker: the child already
+    # ran and cost money, and an exception here would lose its result AND leave
+    # the task row un-finalised. Say so loudly, finish the task, move on.
     reply_to = payload.get("reply_to") or {}
     target_kind = str(reply_to.get("target_kind") or "")
-    if target_kind:
+    try:
+        target_id = int(reply_to["target_id"]) if target_kind else None
+    except (KeyError, TypeError, ValueError):
+        target_kind, target_id = "", None
+
+    if target_kind and target_id is not None:
         await get_agent_run_inbox_repository().enqueue(
             target_kind=target_kind,
-            target_id=int(reply_to["target_id"]),
+            target_id=target_id,
             user_id=str(payload["user_id"]),
             kind="subagent_result",
             content=content,
         )
     else:
         logger.error(
-            f"[agent-worker] subagent task {task_id} has no reply target; "
-            f"the result has nowhere to go"
+            f"[agent-worker] subagent task {task_id} has no usable reply "
+            f"target ({reply_to!r}); the result has nowhere to go"
         )
 
     if parent_run_id:
@@ -463,9 +471,9 @@ async def _run_subagent_task(
                 f"failed: {err}"
             )
 
-    if target_kind == "issue":
+    if target_kind == "issue" and target_id is not None:
         await deliver_or_dispatch(
-            int(reply_to["target_id"]),
+            target_id,
             kind="subagent_result",
             content=content,
             user_id=str(payload["user_id"]),

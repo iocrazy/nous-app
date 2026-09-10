@@ -189,3 +189,17 @@ async def test_a_failed_child_marks_the_task_failed():
     assert w.workforce.update_task_status.await_args.kwargs["lifecycle_status"] == (
         "failed"
     )
+
+
+async def test_a_malformed_reply_target_is_logged_not_raised():
+    """The child already ran and cost money. An exception here would lose its
+    result and leave the task row un-finalised."""
+    w = _wire(agent_repo_raises=True)
+    out = await _run(w, _task(reply_to={"target_kind": "issue"}))
+
+    assert out["status"] == "success"
+    w.inbox_repo.enqueue.assert_not_awaited()
+    w.deliver.assert_not_awaited()
+    assert (
+        w.workforce.update_task_status.await_args.kwargs["lifecycle_status"] == "done"
+    )

@@ -72,16 +72,21 @@ async def deliver_or_dispatch(
     that turn as the reply body. ``source`` is its provenance, e.g.
     ``{"kind": "schedule", "schedule_id": …, "created_by": "agent"}``.
     """
+    # Read the row and the session ONCE and hand both to the busy half: the
+    # composed path would otherwise ask the database the same two questions
+    # twice for every background delivery.
     issue = await _fresh_issue(issue_id, None)
     if issue is None:
         return DeliverResult("skipped", reason="issue_missing")
+    session_id = await _session_id(issue_id)
 
-    diverted = await divert_to_inbox_if_busy(
+    diverted = await _decide(
         issue_id,
         kind=kind,
         content=content,
         user_id=user_id,
-        issue=issue,
+        row=issue,
+        session_id=session_id,
         already_enqueued=already_enqueued,
     )
     if diverted.mode != "skipped" or diverted.reason != "idle":
@@ -90,7 +95,7 @@ async def deliver_or_dispatch(
     if message_body:
         await _append_thread_message(
             issue_id,
-            session_id=await _session_id(issue_id),
+            session_id=session_id,
             user_id=user_id,
             body=message_body,
             source=source,
@@ -133,13 +138,45 @@ async def divert_to_inbox_if_busy(
     row = await _fresh_issue(issue_id, issue)
     if row is None:
         return DeliverResult("skipped", reason="issue_missing")
+    if session_id is None:
+        session_id = await _session_id(issue_id)
+    return await _decide(
+        issue_id,
+        kind=kind,
+        content=content,
+        user_id=user_id,
+        row=row,
+        session_id=session_id,
+        message_body=message_body,
+        attachments=attachments,
+        append_as_user_id=append_as_user_id,
+        paused=paused,
+        check_terminal=check_terminal,
+        already_enqueued=already_enqueued,
+    )
+
+
+async def _decide(
+    issue_id: int,
+    *,
+    kind: str,
+    content: dict[str, Any],
+    user_id: str,
+    row: dict[str, Any],
+    session_id: Optional[str],
+    message_body: Optional[str] = None,
+    attachments: Optional[list] = None,
+    append_as_user_id: Optional[str] = None,
+    paused: Optional[bool] = None,
+    check_terminal: bool = True,
+    already_enqueued: bool = False,
+) -> DeliverResult:
+    """The busy decision on a row and session the caller already read."""
     if check_terminal and (
         row.get("status") in TERMINAL_STATUSES or row.get("hidden_at")
     ):
         return DeliverResult("skipped", reason="issue_terminal")
 
-    if session_id is None:
-        session_id = await _session_id(issue_id)
     why = await _busy_reason(issue_id, row, session_id, paused=paused)
     if why is None:
         return DeliverResult("skipped", reason="idle")
