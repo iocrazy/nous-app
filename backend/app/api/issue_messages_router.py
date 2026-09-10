@@ -561,22 +561,30 @@ async def _divert_to_inbox_if_running(
     attachments_payload: list | None,
     *,
     paused: bool = False,
+    issue_row: dict,
 ) -> Optional[str]:
     """Enqueue the comment on the issue's inbox when a ROOT run is running on
     it — or when the issue is PAUSED (phase 2a: the comment waits for the
-    resumed run; a wake would start a turn on a paused target). Return the
-    inbox id, or None when neither holds (caller falls through to the wake
-    path). The comment row is persisted first so a failed enqueue never loses
-    the human's words."""
+    resumed run; a wake would start a turn on a paused target) — or while a
+    dispatch is in flight (phase 2b-2 §4.1: the run row does not exist yet, so
+    ``running_root_run_id`` reads idle and the comment would start a SECOND
+    turn racing the one being dispatched). Return the inbox id, or None when
+    none of the three holds (caller falls through to the wake path). The
+    comment row is persisted first so a failed enqueue never loses the human's
+    words. ``issue_row`` is the row the caller already loaded — the marker
+    lives on it, and re-reading it here would only add a second chance to see
+    a different value."""
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
     from app.repositories.agent_runs_repository import get_agent_runs_repository
+    from app.services.issues.issue_dispatch import is_dispatching
 
     running = await get_agent_runs_repository().running_root_run_id(
         issue_id=issue_id, conversation_id=int(session_id)
     )
-    if running is None and not paused:
+    dispatching = is_dispatching(issue_row)
+    if running is None and not paused and not dispatching:
         return None
     await ConversationsAiStore().append_user_message(
         session_id=int(session_id),
@@ -591,7 +599,11 @@ async def _divert_to_inbox_if_running(
         kind="steer",
         content={"body": body, "attachments": attachments_payload or []},
     )
-    why = f"run {running}" if running is not None else "issue paused"
+    why = (
+        f"run {running}"
+        if running is not None
+        else ("issue paused" if paused else "dispatch in flight")
+    )
     logger.info(f"[issue_reply] issue {issue_id}: diverted to inbox ({why})")
     return str(row["id"])
 
@@ -714,6 +726,7 @@ async def post_issue_message(
             payload.body,
             attachments_payload,
             paused=paused,
+            issue_row=issue_row,
         )
     )
     if inbox_id is not None:

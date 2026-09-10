@@ -119,6 +119,28 @@ async def test_atomic_checkout_updates_with_lock_guard(monkeypatch):
     assert binds["id_1"] == 42
 
 
+async def test_atomic_checkout_closes_the_dispatch_window_in_the_same_update(
+    monkeypatch,
+):
+    """Phase 2b-2 §4.1: the ``dispatching`` marker must be REMOVED (jsonb ``-``,
+    not merged to null) by the very UPDATE that takes the lock. A separate
+    write could be interleaved by the fork this marker exists to stop, and a
+    merged ``null`` would leave the key behind for every other reader."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession([_FakeResult(rowcount=1)])
+    _patch_scopes(monkeypatch, session)
+
+    assert await il.atomic_checkout(42, "wf-1") is True
+
+    sql, binds = session.calls[-1]
+    assert "execution_locked_at=" in sql and "execution_state=" in sql
+    # The removal operand is a bound literal cast to text — the same explicit
+    # form set_status uses so jsonb's overloaded ``-`` is not ambiguous.
+    assert " - CAST(" in sql
+    assert "dispatching" in [v for v in binds.values() if v == "dispatching"]
+
+
 async def test_atomic_checkout_returns_false_when_no_row(monkeypatch):
     import app.workflows.issue_lifecycle as il
 

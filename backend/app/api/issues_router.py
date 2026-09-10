@@ -590,6 +590,7 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
     from app.repositories.agent_runs_repository import get_agent_runs_repository
     from app.services.infra import dbos_orchestrator
     from app.services.issues.execution_state import merge_execution_state
+    from app.services.issues.issue_dispatch import is_dispatching
 
     existing = await _load_visible_issue(issue_id, auth)
     paused = bool(existing.get("paused_at"))
@@ -628,6 +629,16 @@ async def resume_issue(issue_id: int, auth: AuthDep) -> IssueResumeResponse:
             "could be withdrawn"
         )
         existing = await _load_visible_issue(issue_id, auth)
+
+    # Phase 2b-2 §4.1: same window the fork guard closes. The lock below is
+    # written by the workflow's atomic_checkout, so between an enqueue and that
+    # step a resume sees an idle issue and dispatches a second workflow — which
+    # atomic_checkout then silently skips.
+    if is_dispatching(existing):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "issue_busy", "message": "a dispatch is in flight"},
+        )
 
     if existing.get("execution_locked_at"):
         marker = (existing.get("execution_state") or {}).get("awaiting_input") or {}

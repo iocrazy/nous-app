@@ -46,8 +46,19 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
-    """Atomically claim an issue. False if someone else already holds the lock."""
-    from sqlalchemy import func, text, update
+    """Atomically claim an issue. False if someone else already holds the lock.
+
+    Phase 2b-2 §4.1: this is also where the dispatch window CLOSES. Between the
+    enqueue (``issue_dispatch.start_execute_issue``) and this step the issue has
+    neither a lock nor a run row, so ``execution_state.dispatching`` stands in
+    for both; it is removed here, in the same UPDATE that takes the lock,
+    because a separate write could be interleaved by the very fork the marker
+    exists to stop. Removed with jsonb ``-`` rather than merged to ``null``:
+    ``merge_execution_state`` cannot delete a key, and a lingering ``null``
+    would make every reader parse a marker that no longer means anything.
+    """
+    from sqlalchemy import Text, cast, func, literal, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
 
     from app.db.session import write_scope
     from app.models import Issues
@@ -58,7 +69,16 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
         result = await session.execute(
             update(Issues)
             .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
-            .values(execution_locked_at=func.now(), dbos_workflow_id=dbos_workflow_id)
+            .values(
+                execution_locked_at=func.now(),
+                dbos_workflow_id=dbos_workflow_id,
+                # Operands explicitly cast: an untyped bind against jsonb's
+                # overloaded ``-`` (text / text[] / integer) is ambiguous to
+                # the planner — same form as set_status's error-key removal.
+                execution_state=func.coalesce(
+                    Issues.execution_state, cast(literal("{}"), JSONB)
+                ).op("-", return_type=JSONB)(cast(literal("dispatching"), Text)),
+            )
         )
         locked = result.rowcount
     return locked > 0

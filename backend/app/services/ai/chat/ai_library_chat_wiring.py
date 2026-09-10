@@ -115,6 +115,7 @@ async def build_agent_runner_stack(
     parent_run_id: Optional[str] = None,
     agent_depth: int = 0,
     delegation_chain: tuple[str, ...] = (),
+    issue_id: Optional[int] = None,
 ) -> AgentRunnerStack:
     """Construct a fully-wired AgentRunner for one agent turn.
 
@@ -129,6 +130,11 @@ async def build_agent_runner_stack(
     function appends the current agent's slug and threads the result into
     AgentRunner hook contexts and SubAgentTaskService, so children inherit
     the extended chain (M2 multi-agent scope).
+
+    ``issue_id`` rides the same rail (phase 2b-2 §4.2): a sub-run spawned
+    inside an issue turn belongs to that issue, so SubAgentTaskService stamps
+    it on the child's agent_runs row instead of leaving the issue's run tree
+    with holes in it.
 
     Steps:
       1. Recall memory (Graphiti graph facts + Honcho user context)
@@ -425,6 +431,7 @@ async def build_agent_runner_stack(
         session_id=session_id,
         delegation_chain=own_chain,
         max_parallel=max_parallel,
+        issue_id=issue_id,
     )
 
     # Seam A: the step-boundary chain, registered here so the order is

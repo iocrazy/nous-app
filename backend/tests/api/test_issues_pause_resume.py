@@ -70,6 +70,15 @@ def wired(monkeypatch):
 
     monkeypatch.setattr(es, "merge_execution_state", merge)
 
+    # Phase 2b-2 §4.1: start_execute_issue writes its own `dispatching` marker
+    # through a module-level binding of the same helper. Patched separately so
+    # `merge` stays the resume endpoint's seam alone — otherwise which mock
+    # sees which write depends on module import ORDER within the session.
+    dispatch_marker = AsyncMock()
+    import app.services.issues.issue_dispatch as dispatch_mod
+
+    monkeypatch.setattr(dispatch_mod, "merge_execution_state", dispatch_marker)
+
     from app.services.infra import dbos_orchestrator
 
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: True)
@@ -82,6 +91,7 @@ def wired(monkeypatch):
         runs=runs_repo,
         inbox=inbox_repo,
         merge=merge,
+        dispatch_marker=dispatch_marker,
         dispatch=dispatch,
         persist=persist,
     )
@@ -145,6 +155,26 @@ async def test_resume_with_pending_inbox_items_redispatches(wired):
     wired.merge.assert_awaited_once_with(7, {"resumed_from_run_id": None})
     wired.dispatch.assert_called_once_with(7, out.workflow_id)
     wired.persist.assert_awaited_once_with(7, out.workflow_id)
+
+
+async def test_the_dispatch_marker_is_written_before_the_enqueue(wired):
+    """Phase 2b-2 §4.1: a marker stamped AFTER the enqueue would leave open
+    exactly the window it exists to close — DBOS can have the workflow running
+    before the caller's next statement."""
+    wired.issue_repo.get_by_id.return_value = _issue(paused_at=NOW)
+    wired.inbox.pending_count.return_value = 2
+    seen: list[int] = []
+    wired.dispatch.side_effect = lambda *a: seen.append(
+        wired.dispatch_marker.await_count
+    )
+
+    await r.resume_issue(7, AUTH)
+
+    assert seen == [1]
+    issue_id, patch = wired.dispatch_marker.await_args.args
+    assert issue_id == 7
+    assert patch["dispatching"]["workflow_id"].startswith("issue-7-")
+    assert dt.datetime.fromisoformat(patch["dispatching"]["at"]).tzinfo is not None
 
 
 async def test_resume_after_a_paused_run_redispatches_with_its_id(wired):
