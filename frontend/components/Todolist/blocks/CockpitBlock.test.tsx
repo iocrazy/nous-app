@@ -221,3 +221,39 @@ describe('CockpitBlockView — tools timed out (harness 2b-1 §3)', () => {
     expect(screen.queryByTestId('cockpit-tools')).toBeNull();
   });
 });
+
+// ── harness 2b-2 §5: Sub-agents cell + wake-up subline ──────────────────────
+describe('CockpitBlockView — sub-agents and wake-ups (harness 2b-2 §5)', () => {
+  const base = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0, running: 0, async_pending: 0, last: null }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
+
+  it('counts done against total and calls out the ones still in the background', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, children: { total: 2, done: 1, running: 0, async_pending: 1, last: { child_run_id: '9', subagent_type: 'librarian', status: 'completed' } } };
+    render(<CockpitBlockView ctx={c} />);
+    const cell = screen.getByTestId('cockpit-children');
+    expect(cell.textContent).toContain('1');
+    expect(cell.textContent).toContain('/2');
+    expect(cell.textContent).toContain('1 in background');
+  });
+
+  it('no cell when the run dispatched no sub-agent', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.queryByTestId('cockpit-children')).toBeNull();
+  });
+
+  it('the subline says when the next wake-up fires', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, wakeups: [{ schedule_id: 'sc-1', fire_at: '2026-09-11T01:00:00Z', note: 'check the render' }] };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.getByTestId('cockpit-wakeup').textContent).toContain('Wakes at');
+  });
+
+  it('no wake-up text when nothing is armed', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.queryByTestId('cockpit-wakeup')).toBeNull();
+  });
+});

@@ -35,6 +35,15 @@ vi.mock('../services/aiService', async (importOriginal) => ({
     chat: true, transcription: true, translation: true, visual_analysis: true,
     caption: true, classification: true, summarization: true,
   }),
+  // The panel actually calls getAIGovernance, not getModuleGovernance. Left
+  // unmocked it made a REAL request that settled after jsdom was torn down —
+  // an EnvironmentTeardownError attributed to this file with nothing failing
+  // in it (2026-09-10).
+  getAIGovernance: vi.fn().mockResolvedValue({
+    chat: true, transcription: true, translation: true, visual_analysis: true,
+    caption: true, classification: true, summarization: true,
+    nous_enabled: false, nous_modules: {},
+  }),
 }));
 vi.mock('../services/aiLibraryService', () => ({
   aiLibraryService: { listAgents: vi.fn().mockResolvedValue([]) },

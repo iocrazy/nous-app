@@ -16,7 +16,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, ChevronDown } from 'lucide-react';
+import { Send, ChevronDown, Clock } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -47,6 +47,7 @@ import type {
 } from '../../types';
 import { IssueCommentTriggerChip } from './IssueCommentTriggerChip';
 import { isNoteDraft } from './isNoteDraft';
+import { LaterPopover } from './LaterPopover';
 import type { CommentTriggerPreview } from '../../services/issueMessageService';
 
 /** Merged attachment payload the parent forwards to the backend: staged file
@@ -95,6 +96,12 @@ interface IssueReplyBoxProps {
   onNoteBoundaryChange?: (noteBody: string | null) => void;
   /** Scope the @-mention resource picker to this team + personal resources. */
   teamId?: string;
+  /** The issue this composer belongs to. Absent on surfaces that have no
+   *  issue behind them — the "Later" affordance is then hidden rather than
+   *  posting a wake-up at nothing (harness 2b-2 §5-2). */
+  issueId?: number;
+  /** A wake-up was armed; the page re-reads its schedules panel. */
+  onScheduled?: () => void;
 }
 
 /** Walk the tiptap doc and collect all resourceRef nodes (mirrors ChatInput). */
@@ -124,11 +131,14 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   triggerAgentName,
   onNoteBoundaryChange,
   teamId,
+  issueId,
+  onScheduled,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [agentId, setAgentId] = useState<string | null>(defaultAgentId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [laterOpen, setLaterOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
   // Library ASSETS staged for this comment. Their own list beside the files,
@@ -536,6 +546,32 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
 
       <div className="flex items-center gap-2 px-2 pb-2 border-t border-ink-800/80 pt-2">
         <span className="text-[12px] text-ink-600 ml-1">⌘↩ to send</span>
+        {/* Beside "⌘↩ to send" for the same reason the trigger chip is: both
+            say what will happen to the text now in the box. */}
+        {issueId != null && (
+          <div className="relative">
+            <button
+              type="button"
+              data-testid="reply-later"
+              onClick={() => setLaterOpen((v) => !v)}
+              disabled={inputBlocked}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[12px] rounded text-ink-400 hover:bg-ink-800 hover:text-ink-200 disabled:opacity-40"
+            >
+              <Clock size={11} /> {t('later.button', 'Later')}
+            </button>
+            {laterOpen && (
+              <LaterPopover
+                issueId={issueId}
+                text={editor?.getText().trim() ?? ''}
+                onClose={() => setLaterOpen(false)}
+                onScheduled={() => {
+                  setLaterOpen(false);
+                  onScheduled?.();
+                }}
+              />
+            )}
+          </div>
+        )}
         {/* Sits beside "⌘↩ to send" on purpose: it describes what that keystroke
             is about to cost. */}
         {triggerPreview && (

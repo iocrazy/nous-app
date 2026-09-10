@@ -5605,7 +5605,10 @@
       "forbidden": "你无权控制这个 issue",
       "not_found": "找不到该 issue",
       "generic": "无法更新该 issue"
-    }
+    },
+    "subagents": "子代理",
+    "subagentsBackground": "{{count}} 个后台",
+    "wakesAt": "{{at}} 唤醒"
   },
   "issues": {
     "pageTitle": "待办事项",
@@ -5632,6 +5635,9 @@
     "queuedTitle": "等待 agent 接手的评论",
     "attention": {
       "queued": "排队中"
+    },
+    "quick": {
+      "scheduled": "定时"
     }
   },
   "moduleDisabled": {
@@ -5721,7 +5727,9 @@
     "budgetHalt": "预算超支（{{pct}}%）",
     "turnEnd": "本轮结束 · {{reason}}",
     "steps": "{{count}} 步",
-    "denied": "已拦截：{{tool}}"
+    "denied": "已拦截：{{tool}}",
+    "inboxSubagent": "子代理结果 · {{type}}（后台）· {{verdict}} · 已在第 {{n}} 步前读到",
+    "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到"
   },
   "fork": {
     "title": "从{{step}}分叉",
@@ -5774,6 +5782,54 @@
       "budget_still_exhausted": "预算仍已用尽，先提高预算。",
       "budget_unreadable": "读不到预算，请重试。",
       "no_issue_target": "这个问题没有关联的 issue。"
+    }
+  },
+  "subagent": {
+    "waiting": "等待结果",
+    "queued": "后台 · 结果将进收件箱",
+    "continued": "续聊自 #{{run}}",
+    "open": "打开 run #{{run}}",
+    "panelTitle": "子 run #{{run}} · 来自 run #{{parent}} 第 {{step}} 步 · {{mode}}",
+    "modeSync": "前台",
+    "modeAsync": "后台",
+    "backToParent": "回到父 run",
+    "done": "✓ 完成",
+    "failed": "失败"
+  },
+  "schedule": {
+    "agentSet": "Agent 定了唤醒 · {{at}}",
+    "cancel": "取消",
+    "cancelFailed": "取消失败",
+    "loadFailed": "读取该 issue 的定时失败",
+    "startedBy": "由定时唤醒开始",
+    "once": "一次性",
+    "routine": "例行",
+    "title": "定时",
+    "add": "+ 稍后",
+    "empty": "暂无定时唤醒"
+  },
+  "later": {
+    "button": "稍后",
+    "in1h": "1 小时后",
+    "tonight": "今晚 20:00",
+    "tomorrow": "明早 09:00",
+    "custom": "自定义",
+    "confirm": "定时发送",
+    "needText": "先写一句到点要发的话",
+    "explain": "到点时：agent 在跑就插进下一步；空闲就用这句话开始新一轮；issue 已结束则不再发。只发一次。",
+    "notePlaceholder": "到点要发的话",
+    "scheduling": "创建中…",
+    "error": {
+      "fire_at_out_of_range": "时间要在将来、且不超过 30 天",
+      "fire_at_timezone_required": "这个时间没带时区，重新选一次",
+      "fire_at_required": "先选一个唤醒时间",
+      "text_required": "先写一句到点要发的话",
+      "issue_id_required": "无法识别这个 issue",
+      "invalid_timezone": "服务器不认识这个时区",
+      "forbidden": "你没有权限在这个 issue 上定时",
+      "not_found": "issue 不存在",
+      "unknown": "定时创建失败（{{code}}）",
+      "generic": "定时创建失败"
     }
   }
 }

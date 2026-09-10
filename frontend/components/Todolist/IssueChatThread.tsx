@@ -10,9 +10,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Zap, ChevronRight, ChevronDown, Paperclip, GitFork } from 'lucide-react';
+import { Zap, ChevronRight, ChevronDown, Clock, Paperclip, GitFork } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
-import { simulateAgentRunComplete } from '../../services/issueMessageService';
+import { simulateAgentRunComplete, startedByWakeup } from '../../services/issueMessageService';
+import type { ChildRunOrigin } from './childRunContext';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
 import { groupAgentRuns, type RunGroupEntry } from './runGrouping';
 import { formatTokens, formatCentsAsUsd } from '../../pages/usagePanelHelpers';
@@ -154,7 +155,7 @@ const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<st
   );
 };
 
-const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef> }> = ({ msg, agentsById }) => {
+const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; fromWakeup?: boolean }> = ({ msg, agentsById, fromWakeup }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
   const initials = (agent?.name ?? '·').slice(0, 2).toUpperCase();
   const boardSignoff = (msg.meta?.board_signoff as string | undefined);
@@ -225,7 +226,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         </span>
       </div>
       <RunMetaLine msg={msg} />
-      <RunTrajectory runId={msg.agent_run_id} isRunning={isRunning} />
+      <RunTrajectory runId={msg.agent_run_id} isRunning={isRunning} startedByWakeup={fromWakeup} />
       {msg.body && (
         <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
@@ -236,13 +237,29 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
 };
 
 /**
+ * Runs a wake-up started (harness 2b-2 §5-2). A fired schedule posts an
+ * ordinary comment and the run it triggers is the very next row, so the
+ * marker is read off the row IMMEDIATELY before — reaching further back
+ * would credit a wake-up for a turn some later comment actually started.
+ */
+export function wakeupRunIds(messages: IssueMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (let i = 1; i < messages.length; i += 1) {
+    const row = messages[i];
+    if (row.kind !== 'agent_run' || !row.agent_run_id) continue;
+    if (startedByWakeup(messages[i - 1])) ids.add(String(row.agent_run_id));
+  }
+  return ids;
+}
+
+/**
  * What this run did, step by step — the shared TrajectoryRenderer over the
  * run's transcript (harness P4 seam C). Steps do not stack: the live step is
  * the one expanded block, finished steps are one-line summaries. Sourced from
  * `agent_run_transcript_events` — an IssueMessage carries only `agent_run_id`.
  * Renders once per run; a capability denial keeps its own notice above.
  */
-export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
+export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean; startedByWakeup?: boolean }> = ({ runId, isRunning, startedByWakeup: fromWakeup }) => {
   const { t } = useTranslation();
   const { events, denials } = useRunToolActivity(runId, isRunning);
   // Replay (harness 2b-1 §1): the scrubber sits on the issue's NEWEST run
@@ -267,7 +284,7 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean 
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
-      {(origin || timedOut.count > 0) && (
+      {(origin || timedOut.count > 0 || fromWakeup) && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="run-header-chips">
           {origin && (
             <button
@@ -281,6 +298,15 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean 
               <GitFork size={10} />
               {t('fork.chipSeq', 'Forked from run #{{run}} @ seq {{seq}}', { run: origin.ofRunId.slice(-6), seq: origin.atSeq })}
             </button>
+          )}
+          {fromWakeup && (
+            <span
+              data-testid="run-wakeup-chip"
+              className="inline-flex items-center gap-1 rounded-full border border-info-line bg-info-soft/40 px-2 py-0.5 text-[11px] text-info"
+            >
+              <Clock size={10} />
+              {t('schedule.startedBy', 'Started By Wake-up')}
+            </span>
           )}
           {timedOut.count > 0 && (
             <span
@@ -315,17 +341,45 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean 
  * drawn above the thread with its own scrubber and fork marks, so the fork
  * chip and a `?run=&seq=` link to it have somewhere to land.
  */
-export const DetachedRunPanel: React.FC<{ runId: string }> = ({ runId }) => {
+export const DetachedRunPanel: React.FC<{
+  runId: string;
+  /** Set when the panel is showing a SUB-RUN rather than a fork origin
+   *  (harness 2b-2 §5-1) — the header then says where the child came from. */
+  origin?: ChildRunOrigin;
+  onBack?: () => void;
+}> = ({ runId, origin, onBack }) => {
   const { t } = useTranslation();
   const ref = React.useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
   }, [runId]);
   return (
-    <div ref={ref} id={`run-${runId}`} data-testid="detached-run-panel" className="mx-4 mt-3 rounded-lg border border-info-line bg-info-soft/30 p-2">
-      <div className="mb-1 text-[12px] text-info">
-        {t('replay.originRun', 'Original run #{{run}} (from an earlier conversation of this issue)', { run: runId.slice(-6) })}
-      </div>
+    <div
+      ref={ref}
+      id={`run-${runId}`}
+      data-testid="detached-run-panel"
+      data-variant={origin ? 'child' : 'origin'}
+      className={`mx-4 mt-3 rounded-lg border p-2 ${origin ? 'border-agent-line bg-agent-soft/30' : 'border-info-line bg-info-soft/30'}`}
+    >
+      {origin ? (
+        <div className="mb-1 flex items-center gap-2 text-[12px] text-agent">
+          <span data-testid="child-run-header">
+            {t('subagent.panelTitle', 'Sub-run #{{run}} · from run #{{parent}} step {{step}} · {{mode}}', {
+              run: runId.slice(-6),
+              parent: (origin.parentRunId ?? '').slice(-6) || '—',
+              step: origin.step,
+              mode: origin.mode === 'async' ? t('subagent.modeAsync', 'Background') : t('subagent.modeSync', 'Foreground'),
+            })}
+          </span>
+          <button type="button" data-testid="child-run-back" onClick={onBack} className="ml-auto underline decoration-dotted">
+            {t('subagent.backToParent', 'Back To Parent')}
+          </button>
+        </div>
+      ) : (
+        <div className="mb-1 text-[12px] text-info">
+          {t('replay.originRun', 'Original run #{{run}} (from an earlier conversation of this issue)', { run: runId.slice(-6) })}
+        </div>
+      )}
       <RunTrajectory runId={runId} isRunning={false} />
     </div>
   );
@@ -367,7 +421,9 @@ const RunGroupCard: React.FC<{
   selfUserId?: string;
   /** Session-view deep link, or null when this issue has no session / no team. */
   conversationHref?: string | null;
-}> = ({ entry, agentsById, selfUserId, conversationHref }) => {
+  /** Run ids a wake-up started — computed once for the whole thread. */
+  wakeupRuns?: Set<string>;
+}> = ({ entry, agentsById, selfUserId, conversationHref, wakeupRuns }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   // Replay (harness 2b-1 §1): the scrubber lives on the newest run's row —
@@ -427,7 +483,7 @@ const RunGroupCard: React.FC<{
         <div data-testid="run-group-body" className="px-3 pb-2">
           {entry.items.map((m) => (
             m.kind === 'agent_run'
-              ? <AgentRunEvent key={m.id} msg={m} agentsById={agentsById} />
+              ? <AgentRunEvent key={m.id} msg={m} agentsById={agentsById} fromWakeup={!!m.agent_run_id && !!wakeupRuns?.has(String(m.agent_run_id))} />
               : <SystemStatusEvent key={m.id} msg={m} selfUserId={selfUserId} />
           ))}
         </div>
@@ -576,6 +632,9 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
     );
   }
   const renderItems = buildTimeline(messages);
+  // Read off the flat list, before any grouping: adjacency is the signal, and
+  // grouping is exactly what destroys it.
+  const wakeupRuns = wakeupRunIds(messages);
   return (
     <div className="px-4 py-3">
       {renderItems.map((item) => {
@@ -583,11 +642,11 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
           return <SystemStatusGroup key={item.key} messages={item.messages} selfUserId={selfUserId} />;
         }
         if (item.kind === 'run_group') {
-          return <RunGroupCard key={item.key} entry={item} agentsById={agentsById} selfUserId={selfUserId} conversationHref={conversationHref} />;
+          return <RunGroupCard key={item.key} entry={item} agentsById={agentsById} selfUserId={selfUserId} conversationHref={conversationHref} wakeupRuns={wakeupRuns} />;
         }
         const m = item.message;
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;
-        if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} />;
+        if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} fromWakeup={!!m.agent_run_id && wakeupRuns.has(String(m.agent_run_id))} />;
         if (m.meta?.deliverable_upload) return <DeliverableFiledEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
         return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
       })}

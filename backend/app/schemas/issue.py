@@ -139,6 +139,10 @@ class Issue(IssueBase):
     completed_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     hidden_at: Optional[datetime] = None
+    #: harness 2b-2 §5-2: one-shot wake-ups still armed against this issue.
+    #: Folded by ``list_for_user`` only — every other read leaves the default,
+    #: so a client must treat 0 as "none pending here", not as gospel.
+    pending_wakeups: int = 0
     created_at: datetime
     updated_at: datetime
 

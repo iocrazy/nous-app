@@ -27,6 +27,19 @@ export type AgentLivenessState =
   | 'cancelled'
   | 'finished';
 
+/**
+ * Where a thread row came from, when it did not come from a person typing.
+ * A wake-up writes an ORDINARY `comment` row owned by the rule's owner —
+ * there is no author_kind column — so this marker inside the existing `meta`
+ * jsonb is the only thing that tells the two apart.
+ */
+export interface IssueMessageSource {
+  kind: string;
+  /** `user_schedules.id` — a uuid STRING (mig 204). */
+  schedule_id?: string;
+  created_by?: string;
+}
+
 export interface IssueMessage {
   id: string;
   issue_id: number;
@@ -34,7 +47,7 @@ export interface IssueMessage {
   author_user_id: string | null;
   author_agent_id: string | null;
   body: string | null;
-  meta: Record<string, unknown>;
+  meta: Record<string, unknown> & { source?: IssueMessageSource };
   duration_seconds: number | null;
   agent_run_id: string | null;
   /** Optional: surfaced when the chat row was emitted by the agent_runs
@@ -45,6 +58,10 @@ export interface IssueMessage {
   to_status: string | null;
   created_at: string;
 }
+
+/** True when a schedule firing wrote this row. */
+export const startedByWakeup = (msg: IssueMessage | undefined | null): boolean =>
+  msg?.meta?.source?.kind === 'schedule';
 
 export interface IssueMessageList {
   messages: IssueMessage[];

@@ -35,7 +35,7 @@ const events = [
 
 describe('TrajectoryRenderer', () => {
   it('registers a renderer for every folded node kind', () => {
-    expect(registeredTrajectoryNodeKinds()).toEqual(['budget', 'denied', 'error', 'inbox', 'step', 'turn_end', 'user']);
+    expect(registeredTrajectoryNodeKinds()).toEqual(['budget', 'denied', 'error', 'inbox', 'schedule', 'step', 'turn_end', 'user']);
   });
 
   it('shows only the live step expanded; a finished step is one summary row until clicked', () => {

@@ -339,6 +339,11 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   );
 };
 
+/** Has a one-shot wake-up still waiting to fire (harness 2b-2 §5-2). Absent
+ *  on rows read from anything but the list endpoint, so a missing field means
+ *  "not known here", which for this chip is the same as none. */
+const hasWakeup = (issue: UiIssue): boolean => (issue.raw.pending_wakeups ?? 0) > 0;
+
 function applyFilters(issues: UiIssue[], filters: IssueFilters, currentUserId: string | undefined): UiIssue[] {
   const assigneeActive = filters.assigneeMe || filters.assigneeNone || filters.assigneeAgents.size > 0;
   const creatorActive = filters.creatorMe || filters.creatorsAgents.size > 0;
@@ -451,6 +456,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   // moving" before "what column is it in". Status / Project stay selectable.
   const [groupMode, setGroupMode] = useState<IssueGroupMode>('phase');
   const [phaseFilter, setPhaseFilter] = useState<IssuePhase | null>(null);
+  const [scheduledOnly, setScheduledOnly] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
   const [groupNewProjectOpen, setGroupNewProjectOpen] = useState(false);
   const [groupNewProjectName, setGroupNewProjectName] = useState('');
@@ -610,12 +616,17 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const byPhase = phaseFilter ? filteredByPanel.filter((i) => issuePhase(i) === phaseFilter) : filteredByPanel;
-    if (!q) return byPhase;
-    return byPhase.filter((i) => {
+    const byWakeup = scheduledOnly ? byPhase.filter(hasWakeup) : byPhase;
+    if (!q) return byWakeup;
+    return byWakeup.filter((i) => {
       const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [filteredByPanel, search, phaseFilter]);
+  }, [filteredByPanel, search, phaseFilter, scheduledOnly]);
+
+  // harness 2b-2 §5-2: how many issues have a wake-up waiting to fire. Same
+  // rule as the phase counts — off the scoped list, not the filtered one.
+  const scheduledCount = useMemo(() => scopedIssues.filter(hasWakeup).length, [scopedIssues]);
 
   // Phase counts for the Quick chips — off the scoped list, so a chip's count
   // never shrinks because of the filter it is about to apply.
@@ -936,6 +947,20 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               </button>
             );
           })}
+          {/* Not a phase — an issue can be idle AND have a wake-up armed — so
+              it sits beside the phase chips rather than among them. */}
+          <button
+            type="button"
+            data-testid="quick-scheduled"
+            onClick={() => setScheduledOnly((v) => !v)}
+            disabled={scheduledCount === 0 && !scheduledOnly}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full transition disabled:opacity-40 ${
+              scheduledOnly ? `ring-1 ${PHASE_TONE.paused}` : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
+            }`}
+          >
+            {t('issues.quick.scheduled', 'Scheduled')}
+            <span className="tabular-nums text-ink-500">{scheduledCount}</span>
+          </button>
         </div>
         <IssuePipeline issues={scopedIssues} activeStatus={pipelineActive} onPick={pickStatus} />
         <div className="ml-auto flex items-center gap-2 shrink-0">

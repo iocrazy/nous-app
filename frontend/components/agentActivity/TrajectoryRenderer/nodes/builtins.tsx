@@ -6,13 +6,17 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronDown, ChevronRight, Inbox, MessageSquare, RotateCw, ShieldOff, Wallet, Wrench, GitFork } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Clock, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
 
+import { schedulesService } from '../../../../services/schedulesService';
+import { fmtWhen } from '../../../../utils/fmtWhen';
+import { useChildRun } from '../../../Todolist/childRunContext';
 import type {
   BudgetNode,
   DeniedNode,
   ErrorNode,
   InboxNode,
+  ScheduleNode,
   StepLine,
   StepNode,
   TurnEndNode,
@@ -91,6 +95,101 @@ function fmtSeconds(s: number | null | undefined, decimals = 0): string {
   if (s >= 120) return `${decimals > 0 ? (s / 60).toFixed(1) : String(Math.round((s / 60) * 100) / 100)} min`;
   return `${decimals > 0 ? s.toFixed(decimals) : String(Math.round(s * 100) / 100)}s`;
 }
+
+/**
+ * Sub-agents dispatched by one step (harness 2b-2 §5-1). Three states, and
+ * the difference between them is the whole point: a foreground child means
+ * "wait, the parent is blocked on this", a background one means "go do
+ * something else, the answer lands in the inbox", a finished one is a
+ * receipt. Only a child with a run id can be opened — a background task that
+ * has not started has no run to show.
+ */
+type ChildState = 'running' | 'queued' | 'done' | 'failed';
+
+const CHILD_TONE: Record<ChildState, string> = {
+  running: 'border-agent-line bg-agent-soft/40 text-agent',
+  queued: 'border-info-line bg-info-soft/40 text-info',
+  done: 'border-ok-line bg-ok-soft/40 text-ink-300',
+  failed: 'border-danger-line bg-danger-soft/40 text-danger',
+};
+
+/** The only statuses that mean the child actually delivered. Anything else a
+ *  child can end as — `failed`, `cancelled`, a timeout — is a non-result, and
+ *  drawing it in ok-green tells the reader the opposite of the truth. */
+const CHILD_OK = new Set(['completed', 'ok', 'succeeded', 'success']);
+
+/** True once the child has ended, whatever the verdict. */
+export function childState(status: string | null, mode: 'sync' | 'async'): ChildState {
+  if (!status) return mode === 'async' ? 'queued' : 'running';
+  return CHILD_OK.has(status.toLowerCase()) ? 'done' : 'failed';
+}
+
+export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
+  const { t } = useTranslation();
+  const childRun = useChildRun();
+  if (node.children.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 px-2.5 pb-1.5 pl-7" data-testid="subagent-cards">
+      {node.children.map((c) => {
+        const state = childState(c.status, c.mode);
+        const spend = [fmtMs(c.durationMs), fmtCents(c.costCents)].filter(Boolean).join(' · ');
+        return (
+          <div
+            key={c.key}
+            data-testid="subagent-card"
+            data-state={state}
+            data-mode={c.mode}
+            className={`rounded-md border px-2 py-1 text-[11px] ${CHILD_TONE[state]}`}
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              {state === 'running' && (
+                <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-agent-line border-t-agent" />
+              )}
+              <Users size={11} className="shrink-0" />
+              <span className="font-medium">{c.subagentType}</span>
+              {c.continuedFrom && (
+                <span data-testid="subagent-continued" className="shrink-0 rounded border border-agent-line px-1">
+                  {t('subagent.continued', 'Continued From #{{run}}', { run: c.continuedFrom.slice(-6) })}
+                </span>
+              )}
+              <span className="truncate text-ink-400">{c.description}</span>
+              <span className="ml-auto shrink-0 tabular-nums">
+                {state === 'running' && t('subagent.waiting', 'Waiting For Result')}
+                {state === 'queued' && t('subagent.queued', 'Background · Result Arrives In The Inbox')}
+                {state === 'done' && [t('subagent.done', '✓ Done'), spend].filter(Boolean).join(' · ')}
+                {state === 'failed' && [t('subagent.failed', 'Failed'), spend].filter(Boolean).join(' · ')}
+              </span>
+              {c.childRunId && childRun && (
+                <button
+                  type="button"
+                  data-testid="subagent-open"
+                  className="shrink-0 underline decoration-dotted"
+                  onClick={() =>
+                    childRun.open({
+                      childRunId: c.childRunId as string,
+                      parentRunId: null,
+                      step: node.step,
+                      mode: c.mode,
+                      subagentType: c.subagentType,
+                      description: c.description,
+                    })
+                  }
+                >
+                  {t('subagent.open', 'Open Run #{{run}}', { run: c.childRunId.slice(-6) })}
+                </button>
+              )}
+            </div>
+            {c.summary && (
+              <div className="mt-0.5 truncate pl-4 text-ink-400" data-testid="subagent-summary">
+                {c.summary}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, onToggle, marks }) => {
   const { t } = useTranslation();
@@ -171,20 +270,99 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
           )}
         </div>
       )}
+      {/* Outside the `open` block on purpose: a dispatched sub-agent is the
+          one thing about a collapsed step you still need to see. */}
+      <SubagentCards node={node} />
     </div>
   );
 };
 
 export const InboxNodeView: React.FC<NodeProps<InboxNode>> = ({ node }) => {
   const { t } = useTranslation();
+  // Three things arrive through one inbox and read very differently: a
+  // sub-agent's answer, a wake-up that fired, and a person steering.
+  const result = node.result;
+  const wakeup = node.source?.kind === 'schedule';
+  // A sub-agent result is only ever filed by the background worker (a
+  // foreground child answers in-line), so the row can say so outright — and
+  // its own verdict has to travel with it, exactly as on the card.
+  const failed = !!result && childState(result.status, 'async') === 'failed';
+  const label = result
+    ? t('trajectory.inboxSubagent', 'Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}', {
+        type: result.subagentType,
+        verdict: failed ? t('subagent.failed', 'Failed') : t('subagent.done', '✓ Done'),
+        n: node.step ?? '?',
+      })
+    : wakeup
+      ? t('trajectory.inboxWakeup', 'Wake-up · set by {{who}} · read before step {{n}}', { who: node.source?.createdBy ?? 'user', n: node.step ?? '?' })
+      : t('trajectory.inboxClaimed', { kind: node.inboxKind });
   return (
-    <Row className="rounded-md bg-ok-soft text-ink-200" testId="traj-inbox">
-      <Inbox size={12} className="shrink-0 text-ok" />
-      <span className="truncate">{t('trajectory.inboxClaimed', { kind: node.inboxKind })}</span>
-      {node.step !== null && (
-        <span className="ml-auto shrink-0 text-[11px] text-ink-600">{t('trajectory.beforeStep', { n: node.step })}</span>
+    <div className={`rounded-md ${failed ? 'bg-danger-soft' : 'bg-ok-soft'}`} data-testid="traj-inbox">
+      <Row className={failed ? 'text-danger' : 'text-ink-200'}>
+        <Inbox size={12} className={`shrink-0 ${failed ? 'text-danger' : wakeup ? 'text-info' : 'text-ok'}`} />
+        <span className="truncate">{label}</span>
+        {node.step !== null && !result && !wakeup && (
+          <span className="ml-auto shrink-0 text-[11px] text-ink-600">{t('trajectory.beforeStep', { n: node.step })}</span>
+        )}
+      </Row>
+      {result && result.summary && (
+        <div className="px-2.5 pb-1.5 pl-7 text-[11px] text-ink-400" data-testid="traj-inbox-summary">
+          {result.summary}
+        </div>
       )}
-    </Row>
+    </div>
+  );
+};
+
+/**
+ * A wake-up the AGENT set on itself (harness 2b-2 §5-2). Cancelling is a
+ * DELETE that can fail, and a cancel that silently did nothing is worse than
+ * no button — the failure gets its own line.
+ */
+export const ScheduleNodeView: React.FC<NodeProps<ScheduleNode>> = ({ node }) => {
+  const { t } = useTranslation();
+  const [cancelled, setCancelled] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  const when = fmtWhen(node.fireAt);
+  const cancel = async (): Promise<void> => {
+    if (pending || cancelled) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      await schedulesService.remove(node.scheduleId);
+      setCancelled(true);
+    } catch (err) {
+      console.error('[ScheduleNodeView] cancel failed', err);
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div className="rounded-md bg-info-soft/50" data-testid="traj-schedule" data-cancelled={cancelled ? 'true' : 'false'}>
+      <Row className="text-info">
+        <Clock size={12} className="shrink-0" />
+        <span className="truncate">{t('schedule.agentSet', 'Agent scheduled a wake-up · {{at}}', { at: when })}</span>
+        {node.note && <span className="truncate text-ink-400">{node.note}</span>}
+        {!cancelled && (
+          <button
+            type="button"
+            data-testid="traj-schedule-cancel"
+            disabled={pending}
+            onClick={() => void cancel()}
+            className="ml-auto shrink-0 underline decoration-dotted disabled:opacity-50"
+          >
+            {t('schedule.cancel', 'Cancel')}
+          </button>
+        )}
+      </Row>
+      {failed && (
+        <div className="px-2.5 pb-1.5 pl-7 text-[11px] text-danger" data-testid="traj-schedule-cancel-error">
+          {t('schedule.cancelFailed', 'Could not cancel that wake-up.')}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -241,6 +419,7 @@ export const ErrorNodeView: React.FC<NodeProps<ErrorNode>> = ({ node }) => (
 registerTrajectoryNode('user', UserNodeView);
 registerTrajectoryNode('step', StepNodeView);
 registerTrajectoryNode('inbox', InboxNodeView);
+registerTrajectoryNode('schedule', ScheduleNodeView);
 registerTrajectoryNode('budget', BudgetNodeView);
 registerTrajectoryNode('turn_end', TurnEndNodeView);
 registerTrajectoryNode('denied', DeniedNodeView);
