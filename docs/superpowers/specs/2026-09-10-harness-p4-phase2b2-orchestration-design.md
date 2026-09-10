@@ -19,6 +19,14 @@
 | 前端已有子代理/定时的落点 | `issueBlocks` 的 `timeline` zone 空；`parent_run_id` / `child_runs` 在 `frontend/` 零出现；schedule UI 只在 Agent 工作台 Routines 面板；主页 Quick 无「定时」芯片 | 子代理卡、定时卡、Quick 芯片都是新画；子 run 面板复用 2b-1 `DetachedRunPanel` |
 | Vitest 偶发 `EnvironmentTeardownError` 是环境抖动 | `AISettings.tsx:594` 的 `getAIGovernance()` 未 mock，真发 fetch，`.finally(setGovernanceLoaded)` 在 jsdom 拆卸后落定 | 补 mock + `tests/setup.ts` 全局 fetch 桩兜整类 |
 
+> **写 plan 时的偏差（2026-09-10，三段勘察后已定，plan 以此为准）**
+> - §1/§6：`agent_tasks` 有 ORM 模型（`models/agents.py:568`），schema-drift 门禁两向零容忍，模型与 `DROP TABLE` 必须同 PR——「迁移与消费代码分 PR」在这一条上让位于门禁；`check-realtime-publication-drift.sh` 没有期望表清单（它 diff 的是前端订阅），DROP 不需要改它。`tests/models/test_transcript_event_types_phase2a.py` 钉着 `LATEST_MIGRATION = 460`，461 要推进；`agent_run_inbox.kind` 此前无 ORM 镜像测试，本期补。
+> - §1：`InboxProcessor.tick()` 早就返回 `tasks_created`，而 `inbox_dispatch_workflow` 读的是从不存在的 `tasks_enqueued`——那行日志从没打出过，T3 一并修。`inflight_count` 没有 healthz 消费方；`workforce_router.py:409` 的健康端点读 `app.state.workforce_scheduler`，PR-D8 之后无人设置，至今恒报 down——T3 改读 DBOS pool 与派生计数。
+> - §2：`run_turn` 的历史参数叫 `user_messages`（续聊把重建消息传这里）；`create_task()` 把 payload 存在 `task_tracking.metadata.agent_payload` 且需要 `agent_id`（spawn 时按 slug 解析目标子代理 UUID），payload 多带 `caller_agent_id` 供 worker 重建服务；`run_one_task` 的 `agent.persistent` 门会拒掉非持久子代理，`subagent` 分支放在 agent 解析之前；`deliver_or_dispatch` 多一个 `already_enqueued`——worker 已经写过 `subagent_result`，忙态分支不许二次插入，只要空闲派发那一臂。
+> - §3：`issue_messages` 没有 `author_kind`，定时发起的行是 `kind='comment'` + `author_user_id`=规则所有者 + `meta.source={kind:"schedule", schedule_id, created_by}`；`ScheduleCreatePayload` 的 `name` / `cron_expr` 改可选、加 `fire_at`，`ScheduleResponse.cron_expr` 可空；400 的 `detail` 必须是 dict（`ErrorResponse` 外壳把字符串 detail 变成 `details: null`）；`agent_routine` payload 没有 issue 目标字段，`GET /issues/{id}/schedules` 按 `payload.last_issue_id` 列出它。
+> - §5：主页 Quick 芯片纯前端从列表行算，没有可用字段——issue 列表项加 `pending_wakeups: int`（`list_for_user` 一次聚合），T6 因此是小全栈任务；「由定时唤醒开始」芯片不能从 run 事件推（首条 `user` 事件只是文本），改读紧邻在前的 `meta.source.kind === "schedule"` 线程行；`IssueReplyBox` 现无 `issueId` prop，要从 `IssueDetailView` 传入；`schedulesService.create` 要求 `name`/`cron_expr`，前端另写 `createIssueWakeup`；`subagent_done` 可能落在比派出更晚的 step，折叠要跨所有 step 节点找卡。
+> - 本期没有给 `run_turn` 结果加任何标志（派出/完成都是事件），`test_turn_end_reasons.py` 不动。
+
 ## 1. 接活 workforce 链（前置，T3）
 
 **原则**：一条链只有一个执行入口（DBOS scheduled tick → enqueue → `agent_workforce_workflow` → `run_one_task`），死组件与假承诺一起清掉。
