@@ -12,7 +12,7 @@ import base64
 import datetime
 import json
 from contextlib import nullcontext
-from typing import Optional
+from typing import Iterable, Optional, Sequence
 
 from loguru import logger
 from sqlalchemy import Text as SAText
@@ -315,6 +315,13 @@ def _inbox_filters(
     return crit
 
 
+def _promoted_resource_ids_stmt(gen_ids: Sequence[int]):
+    return select(GeneratedMedia.id, GeneratedMedia.promoted_resource_id).where(
+        GeneratedMedia.id.in_(list(gen_ids)),
+        GeneratedMedia.promoted_resource_id.is_not(None),
+    )
+
+
 class GeneratedMediaRepository:
     async def list_for_project(
         self,
@@ -445,6 +452,21 @@ class GeneratedMediaRepository:
                 .first()
             )
         return _normalize(dict(row)) if row else None
+
+    async def promoted_resource_ids(
+        self, gen_ids: Iterable[int | str]
+    ) -> dict[int, int]:
+        """``{generation id: promoted resource id}`` for the archived ones.
+
+        Unscoped like ``get_by_id``: the ids come from one canvas's own
+        nodes_json and the answer only feeds that canvas's refs mirror.
+        """
+        ids = sorted({int(g) for g in gen_ids})
+        if not ids:
+            return {}
+        async with read_scope() as session:
+            rows = (await session.execute(_promoted_resource_ids_stmt(ids))).all()
+        return {int(gen_id): int(resource_id) for gen_id, resource_id in rows}
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:
         # Capture the location BEFORE deleting so we can clean up an orphaned

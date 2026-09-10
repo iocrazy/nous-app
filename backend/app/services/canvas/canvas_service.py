@@ -17,9 +17,14 @@ from loguru import logger
 from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.canvas_repository import CanvasRepository
+from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.canvas import CanvasCreate, CanvasUpdate
 from app.services.canvas.asset_node_refs import extract_asset_node_refs
-from app.services.canvas.asset_refs import extract_asset_refs
+from app.services.canvas.asset_refs import (
+    extract_asset_refs,
+    extract_output_generation_ids,
+    merge_promoted_output_refs,
+)
 
 
 class CanvasConflict(Exception):
@@ -39,10 +44,12 @@ class CanvasService:
         repository: Optional[CanvasRepository] = None,
         refs_repository: Optional[CanvasRefsRepository] = None,
         asset_refs_repository: Optional[CanvasAssetRefsRepository] = None,
+        generated_media_repository: Optional[GeneratedMediaRepository] = None,
     ) -> None:
         self.repo = repository or CanvasRepository()
         self.refs_repo = refs_repository or CanvasRefsRepository()
         self.asset_refs_repo = asset_refs_repository or CanvasAssetRefsRepository()
+        self.gen_repo = generated_media_repository or GeneratedMediaRepository()
 
     # ------------------------------------------------------------------
     # Reads
@@ -180,6 +187,7 @@ class CanvasService:
         """
         try:
             refs = extract_asset_refs(nodes_json)
+            refs = await self._with_archived_outputs(canvas_id, nodes_json, refs)
             await self.refs_repo.replace_for_canvas(canvas_id, refs)
         except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
             logger.error(
@@ -209,6 +217,29 @@ class CanvasService:
                 )
         except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
             logger.error(f"canvas {canvas_id} asset-refs sync failed (non-fatal): {e}")
+
+    async def _with_archived_outputs(
+        self, canvas_id: str, nodes_json: Any, refs: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        """``refs`` plus the output refs whose generation has been archived.
+
+        Its own try: a failed lookup degrades to the legacy refs and says so —
+        it must not stop them being written.
+        """
+        pairs = extract_output_generation_ids(nodes_json)
+        if not pairs:
+            return refs
+        try:
+            promoted = await self.gen_repo.promoted_resource_ids(
+                gen_id for _, gen_id in pairs
+            )
+        except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
+            logger.error(
+                f"canvas {canvas_id} archived-output ref lookup failed "
+                f"(non-fatal, legacy refs only): {e}"
+            )
+            return refs
+        return merge_promoted_output_refs(refs, pairs, promoted)
 
     async def soft_delete(self, canvas_id: str) -> bool:
         return await self.repo.soft_delete(canvas_id)
