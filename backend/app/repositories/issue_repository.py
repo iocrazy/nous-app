@@ -329,7 +329,42 @@ class IssueRepository:
             )
             result = await session.execute(page_stmt)
             items = [_row(r) for r in result.scalars().all()]
+            await self._fold_pending_wakeups(session, items)
         return items, total
+
+    @staticmethod
+    async def _fold_pending_wakeups(session, items: list[dict[str, Any]]) -> None:
+        """Stamp ``pending_wakeups`` on one page of issues (harness 2b-2 §5-2).
+
+        ONE aggregate for the whole page, after paging — never per row. The
+        field is set on EVERY item, so a client never has to tell "zero" from
+        "the server did not fold this".
+
+        ``payload ->> 'issue_id'`` yields TEXT, so the ids are bound as
+        strings: a bigint bind compiles fine and matches nothing.
+        """
+        if not items:
+            return
+        from sqlalchemy import func
+
+        from app.models import UserSchedules
+
+        by_issue: dict[str, int] = {}
+        ids = [str(i["id"]) for i in items]
+        key = UserSchedules.payload["issue_id"].astext
+        rows = await session.execute(
+            select(key, func.count())
+            .where(
+                UserSchedules.task_type == "issue_wakeup",
+                UserSchedules.enabled.is_(True),
+                key.in_(ids),
+            )
+            .group_by(key)
+        )
+        for issue_id, count in rows.all():
+            by_issue[str(issue_id)] = int(count)
+        for item in items:
+            item["pending_wakeups"] = by_issue.get(str(item["id"]), 0)
 
     async def list_needs_input(
         self, user_id: str, *, limit: int = 50

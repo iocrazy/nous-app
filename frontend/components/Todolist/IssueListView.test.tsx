@@ -274,3 +274,28 @@ describe('IssueListView — paused rows (phase 2a §4)', () => {
     expect(screen.queryByTestId('queued-chip')).toBeNull();
   });
 });
+
+// ── harness 2b-2 §5-2: Quick "Scheduled" chip ──────────────────────────────
+describe('IssueListView — Scheduled quick chip (harness 2b-2 §5-2)', () => {
+  // `pending_wakeups` is folded onto the list row by the backend; a row that
+  // predates the field simply has none, and must not count.
+  const armed = () => mkIssue({ id: 40, identifier: 'MH-40', title: 'Armed one', status: 'todo', raw: { pending_wakeups: 1 } as never });
+  const quiet = () => mkIssue({ id: 41, identifier: 'MH-41', title: 'Quiet one', status: 'todo' });
+
+  it('counts the issues with a wake-up armed and filters down to them', () => {
+    const { container } = renderList([armed(), quiet()]);
+    const chip = container.querySelector('[data-testid="quick-scheduled"]') as HTMLButtonElement;
+    expect(chip.textContent).toMatch(/Scheduled/);
+    expect(chip.textContent).toMatch(/1/);
+    fireEvent.click(chip);
+    expect(screen.getByText('Armed one')).toBeTruthy();
+    expect(screen.queryByText('Quiet one')).toBeNull();
+    fireEvent.click(chip);
+    expect(screen.getByText('Quiet one')).toBeTruthy();
+  });
+
+  it('is disabled with nothing scheduled, so it cannot filter to an empty list', () => {
+    const { container } = renderList([quiet()]);
+    expect((container.querySelector('[data-testid="quick-scheduled"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+});

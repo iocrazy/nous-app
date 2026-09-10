@@ -70,6 +70,10 @@ export interface Issue {
   completed_at: string | null;
   cancelled_at: string | null;
   hidden_at: string | null;
+  /** harness 2b-2 §5-2: one-shot wake-ups still armed on this issue. Folded
+   *  by the LIST endpoint only, so it is absent on rows read any other way —
+   *  read it as `?? 0` and never as an authoritative zero. */
+  pending_wakeups?: number;
   created_at: string;
   updated_at: string;
 }
