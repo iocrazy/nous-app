@@ -1,6 +1,6 @@
 """Sub-classification of ``origin_kind='canvas_upload'`` generated_media rows.
 
-``canvas_upload`` is not one thing. THREE unrelated writers register under it,
+``canvas_upload`` is not one thing. FOUR unrelated writers register under it,
 and the Generated inbox showed all three side by side as if a writer were
 supposed to triage them:
 
@@ -10,7 +10,9 @@ supposed to triage them:
 * ``POST /generated-media/import-from-resource`` — a library asset transcoded
   into a durable URL purely so the i2i bridge can fetch it. Nobody asked for
   this image; it already exists in My Uploads;
-* the upscale endpoint's result.
+* the upscale endpoint's result;
+* the canvas editors' crop / grid / outpaint derive and the client-baked
+  resize (role ``derived``).
 
 The origin KIND cannot separate them (they share a storage path and a card
 shape), so the distinction rides in ``params.role``. This module owns that
@@ -29,12 +31,13 @@ MASK = "mask"
 BRUSH = "brush"
 REFERENCE = "reference"
 UPSCALE_RESULT = "upscale_result"
+DERIVED = "derived"
 
 #: Every role a ``canvas_upload`` row may carry. The import endpoint rejects
 #: anything outside this set rather than storing it: an unrecognised role would
 #: be stamped, never matched by any filter, and behave exactly like the missing
 #: role it is a typo of — a silent classification failure.
-CANVAS_UPLOAD_ROLES = (USER_UPLOAD, MASK, BRUSH, REFERENCE, UPSCALE_RESULT)
+CANVAS_UPLOAD_ROLES = (USER_UPLOAD, MASK, BRUSH, REFERENCE, UPSCALE_RESULT, DERIVED)
 
 #: Roles the inbox hides unless asked for. These are INPUTS to a generation —
 #: machine-made, or a copy of something the user already has — not products
@@ -42,6 +45,8 @@ CANVAS_UPLOAD_ROLES = (USER_UPLOAD, MASK, BRUSH, REFERENCE, UPSCALE_RESULT)
 #:
 #: ``upscale_result`` is deliberately NOT here: an upscale is a thing the user
 #: asked for and wants to see.
+#: ``derived`` (a crop / grid tile / outpaint made in a canvas editor, or a
+#: client-baked resize) is not here for the same reason.
 INTERMEDIATE_ROLES = (MASK, BRUSH, REFERENCE)
 
 #: The JSON key inside ``generated_media.params``.
