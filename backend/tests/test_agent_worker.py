@@ -39,13 +39,19 @@ def _task(
         payload["delegated_at_depth"] = depth
     if parent_run_id:
         payload["parent_run_id"] = str(parent_run_id)
+    task_id = str(uuid4())
     return {
-        "id": str(uuid4()),
+        "id": task_id,
         "agent_id": str(agent_id or uuid4()),
         "user_id": str(user_id or uuid4()),
         "lifecycle_status": "assigned",
         "payload": payload,
         "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
+        # Every task that reaches the worker was dispatched, and dispatch is
+        # what mints this. run_one_task refuses a task without it — see
+        # test_missing_workflow_id_is_refused_not_coerced, which builds its own
+        # dict precisely to omit it.
+        "workforce_workflow_id": f"workforce-{task_id}-1",
     }
 
 
@@ -550,3 +556,35 @@ async def test_worker_hydrates_agent_user_and_payload_from_the_claim():
     # agent_id the claim returned.
     agent_repo.get_by_id.assert_awaited_once_with(agent_id)
     assert result["status"] != "skipped"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_missing_workflow_id_is_refused_not_coerced():
+    """An absent ownership token fails the task; it must not become "".
+
+    The empty string is not a harmless default — ``claim_task`` WRITES whatever
+    it is given into ``metadata.workforce_workflow_id``. Two tasks dispatched
+    without an id would both store "", and each would then satisfy the other's
+    re-entry arm: an ownership check that admits anyone. Refusing turns a
+    future producer that forgets the key into a visible typed failure instead
+    of a quiet correctness hole."""
+    task = _task()
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(return_value=None)
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    with patch(
+        "app.services.workforce.agent_worker.get_agent_workforce_repository",
+        return_value=workforce,
+    ):
+        result = await run_one_task({"id": task["id"]})  # no workforce_workflow_id
+
+    assert result["status"] == "failed"
+    assert workforce.update_task_status.await_args.kwargs["error_code"] == (
+        "missing_workflow_id"
+    )
+    # It never reached the claim — an unowned claim is what we are preventing.
+    workforce.claim_task.assert_not_awaited()

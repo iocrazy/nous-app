@@ -117,7 +117,28 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     # re-enter a row it already moved past 'queued', while still refusing a
     # different worker. Without it a crash between claim and completion strands
     # the row at 'assigned' with nothing able to pick it up again.
-    workflow_id = str(task.get("workforce_workflow_id") or "")
+    #
+    # Absent → refuse, never coerce to "". The empty string is not a harmless
+    # default: ``claim_task`` WRITES whatever it is handed into
+    # ``metadata.workforce_workflow_id``, so two tasks dispatched without an id
+    # would both store "" and each would then satisfy the other's re-entry arm
+    # — an ownership check that admits anyone. A producer that forgets the key
+    # should fail loudly here rather than quietly share a token.
+    workflow_id = str(task.get("workforce_workflow_id") or "").strip()
+    if not workflow_id:
+        logger.error(f"[agent-worker] task {task_id} dispatched with no workflow id")
+        await workforce.update_task_status(
+            task_id=task_id,
+            lifecycle_status="failed",
+            error_code="missing_workflow_id",
+            error_message=(
+                "task dict carries no workforce_workflow_id; the claim's "
+                "ownership token would be empty and shared with every other "
+                "id-less task"
+            ),
+        )
+        return {"task_id": str(task_id), "status": "failed", "run_id": None}
+
     claimed = await workforce.claim_task(str(task_id), workflow_id=workflow_id)
     if claimed is None:
         logger.info(f"[agent-worker] task {task_id} not claimable (already taken)")

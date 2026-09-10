@@ -20,8 +20,12 @@ The DSN-gated integration suite in
 round-trip + the crasher-proof uuid→str parity, including the four dispatch
 statements a stubbed session can only compile (claim_task's two CAS arms,
 the ``->>`` IS NULL dispatch list, the ``||`` metadata merges, the inflight
-count). ⚠️ That file is NOT on schema-drift.yml, so nothing runs it unless a
-person sets INTEGRATION_DATABASE_URL — green here is not green on Postgres.
+count). That file runs on every schema-drift.yml build (its own step, through
+pytest-no-full-skip.sh), so those statements are executed against a real
+Postgres on each PR that touches this repository. Green HERE still is not
+green on Postgres — a stubbed session accepts SQL the server would reject —
+which is exactly why that file exists; do not add a statement here without
+giving it a case there.
 
 A4 (migration 200) note: tasks live in task_tracking[task_kind='agent_task'];
 8-state lifecycle precision is preserved in the `phase` column while the
