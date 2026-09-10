@@ -303,6 +303,107 @@ export async function deriveOutpaint(
 }
 
 // ============================================================
+// Canvas derive — any image the canvas shows (2026-09-10)
+// ============================================================
+
+/** One image a canvas derive produced: a durable generated-media item. */
+export interface CanvasDerivedImage {
+  /** generated_media id (snowflake, string on the wire). */
+  id: string;
+  /** Always `/api/v1/generated-media/{id}/cover`. */
+  url: string;
+  kind: 'image';
+  /** 0-based tile position for a grid derive; null otherwise. */
+  row: number | null;
+  col: number | null;
+}
+
+export interface CanvasDeriveOptions {
+  /** The node the edit was made from — provenance on the registered row. */
+  nodeId?: string;
+}
+
+export interface CanvasOutpaintOptions extends CanvasDeriveOptions {
+  prompt?: string;
+}
+
+function canvasDerivePayload(
+  sourceUrl: string,
+  opts: CanvasDeriveOptions,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { source_url: sourceUrl };
+  if (opts.nodeId) payload.node_id = opts.nodeId;
+  return payload;
+}
+
+async function postCanvasDerive(
+  canvasId: string,
+  op: 'crop' | 'grid' | 'outpaint',
+  payload: Record<string, unknown>,
+): Promise<CanvasDerivedImage[]> {
+  const response = await apiFetch(`/api/v1/canvases/${canvasId}/derive-${op}`, {
+    method: 'POST',
+    json: payload,
+  });
+  const data = await readEnvelope<{ images?: CanvasDerivedImage[] }>(response);
+  if (!Array.isArray(data.images) || data.images.length === 0) {
+    throw new ApiError(`canvas derive-${op} returned no images`, response.status);
+  }
+  return data.images;
+}
+
+/**
+ * Crop whatever image `sourceUrl` names — a generation, an upload, a library
+ * asset — into a new generated-media item in the canvas's space. The backend
+ * checks the canvas write and the source read; refusals arrive as ApiError.
+ */
+export async function deriveCanvasCrop(
+  canvasId: string,
+  sourceUrl: string,
+  region: CropRegion,
+  opts: CanvasDeriveOptions = {},
+): Promise<CanvasDerivedImage> {
+  const [image] = await postCanvasDerive(canvasId, 'crop', {
+    ...canvasDerivePayload(sourceUrl, opts),
+    region,
+  });
+  return image;
+}
+
+/** Split `sourceUrl` along normalized lines; one item per tile, row-major. */
+export async function deriveCanvasGrid(
+  canvasId: string,
+  sourceUrl: string,
+  lines: GridLines,
+  opts: CanvasDeriveOptions = {},
+): Promise<CanvasDerivedImage[]> {
+  return postCanvasDerive(canvasId, 'grid', {
+    ...canvasDerivePayload(sourceUrl, opts),
+    xs: lines.xs,
+    ys: lines.ys,
+  });
+}
+
+/** Extend `sourceUrl`'s canvas (blur fill) into a new item. */
+export async function deriveCanvasOutpaint(
+  canvasId: string,
+  sourceUrl: string,
+  padding: OutpaintPadding,
+  opts: CanvasOutpaintOptions = {},
+): Promise<CanvasDerivedImage> {
+  const payload: Record<string, unknown> = {
+    ...canvasDerivePayload(sourceUrl, opts),
+    left: padding.left,
+    top: padding.top,
+    right: padding.right,
+    bottom: padding.bottom,
+  };
+  if (opts.prompt) payload.prompt = opts.prompt;
+  const [image] = await postCanvasDerive(canvasId, 'outpaint', payload);
+  return image;
+}
+
+// ============================================================
 // Team canvas tree (canvas nav N+1 fix)
 // ============================================================
 
