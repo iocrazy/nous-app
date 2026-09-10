@@ -143,6 +143,87 @@ async def test_cycle_detection_walks_from_the_running_run(monkeypatch):
     assert await svc._detect_cycle(target_agent_id=target_agent_id) == 900
 
 
+async def test_the_walk_survives_a_second_hop(monkeypatch):
+    """Fix round 1, I2. The hop-2 cursor did ``UUID(parent)`` on a BIGINT run
+    id — ``AttributeError`` outside the try, escaping ``_detect_cycle`` AND
+    ``execute()``, so the whole Delegate call ended as an exception instead of
+    a typed refusal. It was unreachable only because ``parent_run_id`` was
+    always NULL; defect 1/5 are what put a value there.
+
+    Real-shape ids on purpose: ``agent_runs.id`` / ``parent_run_id`` are
+    BIGINT Snowflakes and come back from the driver as ``int``.
+    """
+    target_agent_id = uuid4()
+    chain = {
+        900: {"id": 900, "agent_id": str(uuid4()), "parent_run_id": 348020782937177},
+        348020782937177: {
+            "id": 348020782937177,
+            "agent_id": str(target_agent_id),
+            "parent_run_id": None,
+        },
+    }
+    seen: list[int] = []
+
+    class _Session:
+        async def execute(self, stmt):
+            # the bound id is whatever the walker put in `current`
+            binds = stmt.compile().params
+            rid = int(next(v for k, v in binds.items() if isinstance(v, (int, str))))
+            seen.append(rid)
+            row = chain.get(rid)
+            return SimpleNamespace(mappings=lambda: SimpleNamespace(first=lambda: row))
+
+    class _Scope:
+        async def __aenter__(self):
+            return _Session()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    import app.db.session as session_mod
+
+    monkeypatch.setattr(session_mod, "read_scope", lambda: _Scope())
+
+    svc, _ = _service(parent_run_id=None, recorder=_Rec(900))
+    del svc._detect_cycle
+    found = await svc._detect_cycle(target_agent_id=target_agent_id)
+
+    assert seen == [900, 348020782937177], "the walk never reached hop 2"
+    assert found == 348020782937177
+
+
+async def test_an_unusable_parent_id_ends_the_walk_instead_of_escaping(monkeypatch):
+    """A chain row with a junk parent is a data problem, not a reason for the
+    Delegate tool to raise into the model's tool loop."""
+
+    class _Session:
+        async def execute(self, stmt):
+            return SimpleNamespace(
+                mappings=lambda: SimpleNamespace(
+                    first=lambda: {
+                        "id": 900,
+                        "agent_id": str(uuid4()),
+                        "parent_run_id": "not-an-id",
+                    }
+                )
+            )
+
+    class _Scope:
+        async def __aenter__(self):
+            return _Session()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    import app.db.session as session_mod
+
+    monkeypatch.setattr(session_mod, "read_scope", lambda: _Scope())
+
+    svc, _ = _service(parent_run_id=None, recorder=_Rec(900))
+    del svc._detect_cycle
+    assert await svc._detect_cycle(target_agent_id=uuid4()) is None
+
+
 async def test_no_run_at_all_still_skips_the_walk():
     """Nothing to walk is not the same as a walk that found nothing — but
     with neither a recorder nor a constructor value there IS no chain."""

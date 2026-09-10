@@ -34,6 +34,13 @@ SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
 # Keys are seed DIRECTORY names — note the mixed hyphen/underscore style is
 # the real on-disk state, not a typo. tests/test_agent_group_seed.py asserts
 # this map and backend/seeds/agents/ stay in lockstep.
+#: Keys an agent seed may declare in its ``AGENT.md`` frontmatter. A leading
+#: ``---`` block is stripped from the model-visible body ONLY when it parses as
+#: a mapping containing at least one of these — otherwise it is a horizontal
+#: rule and the prose after it must survive (see ``_read_agent_md``).
+#: Adding a key here means adding it to ``backend/seeds/README.md`` too.
+FRONTMATTER_KEYS = frozenset({"persistent"})
+
 DEFAULT_AGENT_GROUP = "tools"
 AGENT_GROUP_BY_SLUG = {
     "script_ai": "writing",
@@ -208,21 +215,50 @@ class SeedLoader:
 
     @staticmethod
     def _read_agent_md(agent_dir: Path) -> tuple[Optional[str], dict[str, Any]]:
-        """``(body, frontmatter)`` for AGENT.md — the body WITHOUT the
-        frontmatter block.
+        """``(body, frontmatter)`` for AGENT.md — the body without a
+        frontmatter block, but ONLY when there really was one.
 
         ``agent_md`` is model-visible: it is pasted into the system message, so
         a raw YAML header there would be a prompt change wearing a
-        configuration hat. Seeds that declare nothing parse to an empty dict
-        and a byte-identical body (verified across all 17 seeds), so this is
-        the same content the loader wrote before.
+        configuration hat — and losing prose here is the same class in the
+        other direction.
+
+        A leading ``---`` is ambiguous. ``frontmatter.load`` reads it as an
+        opening fence either way, so a file that starts with a horizontal RULE
+        comes back with ``metadata={}`` and a body that begins after the SECOND
+        rule: everything between them is silently gone, with no exception and
+        no log (Task 7a fix round 1, I4). The parse is therefore only accepted
+        when it yielded a mapping that declares something this loader knows —
+        ``FRONTMATTER_KEYS``. Anything else is prose and is returned untouched.
         """
         path = agent_dir / "AGENT.md"
         if not path.exists():
             return (None, {})
-        post = frontmatter.load(path)
+        raw = path.read_text().strip()
+        if not raw:
+            return (None, {})
+        try:
+            post = frontmatter.loads(raw)
+            meta = dict(post.metadata)
+        except Exception as exc:  # noqa: BLE001 — unparseable header = prose
+            logger.warning(
+                f"seed_loader: {path} has an unreadable leading block "
+                f"({exc!s:.120}); treating the whole file as prose"
+            )
+            return (raw, {})
+        if not (meta.keys() & FRONTMATTER_KEYS):
+            # Nothing we recognise — do not strip anything. This is the
+            # horizontal-rule case, and also a seed whose header uses keys a
+            # LATER version of this loader will understand: better to ship the
+            # extra lines to the model than to drop the body.
+            if meta:
+                logger.warning(
+                    f"seed_loader: {path} declares {sorted(meta)} — no known "
+                    f"key among {sorted(FRONTMATTER_KEYS)}; nothing stripped"
+                )
+            return (raw, {})
         body = (post.content or "").strip()
-        return (body or None, dict(post.metadata))
+        return (body or None, meta)
 
     @staticmethod
     def _agent_seed_hash(fields: dict[str, Any]) -> str:

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import datetime as dt
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -105,6 +104,73 @@ async def test_the_drain_turns_are_bounded():
     assert MAX_INBOX_DRAIN_TURNS >= 1
 
 
+async def test_an_issue_awaiting_input_is_not_drained():
+    """I1. The park branch at the loop top has no ``wait_rounds`` ceiling, so a
+    drain ``continue`` on a ``needs_input`` turn re-entered it and suspended
+    the dispatch for the recv TTL (72 h by default) — holding the execution
+    lock the whole time and draining nothing, because a parked workflow runs
+    no turns and reaches no step boundary.
+
+    The other half of the same gate: with the wait-gate deps absent the drain
+    would instead run a turn that swallows the agent's question. Either way an
+    issue that is waiting on a person is not drained here — the item waits for
+    the answer, exactly as the sweeper leaves paused/awaiting issues alone.
+    """
+    rec = _Recorder(outcome="needs_input")
+    out = await _run(rec, _pending([1]))
+    assert rec.turns == [False], "a parked turn must not buy a drain turn"
+    assert out["outcome"] == "needs_input"
+
+
+async def test_a_finished_turn_is_still_drained():
+    """Negative control for the gate above — without it the gate could be
+    ``False`` for every outcome and the test above would still pass."""
+    rec = _Recorder(outcome="completed")
+    await _run(rec, _pending([1, 0]))
+    assert rec.turns == [False, True]
+
+
+async def test_every_exit_reports_how_many_drain_turns_it_ran():
+    """M3. ``inbox_drains`` was only on the normal exit, so the preempt and
+    pause exits described a different shape of dispatch than the one beside
+    them."""
+    rec = _Recorder(outcome="completed")
+    normal = await _run(rec, _pending([0]))
+    assert normal["inbox_drains"] == 0
+
+    paused = await _run_dispatch(
+        _Recorder(), load_issue=_load_issue_with(paused_at="2026-09-10T00:00:00Z")
+    )
+    assert "inbox_drains" in paused, paused
+
+    preempted = await _run_dispatch(
+        _Recorder(), load_issue=_load_issue_with(status="done")
+    )
+    assert preempted.get("preempted") is True and "inbox_drains" in preempted
+
+
+def _load_issue_with(**over):
+    async def _load(issue_id):
+        return {"id": issue_id, "status": "in_progress", **over}
+
+    return _load
+
+
+async def _run_dispatch(rec, *, load_issue):
+    from app.workflows.issue_lifecycle import _run_dispatch_with_continuation
+
+    return await _run_dispatch_with_continuation(
+        1,
+        {"id": 1},
+        "agent-1",
+        "user-1",
+        run_turn=rec.run_turn,
+        set_status=rec.set_status,
+        load_issue=load_issue,
+        pending_inbox=_pending([0]),
+    )
+
+
 async def test_an_unreadable_inbox_does_not_break_the_dispatch(monkeypatch):
     """The probe is a sharpening, not a dependency: a read that fails leaves
     the dispatch exactly as it was — and says so in the log."""
@@ -126,115 +192,50 @@ async def test_an_unreadable_inbox_does_not_break_the_dispatch(monkeypatch):
     assert rec.turns == [False]
 
 
-async def test_the_production_wiring_passes_a_real_probe():
+async def test_the_production_wiring_uses_the_real_probe(monkeypatch):
     """A layer that only ever runs with an injected fake is a layer that never
-    runs. ``None`` must resolve to the repository-backed probe."""
-    import inspect
+    runs. With no probe injected — the production call — the loop must reach
+    the repository itself.
 
-    from app.workflows import issue_lifecycle as lifecycle
-
-    src = inspect.getsource(lifecycle._run_dispatch_with_continuation)
-    assert "_pending_inbox_count" in src
-
-
-# ── layer (b): the sweeper picks up what the run left behind ────────────
-
-
-def _fake_inbox_repo(targets, *, item_user="11111111-1111-1111-1111-111111111111"):
-    async def pending_issue_targets(*, limit):
-        assert limit == 20
-        return targets
-
-    async def list_for_target(*, target_kind, target_id, pending_only, limit=100):
-        return [{"id": 5, "kind": "steer", "user_id": item_user}]
-
-    return SimpleNamespace(
-        pending_issue_targets=pending_issue_targets,
-        list_for_target=list_for_target,
-    )
-
-
-async def test_sweeper_dispatches_an_idle_issue_that_still_holds_an_item(
-    monkeypatch,
-):
+    Behavioural on purpose: the source-substring version of this test passed
+    while the call sat in a branch that never executed, and went red on a
+    rename that changed nothing.
+    """
     import app.repositories.agent_run_inbox_repository as inbox_mod
-    import app.services.issues.inbox_or_dispatch as deliver_mod
-    from app.services.issues.inbox_or_dispatch import DeliverResult
-    from app.workflows import agent_runs_sweeper as sw
+    from app.workflows.issue_lifecycle import _run_dispatch_with_continuation
+
+    seen: list = []
+
+    async def _pending_count(*, target_kind, target_id):
+        seen.append((target_kind, target_id))
+        return 1 if len(seen) == 1 else 0
 
     monkeypatch.setattr(
         inbox_mod,
         "get_agent_run_inbox_repository",
-        lambda: _fake_inbox_repo(
-            [{"target_id": 348020765598796, "count": 1, "oldest_at": None}]
-        ),
-    )
-    deliver = AsyncMock(return_value=DeliverResult("dispatched", workflow_id="wf-1"))
-    monkeypatch.setattr(deliver_mod, "deliver_or_dispatch", deliver)
-
-    assert await sw.drain_idle_inbox_step() == 1
-    assert deliver.await_args.args[0] == 348020765598796
-    # the item is already on the inbox — the drain must not write a second row
-    assert deliver.await_args.kwargs["already_enqueued"] is True
-
-
-async def test_sweeper_leaves_a_busy_issue_alone(monkeypatch):
-    """``deliver_or_dispatch`` owns the three busy signals (running root run,
-    paused, dispatch in flight) — the drain must not re-implement them, and a
-    busy answer counts as nothing dispatched."""
-    import app.repositories.agent_run_inbox_repository as inbox_mod
-    import app.services.issues.inbox_or_dispatch as deliver_mod
-    from app.services.issues.inbox_or_dispatch import DeliverResult
-    from app.workflows import agent_runs_sweeper as sw
-
-    monkeypatch.setattr(
-        inbox_mod,
-        "get_agent_run_inbox_repository",
-        lambda: _fake_inbox_repo([{"target_id": 7, "count": 2, "oldest_at": None}]),
-    )
-    monkeypatch.setattr(
-        deliver_mod,
-        "deliver_or_dispatch",
-        AsyncMock(return_value=DeliverResult("inbox", reason="already_enqueued")),
+        lambda: SimpleNamespace(pending_count=_pending_count),
     )
 
-    assert await sw.drain_idle_inbox_step() == 0
-
-
-async def test_one_failing_issue_does_not_stop_the_rest(monkeypatch):
-    import app.repositories.agent_run_inbox_repository as inbox_mod
-    import app.services.issues.inbox_or_dispatch as deliver_mod
-    from app.services.issues.inbox_or_dispatch import DeliverResult
-    from app.workflows import agent_runs_sweeper as sw
-
-    monkeypatch.setattr(
-        inbox_mod,
-        "get_agent_run_inbox_repository",
-        lambda: _fake_inbox_repo(
-            [
-                {"target_id": 1, "count": 1, "oldest_at": None},
-                {"target_id": 2, "count": 1, "oldest_at": None},
-            ]
-        ),
+    rec = _Recorder()
+    await _run_dispatch_with_continuation(
+        7,
+        {"id": 7},
+        "agent-1",
+        "user-1",
+        run_turn=rec.run_turn,
+        set_status=rec.set_status,
+        load_issue=_load_issue,
+        max_continuations=2,
     )
-
-    async def _deliver(issue_id, **kw):
-        if issue_id == 1:
-            raise RuntimeError("boom")
-        return DeliverResult("dispatched", workflow_id="wf-2")
-
-    monkeypatch.setattr(deliver_mod, "deliver_or_dispatch", _deliver)
-    assert await sw.drain_idle_inbox_step() == 1
+    assert seen and seen[0] == ("issue", 7)
+    assert rec.turns == [False, True], "the real probe never bought a drain turn"
 
 
-def test_the_tick_runs_the_drain_step():
-    import inspect
-
-    from app.workflows import agent_runs_sweeper as sw
-
-    assert "drain_idle_inbox_step()" in inspect.getsource(
-        sw.agent_runs_sweeper_workflow
-    )
+# ── layer (b) lives in test_inbox_drain_chain.py ────────────────────────
+#
+# The sweeper half moved there when the drain was split into a scan step and a
+# body dispatch (fix round 1, C1): those cases have to drive the REAL workflow
+# body to be worth anything, and they carry the route-C guards.
 
 
 async def test_pending_issue_targets_selects_only_unclaimed_unexpired_issues():

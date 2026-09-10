@@ -37,6 +37,7 @@ header for the longer cascade explanation.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from dbos import DBOS
 from loguru import logger
@@ -157,31 +158,32 @@ INBOX_DRAIN_LIMIT = 20
 
 
 @DBOS.step()
-async def drain_idle_inbox_step() -> int:
-    """Dispatch idle issues that are still holding an unclaimed inbox item.
+async def scan_idle_inbox_step() -> list[dict[str, Any]]:
+    """SELECT ONLY. Returns the drain orders the WORKFLOW body must dispatch.
 
     Items are claimed at STEP boundaries only (``InboxClaimHook``). Between a
     run's last boundary and its row going terminal there is a window with no
     boundary left, and anything that lands there is stranded: the 2026-09-10
     acceptance watched a ``subagent_result`` and a scheduled ``steer`` sit
-    unclaimed for 15 and 8.8 minutes, with the schedule row reporting a clean
+    unclaimed for 15 and 8.8 minutes while the schedule row reported a clean
     ``fire_count=1``. ``issue_lifecycle`` now drains before it ends, bounded;
     this is the backstop for everything that misses that window — a run that
     crashed, a dispatch that never started, a stream past the bound.
 
-    The busy question is NOT re-implemented here. ``deliver_or_dispatch``
-    already owns all three signals (a running root run, ``paused_at``, the
-    in-flight ``dispatching`` marker) plus the terminal/hidden check, so this
-    calls it with ``already_enqueued=True``: on busy it returns without writing
-    a second row, on idle it starts the turn on the continuation nudge.
+    ⚠️ **This function must never dispatch.** DBOS forbids ``start_workflow``
+    from inside a step and asserts it with an EMPTY message, which the delivery
+    path catches and returns as ``skipped/dispatch_failed:`` — the first cut of
+    this drain did exactly that and could not fire even once in production
+    while logging "left in place" at INFO (route C; ``scheduled_master.py:105``
+    records the same rule, and Task 5's wake-up dispatch is split for it). The
+    body half is ``_drain_one_issue``.
 
-    Returns how many issues were actually dispatched. One issue's failure is
-    logged and skipped — the rest of the tick still runs.
+    An order carries only what the dispatch needs. The step's return value is
+    checkpointed into ``dbos.operation_outputs`` every minute, forever.
     """
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
-    from app.services.issues import inbox_or_dispatch as deliver_mod
 
     repo = get_agent_run_inbox_repository()
     try:
@@ -189,42 +191,84 @@ async def drain_idle_inbox_step() -> int:
     except Exception as err:  # noqa: BLE001 — a probe that cannot read has
         # not proved there is nothing to drain; say so and try again next tick.
         logger.error(f"[sweeper] idle-drain could not list pending targets: {err}")
-        return 0
+        return []
 
-    dispatched = 0
+    orders: list[dict[str, Any]] = []
     for target in targets:
         issue_id = int(target["target_id"])
-        count = int(target.get("count") or 0)
         try:
-            items = await repo.list_for_target(
-                target_kind="issue", target_id=issue_id, pending_only=True, limit=1
+            item = await repo.oldest_pending_for_target(
+                target_kind="issue", target_id=issue_id
             )
-            if not items:
-                # claimed between the two reads — nothing stranded after all
-                continue
-            item = items[0]
-            result = await deliver_mod.deliver_or_dispatch(
-                issue_id,
-                kind=str(item.get("kind") or "steer"),
-                content={},
-                user_id=str(item["user_id"]),
-                already_enqueued=True,
-            )
-        except Exception as err:  # noqa: BLE001 — one issue must not sink the tick
-            logger.exception(f"[sweeper] idle-drain failed for issue {issue_id}: {err}")
+        except Exception as err:  # noqa: BLE001 — one issue must not sink the scan
+            logger.exception(f"[sweeper] idle-drain scan failed for {issue_id}: {err}")
             continue
-        if result.mode == "dispatched":
-            dispatched += 1
-            logger.info(
-                f"[sweeper] issue {issue_id}: {count} stranded inbox item(s) — "
-                f"dispatched {result.workflow_id}"
-            )
-        else:
-            logger.info(
-                f"[sweeper] issue {issue_id}: {count} pending inbox item(s) left "
-                f"in place ({result.mode}/{result.reason})"
-            )
-    return dispatched
+        if item is None:
+            # claimed between the two reads — nothing stranded after all
+            continue
+        orders.append(
+            {
+                "issue_id": issue_id,
+                "user_id": str(item["user_id"]),
+                "kind": str(item.get("kind") or "steer"),
+                "pending_count": int(target.get("count") or 0),
+            }
+        )
+    return orders
+
+
+async def _drain_one_issue(order: dict[str, Any], counters: dict[str, int]) -> None:
+    """Dispatch one stranded issue. Runs in the workflow BODY — see the step's
+    docstring for why it cannot live inside one.
+
+    The busy question is NOT re-implemented here. ``deliver_or_dispatch`` owns
+    all three signals (a running root run, ``paused_at``, the in-flight
+    ``dispatching`` marker) plus the terminal/hidden check, so this calls it
+    with ``already_enqueued=True``: on busy it returns without writing a second
+    row, on idle it starts the turn on the continuation nudge.
+
+    THREE outcomes, reported apart. "The issue is busy" is routine; "the
+    dispatch itself failed" is a fault, and the first cut logged both at INFO
+    as "left in place" — which is how a backstop that never worked read as
+    working.
+    """
+    from app.services.issues import inbox_or_dispatch as deliver_mod
+
+    issue_id = int(order["issue_id"])
+    count = int(order.get("pending_count") or 0)
+    try:
+        result = await deliver_mod.deliver_or_dispatch(
+            issue_id,
+            kind=str(order.get("kind") or "steer"),
+            content={},
+            user_id=str(order["user_id"]),
+            already_enqueued=True,
+        )
+    except Exception as err:  # noqa: BLE001 — one issue must not sink the tick
+        counters["failed"] += 1
+        logger.exception(f"[sweeper] idle-drain failed for issue {issue_id}: {err}")
+        return
+
+    if result.mode == "dispatched":
+        counters["dispatched"] += 1
+        logger.info(
+            f"[sweeper] issue {issue_id}: {count} stranded inbox item(s) — "
+            f"dispatched {result.workflow_id}"
+        )
+    elif result.mode == "skipped" and str(result.reason or "").startswith(
+        "dispatch_failed"
+    ):
+        counters["failed"] += 1
+        logger.error(
+            f"[sweeper] idle-drain could not dispatch issue {issue_id} holding "
+            f"{count} stranded inbox item(s): {result.reason}"
+        )
+    else:
+        counters["busy"] += 1
+        logger.info(
+            f"[sweeper] issue {issue_id}: {count} pending inbox item(s) left "
+            f"in place ({result.mode}/{result.reason})"
+        )
 
 
 @DBOS.step()
@@ -312,14 +356,25 @@ async def agent_runs_sweeper_workflow(
     fires per cron tick across the cluster."""
     heartbeat_lost = await mark_heartbeat_lost_step()
     transitions = await recompute_monthly_budgets_step()
-    # Drain BEFORE expiring: an item that is both stranded and a day old should
+    # Scan BEFORE expiring: an item that is both stranded and a day old should
     # get its turn rather than be thrown away by the step running beside it.
-    drained = await drain_idle_inbox_step()
+    # The dispatch itself happens HERE, in the body — never inside a step.
+    drain = {"dispatched": 0, "busy": 0, "failed": 0}
+    for order in await scan_idle_inbox_step():
+        await _drain_one_issue(order, drain)
     expired_inbox = await expire_orphan_inbox_step()
     reconciled = await reconcile_issue_execution_state_step()
-    if heartbeat_lost or transitions or drained or expired_inbox or reconciled:
+    if (
+        heartbeat_lost
+        or transitions
+        or any(drain.values())
+        or expired_inbox
+        or reconciled
+    ):
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
-            f"budget_transitions={transitions} inbox_drained={drained} "
+            f"budget_transitions={transitions} "
+            f"inbox_drained={drain['dispatched']} inbox_busy={drain['busy']} "
+            f"inbox_drain_failed={drain['failed']} "
             f"expired_inbox={expired_inbox} reconciled_issues={reconciled}"
         )

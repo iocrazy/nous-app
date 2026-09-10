@@ -202,17 +202,98 @@ async def test_child_chain_check_walks_up_to_the_running_run(monkeypatch):
 # ── the runner → service binding both loops depend on ───────────────────
 
 
-def test_both_turn_loops_bind_the_recorder_to_the_subagent_service():
-    """``active_parent_run_id`` reads the recorder, so a turn loop that
-    forgot to bind it would silently detach every child it spawns."""
-    import inspect
-
+def _runner_with(svc, delegate=None, *, recorder_reason="cancelled"):
+    """A real AgentRunner whose first step boundary stops the turn. The binding
+    happens before the loop, so a turn that stops immediately still proves it —
+    and nothing calls a model."""
     from app.services.ai.runner.agent_runner import AgentRunner
+    from app.services.ai.runner.step_hooks import StepHookChain
+    from tests.runner.test_turn_end_reasons import _StopHook
 
-    for loop in (AgentRunner._run_turn_inner, AgentRunner._stream_turn_inner):
-        assert "_bind_turn_recorder(recorder)" in inspect.getsource(
-            loop
-        ), f"{loop.__name__} does not bind the recorder"
+    class _Tool:
+        recorder = None
+        subagent_task = None
+
+        async def execute(self, args):
+            return {}
+
+    tool = _Tool()
+    tool.subagent_task = svc
+    runner = AgentRunner(
+        adapter=SimpleNamespace(),  # no `stream`: production's shape
+        skill_tool=tool,
+        step_hooks=StepHookChain([_StopHook(recorder_reason)]),
+    )
+    runner.delegate_tool = delegate
+    return runner
+
+
+async def test_the_buffered_loop_binds_the_recorder_before_any_tool_runs():
+    """Behavioural replacement for a source-substring assertion: that version
+    stayed green when the call moved into a branch that never executes, and
+    went red on a rename that changed nothing.
+
+    ``active_parent_run_id`` reads the recorder, so a loop that does not bind
+    it detaches every child that turn spawns."""
+    from tests.runner.test_turn_end_reasons import _composed, _Rec
+
+    svc = _svc(parent_recorder=None)
+    rec = _Rec()
+    rec.run_id = 900
+    await _runner_with(svc).run_turn(
+        _composed(), [{"role": "user", "content": "q"}], recorder=rec
+    )
+    assert svc.parent_recorder is rec
+    assert svc.active_parent_run_id == "900"
+
+
+async def test_the_streaming_loop_binds_it_itself(monkeypatch):
+    """``stream_turn`` delegates to ``run_turn`` on the production adapter
+    shape, so a binding done only there would look identical here. The stub
+    ``run_turn`` therefore checks the binding was ALREADY made when the
+    streaming loop handed over."""
+    from tests.runner.test_turn_end_reasons import _composed, _Rec
+
+    svc = _svc(parent_recorder=None)
+    rec = _Rec()
+    rec.run_id = 900
+    runner = _runner_with(svc)
+    bound_at_handover: list = []
+
+    async def _fake_run_turn(*a, **kw):
+        bound_at_handover.append(svc.parent_recorder)
+        return {"content": "", "raw": {}, "cancelled": True}
+
+    monkeypatch.setattr(runner, "run_turn", _fake_run_turn)
+
+    async for _ in runner.stream_turn(
+        _composed(),
+        [{"role": "user", "content": "q"}],
+        recorder=rec,
+        auto_recorder=False,
+    ):
+        pass
+
+    assert bound_at_handover == [rec], bound_at_handover
+
+
+async def test_both_tools_are_bound_not_just_the_task_one():
+    """``Delegate`` reads the same property — and for it an unbound recorder
+    also turns cycle detection off (defect 5)."""
+    from tests.runner.test_turn_end_reasons import _composed, _Rec
+
+    svc = _svc(parent_recorder=None)
+
+    class _Delegate:
+        parent_recorder = None
+
+    delegate = _Delegate()
+    rec = _Rec()
+    rec.run_id = 900
+    await _runner_with(svc, delegate).run_turn(
+        _composed(), [{"role": "user", "content": "q"}], recorder=rec
+    )
+    assert svc.parent_recorder is rec and delegate.parent_recorder is rec
 
 
 def test_binding_is_a_no_op_without_a_service_or_a_recorder():

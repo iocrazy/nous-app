@@ -518,7 +518,12 @@ class DelegateToolService:
         from app.db.session import read_scope
         from app.models import AgentRuns
 
-        current = start
+        try:
+            start_id = int(start)
+        except (TypeError, ValueError):
+            logger.warning(f"[delegate] cycle-walk: unusable start {start!r}")
+            return None
+        current: Optional[int] = start_id
         for _ in range(self.MAX_CHAIN_WALK_DEPTH):
             if current is None:
                 return None
@@ -558,11 +563,27 @@ class DelegateToolService:
                 return data["id"]
 
             parent = data.get("parent_run_id")
-            current = UUID(parent) if parent else None
+            if not parent:
+                return None
+            try:
+                # agent_runs.parent_run_id is BIGINT (mig 232); asyncpg hands
+                # it back as int. ``UUID(parent)`` here raised AttributeError
+                # OUTSIDE the try below and escaped both this function and
+                # ``execute()`` — the Delegate tool ended as an exception
+                # rather than a typed refusal. It was unreachable only while
+                # parent_run_id was always NULL (Task 7a fix round 1, I2).
+                current = int(parent)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"[delegate] cycle-walk: run {data.get('id')} has an "
+                    f"unusable parent_run_id {parent!r}; ending the walk"
+                )
+                return None
 
         # Walked the cap without resolution — treat as cycle to be safe.
         logger.warning(
             f"[delegate] cycle-walk hit MAX_CHAIN_WALK_DEPTH "
             f"({self.MAX_CHAIN_WALK_DEPTH}) — refusing dispatch"
         )
-        return start
+        # int, like the found-cycle return above: one type out of this function.
+        return start_id

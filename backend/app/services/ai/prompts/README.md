@@ -58,11 +58,16 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 `<graph_facts>` / `<agent_memory>` 由召回层定条数；`<user_context>` 是 Honcho 的工作表示，按用户增长但每轮替换、不累积。
 
+`<available_workers>` 有界且**双重条件**：只在 `FEATURE_WORKFORCE_DELEGATE` 打开时才去查、才渲染，条目数 = `ai_agents.persistent=true` 的行数（2026-09-10 起为 3：`summarize` / `analyze` / `coordinator`，由 seed frontmatter 声明）。一条约 20–30 token（slug + description + model），加上固定的一段说明句，量级是**每个 agent 每次请求百余 token**。
+
+⚠️ 这个块**不看当前 agent 有没有真的会用 Delegate**——只要开关开着，每个 agent（含 ChatPanel、17 个 seed、全部用户自建）都会看到同一份清单。它与工具本身共用一个开关，所以「模型看得到清单」与「模型调得动工具」永远同真同假；曾经它是无条件渲染的，等于给永远不会 delegate 的 agent 付永久 token（Task 7a 评审 I3）。
+
 #### KV Cache effect
 
 **稳定前缀 + 每轮替换的尾部**，边界就是 `<!-- CACHE_BOUNDARY -->`。
 
 - 边界**之前**（身份 / skills / workers）逐轮不变，构成可复用前缀。改 agent 任一份文档、增删一个绑定 skill、增删一个 persistent agent，都会让前缀失效——这是正确的。
+- **`FEATURE_WORKFORCE_DELEGATE` 翻一次 = 全站前缀失效一次**。开关一开，每个 agent 的系统消息多出 `<available_workers>` 块，`_prefix_fingerprint()` 随之改变，所有 agent 的 provider 前缀缓存**一次性**全部作废；关掉时同样。这是把这个能力打开该付的、可见的代价，不是漂移——它只发生在翻开关的那一刻，之后回到稳定前缀。往 `ai_agents.persistent` 增删一行也会让所有 agent 的前缀失效一次（同一段进指纹），所以 persistent 名单不该被当成日常可调的配置。
 - 边界**之后**（图谱事实 / 用户模型 / agent 记忆 / request instructions / runtime 行）每轮都变。`# Runtime` 里的时间戳精确到分钟，所以**同一分钟内的连续请求前缀相同，跨分钟必变**——这一段本来就在边界之后，不影响前缀复用。
 - 「不会让复用失效」指的是本模块保证不动已有前缀；provider 侧缓存**是否命中、何时淘汰**不在本模块契约内。
 

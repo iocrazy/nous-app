@@ -245,6 +245,28 @@ class AgentRunInboxRepository:
         async with read_scope() as session:
             return [_row(r) for r in (await session.execute(stmt)).scalars().all()]
 
+    async def oldest_pending_for_target(
+        self, *, target_kind: str, target_id: int
+    ) -> Optional[dict[str, Any]]:
+        """The OLDEST unclaimed, unexpired item on this target, or None.
+
+        Deliberately not ``list_for_target(limit=1)``: that one is a listing
+        for the UI and orders ``created_at DESC``, so it hands back the NEWEST
+        item — the opposite of what a drain wants, and a mismatch the caller
+        could not see (Task 7a review M1). The order is in the name here.
+        """
+        stmt = (
+            select(AgentRunInbox)
+            .where(AgentRunInbox.target_kind == target_kind)
+            .where(AgentRunInbox.target_id == int(target_id))
+            .where(*_pending())
+            .order_by(AgentRunInbox.created_at.asc(), AgentRunInbox.id.asc())
+            .limit(1)
+        )
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).scalars().first()
+        return _row(row) if row is not None else None
+
     async def pending_count(self, *, target_kind: str, target_id: int) -> int:
         async with read_scope() as session:
             return int(

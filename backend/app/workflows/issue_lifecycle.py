@@ -1025,6 +1025,7 @@ async def _run_dispatch_with_continuation(
                 "outcome": outcome,
                 "attempts": attempt,
                 "wait_rounds": wait_rounds,
+                "inbox_drains": drains,
             }
         if outcome == "needs_input" and gate_ready:
             # Park exactly as the terminal path would (route_finish_outcome
@@ -1055,6 +1056,7 @@ async def _run_dispatch_with_continuation(
                     "outcome": outcome,
                     "attempts": attempt,
                     "wait_rounds": wait_rounds,
+                    "inbox_drains": drains,
                 }
             # The answer itself may have moved the issue terminal (a budget
             # "Cancel" runs transition_status before the wake): re-check
@@ -1074,6 +1076,7 @@ async def _run_dispatch_with_continuation(
                     "outcome": outcome,
                     "attempts": attempt,
                     "wait_rounds": wait_rounds,
+                    "inbox_drains": drains,
                 }
             wait_rounds += 1
             await set_status(issue_id, "in_progress")
@@ -1095,7 +1098,7 @@ async def _run_dispatch_with_continuation(
                 logger.info(
                     f"[execute_issue] issue {issue_id} is paused; not starting a turn"
                 )
-                return _paused_result(issue_id, res, attempt, wait_rounds)
+                return _paused_result(issue_id, res, attempt, wait_rounds, drains)
             turn_no += 1
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_turn(
@@ -1109,7 +1112,7 @@ async def _run_dispatch_with_continuation(
             # nothing is routed, no status is written, the lock is released by
             # execute_issue's finally. ``paused_at`` (stamped by /pause before
             # the flag was raised) is what the UI and /resume read.
-            return _paused_result(issue_id, res, attempt, wait_rounds)
+            return _paused_result(issue_id, res, attempt, wait_rounds, drains)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
         if outcome == "continue" and attempt < max_continuations:
@@ -1128,7 +1131,23 @@ async def _run_dispatch_with_continuation(
         # it a boundary; the InboxClaimHook claims it at that turn's first
         # step. The loop top re-checks preempt + paused, so this cannot revive
         # an issue a human just closed.
-        if drains < MAX_INBOX_DRAIN_TURNS and await inbox_probe(issue_id):
+        #
+        # NOT while the issue is awaiting an answer (fix round 1, I1). Two
+        # different wrecks, one gate:
+        #   * with the wait gate wired (production), ``continue`` re-enters the
+        #     park branch at the loop top — which has no ``wait_rounds``
+        #     ceiling of its own — and suspends on DBOS.recv for the TTL (72 h
+        #     by default), holding the execution lock and draining nothing: a
+        #     parked workflow runs no turn and reaches no step boundary;
+        #   * without it, the drain runs a turn that answers a question the
+        #     user never saw, and the agent's question never reaches routing.
+        # An issue waiting on a person is the sweeper's case, not this one —
+        # and the sweeper skips awaiting/paused issues too.
+        if (
+            drains < MAX_INBOX_DRAIN_TURNS
+            and outcome != "needs_input"
+            and await inbox_probe(issue_id)
+        ):
             drains += 1
             logger.info(
                 f"[execute_issue] issue {issue_id}: inbox item arrived after the "
@@ -1156,10 +1175,17 @@ async def _run_dispatch_with_continuation(
 
 
 def _paused_result(
-    issue_id: int, res: Optional[dict[str, Any]], attempt: int, wait_rounds: int
+    issue_id: int,
+    res: Optional[dict[str, Any]],
+    attempt: int,
+    wait_rounds: int,
+    inbox_drains: int = 0,
 ) -> dict[str, Any]:
     """The dispatch result for a target-level pause — ``outcome: "paused"``
-    is a workflow-level marker, never a FinishIssue outcome."""
+    is a workflow-level marker, never a FinishIssue outcome.
+
+    Carries the three bounded counters like every other exit: a shape that
+    differs per exit makes a reader check which one they are holding."""
     return {
         "issue_id": issue_id,
         "outcome": "paused",
@@ -1167,6 +1193,7 @@ def _paused_result(
         "run_id": (res or {}).get("run_id"),
         "attempts": attempt,
         "wait_rounds": wait_rounds,
+        "inbox_drains": inbox_drains,
     }
 
 

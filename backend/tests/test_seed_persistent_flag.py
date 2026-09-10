@@ -127,6 +127,61 @@ async def test_a_new_row_is_inserted_with_the_column(tmp_path: Path) -> None:
     assert repo.insert.await_args.args[0]["persistent"] is True
 
 
+# ── a leading `---` is not always frontmatter ──────────────────────────
+
+
+HR_SEED = """---
+You are an agent that keeps its own rules above the fold.
+
+---
+
+More prose after the rule.
+"""
+
+
+def test_a_horizontal_rule_does_not_eat_the_prose(tmp_path: Path) -> None:
+    """Fix round 1, I4. ``frontmatter.load`` treats a leading ``---`` as an
+    opening fence: on this file it returns ``metadata={}`` and a body starting
+    at "More prose", silently dropping everything between the two rules — and
+    that text is MODEL-VISIBLE (it becomes ``agent_md``). No exception, no log.
+
+    A leading block is only frontmatter when it parses as a YAML mapping that
+    declares something we know. Anything else is prose and stays.
+    """
+    d = _seed(tmp_path, "translate", HR_SEED)
+    fields = _loader(tmp_path, _agent_repo())._read_agent_fields(d, "translate")
+    assert fields["agent_md"] == HR_SEED.strip()
+    assert fields["persistent"] is False
+
+
+def test_a_yaml_block_with_no_known_key_is_left_alone(tmp_path: Path) -> None:
+    """``---\nnot a mapping\n---\nBody`` also parses to ``metadata={}``. The
+    rule is the same: nothing recognised, nothing stripped."""
+    raw = "---\nnot a mapping\n---\nBody\n"
+    d = _seed(tmp_path, "translate", raw)
+    fields = _loader(tmp_path, _agent_repo())._read_agent_fields(d, "translate")
+    assert fields["agent_md"] == raw.strip()
+
+
+def test_every_shipped_seed_keeps_its_prose(tmp_path: Path) -> None:
+    """Lockstep over the real files: a seed that declares nothing must come
+    back byte-for-byte, and one that declares something must differ from its
+    raw text ONLY by its frontmatter block."""
+    import frontmatter
+
+    loader = _loader(tmp_path, _agent_repo())
+    for d in sorted(SEEDS_AGENTS_DIR.iterdir()):
+        if not d.is_dir() or not (d / "AGENT.md").exists():
+            continue
+        raw = (d / "AGENT.md").read_text().strip()
+        fields = loader._read_agent_fields(d, d.name)
+        if d.name in EXPECTED_PERSISTENT:
+            assert fields["agent_md"] == frontmatter.loads(raw).content.strip()
+            assert "persistent:" not in (fields["agent_md"] or "")
+        else:
+            assert fields["agent_md"] == raw, f"{d.name}: prose changed"
+
+
 # ── lockstep with what 162 / 163 actually promoted ─────────────────────
 
 

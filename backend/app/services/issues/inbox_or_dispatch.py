@@ -33,7 +33,12 @@ from typing import Any, Literal, Optional
 
 from loguru import logger
 
-from app.services.issues.issue_dispatch import is_dispatching
+from app.services.issues.issue_dispatch import (
+    clear_dispatching,
+    is_dispatching,
+    looks_like_duplicate_dispatch,
+    mark_dispatching,
+)
 
 #: Statuses on which a background trigger must not start a turn. The COMMENT
 #: path opts out (``check_terminal=False``): a comment on a done issue wakes
@@ -256,11 +261,28 @@ async def dispatch_issue_reply(
     )
 
     wf_id = workflow_id or f"issue-reply-{issue_id}-{uuid.uuid4()}"
+    # BEFORE the enqueue (phase 2b-2 §4.1): the run row is written inside the
+    # workflow, so between here and there every busy check — fork's, resume's,
+    # this module's own — reads idle. Stamped afterwards the marker would leave
+    # open exactly the window it exists to close. Best-effort by design: a
+    # failed marker means this dispatch runs unguarded (yesterday's behaviour),
+    # never that the reply is refused. Mirrors ``_dispatch_execute_issue``.
+    #
+    # Nothing clears it on success: the reply workflow has no ``atomic_checkout``
+    # to remove it, so the 60 s TTL is the closer — long enough to cover the
+    # gap until the run row exists, short enough that a crashed dispatch cannot
+    # pin the issue busy. It is also what stops two sweeper ticks from
+    # double-dispatching the same stranded issue.
+    await mark_dispatching(issue_id, wf_id)
     try:
         dispatch_respond_to_issue_reply(
             issue_id, user_id, body or CONTINUATION_NUDGE, attachments, wf_id, source
         )
     except Exception as exc:  # noqa: BLE001 — typed failure, never silent
+        # A duplicate means DBOS already holds the workflow; only a real
+        # failure means nobody is coming, so only that reopens the window.
+        if not looks_like_duplicate_dispatch(exc):
+            await clear_dispatching(issue_id)
         logger.opt(exception=True).error(
             f"[deliver] issue {issue_id}: dispatch failed: {exc}"
         )

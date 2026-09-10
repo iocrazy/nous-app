@@ -327,3 +327,78 @@ async def test_without_a_key_the_workflow_id_stays_random(monkeypatch):
         5, kind="steer", content={}, user_id=ME, message_body="hi"
     )
     assert out.workflow_id.startswith("issue-reply-5-")
+
+
+# ── the dispatch window on the reply seam (fix round 1, C1/M2) ──────────
+
+
+async def test_the_reply_dispatch_opens_the_window_before_enqueuing(monkeypatch):
+    """Task 2's marker is what makes the seconds between "enqueued" and "the
+    run row exists" read as busy. The reply seam did not write it, so two
+    sweeper ticks could dispatch the same stranded issue and fork/resume saw
+    an idle issue that was not."""
+    import app.services.issues.inbox_or_dispatch as mod
+    import app.services.issues.issue_reply_dispatch as dispatch_mod
+
+    order: list[str] = []
+
+    async def _mark(issue_id, workflow_id):
+        order.append(f"mark:{workflow_id}")
+
+    monkeypatch.setattr(mod, "mark_dispatching", _mark)
+    monkeypatch.setattr(
+        dispatch_mod,
+        "dispatch_respond_to_issue_reply",
+        lambda *a, **k: order.append("dispatch"),
+    )
+
+    out = await mod.dispatch_issue_reply(5, user_id=ME, body="hi")
+
+    assert out.mode == "dispatched"
+    assert order == [f"mark:{out.workflow_id}", "dispatch"], order
+
+
+async def test_a_failed_reply_dispatch_reopens_the_window(monkeypatch):
+    import app.services.issues.inbox_or_dispatch as mod
+    import app.services.issues.issue_reply_dispatch as dispatch_mod
+
+    cleared: list[int] = []
+
+    async def _boom(*a, **k):
+        return None
+
+    monkeypatch.setattr(mod, "mark_dispatching", AsyncMock())
+    monkeypatch.setattr(mod, "clear_dispatching", lambda i: _cleared(cleared, i))
+
+    def _raise(*a, **k):
+        raise RuntimeError("dbos refused")
+
+    monkeypatch.setattr(dispatch_mod, "dispatch_respond_to_issue_reply", _raise)
+
+    out = await mod.dispatch_issue_reply(5, user_id=ME, body="hi")
+    assert out.mode == "skipped" and out.reason.startswith("dispatch_failed")
+    assert cleared == [5], "a dispatch nobody is coming for must not pin the issue"
+
+
+async def _cleared(sink, issue_id):
+    sink.append(issue_id)
+
+
+async def test_a_duplicate_dispatch_leaves_the_window_open(monkeypatch):
+    """DBOS already holds the workflow — clearing here would say "nobody is
+    coming" about a run that is on its way."""
+    import app.services.issues.inbox_or_dispatch as mod
+    import app.services.issues.issue_reply_dispatch as dispatch_mod
+
+    cleared: list[int] = []
+    monkeypatch.setattr(mod, "mark_dispatching", AsyncMock())
+    monkeypatch.setattr(mod, "clear_dispatching", lambda i: _cleared(cleared, i))
+    monkeypatch.setattr(mod, "looks_like_duplicate_dispatch", lambda exc: True)
+
+    def _raise(*a, **k):
+        raise RuntimeError("workflow already exists")
+
+    monkeypatch.setattr(dispatch_mod, "dispatch_respond_to_issue_reply", _raise)
+
+    await mod.dispatch_issue_reply(5, user_id=ME, body="hi")
+    assert cleared == []

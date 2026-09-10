@@ -349,3 +349,105 @@ def test_description_html_escaped():
     )
     assert "&lt;tag&gt;" in msg
     assert "<tag>" not in msg  # un-escaped original should not leak
+
+
+# ── the workers block follows the Delegate flag (fix round 1, I3) ───────
+
+
+def _composer_listing(workers: list[dict], calls: list[str]):
+    """A composer whose repos answer with ``workers`` and record the lookup."""
+    from app.services.ai.prompts.prompt_composer import PromptComposer
+
+    composer = PromptComposer(agent_repo=None, skill_repo=None)
+
+    class _AgentRepo:
+        async def get_by_slug(self, slug):
+            return {
+                # a real uuid: the composer parses agent["id"] with UUID()
+                "id": "10000000-0000-0000-0000-000000000001",
+                "slug": "script_ai",
+                "name": "Script AI",
+                "model": "qwen-max",
+                "identity_md": "I am the Script AI.",
+            }
+
+        async def get_skill_ids(self, agent_id):
+            return []
+
+        async def list_persistent(self):
+            calls.append("list_persistent")
+            return workers
+
+    class _SkillRepo:
+        async def list_by_ids(self, ids):
+            return []
+
+    composer.agent_repo = _AgentRepo()
+    composer.skill_repo = _SkillRepo()
+    return composer
+
+
+WORKER_ROWS = [
+    {
+        "id": "20000000-0000-0000-0000-000000000002",
+        "slug": "summarize",
+        "description": "Summarize media.",
+        "model": "m",
+    },
+]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_workers_block_while_delegate_is_off(monkeypatch):
+    """The block exists to tell the model what ``Delegate`` can target. With
+    the tool gated off the model cannot call it at all, so the paragraph is
+    pure token cost in EVERY agent's system message — and it sits before the
+    cache boundary, inside the fingerprint. Task 7a defect 4 was about to put
+    three real workers in there for every agent in the product.
+    """
+    from app.services.ai.prompts.prompt_composer import ComposerInput
+    from app.services.workforce import delegate_feature as gate
+
+    monkeypatch.setattr(gate, "delegate_feature_enabled", lambda: False)
+    calls: list[str] = []
+    out = await _composer_listing(WORKER_ROWS, calls).compose(
+        ComposerInput(agent_slug="script_ai")
+    )
+    assert "<available_workers>" not in out.system_message
+    assert calls == [], "the listing itself is skipped, not just the rendering"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_workers_block_returns_when_delegate_is_on(monkeypatch):
+    from app.services.ai.prompts.prompt_composer import ComposerInput
+    from app.services.workforce import delegate_feature as gate
+
+    monkeypatch.setattr(gate, "delegate_feature_enabled", lambda: True)
+    calls: list[str] = []
+    out = await _composer_listing(WORKER_ROWS, calls).compose(
+        ComposerInput(agent_slug="script_ai")
+    )
+    assert "<available_workers>" in out.system_message
+    assert "summarize" in out.system_message
+    assert calls == ["list_persistent"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_flipping_the_flag_moves_the_prefix_fingerprint(monkeypatch):
+    """One-time cache invalidation, and it must be visible as one: the
+    fingerprint is what tells a reader the stable prefix changed."""
+    from app.services.ai.prompts.prompt_composer import ComposerInput
+    from app.services.workforce import delegate_feature as gate
+
+    monkeypatch.setattr(gate, "delegate_feature_enabled", lambda: False)
+    off = await _composer_listing(WORKER_ROWS, []).compose(
+        ComposerInput(agent_slug="script_ai")
+    )
+    monkeypatch.setattr(gate, "delegate_feature_enabled", lambda: True)
+    on = await _composer_listing(WORKER_ROWS, []).compose(
+        ComposerInput(agent_slug="script_ai")
+    )
+    assert off.prefix_fingerprint != on.prefix_fingerprint
