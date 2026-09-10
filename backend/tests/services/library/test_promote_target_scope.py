@@ -27,8 +27,8 @@ import pytest
 
 import app.services.library.promote_generated_media_service as svc_mod
 
-TEAM_SCOPE = 42      # the team board the generation belongs to
-PERSONAL = 999       # the caller's own personal team
+TEAM_SCOPE = 42  # the team board the generation belongs to
+PERSONAL = 999  # the caller's own personal team
 OTHER_TEAM = 77
 
 
@@ -154,7 +154,12 @@ def test_the_promote_endpoint_does_not_pin_the_caller_s_personal_scope():
     """
     from pathlib import Path
 
-    src = Path(__file__).resolve().parents[3] / "app" / "api" / "generated_media_router.py"
+    src = (
+        Path(__file__).resolve().parents[3]
+        / "app"
+        / "api"
+        / "generated_media_router.py"
+    )
     text = src.read_text(encoding="utf-8")
 
     marker = "async def promote_generation("
