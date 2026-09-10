@@ -68,7 +68,10 @@ async function renderPage() {
 
 describe('ShortcutsTagsPage options', () => {
   beforeEach(() => vi.resetModules());
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('hides Pipeline-group tags', async () => {
     mockFetch();
@@ -185,6 +188,42 @@ describe('ShortcutsTagsPage options', () => {
     ]);
   });
 
+  it('times out a stalled save so the queued latest state still goes out', async () => {
+    const SAVE_TIMEOUT_MS = 12_000; // mirrors the page constant
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/tags?enabled_only=true')) {
+        return new Response(JSON.stringify({ tags: TAGS, total: TAGS.length }), { status: 200 });
+      }
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) {
+        // Stalled link: never settles on its own — only the abort signal ends it, as with real fetch.
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+        });
+      }
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await renderPage();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getAllByText('猫')[0]); // POST #1 — stalls
+    fireEvent.click(screen.getByTestId('opt-rating-5')); // queued behind #1
+    await act(async () => { await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS - 1); });
+    expect(bodies).toHaveLength(1);
+    expect(screen.getByText(/保存中/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(bodies).toEqual([
+      { tags: ['Cats'], rating: null, transcribe: false, summarize: false, analyze: false },
+      { tags: ['Cats'], rating: 5, transcribe: false, summarize: false, analyze: false },
+    ]);
+    expect(screen.getByText(/已保存/)).toBeTruthy();
+    expect(screen.queryByText(/保存失败/)).toBeNull();
+    // Only the "saved → idle" timer may remain; each link's timeout is cleared on settle.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('keeps the Pipeline group out of the create-form group dropdown', async () => {
     mockFetch();
     await renderPage();
@@ -278,5 +317,22 @@ describe('ShortcutsTagsPage search-or-create', () => {
     await renderPage();
     await createVia();
     expect(await screen.findByText(precise)).toBeTruthy();
+  });
+
+  // ErrorResponse envelope per app/core/exceptions.py: string detail → error=detail,
+  // details=null; dict detail → error="Request failed"; any 5xx → "Internal server error".
+  const envelope = (status: number, error: string, details: unknown = null) => () =>
+    new Response(JSON.stringify({ success: false, error, code: `http_${status}`, request_id: 'r1', details }), { status });
+
+  it.each([
+    ['500 envelope', envelope(500, 'Internal server error'), '创建失败（500）'],
+    ['400 string detail', envelope(400, 'Tag name is not allowed'), 'Tag name is not allowed'],
+    ['400 dict detail', envelope(400, 'Request failed', { code: 'bad_tag' }), '创建失败（400）'],
+  ])('shows a useful message for a non-409 create failure (%s)', async (_case, createReply, expected) => {
+    mockFetch({ createReply });
+    await renderPage();
+    fireEvent.change(screen.getByPlaceholderText('搜索标签...'), { target: { value: 'Birds' } });
+    fireEvent.click(await screen.findByTestId('quick-create-btn'));
+    expect(await screen.findByText(expected)).toBeTruthy();
   });
 });

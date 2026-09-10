@@ -30,6 +30,13 @@ type Choice<K extends keyof Options> = { id: number; value: Options[K]; text: st
 /** Wait after the last keystroke before asking MyMemory for a counterpart name. */
 const TRANSLATE_DEBOUNCE_MS = 600;
 
+/**
+ * Abort a selection POST that hasn't settled by then. Saves are serialized, so a
+ * stalled request on a flaky mobile link would otherwise hold every queued save
+ * (including the final state) until the browser's own network timeout.
+ */
+const SAVE_TIMEOUT_MS = 12_000;
+
 const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
 
 /** Counterpart name (zh↔en) from MyMemory; '' when unavailable — translation is optional. */
@@ -59,7 +66,9 @@ type CreateConflict = { name?: string; name_zh?: string; type?: string };
 const describeCreateError = async (res: Response, name: string, lang: string): Promise<string> => {
   const body = await res.json().catch(() => ({}) as Record<string, unknown>);
   const structured = body?.details ?? body?.detail;
-  const human = body?.error ?? body?.detail;
+  // Only a 4xx with a string detail carries a real message in `error`; dict details
+  // become "Request failed" and every 5xx becomes "Internal server error".
+  const human = res.status < 500 && body?.details == null ? (body?.error ?? body?.detail) : undefined;
   if (res.status === 409) {
     // Backend names WHICH tag conflicts. The English name (often an
     // auto-translation, e.g. 康复 -> "Healing") may collide with a
@@ -329,11 +338,14 @@ export const ShortcutsTagsPage: React.FC = () => {
     // Body is captured now — the state at the moment of the user's action.
     const body = JSON.stringify({ tags: Array.from(nextTags), ...nextOptions });
     setSaveStatus('saving');
-    saveChainRef.current = saveChainRef.current.then(() =>
-      fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+    saveChainRef.current = saveChainRef.current.then(() => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+      return fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
+        signal: controller.signal,
       })
         .then((res) => {
           if (!res.ok) throw new Error(`Save selection failed: HTTP ${res.status}`);
@@ -346,8 +358,9 @@ export const ShortcutsTagsPage: React.FC = () => {
         .catch((err) => {
           console.error('Failed to save selection:', err);
           if (isLatest()) setSaveStatus('error');
-        }),
-    );
+        })
+        .finally(() => clearTimeout(timeout));
+    });
   }, [token]);
 
   // Next state is computed from the current render's values, never inside a
