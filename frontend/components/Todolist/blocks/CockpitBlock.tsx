@@ -9,15 +9,18 @@ import { useTranslation } from 'react-i18next';
 import { GitFork, Pause, Play, Square } from 'lucide-react';
 
 import { aiLibraryService } from '../../../services/aiLibraryService';
+import { fmtWhen } from '../../../utils/fmtWhen';
 import { pauseIssue, resumeIssue } from '../../../services/issuesService';
 import {
   budgetState,
+  childrenState,
   contextGauge,
   currentStep,
   retryState,
   selectRunView,
   stepProgress,
   toolsState,
+  wakeupsState,
 } from '../../TaskCenter/runView';
 import { formatElapsed } from '../formatElapsed';
 import { controlErrorText } from '../issueControlErrors';
@@ -27,6 +30,7 @@ import { isReplaying, useReplay } from '../replayContext';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
 import { formatCents } from './BudgetBlock';
 
+
 const PHASE_TONE: Record<string, string> = {
   running: 'text-ok bg-ok-soft border-ok-line',
   waiting_input: 'text-warn bg-warn-soft border-warn-line',
@@ -34,6 +38,13 @@ const PHASE_TONE: Record<string, string> = {
   blocked: 'text-danger bg-danger-soft border-danger-line',
   done: 'text-ink-400 bg-ink-900 border-ink-800',
   idle: 'text-ink-400 bg-ink-900 border-ink-800',
+};
+
+/** Tailwind needs the class written out; a template string is not scanned. */
+const GRID_COLS: Record<number, string> = {
+  4: 'sm:grid-cols-4',
+  5: 'sm:grid-cols-5',
+  6: 'sm:grid-cols-6',
 };
 
 const Cell: React.FC<React.PropsWithChildren<{ label: string; testId: string; bar?: { pct: number; tone: string } }>> = ({
@@ -90,6 +101,10 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const runBudget = budgetState(view);
   // Phase 2b-1 §3: a fifth cell only when a tool actually timed out.
   const tools = toolsState(view);
+  // harness 2b-2 §5-1: a sub-agent cell only when this run dispatched one,
+  // and the next armed wake-up on the subline.
+  const children = childrenState(view);
+  const wakeups = wakeupsState(view);
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
   // while the issue marker is absent. A parked issue (marker present) draws
@@ -247,7 +262,10 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         </div>
       )}
-      <div className={`grid grid-cols-2 gap-2 ${tools && tools.timed_out > 0 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
+      {/* Four fixed cells plus the two conditional ones — the column count
+          follows what is actually rendered, so a cell never sits alone on a
+          half-empty row. */}
+      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (children ? 1 : 0)]}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -295,6 +313,17 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             {tools.last_timed_out && <div className="text-[11px] text-ink-500 truncate">{tools.last_timed_out}</div>}
           </Cell>
         )}
+        {children && (
+          <Cell label={t('issueDetail.subagents', 'Sub-agents')} testId="cockpit-children">
+            {children.done}
+            <span className="text-ink-500 text-[12px]">/{children.total}</span>
+            {children.async_pending > 0 && (
+              <div className="text-[11px] text-info truncate">
+                {t('issueDetail.subagentsBackground', '{{count}} in background', { count: children.async_pending })}
+              </div>
+            )}
+          </Cell>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-500" data-testid="cockpit-subline">
@@ -310,6 +339,11 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         )}
         {rollup.inbox_pending > 0 && <span className="text-ok">{t('issueDetail.inboxPending', { count: rollup.inbox_pending })}</span>}
         {elapsed != null && <span className="tabular-nums">{formatElapsed(elapsed)}</span>}
+        {wakeups.length > 0 && (
+          <span className="text-info" data-testid="cockpit-wakeup">
+            {t('issueDetail.wakesAt', 'Wakes at {{at}}', { at: fmtWhen(wakeups[0].fire_at) })}
+          </span>
+        )}
       </div>
     </section>
   );

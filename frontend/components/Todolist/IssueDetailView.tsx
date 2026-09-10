@@ -40,6 +40,7 @@ import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { selectRunCost, selectRunView } from '../TaskCenter/runView';
+import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from './childRunContext';
 import { ReplayContext, type ReplayState } from './replayContext';
 import { ForkRunDialog } from './ForkRunDialog';
 import { forkErrorText } from './forkErrors';
@@ -207,6 +208,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     const inThread = messages.some((m) => m.kind === 'agent_run' && m.agent_run_id && String(m.agent_run_id) === replayPos.runId);
     return inThread || replayPos.runId === progress?.current_run?.id ? null : replayPos.runId;
   }, [replayPos, messages, progress?.current_run?.id]);
+  // ── Sub-runs (harness 2b-2 §5-1) ───────────────────────────────────────
+  // A sub-agent card opens its child run in a panel above the thread. The
+  // page owns the state because the panel is a sibling of the thread, not a
+  // descendant of the card that asked for it.
+  const [childRun, setChildRun] = useState<ChildRunOrigin | null>(null);
+  const childRunState = useMemo<ChildRunState>(
+    () => ({ current: childRun, open: setChildRun, close: () => setChildRun(null) }),
+    [childRun],
+  );
+
   // ── Fork (harness 2b-1 §2) ─────────────────────────────────────────────
   const [forkAt, setForkAt] = useState<{ runId: string; seq: number; label: string } | null>(null);
   const [forkPending, setForkPending] = useState(false);
@@ -562,11 +573,13 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
           {/* Zone: cockpit — registered blocks (issueBlocks.ts); today one block
               reading the rollup through runView selectors. */}
-          <ReplayContext.Provider value={replay}>
-            {cockpitBlocks.map((b) => (
-              <b.component key={b.id} ctx={blockCtx} />
-            ))}
-          </ReplayContext.Provider>
+          <ChildRunContext.Provider value={childRunState}>
+            <ReplayContext.Provider value={replay}>
+              {cockpitBlocks.map((b) => (
+                <b.component key={b.id} ctx={blockCtx} />
+              ))}
+            </ReplayContext.Provider>
+          </ChildRunContext.Provider>
           {forkAt && (
             <ForkRunDialog
               stepLabel={forkAt.label}
@@ -660,8 +673,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
+                  <ChildRunContext.Provider value={childRunState}>
                   <ReplayContext.Provider value={replay}>
                     {detachedRunId && <DetachedRunPanel runId={detachedRunId} />}
+                    {childRun && (
+                      <DetachedRunPanel
+                        runId={childRun.childRunId}
+                        origin={childRun}
+                        onBack={() => setChildRun(null)}
+                      />
+                    )}
                     <IssueChatThread
                       messages={messages}
                       agentsById={agentsById}
@@ -671,6 +692,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                       aiSessionId={issue.raw.ai_session_id}
                     />
                   </ReplayContext.Provider>
+                  </ChildRunContext.Provider>
                 )}
               {agentLive && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">

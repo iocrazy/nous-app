@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, Clock, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
 
 import { schedulesService } from '../../../../services/schedulesService';
+import { fmtWhen } from '../../../../utils/fmtWhen';
 import { useChildRun } from '../../../Todolist/childRunContext';
 import type {
   BudgetNode,
@@ -32,12 +33,6 @@ function fmtCents(c: number | null): string {
   return c === null ? '' : `¢${c.toFixed(c < 1 ? 3 : 2)}`;
 }
 
-/** An ISO instant in the reader's own clock; the raw string when it is not one. */
-export function fmtWhen(iso: string | null): string {
-  if (!iso) return '—';
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? new Date(ms).toLocaleString() : iso;
-}
 
 const Row: React.FC<React.PropsWithChildren<{ className?: string; testId?: string }>> = ({
   className = '',
