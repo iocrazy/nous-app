@@ -13,26 +13,11 @@ vi.mock('../../services/canvasService', async (importOriginal) => {
     await importOriginal<typeof import('../../services/canvasService')>();
   return {
     ...actual,
-    deriveGrid: vi.fn(),
+    deriveCanvasGrid: vi.fn(),
   };
 });
 
-vi.mock('../../../../services/resourceService', () => ({
-  getResourceFileUrl: (id: string, token?: string) =>
-    `https://example.test/api/v1/resources/${id}/file${token ? `?token=${token}` : ''}`,
-}));
-
-vi.mock('../../../../supabaseClient', () => ({
-  getSupabaseClient: () => ({
-    auth: {
-      getSession: async () => ({
-        data: { session: { access_token: 'fake-token' } },
-      }),
-    },
-  }),
-}));
-
-const { deriveGrid } = await import('../../services/canvasService');
+const { deriveCanvasGrid } = await import('../../services/canvasService');
 
 beforeEach(() => {
   useCanvasCoreStore.getState().reset();
@@ -42,7 +27,7 @@ beforeEach(() => {
     loadStatus: 'ready',
     baseUpdatedAt: '2026-06-10T12:00:00+00:00',
   });
-  (deriveGrid as ReturnType<typeof vi.fn>).mockReset();
+  (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockReset();
 });
 
 afterEach(() => {
@@ -72,12 +57,11 @@ const baseProps = {
   zIndex: 0,
 } as const;
 
-function seedImageOutput(resourceId: string | null) {
+function seedImageOutput() {
   const fullData = {
     kind: 'image',
-    resource_id: resourceId,
     preview_text: '',
-    preview_url: 'https://example.test/source.png',
+    preview_url: '/api/v1/generated-media/5/cover',
     crop_region: null,
   };
   useCanvasCoreStore.setState({
@@ -94,17 +78,8 @@ function seedImageOutput(resourceId: string | null) {
 }
 
 function fakeTile(row: number, col: number) {
-  return {
-    row,
-    col,
-    resource: {
-      id: `tile-${row}${col}`,
-      filename: `grid-r${row + 1}c${col + 1}-orig.png`,
-      file_path: `teams/s/derived/tile-${row}${col}/v1/x.png`,
-      mime_type: 'image/png',
-      file_size_bytes: 100,
-    },
-  };
+  const id = `9${row}${col}`;
+  return { id, url: `/api/v1/generated-media/${id}/cover`, kind: 'image', row, col };
 }
 
 // ============================================================
@@ -112,24 +87,14 @@ function fakeTile(row: number, col: number) {
 // ============================================================
 
 describe('OutputNodeView — Split button', () => {
-  it('shows the Split button for a persisted image output', () => {
-    const fullData = seedImageOutput('source-123');
+  it('shows for any image output on a canvas — no resource_id needed', () => {
+    const fullData = seedImageOutput();
     render(
       <Wrap>
         <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     expect(screen.getByRole('button', { name: 'Split' })).toBeInTheDocument();
-  });
-
-  it('hides the Split button when there is no resource_id', () => {
-    const fullData = seedImageOutput(null);
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
-      </Wrap>,
-    );
-    expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument();
   });
 });
 
@@ -138,14 +103,14 @@ describe('OutputNodeView — Split button', () => {
 // ============================================================
 
 describe('OutputNodeView — grid commit spawns tile nodes', () => {
-  it('calls deriveGrid and adds one image output node per tile', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveGrid as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      rows: 2,
-      cols: 2,
-      tiles: [fakeTile(0, 0), fakeTile(0, 1), fakeTile(1, 0), fakeTile(1, 1)],
-    });
-
+  it('derives from the shown image and adds one output node per tile', async () => {
+    const fullData = seedImageOutput();
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      fakeTile(0, 0),
+      fakeTile(0, 1),
+      fakeTile(1, 0),
+      fakeTile(1, 1),
+    ]);
     render(
       <Wrap>
         <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
@@ -155,61 +120,45 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
-    await waitFor(() => {
-      expect(deriveGrid).toHaveBeenCalledTimes(1);
-    });
-    expect(deriveGrid).toHaveBeenCalledWith('source-123', {
-      xs: [0.5],
-      ys: [0.5],
-    });
-
-    await waitFor(() => {
-      expect(useCanvasCoreStore.getState().nodes).toHaveLength(5);
-    });
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasGrid).toHaveBeenCalledWith(
+      '4242',
+      '/api/v1/generated-media/5/cover',
+      { xs: [0.5], ys: [0.5] },
+      { nodeId: 'o1' },
+    );
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(5));
     const nodes = useCanvasCoreStore.getState().nodes as Array<{
       id: string;
       type: string;
       position: { x: number; y: number };
       data: Record<string, unknown>;
     }>;
-    // Source node untouched.
     expect(nodes[0].id).toBe('o1');
-    expect(nodes[0].data.resource_id).toBe('source-123');
-
+    expect(nodes[0].data.preview_url).toBe('/api/v1/generated-media/5/cover');
     const tiles = nodes.slice(1);
     expect(tiles.every((node) => node.type === 'output')).toBe(true);
-    expect(tiles.map((node) => node.data.resource_id)).toEqual([
-      'tile-00',
-      'tile-01',
-      'tile-10',
-      'tile-11',
+    expect(tiles.map((node) => node.data.preview_url)).toEqual([
+      '/api/v1/generated-media/900/cover',
+      '/api/v1/generated-media/901/cover',
+      '/api/v1/generated-media/910/cover',
+      '/api/v1/generated-media/911/cover',
     ]);
-    expect(tiles[0].data.preview_url).toBe(
-      'https://example.test/api/v1/resources/tile-00/file?token=fake-token',
-    );
-    // Same row shares y; second column sits right of the first.
     expect(tiles[0].position.y).toBe(tiles[1].position.y);
     expect(tiles[1].position.x).toBeGreaterThan(tiles[0].position.x);
-    // Second row sits below the first, same x as its column.
     expect(tiles[2].position.y).toBeGreaterThan(tiles[0].position.y);
     expect(tiles[2].position.x).toBe(tiles[0].position.x);
-    // All tiles start right of the source node.
     expect(tiles[0].position.x).toBeGreaterThan(nodes[0].position.x);
-
-    // Modal closed.
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId('unified-image-editor'),
-      ).not.toBeInTheDocument();
-    });
+    await waitFor(() =>
+      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument(),
+    );
   });
 
-  it('shows an error banner + keeps the modal open when deriveGrid rejects', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('HTTP 400: at least one split line is required'),
+  it('shows an error banner + keeps the modal open when the derive rejects', async () => {
+    const fullData = seedImageOutput();
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('at least one split line is required'),
     );
-
     render(
       <Wrap>
         <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
@@ -219,13 +168,10 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
-    await waitFor(() => {
-      expect(deriveGrid).toHaveBeenCalledTimes(1);
-    });
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('grid-commit-error');
-    expect(banner.textContent).toMatch(/split line/i);
-    // No tile nodes were added.
+    expect(banner.textContent).toMatch(/split line/);
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
 });
