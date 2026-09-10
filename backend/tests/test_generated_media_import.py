@@ -39,11 +39,16 @@ def _patch_scope_and_register(monkeypatch, captured):
     async def _fake_scope(_auth):
         return 42
 
+    async def _fake_canvas_scope(_auth, canvas_id):
+        captured["canvas_scope_for"] = canvas_id
+        return 77
+
     async def _fake_register(**kwargs):
         captured.update(kwargs)
         return {"id": 999}
 
     monkeypatch.setattr(router_mod, "_scope", _fake_scope)
+    monkeypatch.setattr(router_mod, "_canvas_import_scope", _fake_canvas_scope)
     monkeypatch.setattr(gm, "register_generated_media", _fake_register)
 
 
@@ -68,7 +73,7 @@ async def test_import_image_registers_and_returns_cover_url(monkeypatch):
         "media_kind": "image",
         "mime": "image/png",
     }
-    assert captured["scope_id"] == 42
+    assert captured["scope_id"] == 77
     assert captured["mime"] == "image/png"
     assert captured["origin"].kind == "canvas_upload"
     assert captured["origin"].canvas_id == 123
@@ -78,6 +83,7 @@ async def test_import_image_registers_and_returns_cover_url(monkeypatch):
     assert captured["origin"].params == {"filename": "pic.png", "role": "user_upload"}
     # The temp file existed at register time — source_path was passed.
     assert captured["source_path"]
+    assert captured["canvas_scope_for"] == 123
 
 
 @pytest.mark.asyncio
@@ -97,6 +103,8 @@ async def test_import_video_returns_stream_url(monkeypatch):
     assert resp["data"]["url"] == "/api/v1/generated-media/999/stream"
     assert resp["data"]["media_kind"] == "video"
     assert captured["origin"].canvas_id is None
+    assert "canvas_scope_for" not in captured
+    assert captured["scope_id"] == 42
 
 
 @pytest.mark.asyncio
@@ -199,3 +207,57 @@ async def test_import_rejects_an_unknown_role(monkeypatch):
     assert exc.value.status_code == 400
     assert "maks" in str(exc.value.detail)
     assert captured == {}  # nothing was registered
+
+
+@pytest.mark.asyncio
+async def test_canvas_import_scope_gates_the_canvas_then_resolves_its_scope(
+    monkeypatch,
+):
+    import sys
+
+    import app.workflows.canvas_generation as cg
+
+    router_mod = _router_mod()
+    calls = []
+
+    async def _fake_gate(canvas_id, auth):
+        calls.append(("gate", canvas_id))
+        return "777"
+
+    async def _fake_registration_scope(canvas_id, user_id):
+        calls.append(("scope", canvas_id, user_id))
+        return 77
+
+    monkeypatch.setattr(
+        sys.modules["app.api.canvases_router"], "_gate_canvas_write", _fake_gate
+    )
+    monkeypatch.setattr(cg, "_registration_scope_id", _fake_registration_scope)
+
+    assert await router_mod._canvas_import_scope(_Auth(), 123) == 77
+    assert calls == [("gate", "123"), ("scope", 123, "u-uuid")]
+
+
+@pytest.mark.asyncio
+async def test_canvas_import_scope_unresolved_is_500(monkeypatch):
+    import sys
+
+    from fastapi import HTTPException
+
+    import app.workflows.canvas_generation as cg
+
+    router_mod = _router_mod()
+
+    async def _fake_gate(canvas_id, auth):
+        return "777"
+
+    async def _unresolved(canvas_id, user_id):
+        raise RuntimeError("scope_unresolved")
+
+    monkeypatch.setattr(
+        sys.modules["app.api.canvases_router"], "_gate_canvas_write", _fake_gate
+    )
+    monkeypatch.setattr(cg, "_registration_scope_id", _unresolved)
+
+    with pytest.raises(HTTPException) as caught:
+        await router_mod._canvas_import_scope(_Auth(), 123)
+    assert caught.value.status_code == 500

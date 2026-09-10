@@ -12,9 +12,10 @@ import base64
 import datetime
 import json
 from contextlib import nullcontext
-from typing import Optional
+from typing import Iterable, Optional, Sequence
 
 from loguru import logger
+from sqlalchemy import Select
 from sqlalchemy import Text as SAText
 from sqlalchemy import case, cast
 from sqlalchemy import delete as sa_delete
@@ -315,6 +316,26 @@ def _inbox_filters(
     return crit
 
 
+def _promoted_resource_ids_stmt(gen_ids: Sequence[int]) -> Select:
+    """``(generation id, promoted resource id)`` for the archived ones whose
+    resource still exists.
+
+    ``promoted_resource_id`` has no FK and is not cleared when a resource is
+    purged, while ``canvas_resource_refs.resource_id`` REFERENCES resources:
+    one dangling id would fail the refs INSERT after its DELETE committed and
+    wipe every ref the canvas has. The INNER JOIN keeps only live targets
+    (a trashed-but-not-purged row still exists, so it still counts).
+    """
+    return (
+        select(GeneratedMedia.id, GeneratedMedia.promoted_resource_id)
+        .join(Resources, Resources.id == GeneratedMedia.promoted_resource_id)
+        .where(
+            GeneratedMedia.id.in_(list(gen_ids)),
+            GeneratedMedia.promoted_resource_id.is_not(None),
+        )
+    )
+
+
 class GeneratedMediaRepository:
     async def list_for_project(
         self,
@@ -445,6 +466,35 @@ class GeneratedMediaRepository:
                 .first()
             )
         return _normalize(dict(row)) if row else None
+
+    async def promoted_resource_ids(
+        self, gen_ids: Iterable[int | str]
+    ) -> dict[int, int]:
+        """``{generation id: promoted resource id}`` for the archived ones.
+
+        Unscoped like ``get_by_id``: the ids come from one canvas's own
+        nodes_json and the answer only feeds that canvas's refs mirror.
+        ``Resources`` is UserScoped and joined here, so under an ambient user
+        Scope the join would silently drop another contributor's archived
+        output — same rationale as
+        ``canvas_refs_repository.list_assets_for_canvas``.
+        """
+        ids = sorted({int(g) for g in gen_ids})
+        if not ids:
+            return {}
+        scope_cm = (
+            system_request_scope(
+                reason="canvas refs archived-output lookup: canvas membership "
+                "is the authorization boundary, not creator_id — a canvas can "
+                "show generations archived by multiple contributors"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                rows = (await session.execute(_promoted_resource_ids_stmt(ids))).all()
+        return {int(gen_id): int(resource_id) for gen_id, resource_id in rows}
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:
         # Capture the location BEFORE deleting so we can clean up an orphaned

@@ -31,6 +31,7 @@ from app.services.library.generated_roles import (
     UPSCALE_RESULT,
     normalize_role,
 )
+from app.services.library.generation_access import can_read_generation_scope
 from app.services.library.media_preview import ensure_preview
 from app.services.library.media_serving import (
     filesystem_response,
@@ -87,6 +88,37 @@ async def _serve_video_stream(
 async def _scope(auth) -> int:
     """Resolve the caller's personal team id as an int scope key."""
     return int(await _resolve_personal_team_id(str(auth.user_id)))
+
+
+async def _canvas_import_scope(auth, canvas_id: int) -> int:
+    """The canvas's own scope, after the canvas write gate.
+
+    A mask / brush / resize baked in a team board's editor belongs to that
+    board — the same scope its crop / grid / outpaint register into
+    (``canvas_derive_service``) and its generations register into.
+    """
+    import sys
+
+    from app.workflows.canvas_generation import _registration_scope_id
+
+    # ``app.api`` rebinds ``canvases_router`` to the APIRouter; the module
+    # (and its patchable gate) lives in sys.modules.
+    gate = sys.modules["app.api.canvases_router"]._gate_canvas_write
+    await gate(str(canvas_id), auth)
+    try:
+        return await _registration_scope_id(canvas_id, str(auth.user_id))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=500, detail="canvas scope could not be resolved"
+        ) from exc
+
+
+async def _import_scope(auth, canvas_id: int | None) -> int:
+    """Where an import registers: the canvas's scope when it names one,
+    otherwise the caller's personal team (unchanged)."""
+    if canvas_id is None:
+        return await _scope(auth)
+    return await _canvas_import_scope(auth, canvas_id)
 
 
 @router.get("")
@@ -232,7 +264,7 @@ async def import_generation(
 
         row = await register_generated_media(
             user_id=str(auth.user_id),
-            scope_id=await _scope(auth),
+            scope_id=await _import_scope(auth, canvas_id_int),
             source_path=tmp_path,
             mime=mime,
             origin=GenerationOrigin(
@@ -457,6 +489,13 @@ async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
     return {"data": {"deleted": ok}}
 
 
+def _membership():
+    """Seam: the team-membership lookup (patched in tests)."""
+    from app.repositories.conversation_repository import get_conversation_repository
+
+    return get_conversation_repository()
+
+
 def _upscale_provider():
     """Seam: the jimeng CLI provider (patched in tests)."""
     from app.services.media.parsers.video_providers.jimeng_cli import (
@@ -505,7 +544,18 @@ async def upscale_generation(
 ) -> dict:
     """IC 放大: run jimeng ``image_upscale`` on this generation and register
     the result as a NEW generated-media row (the source stays)."""
-    scope_id = await _scope(auth)
+    # Read gate on the SOURCE, then file the result where the source lives —
+    # the caller's personal team is the wrong home for a team board's image
+    # (the promote fix in #2212 settled the same question).
+    source = await GeneratedMediaRepository().get_by_id(gen_id)
+    if source is None or not await can_read_generation_scope(
+        source,
+        user_id=str(auth.user_id),
+        personal_team_id=await _scope(auth),
+        membership=_membership(),
+    ):
+        raise HTTPException(status_code=404, detail="generation not found")
+    scope_id = int(source["scope_id"])
     async with request_scope(Scope(user_id=str(auth.user_id))):
         async with _materialize_gen_file(gen_id) as src:
             if src is None:

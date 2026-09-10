@@ -329,3 +329,88 @@ async def test_a_clean_save_does_not_warn_about_loadouts():
         loguru_logger.remove(handler_id)
 
     assert not any("stored without" in line for line in seen), seen
+
+
+class FakeGenRepo:
+    def __init__(self, promoted: Dict[int, int] | None = None, boom: bool = False):
+        self.promoted = promoted or {}
+        self.boom = boom
+        self.calls: List[List[int]] = []
+
+    async def promoted_resource_ids(self, gen_ids) -> Dict[int, int]:
+        ids = [int(g) for g in gen_ids]
+        self.calls.append(ids)
+        if self.boom:
+            raise RuntimeError("db down")
+        return {g: r for g, r in self.promoted.items() if g in ids}
+
+
+def _archived_update() -> CanvasUpdate:
+    return CanvasUpdate(
+        base_updated_at=FROZEN,
+        nodes_json=[
+            {
+                "id": "out-1",
+                "type": "output",
+                "data": {
+                    "kind": "image",
+                    "preview_url": "/api/v1/generated-media/5/cover",
+                    "images": [{"url": "/api/v1/generated-media/6/cover"}],
+                },
+            },
+            {
+                "id": "out-2",
+                "type": "output",
+                "data": {"kind": "image", "resource_id": "222"},
+            },
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_counts_archived_generations_shown_by_output_nodes():
+    refs_repo = FakeRefsRepo()
+    gen_repo = FakeGenRepo({5: 333})
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs_repo,
+        generated_media_repository=gen_repo,
+    )
+    await svc.update_with_lock("5001", _archived_update())
+    assert gen_repo.calls == [[5, 6]]
+    _, refs = refs_repo.calls[0]
+    assert {(r["node_id"], r["resource_id"], r["role"]) for r in refs} == {
+        ("out-1", "333", "output"),
+        ("out-2", "222", "output"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_save_without_generation_urls_skips_the_lookup():
+    refs_repo = FakeRefsRepo()
+    gen_repo = FakeGenRepo({5: 333})
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs_repo,
+        generated_media_repository=gen_repo,
+    )
+    upd = CanvasUpdate(
+        base_updated_at=FROZEN,
+        nodes_json=[{"id": "out-2", "type": "output", "data": {"resource_id": "222"}}],
+    )
+    await svc.update_with_lock("5001", upd)
+    assert gen_repo.calls == []
+    assert [r["resource_id"] for r in refs_repo.calls[0][1]] == ["222"]
+
+
+@pytest.mark.asyncio
+async def test_archived_lookup_failure_still_writes_the_legacy_refs():
+    refs_repo = FakeRefsRepo()
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs_repo,
+        generated_media_repository=FakeGenRepo(boom=True),
+    )
+    await svc.update_with_lock("5001", _archived_update())
+    _, refs = refs_repo.calls[0]
+    assert [(r["node_id"], r["resource_id"]) for r in refs] == [("out-2", "222")]
