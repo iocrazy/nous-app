@@ -18,6 +18,7 @@ from app.models import CanvasResourceRefs
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.library.generation_access import can_read_generation_scope
 from app.services.library.media_storage import (
     materialize,
     sha256_file,
@@ -93,21 +94,12 @@ class PromoteGeneratedMediaService:
     async def _can_read_source_scope(
         self, gen: dict, *, user_id: str, personal_team_id: int, conv_repo
     ) -> bool:
-        """May *user_id* read the scope this generation lives in?
-
-        Works for every ``origin_kind`` — a chat_upload row carries the same
-        ``scope_id`` as any other (the resolved chat scope), so this is the
-        check that still applies when there is no conversation to check
-        membership against. A row with no ``scope_id`` at all is unreadable.
-        """
-        gen_scope = gen.get("scope_id")
-        if gen_scope is None:
-            return False
-        source_scope_id = int(gen_scope)
-        if source_scope_id == personal_team_id:
-            return True
-        return bool(
-            await conv_repo.is_team_member(team_id=source_scope_id, user_id=user_id)
+        """Delegates to the shared rule — see ``generation_access``."""
+        return await can_read_generation_scope(
+            gen,
+            user_id=user_id,
+            personal_team_id=personal_team_id,
+            membership=conv_repo,
         )
 
     async def promote(
