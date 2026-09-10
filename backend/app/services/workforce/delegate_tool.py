@@ -119,6 +119,7 @@ class DelegateToolService:
         agent_depth: int = 0,
         agent_repo: Optional[AgentRepository] = None,
         workforce_repo: Optional[AgentWorkforceRepository] = None,
+        parent_recorder: Optional[Any] = None,
     ) -> None:
         self.caller_agent_id = caller_agent_id
         self.caller_user_id = caller_user_id
@@ -126,6 +127,37 @@ class DelegateToolService:
         self.agent_depth = agent_depth
         self.agent_repo = agent_repo or get_agent_repository()
         self.workforce_repo = workforce_repo or get_agent_workforce_repository()
+        # The turn's RunRecorder, bound by AgentRunner._bind_turn_recorder once
+        # the row exists. See active_parent_run_id for why it, not the
+        # constructor value, is what a delegated child hangs off.
+        self.parent_recorder = parent_recorder
+
+    @property
+    def active_parent_run_id(self) -> Optional[str]:
+        """The run a delegation issued NOW hangs off — resolved at call time.
+
+        The constructor value answers a DIFFERENT question: which run this
+        turn is itself a child of. ``build_agent_runner_stack`` passes ``None``
+        there for a top-of-tree turn, so on every root issue / chat run the
+        constructor value is empty — and three things went out wrong because
+        of it (Task 7a defect 5, same family as defect 1 in
+        ``SubAgentTaskService``): the inbox payload's ``parent_run_id`` was
+        null so the child's cost never rolled up; the root abort registry
+        never registered the child so a cancel did not fan out; and
+        ``_detect_cycle`` short-circuits on a falsy value, which turned cycle
+        protection OFF for exactly the runs users start.
+
+        The recorder's row IS the run currently executing, so that is the
+        parent. The constructor value stays the fallback for callers with no
+        recorder — the workforce worker rebuilds this service from an inbox
+        payload whose ``parent_run_id`` is already the right one.
+        """
+        rid = getattr(self.parent_recorder, "run_id", None)
+        return (
+            str(rid)
+            if rid
+            else (str(self.parent_run_id) if self.parent_run_id else None)
+        )
 
     async def execute(self, args: Dict[str, Any]) -> Dict[str, Any]:
         # Audit #4 fail-closed gate: the inbox→worker execution chain is not
@@ -227,7 +259,7 @@ class DelegateToolService:
             "delegated_by": str(self.caller_agent_id),
             "delegated_at_depth": self.agent_depth,
             "await": await_result,
-            "parent_run_id": str(self.parent_run_id) if self.parent_run_id else None,
+            "parent_run_id": self.active_parent_run_id,
         }
 
         inbox_row = await self.workforce_repo.enqueue_inbox(
@@ -265,9 +297,10 @@ class DelegateToolService:
             from app.main import app as _app
 
             registry = getattr(_app.state, "root_abort_registry", None)
+            active_run_id = self.active_parent_run_id
             if (
                 registry is not None
-                and self.parent_run_id is not None
+                and active_run_id is not None
                 and inbox_row.get("id")
             ):
                 # The child "run_id" we want to register is the new
@@ -278,7 +311,7 @@ class DelegateToolService:
                 # When the runner does spawn a real run, it should also
                 # register that run_id against the same root.
                 registry.register_child(
-                    parent_run_id=str(self.parent_run_id),
+                    parent_run_id=active_run_id,
                     child_run_id=str(inbox_row["id"]),
                 )
         except Exception:
@@ -465,14 +498,19 @@ class DelegateToolService:
         appears in the chain, or None if no cycle.
 
         Walk = follow agent_runs.parent_run_id starting from
-        ``self.parent_run_id`` toward the root. At each hop, if
+        ``active_parent_run_id`` — the run executing right now, NOT the
+        constructor value, which is empty on a root run and therefore used to
+        skip the walk entirely. At each hop, if
         ``agent_id == target_agent_id`` we've found a cycle (target
         already running upstream). Caller's own agent is also checked
         — caller_agent_id == target_agent_id is filtered earlier as
         self-delegate, but a delegation that would re-enter ANY agent
         already on the chain is a cycle.
         """
-        if self.parent_run_id is None:
+        start = self.active_parent_run_id
+        if start is None:
+            # Genuinely nothing to walk: no recorder AND no inherited id, so
+            # there is no chain. Distinct from "the walk found nothing".
             return None
 
         from sqlalchemy import select
@@ -480,7 +518,12 @@ class DelegateToolService:
         from app.db.session import read_scope
         from app.models import AgentRuns
 
-        current = self.parent_run_id
+        try:
+            start_id = int(start)
+        except (TypeError, ValueError):
+            logger.warning(f"[delegate] cycle-walk: unusable start {start!r}")
+            return None
+        current: Optional[int] = start_id
         for _ in range(self.MAX_CHAIN_WALK_DEPTH):
             if current is None:
                 return None
@@ -520,11 +563,27 @@ class DelegateToolService:
                 return data["id"]
 
             parent = data.get("parent_run_id")
-            current = UUID(parent) if parent else None
+            if not parent:
+                return None
+            try:
+                # agent_runs.parent_run_id is BIGINT (mig 232); asyncpg hands
+                # it back as int. ``UUID(parent)`` here raised AttributeError
+                # OUTSIDE the try below and escaped both this function and
+                # ``execute()`` — the Delegate tool ended as an exception
+                # rather than a typed refusal. It was unreachable only while
+                # parent_run_id was always NULL (Task 7a fix round 1, I2).
+                current = int(parent)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"[delegate] cycle-walk: run {data.get('id')} has an "
+                    f"unusable parent_run_id {parent!r}; ending the walk"
+                )
+                return None
 
         # Walked the cap without resolution — treat as cycle to be safe.
         logger.warning(
             f"[delegate] cycle-walk hit MAX_CHAIN_WALK_DEPTH "
             f"({self.MAX_CHAIN_WALK_DEPTH}) — refusing dispatch"
         )
-        return self.parent_run_id
+        # int, like the found-cycle return above: one type out of this function.
+        return start_id

@@ -541,6 +541,23 @@ async def workforce_healthz() -> dict[str, Any]:
             "pending_depth": pending_depth,
         }
 
+        if persistent_agents == 0:
+            # The capability is configured but has nobody to target: every
+            # Delegate call is refused with "not configured as a persistent
+            # worker". This endpoint counts them and used to short-circuit its
+            # ONLY alert on exactly this number, so a workforce that could not
+            # work reported healthy — that is how production ran at zero
+            # persistent agents unnoticed (Task 7a defect 4). Typed prefix so a
+            # monitor can match on the reason, not on the prose.
+            issues.append(
+                "no_persistent_agents: no ai_agents row has persistent=true — "
+                "every Delegate call will be refused; the seed loader upserts "
+                "this flag on startup, so a worker service that has not "
+                "restarted since the seeds declared it is the usual cause"
+            )
+            if overall == "healthy":
+                overall = "degraded"
+
         if persistent_agents > 0 and pending_depth > 0 and recent_processed == 0:
             issues.append(
                 f"queue stuck: {pending_depth} pending, no rows processed "

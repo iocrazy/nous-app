@@ -245,3 +245,26 @@ async def test_dispatch_probe_failure_degrades_rather_than_reporting_healthy(
 
     assert out["status"] != "healthy"
     assert any("dispatch" in i.lower() for i in out["issues"])
+
+
+@pytest.mark.asyncio
+async def test_zero_persistent_agents_is_a_typed_degraded_reason(monkeypatch):
+    """Task 7a defect 4: with no persistent agent every ``Delegate`` call is
+    refused, and this endpoint — the one place that counts them — used to
+    short-circuit its only alert on exactly that number and report healthy.
+    A capability that cannot work must not read as fine."""
+    _patch(monkeypatch, launched=True, inflight=0, counts=[0, 0, 0])
+    out = await mod.workforce_healthz()
+    assert out["supabase"]["persistent_agents"] == 0
+    assert out["status"] == "degraded"
+    assert any(str(i).startswith("no_persistent_agents") for i in out["issues"]), out[
+        "issues"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_persistent_agent_clears_the_reason(monkeypatch):
+    _patch(monkeypatch, launched=True, inflight=0, counts=[2, 0, 0])
+    out = await mod.workforce_healthz()
+    assert not any(str(i).startswith("no_persistent_agents") for i in out["issues"])
+    assert out["status"] == "healthy"

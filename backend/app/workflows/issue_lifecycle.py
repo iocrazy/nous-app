@@ -43,6 +43,68 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_status,
 )
 
+# Task 7a defect 2: extra turns a dispatch may run purely to drain items that
+# landed on the inbox after its last step boundary. Bounded on purpose — a
+# steady stream of steers must not keep ONE dispatch alive indefinitely; past
+# this bound the minute-ly sweeper's idle-drain picks the issue up instead.
+MAX_INBOX_DRAIN_TURNS = 3
+
+
+def _execution_state_without_dispatching():
+    """``execution_state - 'dispatching'`` as an UPDATE value.
+
+    One definition, three writers (``atomic_checkout``, ``acquire_turn_lock``,
+    ``clear_dispatch_marker_step``): the marker's REMOVAL has to look the same
+    everywhere or one path leaves an issue reading busy for the marker's whole
+    TTL — which is exactly what the reply seam did between fix rounds 1 and 2.
+
+    jsonb ``-``, not a merge to ``null``: ``merge_execution_state`` cannot
+    delete a key, and a lingering ``null`` would make every reader parse a
+    marker that no longer means anything. Operands explicitly cast — an
+    untyped bind against jsonb's overloaded ``-`` (text / text[] / integer) is
+    ambiguous to the planner.
+    """
+    from sqlalchemy import Text, cast, func, literal
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.models import Issues
+
+    return func.coalesce(Issues.execution_state, cast(literal("{}"), JSONB)).op(
+        "-", return_type=JSONB
+    )(cast(literal("dispatching"), Text))
+
+
+@DBOS.step()
+async def clear_dispatch_marker_step(issue_id: int) -> None:
+    """Remove ``execution_state.dispatching`` unconditionally.
+
+    The defensive half of the reply path's window close: ``acquire_turn_lock``
+    removes it in the same UPDATE that takes the lock, but a workflow that
+    dies BEFORE its first step never reaches that — and then nothing else
+    would, because ``atomic_checkout`` (Task 2's remover) is on the dispatch
+    path, not this one. Best-effort: failing to clear must not fail a reply
+    that otherwise worked; the 60 s TTL remains the backstop.
+    """
+    from sqlalchemy import text, update
+
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    try:
+        # execution fields are service_role-only (issues_update_allowlist)
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(Issues.id == issue_id)
+                .values(execution_state=_execution_state_without_dispatching())
+            )
+    except Exception as err:  # noqa: BLE001 — logged, never fatal
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: could not clear the dispatching "
+            f"marker ({err!r}); it expires with its TTL"
+        )
+
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
@@ -57,8 +119,7 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     ``merge_execution_state`` cannot delete a key, and a lingering ``null``
     would make every reader parse a marker that no longer means anything.
     """
-    from sqlalchemy import Text, cast, func, literal, text, update
-    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy import func, text, update
 
     from app.db.session import write_scope
     from app.models import Issues
@@ -72,12 +133,7 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
             .values(
                 execution_locked_at=func.now(),
                 dbos_workflow_id=dbos_workflow_id,
-                # Operands explicitly cast: an untyped bind against jsonb's
-                # overloaded ``-`` (text / text[] / integer) is ambiguous to
-                # the planner — same form as set_status's error-key removal.
-                execution_state=func.coalesce(
-                    Issues.execution_state, cast(literal("{}"), JSONB)
-                ).op("-", return_type=JSONB)(cast(literal("dispatching"), Text)),
+                execution_state=_execution_state_without_dispatching(),
             )
         )
         locked = result.rowcount
@@ -267,19 +323,31 @@ async def acquire_turn_lock(issue_id: int) -> bool:
     """Claim the per-issue turn lock for a reply turn. Reuses
     issues.execution_locked_at (shared with execute_issue dispatch) but does
     NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
-    Returns True if acquired, False if a turn is already in flight."""
+    Returns True if acquired, False if a turn is already in flight.
+
+    This is also where the REPLY path's dispatch window closes, mirroring
+    ``atomic_checkout``: the marker written by ``dispatch_issue_reply`` stood
+    in for a lock that did not exist yet, and this UPDATE is the moment it
+    does. Removed in the SAME statement — a separate write could be
+    interleaved by the very fork the marker exists to stop — and only when the
+    lock is actually taken, because a turn that lost the race is not the one
+    the marker was about.
+    """
     from sqlalchemy import func, text, update
 
     from app.db.session import write_scope
     from app.models import Issues
 
-    # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
+    # execution fields are service_role-only (issues_update_allowlist, mig 170)
     async with write_scope() as session:
         await session.execute(text("SET LOCAL ROLE service_role"))
         result = await session.execute(
             update(Issues)
             .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
-            .values(execution_locked_at=func.now())
+            .values(
+                execution_locked_at=func.now(),
+                execution_state=_execution_state_without_dispatching(),
+            )
         )
         locked = result.rowcount
     return locked > 0
@@ -307,6 +375,7 @@ async def run_issue_reply_step(
     user_id: str,
     reply_text: str,
     attachments: Optional[list[dict]] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Run one reply turn, streaming token deltas + the final message to Redis.
 
@@ -346,6 +415,10 @@ async def run_issue_reply_step(
         # return (crash, cancel, empty output). Same hole as the dispatch path,
         # different trigger.
         issue_id=issue_id,
+        # Task 7a defect 6: provenance for the user message this turn opens
+        # with. The turn is the ONLY writer of that message (defect 7), so if
+        # it does not carry the source, nothing downstream can.
+        message_source=source,
     )
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -516,6 +589,7 @@ async def respond_to_issue_reply(
     user_id: str,
     reply_text: str,
     attachments: Optional[list[dict]] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Spec-1b: run one agent turn in response to a human reply on an issue.
     Serialized per issue via the turn lock; does NOT change issue status —
@@ -528,27 +602,52 @@ async def respond_to_issue_reply(
     ``attachments`` (added in sub-plan 3, Task 5) is a list of serialised
     AttachmentRequest dicts forwarded to run_session_turn so the agent turn
     can process images/PDFs pasted or dragged into the reply box.
+
+    ``source`` (Task 7a defect 6) is the provenance of the reply text — a
+    scheduled wake-up's ``{"kind": "schedule", …}``. It is BOUND to the turn
+    callable rather than added to ``_run_reply_turns``' signature: that
+    function takes its ``run_turn`` injected and every test fake implements
+    the exact kwarg set, so widening it there would break fakes that have
+    nothing to do with provenance. A reply with no provenance keeps handing
+    over the bare step, so the ordinary path is byte-for-byte what it was.
     """
-    session_id = await ensure_issue_session_step(issue_id)
-    auto_close = await load_auto_close_flag()
-    await publish_status(issue_id, "running")
+    # Defensive outer finally: whatever happened, no dispatching marker
+    # outlives this workflow. ``acquire_turn_lock`` already removes it on the
+    # normal path, in the same UPDATE that takes the lock; this covers the run
+    # that never got there — no assignable session, a raise in any step, a
+    # lock it never won. Without it a reply dispatch that died early left the
+    # issue reading BUSY for the marker's full TTL, and every fork / resume /
+    # next comment in that window was answered as if a turn were running.
+    # It wraps the session step too, which is the one that raises most often.
     try:
-        return await _run_reply_turns(
-            issue_id,
-            user_id,
-            reply_text,
-            session_id=session_id,
-            acquire=acquire_turn_lock,
-            run_turn=run_issue_reply_step,
-            release=clear_lock,
-            sleep=DBOS.sleep_async,
-            load_issue=load_issue,
-            set_status=set_status,
-            auto_close=auto_close,
-            attachments=attachments,
-        )
+        session_id = await ensure_issue_session_step(issue_id)
+        auto_close = await load_auto_close_flag()
+        await publish_status(issue_id, "running")
+        try:
+            return await _run_reply_turns(
+                issue_id,
+                user_id,
+                reply_text,
+                session_id=session_id,
+                acquire=acquire_turn_lock,
+                run_turn=(
+                    functools.partial(run_issue_reply_step, source=source)
+                    if source
+                    else run_issue_reply_step
+                ),
+                release=clear_lock,
+                sleep=DBOS.sleep_async,
+                load_issue=load_issue,
+                set_status=set_status,
+                auto_close=auto_close,
+                attachments=attachments,
+            )
+        finally:
+            # Paired with the "running" above: only a turn that was announced
+            # gets announced as done.
+            await publish_status(issue_id, "done")
     finally:
-        await publish_status(issue_id, "done")
+        await clear_dispatch_marker_step(issue_id)
 
 
 async def run_issue_reply_for_wait(
@@ -892,6 +991,31 @@ async def _question_for_park(
     return {**payload, "run_id": run_id}
 
 
+async def _pending_inbox_count(issue_id: int) -> int:
+    """How many unclaimed, unexpired items this issue's inbox still holds.
+
+    A sharpening, not a dependency: an unreadable inbox reads as zero (with a
+    warning) so a database hiccup can never turn into an extra billed turn or
+    a dispatch that refuses to end.
+    """
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    try:
+        return int(
+            await get_agent_run_inbox_repository().pending_count(
+                target_kind="issue", target_id=int(issue_id)
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — logged, never fatal
+        logger.warning(
+            f"[execute_issue] issue {issue_id}: inbox probe failed ({exc!r}); "
+            "treating as empty — the sweeper's idle-drain remains the backstop"
+        )
+        return 0
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -908,6 +1032,7 @@ async def _run_dispatch_with_continuation(
     clear_waiting: Optional[Callable[..., Awaitable[None]]] = None,
     run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     mark_turn: Optional[Callable[..., Awaitable[None]]] = None,
+    pending_inbox: Optional[Callable[[int], Awaitable[int]]] = None,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -936,12 +1061,21 @@ async def _run_dispatch_with_continuation(
     agent turn (initial, continuation and post-resume reply alike) with the
     1-based turn number, so the list page can show "turn N" while the dispatch
     is still running. It is decoration only: any failure is swallowed.
+
+    Inbox drain (Task 7a defect 2): before the loop ends it asks
+    ``pending_inbox`` (default: the repository-backed ``_pending_inbox_count``)
+    whether anything landed on this issue's inbox after the last step boundary,
+    and buys up to ``MAX_INBOX_DRAIN_TURNS`` extra turns so it can be claimed.
+    Bounded on purpose — the sweeper's minute-ly idle-drain is the backstop for
+    a stream that outlasts the bound.
     """
     from app.core.config import settings
 
     attempt = 0
     wait_rounds = 0
+    drains = 0
     turn_no = 0
+    inbox_probe = pending_inbox or _pending_inbox_count
     outcome: Optional[str] = None
     reason: Optional[str] = None
     res: Optional[dict[str, Any]] = None
@@ -966,6 +1100,7 @@ async def _run_dispatch_with_continuation(
                 "outcome": outcome,
                 "attempts": attempt,
                 "wait_rounds": wait_rounds,
+                "inbox_drains": drains,
             }
         if outcome == "needs_input" and gate_ready:
             # Park exactly as the terminal path would (route_finish_outcome
@@ -996,6 +1131,7 @@ async def _run_dispatch_with_continuation(
                     "outcome": outcome,
                     "attempts": attempt,
                     "wait_rounds": wait_rounds,
+                    "inbox_drains": drains,
                 }
             # The answer itself may have moved the issue terminal (a budget
             # "Cancel" runs transition_status before the wake): re-check
@@ -1015,6 +1151,7 @@ async def _run_dispatch_with_continuation(
                     "outcome": outcome,
                     "attempts": attempt,
                     "wait_rounds": wait_rounds,
+                    "inbox_drains": drains,
                 }
             wait_rounds += 1
             await set_status(issue_id, "in_progress")
@@ -1036,21 +1173,21 @@ async def _run_dispatch_with_continuation(
                 logger.info(
                     f"[execute_issue] issue {issue_id} is paused; not starting a turn"
                 )
-                return _paused_result(issue_id, res, attempt, wait_rounds)
+                return _paused_result(issue_id, res, attempt, wait_rounds, drains)
             turn_no += 1
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_turn(
                 issue_row,
                 agent_id,
                 user_id,
-                is_continuation=(attempt > 0 or wait_rounds > 0),
+                is_continuation=(attempt > 0 or wait_rounds > 0 or drains > 0),
             )
         if (res or {}).get("stop_reason") == "paused":
             # PauseHook stopped the run at a step boundary. Not an outcome:
             # nothing is routed, no status is written, the lock is released by
             # execute_issue's finally. ``paused_at`` (stamped by /pause before
             # the flag was raised) is what the UI and /resume read.
-            return _paused_result(issue_id, res, attempt, wait_rounds)
+            return _paused_result(issue_id, res, attempt, wait_rounds, drains)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
         if outcome == "continue" and attempt < max_continuations:
@@ -1062,6 +1199,36 @@ async def _run_dispatch_with_continuation(
             and wait_rounds < settings.NEEDS_INPUT_MAX_WAIT_ROUNDS
         ):
             continue  # back to loop top: preempt re-check → park + suspend
+        # Task 7a defect 2: items are claimed at STEP boundaries, and this
+        # turn's last boundary is already behind us — anything that landed
+        # since (a scheduled steer, a background sub-agent's result) would sit
+        # unclaimed until the day-old expiry threw it away. One more turn gives
+        # it a boundary; the InboxClaimHook claims it at that turn's first
+        # step. The loop top re-checks preempt + paused, so this cannot revive
+        # an issue a human just closed.
+        #
+        # NOT while the issue is awaiting an answer (fix round 1, I1). Two
+        # different wrecks, one gate:
+        #   * with the wait gate wired (production), ``continue`` re-enters the
+        #     park branch at the loop top — which has no ``wait_rounds``
+        #     ceiling of its own — and suspends on DBOS.recv for the TTL (72 h
+        #     by default), holding the execution lock and draining nothing: a
+        #     parked workflow runs no turn and reaches no step boundary;
+        #   * without it, the drain runs a turn that answers a question the
+        #     user never saw, and the agent's question never reaches routing.
+        # An issue waiting on a person is the sweeper's case, not this one —
+        # and the sweeper skips awaiting/paused issues too.
+        if (
+            drains < MAX_INBOX_DRAIN_TURNS
+            and outcome != "needs_input"
+            and await inbox_probe(issue_id)
+        ):
+            drains += 1
+            logger.info(
+                f"[execute_issue] issue {issue_id}: inbox item arrived after the "
+                f"last step boundary; draining turn {drains}/{MAX_INBOX_DRAIN_TURNS}"
+            )
+            continue
         break
 
     content_len = len((res or {}).get("content") or "")
@@ -1074,14 +1241,26 @@ async def _run_dispatch_with_continuation(
         content_len=content_len,
         run_id=(res or {}).get("run_id"),
     )
-    return {"outcome": outcome, "attempts": attempt, "wait_rounds": wait_rounds}
+    return {
+        "outcome": outcome,
+        "attempts": attempt,
+        "wait_rounds": wait_rounds,
+        "inbox_drains": drains,
+    }
 
 
 def _paused_result(
-    issue_id: int, res: Optional[dict[str, Any]], attempt: int, wait_rounds: int
+    issue_id: int,
+    res: Optional[dict[str, Any]],
+    attempt: int,
+    wait_rounds: int,
+    inbox_drains: int = 0,
 ) -> dict[str, Any]:
     """The dispatch result for a target-level pause — ``outcome: "paused"``
-    is a workflow-level marker, never a FinishIssue outcome."""
+    is a workflow-level marker, never a FinishIssue outcome.
+
+    Carries the three bounded counters like every other exit: a shape that
+    differs per exit makes a reader check which one they are holding."""
     return {
         "issue_id": issue_id,
         "outcome": "paused",
@@ -1089,6 +1268,7 @@ def _paused_result(
         "run_id": (res or {}).get("run_id"),
         "attempts": attempt,
         "wait_rounds": wait_rounds,
+        "inbox_drains": inbox_drains,
     }
 
 

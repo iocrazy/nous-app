@@ -267,3 +267,97 @@ async def test_run_reply_turns_releases_even_on_error():
             sleep=sleep,
         )
     assert released["n"] == 1  # finally released
+
+
+# ── the dispatch marker must not outlive the reply workflow (round 2) ───
+
+
+@pytest.mark.asyncio
+async def test_acquire_turn_lock_closes_the_dispatch_window(monkeypatch):
+    """Round 1 gave the reply seam a ``dispatching`` marker but no remover:
+    ``atomic_checkout`` is the only one, and the reply workflow never calls it.
+    A fast reply turn therefore left the marker standing for the rest of its
+    60 s TTL — fork/resume answered 409 ``issue_busy`` and the next human
+    comment was diverted to an inbox with no step boundary coming.
+
+    Removed in the SAME update that takes the lock, exactly like
+    ``atomic_checkout``: a separate write could be interleaved by the very
+    fork the marker exists to stop.
+    """
+    from app.workflows import issue_lifecycle as m
+
+    session = _FakeSession(rowcount=1)
+    monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
+
+    assert await m.acquire_turn_lock.__wrapped__(99) is True
+    sql = "\n".join(s for s, _ in session.calls).lower()
+    binds = [v for _, params in session.calls for v in params.values()]
+    assert "execution_locked_at=now()" in sql
+    # jsonb `-`, not a merge to null: merge cannot delete a key, and a
+    # lingering null makes every reader parse a marker that means nothing.
+    # The key travels as a BOUND parameter, so it is asserted there.
+    assert "execution_state" in sql and " - cast(" in sql
+    assert "dispatching" in binds
+
+
+@pytest.mark.asyncio
+async def test_the_reply_workflow_clears_the_marker_even_when_it_fails(monkeypatch):
+    """A workflow that dies before its first step never reaches the lock, so
+    the terminal path is the only thing standing between a failed dispatch and
+    a 60 s phantom-busy issue."""
+    from app.workflows import issue_lifecycle as m
+
+    cleared: list[int] = []
+
+    async def _clear(issue_id):
+        cleared.append(issue_id)
+
+    async def _boom(*a, **kw):
+        raise RuntimeError("no session")
+
+    monkeypatch.setattr(m, "clear_dispatch_marker_step", _clear)
+    monkeypatch.setattr(m, "ensure_issue_session_step", _boom)
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+
+    raw = m.respond_to_issue_reply.__wrapped__.__wrapped__
+    with pytest.raises(RuntimeError):
+        await raw(99, "u", "hi")
+
+    assert cleared == [99]
+
+
+@pytest.mark.asyncio
+async def test_the_reply_workflow_clears_the_marker_on_success(monkeypatch):
+    from app.workflows import issue_lifecycle as m
+
+    cleared: list[int] = []
+
+    async def _clear(issue_id):
+        cleared.append(issue_id)
+
+    monkeypatch.setattr(m, "clear_dispatch_marker_step", _clear)
+    monkeypatch.setattr(m, "ensure_issue_session_step", AsyncMock(return_value="55"))
+    monkeypatch.setattr(m, "load_auto_close_flag", AsyncMock(return_value=False))
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(m, "_run_reply_turns", AsyncMock(return_value={"ok": True}))
+
+    raw = m.respond_to_issue_reply.__wrapped__.__wrapped__
+    assert await raw(99, "u", "hi") == {"ok": True}
+    assert cleared == [99]
+
+
+@pytest.mark.asyncio
+async def test_the_dispatch_path_still_clears_it_in_the_checkout(monkeypatch):
+    """Task 2's own remover is untouched — this is the control that says the
+    reply-side fix did not move the window on the dispatch side."""
+    from app.workflows import issue_lifecycle as m
+
+    session = _FakeSession(rowcount=1)
+    monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
+
+    assert await m.atomic_checkout.__wrapped__(99, "wf-1") is True
+    sql = "\n".join(s for s, _ in session.calls).lower()
+    binds = [v for _, params in session.calls for v in params.values()]
+    assert "execution_state" in sql and " - cast(" in sql
+    assert "dispatching" in binds
+    assert "dbos_workflow_id" in sql

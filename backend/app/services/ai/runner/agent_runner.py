@@ -499,6 +499,8 @@ class AgentRunner:
             )
             return
 
+        self._bind_turn_recorder(recorder)
+
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
             # Production ALWAYS lands here for chunk_callback turns: the chat
@@ -1605,6 +1607,35 @@ class AgentRunner:
             }
         return base
 
+    def _bind_turn_recorder(self, recorder: Optional["RunRecorder"]) -> None:
+        """Hand the per-turn recorder to BOTH tools that spawn work.
+
+        Two things ride on this, and the second one is not telemetry. Phase 5
+        of #199 rolls a spawn's envelope counters up to ``metadata.subagents``
+        — and since Task 7a the recorder is also where a spawn reads the id of
+        the run it is spawning FROM (``active_parent_run_id``), because the
+        constructor value is ``None`` on every root run. Both turn loops bind
+        it, and both tools receive it: a path that forgot to would silently
+        detach every child it spawns, and for ``Delegate`` it would also turn
+        cycle protection off.
+
+        Set lazily and per tool — ``SkillToolService.subagent_task`` and
+        ``delegate_tool`` are each optional, depending on what the chat layer
+        installed for this run.
+        """
+        if recorder is None:
+            return
+        for owner, attr in (
+            (getattr(self.skill_tool, "subagent_task", None), "subagent_task"),
+            (getattr(self, "delegate_tool", None), "delegate_tool"),
+        ):
+            if owner is None:
+                continue
+            try:
+                owner.parent_recorder = recorder
+            except Exception:  # noqa: BLE001 — never fail a turn over a binding
+                logger.exception(f"[runner] could not bind the recorder to {attr}")
+
     async def _run_turn_inner(
         self,
         composed: ComposedSystemPrompt,
@@ -1633,19 +1664,7 @@ class AgentRunner:
         if preflight_err is not None:
             return {"content": "", "raw": None, **preflight_err}
 
-        # Phase 5 of #199: hand the per-turn recorder to the
-        # SubAgentTaskService so any spawn() inside this turn can roll
-        # its envelope counters up to metadata.subagents. Set lazily —
-        # SkillToolService.subagent_task may be None if the chat layer
-        # didn't install one for this run.
-        if (
-            recorder is not None
-            and getattr(self.skill_tool, "subagent_task", None) is not None
-        ):
-            try:
-                self.skill_tool.subagent_task.parent_recorder = recorder
-            except Exception:  # noqa: BLE001 — telemetry side-effect
-                pass
+        self._bind_turn_recorder(recorder)
 
         messages = list(user_messages)
         iteration = 0

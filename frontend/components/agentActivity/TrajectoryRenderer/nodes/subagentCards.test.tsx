@@ -228,6 +228,25 @@ describe('ScheduleNodeView', () => {
     expect(screen.getByTestId('traj-schedule-cancel')).toBeInTheDocument();
   });
 
+  // Task 7a defect 8b: at thread column width the absolute timestamp and the
+  // note were BOTH `truncate`, so the row collapsed into two ellipses and said
+  // nothing at all.
+  it('renders the time compactly and keeps the full one reachable', () => {
+    render(<ScheduleNodeView node={node} expanded={false} />);
+    const at = screen.getByTestId('traj-schedule-at');
+    expect(at.textContent).not.toMatch(/:\d\d:\d\d/); // no seconds
+    expect(at).toHaveAttribute('title', new Date(node.fireAt as string).toLocaleString());
+  });
+
+  it('lets a long note wrap instead of clipping it', () => {
+    const long = 'Check whether the render finished and then ping the team about the cover';
+    render(<ScheduleNodeView node={{ ...node, note: long }} expanded={false} />);
+    const el = screen.getByTestId('traj-schedule-note');
+    expect(el).toHaveTextContent(long);
+    expect(el).toHaveAttribute('title', long);
+    expect(el.className).not.toContain('truncate');
+  });
+
   it('a cancel that went through takes the button away', async () => {
     remove.mockResolvedValue(undefined);
     render(<ScheduleNodeView node={node} expanded={false} />);

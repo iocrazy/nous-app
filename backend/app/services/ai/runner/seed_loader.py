@@ -34,6 +34,13 @@ SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
 # Keys are seed DIRECTORY names — note the mixed hyphen/underscore style is
 # the real on-disk state, not a typo. tests/test_agent_group_seed.py asserts
 # this map and backend/seeds/agents/ stay in lockstep.
+#: Keys an agent seed may declare in its ``AGENT.md`` frontmatter. A leading
+#: ``---`` block is stripped from the model-visible body ONLY when it parses as
+#: a mapping containing at least one of these — otherwise it is a horizontal
+#: rule and the prose after it must survive (see ``_read_agent_md``).
+#: Adding a key here means adding it to ``backend/seeds/README.md`` too.
+FRONTMATTER_KEYS = frozenset({"persistent"})
+
 DEFAULT_AGENT_GROUP = "tools"
 AGENT_GROUP_BY_SLUG = {
     "script_ai": "writing",
@@ -185,6 +192,7 @@ class SeedLoader:
             return None
 
         identity_md = read_if_exists("IDENTITY.md")
+        agent_md, agent_fm = self._read_agent_md(agent_dir)
         name = slug.replace("_", " ").title()
         return {
             "slug": slug,
@@ -192,22 +200,91 @@ class SeedLoader:
             "description": _extract_description_from_identity(identity_md),
             "identity_md": identity_md,
             "soul_md": read_if_exists("SOUL.md"),
-            "agent_md": read_if_exists("AGENT.md"),
+            "agent_md": agent_md,
             "is_system_preset": True,
             "agent_group": AGENT_GROUP_BY_SLUG.get(slug, DEFAULT_AGENT_GROUP),
+            # Workforce worker (M3 Delegate target). Declared by the seed, not
+            # by a migration: migrations 162/163 promoted summarize / analyze /
+            # coordinator, then sank below the schema baseline watermark and
+            # never ran on the live database — so production sat at ZERO
+            # persistent agents and every Delegate call was refused (Task 7a
+            # defect 4). Upserting it on every startup is what makes a fresh
+            # deploy converge without a new migration.
+            "persistent": bool(agent_fm.get("persistent", False)),
         }
 
-    async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
-        seed_hash = _sha(
+    @staticmethod
+    def _read_agent_md(agent_dir: Path) -> tuple[Optional[str], dict[str, Any]]:
+        """``(body, frontmatter)`` for AGENT.md — the body without a
+        frontmatter block, but ONLY when there really was one.
+
+        ``agent_md`` is model-visible: it is pasted into the system message, so
+        a raw YAML header there would be a prompt change wearing a
+        configuration hat — and losing prose here is the same class in the
+        other direction.
+
+        A leading ``---`` is ambiguous. ``frontmatter.load`` reads it as an
+        opening fence either way, so a file that starts with a horizontal RULE
+        comes back with ``metadata={}`` and a body that begins after the SECOND
+        rule: everything between them is silently gone, with no exception and
+        no log (Task 7a fix round 1, I4). The parse is therefore only accepted
+        when it yielded a mapping that declares something this loader knows —
+        ``FRONTMATTER_KEYS``. Anything else is prose and is returned untouched.
+        """
+        path = agent_dir / "AGENT.md"
+        if not path.exists():
+            return (None, {})
+        raw = path.read_text().strip()
+        if not raw:
+            return (None, {})
+        try:
+            post = frontmatter.loads(raw)
+            meta = dict(post.metadata)
+        except Exception as exc:  # noqa: BLE001 — unparseable header = prose
+            logger.warning(
+                f"seed_loader: {path} has an unreadable leading block "
+                f"({exc!s:.120}); treating the whole file as prose"
+            )
+            return (raw, {})
+        if not (meta.keys() & FRONTMATTER_KEYS):
+            # Nothing we recognise — do not strip anything. This is the
+            # horizontal-rule case, and also a seed whose header uses keys a
+            # LATER version of this loader will understand: better to ship the
+            # extra lines to the model than to drop the body.
+            if meta:
+                logger.warning(
+                    f"seed_loader: {path} declares {sorted(meta)} — no known "
+                    f"key among {sorted(FRONTMATTER_KEYS)}; nothing stripped"
+                )
+            return (raw, {})
+        body = (post.content or "").strip()
+        return (body or None, meta)
+
+    @staticmethod
+    def _agent_seed_hash(fields: dict[str, Any]) -> str:
+        """Hash of everything the seed OWNS on an agent row.
+
+        Anything the loader writes must be in here. A field that is written
+        but not hashed lands only on rows that changed for some other reason:
+        flipping it alone hits the unchanged-skip branch in ``_upsert_agent``
+        and never reaches the database.
+        """
+        return _sha(
             fields.get("identity_md"),
             fields.get("soul_md"),
             fields.get("agent_md"),
             fields.get("name"),
             fields.get("description"),
             # Must be hashed: without it, re-grouping an agent hits the skip
-            # branch below and the new group never reaches the DB.
+            # branch and the new group never reaches the DB.
             fields.get("agent_group"),
+            # Same reason, and it is the whole point of defect 4: production
+            # rows already carry the right prose, so ONLY this flag differs.
+            fields.get("persistent"),
         )
+
+    async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
+        seed_hash = self._agent_seed_hash(fields)
         fields_with_hash = {**fields, "seed_hash": seed_hash}
 
         existing = await self.agent_repo.get_by_slug(slug)

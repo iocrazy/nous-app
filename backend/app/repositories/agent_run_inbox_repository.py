@@ -70,6 +70,10 @@ def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
         .where(*_pending())
         .where(AgentRunInbox.created_at < older_than)
         .values(expired_at=dt.datetime.now(dt.timezone.utc))
+        # RETURNING, not rowcount: expiring an item DISCARDS a delivery nobody
+        # ever consumed, and the sweep has to be able to name which targets
+        # lost what (Task 7a defect 2 — the discard used to be silent).
+        .returning(AgentRunInbox.target_kind, AgentRunInbox.target_id)
     )
     if skip_paused_issues:
         paused_issue_ids = select(Issues.id).where(Issues.paused_at.isnot(None))
@@ -82,6 +86,33 @@ def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
             )
         )
     return stmt
+
+
+def pending_issue_targets_stmt(limit: int):
+    """Every ISSUE target still holding an unclaimed, unexpired item, oldest
+    first: ``(target_id, count, oldest_at)``.
+
+    The sweeper's idle-drain reads this. Oldest first because a stranded item
+    is somebody waiting — the one that has waited longest goes first — and the
+    limit bounds one tick's work, not the backlog: what does not fit is picked
+    up next minute.
+
+    No aggregate over ``user_id``: Postgres has no ``min(uuid)``, and a stubbed
+    session would happily compile one. The caller reads one pending row per
+    target instead (bounded by the same limit).
+    """
+    return (
+        select(
+            AgentRunInbox.target_id,
+            func.count().label("count"),
+            func.min(AgentRunInbox.created_at).label("oldest_at"),
+        )
+        .where(AgentRunInbox.target_kind == "issue")
+        .where(*_pending())
+        .group_by(AgentRunInbox.target_id)
+        .order_by(func.min(AgentRunInbox.created_at))
+        .limit(int(limit))
+    )
 
 
 def dedupe_lookup_stmt(target_kind: str, target_id: int, dedupe_key: str):
@@ -214,6 +245,28 @@ class AgentRunInboxRepository:
         async with read_scope() as session:
             return [_row(r) for r in (await session.execute(stmt)).scalars().all()]
 
+    async def oldest_pending_for_target(
+        self, *, target_kind: str, target_id: int
+    ) -> Optional[dict[str, Any]]:
+        """The OLDEST unclaimed, unexpired item on this target, or None.
+
+        Deliberately not ``list_for_target(limit=1)``: that one is a listing
+        for the UI and orders ``created_at DESC``, so it hands back the NEWEST
+        item — the opposite of what a drain wants, and a mismatch the caller
+        could not see (Task 7a review M1). The order is in the name here.
+        """
+        stmt = (
+            select(AgentRunInbox)
+            .where(AgentRunInbox.target_kind == target_kind)
+            .where(AgentRunInbox.target_id == int(target_id))
+            .where(*_pending())
+            .order_by(AgentRunInbox.created_at.asc(), AgentRunInbox.id.asc())
+            .limit(1)
+        )
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).scalars().first()
+        return _row(row) if row is not None else None
+
     async def pending_count(self, *, target_kind: str, target_id: int) -> int:
         async with read_scope() as session:
             return int(
@@ -227,6 +280,17 @@ class AgentRunInboxRepository:
                     )
                 ).scalar_one()
             )
+
+    async def pending_issue_targets(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Issues that still hold a pending item, oldest first (sweeper's
+        idle-drain). System-wide: unlike ``pending_summary`` this is not a
+        user's view, so no visibility predicate applies."""
+        async with read_scope() as session:
+            rows = (await session.execute(pending_issue_targets_stmt(limit))).all()
+        return [
+            {"target_id": int(tid), "count": int(n), "oldest_at": oldest}
+            for tid, n, oldest in rows
+        ]
 
     async def pending_summary(self, user_id: str) -> list[dict[str, Any]]:
         """Per-issue count of unclaimed items for the issues ``user_id`` can
@@ -246,16 +310,38 @@ class AgentRunInboxRepository:
         ended before the next step boundary). Marked, never deleted.
 
         ``skip_paused_issues`` (phase 2a): an item queued on a PAUSED issue is
-        waiting for resume, not orphaned — however old it gets."""
+        waiting for resume, not orphaned — however old it gets.
+
+        Every expiry is WARNED with its target and count. A day-old unclaimed
+        item is still an orphan and expiry is still the right end state, but
+        the discard must be visible: during the 2026-09-10 acceptance a
+        scheduled wake-up was stranded here while its schedule row reported
+        ``fire_count=1``, and nothing anywhere would ever have said otherwise.
+        """
         try:
             async with write_scope() as session:
-                result = await session.execute(
-                    expire_stale_stmt(older_than, skip_paused_issues=skip_paused_issues)
-                )
-                return result.rowcount or 0
+                rows = (
+                    await session.execute(
+                        expire_stale_stmt(
+                            older_than, skip_paused_issues=skip_paused_issues
+                        )
+                    )
+                ).all()
         except Exception as err:  # noqa: BLE001
             logger.error(f"[agent_run_inbox] expire_stale failed: {err}")
             return 0
+
+        by_target: dict[tuple[str, int], int] = {}
+        for target_kind, target_id in rows:
+            key = (str(target_kind), int(target_id))
+            by_target[key] = by_target.get(key, 0) + 1
+        for (target_kind, target_id), count in by_target.items():
+            logger.warning(
+                f"[agent_run_inbox] {target_kind} {target_id}: {count} pending "
+                f"item(s) expired unclaimed (queued before {older_than.isoformat()}) "
+                "— they were delivered to the inbox and nobody ever consumed them"
+            )
+        return len(rows)
 
     # ── target lookups (the hook resolves its targets once per run) ──────
 
@@ -309,4 +395,5 @@ __all__ = [
     "Target",
     "claim_stmt",
     "get_agent_run_inbox_repository",
+    "pending_issue_targets_stmt",
 ]

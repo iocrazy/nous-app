@@ -1,9 +1,14 @@
 """Client-aware dispatch for the issue_messages router (gateway→DBOSClient prep).
 
-`_dispatch_respond_to_issue_reply(issue_id, owner_id, body, attachments, wf_id)`
-routes through the gateway DBOSClient when one is constructed, else falls back to
-`SetWorkflowID + DBOS.start_workflow`. Client is None today → fallback → zero
-behavior change. Preserves the exact positional args.
+`_dispatch_respond_to_issue_reply(issue_id, owner_id, body, attachments, wf_id,
+source)` routes through the gateway DBOSClient when one is constructed, else
+falls back to `SetWorkflowID + DBOS.start_workflow`. Client is None today →
+fallback → zero behavior change. Preserves the exact positional args.
+
+``source`` (Task 7a defect 6) is the reply's provenance, trailing and
+defaulted so a workflow enqueued before it existed replays as ``None``. It
+must reach BOTH arms — a wake-up dispatched through the client arm with the
+source dropped would lose the chip just as thoroughly as not sending it at all.
 """
 
 from __future__ import annotations
@@ -53,7 +58,7 @@ def test_dispatch_uses_client_when_set(monkeypatch):
     assert options["queue_name"] == "dbos_dispatch"
     assert options["workflow_id"] == "issue-reply-42-uuid"
     assert "app_version" not in options
-    assert args == (42, "owner-99", "hello body", attachments)
+    assert args == (42, "owner-99", "hello body", attachments, None)
 
 
 def test_dispatch_pins_app_version_when_present(monkeypatch):
@@ -67,7 +72,7 @@ def test_dispatch_pins_app_version_when_present(monkeypatch):
 
     options, args = fake.calls[0]
     assert options["app_version"] == "cafe1234"
-    assert args == (1, "o", "b", None)
+    assert args == (1, "o", "b", None, None)
 
 
 def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
@@ -88,4 +93,24 @@ def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
     assert len(spy) == 1
     wf, args = spy[0]
     assert wf is dispatch_mod.respond_to_issue_reply
-    assert args == (5, "owner-5", "body text", attachments)
+    assert args == (5, "owner-5", "body text", attachments, None)
+
+
+def test_a_wake_ups_provenance_reaches_both_arms(monkeypatch):
+    """Task 7a defect 6: the source is what lets the thread tell a scheduled
+    wake-up from a person typing."""
+    source = {"kind": "schedule", "schedule_id": "s1", "created_by": "user"}
+
+    fake = _FakeClient()
+    monkeypatch.setattr(dbos_orchestrator, "_client", fake)
+    monkeypatch.setattr(dbos_orchestrator, "_resolve_pinned_app_version", lambda: None)
+    msgs_router._dispatch_respond_to_issue_reply(7, "o", "wake", None, "wf-7", source)
+    assert fake.calls[0][1] == (7, "o", "wake", None, source)
+
+    from dbos import DBOS
+
+    monkeypatch.setattr(dbos_orchestrator, "_client", None)
+    spy: list = []
+    monkeypatch.setattr(DBOS, "start_workflow", lambda wf, *args: spy.append(args))
+    msgs_router._dispatch_respond_to_issue_reply(7, "o", "wake", None, "wf-7", source)
+    assert spy[0] == (7, "o", "wake", None, source)

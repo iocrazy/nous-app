@@ -152,15 +152,29 @@ class PromptComposer:
         # agent that just delegates to others doesn't need a skill of
         # its own. Self is excluded so the LLM doesn't try to delegate
         # to itself.
+        #
+        # Gated on the SAME flag as the tool (fix round 1, I3). The block
+        # exists to tell the model what ``Delegate`` can target; with the tool
+        # gated off the model cannot call it, so the paragraph plus one entry
+        # per persistent agent is pure token cost in EVERY agent's system
+        # message — and it sits BEFORE the cache boundary, inside the prefix
+        # fingerprint. Flipping the flag therefore invalidates every agent's
+        # prefix ONCE, which is the intended, visible cost of turning the
+        # capability on; leaving it ungated would have spent it on agents that
+        # can never delegate. Bounded by the number of persistent agents
+        # (three today) — see prompts/README.md.
+        from app.services.workforce import delegate_feature
+
         workers: list[dict[str, Any]] = []
-        try:
-            workers_raw = await self.agent_repo.list_persistent()
-            workers = [w for w in workers_raw if w.get("id") != agent.get("id")]
-        except Exception:
-            # Best-effort. If the listing fails, render without
-            # workers — Delegate will get "unknown agent slug" from
-            # the tool layer if the LLM tries it.
-            workers = []
+        if delegate_feature.delegate_feature_enabled():
+            try:
+                workers_raw = await self.agent_repo.list_persistent()
+                workers = [w for w in workers_raw if w.get("id") != agent.get("id")]
+            except Exception:
+                # Best-effort. If the listing fails, render without
+                # workers — Delegate will get "unknown agent slug" from
+                # the tool layer if the LLM tries it.
+                workers = []
 
         system_message = self._assemble_system_message(
             agent=agent,

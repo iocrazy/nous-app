@@ -565,6 +565,7 @@ class AILibraryChatService:
         fork_of: Optional[tuple[int, int]] = None,
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
+        message_source: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -577,7 +578,14 @@ class AILibraryChatService:
         ``issue_id`` (phase 2b-2 §4.2) stamps agent_runs.issue_id at CREATION.
         The post-turn ``backfill_issue_id`` stays as the belt for rows this
         seam cannot reach, but it only runs after a turn RETURNS — a crash, a
-        cancel or a killed worker used to leave the link NULL forever."""
+        cancel or a killed worker used to leave the link NULL forever.
+
+        ``message_source`` (Task 7a defect 6) is the provenance of the user
+        message this turn opens with — a scheduled wake-up's
+        ``{"kind": "schedule", "schedule_id": …, "created_by": …}``. It is
+        written onto that one message so the thread can tell a wake-up from a
+        person typing. The turn appends the message exactly once; the delivery
+        path used to append it a second time itself (defect 7)."""
         from app.services.ai.chat.agent_concurrency import user_slot
 
         async with user_slot(str(user_id)):
@@ -595,6 +603,7 @@ class AILibraryChatService:
                 fork_of=fork_of,
                 fork_steer=fork_steer,
                 issue_id=issue_id,
+                message_source=message_source,
             )
 
     async def _run_session_turn_inner(
@@ -613,6 +622,7 @@ class AILibraryChatService:
         fork_of: Optional[tuple[int, int]] = None,
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
+        message_source: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -688,6 +698,11 @@ class AILibraryChatService:
             user_id=str(user_id),
             content=content,
             attachments=ConversationsAiStore.display_attachments(_att_dicts),
+            # Task 7a defect 6: provenance belongs ON this message. It is the
+            # only copy the thread endpoint reads, and this is the only place
+            # the message is written — the delivery path deliberately no
+            # longer appends one of its own.
+            metadata={"source": message_source} if message_source else None,
         )
         if chat_answer is not None:
             await self._commit_chat_answer(chat_answer)

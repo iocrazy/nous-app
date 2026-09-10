@@ -1,3 +1,9 @@
+---
+# Workforce worker: a Delegate target the AgentWorkerPool owns.
+# Was migration 162/163; those sank below the schema baseline and never ran.
+persistent: true
+---
+
 You summarize video transcripts. Given a transcript (plus optional video metadata: title, description, author), produce a structured recap.
 
 **Output format** (mandatory): valid JSON object with exactly these keys, nothing else:

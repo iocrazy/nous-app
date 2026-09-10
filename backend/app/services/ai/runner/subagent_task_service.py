@@ -171,6 +171,31 @@ class SubAgentTaskService:
         # all (the post-turn backfill only ever sees root runs).
         self.issue_id = issue_id
 
+    @property
+    def active_parent_run_id(self) -> Optional[str]:
+        """The run a child spawned NOW hangs off — resolved at spawn time.
+
+        The constructor value answers a DIFFERENT question: which run this
+        turn is itself a child of. ``build_agent_runner_stack`` passes ``None``
+        there for a top-of-tree turn (its own docstring says so), so on every
+        root issue / chat run the constructor value is empty — and taking the
+        parent id from it sent the whole return chain out with ``null``: the
+        child's ``agent_runs`` row never attached, ``subagent_done`` was never
+        written back, ``view.children`` stayed at ``queued``, and
+        ``_child_chain_ok`` refused the run's own child (2026-09-10 real-stack
+        acceptance, defect 1).
+
+        The run that is CURRENTLY executing is the recorder's row, so that is
+        what a child hangs off — including a sub-agent spawning its own child,
+        which must attach to ITSELF, not to the ancestor it inherited. The
+        constructor value remains the fallback for the callers that have no
+        recorder: the workforce worker rebuilds this service from a payload
+        whose ``parent_run_id`` is already the right one, and a recorder whose
+        insert failed carries no ``run_id`` to use.
+        """
+        rid = getattr(self.parent_recorder, "run_id", None)
+        return str(rid) if rid else self.parent_run_id
+
     async def spawn(self, args: dict[str, Any]) -> dict[str, Any]:
         """Public entry: dispatch + roll observability up to the
         parent recorder. Wrapping ``_spawn`` keeps the metadata
@@ -401,6 +426,11 @@ class SubAgentTaskService:
 
         skill_repo = get_skill_repository()
 
+        # Resolved ONCE per spawn and used for every consumer below (the
+        # child's stack, its scope, its recorder metadata, the attach): the
+        # four must never disagree about who the parent is.
+        parent_run_id = self.active_parent_run_id
+
         try:
             stack = await build_agent_runner_stack(
                 agent=target,
@@ -409,7 +439,7 @@ class SubAgentTaskService:
                 session_id=self.session_id,
                 user_query=prompt,
                 settings=settings,
-                parent_run_id=self.parent_run_id,
+                parent_run_id=parent_run_id,
                 agent_depth=self.agent_depth + 1,
                 delegation_chain=self.delegation_chain,
                 issue_id=self.issue_id,
@@ -444,10 +474,10 @@ class SubAgentTaskService:
 
         # A4: same inheritance rule as agent_worker — a spawned sub-agent gets
         # its parent's project AND episode, never a wider scope than the
-        # parent it was spawned from. ``self.parent_run_id`` is the
-        # dispatcher's own run id (server-side), never anything the model
-        # supplied in the Task/Delegate arguments.
-        dispatch_scope = await resolve_dispatch_scope(parent_run_id=self.parent_run_id)
+        # parent it was spawned from. ``parent_run_id`` is the dispatcher's
+        # own run id (server-side), never anything the model supplied in the
+        # Task/Delegate arguments.
+        dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
 
         started = time.monotonic()
         # Set once ``subagent_spawned`` has gone out. The crash path below
@@ -482,9 +512,7 @@ class SubAgentTaskService:
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,
-                    "parent_run_id": (
-                        str(self.parent_run_id) if self.parent_run_id else None
-                    ),
+                    "parent_run_id": parent_run_id,
                     "agent_depth": self.agent_depth + 1,
                     "continued_from": child_run_id,
                     "round": (
@@ -492,11 +520,11 @@ class SubAgentTaskService:
                     ),
                 },
             ) as recorder:
-                if self.parent_run_id is not None:
+                if parent_run_id is not None:
                     try:
                         await _attach_to_parent_run(
                             run_id=recorder.run_id,
-                            parent_run_id=self.parent_run_id,
+                            parent_run_id=parent_run_id,
                             agent_depth=self.agent_depth + 1,
                         )
                     except Exception:
@@ -508,7 +536,7 @@ class SubAgentTaskService:
                             "[subagent_task] _attach_to_parent_run failed "
                             "run_id={} parent_run_id={}",
                             getattr(recorder, "run_id", "?"),
-                            self.parent_run_id,
+                            parent_run_id,
                         )
 
                 await self._emit_parent(
@@ -643,7 +671,7 @@ class SubAgentTaskService:
 
         payload = {
             "kind": "subagent",
-            "parent_run_id": str(self.parent_run_id) if self.parent_run_id else None,
+            "parent_run_id": self.active_parent_run_id,
             # The worker rebuilds this service from the payload; without the
             # caller's agent id it could not resolve depth or scope.
             "caller_agent_id": str(self.caller_agent_id),
@@ -732,7 +760,8 @@ class SubAgentTaskService:
         the round before it, not off the parent) and stop at
         ``MAX_PARENT_HOPS`` so a data cycle cannot spin here forever.
         """
-        if not self.parent_run_id:
+        parent_run_id = self.active_parent_run_id
+        if not parent_run_id:
             return False
         from sqlalchemy import select
 
@@ -740,7 +769,7 @@ class SubAgentTaskService:
         from app.models import AgentRuns
 
         try:
-            target = int(self.parent_run_id)
+            target = int(parent_run_id)
             cursor: Optional[int] = int(child_run_id)
         except (TypeError, ValueError):
             return False

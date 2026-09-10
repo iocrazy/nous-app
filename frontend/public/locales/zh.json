@@ -5807,7 +5807,10 @@
     "routine": "例行",
     "title": "定时",
     "add": "+ 稍后",
-    "empty": "暂无定时唤醒"
+    "empty": "暂无定时唤醒",
+    "fired": "已触发",
+    "paused": "已暂停",
+    "pausedReason": "已暂停：{{reason}}"
   },
   "later": {
     "button": "稍后",

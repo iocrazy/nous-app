@@ -72,8 +72,33 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     <RailCard title={t('schedule.title', 'Schedules')} testId="detail-schedules-panel">
       {items.map((row) => {
         const routine = !!row.cron_expr;
+        // SPENT means "this will never happen again": a one-shot that has
+        // already fired. Only those lose the ✕ — cancelling a wake-up that is
+        // over is an offer to delete nothing, and it is why this block and the
+        // home Quick chip disagreed about how many wake-ups an issue has (the
+        // chip counts pending ones).
+        //
+        // A disabled ROUTINE is a different thing: paused for budget or after
+        // a failed dispatch, it is still a live row a person may well want
+        // gone — taking its ✕ away would strand it in the list with no way to
+        // remove it (fix round 2).
+        const spent = !row.enabled && !routine && row.pause_reason === 'fired_once';
+        const disabled = !row.enabled;
+        const status = !disabled
+          ? null
+          : row.pause_reason === 'fired_once'
+            ? t('schedule.fired', 'Fired')
+            : row.pause_reason
+              ? t('schedule.pausedReason', 'Paused: {{reason}}', { reason: row.pause_reason })
+              : t('schedule.paused', 'Paused');
         return (
-          <div key={row.id} data-testid="schedule-row" data-kind={routine ? 'routine' : 'once'} className="flex items-start gap-2 py-1 text-[12px]">
+          <div
+            key={row.id}
+            data-testid="schedule-row"
+            data-kind={routine ? 'routine' : 'once'}
+            data-enabled={row.enabled ? 'true' : 'false'}
+            className={`flex items-start gap-2 py-1 text-[12px] ${disabled ? 'opacity-60' : ''}`}
+          >
             <Clock size={11} className="mt-0.5 shrink-0 text-info" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-ink-300">{row.text}</div>
@@ -81,19 +106,28 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
                 {routine ? row.cron_expr : fmtWhen(row.fire_at)}
                 {' · '}
                 {routine ? t('schedule.routine', 'Routine') : t('schedule.once', 'Once')}
-                {!row.enabled && row.pause_reason ? ` · ${row.pause_reason}` : ''}
+                {status && (
+                  <>
+                    {' · '}
+                    <span data-testid="schedule-status" className="text-ink-600">
+                      {status}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
-            <button
-              type="button"
-              data-testid="schedule-cancel"
-              disabled={cancelling === row.id}
-              onClick={() => void cancel(row.id)}
-              title={t('schedule.cancel', 'Cancel')}
-              className="shrink-0 rounded p-0.5 text-ink-500 hover:text-danger disabled:opacity-40"
-            >
-              <X size={12} />
-            </button>
+            {!spent && (
+              <button
+                type="button"
+                data-testid="schedule-cancel"
+                disabled={cancelling === row.id}
+                onClick={() => void cancel(row.id)}
+                title={t('schedule.cancel', 'Cancel')}
+                className="shrink-0 rounded p-0.5 text-ink-500 hover:text-danger disabled:opacity-40"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
         );
       })}
