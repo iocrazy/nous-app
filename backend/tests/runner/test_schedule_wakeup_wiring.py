@@ -106,6 +106,28 @@ async def test_the_recorder_reaches_the_handler():
     assert seen["run_id"] == 7 and out["schedule_id"] == "s1"
 
 
+def test_only_root_issue_turns_can_reach_the_registration_block():
+    """Why the trigger check is enough to keep the tool off sub-agent runs.
+
+    A background sub-agent executes in ``workforce/agent_worker.py``, which
+    drives ``runner.run_turn`` itself under ``trigger="workforce"`` and never
+    goes through the chat service's turn seam — so it never reaches the block
+    that injects the spec, and its runner's handler stays None. That argument
+    holds only while the seam has no other callers, which is what this pins:
+    a new caller has to decide whether its runs are root issue runs before it
+    inherits the ability to arm wake-ups."""
+    callers = set()
+    for path in Path("app").rglob("*.py"):
+        src = path.read_text(encoding="utf-8")
+        if re.search(r"(?<!def )(?<!_inner\()run_session_turn\(", src):
+            callers.add(path.as_posix())
+    assert callers == {
+        "app/services/ai/chat/ai_library_chat_service.py",  # .chat() → itself
+        "app/services/issues/issue_agent_executor.py",  # issue dispatch/reply
+        "app/workflows/issue_lifecycle.py",  # issue reply turn
+    }
+
+
 def test_the_spec_is_advertised_verbatim():
     """The description is a stable literal the prompts README quotes."""
     assert schedule_wakeup_spec()["function"]["description"].startswith(
