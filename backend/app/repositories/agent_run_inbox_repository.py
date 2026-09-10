@@ -84,6 +84,30 @@ def expire_stale_stmt(older_than: dt.datetime, *, skip_paused_issues: bool):
     return stmt
 
 
+def dedupe_lookup_stmt(target_kind: str, target_id: int, dedupe_key: str):
+    """The live item on this target carrying ``content.dedupe_key``, if any.
+
+    LIVE is pending OR CLAIMED — a claimed item was delivered, so re-queueing
+    it would show the agent the same wake-up twice. An EXPIRED item is one
+    nobody ever consumed (its run ended before the next step boundary), so it
+    is deliberately NOT a match: the caller may queue again.
+
+    Best-effort by construction: without a unique index two SIMULTANEOUS
+    enqueues can both miss. It is aimed at the sequential case it is needed
+    for — a workflow body replayed after a crash — and says so rather than
+    claiming an airtight guarantee it cannot make without a migration.
+    """
+    return (
+        select(AgentRunInbox)
+        .where(AgentRunInbox.target_kind == target_kind)
+        .where(AgentRunInbox.target_id == int(target_id))
+        .where(AgentRunInbox.expired_at.is_(None))
+        .where(AgentRunInbox.content["dedupe_key"].astext == dedupe_key)
+        .order_by(AgentRunInbox.created_at, AgentRunInbox.id)
+        .limit(1)
+    )
+
+
 def claim_stmt(
     targets: Sequence[Target], run_id: int, turn: int, step: int, now: dt.datetime
 ):
@@ -125,8 +149,27 @@ class AgentRunInboxRepository:
         user_id: str,
         kind: str,
         content: dict[str, Any],
+        dedupe_key: Optional[str] = None,
     ) -> dict[str, Any]:
+        """Queue one item. With ``dedupe_key`` the write is idempotent on that
+        key: a caller whose delivery may be REPLAYED (a DBOS workflow body
+        resumed after a crash — its writes are not step-recorded) gets the
+        existing item back instead of a second copy. The key rides inside
+        ``content`` so no column and no migration are needed."""
         async with write_scope() as session:
+            if dedupe_key:
+                existing = (
+                    await session.execute(
+                        dedupe_lookup_stmt(target_kind, int(target_id), dedupe_key)
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    logger.info(
+                        f"[agent_run_inbox] {target_kind} {target_id}: "
+                        f"dedupe_key {dedupe_key} already queued — reusing item"
+                    )
+                    return _row(existing)
+                content = {**content, "dedupe_key": dedupe_key}
             row = (
                 await session.execute(
                     insert(AgentRunInbox)

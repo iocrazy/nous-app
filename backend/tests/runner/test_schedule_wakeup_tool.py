@@ -28,14 +28,20 @@ class _Recorder:
 
 @pytest.fixture
 def inserted(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Capture the row the tool would insert instead of touching a DB."""
+    """Capture the row the tool would insert instead of touching a DB, and
+    answer the per-run count from those same rows — the cap is counted in the
+    DATABASE now, so the double must model the table, not a counter."""
     rows: list = []
 
     async def _insert(row: dict) -> str:
         rows.append(row)
-        return "sched-uuid-1"
+        return f"sched-uuid-{len(rows)}"
+
+    async def _count(run_id: str) -> int:
+        return sum(1 for r in rows if r["payload"].get("run_id") == run_id)
 
     monkeypatch.setattr(swt, "_insert_wakeup_row", _insert)
+    monkeypatch.setattr(swt, "_count_wakeups_for_run", _count)
     return rows
 
 
@@ -161,6 +167,39 @@ async def test_the_fourth_wakeup_in_one_run_is_refused(inserted):
     out = await handler({"delay_minutes": 30, "note": "once more"}, recorder)
     assert out == {"error": "too_many_wakeups"}
     assert len(inserted) == swt.MAX_WAKEUPS_PER_RUN
+
+
+@pytest.mark.asyncio
+async def test_the_cap_is_per_run_not_per_turn(inserted):
+    """A run spans several turns and each turn builds a FRESH handler, so a
+    counter living in the closure caps turns, not runs — 5 turns would arm 15
+    wake-ups. The count comes from the rows this run already armed."""
+    recorder = _Recorder()
+    for _ in range(swt.MAX_WAKEUPS_PER_RUN):
+        assert "schedule_id" in await _handler()(
+            {"delay_minutes": 30, "note": "again"}, recorder
+        )
+    out = await _handler()({"delay_minutes": 30, "note": "next turn"}, recorder)
+    assert out == {"error": "too_many_wakeups"}
+
+
+@pytest.mark.asyncio
+async def test_another_run_starts_from_zero(inserted):
+    for _ in range(swt.MAX_WAKEUPS_PER_RUN):
+        await _handler()({"delay_minutes": 30, "note": "again"}, _Recorder(1))
+    assert "schedule_id" in await _handler()(
+        {"delay_minutes": 30, "note": "other run"}, _Recorder(2)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_naive_fire_at_has_its_own_code_on_the_api_path():
+    """The tool reads a naive time as UTC; the API refuses it — and must say
+    WHICH thing is wrong, or the UI shows "pick a time" to someone who did."""
+    from app.api.schedules_router import _bad_request
+
+    exc = _bad_request("fire_at_timezone_required", "x")
+    assert exc.detail["code"] == "fire_at_timezone_required"
 
 
 @pytest.mark.asyncio

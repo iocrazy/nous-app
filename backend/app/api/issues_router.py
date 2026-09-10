@@ -20,6 +20,7 @@ subscribe via /api/v1/workflows/{workflow_id}/events (D4 SSE).
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Optional
 
 from dbos import DBOS, SetWorkflowID
@@ -760,6 +761,13 @@ async def list_issue_pipeline_runs(issue_id: int, auth: AuthDep):
     return PipelineRunListResponse(items=items)
 
 
+#: How long a stopped schedule keeps showing on its issue. Long enough to
+#: answer "why didn't my wake-up fire?", short enough that a long-lived issue
+#: does not accumulate every wake-up it ever armed.
+_RETIRED_SCHEDULE_WINDOW = timedelta(days=7)
+_ISSUE_SCHEDULES_LIMIT = 50
+
+
 @router.get("/{issue_id}/schedules")
 async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
     """Everything timed on this issue: the one-shot wake-ups pointing at it,
@@ -772,7 +780,14 @@ async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
 
     ``payload.last_issue_id`` is the only field an agent_routine payload has
     that names an issue — it is the evidence that THIS routine produced THIS
-    issue (see ``_fire_agent_routine``'s stash)."""
+    issue (see ``_fire_agent_routine``'s stash).
+
+    Bounded on purpose: live rows plus recently stopped ones, newest fire
+    first, capped. Every wake-up a long-lived issue ever armed would otherwise
+    stay in this list for ever and the panel reading it would grow without
+    limit."""
+    import datetime as _dt
+
     from sqlalchemy import or_, select
 
     from app.db.session import read_scope
@@ -788,6 +803,7 @@ async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
     # jsonb ->> yields TEXT, so the id has to be bound as a string; a bigint
     # bind silently matches nothing.
     sid = str(issue_id)
+    recent = _dt.datetime.now(_dt.timezone.utc) - _RETIRED_SCHEDULE_WINDOW
     stmt = (
         select(*UserSchedules.__table__.columns)
         .where(
@@ -798,7 +814,14 @@ async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
                 & (UserSchedules.payload["last_issue_id"].astext == sid),
             )
         )
-        .order_by(UserSchedules.next_fire_at)
+        .where(
+            or_(
+                UserSchedules.enabled.is_(True),
+                UserSchedules.paused_at > recent,
+            )
+        )
+        .order_by(UserSchedules.enabled.desc(), UserSchedules.next_fire_at)
+        .limit(_ISSUE_SCHEDULES_LIMIT)
     )
     async with read_scope() as session:
         rows = (await session.execute(stmt)).mappings().all()
@@ -819,6 +842,10 @@ async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
                 "text": (payload.get("text") or payload.get("prompt_md") or "")[:500],
                 "created_by": payload.get("created_by") or "user",
                 "enabled": bool(row["enabled"]),
+                # WHY it stopped. fired_once / issue_terminal / stale /
+                # dispatch_failed are four very different states that all
+                # render as `enabled: false` without this.
+                "pause_reason": row["pause_reason"],
             }
         )
     return {"items": items}

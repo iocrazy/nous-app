@@ -355,3 +355,118 @@ async def test_patching_a_one_shot_does_not_invent_a_cron(monkeypatch):
     )
     params = write_session.statements[0].compile().params
     assert "next_fire_at" not in params
+
+
+# ── fix round 1: naive fire_at, and PATCH on a one-shot ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_naive_fire_at_says_so_instead_of_reading_as_missing(monkeypatch):
+    """`fire_at_required` on a time the user DID pick would show them "pick a
+    time" — the code has to name the actual problem."""
+    monkeypatch.setattr(mod, "assert_issue_visible", _visible())
+    naive = datetime.datetime.now() + datetime.timedelta(hours=2)
+    with pytest.raises(HTTPException) as exc:
+        await mod.create_schedule(_wakeup_payload(fire_at=naive), _Auth(_ME))
+    assert exc.value.detail["code"] == "fire_at_timezone_required"
+
+
+def _patch_patch(monkeypatch, existing, write_row=None):
+    read_session = _FakeSession(_Result([existing]))
+    write_session = _FakeSession(_Result([write_row or _full_row(cron_expr=None)]))
+    monkeypatch.setattr(mod, "read_scope", _cm(read_session))
+    monkeypatch.setattr(mod, "write_scope", _cm(write_session))
+    return write_session
+
+
+_ONCE = {
+    "task_type": "issue_wakeup",
+    "cron_expr": None,
+    "timezone": "UTC",
+    "payload": {"issue_id": 7, "text": "ping", "once": True},
+}
+
+
+@pytest.mark.asyncio
+async def test_patching_fire_at_reschedules_a_one_shot(monkeypatch):
+    """Without this the only way to move a wake-up is delete-and-recreate."""
+    write_session = _patch_patch(monkeypatch, _ONCE)
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+
+    await mod.update_schedule(
+        "sched-1", mod.ScheduleUpdatePayload(fire_at=later), _Auth(_ME)
+    )
+
+    params = write_session.statements[0].compile().params
+    assert params["next_fire_at"] == later
+    assert "fire_at" not in params  # not a column
+
+
+@pytest.mark.asyncio
+async def test_patching_fire_at_out_of_range_is_a_typed_400(monkeypatch):
+    _patch_patch(monkeypatch, _ONCE)
+    far = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=31)
+    with pytest.raises(HTTPException) as exc:
+        await mod.update_schedule(
+            "sched-1", mod.ScheduleUpdatePayload(fire_at=far), _Auth(_ME)
+        )
+    assert exc.value.detail["code"] == "fire_at_out_of_range"
+
+
+@pytest.mark.asyncio
+async def test_giving_a_one_shot_a_cron_is_a_typed_400(monkeypatch):
+    _patch_patch(monkeypatch, _ONCE)
+    with pytest.raises(HTTPException) as exc:
+        await mod.update_schedule(
+            "sched-1", mod.ScheduleUpdatePayload(cron_expr="0 9 * * *"), _Auth(_ME)
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "once_row_has_no_cron"
+
+
+@pytest.mark.asyncio
+async def test_giving_a_cron_row_a_fire_at_is_a_typed_400(monkeypatch):
+    _patch_patch(
+        monkeypatch,
+        {
+            "task_type": "agent_routine",
+            "cron_expr": "0 9 * * *",
+            "timezone": "UTC",
+            "payload": {},
+        },
+    )
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+    with pytest.raises(HTTPException) as exc:
+        await mod.update_schedule(
+            "sched-1", mod.ScheduleUpdatePayload(fire_at=later), _Auth(_ME)
+        )
+    assert exc.value.detail["code"] == "cron_row_has_no_fire_at"
+
+
+@pytest.mark.asyncio
+async def test_a_payload_patch_that_would_break_the_check_is_a_400_not_a_500(
+    monkeypatch,
+):
+    """Dropping `once` from a cron-less row violates user_schedules_cron_or_once
+    — Postgres would raise and the router would answer 500."""
+    _patch_patch(monkeypatch, _ONCE)
+    with pytest.raises(HTTPException) as exc:
+        await mod.update_schedule(
+            "sched-1",
+            mod.ScheduleUpdatePayload(payload={"issue_id": 7}),
+            _Auth(_ME),
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "text_required"
+
+
+@pytest.mark.asyncio
+async def test_a_payload_patch_keeps_the_one_shot_marker(monkeypatch):
+    write_session = _patch_patch(monkeypatch, _ONCE)
+    await mod.update_schedule(
+        "sched-1",
+        mod.ScheduleUpdatePayload(payload={"issue_id": 7, "text": "later"}),
+        _Auth(_ME),
+    )
+    params = write_session.statements[0].compile().params
+    assert params["payload"]["once"] is True

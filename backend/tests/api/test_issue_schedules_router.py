@@ -82,6 +82,7 @@ def _wakeup_row(**over):
         "next_fire_at": datetime.datetime(2026, 9, 11, 9, tzinfo=datetime.timezone.utc),
         "payload": {"issue_id": 123, "text": "check the render", "created_by": "agent"},
         "enabled": True,
+        "pause_reason": None,
     }
     row.update(over)
     return row
@@ -95,6 +96,7 @@ def _routine_row(**over):
         "next_fire_at": datetime.datetime(2026, 9, 12, 9, tzinfo=datetime.timezone.utc),
         "payload": {"last_issue_id": 123, "prompt_md": "Summarize yesterday"},
         "enabled": True,
+        "pause_reason": None,
     }
     row.update(over)
     return row
@@ -144,7 +146,11 @@ async def test_both_row_shapes_come_back_in_one_list(monkeypatch):
         "text",
         "created_by",
         "enabled",
+        # Why a disabled row is disabled — fired_once / issue_terminal /
+        # stale / dispatch_failed all look identical without it.
+        "pause_reason",
     }
+    assert wake["pause_reason"] is None
     assert wake["id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     assert wake["task_type"] == "issue_wakeup"
     assert wake["cron_expr"] is None
@@ -170,12 +176,33 @@ async def test_the_query_matches_each_shape_on_its_own_field(monkeypatch):
     compiled = session.statements[0].compile(dialect=postgresql.dialect())
     sql, binds = str(compiled), dict(compiled.params)
     assert "user_schedules" in sql
-    assert "ORDER BY public.user_schedules.next_fire_at" in sql
+    # live rows first, then by fire time
+    assert (
+        "ORDER BY public.user_schedules.enabled DESC, "
+        "public.user_schedules.next_fire_at" in sql
+    )
     # Both discriminators are present, and the issue id is bound as text (the
     # payload is jsonb; ->> yields text, so a bigint bind would not match).
     assert "issue_wakeup" in binds.values()
     assert "agent_routine" in binds.values()
     assert "123" in binds.values()
+    # Burned rows must not pile up on a long-lived issue for ever: only live
+    # rows, or recently stopped ones, and never more than a page of them.
+    assert "enabled" in sql
+    assert "paused_at" in sql
+    assert "LIMIT" in sql
+
+
+@pytest.mark.asyncio
+async def test_a_burned_row_still_reports_why_it_stopped(monkeypatch):
+    _patch_issue(monkeypatch)
+    session = _FakeSession(
+        _Result([_wakeup_row(enabled=False, pause_reason="dispatch_failed")])
+    )
+    monkeypatch.setattr(db_session, "read_scope", _cm(session))
+    item = (await mod.list_issue_schedules(123, _Auth()))["items"][0]
+    assert item["enabled"] is False
+    assert item["pause_reason"] == "dispatch_failed"
 
 
 @pytest.mark.asyncio

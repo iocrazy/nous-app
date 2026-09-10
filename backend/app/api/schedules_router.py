@@ -128,6 +128,9 @@ class ScheduleUpdatePayload(BaseModel):
     payload: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
     timezone: Optional[str] = Field(None, min_length=1, max_length=64)
+    # One-shot rows only: move the wake-up. Without it the only way to
+    # reschedule "remind me later" is delete-and-recreate.
+    fire_at: Optional[datetime] = None
 
 
 class ScheduleResponse(BaseModel):
@@ -194,6 +197,43 @@ def _validate_task_type(task_type: str) -> None:
         )
 
 
+def _validate_fire_at_window(fire_at: datetime) -> None:
+    """The wake-up time must be ahead of now and inside the horizon. Shared by
+    create and PATCH so the two cannot disagree about what "too far" means."""
+    if fire_at.tzinfo is None:
+        raise _bad_request(
+            "fire_at_timezone_required", "fire_at must carry a timezone offset"
+        )
+    now = datetime.now(timezone.utc)
+    if not (now < fire_at <= now + MAX_WAKEUP_HORIZON):
+        raise _bad_request(
+            "fire_at_out_of_range",
+            f"fire_at must be in the future and within "
+            f"{MAX_WAKEUP_HORIZON.days} days",
+        )
+
+
+def _validate_wakeup_payload_fields(body: Dict[str, Any]) -> str:
+    """The two fields the fire path cannot work without, plus the ``once``
+    marker the mig-461 CHECK reads. Returns the text.
+
+    PATCH replaces ``payload`` wholesale, so a caller that drops ``once``
+    would otherwise hit the CHECK and get a 500 out of the driver — the
+    validation is here so it is a typed 400 instead."""
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise _bad_request("text_required", "issue_wakeup payload requires text")
+    issue_id = body.get("issue_id")
+    if not issue_id:
+        raise _bad_request(
+            "issue_id_required", "issue_wakeup payload requires issue_id"
+        )
+    body["text"] = text
+    body["issue_id"] = int(issue_id)
+    body["once"] = True
+    return text
+
+
 async def _validate_issue_wakeup_payload(
     payload: "ScheduleCreatePayload", body: Dict[str, Any], auth: Any
 ) -> str:
@@ -207,31 +247,15 @@ async def _validate_issue_wakeup_payload(
     if fire_at is None:
         raise _bad_request("fire_at_required", "issue_wakeup requires fire_at")
     if fire_at.tzinfo is None:
-        raise _bad_request("fire_at_required", "fire_at must carry a timezone offset")
-    now = datetime.now(timezone.utc)
-    if not (now < fire_at <= now + MAX_WAKEUP_HORIZON):
+        # A distinct code: `fire_at_required` on a time the user DID pick
+        # makes the UI say "pick a time" to someone who just did.
         raise _bad_request(
-            "fire_at_out_of_range",
-            f"fire_at must be in the future and within "
-            f"{MAX_WAKEUP_HORIZON.days} days",
+            "fire_at_timezone_required", "fire_at must carry a timezone offset"
         )
+    _validate_fire_at_window(fire_at)
 
-    text = str(body.get("text") or "").strip()
-    if not text:
-        raise _bad_request("text_required", "issue_wakeup payload requires text")
-
-    issue_id = body.get("issue_id")
-    if not issue_id:
-        raise _bad_request(
-            "issue_id_required", "issue_wakeup payload requires issue_id"
-        )
-    await assert_issue_visible(int(issue_id), auth)
-
-    body["text"] = text
-    body["issue_id"] = int(issue_id)
-    # ``once`` is what the mig-461 CHECK reads to allow a NULL cron_expr; a row
-    # without it would be rejected by the database, not by us.
-    body.setdefault("once", True)
+    text = _validate_wakeup_payload_fields(body)
+    await assert_issue_visible(int(body["issue_id"]), auth)
     body.setdefault("created_by", "user")
     return text
 
@@ -347,9 +371,7 @@ async def update_schedule(
     # validate agent_routine payload edits and (b) recompute next_fire_at when
     # either cron_expr OR timezone changes (each depends on the other's
     # effective value). One read covers both.
-    needs_existing = (
-        ("payload" in fields) or ("cron_expr" in fields) or ("timezone" in fields)
-    )
+    needs_existing = bool({"payload", "cron_expr", "timezone", "fire_at"} & set(fields))
     existing_row: Optional[Mapping[str, Any]] = None
     if needs_existing:
         async with read_scope() as session:
@@ -379,6 +401,26 @@ async def update_schedule(
         and existing_row["task_type"] == "agent_routine"
     ):
         _validate_agent_routine_payload(fields["payload"])
+
+    # A one-shot and a recurring row take different edits, and mixing them is
+    # a typed 400 rather than a CHECK violation surfacing as a 500.
+    is_once = existing_row is not None and not existing_row["cron_expr"]
+    if is_once:
+        if "cron_expr" in fields:
+            raise _bad_request(
+                "once_row_has_no_cron",
+                "a one-time wake-up has no cron; change fire_at instead",
+            )
+        if "payload" in fields and isinstance(fields["payload"], dict):
+            _validate_wakeup_payload_fields(fields["payload"])
+        if "fire_at" in fields:
+            _validate_fire_at_window(fields["fire_at"])
+            fields["next_fire_at"] = fields.pop("fire_at")
+    elif "fire_at" in fields:
+        raise _bad_request(
+            "cron_row_has_no_fire_at",
+            "a recurring schedule fires from its cron; change cron_expr instead",
+        )
 
     if "cron_expr" in fields or "timezone" in fields:
         effective_cron = fields.get("cron_expr") or (

@@ -162,9 +162,14 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
             skipped += 1
             continue
 
-        # Successful fire → clear any consecutive-failure run.
-        await _reset_consecutive_fails(row)
         order = result.get("order")
+        # Successful fire → clear any consecutive-failure run. NOT for a
+        # wake-up: its "success" is still unknown here (the body delivers it),
+        # and clearing the run every tick would keep the delivery breaker from
+        # ever reaching its threshold. finish_issue_wakeup_step owns that
+        # counter for this task_type, both directions.
+        if not (order and order.get("kind") == "issue_wakeup"):
+            await _reset_consecutive_fails(row)
         if order is not None:
             orders.append(order)
         fired += 1
@@ -269,10 +274,11 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     """Dispatch a single due row + advance its next_fire_at.
 
     Returns an outcome dict:
-      * {"outcome": "fired", "order": <order>|None} — a fire happened. For an
-        agent routine `order` carries the dispatch the WORKFLOW body must start
-        (workflows can't be started from inside a step); other task types
-        dispatch inline and carry no order.
+      * {"outcome": "fired", "order": <order>|None} — a fire happened. Two
+        task types carry an `order` the WORKFLOW body must act on, because
+        neither can be done from inside a step: `agent_routine` (start
+        execute_issue) and `issue_wakeup` (deliver, then close the row out).
+        Other task types dispatch inline and carry no order.
       * {"outcome": "skipped"} — no fire: the due fire was discarded as stale,
         gated by delivery policy, or its task_type is unknown. Skips never
         touch the consecutive-failure run.
@@ -334,6 +340,17 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
         )
         return {"outcome": "skipped"}
 
+    # phase 2b-2 §3: a one-shot wake-up is a DB DECISION only. It is handled
+    # here — BEFORE the advance below — because nothing about the row may
+    # change until delivery is known: the workflow BODY delivers it (a step
+    # may not start a workflow) and `finish_issue_wakeup_step` is what burns
+    # the row afterwards. Advancing here would have written "fired 1 time,
+    # last_error cleared" onto a wake-up that had not been delivered, and on
+    # a terminal issue onto one that never could be.
+    if task_type == "issue_wakeup":
+        order = await _fire_issue_wakeup(row)
+        return {"outcome": "fired", "order": order} if order else {"outcome": "skipped"}
+
     # Resolve a generic task_type's workflow up front so an unknown /
     # misconfigured type is a quiet skip (advance so it doesn't hot-loop)
     # rather than a hard failure that would drive the row toward auto-pause.
@@ -369,9 +386,13 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     # ticks don't double-fire the same schedule.
     # NOTE: this is best-effort serialization — for true cluster-wide
     # exactly-once we'd need an advisory lock or DBOS workflow_id dedup keyed
-    # on (id, next_fire_at). Acceptable here because task_type dispatchers are
-    # idempotent (agent_routine via the unique index; generic via the pinned
-    # workflow_id below) so a double-fire dedups.
+    # on (id, next_fire_at). Acceptable here because every task_type dispatcher
+    # is idempotent, and each by its OWN mechanism: agent_routine via the
+    # issues_open_routine_execution_uq index; the generic path via the pinned
+    # workflow_id below; issue_wakeup via the `fire_key` its order carries,
+    # which `deliver_or_dispatch(dedupe_key=…)` applies to both of its arms
+    # (the inbox row and the DBOS workflow id). A wake-up's key is stable
+    # across retries precisely because a one-shot row is never advanced.
     advance: Dict[str, Any] = {
         "last_fired_at": now,
         "fire_count": (row.get("fire_count") or 0) + 1,
@@ -383,18 +404,6 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
         await session.execute(
             update(UserSchedules).where(UserSchedules.id == sched_id).values(**advance)
         )
-
-    # phase 2b-2 §3: a one-shot wake-up is a DB decision only — the order it
-    # returns is delivered by the workflow BODY (deliver_or_dispatch), because
-    # the idle branch starts a workflow and steps may not. Handled before the
-    # agent_routine branch and before the generic registry below.
-    if task_type == "issue_wakeup":
-        order = await _fire_issue_wakeup(row)
-        if order is None:
-            return {"outcome": "skipped"}
-        if _as_dict(row.get("payload")).get("once", True):
-            await _finish_once(row)
-        return {"outcome": "fired", "order": order}
 
     # paperclip R1: agent routines don't dispatch a media workflow — a fire
     # creates an issue assigned to the agent (origin_kind='routine') and
@@ -706,13 +715,21 @@ async def _disable_schedule(
     sched_id: Any, reason: str, *, bump_skipped: bool = False
 ) -> None:
     """Stop a row from ever firing again, with the reason on the row so the
-    Routines UI can say why rather than showing a silently dead schedule."""
+    Routines UI can say why rather than showing a silently dead schedule.
+
+    ``paused_at`` is written ALONGSIDE the reason, always (spec §6 T1): the
+    UI's `isPaused = !!paused_at` is the gate it renders the reason behind, so
+    a row disabled without it stops silently and no surface can say why."""
     from sqlalchemy import update
 
     from app.db.session import write_scope
     from app.models import UserSchedules
 
-    values: Dict[str, Any] = {"enabled": False, "pause_reason": reason}
+    values: Dict[str, Any] = {
+        "enabled": False,
+        "pause_reason": reason,
+        "paused_at": datetime.now(timezone.utc),
+    }
     if bump_skipped:
         values["skipped_count"] = UserSchedules.skipped_count + 1
     async with write_scope() as session:
@@ -721,16 +738,108 @@ async def _disable_schedule(
         )
 
 
-async def _finish_once(row: Dict[str, Any]) -> None:
-    """A one-shot has fired; it is done. Disabling is what keeps the row from
-    being picked up again — there is no next_fire_at to move it past."""
-    await _disable_schedule(row["id"], "fired_once")
+#: Delivery outcomes that mean the wake-up reached its target.
+_WAKEUP_DELIVERED = ("inbox", "dispatched")
+
+
+def _is_delivery_failure(result_mode: str, reason: Optional[str]) -> bool:
+    """A failed delivery arrives in TWO shapes and both must book a failure:
+    an exception (``result_mode='error'``) and the typed value
+    ``DeliverResult('skipped', reason='dispatch_failed: …')`` that the idle
+    branch returns instead of raising. Reading only the first is how a lost
+    wake-up came to look exactly like a delivered one."""
+    return result_mode == "error" or (reason or "").startswith("dispatch_failed")
+
+
+@DBOS.step()
+async def finish_issue_wakeup_step(
+    schedule_id: str,
+    fire_key: str,
+    result_mode: str,
+    reason: Optional[str] = None,
+) -> str:
+    """Close out one wake-up on the OUTCOME of its delivery. Runs after the
+    body has delivered — the row is burned by what happened, never in advance.
+
+    * delivered (inbox / dispatched) → burned: ``enabled=false``,
+      ``pause_reason='fired_once'``, and the fire bookkeeping the advance used
+      to do (``last_fired_at``, ``fire_count+1``, ``last_error=NULL``).
+    * failed → the row stays ARMED and the failure is booked. The next tick
+      retries it, which is safe because the fire key makes the delivery
+      idempotent; at ``_AUTO_PAUSE_THRESHOLD`` consecutive failures it pauses,
+      the same breaker a routine gets.
+    * skipped for any other reason (a terminal issue discovered between the
+      step and the delivery) → disabled with THAT reason, so the row says why.
+
+    Returns the outcome it wrote, for the log and for tests."""
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import UserSchedules
+
+    if result_mode in _WAKEUP_DELIVERED:
+        now = datetime.now(timezone.utc)
+        async with write_scope() as session:
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == schedule_id)
+                .values(
+                    enabled=False,
+                    pause_reason="fired_once",
+                    paused_at=now,
+                    last_fired_at=now,
+                    fire_count=UserSchedules.fire_count + 1,
+                    last_error=None,
+                    consecutive_fails=0,
+                )
+            )
+        logger.info(f"[scheduled_master] wakeup {fire_key} delivered ({result_mode})")
+        return "fired_once"
+
+    if not _is_delivery_failure(result_mode, reason):
+        await _disable_schedule(schedule_id, (reason or "skipped")[:500])
+        logger.info(
+            f"[scheduled_master] wakeup {fire_key} not delivered ({reason}) — "
+            "schedule disabled"
+        )
+        return "disabled"
+
+    # Failure: book it and leave the row armed. RETURNING gives the post-bump
+    # value, so the breaker never decides on a count read before the write.
+    async with write_scope() as session:
+        consecutive = (
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == schedule_id)
+                .values(
+                    consecutive_fails=UserSchedules.consecutive_fails + 1,
+                    fail_count=UserSchedules.fail_count + 1,
+                    last_error=(reason or "delivery failed")[:500],
+                )
+                .returning(UserSchedules.consecutive_fails)
+            )
+        ).scalar()
+    if (consecutive or 0) >= _AUTO_PAUSE_THRESHOLD:
+        await _disable_schedule(schedule_id, "dispatch_failed")
+        logger.warning(
+            f"[scheduled_master] wakeup {fire_key} auto-paused after "
+            f"{consecutive} consecutive delivery failures"
+        )
+        return "paused"
+    logger.warning(
+        f"[scheduled_master] wakeup {fire_key} delivery failed ({reason}) — "
+        f"still armed, retry {consecutive}/{_AUTO_PAUSE_THRESHOLD}"
+    )
+    return "retry"
 
 
 async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """One wake-up fire: DB decision only, returns the delivery ORDER. The
+    """One wake-up fire: VALIDATION only, returns the delivery ORDER. The
     workflow body delivers it (``deliver_or_dispatch``) — a step may not start
-    a workflow, and the idle branch does exactly that.
+    a workflow, and the idle branch does exactly that — and
+    ``finish_issue_wakeup_step`` burns the row afterwards, on the outcome.
+    Nothing here writes the row on the success path: "this wake-up is used up"
+    must never be recorded before "it arrived" is known.
 
     A terminal / hidden / missing issue is not a delivery failure: the target
     will never accept it, so the row is disabled and counted as skipped. A
@@ -754,9 +863,16 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         )
         return None
 
+    # Deterministic per (schedule, scheduled instant). A one-shot row is never
+    # advanced, so a retry of the SAME wake-up produces the SAME key — which
+    # is what makes the retry safe to attempt at all.
+    fire_at = row.get("next_fire_at")
     return {
         "kind": "issue_wakeup",
         "sched_id": str(row["id"]),
+        "fire_key": (
+            f"sched:{row['id']}:{fire_at.isoformat() if fire_at else 'unscheduled'}"
+        ),
         "issue_id": int(issue_id),
         "text": text,
         "user_id": str(row.get("user_id") or ""),
@@ -869,16 +985,20 @@ async def record_routine_dispatch_error_step(sched_id: str, err: str) -> None:
 async def _dispatch_issue_wakeup(
     order: Dict[str, Any], counters: Dict[str, Any]
 ) -> None:
-    """Deliver one wake-up: an inbox steer if the issue's root run is live or
-    paused, a fresh turn if it is idle. ``deliver_or_dispatch`` owns that
-    decision — re-deriving it here is how the three trigger paths drifted
-    apart in the first place.
+    """Deliver one wake-up, then close its row out on the OUTCOME.
 
-    Failures are booked exactly like an agent_routine dispatch failure (the
-    consecutive-failure run → auto-pause), and a ``skipped`` result is logged
-    with its reason rather than passing for a delivery."""
+    ``deliver_or_dispatch`` owns the running→inbox / idle→turn decision —
+    re-deriving it here is how the three trigger paths drifted apart in the
+    first place. It is handed the fire key, so both of its arms are
+    idempotent: this function runs in the workflow BODY, whose writes no step
+    record covers, so a crash makes DBOS replay it verbatim.
+
+    Every outcome — delivered, typed failure, exception, or a skip for some
+    other reason — goes through ``finish_issue_wakeup_step``. There is no
+    branch that leaves the row saying nothing about what happened."""
     from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
 
+    sched_id, fire_key = str(order["sched_id"]), str(order["fire_key"])
     try:
         result = await deliver_or_dispatch(
             int(order["issue_id"]),
@@ -887,32 +1007,37 @@ async def _dispatch_issue_wakeup(
             user_id=str(order.get("user_id") or ""),
             message_body=order["text"],
             source=order["source"],
+            dedupe_key=fire_key,
         )
     except Exception as exc:  # noqa: BLE001 — booked, never swallowed
         counters["errors"] = (counters.get("errors") or 0) + 1
         logger.opt(exception=True).warning(
-            f"[scheduled_master] wakeup {order.get('sched_id')} delivery "
-            f"failed: {exc}"
+            f"[scheduled_master] wakeup {fire_key} delivery raised: {exc}"
         )
-        try:
-            await record_routine_dispatch_error_step(
-                str(order["sched_id"]), f"wakeup failed: {exc}"
-            )
-        except Exception:
-            logger.opt(exception=True).warning(
-                "[scheduled_master] could not record wakeup failure for "
-                f"{order.get('sched_id')}"
-            )
+        await _finish_wakeup_safely(
+            sched_id, fire_key, "error", f"wakeup failed: {exc}"
+        )
         return
-    if result.mode == "skipped":
-        logger.info(
-            f"[scheduled_master] wakeup {order.get('sched_id')} skipped: "
-            f"{result.reason}"
-        )
-    else:
-        logger.info(
-            f"[scheduled_master] wakeup {order.get('sched_id')} → issue "
-            f"{order.get('issue_id')} ({result.mode})"
+
+    if _is_delivery_failure(result.mode, result.reason):
+        # NOT an exception — the idle branch returns its failure as a VALUE.
+        counters["errors"] = (counters.get("errors") or 0) + 1
+    await _finish_wakeup_safely(sched_id, fire_key, result.mode, result.reason)
+
+
+async def _finish_wakeup_safely(
+    sched_id: str, fire_key: str, mode: str, reason: Optional[str]
+) -> None:
+    """Bookkeeping must never take the tick down with it. A finish that fails
+    leaves the row armed, which the fire key makes safe to retry — the one
+    outcome we cannot accept is the tick dying and the other orders in this
+    batch never being delivered at all."""
+    try:
+        await finish_issue_wakeup_step(sched_id, fire_key, mode, reason)
+    except Exception as exc:  # noqa: BLE001 — logged, not swallowed
+        logger.opt(exception=True).error(
+            f"[scheduled_master] wakeup {fire_key} finished as {mode} but the "
+            f"row could not be updated: {exc}"
         )
 
 

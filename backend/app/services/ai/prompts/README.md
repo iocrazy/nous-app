@@ -237,7 +237,7 @@ found three docs
 }
 ```
 
-调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 run 最多 3 次，被拒的调用不计数）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
+调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
 
 到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑）——正文就是 `note` 原文。
 

@@ -270,3 +270,57 @@ async def test_a_failed_read_with_a_caller_row_decides_on_that_row(monkeypatch):
     )
     assert out.mode == "inbox"
     inbox_repo.enqueue.assert_awaited_once()
+
+
+# ── dedupe_key: one delivery per key across a body replay ───────────────────
+
+
+async def test_the_inbox_branch_forwards_the_dedupe_key(monkeypatch):
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    inbox_repo, _store, _dispatch, _rows = _wire(
+        monkeypatch, issue=_issue(), running=777
+    )
+    out = await deliver_or_dispatch(
+        5,
+        kind="steer",
+        content={"text": "wake"},
+        user_id=ME,
+        dedupe_key="sched:s1:2026-09-11T09:00:00+00:00",
+    )
+    assert out.mode == "inbox"
+    assert (
+        inbox_repo.enqueue.await_args.kwargs["dedupe_key"]
+        == "sched:s1:2026-09-11T09:00:00+00:00"
+    )
+
+
+async def test_the_dispatch_branch_pins_the_workflow_id_to_the_key(monkeypatch):
+    """The body's writes are not step-recorded, so a replay would start a
+    SECOND turn. A pinned workflow id makes DBOS collapse the two."""
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    _inbox, _store, dispatch, _rows = _wire(monkeypatch, issue=_issue(), running=None)
+    key = "sched:s1:2026-09-11T09:00:00+00:00"
+    out = await deliver_or_dispatch(
+        5,
+        kind="steer",
+        content={"text": "wake"},
+        user_id=ME,
+        message_body="wake",
+        dedupe_key=key,
+    )
+    assert out.mode == "dispatched" and out.workflow_id == key
+    assert dispatch.call_args.args[4] == key
+
+
+async def test_without_a_key_the_workflow_id_stays_random(monkeypatch):
+    """Every other caller must keep a unique id — a fixed one would make a
+    legitimate re-dispatch a silent no-op."""
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    _inbox, _store, dispatch, _rows = _wire(monkeypatch, issue=_issue(), running=None)
+    out = await deliver_or_dispatch(
+        5, kind="steer", content={}, user_id=ME, message_body="hi"
+    )
+    assert out.workflow_id.startswith("issue-reply-5-")

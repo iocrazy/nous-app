@@ -28,6 +28,12 @@ SCHEDULE_WAKEUP_TOOL_NAME = "ScheduleWakeup"
 # How many wake-ups one run may arm. Three is enough for "check back in an
 # hour, then tomorrow, then give up" and small enough that a confused agent
 # cannot fill the scheduler with its own future turns.
+#
+# Counted in the DATABASE, against ``payload.run_id``. A counter in the
+# handler closure would cap TURNS, not runs: the chat service builds a fresh
+# handler for every turn, so a run that takes five turns would have armed
+# fifteen — the constant, the README and the model-facing error would all have
+# been saying "run" about a number that meant something else.
 MAX_WAKEUPS_PER_RUN = 3
 
 # How far ahead a wake-up may be armed. The API path imports THIS constant
@@ -83,16 +89,17 @@ def make_schedule_wakeup_handler(
 ) -> Callable[..., Awaitable[dict[str, Any]]]:
     """Per-turn handler bound to one issue and its owner.
 
-    The per-run budget lives in this closure because the closure IS the run:
-    the chat service builds one per turn, next to the ``AgentRunner`` it
-    belongs to. ``recorder`` arrives at call time — the run does not exist yet
-    when the tool is registered — and supplies both the run id stamped on the
-    row and the transcript the ``schedule_set`` event lands on.
+    ``recorder`` arrives at call time — the run does not exist yet when the
+    tool is registered — and supplies both the run id stamped on the row (and
+    counted against the per-run budget) and the transcript the
+    ``schedule_set`` event lands on.
     """
-    armed = 0
+    # Fallback budget for a turn with no run id at all (no recorder). The cap
+    # must exist even then; it just degrades to per-turn, which is stricter.
+    armed_without_a_run = 0
 
     async def handler(args: dict[str, Any], recorder: Any = None) -> dict[str, Any]:
-        nonlocal armed
+        nonlocal armed_without_a_run
 
         note = str((args or {}).get("note") or "").strip()
         if not note:
@@ -102,12 +109,23 @@ def make_schedule_wakeup_handler(
         if fire_at is None:
             return {"error": why_not}
 
-        # Counted only once everything the model controls is valid, so a
+        run_id = getattr(recorder, "run_id", None)
+        run_key = str(run_id) if run_id is not None else None
+        # Checked only once everything the model controls is valid, so a
         # rejected call never eats into the budget it could not have spent.
-        if armed >= MAX_WAKEUPS_PER_RUN:
+        if run_key is not None:
+            try:
+                already = await _count_wakeups_for_run(run_key)
+            except Exception as exc:  # noqa: BLE001 — a result the model reads
+                logger.opt(exception=True).warning(
+                    f"[ScheduleWakeup] issue {issue_id}: budget read failed: {exc}"
+                )
+                return {"error": f"ScheduleWakeup failed: {exc.__class__.__name__}"}
+        else:
+            already = armed_without_a_run
+        if already >= MAX_WAKEUPS_PER_RUN:
             return {"error": "too_many_wakeups"}
 
-        run_id = getattr(recorder, "run_id", None)
         row = {
             "user_id": str(user_id),
             "name": note[:200],
@@ -120,7 +138,12 @@ def make_schedule_wakeup_handler(
                 # cron; without it Postgres rejects the row outright.
                 "once": True,
                 "created_by": "agent",
-                "run_id": str(run_id) if run_id is not None else None,
+                # A STRING, deliberately: agent_runs.id is a BIGINT Snowflake,
+                # and a JSON number loses precision past 2^53 the moment this
+                # payload reaches a browser (CLAUDE.md's bigIntSafeFetch trap).
+                # ``->>`` reads it as text either way, so the budget query
+                # below is unaffected by the choice.
+                "run_id": run_key,
             },
             "next_fire_at": fire_at,
         }
@@ -132,7 +155,8 @@ def make_schedule_wakeup_handler(
             )
             return {"error": f"ScheduleWakeup failed: {exc.__class__.__name__}"}
 
-        armed += 1
+        if run_key is None:
+            armed_without_a_run += 1
         fire_at_iso = fire_at.isoformat()
         from app.services.ai.runner.events import emit
 
@@ -179,6 +203,30 @@ def _resolve_fire_at(args: dict[str, Any]) -> tuple[Optional[datetime], str]:
     if fire_at > now + MAX_WAKEUP_HORIZON:
         return None, "fire_at must be within 30 days"
     return fire_at, ""
+
+
+async def _count_wakeups_for_run(run_id: str) -> int:
+    """How many wake-ups this run has already armed, counted on the table.
+
+    Burned rows still count: the budget is "how many times may this run arm a
+    wake-up", not "how many are still pending". Its own function so the
+    handler's decisions stay testable without a database."""
+    from sqlalchemy import func, select
+
+    from app.db.session import read_scope
+    from app.models import UserSchedules
+
+    async with read_scope() as session:
+        return int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(UserSchedules)
+                    .where(UserSchedules.task_type == "issue_wakeup")
+                    .where(UserSchedules.payload["run_id"].astext == str(run_id))
+                )
+            ).scalar_one()
+        )
 
 
 async def _insert_wakeup_row(row: dict[str, Any]) -> str:
