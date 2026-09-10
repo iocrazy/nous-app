@@ -28,11 +28,12 @@ function at(tree: Record<string, unknown>, key: string): unknown {
 describe('subagent.* / schedule.* / later.* locale parity', () => {
   const keys = new Set<string>();
   for (const f of new Set(ROOTS.flatMap(sources))) {
-    const src = fs.readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/t\(\s*'((subagent|schedule|later)\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
-    // laterPresets.ts hands its key through `labelKey`, not a t('…') literal —
-    // a scan that only knows the call form would miss the three preset labels.
-    for (const m of src.matchAll(/labelKey:\s*'((subagent|schedule|later)\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
+    // Any string literal in these namespaces, not just `t('…')` calls: the
+    // keys reached through a lookup table (laterErrors.ts's COPY) or a field
+    // (laterPresets.ts's `labelKey`) are exactly the ones a call-form-only
+    // scan would miss, and they are the ones most likely to be added to one
+    // locale file alone.
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(/'((?:subagent|schedule|later)\.[A-Za-z0-9_.]+)'/g)) keys.add(m[1]);
   }
   const en = JSON.parse(fs.readFileSync(path.join(LOCALES, 'en.json'), 'utf8'));
   const zh = JSON.parse(fs.readFileSync(path.join(LOCALES, 'zh.json'), 'utf8'));

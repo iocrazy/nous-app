@@ -161,8 +161,8 @@ describe('foldEvents — sub-agents and schedules (harness 2b-2)', () => {
     const step = nodes.find((n) => n.kind === 'step');
     if (!step || step.kind !== 'step') throw new Error('no step node');
     expect(step.children).toEqual([
-      { key: 'child:347786145852739', childRunId: '347786145852739', taskId: null, mode: 'sync', subagentType: 'librarian', description: 'Find the deck', continuedFrom: null, status: 'completed', costCents: 0.03, tokensUsed: 1200, durationMs: 8400 },
-      { key: 'child:tk-9', childRunId: null, taskId: 'tk-9', mode: 'async', subagentType: 'archivist', description: 'Sweep old runs', continuedFrom: null, status: null, costCents: null, tokensUsed: null, durationMs: null },
+      { key: 'child:347786145852739', childRunId: '347786145852739', taskId: null, mode: 'sync', subagentType: 'librarian', description: 'Find the deck', continuedFrom: null, status: 'completed', summary: null, costCents: 0.03, tokensUsed: 1200, durationMs: 8400 },
+      { key: 'child:tk-9', childRunId: null, taskId: 'tk-9', mode: 'async', subagentType: 'archivist', description: 'Sweep old runs', continuedFrom: null, status: null, summary: null, costCents: null, tokensUsed: null, durationMs: null },
     ]);
   });
 
@@ -212,5 +212,48 @@ describe('foldEvents — sub-agents and schedules (harness 2b-2)', () => {
   it('folds schedule_set into its own node', () => {
     expect(foldEvents([at(1, 'schedule_set', { schedule_id: 'sc-2', fire_at: '2026-09-11T01:00:00Z', note: 'check the render' })])[0])
       .toEqual({ kind: 'schedule', key: 'seq:1', scheduleId: 'sc-2', fireAt: '2026-09-11T01:00:00Z', note: 'check the render' });
+  });
+});
+
+describe('foldEvents — a background result reaches the card that spawned it', () => {
+  const at = (n: number, event_type: string, payload: Record<string, unknown> = {}, step?: number): AgentRunEvent =>
+    ({ seq: n, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  // The worker files the inbox row BEFORE it writes subagent_done, and the
+  // parent claims it later still — so the two can arrive in either order and
+  // the summary has to land on the card regardless.
+  it('stamps the summary on the card whether the claim comes before or after the done', () => {
+    const spawn = at(2, 'subagent_spawned', { task_id: 'tk-9', mode: 'async', subagent_type: 'librarian', description: 'Find the deck' }, 1);
+    const done = at(3, 'subagent_done', { task_id: 'tk-9', child_run_id: '9', mode: 'async', status: 'completed', cost_cents: 0.03, tokens_used: 900, duration_ms: 8400 }, 1);
+    const claim = at(4, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', turn: 1, step: 2, content: { child_run_id: '9', subagent_type: 'librarian', description: 'Find the deck', status: 'completed', summary: 'Found 3 decks', cost_cents: 0.03, tokens_used: 900 } });
+    for (const order of [[spawn, done, claim], [spawn, claim, done]]) {
+      const nodes = foldEvents([at(1, 'step_start', { turn: 1, step: 1 }, 1), ...order]);
+      const step = nodes.find((n) => n.kind === 'step');
+      if (!step || step.kind !== 'step') throw new Error('no step node');
+      expect(step.children[0].summary).toBe('Found 3 decks');
+    }
+  });
+
+  it('a failed child keeps its status — the card is the only place it shows', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'subagent_spawned', { child_run_id: '9', mode: 'sync', subagent_type: 'librarian', description: 'Find the deck' }, 1),
+      at(3, 'subagent_done', { child_run_id: '9', mode: 'sync', status: 'failed', cost_cents: 0.001, tokens_used: 40, duration_ms: 1200 }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.children[0].status).toBe('failed');
+  });
+
+  it('a claim naming no child stamps nothing and breaks nothing', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'subagent_spawned', { child_run_id: '9', mode: 'sync', subagent_type: 'librarian', description: 'x' }, 1),
+      at(3, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', content: { child_run_id: '404', status: 'completed', summary: 'orphan' } }),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.children[0].summary).toBeNull();
+    expect(nodes.filter((n) => n.kind === 'inbox')).toHaveLength(1);
   });
 });

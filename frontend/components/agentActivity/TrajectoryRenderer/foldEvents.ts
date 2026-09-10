@@ -54,8 +54,13 @@ export interface SubagentChild {
   description: string;
   /** The run this child continues, when it is a continuation. */
   continuedFrom: string | null;
-  /** Null = still going (foreground waiting / background queued). */
+  /** Null = still going (foreground waiting / background queued). Otherwise
+   *  the child's own verdict — `completed`, `failed`, … — which the card is
+   *  the only place a person ever sees. */
   status: string | null;
+  /** What the child reported back, when its result came through the inbox
+   *  (background children only — a foreground child answers in-line). */
+  summary: string | null;
   costCents: number | null;
   tokensUsed: number | null;
   durationMs: number | null;
@@ -462,6 +467,7 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           description: str(p.description) ?? '',
           continuedFrom: str(p.continued_from),
           status: null,
+          summary: null,
           costCents: null,
           tokensUsed: null,
           durationMs: null,
@@ -550,7 +556,32 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
   }
 
   if (current && opts.isRunning === false) closeCurrent();
+  stampResultSummaries(nodes);
   return nodes;
+}
+
+/**
+ * Carry each `subagent_result` claim's summary onto the card it belongs to.
+ *
+ * A second pass, not a case in the loop: the worker files the inbox row
+ * BEFORE it writes `subagent_done`, and the parent claims it later still, so
+ * the claim can arrive on either side of the event that gives the card its
+ * `childRunId`. Matching once at the end is order-independent. A claim whose
+ * child is not on screen (paged-out events) stamps nothing — the inbox row
+ * still renders on its own.
+ */
+function stampResultSummaries(nodes: TrajectoryNode[]): void {
+  const byRun = new Map<string, SubagentChild>();
+  for (const n of nodes) {
+    if (n.kind !== 'step') continue;
+    for (const c of n.children) if (c.childRunId) byRun.set(c.childRunId, c);
+  }
+  if (byRun.size === 0) return;
+  for (const n of nodes) {
+    if (n.kind !== 'inbox' || !n.result?.childRunId) continue;
+    const child = byRun.get(n.result.childRunId);
+    if (child && !child.summary) child.summary = n.result.summary || null;
+  }
 }
 
 /** The single live step, if any — the one block the UI keeps expanded. */

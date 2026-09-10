@@ -5728,7 +5728,7 @@
     "turnEnd": "Turn ended · {{reason}}",
     "steps": "{{count}} steps",
     "denied": "Blocked: {{tool}}",
-    "inboxSubagent": "Sub-agent result · {{type}} · read before step {{n}}",
+    "inboxSubagent": "Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}",
     "inboxWakeup": "Wake-up · set by {{who}} · read before step {{n}}"
   },
   "fork": {
@@ -5792,7 +5792,9 @@
     "panelTitle": "Sub-run #{{run}} · from run #{{parent}} step {{step}} · {{mode}}",
     "modeSync": "Foreground",
     "modeAsync": "Background",
-    "backToParent": "Back To Parent"
+    "backToParent": "Back To Parent",
+    "done": "✓ Done",
+    "failed": "Failed"
   },
   "schedule": {
     "agentSet": "Agent scheduled a wake-up · {{at}}",
@@ -5803,7 +5805,8 @@
     "once": "Once",
     "routine": "Routine",
     "title": "Schedules",
-    "add": "+ Later"
+    "add": "+ Later",
+    "empty": "No Wake-ups Scheduled"
   },
   "later": {
     "button": "Later",
@@ -5814,6 +5817,19 @@
     "confirm": "Schedule",
     "needText": "Type the message this wake-up should send.",
     "explain": "When it fires: if the agent is running it is picked up before its next step; if idle it starts a new turn with this text; if the issue is finished nothing is sent. Fires once.",
-    "error": "Could not schedule that wake-up."
+    "notePlaceholder": "What should this wake-up say?",
+    "scheduling": "Scheduling…",
+    "error": {
+      "fire_at_out_of_range": "Pick a time in the future, within 30 days",
+      "fire_at_timezone_required": "That time carried no time zone — pick it again",
+      "fire_at_required": "Pick a time for this wake-up",
+      "text_required": "Write the message this wake-up should send",
+      "issue_id_required": "This issue could not be identified",
+      "invalid_timezone": "That time zone is not one the server knows",
+      "forbidden": "You cannot schedule anything on this issue",
+      "not_found": "Issue not found",
+      "unknown": "Could not schedule that wake-up ({{code}})",
+      "generic": "Could not schedule that wake-up."
+    }
   }
 }

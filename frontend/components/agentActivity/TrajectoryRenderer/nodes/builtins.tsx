@@ -33,7 +33,6 @@ function fmtCents(c: number | null): string {
   return c === null ? '' : `¢${c.toFixed(c < 1 ? 3 : 2)}`;
 }
 
-
 const Row: React.FC<React.PropsWithChildren<{ className?: string; testId?: string }>> = ({
   className = '',
   testId,
@@ -105,11 +104,25 @@ function fmtSeconds(s: number | null | undefined, decimals = 0): string {
  * receipt. Only a child with a run id can be opened — a background task that
  * has not started has no run to show.
  */
-const CHILD_TONE: Record<'running' | 'queued' | 'done', string> = {
+type ChildState = 'running' | 'queued' | 'done' | 'failed';
+
+const CHILD_TONE: Record<ChildState, string> = {
   running: 'border-agent-line bg-agent-soft/40 text-agent',
   queued: 'border-info-line bg-info-soft/40 text-info',
   done: 'border-ok-line bg-ok-soft/40 text-ink-300',
+  failed: 'border-danger-line bg-danger-soft/40 text-danger',
 };
+
+/** The only statuses that mean the child actually delivered. Anything else a
+ *  child can end as — `failed`, `cancelled`, a timeout — is a non-result, and
+ *  drawing it in ok-green tells the reader the opposite of the truth. */
+const CHILD_OK = new Set(['completed', 'ok', 'succeeded', 'success']);
+
+/** True once the child has ended, whatever the verdict. */
+export function childState(status: string | null, mode: 'sync' | 'async'): ChildState {
+  if (!status) return mode === 'async' ? 'queued' : 'running';
+  return CHILD_OK.has(status.toLowerCase()) ? 'done' : 'failed';
+}
 
 export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
   const { t } = useTranslation();
@@ -118,7 +131,8 @@ export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
   return (
     <div className="flex flex-col gap-1 px-2.5 pb-1.5 pl-7" data-testid="subagent-cards">
       {node.children.map((c) => {
-        const state = c.status ? 'done' : c.mode === 'async' ? 'queued' : 'running';
+        const state = childState(c.status, c.mode);
+        const spend = [fmtMs(c.durationMs), fmtCents(c.costCents)].filter(Boolean).join(' · ');
         return (
           <div
             key={c.key}
@@ -142,7 +156,8 @@ export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
               <span className="ml-auto shrink-0 tabular-nums">
                 {state === 'running' && t('subagent.waiting', 'Waiting For Result')}
                 {state === 'queued' && t('subagent.queued', 'Background · Result Arrives In The Inbox')}
-                {state === 'done' && [fmtMs(c.durationMs), fmtCents(c.costCents)].filter(Boolean).join(' · ')}
+                {state === 'done' && [t('subagent.done', '✓ Done'), spend].filter(Boolean).join(' · ')}
+                {state === 'failed' && [t('subagent.failed', 'Failed'), spend].filter(Boolean).join(' · ')}
               </span>
               {c.childRunId && childRun && (
                 <button
@@ -164,6 +179,11 @@ export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
                 </button>
               )}
             </div>
+            {c.summary && (
+              <div className="mt-0.5 truncate pl-4 text-ink-400" data-testid="subagent-summary">
+                {c.summary}
+              </div>
+            )}
           </div>
         );
       })}
@@ -263,15 +283,23 @@ export const InboxNodeView: React.FC<NodeProps<InboxNode>> = ({ node }) => {
   // sub-agent's answer, a wake-up that fired, and a person steering.
   const result = node.result;
   const wakeup = node.source?.kind === 'schedule';
+  // A sub-agent result is only ever filed by the background worker (a
+  // foreground child answers in-line), so the row can say so outright — and
+  // its own verdict has to travel with it, exactly as on the card.
+  const failed = !!result && childState(result.status, 'async') === 'failed';
   const label = result
-    ? t('trajectory.inboxSubagent', 'Sub-agent result · {{type}} · read before step {{n}}', { type: result.subagentType, n: node.step ?? '?' })
+    ? t('trajectory.inboxSubagent', 'Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}', {
+        type: result.subagentType,
+        verdict: failed ? t('subagent.failed', 'Failed') : t('subagent.done', '✓ Done'),
+        n: node.step ?? '?',
+      })
     : wakeup
       ? t('trajectory.inboxWakeup', 'Wake-up · set by {{who}} · read before step {{n}}', { who: node.source?.createdBy ?? 'user', n: node.step ?? '?' })
       : t('trajectory.inboxClaimed', { kind: node.inboxKind });
   return (
-    <div className="rounded-md bg-ok-soft" data-testid="traj-inbox">
-      <Row className="text-ink-200">
-        <Inbox size={12} className={`shrink-0 ${wakeup ? 'text-info' : 'text-ok'}`} />
+    <div className={`rounded-md ${failed ? 'bg-danger-soft' : 'bg-ok-soft'}`} data-testid="traj-inbox">
+      <Row className={failed ? 'text-danger' : 'text-ink-200'}>
+        <Inbox size={12} className={`shrink-0 ${failed ? 'text-danger' : wakeup ? 'text-info' : 'text-ok'}`} />
         <span className="truncate">{label}</span>
         {node.step !== null && !result && !wakeup && (
           <span className="ml-auto shrink-0 text-[11px] text-ink-600">{t('trajectory.beforeStep', { n: node.step })}</span>
@@ -320,7 +348,7 @@ export const ScheduleNodeView: React.FC<NodeProps<ScheduleNode>> = ({ node }) =>
         {!cancelled && (
           <button
             type="button"
-            data-testid="schedule-cancel"
+            data-testid="traj-schedule-cancel"
             disabled={pending}
             onClick={() => void cancel()}
             className="ml-auto shrink-0 underline decoration-dotted disabled:opacity-50"
@@ -330,7 +358,7 @@ export const ScheduleNodeView: React.FC<NodeProps<ScheduleNode>> = ({ node }) =>
         )}
       </Row>
       {failed && (
-        <div className="px-2.5 pb-1.5 pl-7 text-[11px] text-danger" data-testid="schedule-cancel-error">
+        <div className="px-2.5 pb-1.5 pl-7 text-[11px] text-danger" data-testid="traj-schedule-cancel-error">
           {t('schedule.cancelFailed', 'Could not cancel that wake-up.')}
         </div>
       )}

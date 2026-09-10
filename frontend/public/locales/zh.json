@@ -5728,7 +5728,7 @@
     "turnEnd": "本轮结束 · {{reason}}",
     "steps": "{{count}} 步",
     "denied": "已拦截：{{tool}}",
-    "inboxSubagent": "子代理结果 · {{type}} · 已在第 {{n}} 步前读到",
+    "inboxSubagent": "子代理结果 · {{type}}（后台）· {{verdict}} · 已在第 {{n}} 步前读到",
     "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到"
   },
   "fork": {
@@ -5792,7 +5792,9 @@
     "panelTitle": "子 run #{{run}} · 来自 run #{{parent}} 第 {{step}} 步 · {{mode}}",
     "modeSync": "前台",
     "modeAsync": "后台",
-    "backToParent": "回到父 run"
+    "backToParent": "回到父 run",
+    "done": "✓ 完成",
+    "failed": "失败"
   },
   "schedule": {
     "agentSet": "Agent 定了唤醒 · {{at}}",
@@ -5803,7 +5805,8 @@
     "once": "一次性",
     "routine": "例行",
     "title": "定时",
-    "add": "+ 稍后"
+    "add": "+ 稍后",
+    "empty": "暂无定时唤醒"
   },
   "later": {
     "button": "稍后",
@@ -5814,6 +5817,19 @@
     "confirm": "定时发送",
     "needText": "先写一句到点要发的话",
     "explain": "到点时：agent 在跑就插进下一步；空闲就用这句话开始新一轮；issue 已结束则不再发。只发一次。",
-    "error": "定时创建失败"
+    "notePlaceholder": "到点要发的话",
+    "scheduling": "创建中…",
+    "error": {
+      "fire_at_out_of_range": "时间要在将来、且不超过 30 天",
+      "fire_at_timezone_required": "这个时间没带时区，重新选一次",
+      "fire_at_required": "先选一个唤醒时间",
+      "text_required": "先写一句到点要发的话",
+      "issue_id_required": "无法识别这个 issue",
+      "invalid_timezone": "服务器不认识这个时区",
+      "forbidden": "你没有权限在这个 issue 上定时",
+      "not_found": "issue 不存在",
+      "unknown": "定时创建失败（{{code}}）",
+      "generic": "定时创建失败"
+    }
   }
 }
