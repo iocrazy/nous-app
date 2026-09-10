@@ -52,7 +52,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.services.ai.runner.run_projection import apply as apply_projection
-from app.services.ai.runner.run_projection import empty_views
+from app.services.ai.runner.run_projection import empty_views, recompute_spent
 
 
 class AgentPausedError(Exception):
@@ -762,9 +762,38 @@ class RunRecorder:
         from app.db.session import write_scope
         from app.models import AgentRuns
 
+        # Review I3. ``compute_cost_cents`` only ever knew THIS run's tokens,
+        # while ``metadata_json.cost.spent_cents`` also carries what its
+        # sub-agents spent. ``issue_rollup._run_cents`` reads the view while a
+        # run is running and this column once it has ended, so storing the
+        # own-only figure made an issue's spend DROP by the children's cost at
+        # the moment the parent completed — a spend gauge walking backwards,
+        # feeding the budget gate.
+        #
+        # Both sides are now derived from the SAME own figure: the token-based
+        # one when rates are known, else whatever the step folds accumulated
+        # (a run that emits no step_end events has only the former; one whose
+        # model has no price row has only the latter).
         cost_cents: Optional[float] = None
+        # Re-read the externally-written slices first: a background child that
+        # finished mid-run put its ``subagent_done`` in the transcript, never
+        # in these in-memory views, and this is the last chance to bill it.
+        if self._event_writer is not None:
+            await self._event_writer.refold_children()
+        folded = self._event_writer.views["cost"] if self._event_writer else None
+        own_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
-            cost_cents = self.compute_cost_cents()
+            own_cents = self.compute_cost_cents()
+        elif folded is not None and folded.get("own_cents"):
+            own_cents = float(folded["own_cents"])
+        children_cents = sum(
+            float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
+        )
+        if own_cents is not None or children_cents:
+            cost_cents = round((own_cents or 0.0) + children_cents, 4)
+        if folded is not None and own_cents is not None:
+            folded["own_cents"] = round(own_cents, 4)
+            recompute_spent(folded)
 
         # W3c: classify every finished run. None → direct_human (a human turn);
         # the issue-dispatch path sets rule_owner for routine/pipeline fires.
@@ -936,6 +965,12 @@ async def event_writer_for_run(run_id: Any) -> "RunEventWriter":
     return await RunEventWriter.for_run(run_id)
 
 
+#: The two event types a run's children are folded from. Both can be written
+#: by the background worker on a run it does not own, which is why they are
+#: re-read from the transcript rather than trusted from memory.
+SUBAGENT_EVENT_TYPES = ("subagent_spawned", "subagent_done")
+
+
 class RunEventWriter:
     """The one write path onto a run's transcript + its folded views.
 
@@ -957,6 +992,15 @@ class RunEventWriter:
         self.value_max_chars = value_max_chars
         self.views: dict[str, Any] = empty_views()
         self._pending_mirror = False
+        # Sub-agent events this writer folded but could NOT persist (the
+        # insert-failure branch below). ``refold_children`` rebuilds those two
+        # slices from the transcript, so anything missing from it has to be
+        # replayed on top or it would be dropped on the next mirror.
+        # Edge: an insert that raised may still have COMMITTED (an ambiguous
+        # failure — the connection dropped after the write). The event is then
+        # both in the transcript and here, so the counters inflate by one;
+        # ``by_child`` is keyed and stays exact, which is the half that bills.
+        self._unpersisted_subagent: list[tuple[str, dict[str, Any]]] = []
 
     @classmethod
     async def for_run(cls, run_id: Any) -> "RunEventWriter":
@@ -987,8 +1031,18 @@ class RunEventWriter:
         if isinstance(meta, dict):
             for key in ("view", "cost"):
                 stored = meta.get(key)
-                if isinstance(stored, dict):
-                    writer.views[key] = {**writer.views[key], **stored}
+                if not isinstance(stored, dict):
+                    continue
+                if key == "cost" and "own_cents" not in stored:
+                    # Recorded before ``own_cents`` existed. No fold could add
+                    # a child to that total then, so it WAS this run's own —
+                    # seeding 0 instead would let the next late subagent_done
+                    # recompute the column down to children-only.
+                    stored = {
+                        **stored,
+                        "own_cents": float(stored.get("spent_cents") or 0.0),
+                    }
+                writer.views[key] = {**writer.views[key], **stored}
         return writer
 
     async def append(
@@ -1034,6 +1088,8 @@ class RunEventWriter:
             nxt = apply_projection(self.views, event_type, payload, seq=seq)
             if nxt is not self.views:
                 self.views = nxt
+            if event_type in SUBAGENT_EVENT_TYPES:
+                self._unpersisted_subagent.append((event_type, dict(payload)))
             return None
         await self._fold_and_mirror(event_type, payload, seq)
         return seq
@@ -1055,6 +1111,114 @@ class RunEventWriter:
         self.views = nxt
         self._pending_mirror = False
         await self._mirror()
+        if event_type == "subagent_done":
+            await self._sync_cost_column()
+
+    async def refold_children(self) -> None:
+        """Rebuild ``view.children`` and ``cost.by_child`` from the persisted
+        transcript, then recompute ``cost.spent_cents``.
+
+        TWO writers touch those two slices on one run: the parent's own
+        recorder (these in-memory views, mirrored as WHOLE values) and the
+        background worker, which appends ``subagent_done`` through a separate
+        ``for_run`` writer. Without this the parent's next mirror overwrote
+        the worker's contribution wholesale — a child that finished while its
+        parent was still running left ``async_pending`` stuck at +1 and its
+        cost out of the parent's total.
+
+        Race-free by construction: both writers only ever APPEND, and
+        ``append`` inserts the row BEFORE folding, so every event in these
+        in-memory views is already in the transcript. The one exception is an
+        event whose insert failed — folded in memory, no row — which is why
+        ``_unpersisted_subagent`` is replayed on top.
+
+        Skipped entirely when this run has no children, so the overwhelming
+        majority of runs never pay for the query.
+
+        The WHOLE body is under one guard, including the pre-check that reads
+        the stored ``children.total`` and the final slice assignments. Both
+        call sites — ``_mirror`` (so, ``append``) and ``_finish`` — are on the
+        live path of a turn, where this file's standing contract is that
+        telemetry never fails a run. A stored count that is not a number, or a
+        fold that produces an unusable shape, must cost a warning and a stale
+        slice, not the turn: wiping or crashing over a decoration would be
+        strictly worse than the drift this method exists to correct.
+        """
+        try:
+            children = self.views["view"].get("children") or {}
+            if not int(children.get("total") or 0) and not self._unpersisted_subagent:
+                return
+
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models.agents import AgentRunTranscriptEvents
+
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(
+                                AgentRunTranscriptEvents.event_type,
+                                AgentRunTranscriptEvents.payload,
+                            )
+                            .where(AgentRunTranscriptEvents.run_id == self.run_id)
+                            .where(
+                                AgentRunTranscriptEvents.event_type.in_(
+                                    SUBAGENT_EVENT_TYPES
+                                )
+                            )
+                            .order_by(AgentRunTranscriptEvents.seq.asc())
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+
+            scratch = empty_views()
+            for row in rows:
+                scratch = apply_projection(
+                    scratch, str(row["event_type"]), dict(row["payload"] or {})
+                )
+            for event_type, payload in self._unpersisted_subagent:
+                scratch = apply_projection(scratch, event_type, payload)
+
+            self.views["view"]["children"] = scratch["view"]["children"]
+            self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            recompute_spent(self.views["cost"])
+        except Exception as err:  # noqa: BLE001 — telemetry never fails a run
+            logger.warning(
+                f"[RunEventWriter] children re-fold skipped (run={self.run_id}): {err}"
+            )
+
+    async def _sync_cost_column(self) -> None:
+        """Push the recomputed total into ``agent_runs.cost_cents`` for a run
+        that has ALREADY ENDED (review I3).
+
+        The background ``subagent_done`` is written onto the parent run by the
+        worker, often turns after that run finished — and for an ended run the
+        rollup reads the column, not the view. Restricted to ended rows
+        because a live run's ``_finish`` computes the same total at the end
+        anyway. Idempotent: the value is a derived total over a keyed
+        ``by_child``, so a replayed event assigns the same number.
+        """
+        try:
+            from sqlalchemy import update
+
+            from app.db.session import write_scope
+            from app.models.agents import AgentRuns
+
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self.run_id)
+                    .where(AgentRuns.status != "running")
+                    .values(cost_cents=float(self.views["cost"]["spent_cents"]))
+                )
+        except Exception as err:  # noqa: BLE001 — telemetry never fails a run
+            logger.warning(
+                f"[RunEventWriter] cost column sync failed (run={self.run_id}): {err}"
+            )
 
     def mirror_keys(self) -> dict[str, Any]:
         """Whole values written into metadata_json — one place to read them."""
@@ -1097,6 +1261,9 @@ class RunEventWriter:
         )
 
     async def _mirror(self) -> None:
+        # The mirror writes WHOLE ``view`` / ``cost`` values, so the two
+        # externally-written slices are re-read from the event log first.
+        await self.refold_children()
         try:
             from app.db.session import write_scope
 

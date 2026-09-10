@@ -165,6 +165,15 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         )
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
 
+    # Background sub-agent (phase 2b-2 §2.3). BEFORE the persistent gate on
+    # purpose: a sub-agent target is ordinarily NOT persistent, so falling
+    # through would fail every background Task with 'not_persistent' — the
+    # persistent flag gates the DELEGATE path, which this is not.
+    if (payload.get("kind") or "") == "subagent":
+        return await _run_subagent_task(
+            task_id=task_id, payload=payload, workforce=workforce, agent_id=agent_id
+        )
+
     # Resolve the agent record for model + budget + identity.
     agent_repo = get_agent_repository()
     skill_repo = get_skill_repository()
@@ -358,6 +367,219 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
 
     return {"task_id": str(task_id), "status": "done", "run_id": str(run_id)}
+
+
+async def _run_subagent_task(
+    *,
+    task_id: UUID,
+    payload: dict[str, Any],
+    workforce: AgentWorkforceRepository,
+    agent_id: UUID,
+) -> dict[str, Any]:
+    """A background sub-agent: rebuild the caller's context from the payload,
+    run the very same ``_spawn(await=True)`` the foreground form runs, then
+    deliver the envelope.
+
+    EVERY await after the child has run is guarded individually. Once the
+    child has run it has cost real money, and the parent's transcript already
+    carries a ``subagent_spawned`` telling the user a child is out there — so
+    an exception escaping here would strand the task row at 'assigned' AND
+    pin ``children.async_pending`` at +1 for the rest of the parent's run.
+    Three things therefore always happen, in this order and independently:
+    each delivery step is attempted, ``subagent_done`` is emitted, and the
+    task row is finalised with a typed ``error_code``.
+
+    Delivery is TWO decisions on an issue target, not one. The inbox row is
+    the result itself and is written unconditionally — an idle issue would
+    otherwise have nothing to read the answer from. ``deliver_or_dispatch``
+    then answers the separate question of whether a turn should start now,
+    and ``already_enqueued`` keeps its busy branch from adding a second row.
+
+    ``subagent_done`` goes on the PARENT run. That run may have ended turns
+    ago; events outlive runs, and the fold counts a ``done`` with no matching
+    ``spawned`` (spec §2.4).
+    """
+    import time
+
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+    from app.services.ai.runner.run_recorder import RunEventWriter
+    from app.services.ai.runner.subagent_task_service import SubAgentTaskService
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    started = time.monotonic()
+    parent_run_id = payload.get("parent_run_id")
+    issue_id = payload.get("issue_id")
+
+    try:
+        service = SubAgentTaskService(
+            caller_agent_id=UUID(str(payload["caller_agent_id"])),
+            caller_user_id=UUID(str(payload["user_id"])),
+            parent_run_id=str(parent_run_id) if parent_run_id else None,
+            agent_depth=int(payload.get("agent_depth") or 0),
+            # spec §2.5: the child run belongs to the parent's issue. Without
+            # it the row has no issue link and its spend never reaches the
+            # issue rollup.
+            issue_id=int(issue_id) if issue_id else None,
+        )
+    except (KeyError, ValueError) as err:
+        logger.error(f"[agent-worker] subagent task {task_id} payload unusable: {err}")
+        await _finalise_subagent_task(
+            workforce, task_id, ok=False, error_code="bad_subagent_payload"
+        )
+        return {"task_id": str(task_id), "status": "failed", "run_id": None}
+
+    # ── run the child ────────────────────────────────────────────────
+    failures: list[str] = []
+    try:
+        envelope = await service.run_background_task(payload)
+    except Exception as err:  # noqa: BLE001 — the child must not sink the task
+        logger.exception(f"[agent-worker] subagent task {task_id} crashed: {err}")
+        envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
+        failures.append("subagent_crashed")
+
+    content = {
+        "child_run_id": envelope.get("sub_run_id"),
+        "subagent_type": payload.get("subagent_type"),
+        "description": payload.get("description"),
+        "status": envelope.get("status"),
+        "summary": envelope.get("summary") or "",
+        "cost_cents": envelope.get("cost_cents") or 0,
+        "tokens_used": envelope.get("tokens_used") or 0,
+    }
+
+    # ── deliver: inbox row, audit outbox, wake ───────────────────────
+    # A malformed reply_to must not raise either: the child already ran, and
+    # an exception here would lose its result AND leave the row un-finalised.
+    reply_to = payload.get("reply_to") or {}
+    target_kind = str(reply_to.get("target_kind") or "")
+    try:
+        target_id = int(reply_to["target_id"]) if target_kind else None
+    except (KeyError, TypeError, ValueError):
+        target_kind, target_id = "", None
+
+    if target_kind and target_id is not None:
+        try:
+            await get_agent_run_inbox_repository().enqueue(
+                target_kind=target_kind,
+                target_id=target_id,
+                user_id=str(payload["user_id"]),
+                kind="subagent_result",
+                content=content,
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.exception(
+                f"[agent-worker] subagent task {task_id}: the result could not "
+                f"be delivered to {target_kind} {target_id}: {err}"
+            )
+            failures.append("result_delivery_failed")
+    else:
+        logger.error(
+            f"[agent-worker] subagent task {task_id} has no usable reply "
+            f"target ({reply_to!r}); the result has nowhere to go"
+        )
+        failures.append("no_reply_target")
+
+    # spec §2.2 item 4: the audit trail beside the delivery. It is NOT the
+    # delivery — losing it is logged, but calling the task failed over it
+    # would misreport a result the parent has already received.
+    try:
+        await workforce.enqueue_outbox(
+            sender_agent_id=agent_id,
+            recipient_kind="user",
+            recipient_user_id=UUID(str(payload["user_id"])),
+            recipient_agent_id=None,
+            message_type="task_result",
+            payload={
+                "task_id": str(task_id),
+                "run_id": content["child_run_id"],
+                "content": content["summary"],
+                "kind": "subagent",
+                "status": content["status"],
+            },
+            task_id=task_id,
+        )
+    except Exception as err:  # noqa: BLE001 — audit, not delivery
+        logger.exception(
+            f"[agent-worker] subagent task {task_id}: audit outbox write "
+            f"failed: {err}"
+        )
+
+    if target_kind == "issue" and target_id is not None:
+        try:
+            await deliver_or_dispatch(
+                target_id,
+                kind="subagent_result",
+                content=content,
+                user_id=str(payload["user_id"]),
+                already_enqueued=True,
+            )
+        except Exception as err:  # noqa: BLE001 — the result IS already filed
+            logger.exception(
+                f"[agent-worker] subagent task {task_id}: could not decide "
+                f"whether to wake issue {target_id}: {err}"
+            )
+            failures.append("wake_failed")
+
+    # ── always: the parent's transcript, then the task row ───────────
+    if parent_run_id:
+        try:
+            writer = await RunEventWriter.for_run(int(parent_run_id))
+            await writer.append(
+                "subagent_done",
+                {
+                    "child_run_id": content["child_run_id"],
+                    "task_id": str(task_id),
+                    "mode": "async",
+                    "subagent_type": content["subagent_type"],
+                    "status": content["status"],
+                    "cost_cents": content["cost_cents"],
+                    "tokens_used": content["tokens_used"],
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+        except Exception as err:  # noqa: BLE001 — observability, not the work
+            logger.exception(
+                f"[agent-worker] subagent_done on parent run {parent_run_id} "
+                f"failed: {err}"
+            )
+
+    ok = content["status"] == "success" and not failures
+    error_code = failures[0] if failures else (None if ok else "subagent_failed")
+    await _finalise_subagent_task(
+        workforce, task_id, ok=ok, error_code=error_code, error=envelope.get("error")
+    )
+    return {
+        "task_id": str(task_id),
+        "status": "success" if ok else "failed",
+        "run_id": content["child_run_id"],
+    }
+
+
+async def _finalise_subagent_task(
+    workforce: AgentWorkforceRepository,
+    task_id: UUID,
+    *,
+    ok: bool,
+    error_code: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    """Close the row out. Guarded too: a task left un-finalised is invisible
+    to every operator view, so a failure here is the one worth shouting
+    about — there is nothing further we can do about it in-process."""
+    try:
+        await workforce.update_task_status(
+            task_id=task_id,
+            lifecycle_status="done" if ok else "failed",
+            **({} if error_code is None else {"error_code": error_code}),
+            **({} if not error else {"error_message": str(error)[:500]}),
+        )
+    except Exception as err:  # noqa: BLE001
+        logger.exception(
+            f"[agent-worker] subagent task {task_id} could not be finalised "
+            f"({'done' if ok else 'failed'}): {err}"
+        )
 
 
 async def _move_worker_back_to_idle(

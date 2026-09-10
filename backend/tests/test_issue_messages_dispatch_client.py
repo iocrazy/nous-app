@@ -16,6 +16,8 @@ from app.services.infra import dbos_orchestrator
 # APIRouter instance (shadowing the submodule), so a plain import-as would yield
 # the router object. Load the actual module.
 msgs_router = importlib.import_module("app.api.issue_messages_router")
+# The dispatcher itself now lives here; the router keeps a private alias.
+dispatch_mod = importlib.import_module("app.services.issues.issue_reply_dispatch")
 
 
 class _FakeClient:
@@ -85,5 +87,5 @@ def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
 
     assert len(spy) == 1
     wf, args = spy[0]
-    assert wf is msgs_router.respond_to_issue_reply
+    assert wf is dispatch_mod.respond_to_issue_reply
     assert args == (5, "owner-5", "body text", attachments)

@@ -50,11 +50,23 @@ def _wire(monkeypatch, *, running):
     store_cls = MagicMock(return_value=store)
     store_cls.display_attachments = staticmethod(lambda a: a)
     monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+    # Task 4 moved the busy branch's session append into
+    # services/issues/inbox_or_dispatch; patch the source module so every
+    # importer sees the same stand-in.
+    import app.services.ai.chat.conversations_ai_store as _store_mod
+
+    monkeypatch.setattr(_store_mod, "ConversationsAiStore", store_cls)
 
     wake = AsyncMock(return_value=False)
     monkeypatch.setattr(r, "_try_wake_waiting_workflow", wake)
     dispatch = MagicMock()
     monkeypatch.setattr(r, "_dispatch_respond_to_issue_reply", dispatch)
+    # Task 4 moved the dispatcher into services/issues/issue_reply_dispatch
+    # (two of its three callers are services). Patch it THERE — the router
+    # keeps only a private alias.
+    import app.services.issues.issue_reply_dispatch as _dispatch_mod
+
+    monkeypatch.setattr(_dispatch_mod, "dispatch_respond_to_issue_reply", dispatch)
     return r, runs_repo, inbox_repo, store, wake, dispatch
 
 

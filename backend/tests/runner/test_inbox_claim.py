@@ -211,3 +211,30 @@ async def test_claim_for_step_runs_outside_a_workflow(monkeypatch):
     items = await inbox_mod.claim_for_step([("issue", 7)], 42, 1, 2)
     assert seen == {"targets": [("issue", 7)], "run_id": 42, "turn": 1, "step": 2}
     assert items[0].body() == "x"
+
+
+def test_subagent_result_renders_only_its_summary_with_escaped_attrs():
+    """The whole envelope in the frame would burn tokens on fields the model
+    cannot act on; the summary is the answer it asked for. Both new
+    attributes are attacker-reachable (the slug comes from the model's own
+    call) so both go through escape_frame_attr."""
+    out = render_inbox_message(
+        _item(
+            kind="subagent_result",
+            content={
+                "child_run_id": "52",
+                "subagent_type": 'a" onmouseover="',
+                "description": "dig",
+                "status": "success",
+                "summary": "found three docs",
+                "cost_cents": 3.0,
+                "tokens_used": 900,
+            },
+        )
+    )
+    lines = out.split("\n")
+    assert 'child_run_id="52"' in lines[0]
+    assert 'subagent_type="a&quot; onmouseover=&quot;"' in lines[0]
+    body = "\n".join(lines[1:-1])
+    assert body == "found three docs"
+    assert "cost_cents" not in out and "tokens_used" not in out
