@@ -40,7 +40,6 @@ from app.models.agents import (  # noqa: F401
     AgentRunTranscriptEvents,
     AgentSkills,
     AgentStateHistory,
-    AgentTasks,
     AgentWorkers,
     RunDeliverables,
 )
@@ -280,7 +279,6 @@ __all__ = [
     "AgentRuns",
     "AgentSkills",
     "AgentStateHistory",
-    "AgentTasks",
     "AgentWorkers",
     # ai
     "AgentMemory",
