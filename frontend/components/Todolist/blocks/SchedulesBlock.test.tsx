@@ -140,7 +140,27 @@ describe('SchedulesBlockView', () => {
     ]);
     render(<SchedulesBlockView ctx={ctx()} />);
     expect(await screen.findByTestId('schedule-status')).toHaveTextContent('Paused: budget');
-    expect(screen.queryByTestId('schedule-cancel')).toBeNull();
+  });
+
+  // Fix round 2: only a BURNT one-shot loses its ✕. A routine paused for
+  // budget or after a failed dispatch is still a live row someone may want
+  // gone — hiding its cancel button strands it in the list forever.
+  it('a paused routine stays deletable', async () => {
+    listIssueSchedules.mockResolvedValue([
+      { ...routine, enabled: false, pause_reason: 'budget' },
+    ]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    expect(await screen.findByTestId('schedule-status')).toHaveTextContent('Paused: budget');
+    expect(screen.getByTestId('schedule-cancel')).toBeInTheDocument();
+  });
+
+  it('a one-shot paused for another reason also stays deletable', async () => {
+    listIssueSchedules.mockResolvedValue([
+      { ...once, enabled: false, pause_reason: 'dispatch_failed' },
+    ]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    await screen.findByTestId('schedule-row');
+    expect(screen.getByTestId('schedule-cancel')).toBeInTheDocument();
   });
 
   it('a still-armed row keeps its cancel button and shows no status label', async () => {

@@ -28,7 +28,12 @@ export function fmtWhenCompact(iso: string | null | undefined): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return iso;
-  return new Date(ms).toLocaleString(undefined, {
+  const d = new Date(ms);
+  // The year is dropped only when it is THIS year — a wake-up that fires next
+  // January must not read as one that fires in eleven days.
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString(undefined, {
+    ...(sameYear ? {} : { year: 'numeric' }),
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',

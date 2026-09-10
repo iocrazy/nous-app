@@ -268,11 +268,20 @@ async def dispatch_issue_reply(
     # failed marker means this dispatch runs unguarded (yesterday's behaviour),
     # never that the reply is refused. Mirrors ``_dispatch_execute_issue``.
     #
-    # Nothing clears it on success: the reply workflow has no ``atomic_checkout``
-    # to remove it, so the 60 s TTL is the closer — long enough to cover the
-    # gap until the run row exists, short enough that a crashed dispatch cannot
-    # pin the issue busy. It is also what stops two sweeper ticks from
-    # double-dispatching the same stranded issue.
+    # The reply workflow clears it: ``acquire_turn_lock`` removes it in the
+    # same UPDATE that takes the lock (mirroring ``atomic_checkout``), and
+    # ``respond_to_issue_reply``'s outer finally removes it again for the run
+    # that never got that far. The 60 s TTL is only the backstop for a
+    # workflow that never starts at all.
+    #
+    # ⚠️ An earlier version of this comment said nothing cleared it and the
+    # TTL was the closer. That was true of the code and it was a regression:
+    # after a fast reply turn the marker outlived the run for the rest of the
+    # TTL, so fork/resume answered 409 issue_busy and the next human comment
+    # was diverted to an inbox with no step boundary coming.
+    #
+    # The window is still what stops two sweeper ticks from double-dispatching
+    # the same stranded issue — it just closes when the turn really starts.
     await mark_dispatching(issue_id, wf_id)
     try:
         dispatch_respond_to_issue_reply(

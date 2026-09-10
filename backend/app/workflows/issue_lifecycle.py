@@ -50,6 +50,62 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 MAX_INBOX_DRAIN_TURNS = 3
 
 
+def _execution_state_without_dispatching():
+    """``execution_state - 'dispatching'`` as an UPDATE value.
+
+    One definition, three writers (``atomic_checkout``, ``acquire_turn_lock``,
+    ``clear_dispatch_marker_step``): the marker's REMOVAL has to look the same
+    everywhere or one path leaves an issue reading busy for the marker's whole
+    TTL — which is exactly what the reply seam did between fix rounds 1 and 2.
+
+    jsonb ``-``, not a merge to ``null``: ``merge_execution_state`` cannot
+    delete a key, and a lingering ``null`` would make every reader parse a
+    marker that no longer means anything. Operands explicitly cast — an
+    untyped bind against jsonb's overloaded ``-`` (text / text[] / integer) is
+    ambiguous to the planner.
+    """
+    from sqlalchemy import Text, cast, func, literal
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.models import Issues
+
+    return func.coalesce(Issues.execution_state, cast(literal("{}"), JSONB)).op(
+        "-", return_type=JSONB
+    )(cast(literal("dispatching"), Text))
+
+
+@DBOS.step()
+async def clear_dispatch_marker_step(issue_id: int) -> None:
+    """Remove ``execution_state.dispatching`` unconditionally.
+
+    The defensive half of the reply path's window close: ``acquire_turn_lock``
+    removes it in the same UPDATE that takes the lock, but a workflow that
+    dies BEFORE its first step never reaches that — and then nothing else
+    would, because ``atomic_checkout`` (Task 2's remover) is on the dispatch
+    path, not this one. Best-effort: failing to clear must not fail a reply
+    that otherwise worked; the 60 s TTL remains the backstop.
+    """
+    from sqlalchemy import text, update
+
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    try:
+        # execution fields are service_role-only (issues_update_allowlist)
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(Issues.id == issue_id)
+                .values(execution_state=_execution_state_without_dispatching())
+            )
+    except Exception as err:  # noqa: BLE001 — logged, never fatal
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: could not clear the dispatching "
+            f"marker ({err!r}); it expires with its TTL"
+        )
+
+
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     """Atomically claim an issue. False if someone else already holds the lock.
@@ -63,8 +119,7 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     ``merge_execution_state`` cannot delete a key, and a lingering ``null``
     would make every reader parse a marker that no longer means anything.
     """
-    from sqlalchemy import Text, cast, func, literal, text, update
-    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy import func, text, update
 
     from app.db.session import write_scope
     from app.models import Issues
@@ -78,12 +133,7 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
             .values(
                 execution_locked_at=func.now(),
                 dbos_workflow_id=dbos_workflow_id,
-                # Operands explicitly cast: an untyped bind against jsonb's
-                # overloaded ``-`` (text / text[] / integer) is ambiguous to
-                # the planner — same form as set_status's error-key removal.
-                execution_state=func.coalesce(
-                    Issues.execution_state, cast(literal("{}"), JSONB)
-                ).op("-", return_type=JSONB)(cast(literal("dispatching"), Text)),
+                execution_state=_execution_state_without_dispatching(),
             )
         )
         locked = result.rowcount
@@ -273,19 +323,31 @@ async def acquire_turn_lock(issue_id: int) -> bool:
     """Claim the per-issue turn lock for a reply turn. Reuses
     issues.execution_locked_at (shared with execute_issue dispatch) but does
     NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
-    Returns True if acquired, False if a turn is already in flight."""
+    Returns True if acquired, False if a turn is already in flight.
+
+    This is also where the REPLY path's dispatch window closes, mirroring
+    ``atomic_checkout``: the marker written by ``dispatch_issue_reply`` stood
+    in for a lock that did not exist yet, and this UPDATE is the moment it
+    does. Removed in the SAME statement — a separate write could be
+    interleaved by the very fork the marker exists to stop — and only when the
+    lock is actually taken, because a turn that lost the race is not the one
+    the marker was about.
+    """
     from sqlalchemy import func, text, update
 
     from app.db.session import write_scope
     from app.models import Issues
 
-    # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
+    # execution fields are service_role-only (issues_update_allowlist, mig 170)
     async with write_scope() as session:
         await session.execute(text("SET LOCAL ROLE service_role"))
         result = await session.execute(
             update(Issues)
             .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
-            .values(execution_locked_at=func.now())
+            .values(
+                execution_locked_at=func.now(),
+                execution_state=_execution_state_without_dispatching(),
+            )
         )
         locked = result.rowcount
     return locked > 0
@@ -549,30 +611,43 @@ async def respond_to_issue_reply(
     nothing to do with provenance. A reply with no provenance keeps handing
     over the bare step, so the ordinary path is byte-for-byte what it was.
     """
-    session_id = await ensure_issue_session_step(issue_id)
-    auto_close = await load_auto_close_flag()
-    await publish_status(issue_id, "running")
+    # Defensive outer finally: whatever happened, no dispatching marker
+    # outlives this workflow. ``acquire_turn_lock`` already removes it on the
+    # normal path, in the same UPDATE that takes the lock; this covers the run
+    # that never got there — no assignable session, a raise in any step, a
+    # lock it never won. Without it a reply dispatch that died early left the
+    # issue reading BUSY for the marker's full TTL, and every fork / resume /
+    # next comment in that window was answered as if a turn were running.
+    # It wraps the session step too, which is the one that raises most often.
     try:
-        return await _run_reply_turns(
-            issue_id,
-            user_id,
-            reply_text,
-            session_id=session_id,
-            acquire=acquire_turn_lock,
-            run_turn=(
-                functools.partial(run_issue_reply_step, source=source)
-                if source
-                else run_issue_reply_step
-            ),
-            release=clear_lock,
-            sleep=DBOS.sleep_async,
-            load_issue=load_issue,
-            set_status=set_status,
-            auto_close=auto_close,
-            attachments=attachments,
-        )
+        session_id = await ensure_issue_session_step(issue_id)
+        auto_close = await load_auto_close_flag()
+        await publish_status(issue_id, "running")
+        try:
+            return await _run_reply_turns(
+                issue_id,
+                user_id,
+                reply_text,
+                session_id=session_id,
+                acquire=acquire_turn_lock,
+                run_turn=(
+                    functools.partial(run_issue_reply_step, source=source)
+                    if source
+                    else run_issue_reply_step
+                ),
+                release=clear_lock,
+                sleep=DBOS.sleep_async,
+                load_issue=load_issue,
+                set_status=set_status,
+                auto_close=auto_close,
+                attachments=attachments,
+            )
+        finally:
+            # Paired with the "running" above: only a turn that was announced
+            # gets announced as done.
+            await publish_status(issue_id, "done")
     finally:
-        await publish_status(issue_id, "done")
+        await clear_dispatch_marker_step(issue_id)
 
 
 async def run_issue_reply_for_wait(

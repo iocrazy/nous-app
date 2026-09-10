@@ -29,6 +29,14 @@ describe('fmtWhenCompact', () => {
     expect(out).toContain(String(d.getMinutes()).padStart(2, '0'));
     expect(out.length).toBeLessThan(fmtWhen(iso).length);
   });
+  it('keeps the year when it is not the current one', () => {
+    const y = new Date().getFullYear();
+    const next = `${y + 1}-03-04T05:06:00Z`;
+    expect(fmtWhenCompact(next)).toContain(String(y + 1));
+    // …and drops it for this year, which is the whole point of the format
+    const thisYear = new Date(`${y}-03-04T05:06:00Z`);
+    expect(fmtWhenCompact(thisYear.toISOString())).not.toContain(String(y));
+  });
   it('keeps the same contract for things that are not instants', () => {
     expect(fmtWhenCompact('soon')).toBe('soon');
     expect(fmtWhenCompact(null)).toBe('—');

@@ -15,14 +15,20 @@ module used to wait on are all in place:
   4. the dead by-agent ``claim_next_queued`` is replaced by ``claim_task``, a
      single CAS UPDATE that ``run_one_task`` actually calls.
 
-What is NOT yet done is the part no unit test can supply: a real-stack run
-proving a delegated task travels the whole chain on the deployed worker
-(phase 2b-2 T7). Until that run, the flag stays false — advertising Delegate
-over an unproven chain is the same silent footgun as before: the model gets
-``status="queued"`` and the user gets nothing.
+**The flag is ON as of 2026-09-10** (`config.yml`, PR #2221): the chain was
+exercised locally end to end and the real-stack acceptance ran it far enough to
+prove the tool reaches the model and refuses with a typed message when there is
+no valid target. What that acceptance could NOT prove is a delegated task
+travelling the whole chain on the deployed worker — production had zero
+``ai_agents.persistent=true`` rows, so every call was refused before the inbox
+(Task 7a defect 4, since fixed at the seed loader). That run is still owed.
 
-Off (default) means the tool is not advertised to the LLM AND ``execute()``
-fail-closes with a clear message.
+Turning it back off is a real kill switch, not a no-op: the tool is no longer
+advertised to the LLM, ``execute()`` fail-closes with a message the model can
+act on, and the composer stops rendering ``<available_workers>`` altogether —
+which also means the system-message prefix changes for every agent, so the
+prompt cache is invalidated once in each direction (see
+``app/services/ai/prompts/README.md``). It is safe to flip; it is not free.
 """
 
 from __future__ import annotations

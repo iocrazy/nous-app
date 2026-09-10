@@ -72,26 +72,32 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     <RailCard title={t('schedule.title', 'Schedules')} testId="detail-schedules-panel">
       {items.map((row) => {
         const routine = !!row.cron_expr;
-        // A row the server has DISABLED is not cancellable — it has either
-        // already fired or been paused, and an active ✕ on it offered to
-        // cancel something that will not happen again (Task 7a defect 8a).
-        // It is also why this block and the home Quick chip disagreed about
-        // how many wake-ups an issue has: the chip counts pending ones.
-        const spent = !row.enabled;
-        const status = spent
-          ? row.pause_reason === 'fired_once'
+        // SPENT means "this will never happen again": a one-shot that has
+        // already fired. Only those lose the ✕ — cancelling a wake-up that is
+        // over is an offer to delete nothing, and it is why this block and the
+        // home Quick chip disagreed about how many wake-ups an issue has (the
+        // chip counts pending ones).
+        //
+        // A disabled ROUTINE is a different thing: paused for budget or after
+        // a failed dispatch, it is still a live row a person may well want
+        // gone — taking its ✕ away would strand it in the list with no way to
+        // remove it (fix round 2).
+        const spent = !row.enabled && !routine && row.pause_reason === 'fired_once';
+        const disabled = !row.enabled;
+        const status = !disabled
+          ? null
+          : row.pause_reason === 'fired_once'
             ? t('schedule.fired', 'Fired')
             : row.pause_reason
               ? t('schedule.pausedReason', 'Paused: {{reason}}', { reason: row.pause_reason })
-              : t('schedule.paused', 'Paused')
-          : null;
+              : t('schedule.paused', 'Paused');
         return (
           <div
             key={row.id}
             data-testid="schedule-row"
             data-kind={routine ? 'routine' : 'once'}
             data-enabled={row.enabled ? 'true' : 'false'}
-            className={`flex items-start gap-2 py-1 text-[12px] ${spent ? 'opacity-60' : ''}`}
+            className={`flex items-start gap-2 py-1 text-[12px] ${disabled ? 'opacity-60' : ''}`}
           >
             <Clock size={11} className="mt-0.5 shrink-0 text-info" />
             <div className="min-w-0 flex-1">
