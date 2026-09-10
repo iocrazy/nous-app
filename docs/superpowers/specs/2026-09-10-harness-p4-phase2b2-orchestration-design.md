@@ -150,7 +150,7 @@
 
 | 项 | 变更 |
 |---|---|
-| mig 461 ✅ | 事件白名单加 `subagent_spawned / subagent_done / schedule_set`；`agent_run_inbox.kind` 加 `subagent_result`；`user_schedules.cron_expr` 可空 + `user_schedules_cron_or_once` CHECK（`once` 的比较必须 `coalesce`，见 T1 实施记录第 1 条）；存量 `ai_transcription` / `ai_visual_analysis` 自禁并写 `pause_reason='task_type_unsupported'`；`DROP TABLE IF EXISTS agent_tasks` + 孤儿 `bump_agent_tasks_updated_at()`。ORM 侧同 PR：删 `AgentTasks` 模型与导出、两个 CHECK 字面量追加、`UserSchedules.cron_expr` 改可空 |
+| mig 461 ✅ | 事件白名单加 `subagent_spawned / subagent_done / schedule_set`；`agent_run_inbox.kind` 加 `subagent_result`；`user_schedules.cron_expr` 可空 + `user_schedules_cron_or_once` CHECK（`once` 的比较必须 `coalesce`，见 T1 实施记录第 1 条）；存量 `ai_transcription` / `ai_visual_analysis` 自禁并写 `paused_at=now()` + `pause_reason='task_type_unsupported'`（**两个都要写**：Routines UI 的 `isPaused = !!paused_at` 是渲染 reason 的门，只写 reason 的行在界面上就是无声停摆）；`DROP TABLE IF EXISTS agent_tasks` + 孤儿 `bump_agent_tasks_updated_at()`。ORM 侧同 PR：删 `AgentTasks` 模型与导出、两个 CHECK 字面量追加、`UserSchedules.cron_expr` 改可空 |
 | `Skill(skill="task")` | `+await`, `+child_run_id` |
 | 新工具 `ScheduleWakeup` | issue 根 run 专有 |
 | `POST /schedules` | `+task_type=issue_wakeup`（一次性 `fire_at`）；白名单改由引擎注册表导出 |

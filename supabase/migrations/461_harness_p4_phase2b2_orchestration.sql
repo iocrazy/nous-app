@@ -64,8 +64,14 @@ COMMENT ON COLUMN public.user_schedules.cron_expr IS
 
 -- (d) 白名单曾允许这两种，但引擎注册表从不认：到点每分钟 skip 一次，永不执行。
 --     禁掉存量行；T5 把白名单改成从注册表导出。
+--     ⚠️ paused_at 必须一起写：Routines UI（AgentRoutinesTab.tsx）用
+--     `isPaused = !!paused_at` 当渲染 pause_reason 的门，只写 reason 不写
+--     paused_at 的行在界面上就是一条无声停摆的例行任务——理由写了但没人看得见。
+--     `AND enabled` 让重跑幂等：行已停用就不再重新盖时间戳。
 UPDATE public.user_schedules
-   SET enabled = false, pause_reason = 'task_type_unsupported'
+   SET enabled = false,
+       paused_at = now(),
+       pause_reason = 'task_type_unsupported'
  WHERE task_type IN ('ai_transcription', 'ai_visual_analysis')
    AND enabled;
 
