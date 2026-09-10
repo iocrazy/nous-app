@@ -267,9 +267,7 @@ async def test_create_task_leaves_issue_id_null_when_the_payload_has_none(
         row = TaskTracking(dbos_workflow_id="echo", phase="queued", metadata_={})
         session = _FakeSession([_Result(scalars=[row])])
         _patch_scopes(monkeypatch, session)
-        out = await repo.create_task(
-            agent_id=uuid4(), user_id=uuid4(), payload=payload
-        )
+        out = await repo.create_task(agent_id=uuid4(), user_id=uuid4(), payload=payload)
         assert out is not None, f"an unusable issue_id sank the insert: {payload}"
         assert session.params[0]["issue_id"] is None
 
