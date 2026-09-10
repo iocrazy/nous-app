@@ -39,13 +39,19 @@ def _task(
         payload["delegated_at_depth"] = depth
     if parent_run_id:
         payload["parent_run_id"] = str(parent_run_id)
+    task_id = str(uuid4())
     return {
-        "id": str(uuid4()),
+        "id": task_id,
         "agent_id": str(agent_id or uuid4()),
         "user_id": str(user_id or uuid4()),
         "lifecycle_status": "assigned",
         "payload": payload,
         "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
+        # Every task that reaches the worker was dispatched, and dispatch is
+        # what mints this. run_one_task refuses a task without it — see
+        # test_missing_workflow_id_is_refused_not_coerced, which builds its own
+        # dict precisely to omit it.
+        "workforce_workflow_id": f"workforce-{task_id}-1",
     }
 
 
@@ -112,7 +118,7 @@ async def test_happy_path_queued_to_done_with_outbox():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -193,7 +199,7 @@ async def test_refuses_non_persistent_agent():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -227,11 +233,17 @@ async def test_refuses_non_persistent_agent():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_refuses_depth_exceeded():
-    """delegated_at_depth + 1 > MAX_INHERITED_DEPTH → failed."""
+    """delegated_at_depth + 1 > MAX_INHERITED_DEPTH → failed.
+
+    The depth check runs AFTER the claim (2b-2 T3 fix round): writing a failure
+    onto a row this worker does not own would stamp someone else's task."""
     task = _task(depth=MAX_INHERITED_DEPTH)  # +1 = MAX+1, over the line
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(
+        return_value={**task, "lifecycle_status": "assigned"}
+    )
     workforce.update_task_status = AsyncMock(return_value=True)
 
     with patch(
@@ -255,17 +267,22 @@ async def test_skips_task_no_longer_claimable():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    # Task is already done (someone else processed it).
-    workforce.get_task = AsyncMock(return_value={**task, "lifecycle_status": "done"})
+    # The CAS lost: another worker flipped queued → assigned first, so the
+    # UPDATE matched zero rows. Zero rows is the ONLY honest signal here — the
+    # read-then-check this replaced could see 'assigned' and still be the
+    # second worker to act on it.
+    workforce.claim_task = AsyncMock(return_value=None)
     workforce.update_task_status = AsyncMock(return_value=True)
 
     with patch(
         "app.services.workforce.agent_worker.get_agent_workforce_repository",
         return_value=workforce,
     ):
-        result = await run_one_task(task)
+        result = await run_one_task({**task, "workforce_workflow_id": "wf-1"})
 
     assert result["status"] == "skipped"
+    assert result["reason"] == "not_claimable"
+    workforce.claim_task.assert_awaited_once_with(task["id"], workflow_id="wf-1")
     workforce.update_task_status.assert_not_called()
 
 
@@ -280,7 +297,7 @@ async def test_empty_prompt_fails_fast():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -316,7 +333,7 @@ async def test_run_turn_exception_marks_failed():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -390,7 +407,7 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -449,3 +466,125 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
     outbox_kwargs = workforce.enqueue_outbox.await_args.kwargs
     assert outbox_kwargs["recipient_kind"] == "agent"
     assert outbox_kwargs["recipient_agent_id"] == sender_agent
+
+
+# ─── claim ownership + hydration ──────────────────────────────────────
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_is_keyed_on_this_run_s_own_workflow_id():
+    """The worker claims with the DBOS workflow id it is running under.
+
+    That id is what lets a replay of THIS run re-enter its own row after the
+    worker died mid-flight, while still refusing a different worker. Passing
+    anything else — a recomputed id, a stale one — turns the recovery arm into
+    a lock nobody holds the key to."""
+    task = _task()
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(return_value=None)
+
+    with patch(
+        "app.services.workforce.agent_worker.get_agent_workforce_repository",
+        return_value=workforce,
+    ):
+        await run_one_task({"id": task["id"], "workforce_workflow_id": "workforce-x-7"})
+
+    workforce.claim_task.assert_awaited_once_with(
+        task["id"], workflow_id="workforce-x-7"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_worker_hydrates_agent_user_and_payload_from_the_claim():
+    """A dispatch order carries only id / agent_id / attempt; everything the
+    run needs comes back from the claim.
+
+    Reading the row at claim time rather than trusting the dispatch-time
+    snapshot also means an order that sat in the queue acts on the CURRENT
+    payload, not the one captured when it was enqueued."""
+    agent_id = uuid4()
+    user_id = uuid4()
+    full = _task(agent_id=agent_id, user_id=user_id, prompt="summarise this PR")
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(
+        return_value={**full, "lifecycle_status": "assigned"}
+    )
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": str(uuid4())})
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(return_value=_persistent_agent(agent_id=agent_id))
+
+    stack = _build_runner_stack_mock(content="Done.")
+    cm, _recorder = _run_recorder_cm(run_id=uuid4())
+
+    # The envelope: no agent_id, no user_id, no payload.
+    envelope = {"id": full["id"], "workforce_workflow_id": "workforce-y-1"}
+
+    with (
+        patch(
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_skill_repository",
+            return_value=MagicMock(list_for_agent=AsyncMock(return_value=[])),
+        ),
+        patch(
+            "app.services.workforce.agent_worker.build_agent_runner_stack",
+            return_value=stack,
+        ),
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=cm),
+        patch(
+            "app.services.workforce.agent_worker.resolve_dispatch_scope",
+            return_value=MagicMock(team_id=None, project_id=None),
+        ),
+    ):
+        result = await run_one_task(envelope)
+
+    # It got far enough to resolve the agent — which it could only do with the
+    # agent_id the claim returned.
+    agent_repo.get_by_id.assert_awaited_once_with(agent_id)
+    assert result["status"] != "skipped"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_missing_workflow_id_is_refused_not_coerced():
+    """An absent ownership token fails the task; it must not become "".
+
+    The empty string is not a harmless default — ``claim_task`` WRITES whatever
+    it is given into ``metadata.workforce_workflow_id``. Two tasks dispatched
+    without an id would both store "", and each would then satisfy the other's
+    re-entry arm: an ownership check that admits anyone. Refusing turns a
+    future producer that forgets the key into a visible typed failure instead
+    of a quiet correctness hole."""
+    task = _task()
+
+    workforce = MagicMock()
+    workforce.INBOX_TABLE = "agent_inbox"
+    workforce.claim_task = AsyncMock(return_value=None)
+    workforce.update_task_status = AsyncMock(return_value=True)
+
+    with patch(
+        "app.services.workforce.agent_worker.get_agent_workforce_repository",
+        return_value=workforce,
+    ):
+        result = await run_one_task({"id": task["id"]})  # no workforce_workflow_id
+
+    assert result["status"] == "failed"
+    assert workforce.update_task_status.await_args.kwargs["error_code"] == (
+        "missing_workflow_id"
+    )
+    # It never reached the claim — an unowned claim is what we are preventing.
+    workforce.claim_task.assert_not_awaited()

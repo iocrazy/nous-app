@@ -75,7 +75,8 @@ async def lifespan(app: FastAPI):
     install_cleanup_handlers()
     init_dbos(app)
 
-    # PR-D8 Phase 3: WorkforceScheduler removed — inbox/outbox dispatch
+    # PR-D8 Phase 3: the in-process WorkforceScheduler was removed (its module
+    # was deleted outright in harness 2b-2 T3) — inbox/outbox dispatch
     # is now @DBOS.scheduled in workflows/workforce_dispatch.py, imported via
     # `from app import workflows` in init_dbos on the worker/combined roles.
     # (The gateway is enqueue-only — init_dbos returns early before that import

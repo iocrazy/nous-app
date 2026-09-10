@@ -92,14 +92,28 @@ async def agent_id(integration_db_url):
 
 @pytest.fixture
 async def user_id(integration_db_url):
-    """A real auth.users id (task_tracking.user_id FK → auth.users). Skips if
-    the DB has none."""
+    """A real auth.users id (task_tracking.user_id FK → auth.users).
+
+    Seeds a throwaway row when the database has none, the same way ``agent_id``
+    above seeds an agent. It used to ``pytest.skip`` instead — harmless against
+    a populated dev database, fatal on the ephemeral schema-drift one, which is
+    built from the baseline and is therefore ALWAYS empty. Six tests take this
+    fixture, including all three dispatch round-trips, so skipping would have
+    left the file passing on CI while the statements it exists to execute never
+    ran. ``pytest-no-full-skip.sh`` cannot catch that: seven other tests pass,
+    so the step is green. A fixture that skips is a fixture that can hide."""
     conn = await asyncpg.connect(integration_db_url)
     try:
         uid = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
-        if uid is None:
-            pytest.skip("need >=1 auth.users row to satisfy task_tracking.user_id FK")
-        yield uid
+        if uid is not None:
+            yield uid
+            return
+        seeded = uuid.uuid4()
+        await conn.execute("INSERT INTO auth.users (id) VALUES ($1)", seeded)
+        try:
+            yield seeded
+        finally:
+            await conn.execute("DELETE FROM auth.users WHERE id = $1", seeded)
     finally:
         await conn.close()
 
@@ -310,7 +324,7 @@ async def test_task_business_write_no_trigger_column_clobber(
     task_id = UUID(created["id"])
 
     # claim → assigned (CAS), then in_progress, then done.
-    claimed = await repo.claim_next_queued(agent_id=UUID(str(agent_id)))
+    claimed = await repo.claim_task(created["id"], workflow_id="wf-int-1")
     assert claimed is not None and claimed["lifecycle_status"] == "assigned"
 
     assert await repo.update_task_status(
@@ -355,7 +369,7 @@ async def test_requeue_task(patched_engine, agent_id, user_id, cleanup):
         title=_title(),
     )
     task_id = UUID(created["id"])
-    await repo.claim_next_queued(agent_id=UUID(str(agent_id)))
+    await repo.claim_task(created["id"], workflow_id="wf-int-requeue")
     assert await repo.requeue_task(task_id) is True
     got = await repo.get_task(task_id)
     assert got["lifecycle_status"] == "queued"
@@ -425,3 +439,103 @@ async def test_factory_returns_orm_repository():
     )
 
     assert type(get_agent_workforce_repository()) is AgentWorkforceRepository
+
+
+# ─── 6. Dispatch bookkeeping (2b-2 T3) ───────────────────────────────────
+#
+# These four statements are the ones the unit suite can only compile, never
+# execute: an UPDATE ... RETURNING an ORM entity, a JSONB ``->>`` IS NULL
+# filter, a ``coalesce(col,'{}') || patch`` merge, and a CASE-per-arm CAS.
+# A stubbed session accepts all of them regardless of what Postgres thinks.
+
+
+async def test_claim_task_cas_arms_against_real_pg(
+    patched_engine, agent_id, user_id, cleanup
+):
+    """Both CAS arms, executed: a fresh claim, a same-workflow re-entry, and a
+    foreign workflow that must be refused."""
+    repo = _repo()
+    created = await repo.create_task(
+        agent_id=UUID(str(agent_id)),
+        user_id=UUID(str(user_id)),
+        payload={"prompt": "hi"},
+        title=_title(),
+    )
+    tid = created["id"]
+    mine = "workforce-int-1"
+
+    first = await repo.claim_task(tid, workflow_id=mine)
+    assert first is not None and first["lifecycle_status"] == "assigned"
+    assert first["workforce_workflow_id"] == mine
+
+    # A DIFFERENT workflow cannot steal a row that is no longer queued.
+    assert await repo.claim_task(tid, workflow_id="workforce-int-2") is None
+
+    # Our own replay walks back in, and does NOT knock the phase backwards.
+    assert await repo.update_task_status(
+        task_id=UUID(tid), lifecycle_status="in_progress"
+    )
+    again = await repo.claim_task(tid, workflow_id=mine)
+    assert again is not None
+    assert again["lifecycle_status"] == "in_progress"
+
+
+async def test_dispatch_list_and_stamp_round_trip(
+    patched_engine, agent_id, user_id, cleanup
+):
+    """``list_undispatched_queued_tasks`` → ``mark_dispatched`` → gone from the
+    list; ``requeue_task`` brings it back with the attempt counter intact."""
+    repo = _repo()
+    created = await repo.create_task(
+        agent_id=UUID(str(agent_id)),
+        user_id=UUID(str(user_id)),
+        payload={},
+        title=_title(),
+    )
+    tid = created["id"]
+
+    ids = {t["id"] for t in await repo.list_undispatched_queued_tasks(limit=500)}
+    assert tid in ids
+
+    await repo.mark_dispatched(tid, workflow_id=f"workforce-{tid}-1", attempt=1)
+    ids = {t["id"] for t in await repo.list_undispatched_queued_tasks(limit=500)}
+    assert tid not in ids  # the ->> IS NULL filter really excludes it
+
+    got = await repo.get_task(UUID(tid))
+    assert got["dispatch_attempt"] == 1
+    assert got["workforce_workflow_id"] == f"workforce-{tid}-1"
+
+    # Requeue clears the stamp and the ownership token but KEEPS the counter,
+    # so the next dispatch derives an id DBOS has never seen.
+    await repo.claim_task(tid, workflow_id=f"workforce-{tid}-1")
+    assert await repo.requeue_task(UUID(tid)) is True
+    back = await repo.get_task(UUID(tid))
+    assert back["lifecycle_status"] == "queued"
+    assert back["dispatch_attempt"] == 1
+    assert back["workforce_workflow_id"] is None
+    ids = {t["id"] for t in await repo.list_undispatched_queued_tasks(limit=500)}
+    assert tid in ids
+
+
+async def test_count_inflight_counts_assigned_too(
+    patched_engine, agent_id, user_id, cleanup
+):
+    """'assigned' is where a task whose worker died comes to rest, so the gauge
+    has to see it — that is the one state an operator most needs surfaced."""
+    repo = _repo()
+    created = await repo.create_task(
+        agent_id=UUID(str(agent_id)),
+        user_id=UUID(str(user_id)),
+        payload={},
+        title=_title(),
+    )
+    before = await repo.count_inflight_agent_tasks()
+    assert before >= 1  # queued counts
+
+    await repo.claim_task(created["id"], workflow_id="workforce-count-1")
+    assert await repo.count_inflight_agent_tasks() >= before  # assigned still counts
+
+    assert await repo.update_task_status(
+        task_id=UUID(created["id"]), lifecycle_status="done"
+    )
+    assert await repo.count_inflight_agent_tasks() == before - 1

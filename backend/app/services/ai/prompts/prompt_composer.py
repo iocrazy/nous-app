@@ -400,9 +400,11 @@ class PromptComposer:
         Built-in tools advertised:
         - ``Skill`` — load a skill definition (only when skills are bound)
         - ``Delegate`` — hand a sub-task to another persistent agent. Gated
-          behind ``FEATURE_WORKFORCE_DELEGATE`` (audit #4): the inbox→worker
-          execution chain isn't fully wired, so advertising it would let the
-          LLM queue tasks that orphan forever. Off (default) → not advertised.
+          behind ``settings.FEATURE_WORKFORCE_DELEGATE`` (audit #4). The
+          inbox→worker chain was wired in phase 2b-2 T3; the flag stays off
+          until a real-stack run proves it (T7), because advertising it over
+          an unproven chain lets the LLM queue tasks that orphan forever.
+          Off (default) → not advertised.
         - A4 screenwriting tools (ListScenes / ReadScene / CreateShot /
           UpdateShot / ProposeEdit) — advertised per the agent's granted
           ``capabilities.write_level``, which is "none" for every agent that

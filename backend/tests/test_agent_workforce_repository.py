@@ -9,7 +9,7 @@ instances, so ``_orm_obj_to_dict`` yields a parity dict) — covering the contra
 corners the state machine and dispatcher depend on WITHOUT a live DB:
 
     - claim_next_unread  → CAS guard binds status='unread'
-    - claim_next_queued  → CAS guard binds phase='queued'
+    - claim_task         → single CAS UPDATE ... RETURNING on phase='queued'
     - enqueue_inbox      → dedup collision falls back to lookup
     - create_task        → self-references root_task_id when tree root
     - update_task_status → terminal status binds completed_at
@@ -17,7 +17,15 @@ corners the state machine and dispatcher depend on WITHOUT a live DB:
 
 The DSN-gated integration suite in
 ``tests/integration/test_agent_workforce_repository_orm.py`` exercises the real
-round-trip + the crasher-proof uuid→str parity.
+round-trip + the crasher-proof uuid→str parity, including the four dispatch
+statements a stubbed session can only compile (claim_task's two CAS arms,
+the ``->>`` IS NULL dispatch list, the ``||`` metadata merges, the inflight
+count). That file runs on every schema-drift.yml build (its own step, through
+pytest-no-full-skip.sh), so those statements are executed against a real
+Postgres on each PR that touches this repository. Green HERE still is not
+green on Postgres — a stubbed session accepts SQL the server would reject —
+which is exactly why that file exists; do not add a statement here without
+giving it a case there.
 
 A4 (migration 200) note: tasks live in task_tracking[task_kind='agent_task'];
 8-state lifecycle precision is preserved in the `phase` column while the
@@ -53,7 +61,7 @@ class _Scalars:
 class _Result:
     """A stand-in for a SQLAlchemy Result. ``scalars`` feeds
     ``.scalars().first()/.all()``; ``first`` feeds ``.first()`` (the tuple-row
-    selects in claim_next_queued / update_task_status / requeue_task)."""
+    selects in update_task_status / requeue_task)."""
 
     def __init__(
         self, *, scalars: Optional[list[Any]] = None, first: Any = None
@@ -275,22 +283,177 @@ async def test_create_task_preserves_explicit_root(repo, monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_claim_next_queued_uses_cas_guard(repo, monkeypatch):
-    """A4: CAS guard is on the phase column (task_tracking) — phase preserves
-    the 8-state lifecycle precision after the agent_tasks merge."""
+async def test_claim_task_is_a_single_cas_update_with_returning(repo, monkeypatch):
+    """2b-2 T3: claim-by-id replaces the by-agent ``claim_next_queued``.
+
+    The dispatcher already picked WHICH task; the only question left is whether
+    this worker owns it. One UPDATE ... RETURNING does that atomically — the
+    read-then-check it replaces (``run_one_task``'s ``get_task`` + phase test)
+    was not atomic, so two workers could both pass it."""
     task_id = str(uuid4())
+    wf = f"workforce-{task_id}-1"
     updated = TaskTracking(dbos_workflow_id=task_id, phase="assigned", metadata_={})
-    # 1st execute (select dbos_workflow_id, metadata_).first() → tuple;
-    # 2nd execute (update returning) → updated row.
-    session = _FakeSession([_Result(first=(task_id, {})), _Result(scalars=[updated])])
+    session = _FakeSession([_Result(scalars=[updated])])
     _patch_scopes(monkeypatch, session)
 
-    await repo.claim_next_queued(agent_id=uuid4())
+    out = await repo.claim_task(task_id, workflow_id=wf)
 
-    upd_params = session.params[1]
-    # CAS guard binds phase='queued' in the WHERE; SET phase='assigned'.
-    assert upd_params["phase_1"] == "queued"
-    assert upd_params["phase"] == "assigned"
+    assert out is not None and out["lifecycle_status"] == "assigned"
+    # ONE statement — no separate SELECT to race against.
+    assert len(session.sql) == 1
+    sql = session.sql[0]
+    assert "UPDATE public.task_tracking" in sql
+    assert "RETURNING" in sql
+    p = session.params[0]
+    rendered = str(p)
+    # The fresh-claim arm of the CAS.
+    assert "queued" in rendered
+    assert p["dbos_workflow_id_1"] == task_id
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+    # The claim always records which DBOS workflow owns the row.
+    assert wf in str(p)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_task_readmits_the_same_workflow_after_a_replay(repo, monkeypatch):
+    """A DBOS crash replay re-enters its OWN row.
+
+    Without this arm the recovery path is a dead end: the worker dies between
+    claim and completion, the row sits at 'assigned', the replay's CAS sees a
+    phase that is no longer 'queued', returns None, and the workflow records
+    SUCCESS/skipped. Nothing requeues it — ``force_terminate`` has no caller in
+    ``app/`` — so the task is stranded on every surface at once. Ownership is
+    keyed on the workflow id, so a DIFFERENT worker still cannot steal it."""
+    task_id = str(uuid4())
+    wf = f"workforce-{task_id}-1"
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.claim_task(task_id, workflow_id=wf)
+
+    sql = session.sql[0]
+    rendered = str(session.params[0])
+    # Re-entry arm: assigned / in_progress AND the metadata id matches ours.
+    assert "assigned" in rendered and "in_progress" in rendered
+    assert "workforce_workflow_id" in str(session.params[0])
+    assert wf in str(session.params[0])
+    # Phase only advances out of 'queued' — a re-entered in_progress row keeps
+    # its phase rather than being knocked back to 'assigned'.
+    assert "CASE" in sql.upper()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_task_returns_none_when_someone_else_won(repo, monkeypatch):
+    """Zero rows updated == another worker holds it. Not an error."""
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+    assert await repo.claim_task(str(uuid4()), workflow_id="workforce-x-1") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_list_undispatched_queued_tasks_filters_on_missing_stamp(
+    repo, monkeypatch
+):
+    """The dispatch tick's work list: queued agent_tasks with no
+    ``metadata.dispatched_at``. The ``->>`` IS NULL is the whole point — a row
+    already enqueued must not be enqueued again on the next tick."""
+    row = TaskTracking(dbos_workflow_id=str(uuid4()), phase="queued", metadata_={})
+    session = _FakeSession([_Result(scalars=[row])])
+    _patch_scopes(monkeypatch, session)
+
+    out = await repo.list_undispatched_queued_tasks(limit=7)
+
+    assert len(out) == 1
+    sql = session.sql[0]
+    assert "->>" in sql
+    assert "IS NULL" in sql
+    p = session.params[0]
+    assert p["phase_1"] == "queued"
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+    assert p["param_1"] == "dispatched_at"  # the ->> key
+    assert p["param_2"] == 7  # the LIMIT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_mark_dispatched_records_the_attempt_and_its_workflow_id(
+    repo, monkeypatch
+):
+    """JSONB ``||`` merge, not a read-modify-write: unrelated metadata keys
+    (agent_payload, current_run_id) survive, and no interleaving write is lost
+    between a SELECT and an UPDATE that never happen.
+
+    It records the attempt number and the exact workflow id that was enqueued,
+    because both are load-bearing: the next dispatch derives a FRESH id from
+    the attempt, and ``claim_task`` re-admits a replay only when the id matches."""
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+    task_id = str(uuid4())
+    wf = f"workforce-{task_id}-3"
+
+    await repo.mark_dispatched(task_id, workflow_id=wf, attempt=3)
+
+    assert len(session.sql) == 1
+    sql = session.sql[0]
+    assert "UPDATE public.task_tracking" in sql
+    assert "||" in sql
+    written = str(session.params[0])
+    assert "dispatched_at" in written
+    assert '"dispatch_attempt": 3' in written
+    assert wf in written
+    # Lifecycle columns are NOT touched — this is a metadata-only stamp.
+    assert "phase" not in session.params[0]
+    assert "status" not in session.params[0]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_inflight_agent_tasks_is_derived_from_live_phases(
+    repo, monkeypatch
+):
+    session = _FakeSession([], scalar_values=[4])
+    _patch_scopes(monkeypatch, session)
+
+    assert await repo.count_inflight_agent_tasks() == 4
+
+    p = session.params[0]
+    # 'assigned' belongs in the gauge: it is where a task that lost its worker
+    # comes to rest, which is exactly the state an operator needs to see.
+    assert set(p["phase_1"]) == {"queued", "assigned", "in_progress"}
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_inflight_propagates_failure_instead_of_returning_zero(
+    repo, monkeypatch
+):
+    """Deliberate departure from this file's soft-fail convention.
+
+    Returning 0 for "I could not read the table" is indistinguishable from
+    "the queue is empty" — the caller is a health probe, and handing it a
+    reassuring zero on a dead connection is the empty-output-is-not-a-negative-
+    result trap in miniature. It raises; the probe reports the gauge missing."""
+    session = _FakeSession([])
+
+    async def _boom(stmt):
+        raise RuntimeError("connection reset")
+
+    session.scalar = _boom
+    _patch_scopes(monkeypatch, session)
+
+    with pytest.raises(RuntimeError):
+        await repo.count_inflight_agent_tasks()
+
+
+@pytest.mark.unit
+def test_claim_next_queued_is_gone():
+    """The by-agent claim had zero production callers and is deleted, not
+    deprecated — leaving it invites a second, non-atomic claim path."""
+    assert not hasattr(AgentWorkforceRepository, "claim_next_queued")
 
 
 def _update_status_session() -> _FakeSession:
@@ -347,6 +510,41 @@ async def test_requeue_task_only_acts_on_in_flight_states(repo, monkeypatch):
     p = session.params[1]  # the UPDATE
     assert set(p["phase_1"]) == {"assigned", "in_progress"}
     assert p["phase"] == "queued"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_requeue_task_clears_the_dispatch_stamp(repo, monkeypatch):
+    """A reaped task goes back to 'queued' — and must become visible to the
+    dispatch tick again. The tick skips rows carrying ``dispatched_at``, so a
+    requeue that leaves the stamp in place produces a task that is queued
+    forever and enqueued never: a silent stall with no error anywhere."""
+    md = {
+        "agent_payload": {"prompt": "x"},
+        "assigned_at": "2026-09-10T00:00:00+00:00",
+        "dispatched_at": "2026-09-10T00:00:00+00:00",
+        "dispatch_attempt": 2,
+        "workforce_workflow_id": "workforce-abc-2",
+        "current_run_id": "7",
+    }
+    session = _FakeSession([_Result(first=(md,)), _Result(scalars=["t"])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.requeue_task(uuid4())
+
+    written = session.params[1]["metadata"]
+    assert "dispatched_at" not in written
+    assert "assigned_at" not in written
+    assert "current_run_id" not in written
+    # The dead run's ownership marker goes too — otherwise the next attempt's
+    # claim could be re-admitted as a replay of a workflow that is long gone.
+    assert "workforce_workflow_id" not in written
+    # ⚠️ The ATTEMPT COUNTER survives. It is what makes the next dispatch use a
+    # workflow id DBOS has never seen. Reset it and the re-enqueue collides
+    # with the old SUCCESS row, and DBOS answers by not running it at all.
+    assert written["dispatch_attempt"] == 2
+    # Business payload survives — requeue is not a reset.
+    assert written["agent_payload"] == {"prompt": "x"}
 
 
 # ─── outbox ───────────────────────────────────────────────────────────

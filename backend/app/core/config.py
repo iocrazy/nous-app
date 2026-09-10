@@ -163,6 +163,16 @@ class Settings(BaseSettings):
         "FEATURE_SHOT_GENERATE. Flip true once the video chain is validated on "
         "the target stack (needs the dreamina CLI logged in on the NAS).",
     )
+    FEATURE_WORKFORCE_DELEGATE: bool = Field(
+        default=False,
+        description="Advertise + allow the Workforce Delegate tool. Off "
+        "(default) = not composed into the system prompt AND execute() "
+        "fail-closes. Was a bare os.getenv until phase 2b-2; the chain it "
+        "waited on (scheduled tick → workflow-body dispatch → "
+        "agent_workforce_workflow → claim_task) is wired as of T3. Flip true "
+        "only after the T7 real-stack run — a truthy flag over a broken chain "
+        "returns status='queued' for work that never runs.",
+    )
     STORAGE_SIGNED_URL_PUBLIC_BASE: str = Field(
         default="",
         description="OPTIONAL public base URL (scheme+host[+port]) for storage "

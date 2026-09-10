@@ -30,10 +30,13 @@ two reasons:
    sessions across requests, so the lock can be released by an unrelated
    request before the holding request finishes. Lock acquisition would
    succeed but provide no real exclusion.
-2. M3 runs the workforce as a single in-process scheduler. The
-   ``AgentWorkerPool``'s per-agent ``asyncio.Lock`` already serialises
-   transitions for the same agent. Cross-process exclusion isn't a
-   concern at the current deployment scale.
+2. Dispatch is serialised per agent by the DBOS queue's
+   ``queue_partition_key`` (``agent_workforce``, keyed on agent_id), and the
+   task claim itself is a PG row CAS (``claim_task``). Cross-process
+   exclusion for STATE transitions isn't a concern at the current deployment
+   scale. (Before 2b-2 T3 this sentence credited the deleted
+   ``AgentWorkerPool``'s per-agent ``asyncio.Lock`` — which was per-process,
+   so it never gave what it claimed.)
 
 If we ever scale to multiple FastAPI workers, the right fix is to move
 exclusion to a real distributed primitive (Redis / Postgres
