@@ -340,6 +340,12 @@ async def run_issue_reply_step(
         trigger="issue_reply",
         chunk_callback=_cb,
         attachments=attachment_objects,
+        # phase 2b-2 §4.2: a reply turn is an issue run too. Without this the
+        # row is created with issue_id NULL and only route_finish_outcome's
+        # post-hoc backfill fills it — which never runs when the turn does not
+        # return (crash, cancel, empty output). Same hole as the dispatch path,
+        # different trigger.
+        issue_id=issue_id,
     )
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -657,10 +663,13 @@ PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
 
 async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
-    """Best-effort: stamp ``agent_runs.issue_id`` for the run that just
-    executed this issue's turn. See ``AgentRunsRepository.backfill_issue_id``
-    for why this is a post-hoc UPDATE rather than a RunRecorder constructor
-    kwarg."""
+    """Belt to the creation-time braces. Phase 2b-2 §4.2 made ``issue_id`` a
+    RunRecorder constructor kwarg on both issue paths (``run_issue_agent`` and
+    ``run_issue_reply_step``), so on those the column is already set and this
+    UPDATE's ``WHERE issue_id IS NULL`` makes it a no-op. It stays for the rows
+    that seam cannot reach — runs recorded before that change, and any future
+    issue-adjacent caller that forgets to pass it. Never raises: decoration,
+    not status routing."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     await get_agent_runs_repository().backfill_issue_id(run_id, issue_id)

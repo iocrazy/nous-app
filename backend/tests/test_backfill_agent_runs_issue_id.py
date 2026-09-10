@@ -102,6 +102,34 @@ async def test_a_live_batch_writes_and_reports_its_rowcount(scopes):
     assert scopes == ["write"]
 
 
+async def test_a_dry_run_that_exactly_fills_the_limit_still_reports_exhausted(
+    monkeypatch,
+):
+    """`would_stamp == limit` used to report `exhausted: False`, sending the
+    operator round again for nothing. The scan asks for one MORE than it
+    reports, so "is there anything past this page" is answered, not guessed."""
+    seen: list[int] = []
+
+    async def _batch(dry_run, limit):
+        seen.append(limit)
+        return 10  # exactly the caller's limit, one short of the probe
+
+    monkeypatch.setattr(bf, "_one_batch", _batch)
+    would, exhausted = await bf._dry_run_scan(10)
+    assert seen == [11]
+    assert (would, exhausted) == (10, True)
+
+
+async def test_a_dry_run_with_more_rows_than_the_limit_reports_not_exhausted(
+    monkeypatch,
+):
+    async def _batch(dry_run, limit):
+        return 11  # the probe row came back → there is at least one more page
+
+    monkeypatch.setattr(bf, "_one_batch", _batch)
+    assert await bf._dry_run_scan(10) == (10, False)
+
+
 def test_the_backfill_is_registered_under_its_name():
     from app.api.admin.backfill_router import _BACKFILLS
 

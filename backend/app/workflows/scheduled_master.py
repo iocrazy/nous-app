@@ -721,7 +721,7 @@ async def _dispatch_routine_orders(
         try:
             from app.api.issues_router import _dispatch_execute_issue
 
-            _dispatch_execute_issue(issue_id, workflow_id)
+            await _dispatch_execute_issue(issue_id, workflow_id)
             logger.info(
                 f"[scheduled_master] routine issue {issue_id} dispatched "
                 f"(wf={workflow_id})"

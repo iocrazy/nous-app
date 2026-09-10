@@ -230,7 +230,7 @@ class RelayGateway:
         from app.models import Issues
 
         wf_id = f"issue-{int(issue_id)}-{_uuid.uuid4().hex[:12]}"
-        _dispatch_execute_issue(int(issue_id), wf_id)
+        await _dispatch_execute_issue(int(issue_id), wf_id)
         async with write_scope() as session:
             await session.execute(text("SET LOCAL ROLE service_role"))
             await session.execute(

@@ -552,6 +552,24 @@ def _resolve_owner(issue_row: dict) -> str:
     return str(owner_id)
 
 
+async def _fresh_issue_row(issue_id: int, fallback: dict) -> dict:
+    """Re-read the issue so the busy decision is made on current
+    ``execution_state``.
+
+    The same single-row PK read the caller already used (and the same one
+    ``_try_wake_waiting_workflow`` re-does before it acts), so this adds no new
+    query shape. Failure is not fatal: the caller's row is stale, not wrong,
+    and refusing to decide would lose the comment."""
+    try:
+        return await issue_repository.get_by_id(int(issue_id)) or fallback
+    except Exception as exc:  # noqa: BLE001 — a sharpening, not a dependency
+        logger.warning(
+            f"[issue_reply] issue {issue_id}: could not re-read before the "
+            f"inbox decision ({exc!r}); deciding on the caller's row"
+        )
+        return fallback
+
+
 async def _divert_to_inbox_if_running(
     issue_id: int,
     session_id: str,
@@ -571,9 +589,14 @@ async def _divert_to_inbox_if_running(
     turn racing the one being dispatched). Return the inbox id, or None when
     none of the three holds (caller falls through to the wake path). The
     comment row is persisted first so a failed enqueue never loses the human's
-    words. ``issue_row`` is the row the caller already loaded — the marker
-    lives on it, and re-reading it here would only add a second chance to see
-    a different value."""
+    words.
+
+    ``issue_row`` is the row the caller already holds, but for the marker it
+    is only the FALLBACK: it was loaded several awaits ago (session create,
+    typed-answer validation) while ``running_root_run_id`` beside it is read
+    fresh, and an unattended dispatch landing in that gap has to be visible
+    here. So the marker is re-read; a re-read that fails degrades to the
+    caller's row rather than losing the comment."""
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
@@ -583,7 +606,7 @@ async def _divert_to_inbox_if_running(
     running = await get_agent_runs_repository().running_root_run_id(
         issue_id=issue_id, conversation_id=int(session_id)
     )
-    dispatching = is_dispatching(issue_row)
+    dispatching = is_dispatching(await _fresh_issue_row(issue_id, issue_row))
     if running is None and not paused and not dispatching:
         return None
     await ConversationsAiStore().append_user_message(

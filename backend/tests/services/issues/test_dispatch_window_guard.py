@@ -67,31 +67,185 @@ def test_stale_null_and_malformed_markers_are_all_not_busy():
     )
 
 
-@pytest.mark.asyncio
-async def test_start_execute_issue_marks_before_dispatch_and_clears_on_failure(
-    monkeypatch,
-):
-    calls = []
+# ── The marker lives on the DBOS seam itself ──────────────────────────────
+#
+# Review round 1, item 2: five call sites reach ``execute_issue``, and four of
+# them (autopilot, pipeline relay, routine schedule, stranded recovery) never
+# go through ``start_execute_issue``. Those four are the UNATTENDED dispatches
+# — the ones most likely to collide with a human's fork. So the marker is
+# written by ``issues_router._dispatch_execute_issue``, the one seam all five
+# already call, rather than at four new patch points.
+
+
+def _router():
+    """importlib + sys.modules, not ``import app.api.issues_router as m``: the
+    package re-exports the APIRouter under that very name, so the plain import
+    binds the router OBJECT."""
+    importlib.import_module("app.api.issues_router")
+    return sys.modules["app.api.issues_router"]
+
+
+@pytest.fixture
+def seam(monkeypatch):
+    """The DBOS enqueue stubbed out, every execution_state write captured."""
+    from app.services.infra import dbos_orchestrator
+
+    enqueued: list = []
+
+    class _Client:
+        def enqueue(self, options, *args):
+            enqueued.append((options, args))
+            return "handle"
+
+    monkeypatch.setattr(dbos_orchestrator, "_client", _Client())
+    monkeypatch.setattr(dbos_orchestrator, "_resolve_pinned_app_version", lambda: None)
+
+    writes: list = []
 
     async def _merge(issue_id, patch):
-        calls.append(patch)
+        writes.append((issue_id, patch, len(enqueued)))
 
     monkeypatch.setattr(issue_dispatch, "merge_execution_state", _merge)
-    # importlib + sys.modules, not ``import app.api.issues_router as m``: the
-    # package re-exports the APIRouter under that very name, so the plain
-    # import binds the router OBJECT. start_execute_issue resolves the module
-    # the same way — patch what production actually calls.
-    importlib.import_module("app.api.issues_router")
-    router_mod = sys.modules["app.api.issues_router"]
+    return _ns(enqueued=enqueued, writes=writes)
 
-    def _boom(issue_id, workflow_id):
+
+def test_a_naive_timestamp_on_either_side_is_read_as_utc():
+    """``at`` comes back from jsonb as whatever string was written, and ``now``
+    is a public kwarg later Tasks were told to use. Neither may raise: an
+    aware-minus-naive subtraction is a TypeError, which would take down the
+    dispatch seam over a formatting detail."""
+    aware = datetime.now(timezone.utc)
+    naive = aware.replace(tzinfo=None)
+
+    assert issue_dispatch.is_dispatching(_issue(naive.isoformat()), now=aware) is True
+    assert issue_dispatch.is_dispatching(_issue(aware.isoformat()), now=naive) is True
+    assert issue_dispatch.is_dispatching(_issue(naive.isoformat()), now=naive) is True
+    old = (naive - timedelta(seconds=61)).isoformat()
+    assert issue_dispatch.is_dispatching(_issue(old), now=naive) is False
+
+
+def test_a_null_execution_state_column_is_not_busy():
+    """``issues.execution_state`` is nullable, so this is the shape most real
+    rows have — and the one no dict-valued fixture exercises."""
+    assert issue_dispatch.is_dispatching({"execution_state": None}) is False
+    assert issue_dispatch.is_dispatching({}) is False
+    assert issue_dispatch.is_dispatching({"execution_state": {"turn": 3}}) is False
+
+
+@pytest.mark.asyncio
+async def test_the_dbos_seam_marks_before_it_enqueues(seam):
+    await _router()._dispatch_execute_issue(7, "issue-7-abc")
+
+    assert len(seam.enqueued) == 1
+    issue_id, patch, enqueued_before = seam.writes[0]
+    # Written BEFORE the enqueue: a marker stamped after it would leave open
+    # exactly the window it exists to close.
+    assert enqueued_before == 0
+    assert issue_id == 7
+    assert list(patch["dispatching"]) == ["workflow_id", "at"]
+    assert patch["dispatching"]["workflow_id"] == "issue-7-abc"
+
+
+@pytest.mark.asyncio
+async def test_an_autopilot_dispatch_leaves_the_marker_set(seam, monkeypatch):
+    """The unattended seam. ``node_start._dispatch_node`` never touches
+    ``start_execute_issue``; before the marker moved onto the DBOS seam this
+    path dispatched with no guard at all."""
+    from app.services.workflow import node_start
+
+    await node_start._dispatch_node(42, auto=True)
+
+    assert len(seam.enqueued) == 1
+    issue_id, patch, _ = seam.writes[0]
+    assert issue_id == 42 and patch["dispatching"]["workflow_id"].startswith(
+        "issue-42-"
+    )
+    # And the issue now reads busy to all three readers.
+    assert issue_dispatch.is_dispatching({"execution_state": patch}) is True
+
+
+@pytest.mark.asyncio
+async def test_a_failed_enqueue_clears_the_marker(seam, monkeypatch):
+    from app.services.infra import dbos_orchestrator
+
+    class _Boom:
+        def enqueue(self, *a, **k):
+            raise RuntimeError("dbos is down")
+
+    monkeypatch.setattr(dbos_orchestrator, "_client", _Boom())
+    with pytest.raises(RuntimeError):
+        await _router()._dispatch_execute_issue(7, "issue-7-abc")
+
+    # cleared, not left to rot for 60s
+    assert [p for _, p, _ in seam.writes][-1] == {"dispatching": None}
+
+
+@pytest.mark.asyncio
+async def test_a_duplicate_enqueue_leaves_the_marker_for_the_workflow_to_clear(
+    seam, monkeypatch
+):
+    """A duplicate is a soft success — DBOS already holds that workflow, and
+    its own atomic_checkout will remove the key."""
+    from app.services.infra import dbos_orchestrator
+
+    class _Dup:
+        def enqueue(self, *a, **k):
+            raise RuntimeError("workflow already exists")
+
+    monkeypatch.setattr(dbos_orchestrator, "_client", _Dup())
+    with pytest.raises(RuntimeError):
+        await _router()._dispatch_execute_issue(7, "issue-7-abc")
+
+    assert len(seam.writes) == 1  # the mark only; no clear
+
+
+@pytest.mark.asyncio
+async def test_a_marker_write_failure_never_blocks_the_dispatch(
+    seam, monkeypatch, caplog
+):
+    """Review round 1, item 4: the marker is advisory, not a lock. If writing
+    it fails the correct outcome is "this dispatch runs unguarded" — i.e. the
+    behaviour before this feature existed — not "this issue cannot run".
+    atomic_checkout's CAS is still the backstop."""
+    import logging
+
+    async def _boom(issue_id, patch):
+        raise RuntimeError("issues table is angry")
+
+    monkeypatch.setattr(issue_dispatch, "merge_execution_state", _boom)
+    with caplog.at_level(logging.WARNING):
+        await _router()._dispatch_execute_issue(7, "issue-7-abc")
+
+    assert len(seam.enqueued) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_execute_issue_maps_a_real_failure_to_dispatch_failed(monkeypatch):
+    router_mod = _router()
+
+    async def _boom(issue_id, workflow_id, **kw):
         raise RuntimeError("dbos is down")
 
     monkeypatch.setattr(router_mod, "_dispatch_execute_issue", _boom)
     with pytest.raises(issue_dispatch.DispatchFailed):
         await issue_dispatch.start_execute_issue(7)
-    assert list(calls[0]["dispatching"]) == ["workflow_id", "at"]
-    assert calls[1] == {"dispatching": None}  # cleared, not left to rot for 60s
+
+
+@pytest.mark.asyncio
+async def test_start_execute_issue_treats_a_duplicate_as_a_soft_success(monkeypatch):
+    router_mod = _router()
+    persisted = []
+
+    async def _dup(issue_id, workflow_id, **kw):
+        raise RuntimeError("workflow already exists")
+
+    async def _persist(issue_id, workflow_id):
+        persisted.append((issue_id, workflow_id))
+
+    monkeypatch.setattr(router_mod, "_dispatch_execute_issue", _dup)
+    monkeypatch.setattr(router_mod, "_persist_workflow_id", _persist)
+    wf = await issue_dispatch.start_execute_issue(7)
+    assert persisted == [(7, wf)]
 
 
 # ── The three readers that were blind to the window ────────────────────────
@@ -238,6 +392,106 @@ async def test_a_comment_lands_on_the_inbox_while_a_dispatch_is_in_flight(monkey
     enqueue.assert_awaited_once()
 
 
+async def test_the_comment_guard_re_reads_the_issue_instead_of_trusting_its_caller(
+    monkeypatch,
+):
+    """Review round 1, item 5. The caller loads ``issue_row`` many awaits
+    earlier (session create, typed-answer validation) while
+    ``running_root_run_id`` beside it is read fresh. An unattended dispatch
+    landing in that gap has to be seen, or the comment wakes a SECOND turn
+    racing the one being dispatched."""
+    import importlib
+    import sys
+    from unittest.mock import AsyncMock, MagicMock
+
+    importlib.import_module("app.api.issue_messages_router")
+    r = sys.modules["app.api.issue_messages_router"]
+
+    import app.repositories.agent_run_inbox_repository as inbox_mod
+    import app.repositories.agent_runs_repository as runs_mod
+
+    monkeypatch.setattr(
+        runs_mod,
+        "get_agent_runs_repository",
+        lambda: _ns(running_root_run_id=_async(None)),
+    )
+    enqueue = AsyncMock(return_value={"id": 310819108761499})
+    monkeypatch.setattr(
+        inbox_mod, "get_agent_run_inbox_repository", lambda: _ns(enqueue=enqueue)
+    )
+    store = MagicMock()
+    store.append_user_message = AsyncMock()
+    store_cls = MagicMock(return_value=store)
+    store_cls.display_attachments = staticmethod(lambda a: a)
+    monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+
+    # The row the caller is holding is stale: it was loaded before the
+    # dispatch. The database already knows better.
+    monkeypatch.setattr(
+        r.issue_repository,
+        "get_by_id",
+        AsyncMock(return_value={"id": 5, "execution_state": _marker()}),
+    )
+
+    inbox_id = await r._divert_to_inbox_if_running(
+        5,
+        "55",
+        "11111111-1111-1111-1111-111111111111",
+        _ns(user_id="11111111-1111-1111-1111-111111111111"),
+        "hold on",
+        None,
+        paused=False,
+        issue_row={"id": 5, "execution_state": {}},
+    )
+    assert inbox_id == "310819108761499"
+
+
+async def test_a_failed_re_read_falls_back_to_the_row_the_caller_had(monkeypatch):
+    """The re-read is a sharpening, not a new dependency: if it raises, the
+    decision still gets made from the stale row rather than losing the
+    comment."""
+    import importlib
+    import sys
+    from unittest.mock import AsyncMock, MagicMock
+
+    importlib.import_module("app.api.issue_messages_router")
+    r = sys.modules["app.api.issue_messages_router"]
+
+    import app.repositories.agent_run_inbox_repository as inbox_mod
+    import app.repositories.agent_runs_repository as runs_mod
+
+    monkeypatch.setattr(
+        runs_mod,
+        "get_agent_runs_repository",
+        lambda: _ns(running_root_run_id=_async(None)),
+    )
+    monkeypatch.setattr(
+        inbox_mod,
+        "get_agent_run_inbox_repository",
+        lambda: _ns(enqueue=AsyncMock(return_value={"id": 7})),
+    )
+    store = MagicMock()
+    store.append_user_message = AsyncMock()
+    store_cls = MagicMock(return_value=store)
+    store_cls.display_attachments = staticmethod(lambda a: a)
+    monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+    monkeypatch.setattr(
+        r.issue_repository, "get_by_id", AsyncMock(side_effect=RuntimeError("db"))
+    )
+
+    inbox_id = await r._divert_to_inbox_if_running(
+        5,
+        "55",
+        "11111111-1111-1111-1111-111111111111",
+        _ns(user_id="11111111-1111-1111-1111-111111111111"),
+        "hold on",
+        None,
+        paused=False,
+        issue_row={"id": 5, "execution_state": _marker()},
+    )
+    assert inbox_id == "7"
+
+
 async def test_an_idle_issue_still_falls_through_to_the_wake_path(monkeypatch):
     """Negative control: without a marker the diversion must not fire, or every
     comment on an idle issue would silently queue instead of waking a turn."""
@@ -253,6 +507,13 @@ async def test_an_idle_issue_still_falls_through_to_the_wake_path(monkeypatch):
         runs_mod,
         "get_agent_runs_repository",
         lambda: _ns(running_root_run_id=_async(None)),
+    )
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        r.issue_repository,
+        "get_by_id",
+        AsyncMock(return_value={"id": 5, "execution_state": {}}),
     )
     assert (
         await r._divert_to_inbox_if_running(

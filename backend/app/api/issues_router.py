@@ -54,8 +54,21 @@ router = APIRouter(
 )
 
 
-def _dispatch_execute_issue(issue_id: int, wf_id: str, *, auto: bool = False) -> None:
+async def _dispatch_execute_issue(
+    issue_id: int, wf_id: str, *, auto: bool = False
+) -> None:
     """Dispatch the execute_issue DBOS workflow under a pinned workflow_id.
+
+    Phase 2b-2 §4.1: this is also where the dispatch WINDOW opens. Every path
+    that starts an ``execute_issue`` comes through here — ``start_execute_issue``
+    (the two endpoints + fork) plus four direct callers (autopilot node_start,
+    pipeline relay, routine schedule, stranded recovery) — so the
+    ``execution_state.dispatching`` marker is written HERE rather than at each
+    call site. That is what makes the guard cover the unattended dispatches,
+    which are the ones most likely to collide with a human's fork. The write is
+    async, which is why this helper is; it is best-effort (see
+    ``issue_dispatch.mark_dispatching``) so a marker failure degrades to an
+    unguarded dispatch, never to a refused one.
 
     Client-aware (gateway→DBOSClient prep, currently DORMANT): when the gateway
     has constructed a DBOSClient, enqueue through it into the `dbos_dispatch`
@@ -73,24 +86,37 @@ def _dispatch_execute_issue(issue_id: int, wf_id: str, *, auto: bool = False) ->
         _resolve_pinned_app_version,
         get_dbos_client,
     )
+    from app.services.issues import issue_dispatch
 
-    client = get_dbos_client()
-    if client is not None:
-        from dbos import EnqueueOptions
+    # Before the enqueue: a marker stamped afterwards would leave open exactly
+    # the window it exists to close — DBOS can have the workflow running
+    # before the next statement here executes.
+    await issue_dispatch.mark_dispatching(issue_id, wf_id)
+    try:
+        client = get_dbos_client()
+        if client is not None:
+            from dbos import EnqueueOptions
 
-        opts: dict = {
-            "workflow_name": "execute_issue",
-            "queue_name": "dbos_dispatch",
-            "workflow_id": wf_id,
-        }
-        pinned = _resolve_pinned_app_version()
-        if pinned:
-            opts["app_version"] = pinned
-        client.enqueue(EnqueueOptions(**opts), issue_id, auto)
-        return
+            opts: dict = {
+                "workflow_name": "execute_issue",
+                "queue_name": "dbos_dispatch",
+                "workflow_id": wf_id,
+            }
+            pinned = _resolve_pinned_app_version()
+            if pinned:
+                opts["app_version"] = pinned
+            client.enqueue(EnqueueOptions(**opts), issue_id, auto)
+            return
 
-    with SetWorkflowID(wf_id):
-        DBOS.start_workflow(execute_issue, issue_id, auto)
+        with SetWorkflowID(wf_id):
+            DBOS.start_workflow(execute_issue, issue_id, auto)
+    except Exception as exc:
+        # A duplicate means DBOS already holds the workflow and its own
+        # atomic_checkout will remove the key; only a real failure means
+        # nobody is coming, so only that clears the window here.
+        if not issue_dispatch.looks_like_duplicate_dispatch(exc):
+            await issue_dispatch.clear_dispatching(issue_id)
+        raise
 
 
 def _normalise_uuid_strs(row: dict) -> dict:

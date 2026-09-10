@@ -139,6 +139,10 @@ async def test_atomic_checkout_closes_the_dispatch_window_in_the_same_update(
     # form set_status uses so jsonb's overloaded ``-`` is not ambiguous.
     assert " - CAST(" in sql
     assert "dispatching" in [v for v in binds.values() if v == "dispatching"]
+    # execution_state is NULLABLE and most rows have never been decorated.
+    # `NULL - 'k'` is NULL in Postgres, which would WIPE the column on every
+    # checkout; the coalesce is what keeps that from happening.
+    assert "coalesce(public.issues.execution_state" in sql.lower()
 
 
 async def test_atomic_checkout_returns_false_when_no_row(monkeypatch):

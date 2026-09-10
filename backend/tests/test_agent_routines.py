@@ -308,7 +308,9 @@ async def test_always_policy_uses_unique_fingerprint(
 async def test_dispatch_routine_orders_dispatches_and_records_failures() -> None:
     from app.workflows import scheduled_master as sm
 
-    dispatch = MagicMock(
+    # _dispatch_execute_issue is async since phase 2b-2 (it writes the
+    # dispatching marker before enqueueing), so the stub must be awaitable.
+    dispatch = AsyncMock(
         side_effect=[None, RuntimeError("boom"), Exception("already exists")]
     )
     record = AsyncMock()
@@ -325,8 +327,8 @@ async def test_dispatch_routine_orders_dispatches_and_records_failures() -> None
     ):
         await sm._dispatch_routine_orders(orders, counters)
 
-    assert dispatch.call_count == 3
-    assert dispatch.call_args_list[0].args == (1, "issue-1-a")
+    assert dispatch.await_count == 3
+    assert dispatch.await_args_list[0].args == (1, "issue-1-a")
     # boom → recorded as schedule last_error; duplicate → soft success
     assert counters["errors"] == 1
     record.assert_awaited_once()

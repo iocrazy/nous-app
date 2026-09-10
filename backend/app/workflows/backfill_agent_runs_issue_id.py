@@ -89,6 +89,18 @@ async def _one_batch(dry_run: bool, limit: int) -> int:
         return result.rowcount or 0
 
 
+async def _dry_run_scan(limit: int) -> tuple[int, bool]:
+    """``(would_stamp, exhausted)`` for one dry-run page.
+
+    Scans ``limit + 1`` and reports ``limit``. Without the probe row,
+    "candidates == limit" is ambiguous — it means either "exactly one full
+    page and nothing more" or "the first of many" — and reporting the
+    pessimistic reading sends the operator round again for nothing.
+    """
+    found = await _one_batch(True, limit + 1)
+    return min(found, limit), found <= limit
+
+
 @DBOS.workflow()
 async def backfill_agent_runs_issue_id_workflow(
     dry_run: bool = True,
@@ -132,9 +144,10 @@ async def backfill_agent_runs_issue_id_workflow(
     }
     try:
         if dry_run:
-            result["would_stamp"] = await _one_batch(True, limit)
+            would, exhausted = await _dry_run_scan(limit)
+            result["would_stamp"] = would
             result["batches"] = 1
-            result["exhausted"] = result["would_stamp"] < limit
+            result["exhausted"] = exhausted
         else:
             for _ in range(MAX_BATCHES):
                 stamped = await _one_batch(False, limit)

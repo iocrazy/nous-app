@@ -15,6 +15,16 @@ comment→inbox decision — reads idle. A fork landing there swings
 ``{"skipped": True}``. ``execution_state.dispatching`` is the marker that
 closes the window; ``atomic_checkout`` removes it in the same UPDATE that
 opens the lock.
+
+WHERE the marker is written matters. Five call sites reach ``execute_issue``
+and only three of them go through ``start_execute_issue``; the other four —
+autopilot (``node_start``), pipeline relay, routine schedule, stranded
+recovery — call ``issues_router._dispatch_execute_issue`` directly. Those are
+the UNATTENDED dispatches, the ones most likely to collide with a human's
+fork. So the write lives on that one shared DBOS seam (which calls
+``mark_dispatching`` below) rather than at four separate patch points that a
+sixth caller would then also have to remember. This module owns the marker's
+SHAPE and its readers; the router owns the moment.
 """
 
 from __future__ import annotations
@@ -38,6 +48,14 @@ class DispatchFailed(RuntimeError):
     """DBOS refused the dispatch; the router maps it to a 500."""
 
 
+def _utc(value: datetime) -> datetime:
+    """A naive timestamp is UTC. Both sides go through here: ``at`` is whatever
+    string was written into jsonb, ``now`` is a public kwarg other modules
+    were told to use, and subtracting an aware from a naive is a TypeError —
+    an advisory guard must never raise on the dispatch path."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def is_dispatching(
     issue: dict, *, now: datetime | None = None, ttl_s: int = DISPATCH_MARKER_TTL_S
 ) -> bool:
@@ -50,20 +68,69 @@ def is_dispatching(
 
     ``merge_execution_state`` merges with ``||``, so clearing the marker on a
     failed dispatch writes JSON ``null`` rather than dropping the key; ``null``
-    (and a marker carrying no ``at``) therefore has to read as NOT busy. The
-    real key removal happens in ``atomic_checkout``.
+    (and a marker carrying no ``at``, and a wholly NULL ``execution_state``
+    column, which is what most rows have) therefore has to read as NOT busy.
+    The real key removal happens in ``atomic_checkout``.
     """
     marker = (issue.get("execution_state") or {}).get("dispatching") or {}
     at = marker.get("at") if isinstance(marker, dict) else None
     if not at:
         return False
     try:
-        stamped = datetime.fromisoformat(str(at))
+        stamped = _utc(datetime.fromisoformat(str(at)))
     except ValueError:
         return False  # unparseable = not a guard we can trust; never wedge on it
-    if stamped.tzinfo is None:
-        stamped = stamped.replace(tzinfo=timezone.utc)
-    return (now or datetime.now(timezone.utc)) - stamped < timedelta(seconds=ttl_s)
+    return _utc(now or datetime.now(timezone.utc)) - stamped < timedelta(seconds=ttl_s)
+
+
+def looks_like_duplicate_dispatch(exc: BaseException) -> bool:
+    """A duplicate workflow_id is a soft success — DBOS already holds it, and
+    that workflow's own ``atomic_checkout`` will clear the marker. Shared by
+    the seam (decides whether to clear) and ``start_execute_issue`` (decides
+    whether to raise) so the two can never disagree about what a duplicate is.
+    """
+    low = repr(exc).lower()
+    return "already exists" in low or "duplicate" in low
+
+
+async def mark_dispatching(issue_id: int, workflow_id: str) -> None:
+    """Open the dispatch window. Best-effort ON PURPOSE.
+
+    The marker is advisory, never a lock: ``atomic_checkout``'s CAS is what
+    actually prevents a double run. If this write fails the correct outcome is
+    "this dispatch runs unguarded" — the behaviour that existed before the
+    marker — not "this issue cannot run at all". Raising here would turn a
+    hiccup on a high-traffic table into a refused dispatch, and it would
+    surface as an untyped 500 because only ``DispatchFailed`` is mapped.
+    """
+    try:
+        await merge_execution_state(
+            issue_id,
+            {
+                "dispatching": {
+                    "workflow_id": workflow_id,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — degrade to unguarded, never block
+        logger.warning(
+            f"[issues] could not mark issue {issue_id} dispatching "
+            f"(wf={workflow_id}): {e!r}; this dispatch runs unguarded"
+        )
+
+
+async def clear_dispatching(issue_id: int) -> None:
+    """Close the window from the failure side, so a dispatch that never
+    happened does not read busy for the whole TTL. Best-effort for the same
+    reason as ``mark_dispatching`` — and here the TTL is the fallback."""
+    try:
+        await merge_execution_state(issue_id, {"dispatching": None})
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"[issues] could not clear the dispatching marker on issue "
+            f"{issue_id}: {e!r}; it expires in {DISPATCH_MARKER_TTL_S}s"
+        )
 
 
 async def start_execute_issue(issue_id: int) -> str:
@@ -79,29 +146,13 @@ async def start_execute_issue(issue_id: int) -> str:
     router_mod = importlib.import_module("app.api.issues_router")
 
     workflow_id = f"issue-{issue_id}-{uuid.uuid4().hex[:12]}"
-    # Marker BEFORE the enqueue: a marker written after it would leave exactly
-    # the window it exists to close. Written even though the dispatch may fail
-    # — the except branch clears it, and the TTL covers a crash in between.
-    await merge_execution_state(
-        issue_id,
-        {
-            "dispatching": {
-                "workflow_id": workflow_id,
-                "at": datetime.now(timezone.utc).isoformat(),
-            }
-        },
-    )
+    # The dispatching marker is NOT written here — it is written inside
+    # _dispatch_execute_issue, so the four callers that bypass this function
+    # get it too. See the module docstring.
     try:
-        router_mod._dispatch_execute_issue(issue_id, workflow_id)
+        await router_mod._dispatch_execute_issue(issue_id, workflow_id)
     except Exception as e:
-        if (
-            "already exists" not in repr(e).lower()
-            and "duplicate" not in repr(e).lower()
-        ):
-            # A duplicate is a soft success — DBOS already holds that workflow
-            # and its atomic_checkout will clear the marker. Only a real
-            # failure means nobody is coming, so only it clears here.
-            await merge_execution_state(issue_id, {"dispatching": None})
+        if not looks_like_duplicate_dispatch(e):
             logger.warning(f"[issues] dispatch {issue_id} failed: {e}")
             raise DispatchFailed(f"DBOS dispatch failed: {e}") from e
     await router_mod._persist_workflow_id(issue_id, workflow_id)
@@ -111,6 +162,9 @@ async def start_execute_issue(issue_id: int) -> str:
 __all__ = [
     "DISPATCH_MARKER_TTL_S",
     "DispatchFailed",
+    "clear_dispatching",
     "is_dispatching",
+    "looks_like_duplicate_dispatch",
+    "mark_dispatching",
     "start_execute_issue",
 ]
