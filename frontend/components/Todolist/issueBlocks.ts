@@ -20,6 +20,8 @@ export interface IssueBlockEnv {
   subtaskCount?: { total: number; done: number } | null;
   assigneeName?: string;
   refreshKey?: number;
+  /** Bumped when this issue's schedules change (harness 2b-2 §5-2). */
+  schedulesRefreshKey?: number;
   teamId?: string;
   /** Ask the page to re-read the issue + rollup (after a PATCH, a cancel …). */
   onIssueChanged?: () => void;

@@ -213,6 +213,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // page owns the state because the panel is a sibling of the thread, not a
   // descendant of the card that asked for it.
   const [childRun, setChildRun] = useState<ChildRunOrigin | null>(null);
+  // Bumped when a wake-up is armed or cancelled, so the Schedules block
+  // re-reads instead of showing a list that is already out of date.
+  const [schedulesRefresh, setSchedulesRefresh] = useState(0);
   const childRunState = useMemo<ChildRunState>(
     () => ({ current: childRun, open: setChildRun, close: () => setChildRun(null) }),
     [childRun],
@@ -513,6 +516,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           subtaskCount: subtaskCount ?? null,
           assigneeName: issue.assignee?.name ?? issue.assignee_user_label,
           refreshKey: pipelineRefresh,
+          schedulesRefreshKey: schedulesRefresh,
           teamId,
           onIssueChanged: () => {
             void refreshProgress();
@@ -522,7 +526,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             handleAnswerQuestion(value, answerTo),
         },
       ),
-    [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, teamId, refreshProgress, onIssueDispatched, handleAnswerQuestion],
+    [issue, progress, agentsById, projectPath, subtaskCount, pipelineRefresh, schedulesRefresh, teamId, refreshProgress, onIssueDispatched, handleAnswerQuestion],
   );
   const cockpitBlocks = blocksFor('cockpit', blockCtx);
   useEffect(() => {
@@ -743,6 +747,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               : undefined
           }
           teamId={teamId}
+          issueId={Number(issue.id)}
+          onScheduled={() => setSchedulesRefresh((n) => n + 1)}
         />
         </div>
       </div>
