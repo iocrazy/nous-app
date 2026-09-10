@@ -155,6 +155,26 @@
 > - `useRunToolActivity` 按 `has_more` 用 `after_seq` 翻页读完整个 transcript（此前只取一页 500 条，回放让「完整」成为硬需求）。
 > - 刮擦条 `role=group`（不是带子按钮的 `slider`）；←/→/Home/End 键盘可用。
 
+> **§4 偏离度对照（2026-09-10，对生产 03b6fc3 真机截图逐条对照本节三页文字稿；2b-1 没有单独画板页——本 session Artifact 工具不可用，三页稿即本节文字，plan 里引用的 `control-plane-2b1.html` 从未落盘）**
+>
+> | 页 | 稿上写的 | 线上实际 | 偏离 | 记录处 |
+> |---|---|---|---|---|
+> | ① 回放 | 刻度 = step，当前刻度标 `step 7 / 12 · turn 2` | 刻度 = step，位置文案「第 1 轮 · 第 2 步（2/2）」（turn 在前，含全局步序） | 措辞顺序不同，信息等价 | Task 5 记录 |
+> | ① 回放 | 右侧 `Live` 胶囊 | 「实时」胶囊，回放时点击回到实时 | 无 | — |
+> | ① 回放 | 拖离后轨迹只到该 step，Cockpit 四格取该时刻值 + 灰角标「as of step 7」 | 冻结最新 run：四格取冻结 view，角标「as of turn T · step S」且本身是回到实时按钮；回放**别的** run（分叉原 run）：四格保持实时，按钮读「正在回放 run #… · 实时」 | 「回放别的 run」是稿上没有的态（原 run 不在线程里，另画面板）；角标坐标同源改为 turn·step | Task 5 / Task 6 记录 |
+> | ① 回放 | 键盘 ←/→ | ←/→/Home/End，`role=group` | 多了 Home/End | Task 5 记录 |
+> | ② 分叉 | `Fork from step 7` 按钮 → 弹窗（说明 + steer + Fork/Cancel） | 「从第 2 步分叉」→ 弹窗同形；标题用刮擦条位置文案 | 无 | Task 6 记录 |
+> | ② 分叉 | 成功后详情页切到新 run | 清回放位置、toast、重拉；新 run 行随 rollup 轮询出现，不自动刮到新 run | 少一步「自动切换」 | Task 6 记录 |
+> | ② 分叉 | 新 run 轨迹头部芯片 `Forked from run #… @ step 7` | 行头 `run-fork-chip`「分叉自 run #852739 @ seq 6」+ Cockpit 运行中同样芯片 | 显示 seq 不是 step（行手里只有分叉 run 自己的事件，换不成原 run 的步序）；运行结束后仍在（#2208 补） | Task 6 / Task 8 记录 |
+> | ② 分叉 | 原 run 在 step 7 节点右侧出 `Fork →` 小标 | 步骤节点下方一排「分叉 → #290162」芯片，可点 | 位置在节点下方不是右侧；只画 step_start 边界，turn_end 处的分叉不画 | Task 6 记录 |
+> | ② 分叉 | issue 时间线一条系统行「Forked from step 7」 | 不写 | `issue_messages.kind=system_status` 由 trigger 写、无 body | Task 1 勘察记录 |
+> | ③ 超时 | 工具名后 `Timed out · 60s` 红字徽标，展开可见 `elapsed 60.0s` | 「超时 · 0s」danger 徽标，`实际 0.0s` 直接在行内可见（不需展开） | elapsed 不折叠，直接可见 | Task 7 记录 |
+> | ③ 超时 | Cockpit 第五格 `Tools`「1 timed out」，无则不出现 | 运行中：第五格同稿；issue 空闲后 Cockpit 无 run 视图，改由行头 `run-timeout-chip`「1 个超时」承担 | 空闲态入口换了位置 | Task 8 记录 / #2208 |
+> | ③ 超时 | Reason 行不出现（run 没停） | 不出现，`本轮结束 · completed` | 无 | — |
+> | 配色 | 回放/分叉用 info，超时用 danger | 同 | 无 | — |
+>
+> 未对照的：总稿（2026-09-05 §5「方案 A 定稿，深色」与画板 2–6 页）是深色稿，生产是暖纸浅色主题——这是一期起就存在的全局差异，不属于 2b-1；要不要把画板稿改成浅色由用户定。
+
 ## 5. 数据与端点汇总
 
 | 项 | 变更 |
