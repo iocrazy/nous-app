@@ -26,11 +26,13 @@ interface ParseOutcome {
   playlist?: SodaPlaylistResult;
 }
 
-const AI_INTENTS = [
-  { name: 'Transcript', label: 'Transcript', Icon: Mic },
-  { name: 'Summary', label: 'Summary', Icon: FileText },
-  { name: 'Analyze', label: 'Analyze', Icon: Eye },
-] as const;
+type IntentKey = 'transcribe' | 'summarize' | 'analyze';
+const AI_INTENTS: ReadonlyArray<{ key: IntentKey; label: string; Icon: typeof Mic }> = [
+  { key: 'transcribe', label: 'Transcript', Icon: Mic },
+  { key: 'summarize', label: 'Summary', Icon: FileText },
+  { key: 'analyze', label: 'Analyze', Icon: Eye },
+];
+const NO_INTENTS: Record<IntentKey, boolean> = { transcribe: false, summarize: false, analyze: false };
 
 export const FloatingParse: React.FC<{
   open?: boolean;
@@ -61,6 +63,9 @@ export const FloatingParse: React.FC<{
   // Tag state
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [intents, setIntents] = useState<Record<IntentKey, boolean>>(NO_INTENTS);
+  // Pipeline 组的三枚系统标签由上面的意图按钮承载，不再当普通标签给用户勾。
+  const pickerTags = useMemo(() => allTags.filter((tg) => tg.group_name !== 'Pipeline'), [allTags]);
 
   const detection = useMemo(() => detectParseMode(input), [input]);
 
@@ -72,22 +77,6 @@ export const FloatingParse: React.FC<{
         console.error('FloatingParse: failed to load tags', err);
       });
   }, []);
-
-  // --- AI intent helpers ---
-  const aiTagId = (name: string): string | undefined => {
-    const tag =
-      allTags.find((tg) => tg.name === name && tg.type === 'system') ??
-      allTags.find((tg) => tg.name === name);
-    return tag ? String(tag.id) : undefined;
-  };
-
-  const toggleAiIntent = (name: string) => {
-    const id = aiTagId(name);
-    if (!id) return;
-    setSelectedTagIds((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id],
-    );
-  };
 
   // Unified parse: route by the detected mode so playlist / batch links don't
   // get mis-handled as a single link (which fails with "Track unavailable").
@@ -109,6 +98,7 @@ export const FloatingParse: React.FC<{
           video_bool: true,
           cover_bool: true,
           tag_ids: selectedTagIds,
+          ...intents,
         });
         setResult({
           kind: 'batch',
@@ -123,6 +113,7 @@ export const FloatingParse: React.FC<{
           video_bool: true,
           cover_bool: true,
           tag_ids: selectedTagIds,
+          ...intents,
         })) as { title?: string; videos?: Array<{ title?: string }> };
         setResult({
           kind: 'single',
@@ -181,6 +172,7 @@ export const FloatingParse: React.FC<{
     setResult(null);
     setInput('');
     setSelectedTagIds([]);
+    setIntents(NO_INTENTS);
     onOpenChange?.(false);
   };
 
@@ -235,19 +227,21 @@ export const FloatingParse: React.FC<{
               <div className="mt-2">
                 <div className="text-[11px] text-content-3 mb-1">AI Processing</div>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {AI_INTENTS.map(({ name, label, Icon }) => {
-                    const id = aiTagId(name);
-                    const active = !!id && selectedTagIds.includes(id);
+                  {AI_INTENTS.map(({ key, label, Icon }) => {
+                    const active = intents[key];
                     return (
                       <button
-                        key={name}
-                        disabled={!id}
-                        onClick={() => toggleAiIntent(name)}
+                        key={key}
+                        type="button"
+                        data-testid={`ai-intent-${key}`}
+                        aria-label={`AI intent: ${label}`}
+                        aria-pressed={active}
+                        onClick={() => setIntents((prev) => ({ ...prev, [key]: !prev[key] }))}
                         className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${
                           active
                             ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
                             : 'bg-island-2 text-content-2 border-line'
-                        } disabled:opacity-40`}
+                        }`}
                       >
                         <Icon size={12} />
                         {label}
@@ -262,7 +256,7 @@ export const FloatingParse: React.FC<{
                 <EagleTagPicker
                   selectedTagIds={selectedTagIds}
                   onTagsChange={setSelectedTagIds}
-                  allTags={allTags}
+                  allTags={pickerTags}
                   onCreate={async (name, color) => {
                     try {
                       const tag = await createTag({ name, color, type: 'user' });
