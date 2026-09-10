@@ -102,6 +102,17 @@ MAX_FANOUT = 10
 MAX_PARENT_HOPS = 10
 
 
+def _tokens_of(recorder: Any) -> int:
+    """Whole-sub-turn token total from the child's own counters — the same
+    figure ``_build_envelope`` reports on the success path."""
+    try:
+        return int(getattr(recorder, "prompt_tokens", 0) or 0) + int(
+            getattr(recorder, "completion_tokens", 0) or 0
+        )
+    except Exception:  # noqa: BLE001 — telemetry never fails a turn
+        return 0
+
+
 def _cost_cents_of(recorder: Any) -> float:
     """What the child cost, for the parent's ``cost.by_child`` breakdown.
     The recorder computes it from its own token counters; a stand-in that
@@ -447,6 +458,10 @@ class SubAgentTaskService:
         # ends. A failure BEFORE the announcement owes nothing; emitting a
         # done there would invent a child that never existed.
         announced_child_id: Optional[str] = None
+        # Held alongside the id so the crash path can report what the child
+        # actually burned. A run that died after ten tool calls still cost
+        # money; reporting 0.0 understates exactly the runs worth noticing.
+        announced_recorder: Optional[Any] = None
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -508,6 +523,7 @@ class SubAgentTaskService:
                     },
                 )
                 announced_child_id = str(recorder.run_id)
+                announced_recorder = recorder
 
                 result = await stack.runner.run_turn(
                     composed,
@@ -549,8 +565,8 @@ class SubAgentTaskService:
                         "mode": "sync",
                         "subagent_type": slug,
                         "status": "failed",
-                        "cost_cents": 0.0,
-                        "tokens_used": 0,
+                        "cost_cents": _cost_cents_of(announced_recorder),
+                        "tokens_used": _tokens_of(announced_recorder),
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     },
                 )
@@ -852,11 +868,7 @@ class SubAgentTaskService:
         # carries only the LAST iteration's usage under result['raw']['usage']
         # and NEVER a top-level 'usage' — so the previous `result['usage']` read
         # always yielded 0 and the parent's fan-out cost tree was blank.
-        tokens_used = 0
-        if recorder is not None:
-            tokens_used = int(getattr(recorder, "prompt_tokens", 0) or 0) + int(
-                getattr(recorder, "completion_tokens", 0) or 0
-            )
+        tokens_used = _tokens_of(recorder) if recorder is not None else 0
         if tokens_used == 0:
             usage = (result.get("raw") or {}).get("usage") or {}
             tokens_used = int(usage.get("total_tokens", 0) or 0)

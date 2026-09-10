@@ -505,3 +505,22 @@ async def test_a_non_numeric_reply_target_is_typed_not_raised(monkeypatch, calle
         {"subagent_type": "librarian", "prompt": "x", "await": False}
     )
     assert out["status"] == "failed" and out["error"] == "no_reply_target"
+
+
+async def test_a_crashing_child_reports_the_tokens_it_actually_burned(
+    monkeypatch, caller_ctx
+):
+    """Review round 2, minor. A child that crashed after ten tool calls still
+    cost money; reporting 0.0 makes the parent's by_child understate exactly
+    the runs most worth noticing."""
+    wired = _wire_sync_spawn(monkeypatch)
+    wired.run_turn.side_effect = RuntimeError("provider exploded")
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+
+    await service.spawn({"subagent_type": "librarian", "prompt": "dig"})
+
+    done = rec.events[1][1]
+    assert done["status"] == "failed"
+    assert done["cost_cents"] == 3.0  # the fake recorder's compute_cost_cents
+    assert done["tokens_used"] == 15  # 10 prompt + 5 completion
