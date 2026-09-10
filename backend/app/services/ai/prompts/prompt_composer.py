@@ -588,6 +588,22 @@ class PromptComposer:
                                 "(max 10)."
                             ),
                         },
+                        "await": {
+                            "type": "boolean",
+                            "description": (
+                                "skill='task' only: false runs the sub-agent "
+                                "in the background; the result arrives later "
+                                "as an inbox message instead of this call's "
+                                "return."
+                            ),
+                        },
+                        "child_run_id": {
+                            "type": "string",
+                            "description": (
+                                "skill='task' only: continue an earlier "
+                                "sub-run instead of starting a fresh one."
+                            ),
+                        },
                     },
                     "required": ["skill"],
                 },

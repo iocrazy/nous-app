@@ -38,11 +38,32 @@ M2-b (Phase 4.5): parallel fan-out. ``Skill(skill="task", tasks=[...])``
 spawns each entry concurrently, capped by the caller agent's
 ``capability_profile.max_parallel_delegates`` (default 3, list length
 hard-capped at MAX_FANOUT). The single-task form is unchanged.
+
+Phase 2b-2 §2 adds two more shapes to the same tool:
+
+  - ``await=false`` — BACKGROUND. Instead of running the child here, write a
+    queued ``task_tracking`` row and return immediately; the workforce tick
+    picks it up within ~10s, runs the very same ``_spawn(await=True)``, and
+    delivers the envelope to the parent's target as an
+    ``agent_run_inbox`` row of kind ``subagent_result``. This call NEVER
+    enqueues a DBOS workflow itself: the parent's turn already runs inside a
+    DBOS step, and enqueueing from inside a step is the in-step dispatch the
+    spec forbids.
+  - ``child_run_id`` — CONTINUE. Rebuild an earlier child's messages from its
+    transcript and run one more turn, recorded as a fork of that run so the
+    Runs tree shows the rounds in order.
+
+Both emit ``subagent_spawned`` / ``subagent_done`` on the PARENT run, so a
+trajectory reads the same whether a child ran here or in the background. The
+background ``subagent_done`` is written by the worker, long after the parent
+run may have ended — events outlive runs, and the fold tolerates a ``done``
+with no matching ``spawned``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Optional
 from uuid import UUID
 
@@ -73,6 +94,25 @@ ENVELOPE_KEYS = (
 # is an abuse guard — the per-caller rate limit still applies per child).
 DEFAULT_MAX_PARALLEL = 3
 MAX_FANOUT = 10
+
+# Parent-chain walk bound for ``child_run_id``. Same reasoning as
+# ``delegate_tool._detect_cycle``: a data cycle (two rows pointing at each
+# other) must not spin the walker forever, and no legitimate chain is deeper
+# than the delegation depth cap anyway.
+MAX_PARENT_HOPS = 10
+
+
+def _cost_cents_of(recorder: Any) -> float:
+    """What the child cost, for the parent's ``cost.by_child`` breakdown.
+    The recorder computes it from its own token counters; a stand-in that
+    cannot is reported as 0.0 rather than crashing the emit."""
+    try:
+        compute = getattr(recorder, "compute_cost_cents", None)
+        if callable(compute):
+            return float(compute() or 0.0)
+        return float(getattr(recorder, "cost_cents", 0.0) or 0.0)
+    except Exception:  # noqa: BLE001 — telemetry never fails a turn
+        return 0.0
 
 
 class SubAgentTaskService:
@@ -126,6 +166,11 @@ class SubAgentTaskService:
         side-effect on a single return path so any future early-exit
         added to ``_spawn`` automatically gets counted."""
         if args.get("tasks") is not None:
+            # ``tasks`` starts N fresh children; ``child_run_id`` names exactly
+            # one existing child. Together they have no meaning — refuse rather
+            # than silently continue the same run N times.
+            if args.get("child_run_id"):
+                return self._failed("continue_not_allowed_in_fanout")
             return await self._spawn_parallel(args)
         envelope = await self._spawn(args)
         if self.parent_recorder is not None and hasattr(
@@ -254,6 +299,28 @@ class SubAgentTaskService:
                 f"at caller depth {self.agent_depth}"
             )
 
+        # ``await`` defaults to True — the historical behaviour, and the one a
+        # model that never heard of the flag keeps getting.
+        want_await = args.get("await")
+        want_await = True if want_await is None else bool(want_await)
+        child_run_id = (str(args.get("child_run_id") or "")).strip() or None
+
+        if not want_await:
+            return await self._spawn_async(
+                slug=slug,
+                prompt=prompt,
+                description=description,
+                child_run_id=child_run_id,
+            )
+
+        # CONTINUE: the id came from the model, so ownership is verified
+        # against the parent chain before a single transcript row is read.
+        continue_from: Optional[tuple[list[dict[str, Any]], int]] = None
+        if child_run_id is not None:
+            if not await self._child_chain_ok(child_run_id):
+                return self._failed("not_your_child")
+            continue_from = await self._continue_messages(child_run_id, prompt)
+
         # Lazy import: pulls the full agent_runner stack which we don't
         # want at module-import time for any code path that doesn't
         # actually spawn sub-agents. Single try block + single
@@ -353,6 +420,7 @@ class SubAgentTaskService:
         # supplied in the Task/Delegate arguments.
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=self.parent_run_id)
 
+        started = time.monotonic()
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -365,6 +433,11 @@ class SubAgentTaskService:
                 model=model or None,
                 provider=provider,
                 input_summary=prompt[:240],
+                # A continued round is recorded as a FORK of the run it
+                # continues (mig 453 columns), so the Runs tree shows round 2
+                # hanging off round 1 rather than as an unrelated sibling.
+                fork_of_run_id=int(child_run_id) if child_run_id else None,
+                fork_at_seq=continue_from[1] if continue_from else None,
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,
@@ -372,6 +445,10 @@ class SubAgentTaskService:
                         str(self.parent_run_id) if self.parent_run_id else None
                     ),
                     "agent_depth": self.agent_depth + 1,
+                    "continued_from": child_run_id,
+                    "round": (
+                        (await self._round_of(child_run_id)) if child_run_id else 1
+                    ),
                 },
             ) as recorder:
                 if self.parent_run_id is not None:
@@ -393,20 +470,310 @@ class SubAgentTaskService:
                             self.parent_run_id,
                         )
 
+                await self._emit_parent(
+                    "subagent_spawned",
+                    {
+                        "child_run_id": str(recorder.run_id),
+                        "task_id": None,
+                        "mode": "sync",
+                        "subagent_type": slug,
+                        "description": description or "",
+                        "continued_from": child_run_id,
+                    },
+                )
+
                 result = await stack.runner.run_turn(
                     composed,
-                    user_messages=[{"role": "user", "content": prompt}],
+                    user_messages=(
+                        continue_from[0]
+                        if continue_from
+                        else [{"role": "user", "content": prompt}]
+                    ),
                     recorder=recorder,
                 )
 
-                return self._build_envelope(
+                envelope = self._build_envelope(
                     result=result,
                     sub_run_id=recorder.run_id,
                     recorder=recorder,
                 )
+                await self._emit_parent(
+                    "subagent_done",
+                    {
+                        "child_run_id": str(recorder.run_id),
+                        "task_id": None,
+                        "mode": "sync",
+                        "subagent_type": slug,
+                        "status": envelope["status"],
+                        "cost_cents": _cost_cents_of(recorder),
+                        "tokens_used": envelope["tokens_used"],
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                )
+                return envelope
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
             return self._failed(f"sub-agent crashed: {exc!s:.120}")
+
+    # ── background (await=false) ──────────────────────────────────────
+
+    async def run_background_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The worker's entry point. Deliberately the SAME ``_spawn`` the
+        synchronous form runs — a background child that behaved differently
+        from a foreground one would be a second implementation to keep in
+        step, and the difference the caller cares about (where the result
+        goes) is the worker's job, not this one's."""
+        return await self._spawn(
+            {
+                "subagent_type": payload.get("subagent_type"),
+                "prompt": payload.get("prompt"),
+                "description": payload.get("description") or "",
+                "child_run_id": payload.get("child_run_id"),
+                "await": True,
+            }
+        )
+
+    def _reply_target(self) -> Optional[tuple[str, int]]:
+        """Where a background child's result goes back to. The parent run's
+        issue first, then its conversation; neither (a sub-agent's own
+        sub-agent, a probe run) → None, and the caller refuses ``await=false``
+        rather than running a billed turn nobody will ever read."""
+        rec = self.parent_recorder
+        issue_id = getattr(rec, "issue_id", None) or self.issue_id
+        if issue_id:
+            return ("issue", int(issue_id))
+        conv = getattr(rec, "conversation_id", None) or self.session_id
+        return ("conversation", int(conv)) if conv else None
+
+    async def _spawn_async(
+        self,
+        *,
+        slug: str,
+        prompt: str,
+        description: str,
+        child_run_id: Optional[str],
+    ) -> dict[str, Any]:
+        """Queue the child as a workforce task and return at once.
+
+        No DBOS enqueue here: the parent's turn runs inside a DBOS step, and
+        starting a workflow from inside one is the in-step dispatch spec §2.2
+        forbids. Task 3's ``inbox_dispatch`` tick lists every queued,
+        undispatched ``agent_task`` row and picks this one up within ~10s.
+        """
+        if self.agent_depth >= 1:
+            # One level only. A background child cannot deliver a result to a
+            # parent that has itself already finished, and depth-2 fan-out in
+            # the background is how a runaway tree stops being observable.
+            return self._failed("async_not_allowed_for_subagent")
+        target = self._reply_target()
+        if target is None:
+            return self._failed("no_reply_target")
+
+        agent_id = await self._resolve_agent_id(slug)
+        if agent_id is None:
+            return self._failed(f"unknown agent slug: {slug!r}")
+
+        payload = {
+            "kind": "subagent",
+            "parent_run_id": str(self.parent_run_id) if self.parent_run_id else None,
+            # The worker rebuilds this service from the payload; without the
+            # caller's agent id it could not resolve depth or scope.
+            "caller_agent_id": str(self.caller_agent_id),
+            "subagent_type": slug,
+            "prompt": prompt,
+            "description": description or None,
+            "child_run_id": child_run_id,
+            "reply_to": {"target_kind": target[0], "target_id": target[1]},
+            "user_id": str(self.caller_user_id),
+            "agent_depth": self.agent_depth,
+        }
+
+        from app.repositories.agent_workforce_repository import (
+            get_agent_workforce_repository,
+        )
+
+        try:
+            row = await get_agent_workforce_repository().create_task(
+                agent_id=agent_id,
+                user_id=self.caller_user_id,
+                payload=payload,
+                title=(description or prompt)[:120],
+            )
+        except Exception as exc:  # noqa: BLE001 — typed failure to the model
+            logger.exception("[subagent_task] background task insert failed")
+            return self._failed(f"task_create_failed: {exc!s:.120}")
+        if not row:
+            return self._failed("task_create_failed")
+
+        task_id = str(row["id"])
+        await self._emit_parent(
+            "subagent_spawned",
+            {
+                "child_run_id": None,
+                "task_id": task_id,
+                "mode": "async",
+                "subagent_type": slug,
+                "description": description or "",
+                "continued_from": child_run_id,
+            },
+        )
+        return {
+            **self._failed(""),
+            "status": "queued",
+            "task_id": task_id,
+            "error": None,
+        }
+
+    async def _resolve_agent_id(self, slug: str) -> Optional[UUID]:
+        from app.repositories.agent_repository import get_agent_repository
+
+        try:
+            row = await get_agent_repository().get_by_slug(slug)
+        except Exception:  # noqa: BLE001 — an unresolvable slug is a refusal
+            logger.exception("[subagent_task] agent lookup failed slug={}", slug)
+            return None
+        return UUID(row["id"]) if row else None
+
+    async def _emit_parent(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Put a sub-agent event on the PARENT's transcript. No recorder (CLI
+        spawn, probe run) → nothing to write; ``events.emit`` is already
+        best-effort, so telemetry can never fail a turn."""
+        if self.parent_recorder is None:
+            logger.debug(
+                "[subagent_task] no parent recorder; {} not recorded", event_type
+            )
+            return
+        from app.services.ai.runner.events import emit
+
+        await emit(self.parent_recorder, event_type, payload)
+
+    # ── continue (child_run_id) ───────────────────────────────────────
+
+    async def _child_chain_ok(self, child_run_id: str) -> bool:
+        """True when ``child_run_id`` really descends from this parent run.
+
+        The id comes from the model, so this is the guard that keeps
+        ``child_run_id`` from reading a stranger's transcript. Walk up
+        ``parent_run_id`` / ``fork_of_run_id`` (a continued round hangs off
+        the round before it, not off the parent) and stop at
+        ``MAX_PARENT_HOPS`` so a data cycle cannot spin here forever.
+        """
+        if not self.parent_run_id:
+            return False
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import AgentRuns
+
+        try:
+            target = int(self.parent_run_id)
+            cursor: Optional[int] = int(child_run_id)
+        except (TypeError, ValueError):
+            return False
+
+        try:
+            async with read_scope() as session:
+                for _ in range(MAX_PARENT_HOPS):
+                    row = (
+                        await session.execute(
+                            select(AgentRuns.parent_run_id, AgentRuns.fork_of_run_id)
+                            .where(AgentRuns.id == cursor)
+                            .limit(1)
+                        )
+                    ).first()
+                    if row is None:
+                        return False
+                    parent, forked_from = row[0], row[1]
+                    if parent == target or forked_from == target:
+                        return True
+                    cursor = parent or forked_from
+                    if cursor is None:
+                        return False
+        except Exception:  # noqa: BLE001 — an unverifiable claim is refused
+            logger.exception(
+                "[subagent_task] child chain check failed child_run_id={}",
+                child_run_id,
+            )
+            return False
+        return False
+
+    async def _continue_messages(
+        self, child_run_id: str, prompt: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """The child's own history, then the new instruction."""
+        from app.services.ai.runner.replay import events_upto, messages_from_events
+
+        events, last_seq = await self._load_child_events(child_run_id)
+        msgs = messages_from_events(events_upto(events, last_seq))
+        return ([*msgs, {"role": "user", "content": prompt}], last_seq)
+
+    async def _load_child_events(
+        self, child_run_id: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """``(rows, max_seq)`` in seq order. An unreadable transcript yields
+        an empty history rather than raising: the continued turn then reads
+        as a fresh one, which is degraded but not wrong."""
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import AgentRunTranscriptEvents
+
+        try:
+            async with read_scope() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(
+                                AgentRunTranscriptEvents.seq,
+                                AgentRunTranscriptEvents.event_type,
+                                AgentRunTranscriptEvents.payload,
+                            )
+                            .where(AgentRunTranscriptEvents.run_id == int(child_run_id))
+                            .order_by(AgentRunTranscriptEvents.seq.asc())
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[subagent_task] transcript read failed child_run_id={}", child_run_id
+            )
+            return ([], 0)
+        events = [dict(r) for r in rows]
+        return (events, int(events[-1]["seq"]) if events else 0)
+
+    async def _load_child_metadata(self, child_run_id: str) -> dict[str, Any]:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import AgentRuns
+
+        try:
+            async with read_scope() as session:
+                meta = (
+                    await session.execute(
+                        select(AgentRuns.metadata_json).where(
+                            AgentRuns.id == int(child_run_id)
+                        )
+                    )
+                ).scalar_one_or_none()
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[subagent_task] metadata read failed child_run_id={}", child_run_id
+            )
+            return {}
+        return meta if isinstance(meta, dict) else {}
+
+    async def _round_of(self, child_run_id: str) -> int:
+        """Round number for the run that continues ``child_run_id``. A run
+        recorded before rounds existed has none, and the turn continuing it
+        is by definition the second."""
+        meta = await self._load_child_metadata(child_run_id)
+        try:
+            return int(meta.get("round") or 1) + 1
+        except (TypeError, ValueError):
+            return 2
 
     @staticmethod
     def _build_envelope(
