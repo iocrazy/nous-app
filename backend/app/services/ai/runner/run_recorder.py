@@ -52,7 +52,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.services.ai.runner.run_projection import apply as apply_projection
-from app.services.ai.runner.run_projection import empty_views
+from app.services.ai.runner.run_projection import empty_views, recompute_spent
 
 
 class AgentPausedError(Exception):
@@ -762,9 +762,33 @@ class RunRecorder:
         from app.db.session import write_scope
         from app.models import AgentRuns
 
+        # Review I3. ``compute_cost_cents`` only ever knew THIS run's tokens,
+        # while ``metadata_json.cost.spent_cents`` also carries what its
+        # sub-agents spent. ``issue_rollup._run_cents`` reads the view while a
+        # run is running and this column once it has ended, so storing the
+        # own-only figure made an issue's spend DROP by the children's cost at
+        # the moment the parent completed — a spend gauge walking backwards,
+        # feeding the budget gate.
+        #
+        # Both sides are now derived from the SAME own figure: the token-based
+        # one when rates are known, else whatever the step folds accumulated
+        # (a run that emits no step_end events has only the former; one whose
+        # model has no price row has only the latter).
         cost_cents: Optional[float] = None
+        folded = self._event_writer.views["cost"] if self._event_writer else None
+        own_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
-            cost_cents = self.compute_cost_cents()
+            own_cents = self.compute_cost_cents()
+        elif folded is not None and folded.get("own_cents"):
+            own_cents = float(folded["own_cents"])
+        children_cents = sum(
+            float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
+        )
+        if own_cents is not None or children_cents:
+            cost_cents = round((own_cents or 0.0) + children_cents, 4)
+        if folded is not None and own_cents is not None:
+            folded["own_cents"] = round(own_cents, 4)
+            recompute_spent(folded)
 
         # W3c: classify every finished run. None → direct_human (a human turn);
         # the issue-dispatch path sets rule_owner for routine/pipeline fires.
@@ -987,8 +1011,18 @@ class RunEventWriter:
         if isinstance(meta, dict):
             for key in ("view", "cost"):
                 stored = meta.get(key)
-                if isinstance(stored, dict):
-                    writer.views[key] = {**writer.views[key], **stored}
+                if not isinstance(stored, dict):
+                    continue
+                if key == "cost" and "own_cents" not in stored:
+                    # Recorded before ``own_cents`` existed. No fold could add
+                    # a child to that total then, so it WAS this run's own —
+                    # seeding 0 instead would let the next late subagent_done
+                    # recompute the column down to children-only.
+                    stored = {
+                        **stored,
+                        "own_cents": float(stored.get("spent_cents") or 0.0),
+                    }
+                writer.views[key] = {**writer.views[key], **stored}
         return writer
 
     async def append(
@@ -1055,6 +1089,37 @@ class RunEventWriter:
         self.views = nxt
         self._pending_mirror = False
         await self._mirror()
+        if event_type == "subagent_done":
+            await self._sync_cost_column()
+
+    async def _sync_cost_column(self) -> None:
+        """Push the recomputed total into ``agent_runs.cost_cents`` for a run
+        that has ALREADY ENDED (review I3).
+
+        The background ``subagent_done`` is written onto the parent run by the
+        worker, often turns after that run finished — and for an ended run the
+        rollup reads the column, not the view. Restricted to ended rows
+        because a live run's ``_finish`` computes the same total at the end
+        anyway. Idempotent: the value is a derived total over a keyed
+        ``by_child``, so a replayed event assigns the same number.
+        """
+        try:
+            from sqlalchemy import update
+
+            from app.db.session import write_scope
+            from app.models.agents import AgentRuns
+
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self.run_id)
+                    .where(AgentRuns.status != "running")
+                    .values(cost_cents=float(self.views["cost"]["spent_cents"]))
+                )
+        except Exception as err:  # noqa: BLE001 — telemetry never fails a run
+            logger.warning(
+                f"[RunEventWriter] cost column sync failed (run={self.run_id}): {err}"
+            )
 
     def mirror_keys(self) -> dict[str, Any]:
         """Whole values written into metadata_json — one place to read them."""

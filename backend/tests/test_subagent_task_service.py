@@ -371,3 +371,137 @@ async def test_continue_records_the_fork_columns_and_round(monkeypatch, caller_c
     assert kwargs["fork_of_run_id"] == 42 and kwargs["fork_at_seq"] == 1
     assert kwargs["metadata"]["continued_from"] == "42"
     assert kwargs["metadata"]["round"] == 2
+
+
+async def test_a_crashing_child_still_reports_done(monkeypatch, caller_ctx):
+    """Review C2. ``subagent_spawned`` already told the view a child is
+    running; without a matching done on the crash path the parent's Cockpit
+    shows "1 running" until the run ends — and a provider error is the most
+    common way a child ends."""
+    wired = _wire_sync_spawn(monkeypatch)
+    wired.run_turn.side_effect = RuntimeError("provider exploded")
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+
+    out = await service.spawn({"subagent_type": "librarian", "prompt": "dig"})
+
+    assert out["status"] == "failed" and "provider exploded" in out["error"]
+    assert [t for t, _ in rec.events] == ["subagent_spawned", "subagent_done"]
+    done = rec.events[1][1]
+    assert done["status"] == "failed" and done["mode"] == "sync"
+    assert done["child_run_id"] == "51"
+
+
+async def test_a_child_that_never_started_reports_no_done(monkeypatch, caller_ctx):
+    """Negative control: a spawn refused BEFORE the recorder opened never
+    emitted spawned either, so a done would invent a child."""
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+    out = await service.spawn({"prompt": "no slug"})
+    assert out["status"] == "failed"
+    assert rec.events == []
+
+
+async def test_fan_out_propagates_await_false_to_every_entry(monkeypatch, caller_ctx):
+    """Review I1 / spec §2.1: ``tasks[]`` and ``await=false`` compose. Silently
+    running five sub-agents synchronously when the model asked for five
+    background ones is the worst of the three possible behaviours."""
+    from types import SimpleNamespace as _NS
+
+    created: list[dict] = []
+
+    class _Repo:
+        @staticmethod
+        async def create_task(*, agent_id, user_id, payload, title=None, **kw):
+            created.append(payload)
+            return {"id": f"task-{len(created)}"}
+
+    import app.repositories.agent_workforce_repository as wf_mod
+
+    monkeypatch.setattr(wf_mod, "get_agent_workforce_repository", lambda: _Repo())
+
+    rec = _EventRecorder()
+    rec.issue_id = 7
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+
+    async def _ok(v):
+        return v
+
+    monkeypatch.setattr(service, "_resolve_agent_id", lambda slug: _ok(uuid4()))
+
+    out = await service.spawn(
+        {
+            "await": False,
+            "tasks": [
+                {"subagent_type": "a", "prompt": "one"},
+                {"subagent_type": "b", "prompt": "two"},
+            ],
+        }
+    )
+
+    assert out["status"] == "success" and out["tasks_run"] == 2
+    assert [r["status"] for r in out["results"]] == ["queued", "queued"]
+    assert [p["subagent_type"] for p in created] == ["a", "b"]
+    assert all(p["kind"] == "subagent" for p in created)
+    _ = _NS
+
+
+async def test_fan_out_entry_cannot_carry_child_run_id(monkeypatch, caller_ctx):
+    """The top-level guard rejects ``tasks`` + ``child_run_id``; an entry that
+    smuggles the same key in must be refused for the same reason, not run."""
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+    out = await service.spawn(
+        {"tasks": [{"subagent_type": "a", "prompt": "x", "child_run_id": "51"}]}
+    )
+    assert out["status"] == "failed"
+    assert out["results"][0]["error"] == "continue_not_allowed_in_fanout"
+
+
+async def test_background_payload_carries_the_issue_id(monkeypatch, caller_ctx):
+    """Review I2 / spec §2.5: a sub-run of an issue run IS part of that issue's
+    tree. Without this the background child's agent_runs row has no issue link
+    and its spend is invisible to the issue rollup."""
+    created: dict = {}
+
+    class _Repo:
+        @staticmethod
+        async def create_task(*, agent_id, user_id, payload, title=None, **kw):
+            created.update(payload)
+            return {"id": "task-1"}
+
+    import app.repositories.agent_workforce_repository as wf_mod
+
+    monkeypatch.setattr(wf_mod, "get_agent_workforce_repository", lambda: _Repo())
+
+    rec = _EventRecorder()
+    rec.issue_id = 7
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec, issue_id=7)
+
+    async def _ok(v):
+        return v
+
+    monkeypatch.setattr(service, "_resolve_agent_id", lambda slug: _ok(uuid4()))
+    out = await service.spawn(
+        {"subagent_type": "librarian", "prompt": "x", "await": False}
+    )
+    assert out["status"] == "queued"
+    assert created["issue_id"] == 7
+
+
+async def test_a_non_numeric_reply_target_is_typed_not_raised(monkeypatch, caller_ctx):
+    """Every other refusal returns an envelope; a ValueError escaping into the
+    tool dispatch loop would be the one exception."""
+
+    class _BadRec:
+        run_id = 900
+        issue_id = "not-a-number"
+
+        async def record_event(self, *a, **kw):
+            return None
+
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=_BadRec())
+    out = await service.spawn(
+        {"subagent_type": "librarian", "prompt": "x", "await": False}
+    )
+    assert out["status"] == "failed" and out["error"] == "no_reply_target"

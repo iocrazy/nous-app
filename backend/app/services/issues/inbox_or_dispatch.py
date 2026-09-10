@@ -20,10 +20,9 @@ reply in place, and only when there is no such waiter does the reply start a
 fresh turn. ``deliver_or_dispatch`` composes the halves for the paths that
 have nothing to interpose.
 
-Everything this module touches is resolved INSIDE the call. The router
-imports it, so a module-level import back would be circular; and the
-dispatcher stays on the router on purpose — its tests monkeypatch it there,
-the same arrangement ``issue_dispatch.start_execute_issue`` uses.
+Everything this module touches is resolved INSIDE the call: the router imports
+it, so a module-level import back would be circular, and the worker process
+that runs background sub-agents has no business importing FastAPI routers.
 """
 
 from __future__ import annotations
@@ -75,9 +74,9 @@ async def deliver_or_dispatch(
     # Read the row and the session ONCE and hand both to the busy half: the
     # composed path would otherwise ask the database the same two questions
     # twice for every background delivery.
-    issue = await _fresh_issue(issue_id, None)
+    issue, why_not = await _fresh_issue(issue_id, None)
     if issue is None:
-        return DeliverResult("skipped", reason="issue_missing")
+        return DeliverResult("skipped", reason=why_not or "issue_missing")
     session_id = await _session_id(issue_id)
 
     diverted = await _decide(
@@ -135,9 +134,9 @@ async def divert_to_inbox_if_busy(
     the marker is written by another process moments earlier, so deciding on
     a row loaded several awaits ago would miss exactly the window it guards.
     """
-    row = await _fresh_issue(issue_id, issue)
+    row, why_not = await _fresh_issue(issue_id, issue)
     if row is None:
-        return DeliverResult("skipped", reason="issue_missing")
+        return DeliverResult("skipped", reason=why_not or "issue_missing")
     if session_id is None:
         session_id = await _session_id(issue_id)
     return await _decide(
@@ -214,14 +213,25 @@ async def dispatch_issue_reply(
     attachments: Optional[list] = None,
 ) -> DeliverResult:
     """The idle half. A unique workflow id per dispatch — a fixed one would
-    dedup in DBOS and the re-dispatch would become a silent no-op."""
-    import importlib
+    dedup in DBOS and the re-dispatch would become a silent no-op.
 
-    router = importlib.import_module("app.api.issue_messages_router")
+    An EMPTY ``body`` is not dispatchable. ``respond_to_issue_reply`` appends
+    its body as the turn's user message, and neither ``_run_reply_turns`` nor
+    ``run_issue_reply_step`` has a branch for an empty one — the turn would
+    open with a blank user bubble and a blank ``input_summary``. A delivery
+    that carries no text (a background sub-agent's result, which the run reads
+    off the inbox instead) starts on the same continuation nudge the bounded
+    continuation loop uses.
+    """
+    from app.services.issues.issue_agent_executor import CONTINUATION_NUDGE
+    from app.services.issues.issue_reply_dispatch import (
+        dispatch_respond_to_issue_reply,
+    )
+
     wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
     try:
-        router._dispatch_respond_to_issue_reply(
-            issue_id, user_id, body, attachments, wf_id
+        dispatch_respond_to_issue_reply(
+            issue_id, user_id, body or CONTINUATION_NUDGE, attachments, wf_id
         )
     except Exception as exc:  # noqa: BLE001 — typed failure, never silent
         logger.opt(exception=True).error(
@@ -340,20 +350,36 @@ async def _insert_issue_message(
 
 async def _fresh_issue(
     issue_id: int, fallback: Optional[dict[str, Any]]
-) -> Optional[dict[str, Any]]:
-    """Re-read so the decision sees current ``execution_state``. A read that
-    fails degrades to the caller's row — stale, not wrong — because refusing
-    to decide would lose the delivery."""
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """``(row, failure_reason)``. Re-read so the decision sees current
+    ``execution_state``.
+
+    THREE outcomes, and the last two must not be conflated: the row came back;
+    the row is genuinely gone (``issue_missing``); or the read itself failed
+    (``issue_unreadable``) and there is no caller row to fall back to. A probe
+    that cannot reach its target has not proved the target is absent — the
+    same mistake ``deploy-frontend.yml`` made for weeks. A read that fails
+    WITH a caller row degrades to that row (stale, not wrong) and warns.
+    """
     from app.repositories.issue_repository import issue_repository
 
     try:
-        return await issue_repository.get_by_id(int(issue_id)) or fallback
+        row = await issue_repository.get_by_id(int(issue_id))
     except Exception as exc:  # noqa: BLE001 — a sharpening, not a dependency
-        logger.warning(
-            f"[deliver] issue {issue_id}: could not re-read before the "
-            f"decision ({exc!r}); deciding on the caller's row"
+        if fallback is not None:
+            logger.warning(
+                f"[deliver] issue {issue_id}: could not re-read before the "
+                f"decision ({exc!r}); deciding on the caller's row"
+            )
+            return (fallback, None)
+        logger.error(
+            f"[deliver] issue {issue_id}: read failed and no caller row to "
+            f"fall back to ({exc!r}); the delivery is not attempted"
         )
-        return fallback
+        return (None, "issue_unreadable")
+    if row:
+        return (row, None)
+    return (fallback, None) if fallback is not None else (None, "issue_missing")
 
 
 async def _session_id(issue_id: int) -> Optional[str]:

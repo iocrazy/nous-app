@@ -65,6 +65,12 @@ def _wire(monkeypatch, *, running, paused_at):
     monkeypatch.setattr(r, "_try_wake_waiting_workflow", wake)
     dispatch = MagicMock()
     monkeypatch.setattr(r, "_dispatch_respond_to_issue_reply", dispatch)
+    # Task 4 moved the dispatcher into services/issues/issue_reply_dispatch
+    # (two of its three callers are services). Patch it THERE — the router
+    # keeps only a private alias.
+    import app.services.issues.issue_reply_dispatch as _dispatch_mod
+
+    monkeypatch.setattr(_dispatch_mod, "dispatch_respond_to_issue_reply", dispatch)
     return r, inbox_repo, store, wake, dispatch
 
 

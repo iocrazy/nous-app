@@ -62,13 +62,18 @@ def empty_views() -> Views:
             "revision": 0,
         },
         "cost": {
+            # ``spent_cents`` is DERIVED: own_cents + Σ by_child. It is what
+            # the UI and the budget gate read, and what RunRecorder writes
+            # into agent_runs.cost_cents on finish, so the view and the
+            # column never name different numbers (review I3).
             "spent_cents": 0.0,
+            "own_cents": 0.0,
             "by_step": [],
             "by_model": {},
             "budget_cents": None,
             "pct": None,
-            # phase 2b-2: cents per child run, so a fan-out's cost is
-            # attributable rather than only totalled.
+            # phase 2b-2: cents per child run, KEYED so a replayed
+            # subagent_done overwrites rather than adds.
             "by_child": {},
         },
     }
@@ -79,6 +84,22 @@ def empty_views() -> Views:
 # transcript event type the DB accepts — tests/runner/test_fold_fork.py pins
 # ``registered_types() - LOCAL_FOLD_TYPES ⊆ ORM CHECK literal``.
 LOCAL_FOLD_TYPES: frozenset[str] = frozenset({"context_measured"})
+
+
+def recompute_spent(cost: dict[str, Any]) -> None:
+    """``spent_cents = own_cents + Σ by_child``, in place.
+
+    Two folds move the parts (``step_end`` the run's own steps,
+    ``subagent_done`` a child's total) and both call this, so the total can
+    never drift from its parts. ``by_child`` is a MAPPING, not a running sum:
+    a ``subagent_done`` that arrives twice for the same child — a replayed
+    DBOS step, a re-fold of stored views — overwrites its entry instead of
+    inflating the parent's cost once per delivery.
+    """
+    children = sum(float(v or 0) for v in (cost.get("by_child") or {}).values())
+    cost["spent_cents"] = round(float(cost.get("own_cents") or 0.0) + children, 4)
+    if cost.get("budget_cents"):
+        cost["pct"] = round(cost["spent_cents"] * 100 / cost["budget_cents"])
 
 
 def register(event_type: str) -> Callable[[Fold], Fold]:
@@ -138,4 +159,12 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     turn_end,
 )
 
-__all__ = ["Views", "apply", "empty_views", "register", "registered_types", "replay"]
+__all__ = [
+    "Views",
+    "apply",
+    "empty_views",
+    "recompute_spent",
+    "register",
+    "registered_types",
+    "replay",
+]

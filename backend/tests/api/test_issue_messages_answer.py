@@ -68,6 +68,12 @@ def patched(monkeypatch):
     monkeypatch.setattr(r, "_try_wake_waiting_workflow", p.wake)
     monkeypatch.setattr(r, "_divert_to_inbox_if_running", p.divert)
     monkeypatch.setattr(r, "_dispatch_respond_to_issue_reply", p.dispatch)
+    # Task 4 moved the dispatcher into services/issues/issue_reply_dispatch
+    # (two of its three callers are services). Patch it THERE — the router
+    # keeps only a private alias.
+    import app.services.issues.issue_reply_dispatch as _dispatch_mod
+
+    monkeypatch.setattr(_dispatch_mod, "dispatch_respond_to_issue_reply", p.dispatch)
     monkeypatch.setattr(r.input_gate, "mark_question_answered", p.mark_answered)
     return p
 

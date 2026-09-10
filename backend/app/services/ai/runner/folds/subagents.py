@@ -13,7 +13,7 @@ with no live counter therefore raises ``total`` itself rather than leaving a
 child that finished but was never counted.
 """
 
-from app.services.ai.runner.run_projection import register
+from app.services.ai.runner.run_projection import recompute_spent, register
 
 _EMPTY = {"total": 0, "done": 0, "running": 0, "async_pending": 0, "last": None}
 
@@ -65,11 +65,12 @@ def fold_done(views, payload):
 
     cents = payload.get("cost_cents")
     if isinstance(cents, (int, float)) and not isinstance(cents, bool):
+        # SET, never add: this event can arrive more than once for the same
+        # child (a replayed DBOS step, a re-fold of stored views), and the
+        # parent's cost must not grow once per arrival.
         views["cost"]["by_child"] = {
             **(views["cost"].get("by_child") or {}),
             str(child_run_id): float(cents),
         }
-        views["cost"]["spent_cents"] = round(
-            float(views["cost"].get("spent_cents") or 0) + float(cents), 4
-        )
+        recompute_spent(views["cost"])
     return views

@@ -63,9 +63,15 @@ async def test_session_issue_dispatches_reply_workflow(monkeypatch):
 
     auth = SimpleNamespace(user_id=UUID("11111111-1111-1111-1111-111111111111"))
 
+    # Task 4 moved the dispatcher into services/issues/issue_reply_dispatch;
+    # DBOS / SetWorkflowID are resolved there now, not on the router.
+    import app.services.issues.issue_reply_dispatch as _dispatch_mod
+
     with (
-        patch.object(r, "DBOS", SimpleNamespace(start_workflow=fake_start_workflow)),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _nullctx()),
+        patch.object(
+            _dispatch_mod, "DBOS", SimpleNamespace(start_workflow=fake_start_workflow)
+        ),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _nullctx()),
     ):
         resp = await r.post_issue_message(
             5, IssueMessagePost(body="please continue"), auth

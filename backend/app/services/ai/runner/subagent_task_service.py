@@ -208,6 +208,14 @@ class SubAgentTaskService:
         through ``spawn`` so per-child telemetry (note_subagent + the
         structured log line) is identical to the single form. A crashing
         child becomes a failed envelope — it never sinks its siblings.
+
+        ``await`` composes with the fan-out (spec §2.1): the top-level value
+        is pushed into every entry, so ``tasks=[…], await=false`` enqueues
+        each entry and returns at once. Ignoring the flag here would run the
+        children synchronously while telling the model they were queued —
+        a silently-dropped parameter, the worst of the three options. An
+        entry may not override it, and may not carry ``child_run_id``: one
+        continue names exactly one run, so a fan-out cannot express it.
         """
         tasks = args.get("tasks")
         if not isinstance(tasks, list) or not tasks:
@@ -224,12 +232,19 @@ class SubAgentTaskService:
 
         semaphore = asyncio.Semaphore(self.max_parallel)
 
+        want_await = args.get("await")
+
         async def run_one(task_args: Any) -> dict[str, Any]:
             if not isinstance(task_args, dict):
                 return self._failed("each task must be an object")
+            if task_args.get("child_run_id"):
+                return self._failed("continue_not_allowed_in_fanout")
+            entry = {**task_args}
+            if want_await is not None:
+                entry["await"] = want_await
             async with semaphore:
                 try:
-                    return await self.spawn(dict(task_args))
+                    return await self.spawn(entry)
                 except Exception as exc:  # noqa: BLE001 — sibling isolation
                     logger.exception(
                         "[subagent_task] parallel child crashed slug={}",
@@ -238,7 +253,10 @@ class SubAgentTaskService:
                     return self._failed(f"sub-agent crashed: {exc!s:.120}")
 
         results = list(await asyncio.gather(*(run_one(t) for t in tasks)))
-        ok = sum(1 for r in results if r.get("status") == "success")
+        # ``queued`` counts as OK: the background form's success IS the queued
+        # row. Reading it as a failure would report every background fan-out
+        # as failed while every child is about to run.
+        ok = sum(1 for r in results if r.get("status") in ("success", "queued"))
         if ok == len(results):
             status = "success"
         elif ok == 0:
@@ -250,7 +268,7 @@ class SubAgentTaskService:
             "status": status,
             "tasks_run": len(results),
             "results": results,
-            "summary": f"{ok}/{len(results)} sub-agents succeeded",
+            "summary": f"{ok}/{len(results)} sub-agents dispatched",
         }
 
     async def _spawn(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -421,6 +439,14 @@ class SubAgentTaskService:
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=self.parent_run_id)
 
         started = time.monotonic()
+        # Set once ``subagent_spawned`` has gone out. The crash path below
+        # reads it to decide whether it OWES a matching ``subagent_done``:
+        # the fold only drains ``children.running`` on a done, so a child
+        # announced-then-crashed would sit at "1 running" for the rest of the
+        # parent's run — and a provider error is the most common way a child
+        # ends. A failure BEFORE the announcement owes nothing; emitting a
+        # done there would invent a child that never existed.
+        announced_child_id: Optional[str] = None
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -481,6 +507,7 @@ class SubAgentTaskService:
                         "continued_from": child_run_id,
                     },
                 )
+                announced_child_id = str(recorder.run_id)
 
                 result = await stack.runner.run_turn(
                     composed,
@@ -513,6 +540,20 @@ class SubAgentTaskService:
                 return envelope
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
+            if announced_child_id is not None:
+                await self._emit_parent(
+                    "subagent_done",
+                    {
+                        "child_run_id": announced_child_id,
+                        "task_id": None,
+                        "mode": "sync",
+                        "subagent_type": slug,
+                        "status": "failed",
+                        "cost_cents": 0.0,
+                        "tokens_used": 0,
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                )
             return self._failed(f"sub-agent crashed: {exc!s:.120}")
 
     # ── background (await=false) ──────────────────────────────────────
@@ -540,10 +581,21 @@ class SubAgentTaskService:
         rather than running a billed turn nobody will ever read."""
         rec = self.parent_recorder
         issue_id = getattr(rec, "issue_id", None) or self.issue_id
-        if issue_id:
-            return ("issue", int(issue_id))
         conv = getattr(rec, "conversation_id", None) or self.session_id
-        return ("conversation", int(conv)) if conv else None
+        for kind, raw in (("issue", issue_id), ("conversation", conv)):
+            if not raw:
+                continue
+            try:
+                return (kind, int(raw))
+            except (TypeError, ValueError):
+                # A target we cannot address is the same as no target. Every
+                # other refusal on this path returns a typed envelope; letting
+                # a ValueError escape into the tool dispatch loop would make
+                # this the one that does not.
+                logger.warning(
+                    "[subagent_task] unusable {} reply target {!r}", kind, raw
+                )
+        return None
 
     async def _spawn_async(
         self,
@@ -586,6 +638,12 @@ class SubAgentTaskService:
             "reply_to": {"target_kind": target[0], "target_id": target[1]},
             "user_id": str(self.caller_user_id),
             "agent_depth": self.agent_depth,
+            # spec §2.5: a sub-run of an issue run IS part of that issue's
+            # tree. The worker feeds this back into the child's recorder;
+            # without it the child's agent_runs row has no issue link at all
+            # (the post-turn backfill only ever sees root runs) and its spend
+            # is invisible to the issue rollup.
+            "issue_id": int(self.issue_id) if self.issue_id else None,
         }
 
         from app.repositories.agent_workforce_repository import (

@@ -42,7 +42,6 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from dbos import DBOS, SetWorkflowID
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
@@ -66,9 +65,9 @@ from app.services.issues.comment_trigger import (
     compute_comment_trigger,
 )
 from app.services.issues.issue_message_mapper import map_ai_message_to_issue_message
+from app.services.issues.issue_reply_dispatch import dispatch_respond_to_issue_reply
 from app.services.issues.issue_session import get_or_create_issue_session
 from app.services.issues.issue_visibility import assert_issue_visible
-from app.workflows.issue_lifecycle import respond_to_issue_reply
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
 
@@ -79,50 +78,11 @@ router = APIRouter(prefix="/issues", tags=["Issue Messages"])
 _SESSION_MESSAGES_LIMIT = 10_000
 
 
-def _dispatch_respond_to_issue_reply(
-    issue_id: int,
-    owner_id: str,
-    body: str,
-    attachments: list | None,
-    wf_id: str,
-) -> None:
-    """Dispatch the respond_to_issue_reply DBOS workflow under a pinned wf id.
-
-    Client-aware (gateway→DBOSClient prep, currently DORMANT): when the gateway
-    has constructed a DBOSClient, enqueue through it into the `dbos_dispatch`
-    queue. Otherwise (client is None — today's reality) fall back to the
-    in-process `SetWorkflowID + DBOS.start_workflow` path. Zero behavior change
-    while the client stays None. Positional args preserved exactly:
-    (issue_id, owner_id, body, attachments).
-    """
-    from app.services.infra.dbos_orchestrator import (
-        _resolve_pinned_app_version,
-        get_dbos_client,
-    )
-
-    client = get_dbos_client()
-    if client is not None:
-        from dbos import EnqueueOptions
-
-        opts: dict = {
-            "workflow_name": "respond_to_issue_reply",
-            "queue_name": "dbos_dispatch",
-            "workflow_id": wf_id,
-        }
-        pinned = _resolve_pinned_app_version()
-        if pinned:
-            opts["app_version"] = pinned
-        client.enqueue(EnqueueOptions(**opts), issue_id, owner_id, body, attachments)
-        return
-
-    with SetWorkflowID(wf_id):
-        DBOS.start_workflow(
-            respond_to_issue_reply,
-            issue_id,
-            owner_id,
-            body,
-            attachments,
-        )
+# The dispatcher itself now lives in services/issues/issue_reply_dispatch.py —
+# two of its three callers are services, and a service reaching back into an
+# API router for it is layering upside down. The private alias stays so the
+# router's own tests and readers still find the name here.
+_dispatch_respond_to_issue_reply = dispatch_respond_to_issue_reply
 
 
 from app.services.ai.runner.run_recorder import (  # noqa: E402 — test seam

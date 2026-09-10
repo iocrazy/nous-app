@@ -18,6 +18,9 @@ from uuid import UUID
 
 import pytest
 
+# Task 4 moved the dispatcher (and with it DBOS / SetWorkflowID) into
+# services/issues/issue_reply_dispatch; the router keeps only an alias.
+import app.services.issues.issue_reply_dispatch as _dispatch_mod
 from app.schemas.issue_message import (
     CommentTriggerPreviewRequest,
     IssueMessagePost,
@@ -147,13 +150,13 @@ async def test_preview_and_post_agree(monkeypatch):
     started = {}
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
     ):
         await r.post_issue_message(5, IssueMessagePost(body="go"), _auth())
 
@@ -174,13 +177,13 @@ async def test_suppressed_comment_starts_nothing_and_leaves_a_note(monkeypatch):
 
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
         patch.object(r.ConversationsAiStore, "append_user_message", append),
     ):
         resp = await r.post_issue_message(
@@ -215,13 +218,13 @@ async def test_note_prefix_comment_starts_nothing_and_stores_body_verbatim(monke
 
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
         patch.object(r.ConversationsAiStore, "append_user_message", append),
     ):
         resp = await r.post_issue_message(
@@ -249,13 +252,13 @@ async def test_notex_prefix_comment_still_dispatches(monkeypatch):
     started = {}
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
     ):
         await r.post_issue_message(5, IssueMessagePost(body="/notex ship it"), _auth())
 
@@ -272,13 +275,13 @@ async def test_non_matching_suppress_id_still_dispatches(monkeypatch):
     started = {}
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
     ):
         await r.post_issue_message(
             5,
@@ -298,13 +301,13 @@ async def test_unsuppressed_comment_still_dispatches(monkeypatch):
     started = {}
     with (
         patch.object(
-            r,
+            _dispatch_mod,
             "DBOS",
             SimpleNamespace(
                 start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
             ),
         ),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
     ):
         await r.post_issue_message(5, IssueMessagePost(body="go"), _auth())
 
@@ -347,7 +350,7 @@ async def test_suppressed_note_filters_attachments_like_a_real_turn(monkeypatch)
     append = AsyncMock(return_value={"id": 1})
     with (
         patch.object(r.ConversationsAiStore, "append_user_message", append),
-        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(_dispatch_mod, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
     ):
         await r.post_issue_message(
             5,

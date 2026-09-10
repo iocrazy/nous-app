@@ -284,9 +284,11 @@ class BarrierGateway:
         respond_to_issue_reply workflow appends ``body`` to the session AND runs
         one agent turn, so the wake carries the report — no separate write. The
         pinned id (``key``) makes a double-close idempotent at the DBOS layer."""
-        from app.api.issue_messages_router import _dispatch_respond_to_issue_reply
+        from app.services.issues.issue_reply_dispatch import (
+            dispatch_respond_to_issue_reply,
+        )
 
-        _dispatch_respond_to_issue_reply(int(parent_id), str(owner_id), body, None, key)
+        dispatch_respond_to_issue_reply(int(parent_id), str(owner_id), body, None, key)
 
 
 async def on_child_issue_terminal(

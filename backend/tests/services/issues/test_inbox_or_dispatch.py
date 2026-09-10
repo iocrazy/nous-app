@@ -70,6 +70,12 @@ def _wire(monkeypatch, *, issue, running=None, order=None):
 
     dispatch = MagicMock(side_effect=_dispatch)
     monkeypatch.setattr(router, "_dispatch_respond_to_issue_reply", dispatch)
+    # Task 4 moved the dispatcher into services/issues/issue_reply_dispatch
+    # (two of its three callers are services). Patch it THERE — the router
+    # keeps only a private alias.
+    import app.services.issues.issue_reply_dispatch as _dispatch_mod
+
+    monkeypatch.setattr(_dispatch_mod, "dispatch_respond_to_issue_reply", dispatch)
 
     thread_rows: list[dict] = []
 
@@ -201,3 +207,66 @@ async def test_dispatch_failure_is_typed_not_raised(monkeypatch):
     dispatch.side_effect = RuntimeError("dbos is down")
     out = await deliver_or_dispatch(5, kind="steer", content={}, user_id=ME)
     assert out.mode == "skipped" and out.reason.startswith("dispatch_failed")
+
+
+async def test_a_bodiless_delivery_dispatches_the_continuation_nudge(monkeypatch):
+    """``respond_to_issue_reply`` appends its body as the turn's user message
+    and has no branch for an empty one — the turn would open with a blank
+    bubble and a blank input_summary. A background sub-agent's result carries
+    no text (the run reads it off the inbox), so it starts on the same nudge
+    the bounded continuation loop uses."""
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+    from app.services.issues.issue_agent_executor import CONTINUATION_NUDGE
+
+    _inbox, _store, dispatch, _rows = _wire(monkeypatch, issue=_issue(), running=None)
+    out = await deliver_or_dispatch(
+        5, kind="subagent_result", content={"summary": "s"}, user_id=ME
+    )
+    assert out.mode == "dispatched"
+    body = dispatch.call_args.args[2]
+    assert body == CONTINUATION_NUDGE and body.strip()
+
+
+async def test_a_failed_read_is_not_reported_as_a_missing_issue(monkeypatch):
+    """A probe that cannot reach its target has not proved the target is
+    absent — the deploy-frontend.yml lesson, in one reason string."""
+    import app.repositories.issue_repository as issue_mod
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    _wire(monkeypatch, issue=_issue(), running=None)
+    monkeypatch.setattr(
+        issue_mod,
+        "issue_repository",
+        SimpleNamespace(get_by_id=AsyncMock(side_effect=RuntimeError("pg is down"))),
+    )
+    out = await deliver_or_dispatch(5, kind="steer", content={}, user_id=ME)
+    assert out.mode == "skipped" and out.reason == "issue_unreadable"
+
+
+async def test_a_genuinely_absent_issue_still_reads_as_missing(monkeypatch):
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    _wire(monkeypatch, issue=None, running=None)
+    out = await deliver_or_dispatch(5, kind="steer", content={}, user_id=ME)
+    assert out.mode == "skipped" and out.reason == "issue_missing"
+
+
+async def test_a_failed_read_with_a_caller_row_decides_on_that_row(monkeypatch):
+    """The busy half keeps its degrade-to-stale behaviour: refusing to decide
+    would lose the human's comment."""
+    import app.repositories.issue_repository as issue_mod
+    from app.services.issues.inbox_or_dispatch import divert_to_inbox_if_busy
+
+    inbox_repo, _store, _dispatch, _rows = _wire(
+        monkeypatch, issue=_issue(), running=777
+    )
+    monkeypatch.setattr(
+        issue_mod,
+        "issue_repository",
+        SimpleNamespace(get_by_id=AsyncMock(side_effect=RuntimeError("pg is down"))),
+    )
+    out = await divert_to_inbox_if_busy(
+        5, kind="steer", content={}, user_id=ME, issue=_issue()
+    )
+    assert out.mode == "inbox"
+    inbox_repo.enqueue.assert_awaited_once()

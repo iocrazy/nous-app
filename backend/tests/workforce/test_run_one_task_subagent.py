@@ -49,6 +49,7 @@ def _wire(envelope=None, *, agent_repo_raises=False):
     task_holder: dict = {}
     workforce = MagicMock()
     workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": "ob-1"})
 
     async def _claim(task_id, *, workflow_id):
         return task_holder["task"]
@@ -191,15 +192,125 @@ async def test_a_failed_child_marks_the_task_failed():
     )
 
 
-async def test_a_malformed_reply_target_is_logged_not_raised():
+async def test_a_malformed_reply_target_is_typed_not_raised():
     """The child already ran and cost money. An exception here would lose its
-    result and leave the task row un-finalised."""
+    result and leave the task row un-finalised — so it is reported, not
+    raised. But a result with nowhere to go is a FAILURE: calling it done
+    would be the silent no-op this whole path exists to avoid."""
     w = _wire(agent_repo_raises=True)
     out = await _run(w, _task(reply_to={"target_kind": "issue"}))
 
-    assert out["status"] == "success"
+    assert out["status"] == "failed"
     w.inbox_repo.enqueue.assert_not_awaited()
     w.deliver.assert_not_awaited()
+    kw = w.workforce.update_task_status.await_args.kwargs
+    assert kw["lifecycle_status"] == "failed"
+    assert kw["error_code"] == "no_reply_target"
+
+
+# ─── C1: nothing after the child ran may escape ───────────────────────
+
+
+def _codes(w):
+    return [
+        c.kwargs.get("error_code")
+        for c in w.workforce.update_task_status.await_args_list
+    ]
+
+
+async def test_a_crashing_child_still_emits_done_and_finalises():
+    """The three awaits after the child ran used to sit OUTSIDE run_one_task's
+    try. Any of them raising stranded the task at 'assigned' AND left the
+    parent's children.async_pending permanently +1 — the spawn event had
+    already told the user a child was out there."""
+    w = _wire(agent_repo_raises=True)
+    w.run_bg.side_effect = RuntimeError("provider exploded")
+
+    out = await _run(w, _task())
+
+    assert out["status"] == "failed"
+    w.writer.append.assert_awaited_once()
+    event_type, payload = w.writer.append.await_args.args
+    assert event_type == "subagent_done" and payload["status"] == "failed"
+    assert _codes(w) == ["subagent_crashed"]
+
+
+async def test_a_failed_inbox_write_still_emits_done_and_finalises():
+    w = _wire(agent_repo_raises=True)
+    w.inbox_repo.enqueue.side_effect = RuntimeError("pg is down")
+
+    out = await _run(w, _task())
+
+    assert out["status"] == "failed"
+    assert w.writer.append.await_args.args[0] == "subagent_done"
+    assert _codes(w) == ["result_delivery_failed"]
+
+
+async def test_a_failed_wake_still_emits_done_and_finalises():
+    """``deliver_or_dispatch`` reads ``running_root_run_id``, which raises by
+    design when the read fails (a busy gate must never read a failed query as
+    'nothing running'). One DB blip used to strand the task."""
+    w = _wire(agent_repo_raises=True)
+    w.deliver.side_effect = RuntimeError("running_root_run_id blew up")
+
+    out = await _run(w, _task())
+
+    assert out["status"] == "failed"
+    assert w.writer.append.await_args.args[0] == "subagent_done"
+    assert _codes(w) == ["wake_failed"]
+    # The result still reached the inbox — the wake is the part that failed.
+    w.inbox_repo.enqueue.assert_awaited_once()
+
+
+# ─── spec §2.2 item 4: the audit outbox row ───────────────────────────
+
+
+async def test_the_audit_outbox_row_is_still_written():
+    w = _wire(agent_repo_raises=True)
+    task = _task()
+    await _run(w, task)
+
+    kw = w.workforce.enqueue_outbox.await_args.kwargs
+    assert kw["message_type"] == "task_result"
+    assert kw["recipient_kind"] == "user"
+    assert str(kw["recipient_user_id"]) == task["payload"]["user_id"]
+    assert kw["payload"]["run_id"] == "52"
+    assert str(kw["task_id"]) == task["id"]
+
+
+async def test_a_failed_audit_write_does_not_fail_a_delivered_task():
+    """The outbox is an audit trail beside the delivery, not the delivery.
+    Losing it is logged; calling the task failed would misreport a result the
+    parent has already received."""
+    w = _wire(agent_repo_raises=True)
+    w.workforce.enqueue_outbox.side_effect = RuntimeError("outbox is down")
+
+    out = await _run(w, _task())
+
+    assert out["status"] == "success"
     assert (
         w.workforce.update_task_status.await_args.kwargs["lifecycle_status"] == "done"
     )
+
+
+# ─── I2: the child run belongs to the issue ───────────────────────────
+
+
+async def test_the_issue_id_reaches_the_child_service():
+    w = _wire(agent_repo_raises=True)
+    seen: dict = {}
+
+    import app.services.ai.runner.subagent_task_service as svc_mod
+
+    real_cls = svc_mod.SubAgentTaskService
+
+    class _Recording(real_cls):
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+            super().__init__(**kwargs)
+
+    with patch.object(svc_mod, "SubAgentTaskService", _Recording):
+        await _run(w, _task(issue_id=7))
+
+    assert seen["issue_id"] == 7
+    assert str(seen["parent_run_id"]) == PARENT_RUN_ID
