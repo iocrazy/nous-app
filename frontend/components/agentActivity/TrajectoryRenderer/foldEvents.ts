@@ -490,10 +490,10 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           child.tokensUsed = num(p.tokens_used);
           child.durationMs = num(p.duration_ms);
           // The card's summary line, for the background child whose claim
-          // lands in a LATER run and so never pairs here (MH-90/91/92). A
-          // fallback, not the source of truth: `stampResultSummaries` still
-          // prefers the claim when one did reach this run.
-          if (!child.summary) child.summary = str(p.summary) || null;
+          // lands in a LATER run and so never pairs here (MH-90/91/92). Set
+          // flat: precedence lives in `stampResultSummaries`, which overwrites
+          // this with the claim's wording when a claim did reach this run.
+          child.summary = str(p.summary) || null;
           if (!child.childRunId) child.childRunId = str(p.child_run_id);
           break;
         }

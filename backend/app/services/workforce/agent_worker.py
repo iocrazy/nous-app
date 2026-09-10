@@ -565,7 +565,14 @@ async def _run_subagent_task(
                     # never fires and this is the only source the card has
                     # (MH-90/91/92). Bounded by the helper ``inbox_claimed``
                     # uses, so the two projections of one result agree.
-                    "summary": clip_claimed_text(content["summary"]),
+                    #
+                    # A crashed child has NO summary — falling through to the
+                    # error text is what keeps its card from going blank,
+                    # which is defect J's own symptom. The synchronous crash
+                    # branch does the same.
+                    "summary": clip_claimed_text(
+                        content["summary"] or envelope.get("error") or ""
+                    ),
                     "cost_cents": content["cost_cents"],
                     "tokens_used": content["tokens_used"],
                     "duration_ms": int((time.monotonic() - started) * 1000),

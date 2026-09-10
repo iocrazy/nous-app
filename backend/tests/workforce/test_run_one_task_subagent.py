@@ -13,7 +13,6 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.ai.runner.inbox import CLAIMED_TEXT_MAX
 from app.services.workforce.agent_worker import run_one_task
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -179,11 +178,34 @@ async def test_subagent_done_carries_the_summary_bounded_like_the_claim():
     await _run(w, _task())
 
     _, payload = w.writer.append.await_args.args
-    assert len(payload["summary"]) <= CLAIMED_TEXT_MAX
+    # 500 spelled out, not CLAIMED_TEXT_MAX: an assertion written in terms of
+    # the constant it is bounding would follow the constant anywhere.
+    assert len(payload["summary"]) == 500
     assert payload["summary"].startswith("x" * 100)
     # Cut, and saying so: a silently truncated summary reads as a complete
     # short answer.
     assert payload["summary"].endswith("\u2026")
+
+
+async def test_a_crashed_child_puts_its_error_on_the_summary_line():
+    """A child that crashed produced no summary, and a blank summary line is
+    defect J's own symptom — so the card falls through to the error text. The
+    parent's card is the only place a background child's failure is ever
+    described."""
+    w = _wire(
+        envelope={
+            "status": "failed",
+            "error": "boom",
+            "summary": "",
+            "sub_run_id": None,
+            "tokens_used": 0,
+        },
+        agent_repo_raises=True,
+    )
+    await _run(w, _task())
+
+    _, payload = w.writer.append.await_args.args
+    assert payload["status"] == "failed" and payload["summary"] == "boom"
 
 
 async def test_issue_target_returns_the_wake_order_and_never_dispatches_here():

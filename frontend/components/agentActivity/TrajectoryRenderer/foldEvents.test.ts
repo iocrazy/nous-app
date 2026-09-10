@@ -271,8 +271,8 @@ describe('foldEvents — a background result reaches the card that spawned it', 
   // it wins from either side of the done.
   it('lets the claim win over the done fallback, in either order', () => {
     const spawn = at(2, 'subagent_spawned', { task_id: 'tk-9', mode: 'async', subagent_type: 'librarian', description: 'Find the deck' }, 1);
-    const done = at(3, 'subagent_done', { task_id: 'tk-9', child_run_id: '9', mode: 'async', status: 'completed', summary: 'B', cost_cents: 0.03, tokens_used: 900, duration_ms: 8400 }, 1);
-    const claim = at(4, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', turn: 1, step: 2, content: { child_run_id: '9', subagent_type: 'librarian', description: 'Find the deck', status: 'completed', summary: 'A', cost_cents: 0.03, tokens_used: 900 } });
+    const done = at(3, 'subagent_done', { task_id: 'tk-9', child_run_id: '9', mode: 'async', status: 'success', summary: 'B', cost_cents: 0.03, tokens_used: 900, duration_ms: 8400 }, 1);
+    const claim = at(4, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', turn: 1, step: 2, content: { child_run_id: '9', subagent_type: 'librarian', description: 'Find the deck', status: 'success', summary: 'A', cost_cents: 0.03, tokens_used: 900 } });
     for (const order of [[spawn, done, claim], [spawn, claim, done]]) {
       const nodes = foldEvents([at(1, 'step_start', { turn: 1, step: 1 }, 1), ...order]);
       const step = nodes.find((n) => n.kind === 'step');
