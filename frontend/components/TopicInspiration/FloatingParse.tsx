@@ -13,6 +13,7 @@ import {
 } from '../../services/parserService';
 import { fetchAllTags, createTag } from '../../services/unifiedTagService';
 import { EagleTagPicker } from '../EagleTagPicker';
+import { PIPELINE_TAG_GROUP } from '../../utils/aiIntents';
 import type { Tag } from '../../types';
 
 type Phase = 'collapsed' | 'input' | 'result';
@@ -65,7 +66,7 @@ export const FloatingParse: React.FC<{
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [intents, setIntents] = useState<Record<IntentKey, boolean>>(NO_INTENTS);
   // Pipeline 组的三枚系统标签由上面的意图按钮承载，不再当普通标签给用户勾。
-  const pickerTags = useMemo(() => allTags.filter((tg) => tg.group_name !== 'Pipeline'), [allTags]);
+  const pickerTags = useMemo(() => allTags.filter((tg) => tg.group_name !== PIPELINE_TAG_GROUP), [allTags]);
 
   const detection = useMemo(() => detectParseMode(input), [input]);
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
 import { UiSelect } from '../components/ui';
+import { PIPELINE_TAG_GROUP } from '../utils/aiIntents';
 
 interface Tag {
   id: string;
@@ -19,6 +20,12 @@ interface TagGroup {
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+
+/** Single-choice processing options saved together with the tag selection. */
+type Options = { rating: number | null; transcribe: boolean; summarize: boolean; analyze: boolean };
+const DEFAULT_OPTIONS: Options = { rating: null, transcribe: false, summarize: false, analyze: false };
+/** `id` is the stable data-testid suffix: rating None→0, 1–5; booleans No→0, Yes→1. */
+type Choice<K extends keyof Options> = { id: number; value: Options[K]; text: string };
 
 /** Most-used first within any list (media_count descending) */
 const byMediaCountDesc = (a: Tag, b: Tag) =>
@@ -51,13 +58,14 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [translatedName, setTranslatedName] = useState('');
   const [newTagGroupId, setNewTagGroupId] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
 
   // Read params from both query string and hash fragment
   const params = new URLSearchParams(window.location.search);
@@ -111,25 +119,31 @@ export const ShortcutsTagsPage: React.FC = () => {
       });
   }, [token, apiKey]);
 
+  // Pipeline 组（Transcript / Summary / Analyze）由下方四项单选承载，不再当标签选。
+  const pickableTags = useMemo(
+    () => tags.filter((t) => t.group_name !== PIPELINE_TAG_GROUP),
+    [tags],
+  );
+
   // Case-insensitive search across English + Chinese names
   const query = search.trim().toLowerCase();
   const filteredTags = useMemo(() => {
-    if (!query) return tags;
-    return tags.filter((t) => {
+    if (!query) return pickableTags;
+    return pickableTags.filter((t) => {
       const name = (t.name || '').toLowerCase();
       const nameZh = (t.name_zh || '').toLowerCase();
       return name.includes(query) || nameZh.includes(query);
     });
-  }, [tags, query]);
+  }, [pickableTags, query]);
 
   // Top 8 most used tags — hidden while searching so results stay flat
   const topTags = useMemo(() => {
     if (query) return [];
-    return [...tags]
+    return [...pickableTags]
       .filter((t) => t.media_count > 0)
       .sort(byMediaCountDesc)
       .slice(0, 8);
-  }, [tags, query]);
+  }, [pickableTags, query]);
 
   // Group tags by group_name, exclude ungrouped tags from showing as "Other"
   const grouped = useMemo(() => {
@@ -156,7 +170,7 @@ export const ShortcutsTagsPage: React.FC = () => {
       ([name, list]) =>
         [name, [...list].sort(byMediaCountDesc)] as [string, Tag[]],
     );
-  }, [filteredTags, query]);
+  }, [filteredTags]);
 
   // Extract unique tag groups for create form dropdown
   const tagGroups = useMemo<TagGroup[]>(() => {
@@ -282,42 +296,92 @@ export const ShortcutsTagsPage: React.FC = () => {
   /** Get display label (may be Chinese), but always use English name for storage */
   const getStorageName = (tag: Tag) => tag.name;
 
-  // Toggle tag and auto-save to Redis
-  const toggle = useCallback((tagName: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagName)) {
-        next.delete(tagName);
-      } else {
-        next.add(tagName);
-      }
-      // Auto-save to Redis
-      if (token && next.size > 0) {
-        setSaveStatus('saving');
-        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: Array.from(next) }),
-        })
-          .then(() => {
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 1500);
-          })
-          .catch((err) => {
-            console.error('Failed to save selection:', err);
-            setSaveStatus('idle');
-          });
-      } else if (token && next.size === 0) {
-        // Clear selection
-        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: [] }),
-        }).catch((err) => console.error('Failed to clear selection:', err));
-      }
-      return next;
-    });
+  // Only the most recent save may drive the status line: an older response (or
+  // its idle timer) landing late must not overwrite the newer outcome.
+  const saveSeqRef = useRef(0);
+
+  // 单次 POST 全字段：标签 + 四项单选。后端每次整体替换，所以五个键必须都发；空标签也照发。
+  const saveSelection = useCallback((nextTags: Set<string>, nextOptions: Options) => {
+    if (!token) return;
+    const seq = ++saveSeqRef.current;
+    const isLatest = () => seq === saveSeqRef.current;
+    setSaveStatus('saving');
+    fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: Array.from(nextTags), ...nextOptions }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Save selection failed: HTTP ${res.status}`);
+        if (!isLatest()) return;
+        setSaveStatus('saved');
+        setTimeout(() => {
+          if (isLatest()) setSaveStatus('idle');
+        }, 1500);
+      })
+      .catch((err) => {
+        console.error('Failed to save selection:', err);
+        if (isLatest()) setSaveStatus('error');
+      });
   }, [token]);
+
+  // Next state is computed from the current render's values, never inside a
+  // state updater: StrictMode double-invokes updaters, which would double-POST.
+  const toggle = useCallback((tagName: string) => {
+    const next = new Set(selected);
+    if (next.has(tagName)) {
+      next.delete(tagName);
+    } else {
+      next.add(tagName);
+    }
+    setSelected(next);
+    // 从搜索结果里点中即清空搜索，列表回到全量视图。
+    setSearch('');
+    saveSelection(next, options);
+  }, [selected, options, saveSelection]);
+
+  const setOption = useCallback(<K extends keyof Options>(key: K, value: Options[K]) => {
+    const next: Options = { ...options, [key]: value };
+    setOptions(next);
+    saveSelection(selected, next);
+  }, [selected, options, saveSelection]);
+
+  const yesNo: Choice<'transcribe' | 'summarize' | 'analyze'>[] = [
+    { id: 0, value: false, text: lang === 'zh' ? '否' : 'No' },
+    { id: 1, value: true, text: lang === 'zh' ? '是' : 'Yes' },
+  ];
+  const ratingChoices: Choice<'rating'>[] = [
+    { id: 0, value: null, text: lang === 'zh' ? '无' : 'None' },
+    ...[1, 2, 3, 4, 5].map((v) => ({ id: v, value: v, text: '★'.repeat(v) })),
+  ];
+
+  const renderOptionRow = <K extends keyof Options>(key: K, label: string, choices: Choice<K>[]) => (
+    <div className="flex items-center gap-2" role="radiogroup" aria-label={label}>
+      <span className="w-12 shrink-0 text-xs text-ink-400">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {choices.map((c) => {
+          const active = options[key] === c.value;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              data-testid={`opt-${key}-${c.id}`}
+              onClick={() => setOption(key, c.value)}
+              className={`px-2.5 py-1 rounded-full border text-xs transition-colors ${
+                active
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
+                  : 'bg-ink-800 text-ink-300 border-ink-700'
+              }`}
+            >
+              {c.text}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -366,6 +430,14 @@ export const ShortcutsTagsPage: React.FC = () => {
           placeholder={lang === 'zh' ? '搜索标签...' : 'Search tags...'}
           className="mt-2 w-full px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 placeholder-ink-500 outline-none focus:border-indigo-500"
         />
+      </div>
+
+      {/* Processing options — replace picking Transcript/Summary/Analyze as tags */}
+      <div className="px-4 py-3 border-b border-ink-800 space-y-2.5">
+        {renderOptionRow('rating', lang === 'zh' ? '评级' : 'Rating', ratingChoices)}
+        {renderOptionRow('transcribe', lang === 'zh' ? '转录' : 'Transcribe', yesNo)}
+        {renderOptionRow('summarize', lang === 'zh' ? '总结' : 'Summarize', yesNo)}
+        {renderOptionRow('analyze', lang === 'zh' ? '解析' : 'Analyze', yesNo)}
       </div>
 
       {/* Create tag form */}
@@ -503,7 +575,12 @@ export const ShortcutsTagsPage: React.FC = () => {
       {/* Fixed bottom bar — status only, auto-saved on every toggle */}
       <div className="fixed bottom-0 left-0 right-0 p-3 bg-ink-950/95 backdrop-blur-sm border-t border-ink-800 safe-area-pb">
         <p className="text-center text-sm">
-          {selected.size === 0 && (
+          {saveStatus === 'error' && (
+            <span className="text-danger">
+              {lang === 'zh' ? '保存失败，请再点一次' : 'Save failed, tap again'}
+            </span>
+          )}
+          {selected.size === 0 && saveStatus !== 'error' && (
             <span className="text-ink-500">
               {lang === 'zh' ? '点击标签选择，选完关闭即可' : 'Tap tags to select, close when done'}
             </span>
