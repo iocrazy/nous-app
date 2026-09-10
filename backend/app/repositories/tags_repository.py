@@ -297,6 +297,24 @@ class TagsRepository:
             )
             return _tag_row(row) if row else None
 
+    async def get_system_tag_ids_by_names(self, names: List[str]) -> Dict[str, int]:
+        """英文名 → id，只看 ``type = 'system'`` 行，永不创建。
+
+        意图字段（transcribe / summarize / analyze）映射到 Pipeline 组的
+        Transcript / Summary / Analyze；mig 220 的约定是只匹配系统类型，
+        同名用户标签不算数。"""
+        if not names:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Tags.name, Tags.id).where(
+                        Tags.type == "system", Tags.name.in_(list(names))
+                    )
+                )
+            ).all()
+        return {str(name): int(tag_id) for name, tag_id in rows}
+
     async def get_tag_by_name(
         self, name: str, user_id: Optional[str] = None
     ) -> Optional[dict]:

@@ -1,8 +1,18 @@
 # backend/tests/test_ai_intent_fields.py
 """AI 意图从标签改显式字段（spec 2026-09-10-ai-intent-fields-design.md）。"""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+from loguru import logger as _loguru
 from pydantic import ValidationError
+
+
+@pytest.fixture
+def caplog(caplog):
+    handler_id = _loguru.add(caplog.handler, format="{message}", level="WARNING")
+    yield caplog
+    _loguru.remove(handler_id)
 
 
 def test_fetch_request_accepts_intent_fields_with_string_coercion():
@@ -59,3 +69,41 @@ def test_intent_tag_names_mapping(flags, expected):
 
     t, s, a = flags
     assert intent_tag_names(transcribe=t, summarize=s, analyze=a) == expected
+
+
+@pytest.mark.asyncio
+async def test_resolve_intent_tag_ids_uses_system_lookup_and_skips_missing(caplog):
+    from app.api import media_fetch_helpers as h
+
+    repo = MagicMock()
+    repo.get_system_tag_ids_by_names = AsyncMock(
+        return_value={"Transcript": 11, "Analyze": 33}
+    )
+    repo.create_tag = AsyncMock()
+    with patch.object(h, "get_tags_repository", return_value=repo):
+        ids = await h.resolve_intent_tag_ids(
+            transcribe=True, summarize=True, analyze=True
+        )
+
+    assert ids == ["11", "33"]
+    repo.get_system_tag_ids_by_names.assert_awaited_once_with(
+        ["Transcript", "Summary", "Analyze"]
+    )
+    repo.create_tag.assert_not_called()
+    assert "Summary" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_intent_tag_ids_no_flags_no_query():
+    from app.api import media_fetch_helpers as h
+
+    repo = MagicMock()
+    repo.get_system_tag_ids_by_names = AsyncMock()
+    with patch.object(h, "get_tags_repository", return_value=repo):
+        assert (
+            await h.resolve_intent_tag_ids(
+                transcribe=False, summarize=False, analyze=False
+            )
+            == []
+        )
+    repo.get_system_tag_ids_by_names.assert_not_called()

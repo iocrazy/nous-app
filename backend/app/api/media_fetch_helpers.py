@@ -158,6 +158,25 @@ async def resolve_tag_names_to_ids(tag_names: list[str], user_id: str) -> list[s
     return tag_ids
 
 
+async def resolve_intent_tag_ids(
+    *, transcribe: bool, summarize: bool, analyze: bool
+) -> list[str]:
+    """意图布尔 → Pipeline 系统标签 id（str）。只查 type='system'，绝不创建；
+    查不到说明种子缺失（部署问题），WARNING 后跳过，不阻断抓取。"""
+    names = intent_tag_names(
+        transcribe=transcribe, summarize=summarize, analyze=analyze
+    )
+    if not names:
+        return []
+    found = await get_tags_repository().get_system_tag_ids_by_names(names)
+    missing = [n for n in names if n not in found]
+    if missing:
+        logger.warning(
+            f"[Fetch] intent system tags missing (seed problem, skipped): {missing}"
+        )
+    return [str(found[n]) for n in names if n in found]
+
+
 async def resolve_and_attach_tags(
     resource_id: str, tag_names: list[str], user_id: str
 ) -> list[str]:
