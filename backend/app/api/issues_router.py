@@ -760,6 +760,70 @@ async def list_issue_pipeline_runs(issue_id: int, auth: AuthDep):
     return PipelineRunListResponse(items=items)
 
 
+@router.get("/{issue_id}/schedules")
+async def list_issue_schedules(issue_id: int, auth: AuthDep) -> dict:
+    """Everything timed on this issue: the one-shot wake-ups pointing at it,
+    plus the routine that created it.
+
+    Read-only — cancelling goes through ``DELETE /api/v1/schedules/{id}``,
+    which is owner-scoped. Visibility here is the ISSUE's (a teammate who can
+    read the issue sees what will wake it), which is why the query is not
+    additionally filtered by schedule owner.
+
+    ``payload.last_issue_id`` is the only field an agent_routine payload has
+    that names an issue — it is the evidence that THIS routine produced THIS
+    issue (see ``_fire_agent_routine``'s stash)."""
+    from sqlalchemy import or_, select
+
+    from app.db.session import read_scope
+    from app.models import UserSchedules
+
+    existing = await issue_repository.get_by_id(issue_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
+        )
+    await _assert_visibility(existing, auth)
+
+    # jsonb ->> yields TEXT, so the id has to be bound as a string; a bigint
+    # bind silently matches nothing.
+    sid = str(issue_id)
+    stmt = (
+        select(*UserSchedules.__table__.columns)
+        .where(
+            or_(
+                (UserSchedules.task_type == "issue_wakeup")
+                & (UserSchedules.payload["issue_id"].astext == sid),
+                (UserSchedules.task_type == "agent_routine")
+                & (UserSchedules.payload["last_issue_id"].astext == sid),
+            )
+        )
+        .order_by(UserSchedules.next_fire_at)
+    )
+    async with read_scope() as session:
+        rows = (await session.execute(stmt)).mappings().all()
+
+    items = []
+    for row in rows:
+        payload = row["payload"] or {}
+        items.append(
+            {
+                "id": str(row["id"]),
+                "task_type": row["task_type"],
+                "fire_at": (
+                    row["next_fire_at"].isoformat() if row["next_fire_at"] else None
+                ),
+                "cron_expr": row["cron_expr"],
+                # A wake-up carries `text`; a routine carries the prompt it
+                # will run. Both answer "what will happen when this fires".
+                "text": (payload.get("text") or payload.get("prompt_md") or "")[:500],
+                "created_by": payload.get("created_by") or "user",
+                "enabled": bool(row["enabled"]),
+            }
+        )
+    return {"items": items}
+
+
 @router.delete("/{issue_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def soft_delete_issue(issue_id: int, auth: AuthDep) -> None:
     """User-facing delete — sets hidden_at, keeps row for audit / undo."""

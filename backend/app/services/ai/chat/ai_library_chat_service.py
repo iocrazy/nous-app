@@ -1166,6 +1166,33 @@ class AILibraryChatService:
             runner.finish_issue_handler = finish_issue_handler
             logger.info("[chat] FinishIssue tool registered for issue turn")
 
+            # phase 2b-2 §3.2: ScheduleWakeup rides the same issue road, but
+            # only on the issue's ROOT run and only when we know WHICH issue.
+            # Background sub-agents execute through the workforce worker
+            # (trigger="workforce"), which never reaches this block, so a
+            # child run cannot arm a wake-up that would resume a conversation
+            # it does not own. Without issue_id there is no target at all.
+            if issue_id:
+                from app.services.ai.tools.schedule_wakeup_tool import (
+                    make_schedule_wakeup_handler,
+                    schedule_wakeup_spec,
+                )
+
+                composed = composed.model_copy(
+                    update={
+                        "tools": list(composed.tools or []) + [schedule_wakeup_spec()]
+                    }
+                )
+                # The wake-up is armed as the issue OWNER — the same identity
+                # the turn itself runs under (see _owner_of in
+                # inbox_or_dispatch) — so the fire path can start a turn.
+                runner.schedule_wakeup_handler = make_schedule_wakeup_handler(
+                    issue_id=int(issue_id), user_id=str(user_id)
+                )
+                logger.info(
+                    f"[chat] ScheduleWakeup tool registered for issue {issue_id}"
+                )
+
         # Phase 2a: AskUser on BOTH roads (issue and chat) — the agent's one
         # verb for "ask the human to pick"; the runner parks the turn after it.
         from app.services.ai.tools.ask_user_tool import ask_user_spec

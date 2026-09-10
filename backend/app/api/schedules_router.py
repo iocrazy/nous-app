@@ -16,7 +16,7 @@ Endpoints
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
@@ -30,6 +30,13 @@ from sqlalchemy import update as sa_update
 from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import UserSchedules
+
+# How far ahead a one-shot wake-up may be armed (30 days). Imported, not
+# re-typed: the agent-facing tool states this ceiling in its own description,
+# and two numbers would mean one path silently allowing what the other
+# refuses. A year-out wake-up is far more likely to be a typo than an
+# intention, and the row would sit enabled — invisible — until then.
+from app.services.ai.tools.schedule_wakeup_tool import MAX_WAKEUP_HORIZON
 from app.services.issues.issue_visibility import assert_issue_visible
 
 # The engine decides what a schedule may be. Importing the set instead of
@@ -55,12 +62,6 @@ def _serialize_schedule(row: Mapping[str, Any]) -> Dict[str, Any]:
         else:
             out[key] = value
     return out
-
-
-# How far ahead a one-shot wake-up may be armed. A year-out wake-up is far
-# more likely to be a typo (or a unit mix-up) than an intention, and the row
-# would sit enabled — invisible — until then.
-MAX_WAKEUP_HORIZON = timedelta(days=30)
 
 
 def _bad_request(code: str, message: str) -> HTTPException:
