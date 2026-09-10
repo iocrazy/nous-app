@@ -61,17 +61,19 @@ async def pg():
         await conn.close()
 
 
-async def _issue(pg, user_id, *, paused: bool) -> int:
+async def _issue(pg, user_id, *, paused: bool, locked: bool = False) -> int:
     return await pg.fetchval(
         """INSERT INTO issues (issue_number, identifier, title, status, priority,
-                               origin_kind, created_by_user_id, paused_at)
+                               origin_kind, created_by_user_id, paused_at,
+                               execution_locked_at)
            VALUES ((SELECT COALESCE(MAX(issue_number), 0) + 1 FROM issues),
-                   $1, $2, 'in_progress', 'medium', 'manual', $3, $4)
+                   $1, $2, 'in_progress', 'medium', 'manual', $3, $4, $5)
            RETURNING id""",
         f"P2A5-{uuid.uuid4().hex[:8]}",
         "Pause sweep fixture",
         user_id,
         dt.datetime.now(dt.timezone.utc) if paused else None,
+        dt.datetime.now(dt.timezone.utc) if locked else None,
     )
 
 
@@ -141,5 +143,72 @@ async def test_sweep_expires_orphans_but_leaves_paused_issue_items(orm_dsn, pg):
         )
         await pg.execute(
             "DELETE FROM issues WHERE id = ANY($1::bigint[])", [paused, active]
+        )
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
+
+
+@_skip
+async def test_the_drain_scan_skips_an_issue_whose_turn_lock_is_held(orm_dsn, pg):
+    """Task 7b defect C, against real Postgres.
+
+    ``pending_issue_targets_stmt`` excludes locked issues with
+    ``target_id NOT IN (SELECT id FROM issues WHERE execution_locked_at IS NOT
+    NULL)``. The unit test greps the compiled SQL; only the database can settle
+    that the exclusion narrows the result instead of emptying it — the failure
+    mode of ``NOT IN`` is a NULL in the subquery turning the whole predicate
+    into "match nothing", and a backstop that silently drains nobody reads
+    exactly like a backstop with nothing to do.
+    """
+    from app.repositories.agent_run_inbox_repository import (
+        get_agent_run_inbox_repository,
+    )
+
+    user_id = uuid.uuid4()
+    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", user_id)
+    locked = await _issue(pg, user_id, paused=False, locked=True)
+    idle = await _issue(pg, user_id, paused=False, locked=False)
+    fresh = dt.timedelta(minutes=1)
+    ids = {
+        "locked": await _item(pg, target_kind="issue", target_id=locked, age=fresh),
+        "idle": await _item(pg, target_kind="issue", target_id=idle, age=fresh),
+    }
+    try:
+        targets = {
+            int(t["target_id"])
+            for t in await get_agent_run_inbox_repository().pending_issue_targets(
+                limit=1000
+            )
+        }
+        assert idle in targets, "an idle issue with a stranded item must be drained"
+        assert locked not in targets, "the backstop must not race the running turn"
+
+        # Positive control: the same issue becomes drainable the moment the
+        # lock is released, so the exclusion is about the lock and not about
+        # this row being unreachable for some other reason.
+        #
+        # ``session_replication_role = replica`` because mig 170's allowlist
+        # trigger bypasses only service_role / supabase_admin, and this runner
+        # connects as postgres — the column would otherwise refuse the write
+        # with insufficient_privilege. SET **LOCAL**, so it dies with the
+        # transaction instead of leaking into the rest of the session.
+        async with pg.transaction():
+            await pg.execute("SET LOCAL session_replication_role = replica")
+            await pg.execute(
+                "UPDATE issues SET execution_locked_at = NULL WHERE id = $1", locked
+            )
+        after = {
+            int(t["target_id"])
+            for t in await get_agent_run_inbox_repository().pending_issue_targets(
+                limit=1000
+            )
+        }
+        assert locked in after
+    finally:
+        await pg.execute(
+            "DELETE FROM agent_run_inbox WHERE id = ANY($1::bigint[])",
+            list(ids.values()),
+        )
+        await pg.execute(
+            "DELETE FROM issues WHERE id = ANY($1::bigint[])", [locked, idle]
         )
         await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)

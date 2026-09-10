@@ -21,6 +21,7 @@ Two layers are pinned here, because neither alone is enough:
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -250,6 +251,43 @@ async def test_pending_issue_targets_selects_only_unclaimed_unexpired_issues():
     assert "group by" in sql and "target_kind = " in sql
     # oldest first: an item stranded longest is the one a user is waiting on
     assert "order by" in sql and "limit" in sql
+
+
+async def test_pending_issue_targets_skips_an_issue_whose_turn_lock_is_held():
+    """Task 7b defect C. Layer (a) — ``issue_lifecycle``'s in-turn drain —
+    decides to run one more turn at the end of a run, but the new ``agent_runs``
+    row only appears seconds later. In that gap none of the three busy signals
+    is up: no running root run, not paused, no ``dispatching`` marker. On
+    2026-09-10 the sweeper's tick landed inside an 11 s gap and dispatched the
+    same inbox item layer (a) had already taken, costing a real billed turn
+    that reached the user as an unexplained "Continue working on this issue".
+
+    ``execution_locked_at`` is the signal that WAS up: ``execute_issue`` holds
+    it for the whole lifetime of the workflow. The scan excludes those issues,
+    so the drain and the backstop can no longer both act on one item."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.agent_run_inbox_repository import pending_issue_targets_stmt
+
+    sql = str(
+        pending_issue_targets_stmt(20).compile(dialect=postgresql.dialect())
+    ).lower()
+    assert "execution_locked_at is not null" in sql
+    assert "not in" in sql, "the locked issues must be EXCLUDED, not selected"
+
+
+async def test_the_listing_users_see_is_not_narrowed_by_the_turn_lock():
+    """Negative control. ``pending_summary_stmt`` feeds the "2 queued" chips:
+    an item queued on an issue that is mid-turn is exactly the thing that chip
+    exists to show. Only the sweeper's own query gets the new exclusion."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.agent_run_inbox_repository import pending_summary_stmt
+
+    sql = str(
+        pending_summary_stmt(str(uuid.uuid4())).compile(dialect=postgresql.dialect())
+    ).lower()
+    assert "execution_locked_at" not in sql
 
 
 # ── expiry stops being silent ──────────────────────────────────────────
