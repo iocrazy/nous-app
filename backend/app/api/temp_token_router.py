@@ -20,7 +20,7 @@ import json
 import secrets
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
 from app.core.redis import get_async_redis
@@ -44,12 +44,35 @@ class TempTokenResponse(BaseModel):
     ttl_seconds: int
 
 
-class SelectionRequest(BaseModel):
+class SelectionOptions(BaseModel):
+    """选择页上的四项单选（spec 2026-09-10）。旧令牌没有 options 键时按此默认读。"""
+
+    rating: int | None = Field(None, ge=0, le=5)
+    transcribe: bool = False
+    summarize: bool = False
+    analyze: bool = False
+
+
+class SelectionRequest(SelectionOptions):
     tags: list[str]
 
 
-class SelectionResponse(BaseModel):
+class SelectionResponse(SelectionOptions):
     tags: list[str]
+
+
+SELECTION_FIELDS = ("rating", "transcribe", "summarize", "analyze")
+
+
+def _options_from(data: dict) -> SelectionOptions:
+    return SelectionOptions.model_validate(data.get("options") or {})
+
+
+def _field_as_text(options: SelectionOptions, field: str) -> str:
+    """快捷指令逐项读值：rating → "0"–"5"（None 记 0），布尔 → "1"/"0"。"""
+    if field == "rating":
+        return str(options.rating or 0)
+    return "1" if getattr(options, field) else "0"
 
 
 async def _get_token_data(token: str) -> dict:
@@ -135,6 +158,7 @@ async def save_selection(token: str, request: SelectionRequest):
     """
     data = await _get_token_data(token)
     data["selection"] = request.tags
+    data["options"] = request.model_dump(exclude={"tags"})
 
     redis = await get_async_redis()
     ttl = await redis.ttl(f"{REDIS_PREFIX}{token}")
@@ -239,18 +263,33 @@ async def create_tag_by_token(token: str, request: CreateTagRequest):
 async def get_selection(
     token: str,
     format: str = Query("json", description="Response format: json or text"),
+    field: str | None = Query(
+        None,
+        description="With format=text: return ONE option as plain text — "
+        "rating (0-5) | transcribe | summarize | analyze (1/0).",
+    ),
 ):
     """
     Retrieve saved tag selection. Called by Shortcuts after web view closes.
 
     Use ?format=text to get comma-separated plain text (e.g. "tag1,tag2,tag3").
+    Use ?format=text&field=rating (or transcribe / summarize / analyze) to get
+    that single option as plain text, so Shortcuts needs no JSON parsing.
     """
     from fastapi.responses import PlainTextResponse
 
     data = await _get_token_data(token)
     tags = data.get("selection") or []
+    options = _options_from(data)
 
     if format == "text":
-        return PlainTextResponse(",".join(tags))
+        if field is None:
+            return PlainTextResponse(",".join(tags))
+        if field not in SELECTION_FIELDS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown field '{field}'; expected one of {', '.join(SELECTION_FIELDS)}",
+            )
+        return PlainTextResponse(_field_as_text(options, field))
 
-    return SelectionResponse(tags=tags)
+    return SelectionResponse(tags=tags, **options.model_dump())
