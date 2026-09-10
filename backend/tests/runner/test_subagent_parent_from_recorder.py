@@ -210,7 +210,7 @@ def test_both_turn_loops_bind_the_recorder_to_the_subagent_service():
     from app.services.ai.runner.agent_runner import AgentRunner
 
     for loop in (AgentRunner._run_turn_inner, AgentRunner._stream_turn_inner):
-        assert "_bind_subagent_recorder(recorder)" in inspect.getsource(
+        assert "_bind_turn_recorder(recorder)" in inspect.getsource(
             loop
         ), f"{loop.__name__} does not bind the recorder"
 
@@ -221,15 +221,15 @@ def test_binding_is_a_no_op_without_a_service_or_a_recorder():
     svc = _svc(parent_recorder=None)
     runner = SimpleNamespace(skill_tool=SimpleNamespace(subagent_task=svc))
 
-    AgentRunner._bind_subagent_recorder(runner, None)
+    AgentRunner._bind_turn_recorder(runner, None)
     assert svc.parent_recorder is None
 
     rec = _Rec(run_id=900)
-    AgentRunner._bind_subagent_recorder(runner, rec)
+    AgentRunner._bind_turn_recorder(runner, rec)
     assert svc.parent_recorder is rec
     assert svc.active_parent_run_id == "900"
 
     # no service installed → nothing to bind, and no crash
-    AgentRunner._bind_subagent_recorder(
+    AgentRunner._bind_turn_recorder(
         SimpleNamespace(skill_tool=SimpleNamespace(subagent_task=None)), rec
     )
