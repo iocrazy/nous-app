@@ -23,6 +23,7 @@ from app.api.api_key_router import router as api_key_router
 from app.api.assets_router import router as assets_api_router
 from app.api.beat_memos_router import router as beat_memos_router
 from app.api.beat_templates_router import router as beat_templates_router
+from app.api.canvas_derive_router import router as canvas_derive_router
 from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
@@ -146,6 +147,7 @@ api_router.include_router(router=payment_router, tags=["Payment"])
 
 api_router.include_router(router=projects_router, tags=["MediaTrack"])
 api_router.include_router(router=canvases_router, tags=["Canvas"])
+api_router.include_router(router=canvas_derive_router, tags=["Canvas"])
 api_router.include_router(router=_project_assets_router, tags=["Project Assets"])
 
 api_router.include_router(router=generated_media_router, tags=["Generated Media"])
