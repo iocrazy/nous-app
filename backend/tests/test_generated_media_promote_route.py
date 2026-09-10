@@ -48,39 +48,45 @@ async def client() -> AsyncClient:
 
 @pytest.mark.asyncio
 async def test_promote_route_returns_resource_id(monkeypatch, client):
-    """POST /{gen_id}/promote resolves caller scope, calls the service, and
-    returns {data: {promoted_resource_id: str}}."""
+    """POST /{gen_id}/promote calls the service and returns
+    {data: {promoted_resource_id: str}} — WITHOUT naming a destination scope.
 
-    async def _fake_scope(auth):
-        return 42
+    This test used to assert ``target_scope_id == 42``, i.e. that the route
+    pinned the caller's personal team as the destination. That was the defect,
+    not the contract: a team board's generation had its Tier-2 copy pulled into
+    whichever member opened an editor on it. The destination is now the
+    generation's own scope, resolved by the service, so the route must pass
+    no scope at all.
+    """
+
+    seen: dict = {}
 
     class _FakeSvc:
-        async def promote(self, *, gen_id, user_id, target_scope_id):
-            assert target_scope_id == 42
+        async def promote(self, *, gen_id, user_id, **extra):
+            seen.update(extra)
             return {"id": 555}
 
-    monkeypatch.setattr(r, "_scope", _fake_scope)
     monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvc())
 
     resp = await client.post("/api/v1/generated-media/7/promote")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["data"]["promoted_resource_id"] == "555"
+    assert "target_scope_id" not in seen, (
+        "the route named a destination again — the service must default to "
+        "the generation's own scope"
+    )
 
 
 @pytest.mark.asyncio
 async def test_promote_route_404_when_not_in_scope(monkeypatch, client):
     """POST /{gen_id}/promote returns 404 when the service raises ValueError
-    (generation not found in the caller's scope)."""
-
-    async def _fake_scope(auth):
-        return 99
+    (no such generation, or the caller may not read the scope it lives in)."""
 
     class _FakeSvcNotFound:
-        async def promote(self, *, gen_id, user_id, target_scope_id):
+        async def promote(self, *, gen_id, user_id, **_extra):
             raise ValueError("generation not found")
 
-    monkeypatch.setattr(r, "_scope", _fake_scope)
     monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvcNotFound())
 
     resp = await client.post("/api/v1/generated-media/999/promote")
@@ -96,15 +102,11 @@ async def test_promote_route_establishes_ambient_scope(monkeypatch, client):
 
     seen: dict = {}
 
-    async def _fake_scope(auth):
-        return 42
-
     class _FakeSvc:
-        async def promote(self, *, gen_id, user_id, target_scope_id):
+        async def promote(self, *, gen_id, user_id, **_extra):
             seen["scope"] = current_scope()
             return {"id": 777}
 
-    monkeypatch.setattr(r, "_scope", _fake_scope)
     monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvc())
     resp = await client.post("/api/v1/generated-media/1/promote")
     assert resp.status_code == 200, resp.text

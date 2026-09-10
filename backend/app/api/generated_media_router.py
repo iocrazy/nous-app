@@ -536,7 +536,18 @@ async def upscale_generation(
 
 @router.post("/{gen_id}/promote")
 async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
-    target_scope_id = await _scope(auth)
+    """Promote a generation into a resource, in the scope it already lives in.
+
+    Deliberately does NOT pass ``_scope(auth)``. That helper resolves the
+    CALLER'S personal team, which is right for this router's other endpoints
+    (they browse a personal inbox) and wrong here: promoting is a copy with a
+    destination, and pinning the destination to the caller's private library
+    tore a team board's generation out of the team the moment any member
+    opened an editor on it. The service defaults to the generation's own
+    scope and still gates the write on membership — see its docstring, and
+    `_registration_scope_id` in canvas_generation.py for the same argument
+    settled on the registration side.
+    """
     # The service INSERTs a scoped model (Resources) — the scoped-ORM guard
     # requires an ambient Scope at the request boundary (2026-08-21 prod
     # UnscopedQueryError: promote 500ed for every upload).
@@ -545,7 +556,6 @@ async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
             resource = await PromoteGeneratedMediaService().promote(
                 gen_id=gen_id,
                 user_id=str(auth.user_id),
-                target_scope_id=target_scope_id,
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc))
