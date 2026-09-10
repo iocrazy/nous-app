@@ -7,6 +7,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from '../../../Todolist/childRunContext';
+import { TrajectoryRunContext } from '../trajectoryRunContext';
 import type { InboxNode, ScheduleNode, StepNode, SubagentChild } from '../foldEvents';
 import { InboxNodeView, ScheduleNodeView, SubagentCards } from './builtins';
 
@@ -69,12 +70,14 @@ const step = (children: SubagentChild[]): StepNode => ({
   children,
 });
 
-function withChildRun(node: StepNode, open: (o: ChildRunOrigin) => void) {
+function withChildRun(node: StepNode, open: (o: ChildRunOrigin) => void, runId: string | null = null) {
   const state: ChildRunState = { current: null, open, close: vi.fn() };
   return (
-    <ChildRunContext.Provider value={state}>
-      <SubagentCards node={node} />
-    </ChildRunContext.Provider>
+    <TrajectoryRunContext.Provider value={runId}>
+      <ChildRunContext.Provider value={state}>
+        <SubagentCards node={node} />
+      </ChildRunContext.Provider>
+    </TrajectoryRunContext.Provider>
   );
 }
 
@@ -156,6 +159,35 @@ describe('SubagentCards', () => {
   it('a background child with no run yet has nothing to open', () => {
     render(withChildRun(step([child({ mode: 'async', childRunId: null, taskId: 'tk-9' })]), vi.fn()));
     expect(screen.queryByTestId('subagent-open')).toBeNull();
+  });
+
+  // Task 7b defect H. `parentRunId` was the literal `null`, so the sub-run
+  // panel's header always read «from run #—». The card is INSIDE the run whose
+  // events it is folding, so it is the one place that knows the answer.
+  it('names the run it belongs to when the panel asks where the child came from', () => {
+    const open = vi.fn();
+    render(withChildRun(step([child()]), open, '348057207487810'));
+    fireEvent.click(screen.getByTestId('subagent-open'));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ parentRunId: '348057207487810' }));
+  });
+
+  it('still says null when there is no trajectory run to name', () => {
+    const open = vi.fn();
+    render(withChildRun(step([child()]), open));
+    fireEvent.click(screen.getByTestId('subagent-open'));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ parentRunId: null }));
+  });
+
+  // The card's own version of the rule RunMetaLine states: "an unpriced run
+  // should read as 'no data', not 'free'". A model with no price row computes
+  // 0.0, and ¢0.000 claims the child was free.
+  it('reads an uncomputed cost as no data, not as free', () => {
+    const { unmount } = render(<SubagentCards node={step([child({ status: 'completed', costCents: 0, durationMs: 1200 })])} />);
+    expect(screen.getByTestId('subagent-card')).toHaveTextContent('1.2s · —');
+    expect(screen.getByTestId('subagent-card')).not.toHaveTextContent('¢0.000');
+    unmount();
+    render(<SubagentCards node={step([child({ status: 'completed', costCents: 0.0236, durationMs: 1200 })])} />);
+    expect(screen.getByTestId('subagent-card')).toHaveTextContent('¢0.024');
   });
 });
 

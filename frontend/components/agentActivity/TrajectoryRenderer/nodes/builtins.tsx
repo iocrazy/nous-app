@@ -23,6 +23,7 @@ import type {
   UserNode,
 } from '../foldEvents';
 import { registerTrajectoryNode, type NodeProps } from './registry';
+import { useTrajectoryRunId } from '../trajectoryRunContext';
 
 function fmtMs(ms: number | null): string {
   if (ms === null) return '';
@@ -31,6 +32,17 @@ function fmtMs(ms: number | null): string {
 
 function fmtCents(c: number | null): string {
   return c === null ? '' : `¢${c.toFixed(c < 1 ? 3 : 2)}`;
+}
+
+/** A child's spend, where zero is not a price.
+ *
+ *  A turn that reached a model always costs something once rates are known,
+ *  so 0 here means the cost was never computed — a missing price row, or (up
+ *  to Task 7b defect A) an envelope that dropped the field. `¢0.000` states
+ *  the opposite: that the child was free. Same rule `RunMetaLine` writes down
+ *  — "an unpriced run should read as 'no data', not 'free'". */
+function fmtChildCents(c: number | null): string {
+  return c === null || c === 0 ? '—' : fmtCents(c);
 }
 
 const Row: React.FC<React.PropsWithChildren<{ className?: string; testId?: string }>> = ({
@@ -127,12 +139,15 @@ export function childState(status: string | null, mode: 'sync' | 'async'): Child
 export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
   const { t } = useTranslation();
   const childRun = useChildRun();
+  // The run these events belong to — the child's panel header names it, and
+  // this card is the only place that knows (Task 7b defect H).
+  const parentRunId = useTrajectoryRunId();
   if (node.children.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 px-2.5 pb-1.5 pl-7" data-testid="subagent-cards">
       {node.children.map((c) => {
         const state = childState(c.status, c.mode);
-        const spend = [fmtMs(c.durationMs), fmtCents(c.costCents)].filter(Boolean).join(' · ');
+        const spend = [fmtMs(c.durationMs), fmtChildCents(c.costCents)].filter(Boolean).join(' · ');
         return (
           <div
             key={c.key}
@@ -167,7 +182,7 @@ export const SubagentCards: React.FC<{ node: StepNode }> = ({ node }) => {
                   onClick={() =>
                     childRun.open({
                       childRunId: c.childRunId as string,
-                      parentRunId: null,
+                      parentRunId,
                       step: node.step,
                       mode: c.mode,
                       subagentType: c.subagentType,
