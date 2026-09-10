@@ -239,3 +239,63 @@ async def test_a_failed_transcript_read_leaves_the_slices_alone(monkeypatch):
 
     assert writer.views["view"]["children"]["total"] == 2
     assert writer.views["cost"]["by_child"] == {"51": 3.0}
+
+
+async def test_a_corrupt_stored_children_count_never_fails_the_run(monkeypatch):
+    """Re-review round 2. ``refold_children`` runs on the append and finish
+    paths, where the file's standing contract is that telemetry never fails a
+    run. A ``children.total`` that is not a number — a hand-edited row, a
+    partial write, a future shape — used to raise straight out of ``append``
+    and ``_finish``, taking a live turn down with it."""
+    _wire_db(monkeypatch, [])
+
+    writer = rr.RunEventWriter(7, seq_start=0)
+    writer.views["view"]["children"] = {"total": "x", "done": 0}
+    before = dict(writer.views["view"]["children"])
+
+    seq = await writer.append(
+        "step_end", {"turn": 1, "step": 1, "cost_cents": 10.0, "model": "m"}
+    )
+
+    # The event still landed and the corrupt slice was left exactly as found —
+    # ``apply_projection`` deep-copies, so compare by value, not identity.
+    assert seq == 1
+    assert writer.views["view"]["children"] == before
+
+
+async def test_a_corrupt_stored_children_count_never_fails_the_finish(monkeypatch):
+    import contextlib
+
+    from app.db import session as dbs
+
+    class _S:
+        async def execute(self, stmt, *a, **k):
+            return _Rows([])
+
+    @contextlib.asynccontextmanager
+    async def _scope():
+        yield _S()
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+    monkeypatch.setattr(dbs, "write_scope", _scope)
+
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    rec.run_id = "7"
+    rec._prompt_rate = 1.0
+    rec._completion_rate = 1.0
+    rec.record_usage(prompt_tokens=1000, completion_tokens=0)
+    rec._writer().views["view"]["children"] = {"total": object(), "done": 0}
+
+    await rec._finish(status="completed")  # must not raise
+
+
+async def test_a_corrupt_slice_from_the_transcript_never_fails_the_run(monkeypatch):
+    """The assignments and the recompute were outside the guard too, so a
+    fold that produced an unusable shape had the same reach."""
+    _wire_db(monkeypatch, [])
+
+    writer = rr.RunEventWriter(7, seq_start=0)
+    writer.views["view"]["children"] = {"total": 1, "done": 0}
+    writer.views["cost"] = None  # recompute_spent would blow up on this
+
+    await writer.refold_children()  # must not raise

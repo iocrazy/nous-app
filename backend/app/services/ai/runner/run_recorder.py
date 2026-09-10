@@ -996,6 +996,10 @@ class RunEventWriter:
         # insert-failure branch below). ``refold_children`` rebuilds those two
         # slices from the transcript, so anything missing from it has to be
         # replayed on top or it would be dropped on the next mirror.
+        # Edge: an insert that raised may still have COMMITTED (an ambiguous
+        # failure — the connection dropped after the write). The event is then
+        # both in the transcript and here, so the counters inflate by one;
+        # ``by_child`` is keyed and stays exact, which is the half that bills.
         self._unpersisted_subagent: list[tuple[str, dict[str, Any]]] = []
 
     @classmethod
@@ -1129,14 +1133,22 @@ class RunEventWriter:
         ``_unpersisted_subagent`` is replayed on top.
 
         Skipped entirely when this run has no children, so the overwhelming
-        majority of runs never pay for the query. A read that fails leaves the
-        slices as they are: a stale count is better than wiping children
-        because the database blipped.
+        majority of runs never pay for the query.
+
+        The WHOLE body is under one guard, including the pre-check that reads
+        the stored ``children.total`` and the final slice assignments. Both
+        call sites — ``_mirror`` (so, ``append``) and ``_finish`` — are on the
+        live path of a turn, where this file's standing contract is that
+        telemetry never fails a run. A stored count that is not a number, or a
+        fold that produces an unusable shape, must cost a warning and a stale
+        slice, not the turn: wiping or crashing over a decoration would be
+        strictly worse than the drift this method exists to correct.
         """
-        children = self.views["view"].get("children") or {}
-        if not int(children.get("total") or 0) and not self._unpersisted_subagent:
-            return
         try:
+            children = self.views["view"].get("children") or {}
+            if not int(children.get("total") or 0) and not self._unpersisted_subagent:
+                return
+
             from sqlalchemy import select
 
             from app.db.session import read_scope
@@ -1162,23 +1174,22 @@ class RunEventWriter:
                     .mappings()
                     .all()
                 )
-        except Exception as err:  # noqa: BLE001 — never wipe on a read blip
+
+            scratch = empty_views()
+            for row in rows:
+                scratch = apply_projection(
+                    scratch, str(row["event_type"]), dict(row["payload"] or {})
+                )
+            for event_type, payload in self._unpersisted_subagent:
+                scratch = apply_projection(scratch, event_type, payload)
+
+            self.views["view"]["children"] = scratch["view"]["children"]
+            self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            recompute_spent(self.views["cost"])
+        except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(
                 f"[RunEventWriter] children re-fold skipped (run={self.run_id}): {err}"
             )
-            return
-
-        scratch = empty_views()
-        for row in rows:
-            scratch = apply_projection(
-                scratch, str(row["event_type"]), dict(row["payload"] or {})
-            )
-        for event_type, payload in self._unpersisted_subagent:
-            scratch = apply_projection(scratch, event_type, payload)
-
-        self.views["view"]["children"] = scratch["view"]["children"]
-        self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
-        recompute_spent(self.views["cost"])
 
     async def _sync_cost_column(self) -> None:
         """Push the recomputed total into ``agent_runs.cost_cents`` for a run
