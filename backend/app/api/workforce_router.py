@@ -23,7 +23,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import column, func, select
+from sqlalchemy import Text as SAText
+from sqlalchemy import cast, column, func, literal, select
 from sqlalchemy import update as sa_update
 
 from app.core.deps import get_current_user
@@ -78,6 +79,38 @@ def _serialize_row(row: Mapping[str, Any]) -> dict[str, Any]:
 # per-process equivalent, so they went with it rather than lingering as
 # constants nothing reads.
 _HEALTH_RECENT_WINDOW_S = 300
+
+# The inbox dispatch tick fires every 10s (``@DBOS.scheduled("*/10 * * * * *")``
+# in workflows/workforce_dispatch.py). A queued, never-dispatched agent_task
+# older than three ticks has missed its turn repeatedly — that is a dispatch
+# loop that is not dispatching, not a row that arrived a moment ago.
+_DISPATCH_TICK_S = 10
+_DISPATCH_STALE_AFTER_S = _DISPATCH_TICK_S * 3
+
+
+async def _oldest_undispatched_age_s() -> Optional[float]:
+    """Age in seconds of the oldest queued agent_task nobody has enqueued, or
+    None when there is no such row.
+
+    None means "nothing waiting", which is why it is None and not 0.0 — a
+    caller must never confuse an empty result with a fresh one. Raises on a
+    failed read so the probe can say it does not know instead of saying fine."""
+    async with read_scope() as session:
+        oldest = await session.scalar(
+            select(func.min(TaskTracking.created_at))
+            .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+            .where(TaskTracking.phase == "queued")
+            .where(
+                TaskTracking.metadata_.op("->>", return_type=SAText)(
+                    cast(literal("dispatched_at"), SAText)
+                ).is_(None)
+            )
+        )
+    if oldest is None:
+        return None
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - oldest).total_seconds()
 
 
 # ─── shared helpers ────────────────────────────────────────────────────
@@ -394,8 +427,10 @@ async def workforce_healthz() -> dict[str, Any]:
     """Operational health snapshot for the workforce runtime.
 
     Three signals:
-      * dispatcher: is DBOS usable from this process, and how many agent
-        tasks are live. ``launched=False`` → ``status='down'``.
+      * dispatcher: is DBOS usable from this process, how many agent tasks are
+        live, and how long the oldest never-enqueued queued task has waited.
+        ``launched=False`` → ``down``; a backlog older than three dispatch
+        ticks → ``degraded``.
       * recent_inbox_throughput: count of inbox rows processed in the
         last 5 min. Only flagged when there's at least one persistent
         agent — empty queues on a deployed-but-unused system are fine.
@@ -405,10 +440,13 @@ async def workforce_healthz() -> dict[str, Any]:
 
     ⚠️ What ``launched`` does NOT say: that the scheduled dispatch tick is
     firing. The ticks run under the worker role; this endpoint answers from
-    whichever process serves it. The signal that actually catches a stalled
-    dispatcher is the throughput check below (persistent agents + a non-empty
-    queue + zero rows processed in the window → ``degraded``). Do not promote
-    ``launched`` into a liveness claim it cannot make.
+    whichever process serves it. Two independent signals cover the stages it
+    cannot see, and they watch DIFFERENT stages — do not treat either as a
+    substitute for the other:
+      * ``oldest_undispatched_age_s`` (task_tracking) — the enqueue loop.
+      * the inbox throughput check (agent_inbox) — the stage before it,
+        messages becoming task rows.
+    Do not promote ``launched`` into a liveness claim it cannot make.
 
     Until phase 2b-2 T3 this section read ``app.state.workforce_scheduler``,
     which nothing had set since PR-D8 Phase 3 replaced the in-process
@@ -435,11 +473,30 @@ async def workforce_healthz() -> dict[str, Any]:
         logger.warning(f"[workforce] inflight gauge unavailable: {err}")
         issues.append(f"inflight gauge unavailable: {type(err).__name__}")
         overall = "degraded"
+    # The signal that actually watches the enqueue loop this endpoint's own
+    # release wired up. The inbox throughput check further down reads
+    # agent_inbox — the stage BEFORE this one — so it stays green while every
+    # dispatch throws and gets swallowed per-order.
+    oldest_age: Optional[float] = None
+    try:
+        oldest_age = await _oldest_undispatched_age_s()
+    except Exception as err:
+        logger.warning(f"[workforce] dispatch backlog probe failed: {err}")
+        issues.append(f"dispatch backlog probe failed: {type(err).__name__}")
+        overall = "degraded"
     response["dispatcher"] = {
         "engine": "dbos",
         "launched": launched,
         "inflight_agent_tasks": inflight,
+        "oldest_undispatched_age_s": oldest_age,
     }
+    if oldest_age is not None and oldest_age > _DISPATCH_STALE_AFTER_S:
+        issues.append(
+            f"dispatch stalled: a queued agent_task has waited "
+            f"{oldest_age:.0f}s without being enqueued"
+        )
+        if overall == "healthy":
+            overall = "degraded"
     if not launched:
         issues.append("dbos not launched — no workforce task can execute here")
         overall = "down"

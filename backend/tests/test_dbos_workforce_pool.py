@@ -33,8 +33,10 @@ async def test_dispatch_on_closed_pool_drops_silently():
     queue_mock = _patched_queue()
     with patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock):
         # Should not raise, should not attempt to enqueue.
-        await pool.dispatch({"id": str(uuid4()), "agent_id": str(uuid4())})
+        dropped = await pool.dispatch({"id": str(uuid4()), "agent_id": str(uuid4())})
     queue_mock.enqueue.assert_not_called()
+    # None, so the caller does not stamp a dispatch that never happened.
+    assert dropped is None
 
 
 @pytest.mark.unit
@@ -45,7 +47,7 @@ async def test_dispatch_missing_agent_id_logs_and_returns():
     pool = DbosAgentWorkforcePool()
     queue_mock = _patched_queue()
     with patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock):
-        await pool.dispatch({"id": str(uuid4())})  # no agent_id
+        assert await pool.dispatch({"id": str(uuid4())}) is None  # no agent_id
     queue_mock.enqueue.assert_not_called()
     assert pool.known_agents == set()
 
@@ -58,7 +60,7 @@ async def test_dispatch_missing_task_id_logs_and_returns():
     pool = DbosAgentWorkforcePool()
     queue_mock = _patched_queue()
     with patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock):
-        await pool.dispatch({"agent_id": str(uuid4())})  # no id
+        assert await pool.dispatch({"agent_id": str(uuid4())}) is None  # no id
     queue_mock.enqueue.assert_not_called()
 
 
@@ -72,7 +74,7 @@ async def test_dispatch_enqueues_with_partition_key_and_workflow_id():
 
     agent_id = uuid4()
     task_id = uuid4()
-    task = {"id": str(task_id), "agent_id": str(agent_id)}
+    task = {"id": str(task_id), "agent_id": str(agent_id), "dispatch_attempt": 0}
 
     queue_mock = _patched_queue()
 
@@ -89,10 +91,10 @@ async def test_dispatch_enqueues_with_partition_key_and_workflow_id():
         set_opts.return_value.__exit__ = MagicMock(return_value=False)
 
         pool = DbosAgentWorkforcePool()
-        await pool.dispatch(task)
+        record = await pool.dispatch(task)
 
-    # Workflow id deterministic on task_id
-    set_wf.assert_called_once_with(f"workforce-{task_id}")
+    # Workflow id is scoped to the ATTEMPT, not just the task.
+    set_wf.assert_called_once_with(f"workforce-{task_id}-1")
     # Partition key = agent_id str
     set_opts.assert_called_once_with(queue_partition_key=str(agent_id))
     # Queue.enqueue called once with (workflow_callable, task)
@@ -101,36 +103,12 @@ async def test_dispatch_enqueues_with_partition_key_and_workflow_id():
     assert args[1] is task
     # Agent recorded
     assert agent_id in pool.known_agents
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_dispatch_duplicate_workflow_id_swallowed():
-    """A second enqueue for the same task should be treated as success
-    (DBOS already has it) — the workflow id IS the dedup, so a replayed
-    dispatch tick costs nothing."""
-    from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
-
-    agent_id = uuid4()
-    task_id = uuid4()
-    task = {"id": str(task_id), "agent_id": str(agent_id)}
-
-    queue_mock = MagicMock()
-    queue_mock.enqueue = MagicMock(side_effect=Exception("workflow already exists"))
-
-    with (
-        patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock),
-        patch("app.services.workforce.dbos_pool.SetWorkflowID") as set_wf,
-        patch("app.services.workforce.dbos_pool.SetEnqueueOptions") as set_opts,
-    ):
-        set_wf.return_value.__enter__ = MagicMock()
-        set_wf.return_value.__exit__ = MagicMock(return_value=False)
-        set_opts.return_value.__enter__ = MagicMock()
-        set_opts.return_value.__exit__ = MagicMock(return_value=False)
-
-        pool = DbosAgentWorkforcePool()
-        # Should NOT raise.
-        await pool.dispatch(task)
+    # The caller gets back exactly what was enqueued, so the same values can be
+    # persisted — the stored id must equal the enqueued id or the replay
+    # re-entry check in claim_task compares against the wrong thing.
+    assert record is not None
+    assert record.workflow_id == f"workforce-{task_id}-1"
+    assert record.attempt == 1
 
 
 @pytest.mark.unit
@@ -191,3 +169,70 @@ def test_known_agents_returns_copy():
     snapshot = pool.known_agents
     snapshot.add(uuid4())  # mutating the snapshot must not affect pool
     assert len(pool._known_agents) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_requeued_task_gets_a_workflow_id_dbos_has_never_seen():
+    """The whole point of the attempt suffix.
+
+    Re-enqueuing a workflow id DBOS already holds does NOT re-run it: the
+    status row is upserted with only recovery_attempts/updated_at, keeps its
+    terminal status, and DBOS answers should_execute=False. Its dedup means
+    NEVER AGAIN, not "exactly once". So a task that came back through requeue
+    must arrive under a fresh id, or it is enqueued forever and run never —
+    while the dispatch loop counts it as sent."""
+    from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
+
+    task_id = uuid4()
+    agent_id = uuid4()
+    # attempt 1 already went out and died; requeue kept the counter.
+    task = {"id": str(task_id), "agent_id": str(agent_id), "dispatch_attempt": 1}
+
+    queue_mock = _patched_queue()
+    with (
+        patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock),
+        patch("app.services.workforce.dbos_pool.SetWorkflowID") as set_wf,
+        patch("app.services.workforce.dbos_pool.SetEnqueueOptions") as set_opts,
+    ):
+        set_wf.return_value.__enter__ = MagicMock()
+        set_wf.return_value.__exit__ = MagicMock(return_value=False)
+        set_opts.return_value.__enter__ = MagicMock()
+        set_opts.return_value.__exit__ = MagicMock(return_value=False)
+
+        record = await DbosAgentWorkforcePool().dispatch(task)
+
+    set_wf.assert_called_once_with(f"workforce-{task_id}-2")
+    assert record.attempt == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_same_attempt_redispatch_reuses_the_id_so_dbos_drops_it():
+    """The other direction: a replayed dispatch tick must NOT invent a new id.
+
+    Same attempt → same id → DBOS recognises the duplicate and does not start a
+    second run. Deduplication is wanted HERE; it is only fatal when the task
+    genuinely needs to run again, which is what the attempt counter separates."""
+    from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
+
+    task_id = uuid4()
+    task = {"id": str(task_id), "agent_id": str(uuid4()), "dispatch_attempt": 4}
+
+    seen = []
+    queue_mock = _patched_queue()
+    with (
+        patch("app.workflows.agent_workforce.agent_workforce_queue", queue_mock),
+        patch("app.services.workforce.dbos_pool.SetWorkflowID") as set_wf,
+        patch("app.services.workforce.dbos_pool.SetEnqueueOptions") as set_opts,
+    ):
+        set_wf.return_value.__enter__ = MagicMock()
+        set_wf.return_value.__exit__ = MagicMock(return_value=False)
+        set_opts.return_value.__enter__ = MagicMock()
+        set_opts.return_value.__exit__ = MagicMock(return_value=False)
+
+        pool = DbosAgentWorkforcePool()
+        seen.append(await pool.dispatch(task))
+        seen.append(await pool.dispatch(task))
+
+    assert seen[0].workflow_id == seen[1].workflow_id == f"workforce-{task_id}-5"

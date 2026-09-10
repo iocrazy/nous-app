@@ -17,7 +17,11 @@ corners the state machine and dispatcher depend on WITHOUT a live DB:
 
 The DSN-gated integration suite in
 ``tests/integration/test_agent_workforce_repository_orm.py`` exercises the real
-round-trip + the crasher-proof uuid→str parity.
+round-trip + the crasher-proof uuid→str parity, including the four dispatch
+statements a stubbed session can only compile (claim_task's two CAS arms,
+the ``->>`` IS NULL dispatch list, the ``||`` metadata merges, the inflight
+count). ⚠️ That file is NOT on schema-drift.yml, so nothing runs it unless a
+person sets INTEGRATION_DATABASE_URL — green here is not green on Postgres.
 
 A4 (migration 200) note: tasks live in task_tracking[task_kind='agent_task'];
 8-state lifecycle precision is preserved in the `phase` column while the
@@ -283,11 +287,12 @@ async def test_claim_task_is_a_single_cas_update_with_returning(repo, monkeypatc
     read-then-check it replaces (``run_one_task``'s ``get_task`` + phase test)
     was not atomic, so two workers could both pass it."""
     task_id = str(uuid4())
+    wf = f"workforce-{task_id}-1"
     updated = TaskTracking(dbos_workflow_id=task_id, phase="assigned", metadata_={})
     session = _FakeSession([_Result(scalars=[updated])])
     _patch_scopes(monkeypatch, session)
 
-    out = await repo.claim_task(task_id)
+    out = await repo.claim_task(task_id, workflow_id=wf)
 
     assert out is not None and out["lifecycle_status"] == "assigned"
     # ONE statement — no separate SELECT to race against.
@@ -296,11 +301,42 @@ async def test_claim_task_is_a_single_cas_update_with_returning(repo, monkeypatc
     assert "UPDATE public.task_tracking" in sql
     assert "RETURNING" in sql
     p = session.params[0]
-    # CAS guard binds phase='queued' in the WHERE; SET phase='assigned'.
-    assert p["phase_1"] == "queued"
-    assert p["phase"] == "assigned"
+    rendered = str(p)
+    # The fresh-claim arm of the CAS.
+    assert "queued" in rendered
     assert p["dbos_workflow_id_1"] == task_id
     assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+    # The claim always records which DBOS workflow owns the row.
+    assert wf in str(p)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_task_readmits_the_same_workflow_after_a_replay(repo, monkeypatch):
+    """A DBOS crash replay re-enters its OWN row.
+
+    Without this arm the recovery path is a dead end: the worker dies between
+    claim and completion, the row sits at 'assigned', the replay's CAS sees a
+    phase that is no longer 'queued', returns None, and the workflow records
+    SUCCESS/skipped. Nothing requeues it — ``force_terminate`` has no caller in
+    ``app/`` — so the task is stranded on every surface at once. Ownership is
+    keyed on the workflow id, so a DIFFERENT worker still cannot steal it."""
+    task_id = str(uuid4())
+    wf = f"workforce-{task_id}-1"
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.claim_task(task_id, workflow_id=wf)
+
+    sql = session.sql[0]
+    rendered = str(session.params[0])
+    # Re-entry arm: assigned / in_progress AND the metadata id matches ours.
+    assert "assigned" in rendered and "in_progress" in rendered
+    assert "workforce_workflow_id" in str(session.params[0])
+    assert wf in str(session.params[0])
+    # Phase only advances out of 'queued' — a re-entered in_progress row keeps
+    # its phase rather than being knocked back to 'assigned'.
+    assert "CASE" in sql.upper()
 
 
 @pytest.mark.unit
@@ -309,7 +345,7 @@ async def test_claim_task_returns_none_when_someone_else_won(repo, monkeypatch):
     """Zero rows updated == another worker holds it. Not an error."""
     session = _FakeSession([_Result(scalars=[])])
     _patch_scopes(monkeypatch, session)
-    assert await repo.claim_task(str(uuid4())) is None
+    assert await repo.claim_task(str(uuid4()), workflow_id="workforce-x-1") is None
 
 
 @pytest.mark.unit
@@ -339,20 +375,31 @@ async def test_list_undispatched_queued_tasks_filters_on_missing_stamp(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_mark_dispatched_merges_the_stamp_without_clobbering(repo, monkeypatch):
+async def test_mark_dispatched_records_the_attempt_and_its_workflow_id(
+    repo, monkeypatch
+):
     """JSONB ``||`` merge, not a read-modify-write: unrelated metadata keys
     (agent_payload, current_run_id) survive, and no interleaving write is lost
-    between a SELECT and an UPDATE that never happen."""
+    between a SELECT and an UPDATE that never happen.
+
+    It records the attempt number and the exact workflow id that was enqueued,
+    because both are load-bearing: the next dispatch derives a FRESH id from
+    the attempt, and ``claim_task`` re-admits a replay only when the id matches."""
     session = _FakeSession([_Result(scalars=[])])
     _patch_scopes(monkeypatch, session)
+    task_id = str(uuid4())
+    wf = f"workforce-{task_id}-3"
 
-    await repo.mark_dispatched(str(uuid4()))
+    await repo.mark_dispatched(task_id, workflow_id=wf, attempt=3)
 
     assert len(session.sql) == 1
     sql = session.sql[0]
     assert "UPDATE public.task_tracking" in sql
     assert "||" in sql
-    assert "dispatched_at" in str(session.params[0])
+    written = str(session.params[0])
+    assert "dispatched_at" in written
+    assert '"dispatch_attempt": 3' in written
+    assert wf in written
     # Lifecycle columns are NOT touched — this is a metadata-only stamp.
     assert "phase" not in session.params[0]
     assert "status" not in session.params[0]
@@ -369,7 +416,9 @@ async def test_count_inflight_agent_tasks_is_derived_from_live_phases(
     assert await repo.count_inflight_agent_tasks() == 4
 
     p = session.params[0]
-    assert set(p["phase_1"]) == {"queued", "in_progress"}
+    # 'assigned' belongs in the gauge: it is where a task that lost its worker
+    # comes to rest, which is exactly the state an operator needs to see.
+    assert set(p["phase_1"]) == {"queued", "assigned", "in_progress"}
     assert p["task_kind_1"] == mod.TASK_KIND_AGENT
 
 
@@ -470,6 +519,8 @@ async def test_requeue_task_clears_the_dispatch_stamp(repo, monkeypatch):
         "agent_payload": {"prompt": "x"},
         "assigned_at": "2026-09-10T00:00:00+00:00",
         "dispatched_at": "2026-09-10T00:00:00+00:00",
+        "dispatch_attempt": 2,
+        "workforce_workflow_id": "workforce-abc-2",
         "current_run_id": "7",
     }
     session = _FakeSession([_Result(first=(md,)), _Result(scalars=["t"])])
@@ -481,6 +532,13 @@ async def test_requeue_task_clears_the_dispatch_stamp(repo, monkeypatch):
     assert "dispatched_at" not in written
     assert "assigned_at" not in written
     assert "current_run_id" not in written
+    # The dead run's ownership marker goes too — otherwise the next attempt's
+    # claim could be re-admitted as a replay of a workflow that is long gone.
+    assert "workforce_workflow_id" not in written
+    # ⚠️ The ATTEMPT COUNTER survives. It is what makes the next dispatch use a
+    # workflow id DBOS has never seen. Reset it and the re-enqueue collides
+    # with the old SUCCESS row, and DBOS answers by not running it at all.
+    assert written["dispatch_attempt"] == 2
     # Business payload survives — requeue is not a reset.
     assert written["agent_payload"] == {"prompt": "x"}
 

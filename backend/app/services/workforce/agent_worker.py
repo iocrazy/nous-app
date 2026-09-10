@@ -10,7 +10,9 @@ but reads input from ``agent_tasks.payload`` and writes output to
 ## Lifecycle of a task as it flows through here
 
     queued (set by inbox processor)
-        ↓ claim_task — CAS guard, flips to 'assigned'
+        ↓ claim_task — CAS guard, flips to 'assigned' and records which DBOS
+          workflow owns the row. A replay of THAT SAME workflow is re-admitted
+          from 'assigned'/'in_progress'; anyone else is refused.
     assigned
         ↓ this module enters
     in_progress  ← started_at set
@@ -45,7 +47,8 @@ it claims an unread message.
 
 Route C rule 2 forbids business code from writing task_tracking's lifecycle
 columns — ``mirror_dbos_lifecycle_to_tracking`` owns them. It cannot own THESE
-rows: a workforce task's DBOS workflow id is ``workforce-<task_id>``, while
+rows: a workforce task's DBOS workflow id is ``workforce-<task_id>-<attempt>``
+(see ``dbos_pool.workflow_id_for``), while
 ``task_tracking.dbos_workflow_id`` holds the application-level uuid4 the
 repository minted at create time. They never match, the trigger's join finds
 nothing, and the row would sit at ``queued`` for the whole run. These writes
@@ -85,10 +88,13 @@ MAX_INHERITED_DEPTH = 3
 async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     """Execute one ``agent_task`` end-to-end.
 
-    Idempotent on retry: if the task is no longer in 'assigned' state
-    (e.g. another worker already picked it up after a previous
-    dispatch), this function early-returns. The CAS guard inside
-    ``update_task_status`` prevents duplicate work.
+    Takes ``task`` as a dispatch ENVELOPE — it only has to carry ``id`` and
+    ``workforce_workflow_id``; everything else is read back from the row the
+    claim returns.
+
+    Safe on replay: the claim re-admits this same DBOS workflow and refuses
+    every other, so a retry of THIS run continues its own work while a second
+    worker gets ``skipped``.
 
     Returns a small dict for observability:
       ``{"task_id": str, "status": str, "run_id": str|None}``
@@ -98,14 +104,35 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         logger.error(f"[agent-worker] task missing id: {task}")
         return {"task_id": None, "status": "skipped", "reason": "missing_id"}
     task_id = UUID(task_id_str)
-    agent_id = UUID(task["agent_id"])
-    user_id = UUID(task["user_id"])
 
     workforce = get_agent_workforce_repository()
 
+    # Take ownership atomically: one UPDATE, no preceding read. This replaced a
+    # read-then-check (get_task, then test the phase) that two workers could
+    # both pass — the window between the read and the first write was never
+    # guarded.
+    #
+    # ``workflow_id`` is OUR DBOS workflow id, threaded in by
+    # ``agent_workforce_workflow``. It is what lets a replay of THIS run
+    # re-enter a row it already moved past 'queued', while still refusing a
+    # different worker. Without it a crash between claim and completion strands
+    # the row at 'assigned' with nothing able to pick it up again.
+    workflow_id = str(task.get("workforce_workflow_id") or "")
+    claimed = await workforce.claim_task(str(task_id), workflow_id=workflow_id)
+    if claimed is None:
+        logger.info(f"[agent-worker] task {task_id} not claimable (already taken)")
+        return {"task_id": str(task_id), "status": "skipped", "reason": "not_claimable"}
+    # The claim returns the authoritative row, so a dispatch order only has to
+    # carry an id. It also means the run acts on the CURRENT payload rather
+    # than a snapshot taken whenever the order was enqueued.
+    task = {**task, **claimed}
+    agent_id = UUID(str(task["agent_id"]))
+    user_id = UUID(str(task["user_id"]))
+
     # Refuse to enter the run if depth budget is already blown. The
     # inbox processor should have caught this earlier via DelegateTool,
-    # but defense-in-depth is cheap.
+    # but defense-in-depth is cheap. Checked AFTER the claim: writing a
+    # failure onto a row we do not own would stamp another worker's task.
     payload = task.get("payload") or {}
     inherited_depth = int(payload.get("delegated_at_depth") or 0) + 1
     if inherited_depth > MAX_INHERITED_DEPTH:
@@ -116,16 +143,6 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             error_message=f"inherited depth {inherited_depth} > max {MAX_INHERITED_DEPTH}",
         )
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
-
-    # Take ownership atomically: queued → assigned in ONE UPDATE. Losing the
-    # race returns None. This replaced a read-then-check (get_task, then test
-    # the phase) that two workers could both pass — the window between the
-    # read and the first write was never guarded.
-    claimed = await workforce.claim_task(str(task_id))
-    if claimed is None:
-        logger.info(f"[agent-worker] task {task_id} not claimable (already taken)")
-        return {"task_id": str(task_id), "status": "skipped", "reason": "not_claimable"}
-    task = {**task, **claimed}
 
     # Resolve the agent record for model + budget + identity.
     agent_repo = get_agent_repository()

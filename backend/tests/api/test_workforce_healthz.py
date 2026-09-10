@@ -52,12 +52,26 @@ class _ScopeCM:
         return False
 
 
-def _patch(monkeypatch, *, launched: bool, inflight: int, counts: list[int]) -> None:
+def _patch(
+    monkeypatch,
+    *,
+    launched: bool,
+    inflight: int,
+    counts: list[int],
+    oldest_undispatched_age_s: float | None = None,
+) -> None:
+    """``counts`` answers the inbox throughput selects in order; the dispatch
+    probe is stubbed separately because it reads task_tracking, not agent_inbox."""
     monkeypatch.setattr(mod, "read_scope", lambda: _ScopeCM(_Session(counts)))
     monkeypatch.setattr(mod, "dbos_is_launched", lambda: launched)
     pool = MagicMock()
     pool.inflight_count = AsyncMock(return_value=inflight)
     monkeypatch.setattr(mod, "DbosAgentWorkforcePool", lambda: pool)
+
+    async def _oldest():
+        return oldest_undispatched_age_s
+
+    monkeypatch.setattr(mod, "_oldest_undispatched_age_s", _oldest)
 
 
 @pytest.mark.asyncio
@@ -152,3 +166,82 @@ async def test_db_unreachable_is_still_down(monkeypatch):
 
     assert out["status"] == "down"
     assert out["supabase"]["reachable"] is False
+
+
+# ─── the dispatch probe (Important-4) ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_dispatch_loop_is_reported_even_when_the_inbox_is_fine(
+    monkeypatch,
+):
+    """The signal this endpoint was missing.
+
+    The inbox throughput check reads agent_inbox: messages turning into task
+    rows. That whole stage can be healthy while the NEXT stage — the workflow
+    body's enqueue loop — throws on every order and swallows it per-order.
+    Inbox counters look perfect, tasks pile up at queued, and the only number
+    that moves is a gauge nothing thresholds. So the probe reads task_tracking
+    directly: a queued, never-dispatched row older than a few ticks is a
+    dispatch that is not happening."""
+    _patch(
+        monkeypatch,
+        launched=True,
+        inflight=12,
+        counts=[2, 5, 0],  # agents exist, inbox draining, nothing pending
+        oldest_undispatched_age_s=mod._DISPATCH_STALE_AFTER_S + 1,
+    )
+
+    out = await mod.workforce_healthz()
+
+    assert out["status"] == "degraded"
+    assert any("dispatch" in i.lower() for i in out["issues"])
+    assert out["dispatcher"]["oldest_undispatched_age_s"] is not None
+
+
+@pytest.mark.asyncio
+async def test_a_freshly_queued_task_is_not_a_stall(monkeypatch):
+    """The other direction. A row queued moments ago has not had its tick yet;
+    calling that degraded would make the probe cry wolf every 10 seconds."""
+    _patch(
+        monkeypatch,
+        launched=True,
+        inflight=1,
+        counts=[2, 5, 0],
+        oldest_undispatched_age_s=1.0,
+    )
+
+    out = await mod.workforce_healthz()
+
+    assert out["status"] == "healthy"
+    assert out["issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_undispatched_rows_at_all_is_healthy(monkeypatch):
+    """None means the query found nothing to worry about — distinct from a
+    number that happens to be small, and distinct from a failed read."""
+    _patch(monkeypatch, launched=True, inflight=0, counts=[2, 5, 0])
+
+    out = await mod.workforce_healthz()
+
+    assert out["status"] == "healthy"
+    assert out["dispatcher"]["oldest_undispatched_age_s"] is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_probe_failure_degrades_rather_than_reporting_healthy(
+    monkeypatch,
+):
+    """A probe that cannot read must not answer 'fine'."""
+    _patch(monkeypatch, launched=True, inflight=0, counts=[2, 5, 0])
+
+    async def _boom():
+        raise RuntimeError("pg gone")
+
+    monkeypatch.setattr(mod, "_oldest_undispatched_age_s", _boom)
+
+    out = await mod.workforce_healthz()
+
+    assert out["status"] != "healthy"
+    assert any("dispatch" in i.lower() for i in out["issues"])

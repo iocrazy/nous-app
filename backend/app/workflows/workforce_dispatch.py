@@ -30,11 +30,14 @@ units. Idempotency:
   status=reading and skips, no double-claim.
 * The inbox tick's dispatch loop lives in the workflow BODY, and its step
   result (orders included) is memoized — so a replay re-runs the loop over
-  the SAME orders. That is safe, not sloppy: each enqueue pins
-  workflow_id="workforce-<task_id>", which DBOS dedups, and the claim that
-  actually gates execution is the PG row CAS in
-  ``AgentWorkforceRepository.claim_task``. The ``dispatched_at`` stamp is a
-  cheap first filter, not the correctness boundary.
+  the SAME orders, at the SAME ``dispatch_attempt``, producing the SAME
+  workflow ids. DBOS declines those, which is exactly what a replay should
+  get. ⚠️ Do not read that as general idempotency: DBOS declining an id it
+  already holds means NEVER AGAIN, not "runs once". A task that legitimately
+  needs a second run gets a fresh id from an incremented attempt counter —
+  see ``dbos_pool.workflow_id_for``. The claim that gates execution is the PG
+  row CAS in ``AgentWorkforceRepository.claim_task``; the ``dispatched_at``
+  stamp is a cheap first filter, not the correctness boundary.
 
 Scheduling cadence:
 * outbox: 5s (parity with the legacy scheduler's fast_tick_seconds=5)
@@ -98,12 +101,31 @@ async def _list_undispatched() -> List[Dict[str, Any]]:
     return await get_agent_workforce_repository().list_undispatched_queued_tasks()
 
 
-async def _mark_dispatched(task_id: str) -> None:
+async def _mark_dispatched(task_id: str, *, workflow_id: str, attempt: int) -> None:
     from app.repositories.agent_workforce_repository import (
         get_agent_workforce_repository,
     )
 
-    await get_agent_workforce_repository().mark_dispatched(task_id)
+    await get_agent_workforce_repository().mark_dispatched(
+        task_id, workflow_id=workflow_id, attempt=attempt
+    )
+
+
+def _order_envelope(task: Dict[str, Any]) -> Dict[str, Any]:
+    """The three fields ``DbosAgentWorkforcePool.dispatch`` reads, and nothing
+    else.
+
+    The step's return value is checkpointed into ``dbos.operation_outputs``
+    on every tick, so whole task rows — prompt text included, up to 100 per
+    tick, every 10 seconds — would accumulate there on top of the copy DBOS
+    already keeps as the workflow input. The worker reads the authoritative row
+    back when it claims it (``claim_task`` returns the full shape), so it also
+    stops acting on a snapshot taken at dispatch time."""
+    return {
+        "id": task.get("id"),
+        "agent_id": task.get("agent_id"),
+        "dispatch_attempt": int(task.get("dispatch_attempt") or 0),
+    }
 
 
 @DBOS.step()
@@ -113,7 +135,7 @@ async def inbox_dispatch_tick_step() -> Dict[str, Any]:
     Returns InboxProcessor.tick()'s counters plus one key of our own:
 
         {"agents_processed": int, "tasks_created": int, "errors": int,
-         "orders": [task_dict, ...]}
+         "orders": [{"id", "agent_id", "dispatch_attempt"}, ...]}
 
     ``orders`` is every queued agent_task carrying no ``metadata.dispatched_at``
     — NOT merely the rows this tick created. A task minted outside the inbox
@@ -125,7 +147,7 @@ async def inbox_dispatch_tick_step() -> Dict[str, Any]:
     """
     processor = _inbox_processor()
     stats: Dict[str, Any] = dict(await processor.tick())
-    stats["orders"] = await _list_undispatched()
+    stats["orders"] = [_order_envelope(t) for t in await _list_undispatched()]
     return stats
 
 
@@ -178,8 +200,21 @@ async def inbox_dispatch_workflow(
     dispatched = 0
     for order in orders:
         try:
-            await pool.dispatch(order)
-            await _mark_dispatched(str(order["id"]))
+            record = await pool.dispatch(order)
+            if record is None:
+                # Nothing reached the queue. Leave the row unstamped so the
+                # next tick sees it again — stamping a dispatch that did not
+                # happen hides the task from every later tick while no
+                # workflow exists to run it.
+                logger.warning(
+                    f"[workforce-dispatch] order {order.get('id')} not enqueued"
+                )
+                continue
+            await _mark_dispatched(
+                str(order["id"]),
+                workflow_id=record.workflow_id,
+                attempt=record.attempt,
+            )
             dispatched += 1
         except Exception as e:  # one bad order never starves the rest
             logger.exception(f"[workforce-dispatch] order {order.get('id')}: {e}")

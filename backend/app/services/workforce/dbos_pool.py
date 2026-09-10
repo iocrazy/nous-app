@@ -27,12 +27,43 @@ Lifecycle semantics:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
 from uuid import UUID
 
 from dbos import SetEnqueueOptions, SetWorkflowID
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DispatchRecord:
+    """What actually went onto the queue, handed back so the caller can persist
+    it verbatim.
+
+    Both fields have to be stored: ``attempt`` is what the NEXT dispatch
+    increments, and ``workflow_id`` is the ownership token ``claim_task``
+    compares against when a replay walks back into its own run. Recomputing
+    either at the call site would risk storing an id different from the one
+    enqueued, which silently breaks the re-entry check."""
+
+    workflow_id: str
+    attempt: int
+
+
+def workflow_id_for(task_id: str, attempt: int) -> str:
+    """The single place the id is spelled. ``workforce-<task_id>-<attempt>``.
+
+    ⚠️ The attempt suffix is load-bearing, not cosmetic. Re-enqueuing an id
+    DBOS already holds does not re-run the workflow: ``insert_workflow_status``
+    upserts with ``set_={recovery_attempts, updated_at}`` only, leaves the row
+    at its terminal status, and ``init_workflow`` answers
+    ``should_execute=False`` (``dbos/_sys_db.py``). DBOS "dedup" means NEVER
+    AGAIN. A task that legitimately needs another run — one that came back
+    through ``requeue_task`` after its worker died — therefore has to arrive
+    under an id DBOS has never seen, or it is enqueued forever and executed
+    never while the dispatch loop happily counts it as sent."""
+    return f"workforce-{task_id}-{int(attempt)}"
 
 
 class DbosAgentWorkforcePool:
@@ -53,21 +84,26 @@ class DbosAgentWorkforcePool:
         # this pool instance only, NOT a cluster-wide fact.
         self._known_agents: set[UUID] = set()
 
-    async def dispatch(self, task: dict[str, Any]) -> None:
-        """Enqueue the task as a DBOS workflow on the per-agent
-        partition. Returns immediately."""
+    async def dispatch(self, task: dict[str, Any]) -> Optional[DispatchRecord]:
+        """Enqueue the task as a DBOS workflow on the per-agent partition.
+        Returns immediately.
+
+        Returns the ``DispatchRecord`` that was enqueued, or ``None`` when
+        nothing was — a closed pool, a malformed row, or a failed enqueue.
+        ``None`` means the caller must NOT stamp the row as dispatched: a stamp
+        without an enqueue hides the task from the next tick's work list."""
         if self._closed:
             logger.warning(
                 f"[dbos-workforce-pool] dispatch on closed pool, "
                 f"dropping task {task.get('id')}"
             )
-            return
+            return None
 
         agent_id_raw = task.get("agent_id")
         task_id_raw = task.get("id")
         if not agent_id_raw or not task_id_raw:
             logger.error(f"[dbos-workforce-pool] task missing agent_id or id: {task}")
-            return
+            return None
 
         agent_id = UUID(agent_id_raw) if isinstance(agent_id_raw, str) else agent_id_raw
         self._known_agents.add(agent_id)
@@ -82,7 +118,8 @@ class DbosAgentWorkforcePool:
             agent_workforce_workflow,
         )
 
-        workflow_id = f"workforce-{task_id_raw}"
+        attempt = int(task.get("dispatch_attempt") or 0) + 1
+        workflow_id = workflow_id_for(str(task_id_raw), attempt)
         partition_key = str(agent_id)
 
         try:
@@ -97,21 +134,18 @@ class DbosAgentWorkforcePool:
                 f"[dbos-workforce-pool] enqueued task={task_id_raw} "
                 f"agent={agent_id} wf_id={workflow_id}"
             )
+            return DispatchRecord(workflow_id=workflow_id, attempt=attempt)
         except Exception as err:
-            # Most likely cause: duplicate workflow_id (same task
-            # enqueued twice within the dedup window). Treat as success
-            # — DBOS already has the work, our caller doesn't need to
-            # retry. Other failures are real and worth logging.
-            err_repr = repr(err)
-            if "already exists" in err_repr.lower() or "duplicate" in err_repr.lower():
-                logger.debug(
-                    f"[dbos-workforce-pool] task={task_id_raw} "
-                    f"already enqueued (workflow_id={workflow_id})"
-                )
-            else:
-                logger.exception(
-                    f"[dbos-workforce-pool] enqueue failed for task={task_id_raw}: {err}"
-                )
+            # NOT a duplicate-id handler: DBOS does not raise for a workflow id
+            # it already holds, it silently declines to execute (see
+            # ``workflow_id_for``). Anything that lands here is a real enqueue
+            # failure — no sys_db connection, queue not registered, unencodable
+            # input. Report it as one and let the caller leave the row
+            # unstamped so the next tick retries.
+            logger.exception(
+                f"[dbos-workforce-pool] enqueue failed for task={task_id_raw}: {err}"
+            )
+            return None
 
     async def inflight_count(self) -> int:
         """Live agent_tasks, derived from task_tracking — NOT counted in this

@@ -129,7 +129,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import Text, cast, func, literal, select
+from sqlalchemy import Text, and_, case, cast, func, literal, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -227,6 +227,10 @@ def tt_row_to_task_shape(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
         "inbox_message_id": row.get("inbox_message_id"),
         "created_at": row.get("created_at"),
         "assigned_at": md.get("assigned_at"),
+        # Dispatch bookkeeping. The pool derives the next workflow id from
+        # ``dispatch_attempt``, so it has to reach the caller, not just the DB.
+        "dispatch_attempt": int(md.get("dispatch_attempt") or 0),
+        "workforce_workflow_id": md.get("workforce_workflow_id"),
         "started_at": row.get("started_at"),
         "ended_at": row.get("completed_at"),
         "updated_at": row.get("updated_at"),
@@ -668,29 +672,76 @@ class AgentWorkforceRepository:
             logger.exception(f"Failed to create task (agent={agent_id}): {e}")
             return None
 
-    async def claim_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """CAS claim by id: queued → assigned, or None if someone got there first.
+    async def claim_task(
+        self, task_id: str, *, workflow_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """CAS claim by id, or None if this worker does not own the row.
 
         Replaces the by-agent ``claim_next_queued`` (zero production callers —
         the dedup that actually ran was ``run_one_task``'s read-then-check,
         which is not atomic). The dispatcher already picked WHICH task; the only
-        question left is whether this worker owns it.
+        question left is whether this worker owns it. One UPDATE ... RETURNING,
+        no preceding SELECT: the read-then-write it replaces left a window in
+        which two workers both saw ``queued``.
 
-        One UPDATE ... RETURNING, no preceding SELECT: the read-then-write it
-        replaces left a window in which two workers both saw ``queued``."""
+        TWO arms, and the second one is not a convenience:
+
+        * **fresh claim** — ``phase='queued'`` → ``'assigned'``.
+        * **same-attempt re-entry** — ``phase IN ('assigned','in_progress')``
+          AND the row's ``metadata.workforce_workflow_id`` equals OUR
+          ``workflow_id``. This is a DBOS replay walking back into its own run
+          after the worker died mid-flight. A queued-only CAS makes that a dead
+          end: the replay is refused, records SUCCESS/skipped, and the row is
+          stranded at ``assigned`` where the dispatch list cannot see it and
+          nothing requeues it (``force_terminate`` has no caller in ``app/``).
+          Ownership is keyed on the workflow id, so a DIFFERENT worker's replay
+          or a second dispatch attempt still cannot steal an in-flight row.
+
+        Re-entry leaves ``phase`` where it was — a row already at
+        ``in_progress`` must not be knocked back to ``assigned``."""
         now_iso = datetime.now(timezone.utc).isoformat()
+        from_queued = TaskTracking.phase == "queued"
+        owns_row = TaskTracking.metadata_.op("->>", return_type=Text)(
+            cast(literal("workforce_workflow_id"), Text)
+        ) == literal(str(workflow_id))
         try:
             async with write_scope() as session:
                 updated = await session.execute(
                     sa_update(TaskTracking)
                     .where(TaskTracking.dbos_workflow_id == str(task_id))
                     .where(TaskTracking.task_kind == TASK_KIND_AGENT)
-                    .where(TaskTracking.phase == "queued")  # the CAS
+                    .where(  # the CAS
+                        or_(
+                            from_queued,
+                            and_(
+                                TaskTracking.phase.in_(("assigned", "in_progress")),
+                                owns_row,
+                            ),
+                        )
+                    )
                     .values(
-                        phase="assigned",
-                        status=LIFECYCLE_TO_STATUS["assigned"],
-                        metadata_=_jsonb_merge(
-                            TaskTracking.metadata_, {"assigned_at": now_iso}
+                        phase=case(
+                            (from_queued, literal("assigned")), else_=TaskTracking.phase
+                        ),
+                        status=case(
+                            (from_queued, literal(LIFECYCLE_TO_STATUS["assigned"])),
+                            else_=TaskTracking.status,
+                        ),
+                        metadata_=case(
+                            (
+                                from_queued,
+                                _jsonb_merge(
+                                    TaskTracking.metadata_,
+                                    {
+                                        "assigned_at": now_iso,
+                                        "workforce_workflow_id": str(workflow_id),
+                                    },
+                                ),
+                            ),
+                            else_=_jsonb_merge(
+                                TaskTracking.metadata_,
+                                {"workforce_workflow_id": str(workflow_id)},
+                            ),
                         ),
                     )
                     .returning(TaskTracking)
@@ -727,13 +778,29 @@ class AgentWorkforceRepository:
             )
         return [s for s in (_task_shape(r) for r in rows) if s]
 
-    async def mark_dispatched(self, task_id: str) -> None:
-        """Stamp ``metadata.dispatched_at`` so the next tick skips this row.
+    async def mark_dispatched(
+        self, task_id: str, *, workflow_id: str, attempt: int
+    ) -> None:
+        """Record that attempt ``attempt`` went out as DBOS workflow
+        ``workflow_id``, and stamp ``dispatched_at`` so the next tick skips it.
 
-        Best effort: DBOS pins the workflow id to ``workforce-<task_id>``, so a
-        lost stamp costs one extra enqueue that DBOS dedups — never a double
-        run. Merged with ``||`` rather than read-modify-write so a concurrent
-        metadata write (current_run_id, agent_result) is not clobbered."""
+        All three keys are load-bearing:
+
+        * ``dispatched_at`` — the cheap filter ``list_undispatched_queued_tasks``
+          reads. Cleared on requeue.
+        * ``dispatch_attempt`` — what makes the NEXT dispatch derive a workflow
+          id DBOS has never seen. Survives requeue. Re-enqueuing a used id does
+          not re-run the workflow: DBOS upserts the status row with only
+          ``recovery_attempts``/``updated_at``, leaves it SUCCESS, and answers
+          ``should_execute=False`` (``dbos/_sys_db.py``). Its "dedup" means
+          NEVER AGAIN, not "exactly once".
+        * ``workforce_workflow_id`` — the ownership token ``claim_task`` checks
+          when a replay re-enters its own run.
+
+        Best effort: a lost stamp costs one extra enqueue of the SAME id, which
+        DBOS drops — never a double run. Merged with ``||`` rather than
+        read-modify-write so a concurrent metadata write (current_run_id,
+        agent_result) is not clobbered."""
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             async with write_scope() as session:
@@ -743,7 +810,12 @@ class AgentWorkforceRepository:
                     .where(TaskTracking.task_kind == TASK_KIND_AGENT)
                     .values(
                         metadata_=_jsonb_merge(
-                            TaskTracking.metadata_, {"dispatched_at": now_iso}
+                            TaskTracking.metadata_,
+                            {
+                                "dispatched_at": now_iso,
+                                "dispatch_attempt": int(attempt),
+                                "workforce_workflow_id": str(workflow_id),
+                            },
                         )
                     )
                 )
@@ -766,7 +838,7 @@ class AgentWorkforceRepository:
                 select(func.count())
                 .select_from(TaskTracking)
                 .where(TaskTracking.task_kind == TASK_KIND_AGENT)
-                .where(TaskTracking.phase.in_(("queued", "in_progress")))
+                .where(TaskTracking.phase.in_(("queued", "assigned", "in_progress")))
             )
         return int(total or 0)
 
@@ -906,6 +978,14 @@ class AgentWorkforceRepository:
                 # Leaving the stamp on a requeued task makes it queued forever
                 # and enqueued never — a stall with no error on any surface.
                 md.pop("dispatched_at", None)
+                # The dead run's ownership token goes too: otherwise the next
+                # attempt's claim would be re-admitted as a "replay" of a
+                # workflow that already finished.
+                md.pop("workforce_workflow_id", None)
+                # ⚠️ ``dispatch_attempt`` deliberately SURVIVES. It is the only
+                # thing that makes the re-dispatch use a workflow id DBOS has
+                # never seen; reset it and the enqueue collides with the old
+                # terminal row, which DBOS answers by not running it at all.
 
                 upd = await session.execute(
                     sa_update(TaskTracking)

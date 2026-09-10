@@ -124,10 +124,11 @@ async def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
 async def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
     """Run one agent task under DBOS.
 
-    Required workflow_id: ``f"workforce-{task['id']}"`` so a duplicate enqueue
-    (broker hiccup, a replayed dispatch tick) short-circuits to the cached
-    result instead of re-executing. ``DbosAgentWorkforcePool.dispatch`` sets
-    it; nothing else enqueues onto this queue.
+    Required workflow_id: ``f"workforce-{task['id']}-{attempt}"`` (see
+    ``dbos_pool.workflow_id_for``) so a duplicate enqueue of the SAME attempt
+    short-circuits instead of re-executing, while a task that legitimately
+    needs another run arrives under an id DBOS has never seen.
+    ``DbosAgentWorkforcePool.dispatch`` sets it; nothing else enqueues here.
 
     Required queue_partition_key: ``task['agent_id']`` so two enqueues for the
     same agent serialise — this took over from the deleted pool's in-process
@@ -135,4 +136,10 @@ async def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
 
     Returns the same shape as run_one_task:
         {"task_id": str, "status": str, "run_id": str|None}"""
-    return await run_one_task_step(task)
+    # Thread OUR workflow id down as the claim's ownership token. It is stable
+    # across a replay of this same workflow (that is what a replay means), so
+    # a run that died after claiming can walk back into its own row; a
+    # different worker's id will not match and cannot steal it. Put in the task
+    # dict rather than a new step argument so the subprocess isolation mode
+    # marshals it for free.
+    return await run_one_task_step({**task, "workforce_workflow_id": DBOS.workflow_id})
