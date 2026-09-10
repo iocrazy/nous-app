@@ -90,6 +90,37 @@ async def _scope(auth) -> int:
     return int(await _resolve_personal_team_id(str(auth.user_id)))
 
 
+async def _canvas_import_scope(auth, canvas_id: int) -> int:
+    """The canvas's own scope, after the canvas write gate.
+
+    A mask / brush / resize baked in a team board's editor belongs to that
+    board — the same scope its crop / grid / outpaint register into
+    (``canvas_derive_service``) and its generations register into.
+    """
+    import sys
+
+    from app.workflows.canvas_generation import _registration_scope_id
+
+    # ``app.api`` rebinds ``canvases_router`` to the APIRouter; the module
+    # (and its patchable gate) lives in sys.modules.
+    gate = sys.modules["app.api.canvases_router"]._gate_canvas_write
+    await gate(str(canvas_id), auth)
+    try:
+        return await _registration_scope_id(canvas_id, str(auth.user_id))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=500, detail="canvas scope could not be resolved"
+        ) from exc
+
+
+async def _import_scope(auth, canvas_id: int | None) -> int:
+    """Where an import registers: the canvas's scope when it names one,
+    otherwise the caller's personal team (unchanged)."""
+    if canvas_id is None:
+        return await _scope(auth)
+    return await _canvas_import_scope(auth, canvas_id)
+
+
 @router.get("")
 async def list_generations(
     auth: AuthDep,
@@ -233,7 +264,7 @@ async def import_generation(
 
         row = await register_generated_media(
             user_id=str(auth.user_id),
-            scope_id=await _scope(auth),
+            scope_id=await _import_scope(auth, canvas_id_int),
             source_path=tmp_path,
             mime=mime,
             origin=GenerationOrigin(
