@@ -250,6 +250,37 @@ describe('foldEvents — a background result reaches the card that spawned it', 
     expect(nodes[1]).toMatchObject({ kind: 'inbox', result: { status: 'failed', childRunId: null } });
   });
 
+  // The production shape for a background child (MH-90/91/92): its claim lands
+  // in a LATER run — the parent had already finished — so there is no inbox
+  // node here to pair with, and the card's summary line came up empty for
+  // every background sub-agent until `subagent_done` started carrying it.
+  it('takes the summary off subagent_done when no claim ever reaches this run', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'subagent_spawned', { task_id: 'tk-9', child_run_id: '348057286155642', mode: 'async', subagent_type: 'summarize', description: 'probe' }, 1),
+      at(3, 'subagent_done', { task_id: 'tk-9', child_run_id: '348057286155642', mode: 'async', subagent_type: 'summarize', status: 'success', summary: 'OK', cost_cents: 0.0236, tokens_used: 1725, duration_ms: 8400 }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error('no step node');
+    expect(step.children[0].summary).toBe('OK');
+    expect(nodes.filter((n) => n.kind === 'inbox')).toHaveLength(0);
+  });
+
+  // Both sources are the same envelope, so they cannot contradict — but the
+  // claim is the unclipped-to-the-row one the user can open, so it wins, and
+  // it wins from either side of the done.
+  it('lets the claim win over the done fallback, in either order', () => {
+    const spawn = at(2, 'subagent_spawned', { task_id: 'tk-9', mode: 'async', subagent_type: 'librarian', description: 'Find the deck' }, 1);
+    const done = at(3, 'subagent_done', { task_id: 'tk-9', child_run_id: '9', mode: 'async', status: 'success', summary: 'B', cost_cents: 0.03, tokens_used: 900, duration_ms: 8400 }, 1);
+    const claim = at(4, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', turn: 1, step: 2, content: { child_run_id: '9', subagent_type: 'librarian', description: 'Find the deck', status: 'success', summary: 'A', cost_cents: 0.03, tokens_used: 900 } });
+    for (const order of [[spawn, done, claim], [spawn, claim, done]]) {
+      const nodes = foldEvents([at(1, 'step_start', { turn: 1, step: 1 }, 1), ...order]);
+      const step = nodes.find((n) => n.kind === 'step');
+      if (!step || step.kind !== 'step') throw new Error('no step node');
+      expect(step.children[0].summary).toBe('A');
+    }
+  });
+
   it('a failed child keeps its status — the card is the only place it shows', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 1 }, 1),

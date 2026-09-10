@@ -430,6 +430,7 @@ async def _run_subagent_task(
     from app.repositories.agent_run_inbox_repository import (
         get_agent_run_inbox_repository,
     )
+    from app.services.ai.runner.inbox import clip_claimed_text
     from app.services.ai.runner.run_recorder import RunEventWriter
     from app.services.ai.runner.subagent_task_service import SubAgentTaskService
 
@@ -558,6 +559,20 @@ async def _run_subagent_task(
                     "mode": "async",
                     "subagent_type": content["subagent_type"],
                     "status": content["status"],
+                    # The card's summary line. A background child's inbox
+                    # claim lands in a LATER run — the parent had already
+                    # finished — so the fold's same-run claim/card pairing
+                    # never fires and this is the only source the card has
+                    # (MH-90/91/92). Bounded by the helper ``inbox_claimed``
+                    # uses, so the two projections of one result agree.
+                    #
+                    # A crashed child has NO summary — falling through to the
+                    # error text is what keeps its card from going blank,
+                    # which is defect J's own symptom. The synchronous crash
+                    # branch does the same.
+                    "summary": clip_claimed_text(
+                        content["summary"] or envelope.get("error") or ""
+                    ),
                     "cost_cents": content["cost_cents"],
                     "tokens_used": content["tokens_used"],
                     "duration_ms": int((time.monotonic() - started) * 1000),

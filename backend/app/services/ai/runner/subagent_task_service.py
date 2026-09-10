@@ -69,6 +69,10 @@ from uuid import UUID
 
 from loguru import logger
 
+# One bound for both projections of a child's result: the ``inbox_claimed``
+# content and the ``subagent_done`` event the card's summary line reads.
+from app.services.ai.runner.inbox import clip_claimed_text
+
 # Reuse DelegateToolService's depth + rate-limit + cycle helpers so
 # the two spawning paths share the same safety net.
 from app.services.workforce.delegate_tool import (
@@ -625,6 +629,9 @@ class SubAgentTaskService:
                         "mode": "sync",
                         "subagent_type": slug,
                         "status": envelope["status"],
+                        # Same key, same bound as the background path's, so
+                        # the card renders a summary line whichever mode ran.
+                        "summary": clip_claimed_text(envelope["summary"]),
                         "cost_cents": _cost_cents_of(recorder),
                         "tokens_used": envelope["tokens_used"],
                         "duration_ms": int((time.monotonic() - started) * 1000),
@@ -633,6 +640,7 @@ class SubAgentTaskService:
                 return envelope
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
+            error_msg = f"sub-agent crashed: {exc!s:.120}"
             if announced_child_id is not None:
                 await self._emit_parent(
                     "subagent_done",
@@ -642,12 +650,16 @@ class SubAgentTaskService:
                         "mode": "sync",
                         "subagent_type": slug,
                         "status": "failed",
+                        # There is no envelope to summarise, so the card says
+                        # WHY instead of going blank — the parent's trajectory
+                        # is the only place that reason is ever shown.
+                        "summary": clip_claimed_text(error_msg),
                         "cost_cents": _cost_cents_of(announced_recorder),
                         "tokens_used": _tokens_of(announced_recorder),
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     },
                 )
-            return self._failed(f"sub-agent crashed: {exc!s:.120}")
+            return self._failed(error_msg)
 
     # ── background (await=false) ──────────────────────────────────────
 

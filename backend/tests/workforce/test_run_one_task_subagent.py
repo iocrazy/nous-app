@@ -154,6 +154,58 @@ async def test_subagent_done_is_written_on_the_parent_run():
     assert event_type == "subagent_done"
     assert payload["mode"] == "async" and payload["child_run_id"] == "52"
     assert payload["task_id"] == task["id"] and payload["status"] == "success"
+    assert payload["summary"] == "s"
+
+
+async def test_subagent_done_carries_the_summary_bounded_like_the_claim():
+    """The card's summary line is fed from HERE for a background child.
+
+    Its inbox claim lands in a LATER run — the parent had already finished by
+    the time the result came back — so the fold's same-run claim/card pairing
+    never fires and this event is the only source the card has (MH-90/91/92).
+    Bounded by the SAME helper ``inbox_claimed`` uses: two projections of one
+    child that disagreed on their bound would be a difference to explain.
+    """
+    w = _wire(
+        envelope={
+            "status": "success",
+            "summary": "x" * 600,
+            "sub_run_id": "52",
+            "tokens_used": 9,
+        },
+        agent_repo_raises=True,
+    )
+    await _run(w, _task())
+
+    _, payload = w.writer.append.await_args.args
+    # 500 spelled out, not CLAIMED_TEXT_MAX: an assertion written in terms of
+    # the constant it is bounding would follow the constant anywhere.
+    assert len(payload["summary"]) == 500
+    assert payload["summary"].startswith("x" * 100)
+    # Cut, and saying so: a silently truncated summary reads as a complete
+    # short answer.
+    assert payload["summary"].endswith("\u2026")
+
+
+async def test_a_crashed_child_puts_its_error_on_the_summary_line():
+    """A child that crashed produced no summary, and a blank summary line is
+    defect J's own symptom — so the card falls through to the error text. The
+    parent's card is the only place a background child's failure is ever
+    described."""
+    w = _wire(
+        envelope={
+            "status": "failed",
+            "error": "boom",
+            "summary": "",
+            "sub_run_id": None,
+            "tokens_used": 0,
+        },
+        agent_repo_raises=True,
+    )
+    await _run(w, _task())
+
+    _, payload = w.writer.append.await_args.args
+    assert payload["status"] == "failed" and payload["summary"] == "boom"
 
 
 async def test_issue_target_returns_the_wake_order_and_never_dispatches_here():

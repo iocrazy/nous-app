@@ -76,9 +76,15 @@ class InboxItem:
         return json.dumps(c, ensure_ascii=False, default=str)
 
 
-def _clip(text: Any, limit: int = CLAIMED_TEXT_MAX) -> str:
+def clip_claimed_text(text: Any, limit: int = CLAIMED_TEXT_MAX) -> str:
     """``text`` as a string, bounded, saying so when it was cut. A silently
-    truncated summary reads as a complete short answer."""
+    truncated summary reads as a complete short answer.
+
+    Public because ``subagent_done`` carries the same child's summary on the
+    parent's transcript and must be bounded identically: two projections of
+    one result that disagreed on their bound would be a difference with no
+    meaning behind it (Task 7c).
+    """
     s = "" if text is None else str(text)
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
@@ -110,9 +116,11 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
             "subagent_type": c.get("subagent_type"),
             # Model-authored and unbounded upstream — clipped like any other
             # free text, just to a title's length.
-            "description": _clip(c.get("description"), CLAIMED_DESCRIPTION_MAX),
+            "description": clip_claimed_text(
+                c.get("description"), CLAIMED_DESCRIPTION_MAX
+            ),
             "status": c.get("status"),
-            "summary": _clip(c.get("summary") or ""),
+            "summary": clip_claimed_text(c.get("summary") or ""),
             "cost_cents": c.get("cost_cents"),
             "tokens_used": c.get("tokens_used"),
         }
@@ -133,7 +141,7 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
             if isinstance(v, str)
             else (json.dumps(v, ensure_ascii=False) if v is not None else None)
         )
-    out: dict[str, Any] = {"text": _clip(text)}
+    out: dict[str, Any] = {"text": clip_claimed_text(text)}
     source = c.get("source")
     if isinstance(source, dict):
         out["source"] = source
@@ -209,9 +217,12 @@ async def claim_for_step(
 
 
 __all__ = [
+    "CLAIMED_TEXT_MAX",
     "INBOX_FRAME",
     "InboxItem",
     "claim_for_step",
+    "claimed_event_content",
+    "clip_claimed_text",
     "render_inbox_message",
     "resolve_targets",
 ]

@@ -330,6 +330,9 @@ async def test_sync_spawn_brackets_the_child_with_spawned_then_done(
     assert done["mode"] == "sync" and done["child_run_id"] == "51"
     assert done["status"] == "success" and done["cost_cents"] == 3.0
     assert done["tokens_used"] == 15 and done["duration_ms"] >= 0
+    # The card's summary line reads this key. The synchronous form carries it
+    # too, so one fold branch serves both modes.
+    assert done["summary"] == "found it"
 
 
 async def test_continue_records_the_fork_columns_and_round(monkeypatch, caller_ctx):
@@ -394,6 +397,9 @@ async def test_a_crashing_child_still_reports_done(monkeypatch, caller_ctx):
     done = rec.events[1][1]
     assert done["status"] == "failed" and done["mode"] == "sync"
     assert done["child_run_id"] == "51"
+    # A crashed child's card says WHY on its summary line rather than going
+    # blank — the parent's transcript is the only place that reason appears.
+    assert "provider exploded" in done["summary"]
 
 
 async def test_a_child_that_never_started_reports_no_done(monkeypatch, caller_ctx):
