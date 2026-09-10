@@ -489,6 +489,11 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           child.costCents = num(p.cost_cents);
           child.tokensUsed = num(p.tokens_used);
           child.durationMs = num(p.duration_ms);
+          // The card's summary line, for the background child whose claim
+          // lands in a LATER run and so never pairs here (MH-90/91/92). A
+          // fallback, not the source of truth: `stampResultSummaries` still
+          // prefers the claim when one did reach this run.
+          if (!child.summary) child.summary = str(p.summary) || null;
           if (!child.childRunId) child.childRunId = str(p.child_run_id);
           break;
         }
@@ -577,10 +582,19 @@ function stampResultSummaries(nodes: TrajectoryNode[]): void {
     for (const c of n.children) if (c.childRunId) byRun.set(c.childRunId, c);
   }
   if (byRun.size === 0) return;
+  // Overwrites whatever `subagent_done` left as a fallback: both read the
+  // same envelope, and this one belongs to a row the user can open. Guarding
+  // on `!child.summary` instead would hand the win to whichever event the
+  // loop happened to see first — order-dependence is the bug this pass exists
+  // to avoid. `stamped` keeps the FIRST claim's wording when a child somehow
+  // has two, and an empty claim never blanks a summary that already reads.
+  const stamped = new Set<SubagentChild>();
   for (const n of nodes) {
-    if (n.kind !== 'inbox' || !n.result?.childRunId) continue;
+    if (n.kind !== 'inbox' || !n.result?.childRunId || !n.result.summary) continue;
     const child = byRun.get(n.result.childRunId);
-    if (child && !child.summary) child.summary = n.result.summary || null;
+    if (!child || stamped.has(child)) continue;
+    child.summary = n.result.summary;
+    stamped.add(child);
   }
 }
 
