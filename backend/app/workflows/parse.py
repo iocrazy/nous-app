@@ -528,12 +528,28 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
 async def set_resource_rating(resource_id: str, rating: int) -> bool:
     """把抓取请求带来的评级写到 resources.rating。失败只告警——评级是装饰
     字段，不该让一次成功的解析变红。"""
+    from contextlib import nullcontext
+
+    from app.db.scope import is_enforced, system_request_scope
     from app.repositories.resources_repository import ResourcesRepository
 
-    try:
-        updated = await ResourcesRepository().update_resource(
-            resource_id, {"rating": rating}
+    # 作用域是承重的：这里跑在 DBOS 步骤里，没有 HTTP 请求带来的环境 scope；
+    # 而生产 secrets/backend.env 开着 SCOPE_ENFORCE_RESOURCES，不包的话
+    # do_orm_execute choke point 对 Resources 直接抛 UnscopedQueryError，
+    # 评级被下面的 except 静默吞成 WARNING。按 is_enforced 门控（同
+    # ai_transcription.load_transcribe_inputs），flag 关时与旧行为逐字节一致。
+    scope_cm = (
+        system_request_scope(
+            reason="parse workflow: write fetch-request rating to resource"
         )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    try:
+        async with scope_cm:
+            updated = await ResourcesRepository().update_resource(
+                resource_id, {"rating": rating}
+            )
     except Exception as e:
         logger.warning(f"[parse] set_resource_rating failed for {resource_id}: {e}")
         return False

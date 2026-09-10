@@ -149,6 +149,56 @@ async def test_set_resource_rating_reports_missing_row_as_not_written(caplog):
     assert "set_resource_rating" in caplog.text
 
 
+async def _rating_write_seen_scope(enforced: bool):
+    """跑一次 set_resource_rating，返回 (结果, update_resource 执行时的环境 scope)。"""
+    from app.db import scope as scope_mod
+    from app.workflows import parse as parse_mod
+
+    seen: dict = {}
+
+    async def _update(resource_id, data):
+        seen["scope"] = scope_mod.current_scope()
+        return {"id": 7, "rating": 4}
+
+    repo = MagicMock()
+    repo.update_resource = AsyncMock(side_effect=_update)
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=repo,
+        ),
+        patch(
+            "app.db.scope.is_enforced",
+            side_effect=lambda table: enforced and table == "resources",
+        ),
+    ):
+        ok = await parse_mod.set_resource_rating("7", 4)
+    repo.update_resource.assert_awaited_once_with("7", {"rating": 4})
+    return ok, seen["scope"]
+
+
+@pytest.mark.asyncio
+async def test_set_resource_rating_writes_under_system_scope_when_enforced():
+    """生产开着 SCOPE_ENFORCE_RESOURCES，而 DBOS 步骤没有请求作用域——
+    不包 system_request_scope 时 choke point 抛 UnscopedQueryError，评级被静默拦下。"""
+    from app.db.scope import SYSTEM
+
+    ok, seen_scope = await _rating_write_seen_scope(enforced=True)
+    assert ok is True
+    assert seen_scope is SYSTEM
+
+
+@pytest.mark.asyncio
+async def test_set_resource_rating_stays_legacy_when_not_enforced():
+    """flag 关闭时不开 SYSTEM 作用域，行为与改动前逐字节一致。"""
+    from app.db.scope import SYSTEM
+
+    ok, seen_scope = await _rating_write_seen_scope(enforced=False)
+    assert ok is True
+    assert seen_scope is not SYSTEM
+    assert seen_scope is None
+
+
 def test_single_fetch_path_is_wired_for_intents_and_rating():
     """源码钉：单链路必须把意图 id 并入 effective_tag_ids，并把 rating 转发给 parse_workflow。
     parse_workflow 被 @DBOS.workflow() 包着，inspect 未必能取到原函数源码，所以直接读文件。"""
