@@ -107,3 +107,63 @@ async def test_resolve_intent_tag_ids_no_flags_no_query():
             == []
         )
     repo.get_system_tag_ids_by_names.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_resource_rating_writes_via_repository():
+    from app.workflows import parse as parse_mod
+
+    repo = MagicMock()
+    repo.update_resource = AsyncMock(return_value={"id": 7, "rating": 4})
+    with patch(
+        "app.repositories.resources_repository.ResourcesRepository", return_value=repo
+    ):
+        assert await parse_mod.set_resource_rating("7", 4) is True
+    repo.update_resource.assert_awaited_once_with("7", {"rating": 4})
+
+
+@pytest.mark.asyncio
+async def test_set_resource_rating_swallows_failure():
+    from app.workflows import parse as parse_mod
+
+    repo = MagicMock()
+    repo.update_resource = AsyncMock(side_effect=RuntimeError("db down"))
+    with patch(
+        "app.repositories.resources_repository.ResourcesRepository", return_value=repo
+    ):
+        assert await parse_mod.set_resource_rating("7", 4) is False
+
+
+@pytest.mark.asyncio
+async def test_set_resource_rating_reports_missing_row_as_not_written(caplog):
+    """update_resource 对不存在 / scope 看不见的行返回 {} 而不 raise——
+    那是「没写进去」，不能报 True，也不能静默。"""
+    from app.workflows import parse as parse_mod
+
+    repo = MagicMock()
+    repo.update_resource = AsyncMock(return_value={})
+    with patch(
+        "app.repositories.resources_repository.ResourcesRepository", return_value=repo
+    ):
+        assert await parse_mod.set_resource_rating("7", 4) is False
+    assert "set_resource_rating" in caplog.text
+
+
+def test_single_fetch_path_is_wired_for_intents_and_rating():
+    """源码钉：单链路必须把意图 id 并入 effective_tag_ids，并把 rating 转发给 parse_workflow。
+    parse_workflow 被 @DBOS.workflow() 包着，inspect 未必能取到原函数源码，所以直接读文件。"""
+    import inspect
+    from pathlib import Path
+
+    from app.api import media_fetch_helpers as h
+    from app.workflows import parse as parse_mod
+
+    src = inspect.getsource(h.handle_media_fetch_dispatch)
+    assert "await resolve_intent_tag_ids(" in src
+    assert '"rating": request.rating' in src
+
+    wf_text = Path(parse_mod.__file__).read_text(encoding="utf-8")
+    assert "rating: Optional[int] = None," in wf_text
+    assert (
+        "set_rating_step(resource_id=str(resource_id), rating=int(rating))" in wf_text
+    )

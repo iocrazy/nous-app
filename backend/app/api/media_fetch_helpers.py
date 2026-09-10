@@ -419,6 +419,18 @@ async def handle_media_fetch_dispatch(
         except Exception as e:
             logger.warning(f"[Fetch] tag-name resolution failed (non-fatal): {e}")
 
+    # 显式意图 → Pipeline 系统标签 id，走同一条 tag_ids 通道，下载链不用改。
+    try:
+        for tid in await resolve_intent_tag_ids(
+            transcribe=request.transcribe,
+            summarize=request.summarize,
+            analyze=request.analyze,
+        ):
+            if tid not in effective_tag_ids:
+                effective_tag_ids.append(tid)
+    except Exception as e:
+        logger.warning(f"[Fetch] intent tag resolution failed (non-fatal): {e}")
+
     has_cookie = False
     if platform in ("douyin", "bilibili", "youtube"):
         try:
@@ -559,6 +571,7 @@ async def handle_media_fetch_dispatch(
             # workflow attaches them to the new resource. Previously only raw
             # tag_ids were forwarded, dropping name-based tags entirely.
             "tag_ids": effective_tag_ids,
+            "rating": request.rating,
             # Without this, parse_workflow defaults to platform="douyin"
             # and feeds bilibili / youtube URLs into the douyin fallback
             # chain — which can never succeed (DrissionPage waits on a
