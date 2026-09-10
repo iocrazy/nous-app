@@ -4864,6 +4864,7 @@
     "batchSubmitted": "已派发 {{n}}，失败 {{f}}",
     "parsed": "已解析",
     "downloadDispatched": "已派发下载 — 见 Task Center",
+    "aiSingleLinkOnly": "AI 处理仅对单个链接生效",
     "playlistDispatched": "已派发 {{n}} 首",
     "downloadAll": "全部下载（{{n}}）",
     "sourceHealth": "信源健康",

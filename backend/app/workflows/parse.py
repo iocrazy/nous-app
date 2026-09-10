@@ -525,6 +525,34 @@ def attach_tags_step(*, resource_id: str, tag_ids: list[str]) -> int:
     return asyncio.run(_do())
 
 
+async def set_resource_rating(resource_id: str, rating: int) -> bool:
+    """把抓取请求带来的评级写到 resources.rating。失败只告警——评级是装饰
+    字段，不该让一次成功的解析变红。"""
+    from app.repositories.resources_repository import ResourcesRepository
+
+    try:
+        updated = await ResourcesRepository().update_resource(
+            resource_id, {"rating": rating}
+        )
+    except Exception as e:
+        logger.warning(f"[parse] set_resource_rating failed for {resource_id}: {e}")
+        return False
+    # update_resource 对不存在 / 不可见的行返回 {} 而不 raise——那是没写进去。
+    if not updated:
+        logger.warning(
+            f"[parse] set_resource_rating: resource {resource_id} not found, "
+            "rating not written"
+        )
+        return False
+    return True
+
+
+@DBOS.step()
+def set_rating_step(*, resource_id: str, rating: int) -> bool:
+    """DBOS 步骤外壳；逻辑在 set_resource_rating 便于直接测。"""
+    return asyncio.run(set_resource_rating(resource_id, rating))
+
+
 @DBOS.step()
 def update_parse_subtitle_step(workflow_id: str, subtitle: str) -> None:
     """Update task_tracking.subtitle in place (no phase change).
@@ -615,6 +643,7 @@ def parse_workflow(
     tag_ids: Optional[list[str]] = None,
     platform: str = "douyin",
     flow_id: Optional[str] = None,
+    rating: Optional[int] = None,
 ) -> dict[str, Any]:
     """DBOS port of parse_single_link_task.
 
@@ -691,6 +720,10 @@ def parse_workflow(
     # chain_followups_step's tag-driven AI dispatch can see them.
     if tag_ids and resource_id:
         attach_tags_step(resource_id=str(resource_id), tag_ids=list(tag_ids))
+
+    # 3a'. 抓取请求带的评级（spec 2026-09-10）。None = 调用方没给，不写。
+    if rating is not None and resource_id:
+        set_rating_step(resource_id=str(resource_id), rating=int(rating))
 
     # 3b. Backfill parse task_tracking row with media_id + friendly
     # subtitle so the frontend can show the parsed-media card and link

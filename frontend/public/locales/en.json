@@ -4864,6 +4864,7 @@
     "batchSubmitted": "{{n}} dispatched, {{f}} failed",
     "parsed": "Parsed",
     "downloadDispatched": "Download dispatched — see Task Center",
+    "aiSingleLinkOnly": "AI processing runs for single links only",
     "playlistDispatched": "{{n}} tracks dispatched",
     "downloadAll": "Download all ({{n}})",
     "sourceHealth": "Source health",

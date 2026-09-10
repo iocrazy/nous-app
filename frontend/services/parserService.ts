@@ -54,7 +54,18 @@ export interface FetchOptions {
   video_bool?: boolean;
   cover_bool?: boolean;
   tag_ids?: string[];
+  /** AI intents (spec 2026-09-10): sent only when true; mapped server-side to Pipeline system tags. */
+  transcribe?: boolean;
+  summarize?: boolean;
+  analyze?: boolean;
 }
+
+/** Copy the true-valued AI intents onto a request body (false/undefined are omitted). */
+export const applyIntentFields = (body: Record<string, unknown>, options: FetchOptions) => {
+  for (const key of ['transcribe', 'summarize', 'analyze'] as const) {
+    if (options[key]) body[key] = true;
+  }
+};
 
 export interface FetchResponse {
   success: boolean;
@@ -103,6 +114,7 @@ export const parseShareLink = async (
   if (options.tag_ids?.length) {
     body.tag_ids = options.tag_ids;
   }
+  applyIntentFields(body, options);
 
   const response = await fetch(`${apiUrl}/api/v1/media/fetch`, {
     method: 'POST',
@@ -142,6 +154,7 @@ export const parseBatchLinks = async (
   if (options.tag_ids?.length) {
     batchBody.tag_ids = options.tag_ids;
   }
+  applyIntentFields(batchBody, options);
 
   const response = await fetch(`${apiUrl}/api/v1/media/fetch/batch`, {
     method: 'POST',

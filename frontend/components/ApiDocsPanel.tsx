@@ -112,6 +112,10 @@ const endpoints: EndpointDef[] = [
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously via task queue' },
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach' },
       { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
+      { name: 'transcribe', type: 'boolean', required: false, default: 'false', description: 'Run AI transcription after download (maps to Pipeline system tags)' },
+      { name: 'summarize', type: 'boolean', required: false, default: 'false', description: 'Run AI summary after download (maps to Pipeline system tags)' },
+      { name: 'analyze', type: 'boolean', required: false, default: 'false', description: 'Run AI cover analysis after download (maps to Pipeline system tags)' },
+      { name: 'rating', type: 'integer', required: false, description: 'Star rating written to the resource (0–5)' },
     ],
     curl: `curl -X POST "${BASE_URL}/api/v1/media/fetch" \\
   -H "Content-Type: application/json" \\
@@ -136,7 +140,7 @@ const endpoints: EndpointDef[] = [
   {
     method: 'POST',
     path: '/api/v1/media/fetch/batch',
-    description: 'Parse and fetch multiple videos at once. Returns results for each URL.',
+    description: 'Parse and fetch multiple videos at once. Returns results for each URL. AI processing (transcribe / summarize / analyze) needs use_celery: true; without it only tags and rating are applied.',
     params: [
       { name: 'urls', type: 'string[]', required: true, description: 'Array of share links' },
       { name: 'video_bool', type: 'boolean', required: false, default: 'true', description: 'Download video files' },
@@ -144,6 +148,10 @@ const endpoints: EndpointDef[] = [
       { name: 'use_celery', type: 'boolean', required: false, default: 'false', description: 'Process asynchronously' },
       { name: 'tag_ids', type: 'string[]', required: false, description: 'Existing tag UUIDs to attach to all videos' },
       { name: 'tags', type: 'string[]', required: false, description: 'Tag names to attach (auto-created if not found)' },
+      { name: 'transcribe', type: 'boolean', required: false, default: 'false', description: 'Run AI transcription after download (maps to Pipeline system tags)' },
+      { name: 'summarize', type: 'boolean', required: false, default: 'false', description: 'Run AI summary after download (maps to Pipeline system tags)' },
+      { name: 'analyze', type: 'boolean', required: false, default: 'false', description: 'Run AI cover analysis after download (maps to Pipeline system tags)' },
+      { name: 'rating', type: 'integer', required: false, description: 'Star rating written to the resource (0–5)' },
     ],
     curl: `curl -X POST "${BASE_URL}/api/v1/media/fetch/batch" \\
   -H "Content-Type: application/json" \\

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
 import { UiSelect } from '../components/ui';
+import { PIPELINE_TAG_GROUP } from '../utils/aiIntents';
 
 interface Tag {
   id: string;
@@ -19,6 +20,89 @@ interface TagGroup {
 }
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+
+/** Single-choice processing options saved together with the tag selection. */
+type Options = { rating: number | null; transcribe: boolean; summarize: boolean; analyze: boolean };
+const DEFAULT_OPTIONS: Options = { rating: null, transcribe: false, summarize: false, analyze: false };
+/** `id` is the stable data-testid suffix: rating None→0, 1–5; booleans No→0, Yes→1. */
+type Choice<K extends keyof Options> = { id: number; value: Options[K]; text: string };
+
+/** Wait after the last keystroke before asking MyMemory for a counterpart name. */
+const TRANSLATE_DEBOUNCE_MS = 600;
+
+/**
+ * Abort a selection POST that hasn't settled by then. Saves are serialized, so a
+ * stalled request on a flaky mobile link would otherwise hold every queued save
+ * (including the final state) until the browser's own network timeout.
+ */
+const SAVE_TIMEOUT_MS = 12_000;
+
+const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
+
+/** Counterpart name (zh↔en) from MyMemory; '' when unavailable — translation is optional. */
+const fetchTranslation = async (text: string): Promise<string> => {
+  try {
+    const langPair = isChinese(text) ? 'zh|en' : 'en|zh';
+    const res = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}&de=8512939@qq.com`,
+    );
+    if (!res.ok) return '';
+    const data = await res.json();
+    const translated = data?.responseData?.translatedText;
+    return translated && translated !== text ? translated : '';
+  } catch (err) {
+    console.warn('Tag name translation unavailable:', err);
+    return '';
+  }
+};
+
+type CreateConflict = { name?: string; name_zh?: string; type?: string };
+
+/**
+ * User-facing message for a failed POST /tags. Production wraps HTTPException in
+ * the ErrorResponse envelope ({error, code, details}); bare FastAPI uses
+ * {detail}. Both are read so the typed 409 conflict survives either shape.
+ */
+const describeCreateError = async (res: Response, name: string, lang: string): Promise<string> => {
+  const body = await res.json().catch(() => ({}) as Record<string, unknown>);
+  const structured = body?.details ?? body?.detail;
+  // Only a 4xx with a string detail carries a real message in `error`; dict details
+  // become "Request failed" and every 5xx becomes "Internal server error".
+  const human = res.status < 500 && body?.details == null ? (body?.error ?? body?.detail) : undefined;
+  if (res.status === 409) {
+    // Backend names WHICH tag conflicts. The English name (often an
+    // auto-translation, e.g. 康复 -> "Healing") may collide with a
+    // built-in system tag whose Chinese alias differs (Healing/治愈).
+    // The Chinese name isn't the duplicate — surface the real conflict.
+    const conflict =
+      structured && typeof structured === 'object'
+        ? (structured as { conflict?: CreateConflict }).conflict
+        : undefined;
+    if (conflict?.name) {
+      const existingLabel = conflict.name_zh
+        ? `${conflict.name_zh}（${conflict.name}）`
+        : conflict.name;
+      const kind =
+        conflict.type === 'system'
+          ? lang === 'zh'
+            ? '系统内置标签'
+            : 'a built-in tag'
+          : lang === 'zh'
+            ? '已有标签'
+            : 'an existing tag';
+      return lang === 'zh'
+        ? `英文名「${name}」已被${kind}「${existingLabel}」占用。换个英文名，或在上方搜索选择已有标签。`
+        : `The English name "${name}" is already used by ${kind} "${existingLabel}". Use a different English name, or search and select the existing tag above.`;
+    }
+    return lang === 'zh'
+      ? `标签已存在：英文名「${name}」已被占用。请换个名字，或在上方搜索选择已有标签。`
+      : `Tag already exists: "${name}" is taken. Use a different name, or search and select the existing tag above.`;
+  }
+  return (
+    (typeof human === 'string' && human) ||
+    (lang === 'zh' ? `创建失败（${res.status}）` : `Create failed (${res.status})`)
+  );
+};
 
 /** Most-used first within any list (media_count descending) */
 const byMediaCountDesc = (a: Tag, b: Tag) =>
@@ -51,13 +135,14 @@ export const ShortcutsTagsPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [translatedName, setTranslatedName] = useState('');
   const [newTagGroupId, setNewTagGroupId] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
 
   // Read params from both query string and hash fragment
   const params = new URLSearchParams(window.location.search);
@@ -111,25 +196,31 @@ export const ShortcutsTagsPage: React.FC = () => {
       });
   }, [token, apiKey]);
 
+  // Pipeline 组（Transcript / Summary / Analyze）由下方四项单选承载，不再当标签选。
+  const pickableTags = useMemo(
+    () => tags.filter((t) => t.group_name !== PIPELINE_TAG_GROUP),
+    [tags],
+  );
+
   // Case-insensitive search across English + Chinese names
   const query = search.trim().toLowerCase();
   const filteredTags = useMemo(() => {
-    if (!query) return tags;
-    return tags.filter((t) => {
+    if (!query) return pickableTags;
+    return pickableTags.filter((t) => {
       const name = (t.name || '').toLowerCase();
       const nameZh = (t.name_zh || '').toLowerCase();
       return name.includes(query) || nameZh.includes(query);
     });
-  }, [tags, query]);
+  }, [pickableTags, query]);
 
   // Top 8 most used tags — hidden while searching so results stay flat
   const topTags = useMemo(() => {
     if (query) return [];
-    return [...tags]
+    return [...pickableTags]
       .filter((t) => t.media_count > 0)
       .sort(byMediaCountDesc)
       .slice(0, 8);
-  }, [tags, query]);
+  }, [pickableTags, query]);
 
   // Group tags by group_name, exclude ungrouped tags from showing as "Other"
   const grouped = useMemo(() => {
@@ -156,22 +247,24 @@ export const ShortcutsTagsPage: React.FC = () => {
       ([name, list]) =>
         [name, [...list].sort(byMediaCountDesc)] as [string, Tag[]],
     );
-  }, [filteredTags, query]);
+  }, [filteredTags]);
 
-  // Extract unique tag groups for create form dropdown
+  // Extract unique tag groups for create form dropdown (Pipeline is not pickable)
   const tagGroups = useMemo<TagGroup[]>(() => {
     const seen = new Map<string, string>();
-    for (const tag of tags) {
+    for (const tag of pickableTags) {
       if (tag.group_id && tag.group_name && !seen.has(tag.group_id)) {
         seen.set(tag.group_id, tag.group_name);
       }
     }
     return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
-  }, [tags]);
+  }, [pickableTags]);
 
   // Auto-translate: detect input language, translate to the other
   const translateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isChinese = (text: string) => /[\u4e00-\u9fff]/.test(text);
+  useEffect(() => () => {
+    if (translateTimerRef.current) clearTimeout(translateTimerRef.current);
+  }, []);
 
   const handleInputChange = useCallback((value: string) => {
     setNewTagInput(value);
@@ -181,21 +274,9 @@ export const ShortcutsTagsPage: React.FC = () => {
       return;
     }
     translateTimerRef.current = setTimeout(async () => {
-      try {
-        const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
-        const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value.trim())}&langpair=${langPair}&de=8512939@qq.com`
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const translated = data?.responseData?.translatedText;
-        if (translated && translated !== value) {
-          setTranslatedName(translated);
-        }
-      } catch {
-        // Translation is optional
-      }
-    }, 600);
+      const translated = await fetchTranslation(value.trim());
+      if (translated) setTranslatedName(translated);
+    }, TRANSLATE_DEBOUNCE_MS);
   }, []);
 
   const handleCreateTag = useCallback(async () => {
@@ -219,48 +300,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           group_id: newTagGroupId || null,
         }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}) as { detail?: unknown });
-        const detail = err?.detail;
-        if (res.status === 409) {
-          // Backend names WHICH tag conflicts. The English name (often an
-          // auto-translation, e.g. 康复 -> "Healing") may collide with a
-          // built-in system tag whose Chinese alias differs (Healing/治愈).
-          // The Chinese name isn't the duplicate — surface the real conflict.
-          const conflict =
-            detail && typeof detail === 'object'
-              ? (detail as { conflict?: { name?: string; name_zh?: string; type?: string } })
-                  .conflict
-              : undefined;
-          if (conflict?.name) {
-            const existingLabel = conflict.name_zh
-              ? `${conflict.name_zh}（${conflict.name}）`
-              : conflict.name;
-            const kind =
-              conflict.type === 'system'
-                ? lang === 'zh'
-                  ? '系统内置标签'
-                  : 'a built-in tag'
-                : lang === 'zh'
-                  ? '已有标签'
-                  : 'an existing tag';
-            throw new Error(
-              lang === 'zh'
-                ? `英文名「${name}」已被${kind}「${existingLabel}」占用。换个英文名，或在上方搜索选择已有标签。`
-                : `The English name "${name}" is already used by ${kind} "${existingLabel}". Use a different English name, or search and select the existing tag above.`,
-            );
-          }
-          throw new Error(
-            lang === 'zh'
-              ? `标签已存在：英文名「${name}」已被占用。请换个名字，或在上方搜索选择已有标签。`
-              : `Tag already exists: "${name}" is taken. Use a different name, or search and select the existing tag above.`,
-          );
-        }
-        throw new Error(
-          (typeof detail === 'string' && detail) ||
-            (lang === 'zh' ? `创建失败（${res.status}）` : `Create failed (${res.status})`),
-        );
-      }
+      if (!res.ok) throw new Error(await describeCreateError(res, name, lang));
       // Reload tags
       const fetchUrl = `${API_BASE}/api/v1/auth/temp-token/${token}/tags?enabled_only=true`;
       const tagsRes = await fetch(fetchUrl);
@@ -282,42 +322,171 @@ export const ShortcutsTagsPage: React.FC = () => {
   /** Get display label (may be Chinese), but always use English name for storage */
   const getStorageName = (tag: Tag) => tag.name;
 
-  // Toggle tag and auto-save to Redis
-  const toggle = useCallback((tagName: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagName)) {
-        next.delete(tagName);
-      } else {
-        next.add(tagName);
-      }
-      // Auto-save to Redis
-      if (token && next.size > 0) {
-        setSaveStatus('saving');
-        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: Array.from(next) }),
+  // Only the most recent save may drive the status line: an older response (or
+  // its idle timer) landing late must not overwrite the newer outcome.
+  const saveSeqRef = useRef(0);
+  // Saves run one at a time: the backend replaces the whole selection per POST,
+  // so two in flight could land out of order and leave an older state stored.
+  // Each link catches its own failure, so the chain itself never rejects.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // 单次 POST 全字段：标签 + 四项单选。后端每次整体替换，所以五个键必须都发；空标签也照发。
+  const saveSelection = useCallback((nextTags: Set<string>, nextOptions: Options) => {
+    if (!token) return;
+    const seq = ++saveSeqRef.current;
+    const isLatest = () => seq === saveSeqRef.current;
+    // Body is captured now — the state at the moment of the user's action.
+    const body = JSON.stringify({ tags: Array.from(nextTags), ...nextOptions });
+    setSaveStatus('saving');
+    saveChainRef.current = saveChainRef.current.then(() => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+      return fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: controller.signal,
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`Save selection failed: HTTP ${res.status}`);
+          if (!isLatest()) return;
+          setSaveStatus('saved');
+          setTimeout(() => {
+            if (isLatest()) setSaveStatus('idle');
+          }, 1500);
         })
-          .then(() => {
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 1500);
-          })
-          .catch((err) => {
-            console.error('Failed to save selection:', err);
-            setSaveStatus('idle');
-          });
-      } else if (token && next.size === 0) {
-        // Clear selection
-        fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/selection`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: [] }),
-        }).catch((err) => console.error('Failed to clear selection:', err));
-      }
-      return next;
+        .catch((err) => {
+          console.error('Failed to save selection:', err);
+          if (isLatest()) setSaveStatus('error');
+        })
+        .finally(() => clearTimeout(timeout));
     });
   }, [token]);
+
+  // Next state is computed from the current render's values, never inside a
+  // state updater: StrictMode double-invokes updaters, which would double-POST.
+  const toggle = useCallback((tagName: string) => {
+    const next = new Set(selected);
+    if (next.has(tagName)) {
+      next.delete(tagName);
+    } else {
+      next.add(tagName);
+    }
+    setSelected(next);
+    // 从搜索结果里点中即清空搜索，列表回到全量视图。
+    setSearch('');
+    saveSelection(next, options);
+  }, [selected, options, saveSelection]);
+
+  const setOption = useCallback(<K extends keyof Options>(key: K, value: Options[K]) => {
+    const next: Options = { ...options, [key]: value };
+    setOptions(next);
+    saveSelection(selected, next);
+  }, [selected, options, saveSelection]);
+
+  // quickCreate awaits the network before selecting; by then the user may have
+  // changed options, so it must select through the latest toggle, not the one
+  // captured when the create button was clicked.
+  const toggleRef = useRef(toggle);
+  useEffect(() => {
+    toggleRef.current = toggle;
+  }, [toggle]);
+
+  // Search-or-create bar (mirrors chrome-extension popup.js syncQuickCreateBar).
+  const [quickTranslate, setQuickTranslate] = useState('');
+  const quickTouchedRef = useRef(false);
+  const [quickCreating, setQuickCreating] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const quickTerm = search.trim();
+  const showQuickCreate = !!token && !!query && filteredTags.length === 0 && !showCreateForm;
+
+  useEffect(() => {
+    // New query → drop the previous suggestion and ask for a fresh one; an
+    // edited / "="-ed value is the user's and survives.
+    quickTouchedRef.current = false;
+    setQuickTranslate('');
+    setQuickError(null);
+    if (!showQuickCreate) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const translated = await fetchTranslation(quickTerm);
+      if (!cancelled && translated && !quickTouchedRef.current) setQuickTranslate(translated);
+    }, TRANSLATE_DEBOUNCE_MS);
+    return () => {
+      cancelled = true; // a translation already in flight must not land on a newer query
+      clearTimeout(timer);
+    };
+  }, [quickTerm, showQuickCreate]);
+
+  const quickCreate = async () => {
+    const term = quickTerm;
+    if (!term || !token || quickCreating) return;
+    const other = quickTranslate.trim();
+    const payload = isChinese(term)
+      ? { name: other || term, name_zh: term, group_id: null }
+      : { name: term, name_zh: other || null, group_id: null };
+    setQuickCreating(true);
+    setQuickError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await describeCreateError(res, payload.name, lang));
+      const tagsRes = await fetch(`${API_BASE}/api/v1/auth/temp-token/${token}/tags?enabled_only=true`);
+      if (tagsRes.ok) {
+        const data = await tagsRes.json();
+        setTags(data.tags || []);
+      } else {
+        console.error('Failed to reload tags after create:', tagsRes.status);
+      }
+      toggleRef.current(payload.name); // selects + clears the search
+    } catch (err) {
+      setQuickError(err instanceof Error ? err.message : 'Failed to create tag');
+    } finally {
+      setQuickCreating(false);
+    }
+  };
+
+  const yesNo: Choice<'transcribe' | 'summarize' | 'analyze'>[] = [
+    { id: 0, value: false, text: lang === 'zh' ? '否' : 'No' },
+    { id: 1, value: true, text: lang === 'zh' ? '是' : 'Yes' },
+  ];
+  const ratingChoices: Choice<'rating'>[] = [
+    { id: 0, value: null, text: lang === 'zh' ? '无' : 'None' },
+    ...[1, 2, 3, 4, 5].map((v) => ({ id: v, value: v, text: '★'.repeat(v) })),
+  ];
+
+  const renderOptionRow = <K extends keyof Options>(key: K, label: string, choices: Choice<K>[]) => (
+    <div className="flex items-center gap-2" role="radiogroup" aria-label={label}>
+      <span className="w-12 shrink-0 text-xs text-ink-400">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {choices.map((c) => {
+          const active = options[key] === c.value;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              data-testid={`opt-${key}-${c.id}`}
+              onClick={() => setOption(key, c.value)}
+              className={`px-2.5 py-1 rounded-full border text-xs transition-colors ${
+                active
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
+                  : 'bg-ink-800 text-ink-300 border-ink-700'
+              }`}
+            >
+              {c.text}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const countSuffix = selected.size > 0 ? ` (${selected.size})` : '';
 
   if (loading) {
     return (
@@ -349,6 +518,9 @@ export const ShortcutsTagsPage: React.FC = () => {
           </h1>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
+            aria-label={showCreateForm
+              ? (lang === 'zh' ? '关闭新建' : 'Close create form')
+              : (lang === 'zh' ? '新建标签' : 'Create tag')}
             className="w-8 h-8 flex items-center justify-center rounded-full bg-ink-800 text-ink-400 hover:text-ink-50 transition-colors"
           >
             {showCreateForm ? <X size={16} /> : <Plus size={16} />}
@@ -366,6 +538,14 @@ export const ShortcutsTagsPage: React.FC = () => {
           placeholder={lang === 'zh' ? '搜索标签...' : 'Search tags...'}
           className="mt-2 w-full px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-700 text-sm text-ink-50 placeholder-ink-500 outline-none focus:border-indigo-500"
         />
+      </div>
+
+      {/* Processing options — replace picking Transcript/Summary/Analyze as tags */}
+      <div className="px-4 py-3 border-b border-ink-800 space-y-2.5">
+        {renderOptionRow('rating', lang === 'zh' ? '评级' : 'Rating', ratingChoices)}
+        {renderOptionRow('transcribe', lang === 'zh' ? '转录' : 'Transcribe', yesNo)}
+        {renderOptionRow('summarize', lang === 'zh' ? '总结' : 'Summarize', yesNo)}
+        {renderOptionRow('analyze', lang === 'zh' ? '解析' : 'Analyze', yesNo)}
       </div>
 
       {/* Create tag form */}
@@ -412,12 +592,51 @@ export const ShortcutsTagsPage: React.FC = () => {
 
       {/* Tag groups */}
       <div className="px-4 py-3 space-y-5">
-        {filteredTags.length === 0 && (
+        {filteredTags.length === 0 && !showQuickCreate && (
           <p className="text-center text-sm text-ink-500 py-8">
             {query
               ? (lang === 'zh' ? '没有匹配的标签' : 'No tags match your search')
               : (lang === 'zh' ? '暂无标签' : 'No tags yet')}
           </p>
+        )}
+        {showQuickCreate && (
+          <div className="rounded-lg border border-ink-700 bg-ink-900/50 p-3 space-y-2">
+            <p className="text-xs text-ink-500">
+              {lang === 'zh' ? '没有匹配的标签' : 'No tags match your search'}
+            </p>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-ink-500 w-8">{isChinese(quickTerm) ? 'EN:' : 'ZH:'}</span>
+              <input
+                data-testid="quick-translate-input"
+                value={quickTranslate}
+                onChange={(e) => { quickTouchedRef.current = true; setQuickTranslate(e.target.value); }}
+                placeholder={lang === 'zh' ? '对应译名（可改）' : 'Counterpart name (editable)'}
+                className="flex-1 min-w-0 px-2 py-1 rounded bg-ink-800 border border-ink-700 text-ink-50 placeholder-ink-500 outline-none focus:border-[var(--accent-border)]"
+              />
+              <button
+                type="button"
+                data-testid="quick-same-btn"
+                title={lang === 'zh' ? '两种语言同名' : 'Same in both languages'}
+                aria-label={lang === 'zh' ? '两种语言同名' : 'Same in both languages'}
+                onClick={() => { quickTouchedRef.current = true; setQuickTranslate(quickTerm); }}
+                className="px-2 py-1 rounded border border-ink-700 text-ink-300"
+              >
+                =
+              </button>
+            </div>
+            {quickError && <p className="text-xs text-danger">{quickError}</p>}
+            <button
+              type="button"
+              data-testid="quick-create-btn"
+              onClick={quickCreate}
+              disabled={quickCreating}
+              className="w-full py-2 rounded-lg border bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)] text-sm font-medium disabled:opacity-40 active:scale-[0.98]"
+            >
+              {quickCreating
+                ? (lang === 'zh' ? `创建「${quickTerm}」中...` : `Creating "${quickTerm}"...`)
+                : (lang === 'zh' ? `创建「${quickTerm}」` : `Create "${quickTerm}"`)}
+            </button>
+          </div>
         )}
         {/* Frequently used */}
         {topTags.length > 0 && (
@@ -503,22 +722,27 @@ export const ShortcutsTagsPage: React.FC = () => {
       {/* Fixed bottom bar — status only, auto-saved on every toggle */}
       <div className="fixed bottom-0 left-0 right-0 p-3 bg-ink-950/95 backdrop-blur-sm border-t border-ink-800 safe-area-pb">
         <p className="text-center text-sm">
-          {selected.size === 0 && (
-            <span className="text-ink-500">
-              {lang === 'zh' ? '点击标签选择，选完关闭即可' : 'Tap tags to select, close when done'}
+          {saveStatus === 'error' && (
+            <span className="text-danger">
+              {lang === 'zh' ? '保存失败，请重试任一选项' : 'Save failed — change any option to retry'}
             </span>
           )}
-          {selected.size > 0 && saveStatus === 'saving' && (
+          {saveStatus === 'saving' && (
             <span className="text-ink-400">
-              {lang === 'zh' ? `保存中... (${selected.size})` : `Saving... (${selected.size})`}
+              {lang === 'zh' ? '保存中...' : 'Saving...'}{countSuffix}
             </span>
           )}
-          {selected.size > 0 && saveStatus === 'saved' && (
-            <span className="text-emerald-400">
-              {lang === 'zh' ? `已保存 ✓ (${selected.size})` : `Saved ✓ (${selected.size})`}
+          {saveStatus === 'saved' && (
+            <span className="text-ok">
+              {lang === 'zh' ? '已保存 ✓' : 'Saved ✓'}{countSuffix}
             </span>
           )}
-          {selected.size > 0 && saveStatus === 'idle' && (
+          {saveStatus === 'idle' && selected.size === 0 && (
+            <span className="text-ink-500">
+              {lang === 'zh' ? '选择标签或选项，选完关闭即可' : 'Pick tags or options, close when done'}
+            </span>
+          )}
+          {saveStatus === 'idle' && selected.size > 0 && (
             <span className="text-ink-400">
               {lang === 'zh' ? `已选 ${selected.size} 个` : `${selected.size} selected`}
             </span>
