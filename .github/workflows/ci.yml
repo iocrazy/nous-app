@@ -1,6 +1,15 @@
 # CI - Pull Request Quality Checks
 # Runs on every PR to master: frontend build, backend lint, browser tests,
-# Rust check
+# Rust check, codex-daemon tests.
+#
+# 五个测试 job 都挂在 `changes` job 后面，按「这个 PR 碰了哪些目录」决定跑不跑
+# （scripts/ci-changed-areas.sh，映射表与三条不变量写在脚本头部）。托管 runner
+# 按 job 并行数计费，五个 job 全跑一次 = 22–44 计费分钟，而 2026-09-09 实测最近
+# 60 个 PR 里 63% 只碰一个区域或纯文档。
+#
+# ⚠️ 兜底方向永远是「多跑」：changes job 挂了、输出缺失、路径不在映射表内，
+# 五个 job 一律照跑。每个 job 的 `if:` 因此写的是 `!= 'false'` 而不是 `== 'true'`，
+# 且带 `!cancelled()` 让 needs 失败时仍然执行 —— 改这两处之前先读脚本头注释。
 
 name: CI
 
@@ -13,12 +22,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # 仓库默认 workflow token 是只读的（default_workflow_permissions: read），
+    # 而那个"只读"**不含** pull-requests —— 读 pulls/{n}/files 会 403。只在
+    # 此 job 提权，且只到 read（同 pr-behind-check 的做法，不动全局默认）。
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      frontend: ${{ steps.areas.outputs.frontend }}
+      backend: ${{ steps.areas.outputs.backend }}
+      browser: ${{ steps.areas.outputs.browser }}
+      rust: ${{ steps.areas.outputs.rust }}
+      codex_daemon: ${{ steps.areas.outputs.codex_daemon }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 只要 scripts/。文件清单来自 REST（pulls/{n}/files），不依赖 git 历史
+          # —— `git diff origin/base...HEAD` 那条路依赖 fetch 深度，正是 backend
+          # job 里记的 2026-08-23 lint 门禁静默失效的触发条件。
+          sparse-checkout: scripts
+
+      # 先自测：一个恒真的门禁比没有门禁更糟。自测覆盖两向 —— 该跳的跳、
+      # 该跑的跑，以及脚本自己拿不到清单时**只许**退化成全跑。
+      - name: Self-test the gate before trusting it
+        run: bash scripts/ci-changed-areas.selftest.sh
+
+      - name: Compute changed areas
+        id: areas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci-changed-areas.sh
+
   frontend:
     name: Frontend Build
     # fork PR 一律跳过。守卫留着不删：仓库现在是 private，外部 fork PR 本就
     # 不会发生，删掉换不回任何东西；而万一将来再迁回 self-hosted，少这一行
     # 就等于把生产部署机交给任何人。
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    # 三段：① !cancelled() —— changes job 挂了也要跑，兜底方向是"多跑"；
+    # ② fork 守卫；③ changes 没有**明确**说 false 就跑（输出缺失 = 也跑）。
+    if: >-
+      ${{ !cancelled()
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.changes.outputs.frontend != 'false' }}
     # 2026-09-07 迁回 ubuntu-latest。2026-08-06 迁去 self-hosted 的理由已失效，
     # 而代价在累积：
     #  · 计费假红（runner_name 为空 + steps=0 + 2 秒 fail）已恢复 —— 同日
@@ -81,7 +132,13 @@ jobs:
   backend:
     name: Backend Lint & Deps
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    # 三段：① !cancelled() —— changes job 挂了也要跑，兜底方向是"多跑"；
+    # ② fork 守卫；③ changes 没有**明确**说 false 就跑（输出缺失 = 也跑）。
+    if: >-
+      ${{ !cancelled()
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.changes.outputs.backend != 'false' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -208,7 +265,13 @@ jobs:
   browser:
     name: Browser Sidecar Tests
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    # 三段：① !cancelled() —— changes job 挂了也要跑，兜底方向是"多跑"；
+    # ② fork 守卫；③ changes 没有**明确**说 false 就跑（输出缺失 = 也跑）。
+    if: >-
+      ${{ !cancelled()
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.changes.outputs.browser != 'false' }}
     runs-on: ubuntu-latest
     # 在此之前 `browser/` 的 600 个用例**全仓没有任何 workflow 跑过** ——
     # ci.yml 的 pytest 步骤 working-directory 是 backend、只跑 backend/tests/，
@@ -226,11 +289,11 @@ jobs:
     # 里翻日志。代价：一次额外 checkout（fetch-depth 默认 1，秒级），相对
     # uv sync + 30s 测试可以忽略。
     #
-    # 没加 paths 过滤：本 workflow 四个 job 都是无条件跑（前端 job 在纯后端
-    # PR 上照样 npm ci + build），browser 这套 ~30s，跟着这个约定更简单。
-    # per-job paths 过滤要么引第三方 action，要么让 job 变 skipped —— 一旦这个
-    # check 被设成 required，skipped 与 pending 的区分会变成新的坑。全量跑
-    # 直接保证了"browser/** 改动必触发"这条底线。
+    # 2026-09-09 起按区域跑（见文件头与 scripts/ci-changed-areas.sh）。此前
+    # 刻意不加过滤，担心的是"skipped 与 pending 会变成新的坑"—— 查过了：job 级
+    # `if:` 跳过的 job 对 required check 记作通过，会永远 pending 的是
+    # on.pull_request.paths 让 workflow 整个不触发那种，我们没用那种。
+    # "browser/** 改动必触发"这条底线由自测钉住。
     defaults:
       run:
         working-directory: browser
@@ -300,7 +363,13 @@ jobs:
   rust:
     name: Rust Check
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    # 三段：① !cancelled() —— changes job 挂了也要跑，兜底方向是"多跑"；
+    # ② fork 守卫；③ changes 没有**明确**说 false 就跑（输出缺失 = 也跑）。
+    if: >-
+      ${{ !cancelled()
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-latest
     # ⚠️ 把 rust 工具链关进 runner 的 tool cache，别碰 runner 用户的 home。
     #
@@ -380,7 +449,13 @@ jobs:
     # fork PR 一律跳过 —— 同 frontend job 的理由。本 job 现在跑托管 runner，
     # 守卫留着是为了迁回 self-hosted 时不用重加（那时漏掉这一行，等于把生产
     # 部署机交给任何人）。
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    # 三段：① !cancelled() —— changes job 挂了也要跑，兜底方向是"多跑"；
+    # ② fork 守卫；③ changes 没有**明确**说 false 就跑（输出缺失 = 也跑）。
+    if: >-
+      ${{ !cancelled()
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.changes.outputs.codex_daemon != 'false' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -399,9 +474,10 @@ jobs:
 
       # 没有 npm ci —— 零依赖，node --test 是内置的。整个 job 跑不到一秒。
       #
-      # 刻意不加 paths 过滤：GitHub Actions 不支持 job 级 paths，而在
-      # on.pull_request 上加会同时影响另外四个 job。用「改了哪些文件」去
-      # 决定跑不跑，本身就是门禁静默跳过的经典成因（见 CLAUDE.md 里
-      # lint 门禁那条），为一个亚秒级的 job 冒这个险不值得。
+      # 2026-09-09 起按区域跑（见文件头）。此前这里写"用改了哪些文件决定跑不跑
+      # 是门禁静默跳过的经典成因"—— 那条教训针对的是 job 内部 `git diff` 失败
+      # 被 `|| true` 吞成空列表；现在的做法清单来自 REST、失败一律退化成全跑，
+      # 并有自测钉住这个方向。这个 job 本身不到一秒，跳不跳都无所谓，跟着走
+      # 只是为了五个 job 一个约定。
       - name: Unit tests (node --test)
         run: npm test
