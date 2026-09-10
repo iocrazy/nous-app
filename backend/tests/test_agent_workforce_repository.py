@@ -239,6 +239,58 @@ async def test_mark_inbox_processed_attaches_task_id(repo, monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_create_task_writes_the_issue_id_column(repo, monkeypatch):
+    """Task 7a defect 3: the background sub-agent's row carried
+    ``metadata.agent_payload.issue_id`` while the ``issue_id`` COLUMN stayed
+    NULL, so any lookup of "this issue's agent tasks" came back empty. It is a
+    business decoration (route C rule 3), so the app layer writes it."""
+    row = TaskTracking(dbos_workflow_id="echo", phase="queued", metadata_={})
+    session = _FakeSession([_Result(scalars=[row])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.create_task(
+        agent_id=uuid4(),
+        user_id=uuid4(),
+        payload={"kind": "subagent", "issue_id": 348020765598796},
+    )
+    assert session.params[0]["issue_id"] == 348020765598796
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_task_leaves_issue_id_null_when_the_payload_has_none(
+    repo, monkeypatch
+):
+    """System tasks (cleanup, backfills) belong to no issue — and an
+    unusable value is the same as no value, never a failed insert."""
+    for payload in ({"goal": "x"}, {"issue_id": None}, {"issue_id": "not-an-id"}):
+        row = TaskTracking(dbos_workflow_id="echo", phase="queued", metadata_={})
+        session = _FakeSession([_Result(scalars=[row])])
+        _patch_scopes(monkeypatch, session)
+        out = await repo.create_task(
+            agent_id=uuid4(), user_id=uuid4(), payload=payload
+        )
+        assert out is not None, f"an unusable issue_id sank the insert: {payload}"
+        assert session.params[0]["issue_id"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_task_accepts_a_stringified_issue_id(repo, monkeypatch):
+    """Snowflake ids cross JSON as strings often enough that refusing one
+    would silently drop the link on exactly the rows that need it."""
+    row = TaskTracking(dbos_workflow_id="echo", phase="queued", metadata_={})
+    session = _FakeSession([_Result(scalars=[row])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.create_task(
+        agent_id=uuid4(), user_id=uuid4(), payload={"issue_id": "348020765598796"}
+    )
+    assert session.params[0]["issue_id"] == 348020765598796
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_task_self_references_root_task_id(repo, monkeypatch):
     """A4: when parent_task_id/root_task_id are not provided, root_task_id is
     computed before INSERT (= the new task's dbos_workflow_id). Single INSERT."""

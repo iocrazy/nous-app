@@ -184,6 +184,25 @@ LIFECYCLE_TO_STATUS: Dict[str, str] = {
 
 # task_tracking PK 没有 default —— 必须应用层显式提供（migration 180 swap PK
 # 后 dbos_workflow_id 没 gen_random_uuid default）。
+def _payload_issue_id(payload: Dict[str, Any]) -> Optional[int]:
+    """``payload['issue_id']`` as a BIGINT, or None.
+
+    Snowflake ids cross JSON as numbers OR strings, so both are accepted. An
+    unusable value is the same as no value: the link is decoration, and a bad
+    one must never sink the insert that carries the actual work.
+    """
+    raw = (payload or {}).get("issue_id")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"[workforce] unusable payload issue_id {raw!r}; column left NULL"
+        )
+        return None
+
+
 def _new_task_id() -> str:
     return str(uuid.uuid4())
 
@@ -660,6 +679,10 @@ class AgentWorkforceRepository:
             "parent_task_id": str(parent_task_id) if parent_task_id else None,
             "root_task_id": root_id_str,
             "inbox_message_id": str(inbox_message_id) if inbox_message_id else None,
+            # 业务装饰字段（路线 C 第 3 条：由业务代码写，trigger 不碰）。
+            # payload 里早就有 issue_id，列却一直是 NULL —— 于是"按 issue 反查
+            # 它的 agent_task"永远落空（Task 7a 缺陷 3，2026-09-10 真栈实测）。
+            "issue_id": _payload_issue_id(payload),
         }
         try:
             async with write_scope() as session:
