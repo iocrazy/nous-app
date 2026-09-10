@@ -47,6 +47,7 @@ import os
 from typing import Any
 
 from dbos import DBOS, Queue
+from loguru import logger
 
 _DEFAULT_CONCURRENCY = int(os.environ.get("WORKFORCE_QUEUE_CONCURRENCY", "8"))
 
@@ -142,4 +143,66 @@ async def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
     # different worker's id will not match and cannot steal it. Put in the task
     # dict rather than a new step argument so the subprocess isolation mode
     # marshals it for free.
-    return await run_one_task_step({**task, "workforce_workflow_id": DBOS.workflow_id})
+    result = await run_one_task_step(
+        {**task, "workforce_workflow_id": DBOS.workflow_id}
+    )
+    await _dispatch_idle_wake(result)
+    return result
+
+
+async def _dispatch_idle_wake(result: dict[str, Any]) -> None:
+    """Carry out the wake ORDER the step returned. Runs in the workflow BODY.
+
+    The step cannot do this itself: ``deliver_or_dispatch``'s idle arm reaches
+    ``DBOS.start_workflow``, and DBOS asserts ``cur_ctx.is_workflow()`` there.
+    Before Task 7b the worker called it inline and that assertion fired on
+    every background sub-agent result handed to an idle issue — masked by the
+    sweeper's one-minute backstop, so the symptom read as latency rather than
+    as a path that had never worked. Same split as
+    ``agent_runs_sweeper._drain_one_issue`` and ``scheduled_master``.
+
+    ``already_enqueued=True``: the worker already filed the result on the
+    inbox, so this asks ONLY whether a turn should start now — the busy /
+    paused / dispatching / terminal decision stays where it is owned, and the
+    busy arm writes no second row (which is also why ``content`` is unused
+    there and the order need not carry it into ``dbos.operation_outputs``).
+
+    Nothing here may raise. The child has run, its result is filed, and the
+    task row is closed; a wake-up lost to a blip costs the sweeper's next
+    tick, whereas failing the workflow would misreport work that succeeded.
+    Both failure shapes are reported — an exception AND the typed value the
+    idle arm returns instead of raising."""
+    order = (result or {}).get("idle_dispatch")
+    if not order:
+        return
+
+    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
+
+    issue_id = int(order["issue_id"])
+    try:
+        outcome = await deliver_or_dispatch(
+            issue_id,
+            kind="subagent_result",
+            content={},
+            user_id=str(order["user_id"]),
+            already_enqueued=True,
+        )
+    except Exception as err:  # noqa: BLE001 — booked, never swallowed
+        logger.opt(exception=True).error(
+            f"[workforce] issue {issue_id}: the sub-agent result is filed but "
+            f"the wake-up raised: {err}"
+        )
+        return
+
+    if outcome.mode == "skipped" and str(outcome.reason or "").startswith(
+        "dispatch_failed"
+    ):
+        logger.error(
+            f"[workforce] issue {issue_id}: the sub-agent result is filed but "
+            f"the wake-up failed: {outcome.reason}"
+        )
+    else:
+        logger.info(
+            f"[workforce] issue {issue_id}: sub-agent result wake-up "
+            f"{outcome.mode}/{outcome.reason or outcome.workflow_id}"
+        )

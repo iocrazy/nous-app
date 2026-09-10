@@ -54,6 +54,11 @@ class IsolatedRunResult:
     error_code: Optional[str]
     error_message: Optional[str]
     exit_code: int  # the actual OS exit code, for telemetry
+    # The wake ORDER a background sub-agent's branch produced, carried through
+    # the wire so subprocess mode delivers what in-process mode delivers. A
+    # key dropped here is not an error anywhere — it is a wake-up that simply
+    # never happens, in exactly one deployment mode.
+    idle_dispatch: Optional[Dict[str, Any]] = None
 
     def as_worker_dict(self) -> Dict[str, Any]:
         """Match the shape `run_one_task` returns so callers can swap
@@ -63,6 +68,7 @@ class IsolatedRunResult:
             "task_id": self.task_id,
             "status": self.status,
             "run_id": self.run_id,
+            "idle_dispatch": self.idle_dispatch,
         }
         if self.error_code:
             out["reason"] = self.error_code
@@ -208,6 +214,7 @@ def run_isolated(
             error_code=envelope.get("error_code"),
             error_message=envelope.get("error_message"),
             exit_code=rc,
+            idle_dispatch=envelope.get("idle_dispatch"),
         )
 
     # Non-zero rc — map known signal exits to friendly error codes so
@@ -240,6 +247,7 @@ def run_isolated(
             error_message=envelope.get("error_message")
             or f"child exit {rc}, stderr: {stderr[:200]}",
             exit_code=rc,
+            idle_dispatch=envelope.get("idle_dispatch"),
         )
 
     logger.error(

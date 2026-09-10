@@ -8,7 +8,7 @@ turn — without enqueueing the result twice.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -156,21 +156,31 @@ async def test_subagent_done_is_written_on_the_parent_run():
     assert payload["task_id"] == task["id"] and payload["status"] == "success"
 
 
-async def test_issue_target_asks_whether_to_start_a_turn_without_re_enqueueing():
+async def test_issue_target_returns_the_wake_order_and_never_dispatches_here():
+    """The result row is written here; the WAKE is an order the workflow body
+    carries out. This code runs inside a ``@DBOS.step`` and DBOS asserts on
+    ``start_workflow`` there (Task 7b defect B) — see
+    ``tests/workflows/test_workforce_dispatch_chain.py`` for the guards."""
     w = _wire(agent_repo_raises=True)
-    await _run(w, _task())
+    task = _task()
+    out = await _run(w, task)
 
-    w.deliver.assert_awaited_once()
-    kw = w.deliver.await_args.kwargs
-    assert kw["kind"] == "subagent_result" and kw["already_enqueued"] is True
-    # Exactly one row: deliver_or_dispatch must not add a second.
+    w.deliver.assert_not_awaited()
+    assert out["idle_dispatch"] == {
+        "issue_id": 7,
+        "user_id": task["payload"]["user_id"],
+    }
+    # Exactly one row: the order carries no second delivery.
     w.inbox_repo.enqueue.assert_awaited_once()
 
 
 async def test_conversation_target_does_not_dispatch_an_issue_turn():
     w = _wire(agent_repo_raises=True)
-    await _run(w, _task(reply_to={"target_kind": "conversation", "target_id": 42}))
+    out = await _run(
+        w, _task(reply_to={"target_kind": "conversation", "target_id": 42})
+    )
     w.deliver.assert_not_awaited()
+    assert out["idle_dispatch"] is None
     assert w.inbox_repo.enqueue.await_args.kwargs["target_kind"] == "conversation"
 
 
@@ -246,19 +256,22 @@ async def test_a_failed_inbox_write_still_emits_done_and_finalises():
     assert _codes(w) == ["result_delivery_failed"]
 
 
-async def test_a_failed_wake_still_emits_done_and_finalises():
-    """``deliver_or_dispatch`` reads ``running_root_run_id``, which raises by
-    design when the read fails (a busy gate must never read a failed query as
-    'nothing running'). One DB blip used to strand the task."""
+async def test_a_wake_that_cannot_be_decided_here_is_no_longer_this_task_s_risk():
+    """The wake used to run inline, so one DB blip inside
+    ``running_root_run_id`` stranded the task. It now happens in the workflow
+    body, AFTER this function has emitted ``subagent_done`` and closed the row
+    — so a delivery this branch completed can no longer be reported as failed
+    by something that runs later. The body's own failure handling is pinned in
+    ``tests/workflows/test_workforce_dispatch_chain.py``."""
     w = _wire(agent_repo_raises=True)
     w.deliver.side_effect = RuntimeError("running_root_run_id blew up")
 
     out = await _run(w, _task())
 
-    assert out["status"] == "failed"
+    assert out["status"] == "success"
+    assert out["idle_dispatch"] == {"issue_id": 7, "user_id": ANY}
     assert w.writer.append.await_args.args[0] == "subagent_done"
-    assert _codes(w) == ["wake_failed"]
-    # The result still reached the inbox — the wake is the part that failed.
+    assert _codes(w) == [None]
     w.inbox_repo.enqueue.assert_awaited_once()
 
 
