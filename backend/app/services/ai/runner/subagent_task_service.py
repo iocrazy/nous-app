@@ -84,6 +84,12 @@ ENVELOPE_KEYS = (
     "key_findings",
     "files_created",
     "tokens_used",
+    # What the child spent. The BACKGROUND path travels only in this envelope
+    # — the worker has no recorder to ask — so a key missing here is a cost
+    # that reaches the parent as a literal 0 while the child billed real cents
+    # (Task 7b defect A). The synchronous path reads the recorder directly and
+    # was never affected, which is why it went unnoticed.
+    "cost_cents",
     "sub_run_id",
     "status",
 )
@@ -130,10 +136,24 @@ def _as_int(raw: Any) -> Optional[int]:
 
 
 def _cost_cents_of(recorder: Any) -> float:
-    """What the child cost, for the parent's ``cost.by_child`` breakdown.
-    The recorder computes it from its own token counters; a stand-in that
-    cannot is reported as 0.0 rather than crashing the emit."""
+    """What the child cost IN TOTAL, for the parent's ``cost.by_child``.
+
+    The folded view first: ``views["cost"]["spent_cents"]`` is ``own_cents``
+    plus everything the child's OWN children spent, kept in step by
+    ``recompute_spent`` as the run's ``step_end`` and ``subagent_done`` events
+    fold. ``by_child`` holds one number per child and that number is the
+    child's whole subtree, so a child that fanned out has to report the total —
+    ``compute_cost_cents()`` knows only its own tokens.
+
+    It falls back to ``compute_cost_cents()`` for a run that emitted no step
+    folds (and to a plain ``cost_cents`` attribute for a stand-in that has
+    neither). A recorder that cannot answer is reported as 0.0 rather than
+    crashing the emit."""
     try:
+        folded = (getattr(recorder, "views", None) or {}).get("cost") or {}
+        spent = float(folded.get("spent_cents") or 0.0)
+        if spent:
+            return spent
         compute = getattr(recorder, "compute_cost_cents", None)
         if callable(compute):
             return float(compute() or 0.0)
@@ -967,6 +987,9 @@ class SubAgentTaskService:
             "key_findings": [],
             "files_created": [],
             "tokens_used": tokens_used,
+            # Same source the synchronous path's ``subagent_done`` uses, so the
+            # two forms of the same child cannot name different numbers.
+            "cost_cents": _cost_cents_of(recorder) if recorder is not None else 0.0,
             "sub_run_id": str(sub_run_id) if sub_run_id else None,
             "status": status,
             **({"error": error} if error else {}),
@@ -982,6 +1005,9 @@ class SubAgentTaskService:
             "key_findings": [],
             "files_created": [],
             "tokens_used": 0,
+            # Nothing ran, so nothing was spent — but the key is present, so a
+            # reader never has to tell "no cost" apart from "no field".
+            "cost_cents": 0.0,
             "sub_run_id": None,
             "status": "failed",
             "error": error_msg,

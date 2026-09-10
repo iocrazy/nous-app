@@ -173,14 +173,18 @@ async def test_build_envelope_failed_shape():
 
 
 async def test_envelope_keys_are_stable():
-    """Pin the exact 6 keys. Adding new keys is safe (parent agents
+    """Pin the exact 7 keys. Adding new keys is safe (parent agents
     that don't read them just see extras), but renaming or removing
-    is a breaking change for any consumer relying on the schema."""
+    is a breaking change for any consumer relying on the schema.
+
+    ``cost_cents`` joined in Task 7b: the background path travels only in this
+    envelope, so a cost missing from it reached the parent as a literal 0."""
     assert set(ENVELOPE_KEYS) == {
         "summary",
         "key_findings",
         "files_created",
         "tokens_used",
+        "cost_cents",
         "sub_run_id",
         "status",
     }
