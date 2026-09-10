@@ -185,6 +185,7 @@ class SeedLoader:
             return None
 
         identity_md = read_if_exists("IDENTITY.md")
+        agent_md, agent_fm = self._read_agent_md(agent_dir)
         name = slug.replace("_", " ").title()
         return {
             "slug": slug,
@@ -192,22 +193,62 @@ class SeedLoader:
             "description": _extract_description_from_identity(identity_md),
             "identity_md": identity_md,
             "soul_md": read_if_exists("SOUL.md"),
-            "agent_md": read_if_exists("AGENT.md"),
+            "agent_md": agent_md,
             "is_system_preset": True,
             "agent_group": AGENT_GROUP_BY_SLUG.get(slug, DEFAULT_AGENT_GROUP),
+            # Workforce worker (M3 Delegate target). Declared by the seed, not
+            # by a migration: migrations 162/163 promoted summarize / analyze /
+            # coordinator, then sank below the schema baseline watermark and
+            # never ran on the live database — so production sat at ZERO
+            # persistent agents and every Delegate call was refused (Task 7a
+            # defect 4). Upserting it on every startup is what makes a fresh
+            # deploy converge without a new migration.
+            "persistent": bool(agent_fm.get("persistent", False)),
         }
 
-    async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
-        seed_hash = _sha(
+    @staticmethod
+    def _read_agent_md(agent_dir: Path) -> tuple[Optional[str], dict[str, Any]]:
+        """``(body, frontmatter)`` for AGENT.md — the body WITHOUT the
+        frontmatter block.
+
+        ``agent_md`` is model-visible: it is pasted into the system message, so
+        a raw YAML header there would be a prompt change wearing a
+        configuration hat. Seeds that declare nothing parse to an empty dict
+        and a byte-identical body (verified across all 17 seeds), so this is
+        the same content the loader wrote before.
+        """
+        path = agent_dir / "AGENT.md"
+        if not path.exists():
+            return (None, {})
+        post = frontmatter.load(path)
+        body = (post.content or "").strip()
+        return (body or None, dict(post.metadata))
+
+    @staticmethod
+    def _agent_seed_hash(fields: dict[str, Any]) -> str:
+        """Hash of everything the seed OWNS on an agent row.
+
+        Anything the loader writes must be in here. A field that is written
+        but not hashed lands only on rows that changed for some other reason:
+        flipping it alone hits the unchanged-skip branch in ``_upsert_agent``
+        and never reaches the database.
+        """
+        return _sha(
             fields.get("identity_md"),
             fields.get("soul_md"),
             fields.get("agent_md"),
             fields.get("name"),
             fields.get("description"),
             # Must be hashed: without it, re-grouping an agent hits the skip
-            # branch below and the new group never reaches the DB.
+            # branch and the new group never reaches the DB.
             fields.get("agent_group"),
+            # Same reason, and it is the whole point of defect 4: production
+            # rows already carry the right prose, so ONLY this flag differs.
+            fields.get("persistent"),
         )
+
+    async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
+        seed_hash = self._agent_seed_hash(fields)
         fields_with_hash = {**fields, "seed_hash": seed_hash}
 
         existing = await self.agent_repo.get_by_slug(slug)
