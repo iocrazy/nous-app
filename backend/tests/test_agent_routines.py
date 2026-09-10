@@ -73,16 +73,21 @@ def _create_body(**payload_over: Any) -> Dict[str, Any]:
     }
 
 
+# Every 400 out of this router carries {code, message}: the ErrorResponse
+# envelope only forwards a dict detail, so a string reaches the browser as a
+# bare "http_400" the UI cannot branch on (phase 2b-2 Task 5).
+
+
 def test_create_routine_requires_agent_slug(client: TestClient) -> None:
     resp = client.post("/api/v1/schedules", json=_create_body(agent_slug="  "))
     assert resp.status_code == 400
-    assert "agent_slug" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "agent_slug_required"
 
 
 def test_create_routine_requires_prompt(client: TestClient) -> None:
     resp = client.post("/api/v1/schedules", json=_create_body(prompt_md=""))
     assert resp.status_code == 400
-    assert "prompt_md" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "prompt_md_required"
 
 
 def test_create_routine_rejects_unknown_policy(client: TestClient) -> None:
@@ -90,7 +95,7 @@ def test_create_routine_rejects_unknown_policy(client: TestClient) -> None:
         "/api/v1/schedules", json=_create_body(delivery_policy="pile_up")
     )
     assert resp.status_code == 400
-    assert "delivery_policy" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "invalid_delivery_policy"
 
 
 # ─── _fire_agent_routine ────────────────────────────────────────────────────
