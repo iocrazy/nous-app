@@ -1,6 +1,6 @@
 // 2026-08-20 regression pair: (1) node width must stay at the fixed default
-// (width:'100%' let raw images blow the card up to natural size); (2) the
-// editor auto-promotes generated images so the full tab set appears.
+// (width:'100%' let raw images blow the card up to natural size);
+// (2) opening the editor must NOT promote — editors derive from the image url (2026-09-10)
 import { fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +18,20 @@ vi.mock('../mediaEditBridge', () => ({
   genIdFromDurableUrl: vi.fn(() => null),
 }));
 import { ensureResourceId } from '../mediaEditBridge';
+vi.mock('../../services/canvasService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/canvasService')>();
+  return {
+    ...actual,
+    deriveCanvasCrop: vi.fn(async () => ({
+      id: '901',
+      url: '/api/v1/generated-media/901/cover',
+      kind: 'image',
+      row: null,
+      col: null,
+    })),
+  };
+});
+import { deriveCanvasCrop } from '../../services/canvasService';
 
 function seed() {
   useCanvasCoreStore.setState({
@@ -60,15 +74,15 @@ describe('OutputNodeView width + promote', () => {
     );
   });
 
-  it('opening the editor on a generated image promotes it to a resource', async () => {
+  it('opening the editor never promotes the image into the library', async () => {
     render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
     fireEvent.doubleClick(screen.getByTestId('smart-output-body'));
-    expect(ensureResourceId).toHaveBeenCalledWith('/api/v1/generated-media/9/cover');
-    // resource_id lands on the node data once the promote resolves.
-    await vi.waitFor(() => {
-      const data = (useCanvasCoreStore.getState().nodes[0] as { data: { resource_id?: string } }).data;
-      expect(data.resource_id).toBe('777');
-    });
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('editor-tab-split')).toBeInTheDocument();
+    await Promise.resolve();
+    expect(ensureResourceId).not.toHaveBeenCalled();
+    const data = (useCanvasCoreStore.getState().nodes[0] as { data: { resource_id?: string } }).data;
+    expect(data.resource_id).toBeUndefined();
   });
 });
 
@@ -105,4 +119,38 @@ it('Copy to canvas drops the image as an independent media node', () => {
   const media = nodes.find((n) => n.type === 'media');
   expect(media).toBeTruthy();
   expect(media!.data.items).toHaveLength(1);
+});
+
+it('grid dblclick then crop derives from THAT image and swaps only it', async () => {
+  const node = useCanvasCoreStore.getState().nodes[0] as { data: Record<string, unknown> };
+  node.data = {
+    ...node.data,
+    images: [
+      { url: '/api/v1/generated-media/9/cover', kind: 'image' },
+      { url: '/api/v1/generated-media/10/cover', kind: 'image', name: 'mask.png' },
+    ],
+  };
+  render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
+  fireEvent.doubleClick(screen.getAllByAltText(/Generated|mask/i)[1]);
+  fireEvent.click(screen.getByTestId('editor-tab-crop'));
+  fireEvent.click(screen.getByTestId('editor-apply'));
+
+  await vi.waitFor(() =>
+    expect(deriveCanvasCrop).toHaveBeenCalledWith(
+      'c1',
+      '/api/v1/generated-media/10/cover',
+      expect.anything(),
+      { nodeId: 'o1' },
+    ),
+  );
+  await vi.waitFor(() => {
+    const data = (useCanvasCoreStore.getState().nodes[0] as {
+      data: { preview_url: string; images: Array<{ url: string }> };
+    }).data;
+    expect(data.images.map((i) => i.url)).toEqual([
+      '/api/v1/generated-media/9/cover',
+      '/api/v1/generated-media/901/cover',
+    ]);
+    expect(data.preview_url).toBe('/api/v1/generated-media/9/cover');
+  });
 });

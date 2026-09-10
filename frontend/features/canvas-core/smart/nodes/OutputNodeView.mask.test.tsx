@@ -150,6 +150,18 @@ describe('OutputNodeView — Mask button', () => {
     );
     expect(screen.getByRole('button', { name: 'Mask' })).toBeInTheDocument();
   });
+
+  it('opens the mask editor without a resource_id', () => {
+    const without = seedImageOutput(null);
+    render(
+      <Wrap>
+        <OutputNodeView {...baseProps} id="o1" type="output" data={without} />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mask' }));
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('mask-brush-tool')).toBeInTheDocument();
+  });
 });
 
 describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节点)', () => {

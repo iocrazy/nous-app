@@ -1,32 +1,28 @@
 // features/canvas-core/smart/nodes/MediaItemEditor.tsx
 //
 // B3 — the media card's edit pipeline. Opens the UnifiedImageEditor on one
-// item; derive channels appear only after the item's generated_media row is
-// promoted to a resources row (ensureResourceId). Every commit APPENDS the
-// product as a new item on the card (non-destructive; brush/resize bake
-// client-side and skip the promote entirely). Promote failure degrades
-// honestly: only Preview/Brush/Resize stay.
+// item; every commit APPENDS the product as a new item on the card
+// (non-destructive). Crop / outpaint / split derive server-side from the
+// item's OWN url — whatever the image is and wherever it came from — and
+// come back as durable generated-media items in the canvas's space; brush /
+// mask / resize bake client-side. The server derives need a canvas to file
+// the product under, so without one only the client-side tabs show.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import {
-  deriveCrop,
-  deriveGrid,
-  deriveMaskCutout,
-  deriveOutpaint,
+  deriveCanvasCrop,
+  deriveCanvasGrid,
+  deriveCanvasOutpaint,
+  type CanvasDerivedImage,
 } from '../../services/canvasService';
-import { bakeAnnotations, bakeResize } from '../../editor/imageBake';
+import { bakeResize } from '../../editor/imageBake';
 import { strokesToMaskPngBase64 } from '../../editor/maskExport';
-import type { PaintShape } from '../../editor/PaintTool';
 import {
   UnifiedImageEditor,
   type EditorMode,
 } from '../../editor/UnifiedImageEditor';
-import { ensureResourceId } from '../mediaEditBridge';
-import {
-  importCanvasMedia,
-  importResourceAsCanvasMedia,
-} from '../mediaImport';
+import { importCanvasMedia, type CanvasUploadRole } from '../mediaImport';
 import type { GeneratedImageRef } from '../types';
 
 export interface MediaItemEditorProps {
@@ -47,52 +43,34 @@ export function MediaItemEditor({
   onClose,
   onAppend,
 }: MediaItemEditorProps) {
-  const [resourceId, setResourceId] = useState<string | null>(null);
-  const [promoteFailed, setPromoteFailed] = useState(false);
   const [committing, setCommitting] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    setResourceId(null);
-    setPromoteFailed(false);
-    ensureResourceId(item.url)
-      .then((id) => {
-        if (alive) setResourceId(id);
-      })
-      .catch((err) => {
-        console.error('[MediaItemEditor] promote failed:', err);
-        if (alive) setPromoteFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [item.url]);
+  const [error, setError] = useState<string | null>(null);
 
   const run = (work: () => Promise<void>) => {
     void (async () => {
       try {
         setCommitting(true);
+        setError(null);
         await work();
         onClose();
       } catch (err) {
         console.error('[MediaItemEditor] edit failed:', err);
+        // Stay open with the reason on screen: a refused derive that closed
+        // the editor silently is indistinguishable from one that worked.
+        setError(err instanceof Error ? err.message : 'Edit failed');
       } finally {
         setCommitting(false);
       }
     })();
   };
 
-  const appendResource = async (resId: string) => {
-    const minted = await importResourceAsCanvasMedia(resId);
-    onAppend({ url: minted.url, kind: minted.kind, name: item.name });
+  const appendDerived = (image: CanvasDerivedImage) => {
+    onAppend({ url: image.url, kind: 'image', name: item.name, id: image.id });
   };
-  const appendBlob = async (blob: Blob, name: string) => {
+  const appendBlob = async (blob: Blob, name: string, role: CanvasUploadRole) => {
     const file = new File([blob], name, { type: 'image/png' });
-    const minted = await importCanvasMedia(file, canvasId, nodeId);
-    onAppend(minted);
+    onAppend(await importCanvasMedia(file, canvasId, nodeId, role));
   };
-
-  const canDerive = Boolean(resourceId) && !promoteFailed;
 
   return (
     <UnifiedImageEditor
@@ -102,57 +80,60 @@ export function MediaItemEditor({
       initialMode={mode}
       onClose={onClose}
       committing={committing}
+      commitError={error}
       onCropCommit={
-        canDerive
+        canvasId
           ? (region) =>
               run(async () => {
-                const out = await deriveCrop(resourceId!, region);
-                await appendResource(String(out.id));
+                appendDerived(
+                  await deriveCanvasCrop(canvasId, item.url, region, { nodeId }),
+                );
               })
           : undefined
       }
       onOutpaintCommit={
-        canDerive
+        canvasId
           ? (padding, prompt) =>
               run(async () => {
-                const out = await deriveOutpaint(resourceId!, padding, {
-                  prompt,
+                appendDerived(
+                  await deriveCanvasOutpaint(canvasId, item.url, padding, {
+                    nodeId,
+                    prompt,
+                  }),
+                );
+              })
+          : undefined
+      }
+      onSplitCommit={
+        canvasId
+          ? (lines) =>
+              run(async () => {
+                const tiles = await deriveCanvasGrid(canvasId, item.url, lines, {
+                  nodeId,
                 });
-                await appendResource(String(out.id));
+                tiles.forEach(appendDerived);
               })
           : undefined
       }
       onMaskCommit={(strokes, size) =>
         run(async () => {
-          // IC 生成遮罩节点: commit the black/white mask itself as a new
-          // canvas image (no derive, no promote needed).
+          // IC 生成遮罩节点: the black/white mask itself becomes a new item.
           const b64 = strokesToMaskPngBase64(strokes, size.width, size.height);
           const bin = atob(b64.split(',').pop() ?? b64);
           const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          await appendBlob(new Blob([bytes], { type: 'image/png' }), 'mask.png');
+          await appendBlob(new Blob([bytes], { type: 'image/png' }), 'mask.png', 'mask');
         })
-      }
-      onSplitCommit={
-        canDerive
-          ? (lines) =>
-              run(async () => {
-                const out = await deriveGrid(resourceId!, lines);
-                for (const tile of out.tiles) {
-                  await appendResource(String(tile.resource.id));
-                }
-              })
-          : undefined
       }
       onBrushCommit={(composite: Blob) =>
         run(async () => {
-          await appendBlob(composite, 'brush.png');
+          await appendBlob(composite, 'brush.png', 'brush');
         })
       }
       onResizeCommit={(scale: number) =>
         run(async () => {
           const blob = await bakeResize(item.url, scale);
-          await appendBlob(blob, 'resized.png');
+          await appendBlob(blob, 'resized.png', 'derived');
         })
       }
     />

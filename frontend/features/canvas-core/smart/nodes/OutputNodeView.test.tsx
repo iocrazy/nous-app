@@ -101,31 +101,6 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
   });
 
-  it('clicking Commit patches crop_region back into the store', () => {
-    const fullData = seedImageOutput('o1', {
-      crop_region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
-    });
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
-      </Wrap>,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
-    fireEvent.click(screen.getByTestId('editor-apply'));
-    const node = useCanvasCoreStore.getState().nodes[0] as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(node.data.crop_region).toEqual({
-      x: 0.1,
-      y: 0.1,
-      width: 0.3,
-      height: 0.3,
-    });
-    // modal closes after commit
-    expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
-  });
-
   it('Cancel closes the modal without touching crop_region', () => {
     const fullData = seedImageOutput('o1', {
       crop_region: { x: 0.2, y: 0.2, width: 0.4, height: 0.4 },

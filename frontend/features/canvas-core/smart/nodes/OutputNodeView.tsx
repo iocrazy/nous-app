@@ -10,8 +10,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { getResourceFileUrl } from '../../../../services/resourceService';
-import { getSupabaseClient } from '../../../../supabaseClient';
 import { UnifiedImageEditor, type EditorMode } from '../../editor/UnifiedImageEditor';
 import { bakeAnnotations, bakeResize } from '../../editor/imageBake';
 import { importCanvasMedia } from '../mediaImport';
@@ -22,10 +20,9 @@ import { type MaskStroke } from '../../editor/maskMath';
 import { type OutpaintPadding } from '../../editor/outpaintMath';
 import { FULL_REGION, type CropRegion } from '../../editor/types';
 import {
-  deriveCrop,
-  deriveGrid,
-  deriveMaskCutout,
-  deriveOutpaint,
+  deriveCanvasCrop,
+  deriveCanvasGrid,
+  deriveCanvasOutpaint,
 } from '../../services/canvasService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createMediaNode, createOutputNode } from '../factories';
@@ -35,12 +32,12 @@ import { createPromptFromNode } from '../recreate';
 import { requeryRecoverTask } from '../genResume';
 import { latestHistoryImageUrl } from '../outputHistory';
 import { resolveSourceUrls } from '../promptInputs';
+import { swapEditedImage } from '../swapEditedImage';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
 import { regenKey, useRegenStore } from '../regenStore';
-import type { OutputNodeData } from '../types';
+import type { GeneratedImageRef, OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { createMediaNodeFromFiles } from '../dropCreate';
-import { ensureResourceId } from '../mediaEditBridge';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
@@ -69,25 +66,9 @@ const KIND_LABEL: Record<OutputNodeData['kind'], string> = {
 const TILE_LAYOUT_GAP_X = 48;
 const TILE_LAYOUT_STEP_Y = 220;
 
-/** Build the served-file URL for a freshly-derived resource. The crop
- *  endpoint returns a resource row but no URL — the front-end composes
- *  it the same way ResourceCard does. */
-async function buildPreviewUrl(resourceId: string): Promise<string> {
-  try {
-    const supabase = getSupabaseClient();
-    const { data } = await supabase.auth.getSession();
-    return getResourceFileUrl(resourceId, data.session?.access_token);
-  } catch {
-    // If we somehow can't read the session, fall back to the unsigned
-    // URL — the <img> request will still carry the cookie auth if any.
-    return getResourceFileUrl(resourceId);
-  }
-}
-
 export function OutputNodeView({ id, data, selected }: NodeProps) {
   const {
     kind,
-    resource_id,
     preview_text,
     preview_url,
     crop_region,
@@ -128,7 +109,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
   // Grid dblclick: edit THAT image (falls back to the primary preview).
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  // History nodes carry images[] but NO preview_url (outputHistory archives
+  // the image list only) — gating on preview_url alone locked every editing
+  // affordance out of them (2026-08-23 "历史卡无法双击进入编辑").
+  const primaryImageUrl =
+    preview_url || ((images?.[0] as { url?: string } | undefined)?.url ?? null);
+  const canCrop = kind === 'image' && !!primaryImageUrl;
+  // The image an edit acts on: the grid item that was double-clicked, else the
+  // primary. Every derive keys on THIS url — never on the node's legacy
+  // resource_id, which only ever named the primary, and only after a promote.
+  const editSourceUrl = editingUrl ?? primaryImageUrl;
   const [upscaling, setUpscaling] = useState(false);
+  // Declared before the handlers that report through them (upscale, As Asset).
+  const { t } = useTranslation();
+  const toast = useOptionalToast();
   // IC duplicateSmartNodeMediaToCanvas: drop the current image beside this
   // node as an independent media card (no re-upload — same durable url).
   const handleDuplicate = useCallback(() => {
@@ -174,12 +168,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         });
       } catch (err) {
         console.error('upscale failed:', err);
+        // Never silent: a refusal (e.g. 404 on a generation this user cannot
+        // read) is a real outcome of the click.
+        toast?.addToast(
+          t('canvas.upscale.failed', 'Upscale failed: {{reason}}', {
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+          'error',
+        );
       } finally {
         setUpscaling(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview_url, images, id, patchData]);
+  }, [preview_url, images, id, patchData, toast, t]);
   const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -192,6 +194,41 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [outpaintOpen, setOutpaintOpen] = useState(false);
   const [outpaintCommitting, setOutpaintCommitting] = useState(false);
   const [outpaintError, setOutpaintError] = useState<string | null>(null);
+  // The dialog shows ONE reason (`commitError ?? gridError ?? …`), so a
+  // commit starts by forgetting every earlier failure — otherwise a crop
+  // refusal would mask the split refusal that followed it.
+  const clearCommitErrors = useCallback(() => {
+    setCommitError(null);
+    setGridError(null);
+    setMaskError(null);
+    setOutpaintError(null);
+  }, []);
+  // Leaving the editor forgets which item was being edited and why the last
+  // commit failed; otherwise the toolbar's Crop would reopen on a grid item
+  // double-clicked long ago, already showing a stale refusal.
+  useEffect(() => {
+    if (editorMode !== null) return;
+    setEditingUrl(null);
+    clearCommitErrors();
+  }, [editorMode, clearCommitErrors]);
+  // The node's slots as they are NOW. A commit awaits a round trip, and
+  // generation results keep landing in `images` meanwhile
+  // (appendGenerationResults); patching from the render-time closure would
+  // drop them.
+  const readCurrentSlots = useCallback((): {
+    preview_url: string | null;
+    images: GeneratedImageRef[];
+  } => {
+    const current = (
+      useCanvasCoreStore.getState().nodes.find((n) => (n as { id?: string }).id === id) as
+        | { data?: { preview_url?: string | null; images?: GeneratedImageRef[] | null } }
+        | undefined
+    )?.data;
+    return {
+      preview_url: current?.preview_url ?? null,
+      images: Array.isArray(current?.images) ? current.images : [],
+    };
+  }, [id]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const regenerating = useRegenStore((s) => !!s.running[regenKey(canvasId, id)]);
@@ -226,10 +263,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // a NEW generated-media item appended to this node (non-destructive).
   const handleBrushCommit = useCallback(
     (composite: Blob) => {
-      if (!preview_url) return;
+      if (!editSourceUrl) return;
       void (async () => {
         try {
           setPixCommitting(true);
+          clearCommitErrors();
           const file = new File([composite], 'brush.png', { type: 'image/png' });
           // Classified at the point of upload: this composite is an INPUT the
           // editor baked, not something the user asked the library for. Left
@@ -238,7 +276,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           const item = await importCanvasMedia(file, canvasId, id, 'brush');
           patchData({
             images: [
-              ...((images as Array<{ url: string }>) ?? []),
+              ...readCurrentSlots().images,
               { url: item.url, kind: 'image', name: 'brush.png' },
             ],
           });
@@ -251,21 +289,24 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         }
       })();
     },
-    [preview_url, canvasId, id, images, patchData],
+    [editSourceUrl, canvasId, id, clearCommitErrors, readCurrentSlots, patchData],
   );
   const handleResizeCommit = useCallback(
     (scale: number) => {
-      if (!preview_url) return;
+      if (!editSourceUrl) return;
       void (async () => {
         try {
           setPixCommitting(true);
-          const blob = await bakeResize(preview_url, scale);
+          clearCommitErrors();
+          const blob = await bakeResize(editSourceUrl, scale);
           const file = new File([blob], 'resized.png', { type: 'image/png' });
-          const item = await importCanvasMedia(file, canvasId, id);
+          // A resize is a product the user asked for — visible in the inbox,
+          // same role as the server-side derives.
+          const item = await importCanvasMedia(file, canvasId, id, 'derived');
           patchData({
             images: [
-              ...((images as Array<{ url: string }>) ?? []),
-              { url: item.url, kind: 'image', name: 'resized.png' },
+              ...readCurrentSlots().images,
+              { url: item.url, kind: 'image', name: 'resized.png', id: item.id },
             ],
           });
           setEditorMode(null);
@@ -277,20 +318,13 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         }
       })();
     },
-    [preview_url, canvasId, id, images, patchData],
+    [editSourceUrl, canvasId, id, clearCommitErrors, readCurrentSlots, patchData],
   );
 
   const canRegenerate = !!promptIdForOutput(id);
   const onRegenerate = useCallback(() => {
     void regenerateForOutput(id);
   }, [id]);
-
-  // History nodes carry images[] but NO preview_url (outputHistory archives
-  // the image list only) — gating on preview_url alone locked every editing
-  // affordance out of them (2026-08-23 "历史卡无法双击进入编辑").
-  const primaryImageUrl =
-    preview_url || ((images?.[0] as { url?: string } | undefined)?.url ?? null);
-  const canCrop = kind === 'image' && !!primaryImageUrl;
 
   // ── "As Asset" (P4 Task 6) ────────────────────────────────────────────
   //
@@ -311,8 +345,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // the key DISABLED WITH A REASON rather than hidden. Same for a canvas
   // opened outside a `/team/:teamId` route: `/api/v1/assets` is scoped per
   // request and an empty `scope_id` is a 403, not an unscoped query.
-  const { t } = useTranslation();
-  const toast = useOptionalToast();
   const { scopeId } = useCanvasScope();
   const generationId =
     (images?.[0] as { id?: string } | undefined)?.id ??
@@ -342,112 +374,76 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       .finally(() => setAsAssetLoading(false));
   }, [scopeId, generationId, asAssetLoading, toast, t]);
 
-  // Grid split has no local fallback — every tile is derived
-  // server-side, so a persisted source resource is required.
-  const canSplit = canCrop && !!resource_id;
-  // Editor opened on a generated image that has no resources row yet —
-  // promote it in the background (same bridge the media card uses); the
-  // outpaint/mask/split tabs appear as soon as resource_id lands. Without
-  // this, generated outputs only ever showed Preview/Crop/Brush/Resize
-  // (the 2026-08-20 "编辑器内容不多" report).
-  useEffect(() => {
-    if (editorMode === null || resource_id || !preview_url) return;
-    let stale = false;
-    void ensureResourceId(preview_url).then((rid) => {
-      if (rid && !stale) patchData({ resource_id: rid });
-    });
-    return () => {
-      stale = true;
-    };
-  }, [editorMode, resource_id, preview_url, patchData]);
+  // Crop / Expand / Split derive server-side and file the product under this
+  // canvas — any displayable image qualifies, wherever it came from.
+  const canDerive = canCrop && !!canvasId;
 
   const openEditor = useCallback(() => {
-    if (!canCrop) return;
+    if (!canDerive) return;
     setCommitError(null);
     setEditorMode('crop');
-  }, [canCrop]);
+  }, [canDerive]);
 
-  const closeEditor = useCallback(() => {
-    setEditorOpen(false);
-        setEditorMode(null);
-    setCommitError(null);
-  }, []);
+  /** A lightbox tool edits the item on screen, not the primary: point the
+   *  editor at it, then open the mode. */
+  const editViewedItem = useCallback(
+    (open: () => void) => (item: LightboxItem) => {
+      setEditingUrl(item.url);
+      open();
+    },
+    [],
+  );
 
   const handleCommit = useCallback(
     async (region: CropRegion) => {
-      // Fallback path: no resource_id means the image was supplied
-      // ad-hoc (no backend record). Persist the region locally so the
-      // visual stays correct; nothing to derive against.
-      if (!resource_id) {
-        patchData({ crop_region: region });
-        setEditorOpen(false);
-        setEditorMode(null);
-        return;
-      }
+      if (!canvasId || !editSourceUrl) return;
       try {
         setCommitting(true);
-        setCommitError(null);
-        const result = await deriveCrop(resource_id, region);
-        const newId = String(result.id);
-        const newUrl = await buildPreviewUrl(newId);
-        patchData({
-          resource_id: newId,
-          preview_url: newUrl,
-          // The new resource IS the cropped image — clear the in-node
-          // crop so a second crop starts from a clean rectangle.
-          crop_region: null,
+        clearCommitErrors();
+        const derived = await deriveCanvasCrop(canvasId, editSourceUrl, region, {
+          nodeId: id,
         });
+        // Replace THE edited image (primary, one grid item, or a history
+        // item) with its cropped copy — a durable generated-media url, no
+        // session token.
+        patchData({ ...swapEditedImage(readCurrentSlots(), editSourceUrl, derived) });
         setEditorOpen(false);
         setEditorMode(null);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to derive crop';
+        const message = err instanceof Error ? err.message : 'Failed to derive crop';
         setCommitError(message);
         // Leave the modal open so the user can retry or cancel.
       } finally {
         setCommitting(false);
       }
     },
-    [resource_id, patchData],
+    [canvasId, editSourceUrl, id, clearCommitErrors, readCurrentSlots, patchData],
   );
 
   const openOutpaintEditor = useCallback(() => {
-    if (!canSplit) return;
+    if (!canDerive) return;
     setOutpaintError(null);
     setEditorMode('outpaint');
-  }, [canSplit]);
-
-  const closeOutpaintEditor = useCallback(() => {
-    setOutpaintOpen(false);
-        setEditorMode(null);
-    setOutpaintError(null);
-  }, []);
+  }, [canDerive]);
 
   const handleOutpaintCommit = useCallback(
     async (padding: OutpaintPadding, prompt: string) => {
-      if (!resource_id) return;
+      if (!canvasId || !editSourceUrl) return;
       try {
         setOutpaintCommitting(true);
-        setOutpaintError(null);
-        const result = await deriveOutpaint(resource_id, padding, {
+        clearCommitErrors();
+        const derived = await deriveCanvasOutpaint(canvasId, editSourceUrl, padding, {
+          nodeId: id,
           prompt: prompt || undefined,
         });
-        const newId = String(result.id);
-        const newUrl = await buildPreviewUrl(newId);
-        // Spawn the extended image as a fresh node beside the source —
-        // same pattern as the mask cutout.
+        // Spawn the extended image as a fresh node beside the source.
         const store = useCanvasCoreStore.getState();
         const self = store.nodes.find(
           (node) => (node as { id?: string }).id === id,
         ) as { position?: { x: number; y: number } } | undefined;
         const base = self?.position ?? { x: 0, y: 0 };
         const extendedNode = createOutputNode(
-          {
-            kind: 'image',
-            resource_id: newId,
-            preview_text: String(result.filename ?? ''),
-            preview_url: newUrl,
-          },
+          { kind: 'image', preview_text: '', preview_url: derived.url },
           {
             position: {
               x: base.x + SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X,
@@ -456,45 +452,32 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           },
         );
         store.setNodes([...store.nodes, extendedNode]);
-        // IC 扩图联动: the extended image is meant to be re-generated with
-        // the白 area filled, so spawn a wired prompt pre-seeded with IC's
-        // own instruction instead of leaving the user to type it (IC
-        // applyImageOutpaint → setPromptDraftForNode).
-        const extId = String(
-          (extendedNode as unknown as { id?: unknown }).id ?? '',
-        );
+        // IC 扩图联动: pre-seed a wired prompt with IC's own instruction.
+        const extId = String((extendedNode as unknown as { id?: unknown }).id ?? '');
         if (extId) {
           createPromptFromNode(extId, {
             body: 'Remove the white area and fill the scene naturally',
             gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
-            source_ref: newUrl,
+            source_ref: derived.url,
           });
         }
         setOutpaintOpen(false);
         setEditorMode(null);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to extend canvas';
+        const message = err instanceof Error ? err.message : 'Failed to extend canvas';
         setOutpaintError(message);
-        // Leave the modal open so the user can retry or cancel.
       } finally {
         setOutpaintCommitting(false);
       }
     },
-    [resource_id, id],
+    [canvasId, editSourceUrl, id, clearCommitErrors],
   );
 
   const openMaskEditor = useCallback(() => {
-    if (!canSplit) return;
+    if (!canCrop) return;
     setMaskError(null);
     setEditorMode('mask');
-  }, [canSplit]);
-
-  const closeMaskEditor = useCallback(() => {
-    setMaskOpen(false);
-        setEditorMode(null);
-    setMaskError(null);
-  }, []);
+  }, [canCrop]);
 
   const handleMaskCommit = useCallback(
     async (
@@ -503,7 +486,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     ) => {
       try {
         setMaskCommitting(true);
-        setMaskError(null);
+        clearCommitErrors();
         // IC 生成遮罩: the black/white mask lands INSIDE this node, side by
         // side with the original (one node feeds 图1+图2 downstream) — not
         // as a separate card (2026-08-21 "遮罩直接在外面显示").
@@ -535,57 +518,42 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setMaskCommitting(false);
       }
     },
-    [id, canvasId, patchData],
+    [id, canvasId, clearCommitErrors, patchData],
   );
 
 
   const openGridEditor = useCallback(() => {
-    if (!canSplit) return;
+    if (!canDerive) return;
     setGridError(null);
     setEditorMode('split');
-  }, [canSplit]);
-
-  const closeGridEditor = useCallback(() => {
-    setGridOpen(false);
-        setEditorMode(null);
-    setGridError(null);
-  }, []);
+  }, [canDerive]);
 
   const handleGridCommit = useCallback(
     async (lines: GridLines) => {
-      if (!resource_id) return;
+      if (!canvasId || !editSourceUrl) return;
       try {
         setGridCommitting(true);
-        setGridError(null);
-        const result = await deriveGrid(resource_id, lines);
-        const urls = await Promise.all(
-          result.tiles.map((tile) => buildPreviewUrl(String(tile.resource.id))),
-        );
-        // Spawn one output node per tile, mirroring the grid's
-        // row/col arrangement to the right of the source node. The
-        // source node itself is left untouched.
+        clearCommitErrors();
+        const tiles = await deriveCanvasGrid(canvasId, editSourceUrl, lines, {
+          nodeId: id,
+        });
+        // One output node per tile, mirroring the grid to the right of the
+        // source node. The source node itself is left untouched.
         const store = useCanvasCoreStore.getState();
         const self = store.nodes.find(
           (node) => (node as { id?: string }).id === id,
         ) as { position?: { x: number; y: number } } | undefined;
         const base = self?.position ?? { x: 0, y: 0 };
-        const startX =
-          base.x + SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X;
-        const tileNodes = result.tiles.map((tile, index) =>
+        const startX = base.x + SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X;
+        const tileNodes = tiles.map((tile) =>
           createOutputNode(
-            {
-              kind: 'image',
-              resource_id: String(tile.resource.id),
-              preview_text: String(tile.resource.filename ?? ''),
-              preview_url: urls[index],
-            },
+            { kind: 'image', preview_text: '', preview_url: tile.url },
             {
               position: {
                 x:
                   startX +
-                  tile.col *
-                    (SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X),
-                y: base.y + tile.row * TILE_LAYOUT_STEP_Y,
+                  (tile.col ?? 0) * (SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X),
+                y: base.y + (tile.row ?? 0) * TILE_LAYOUT_STEP_Y,
               },
             },
           ),
@@ -594,15 +562,13 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setGridOpen(false);
         setEditorMode(null);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to split image';
+        const message = err instanceof Error ? err.message : 'Failed to split image';
         setGridError(message);
-        // Leave the modal open so the user can retry or cancel.
       } finally {
         setGridCommitting(false);
       }
     },
-    [resource_id, id],
+    [canvasId, editSourceUrl, id, clearCommitErrors],
   );
 
   // Mount the floating toolbar only while the card is hovered / focused
@@ -655,14 +621,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           pinned={selected}
           hovered={revealed}
           onPreview={() => openLightbox(0)}
-          onCrop={canCrop ? openEditor : undefined}
-          onExpand={canSplit ? openOutpaintEditor : undefined}
+          onCrop={canDerive ? openEditor : undefined}
+          onExpand={canDerive ? openOutpaintEditor : undefined}
           onMask={canCrop ? openMaskEditor : undefined}
           onBrush={() => setEditorMode('brush')}
           onUpscale={canCrop ? handleUpscale : undefined}
           onDuplicate={canCrop ? handleDuplicate : undefined}
           upscaling={upscaling}
-          onSplit={canSplit ? openGridEditor : undefined}
+          onSplit={canDerive ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}
           onAsAsset={handleAsAsset}
@@ -687,11 +653,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               title="Crop applied"
             >
               Cropped
-            </div>
-          )}
-          {resource_id && (
-            <div className="text-[10px] uppercase tracking-wider text-emerald-500">
-              Saved
             </div>
           )}
         </div>
@@ -887,24 +848,31 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {outpaintError}
         </div>
       )}
-      {(primaryImageUrl || editingUrl) && (
+      {editSourceUrl && (
         <UnifiedImageEditor
           open={editorMode !== null}
-          src={editingUrl ?? primaryImageUrl ?? ''}
+          src={editSourceUrl ?? ''}
           alt={preview_text || 'Output preview'}
           initialMode={editorMode ?? 'preview'}
-          cropInitialRegion={crop_region ?? undefined}
+          // The legacy crop_region described the PRIMARY picture only; a grid
+          // or history item opens on its full frame.
+          cropInitialRegion={
+            editSourceUrl === preview_url ? (crop_region ?? undefined) : undefined
+          }
           outpaintInitialPrompt={preview_text}
           onClose={() => {
             setEditorMode(null);
             setEditingUrl(null);
           }}
-          onCropCommit={canCrop ? handleCommit : undefined}
-          onOutpaintCommit={canSplit ? handleOutpaintCommit : undefined}
+          onCropCommit={canDerive ? handleCommit : undefined}
+          onOutpaintCommit={canDerive ? handleOutpaintCommit : undefined}
           onMaskCommit={canCrop ? handleMaskCommit : undefined}
-          onSplitCommit={canSplit ? handleGridCommit : undefined}
+          onSplitCommit={canDerive ? handleGridCommit : undefined}
           onBrushCommit={handleBrushCommit}
           onResizeCommit={handleResizeCommit}
+          // The node-level banners above render under the editor's body
+          // portal; the dialog shows the same reason where the user can see it.
+          commitError={commitError ?? gridError ?? maskError ?? outpaintError}
           committing={
             committing ||
             gridCommitting ||
@@ -946,14 +914,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             readOnly
               ? undefined
               : {
-                  ...(canCrop ? { crop: openEditor } : {}),
-                  ...(canSplit
+                  ...(canDerive
                     ? {
-                        expand: openOutpaintEditor,
-                        mask: openMaskEditor,
-                        split: openGridEditor,
+                        crop: editViewedItem(openEditor),
+                        expand: editViewedItem(openOutpaintEditor),
+                        split: editViewedItem(openGridEditor),
                       }
                     : {}),
+                  ...(canCrop ? { mask: editViewedItem(openMaskEditor) } : {}),
                 }
           }
           meta={(() => {

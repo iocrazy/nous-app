@@ -1,45 +1,26 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { OutputNodeView } from './OutputNodeView';
 
-// ----- Module mocks ---------------------------------------------------
-
 vi.mock('../../services/canvasService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/canvasService')>();
-  return {
-    ...actual,
-    deriveCrop: vi.fn(),
-  };
+  return { ...actual, deriveCanvasCrop: vi.fn(), deriveCanvasGrid: vi.fn() };
 });
 
-vi.mock('../../../../services/resourceService', () => ({
-  getResourceFileUrl: (id: string, token?: string) =>
-    `https://example.test/api/v1/resources/${id}/file${token ? `?token=${token}` : ''}`,
-}));
+const { deriveCanvasCrop, deriveCanvasGrid } = await import('../../services/canvasService');
 
-vi.mock('../../../../supabaseClient', () => ({
-  getSupabaseClient: () => ({
-    auth: {
-      getSession: async () => ({
-        data: { session: { access_token: 'fake-token' } },
-      }),
-    },
-  }),
-}));
-
-const { deriveCrop } = await import('../../services/canvasService');
-
+const SOURCE = '/api/v1/generated-media/5/cover';
+const DERIVED = {
+  id: '901',
+  url: '/api/v1/generated-media/901/cover',
+  kind: 'image',
+  row: null,
+  col: null,
+};
 const ORIGINAL_GET_BOUNDING = HTMLElement.prototype.getBoundingClientRect;
 
 beforeEach(() => {
@@ -52,18 +33,12 @@ beforeEach(() => {
   });
   HTMLElement.prototype.getBoundingClientRect = function fakeRect() {
     return {
-      x: 0,
-      y: 0,
-      width: 1000,
-      height: 500,
-      top: 0,
-      left: 0,
-      bottom: 500,
-      right: 1000,
+      x: 0, y: 0, width: 1000, height: 500, top: 0, left: 0, bottom: 500, right: 1000,
       toJSON: () => ({}),
     } as DOMRect;
   };
-  (deriveCrop as ReturnType<typeof vi.fn>).mockReset();
+  (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockReset();
+  (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockReset();
 });
 
 afterEach(() => {
@@ -81,8 +56,7 @@ const baseProps = {
   draggable: true,
   selectable: true,
   deletable: true,
-    // Selected: since fluency T5 the floating toolbar is mounted only while
-  // the card is pinned (selected) or hovered, and these cases drive it.
+  // Selected: the floating toolbar mounts only while pinned or hovered.
   selected: true,
   dragging: false,
   isConnectable: true,
@@ -93,13 +67,14 @@ const baseProps = {
   zIndex: 0,
 } as const;
 
-function seedImageOutput(resourceId: string | null) {
+function seedImageOutput(legacy: Record<string, unknown> = {}) {
   const fullData = {
     kind: 'image',
-    resource_id: resourceId,
     preview_text: '',
-    preview_url: 'https://example.test/source.png',
+    preview_url: SOURCE,
+    images: [{ url: SOURCE, kind: 'image' }],
     crop_region: null,
+    ...legacy,
   };
   useCanvasCoreStore.setState({
     nodes: [{ id: 'o1', type: 'output', data: fullData, position: { x: 0, y: 0 } }],
@@ -107,113 +82,239 @@ function seedImageOutput(resourceId: string | null) {
   return fullData;
 }
 
-// ============================================================
-// Commit calls deriveCrop and patches the node
-// ============================================================
+function nodeData(): Record<string, unknown> {
+  return (useCanvasCoreStore.getState().nodes[0] as { data: Record<string, unknown> }).data;
+}
 
-describe('OutputNodeView — Commit derives and swaps the resource', () => {
-  it('calls deriveCrop with the source resource_id and patches resource_id + preview_url', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      id: '9999000000000001',
-      filename: 'crop-orig.png',
-      file_path: 'teams/s/derived/9999000000000001/v1/crop-orig.png',
-      mime_type: 'image/png',
-      file_size_bytes: 1234,
-    });
+function cropAndApply(fullData: Record<string, unknown>) {
+  render(
+    <Wrap>
+      <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+    </Wrap>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
+  fireEvent.click(screen.getByTestId('editor-apply'));
+}
 
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
-      </Wrap>,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
-    fireEvent.click(screen.getByTestId('editor-apply'));
+describe('OutputNodeView — crop derives from the shown image', () => {
+  it('derives by url (no resource_id needed) and swaps the image in place', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    cropAndApply(seedImageOutput());
 
-    await waitFor(() => {
-      expect(deriveCrop).toHaveBeenCalledTimes(1);
-    });
-    expect(deriveCrop).toHaveBeenCalledWith(
-      'source-123',
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith(
+      '4242',
+      SOURCE,
       expect.objectContaining({ x: 0, y: 0, width: 1, height: 1 }),
+      { nodeId: 'o1' },
     );
-
-    await waitFor(() => {
-      const node = useCanvasCoreStore.getState().nodes[0] as Record<
-        string,
-        Record<string, unknown>
-      >;
-      expect(node.data.resource_id).toBe('9999000000000001');
-    });
-    const node = useCanvasCoreStore.getState().nodes[0] as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(node.data.preview_url).toBe(
-      'https://example.test/api/v1/resources/9999000000000001/file?token=fake-token',
+    await waitFor(() => expect(nodeData().preview_url).toBe(DERIVED.url));
+    expect(nodeData().images).toEqual([{ url: DERIVED.url, kind: 'image', id: '901' }]);
+    expect(nodeData().crop_region).toBeNull();
+    // Nothing session-bearing is persisted into canvas data.
+    expect(JSON.stringify(useCanvasCoreStore.getState().nodes)).not.toMatch(/token=/);
+    await waitFor(() =>
+      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument(),
     );
-    // After a successful derive, the new resource IS the cropped image,
-    // so the in-node crop should be cleared.
-    expect(node.data.crop_region).toBeNull();
-    // Modal closed.
-    await waitFor(() => {
-      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
-    });
   });
 
-  it('shows an error banner + keeps the modal open when deriveCrop rejects', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveCrop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('HTTP 400: invalid region'),
+  it('a legacy promoted node loses the fields that described the old picture', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    cropAndApply(
+      seedImageOutput({
+        resource_id: 'source-123',
+        crop_region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 },
+      }),
     );
 
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
-      </Wrap>,
+    await waitFor(() => expect(nodeData().preview_url).toBe(DERIVED.url));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith(
+      '4242',
+      SOURCE,
+      expect.objectContaining({ x: 0.1, y: 0.1, width: 0.5, height: 0.5 }),
+      { nodeId: 'o1' },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
-    fireEvent.click(screen.getByTestId('editor-apply'));
+    expect(nodeData().resource_id).toBeNull();
+    expect(nodeData().crop_region).toBeNull();
+  });
 
-    await waitFor(() => {
-      expect(deriveCrop).toHaveBeenCalledTimes(1);
-    });
-    // Modal stays open.
+  it('a refused derive shows the server message and changes nothing', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('source image not found'),
+    );
+    cropAndApply(seedImageOutput());
+
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
-    // Error banner shows the backend message.
     const banner = await screen.findByTestId('crop-commit-error');
-    expect(banner.textContent).toMatch(/invalid region/i);
-    // resource_id unchanged.
-    const node = useCanvasCoreStore.getState().nodes[0] as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(node.data.resource_id).toBe('source-123');
+    expect(banner.textContent).toMatch(/source image not found/);
+    // The node's own banner sits beneath the editor's body-portalled overlay;
+    // the reason must also render INSIDE the dialog, where a user can see it.
+    const inEditor = within(screen.getByTestId('unified-image-editor')).getByTestId(
+      'editor-commit-error',
+    );
+    expect(inEditor.textContent).toMatch(/source image not found/);
+    expect(nodeData().preview_url).toBe(SOURCE);
   });
+});
 
-  it('falls back to crop_region-only patch when resource_id is null', async () => {
-    const fullData = seedImageOutput(null);
+function editorError(): HTMLElement | null {
+  return within(screen.getByTestId('unified-image-editor')).queryByTestId('editor-commit-error');
+}
+
+describe('OutputNodeView — the dialog shows the CURRENT refusal only', () => {
+  it('a split refusal is forgotten once the editor closes', async () => {
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('at least one split line is required'),
+    );
+    const fullData = seedImageOutput();
     render(
       <Wrap>
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }));
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/split line/));
+
+    fireEvent.click(screen.getByTestId('editor-cancel'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument(),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+    expect(editorError()).toBeNull();
+  });
+
+  it('a later split refusal replaces an earlier crop refusal', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('source image not found'),
+    );
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('at least one split line is required'),
+    );
+    cropAndApply(seedImageOutput());
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/source image not found/));
+
+    fireEvent.click(screen.getByTestId('editor-tab-split'));
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
-    // deriveCrop must NOT be called when there's no source resource.
-    expect(deriveCrop).not.toHaveBeenCalled();
-    await waitFor(() => {
-      const node = useCanvasCoreStore.getState().nodes[0] as Record<
-        string,
-        Record<string, unknown>
-      >;
-      expect(node.data.crop_region).toEqual({
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-      });
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/split line/));
+    expect(editorError()?.textContent).not.toMatch(/source image not found/);
+  });
+});
+
+describe('OutputNodeView — a crop never drops images that land during the derive', () => {
+  it('keeps a generation result appended while the crop was in flight', async () => {
+    let resolveDerive: (value: typeof DERIVED) => void = () => {};
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<typeof DERIVED>((resolve) => {
+        resolveDerive = resolve;
+      }),
+    );
+    cropAndApply(seedImageOutput());
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+
+    // A generation result lands in the same node while the round trip runs.
+    const LANDED = { url: '/api/v1/generated-media/77/cover', kind: 'image' };
+    useCanvasCoreStore.getState().patchNode('o1', {
+      data: { images: [...(nodeData().images as unknown[]), LANDED] },
     });
+    resolveDerive(DERIVED);
+
+    await waitFor(() => expect(nodeData().preview_url).toBe(DERIVED.url));
+    expect(nodeData().images).toEqual([{ url: DERIVED.url, kind: 'image', id: '901' }, LANDED]);
+  });
+});
+
+const ITEM2 = '/api/v1/generated-media/6/cover';
+
+function renderTwoImages(legacy: Record<string, unknown> = {}) {
+  const fullData = seedImageOutput({
+    images: [
+      { url: SOURCE, kind: 'image' },
+      { url: ITEM2, kind: 'image' },
+    ],
+    ...legacy,
+  });
+  render(
+    <Wrap>
+      <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+    </Wrap>,
+  );
+}
+
+function openLightboxOnSecondItem() {
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  const lightbox = screen.getByTestId('output-lightbox');
+  fireEvent.click(within(lightbox).getByRole('button', { name: 'Next' }));
+  expect(within(lightbox).getByTestId('lightbox-counter').textContent).toBe('2 / 2');
+}
+
+function pickLightboxTool(name: string) {
+  fireEvent.click(
+    within(screen.getByTestId('lightbox-edit-bar')).getByRole('button', { name }),
+  );
+  expect(screen.queryByTestId('output-lightbox')).toBeNull();
+}
+
+describe('OutputNodeView — an edit acts on the image being viewed', () => {
+  it('lightbox Crop on item 2 derives from item 2, not the primary', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Crop');
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith('4242', ITEM2, expect.anything(), {
+      nodeId: 'o1',
+    });
+  });
+
+  it('lightbox Split on item 2 splits item 2', async () => {
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Split');
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
+    expect((deriveCanvasGrid as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe(ITEM2);
+  });
+
+  it('lightbox Mask on item 2 opens the editor on item 2', () => {
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Mask');
+
+    const editor = screen.getByTestId('unified-image-editor');
+    const srcs = within(editor)
+      .getAllByRole('img')
+      .map((img) => img.getAttribute('src') ?? '');
+    expect(srcs.some((src) => src.includes('/generated-media/6/'))).toBe(true);
+    expect(srcs.some((src) => src.includes('/generated-media/5/'))).toBe(false);
+  });
+
+  it('a grid item does not inherit the primary legacy crop region', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    renderTwoImages({ crop_region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } });
+    fireEvent.doubleClick(
+      within(screen.getByTestId('output-images-grid')).getAllByRole('img')[1],
+    );
+    fireEvent.click(screen.getByTestId('editor-tab-crop'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith(
+      '4242',
+      ITEM2,
+      { x: 0, y: 0, width: 1, height: 1 },
+      { nodeId: 'o1' },
+    );
   });
 });

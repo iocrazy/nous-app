@@ -3589,6 +3589,9 @@
         "provider_no_refs": "该模型不支持参考图"
       }
     },
+    "upscale": {
+      "failed": "放大失败：{{reason}}"
+    },
     "asAsset": {
       "action": "存为资产",
       "noScope": "请从工作区打开画布后再存为资产",

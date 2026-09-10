@@ -49,3 +49,25 @@ describe('OutputLightbox edit bar', () => {
     expect(screen.queryByTestId('lightbox-edit-bar')).toBeNull();
   });
 });
+
+describe('OutputLightbox edit bar — carries the viewed item', () => {
+  it('hands the picked tool the item on screen, not the first one', () => {
+    const crop = vi.fn();
+    const items = [
+      { url: '/api/v1/generated-media/1/cover', name: 'a.png' },
+      { url: '/api/v1/generated-media/2/cover', name: 'b.png' },
+    ];
+    render(
+      <OutputLightbox
+        items={items}
+        index={1}
+        kind="image"
+        onIndexChange={() => {}}
+        onClose={() => {}}
+        editActions={{ crop }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
+    expect(crop).toHaveBeenCalledWith(items[1]);
+  });
+});

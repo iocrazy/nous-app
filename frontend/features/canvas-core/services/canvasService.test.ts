@@ -5,6 +5,9 @@ import type { GridLines } from '../editor/gridMath';
 import type { CropRegion } from '../editor/types';
 import type { Canvas } from '../types';
 import {
+  deriveCanvasCrop,
+  deriveCanvasGrid,
+  deriveCanvasOutpaint,
   deriveCrop,
   deriveGrid,
   deriveMaskCutout,
@@ -373,5 +376,94 @@ describe('deriveOutpaint', () => {
     await expect(deriveOutpaint('source-1', padding)).rejects.toBeInstanceOf(
       ApiError,
     );
+  });
+});
+
+describe('canvas derive (any image reference)', () => {
+  const SOURCE = '/api/v1/generated-media/5/cover';
+  const image = (id: string, row: number | null = null, col: number | null = null) => ({
+    id,
+    url: `/api/v1/generated-media/${id}/cover`,
+    kind: 'image',
+    row,
+    col,
+  });
+
+  it('deriveCanvasCrop POSTs source_url + region + node_id to the canvas', async () => {
+    fetchMock.mockResolvedValueOnce(envelope({ images: [image('901')] }));
+    const region: CropRegion = { x: 0.1, y: 0.2, width: 0.3, height: 0.4 };
+    const result = await deriveCanvasCrop('4242', SOURCE, region, { nodeId: 'o1' });
+    expect(result).toEqual(image('901'));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/canvases/4242/derive-crop');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      source_url: SOURCE,
+      node_id: 'o1',
+      region,
+    });
+  });
+
+  it('deriveCanvasGrid returns every tile and omits node_id when absent', async () => {
+    fetchMock.mockResolvedValueOnce(
+      envelope({ images: [image('901', 0, 0), image('902', 0, 1)] }),
+    );
+    const lines: GridLines = { xs: [0.5], ys: [] };
+    const tiles = await deriveCanvasGrid('4242', SOURCE, lines);
+    expect(tiles.map((t) => [t.id, t.row, t.col])).toEqual([
+      ['901', 0, 0],
+      ['902', 0, 1],
+    ]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/canvases/4242/derive-grid');
+    expect(JSON.parse(String(init?.body))).toEqual({ source_url: SOURCE, xs: [0.5], ys: [] });
+  });
+
+  it('deriveCanvasOutpaint sends padding and the prompt only when given', async () => {
+    fetchMock.mockResolvedValueOnce(envelope({ images: [image('901')] }));
+    fetchMock.mockResolvedValueOnce(envelope({ images: [image('902')] }));
+    const padding = { left: 0, top: 0, right: 0.1, bottom: 0 };
+    await deriveCanvasOutpaint('4242', SOURCE, padding, { prompt: 'a windswept meadow' });
+    await deriveCanvasOutpaint('4242', SOURCE, padding);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      source_url: SOURCE,
+      left: 0,
+      top: 0,
+      right: 0.1,
+      bottom: 0,
+      prompt: 'a windswept meadow',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).prompt).toBeUndefined();
+  });
+
+  it('surfaces the ErrorResponse message as ApiError', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: 'source image not found',
+          code: 'http_404',
+          request_id: 'req-1',
+          details: null,
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const err = await deriveCanvasCrop('4242', SOURCE, {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe('source image not found');
+    expect((err as ApiError).status).toBe(404);
+  });
+
+  it('rejects a success envelope with no images', async () => {
+    fetchMock.mockResolvedValueOnce(envelope({ images: [] }));
+    await expect(
+      deriveCanvasCrop('4242', SOURCE, { x: 0, y: 0, width: 1, height: 1 }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });

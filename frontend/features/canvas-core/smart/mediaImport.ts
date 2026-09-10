@@ -22,8 +22,10 @@ import type { GeneratedImageRef } from './types';
  * writer were meant to triage a black-and-white mask. Absent means
  * `user_upload` — the visible default — so every existing caller keeps its
  * behaviour by saying nothing.
+ * 'derived' is a product the user asked for (a client-baked resize) —
+ * visible, like the server-side crop / grid / outpaint beside it.
  */
-export type CanvasUploadRole = 'user_upload' | 'mask' | 'brush';
+export type CanvasUploadRole = 'user_upload' | 'mask' | 'brush' | 'derived';
 
 export const CANVAS_MEDIA_ACCEPT = 'image/*,video/*';
 export const CANVAS_MEDIA_MAX_BYTES = 50 * 1024 * 1024; // backend cap

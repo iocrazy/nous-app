@@ -13,26 +13,11 @@ vi.mock('../../services/canvasService', async (importOriginal) => {
     await importOriginal<typeof import('../../services/canvasService')>();
   return {
     ...actual,
-    deriveOutpaint: vi.fn(),
+    deriveCanvasOutpaint: vi.fn(),
   };
 });
 
-vi.mock('../../../../services/resourceService', () => ({
-  getResourceFileUrl: (id: string, token?: string) =>
-    `https://example.test/api/v1/resources/${id}/file${token ? `?token=${token}` : ''}`,
-}));
-
-vi.mock('../../../../supabaseClient', () => ({
-  getSupabaseClient: () => ({
-    auth: {
-      getSession: async () => ({
-        data: { session: { access_token: 'fake-token' } },
-      }),
-    },
-  }),
-}));
-
-const { deriveOutpaint } = await import('../../services/canvasService');
+const { deriveCanvasOutpaint } = await import('../../services/canvasService');
 
 const ORIGINAL_GET_BOUNDING = HTMLElement.prototype.getBoundingClientRect;
 const ORIGINAL_SET_CAPTURE = HTMLElement.prototype.setPointerCapture;
@@ -59,7 +44,7 @@ beforeEach(() => {
     } as DOMRect;
   };
   HTMLElement.prototype.setPointerCapture = () => {};
-  (deriveOutpaint as ReturnType<typeof vi.fn>).mockReset();
+  (deriveCanvasOutpaint as ReturnType<typeof vi.fn>).mockReset();
 });
 
 afterEach(() => {
@@ -90,12 +75,11 @@ const baseProps = {
   zIndex: 0,
 } as const;
 
-function seedImageOutput(resourceId: string | null) {
+function seedImageOutput() {
   const fullData = {
     kind: 'image',
-    resource_id: resourceId,
     preview_text: 'a windswept meadow',
-    preview_url: 'https://example.test/source.png',
+    preview_url: '/api/v1/generated-media/5/cover',
     crop_region: null,
   };
   useCanvasCoreStore.setState({
@@ -128,40 +112,26 @@ function openDragAndCommit() {
 }
 
 describe('OutputNodeView — Expand button', () => {
-  it('shows for a persisted image output, hides without resource_id', () => {
-    const withResource = seedImageOutput('source-123');
-    const { unmount } = render(
+  it('shows for any image output on a canvas — no resource_id needed', () => {
+    const fullData = seedImageOutput();
+    render(
       <Wrap>
-        <OutputNodeView
-          {...baseProps}
-          id="o1"
-          type="output"
-          data={withResource}
-        />
+        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument();
-    unmount();
-
-    const without = seedImageOutput(null);
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={without} />
-      </Wrap>,
-    );
-    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
   });
 });
 
 describe('OutputNodeView — outpaint commit spawns the extended node', () => {
-  it('calls deriveOutpaint with padding + prompt and adds one node', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveOutpaint as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      id: 'extended-1',
-      filename: 'outpaint-orig.png',
-      file_path: 'teams/s/derived/extended-1/v1/outpaint-orig.png',
-      mime_type: 'image/png',
-      file_size_bytes: 999,
+  it('calls deriveCanvasOutpaint with the source url + padding + prompt and adds one node', async () => {
+    const fullData = seedImageOutput();
+    (deriveCanvasOutpaint as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: '901',
+      url: '/api/v1/generated-media/901/cover',
+      kind: 'image',
+      row: null,
+      col: null,
     });
 
     render(
@@ -172,16 +142,17 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
     openDragAndCommit();
 
     await waitFor(() => {
-      expect(deriveOutpaint).toHaveBeenCalledTimes(1);
+      expect(deriveCanvasOutpaint).toHaveBeenCalledTimes(1);
     });
-    const [sourceId, padding, opts] = (
-      deriveOutpaint as ReturnType<typeof vi.fn>
+    const [canvasId, sourceUrl, padding, opts] = (
+      deriveCanvasOutpaint as ReturnType<typeof vi.fn>
     ).mock.calls[0];
-    expect(sourceId).toBe('source-123');
+    expect(canvasId).toBe('4242');
+    expect(sourceUrl).toBe('/api/v1/generated-media/5/cover');
     expect(padding.right).toBeCloseTo(0.1);
     expect(padding.left).toBe(0);
     // Prompt auto-filled from the node's preview_text.
-    expect(opts).toEqual({ prompt: 'a windswept meadow' });
+    expect(opts).toEqual({ nodeId: 'o1', prompt: 'a windswept meadow' });
 
     await waitFor(() => {
       // IC 扩图联动: source + extended output + the pre-seeded prompt.
@@ -202,10 +173,7 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
     expect(nodes[0].id).toBe('o1');
     const extended = nodes[1];
     expect(extended.type).toBe('output');
-    expect(extended.data.resource_id).toBe('extended-1');
-    expect(extended.data.preview_url).toBe(
-      'https://example.test/api/v1/resources/extended-1/file?token=fake-token',
-    );
+    expect(extended.data.preview_url).toBe('/api/v1/generated-media/901/cover');
     expect(extended.position.x).toBeGreaterThan(nodes[0].position.x);
     expect(extended.position.y).toBe(nodes[0].position.y);
 
@@ -217,8 +185,8 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
   });
 
   it('shows an error banner + keeps the modal open when the derive rejects', async () => {
-    const fullData = seedImageOutput('source-123');
-    (deriveOutpaint as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    const fullData = seedImageOutput();
+    (deriveCanvasOutpaint as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('HTTP 400: at least one side must have padding > 0'),
     );
 
@@ -230,7 +198,7 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
     openDragAndCommit();
 
     await waitFor(() => {
-      expect(deriveOutpaint).toHaveBeenCalledTimes(1);
+      expect(deriveCanvasOutpaint).toHaveBeenCalledTimes(1);
     });
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('outpaint-commit-error');
