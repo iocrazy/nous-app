@@ -11,12 +11,27 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
 from app.services.infra import dbos_orchestrator
+from app.services.issues import issue_dispatch
 
 # NOTE: `app/api/__init__.py` rebinds the name `issues_router` to the APIRouter
 # instance (shadowing the submodule), so a plain `import app.api.issues_router
 # as issues_router` would yield the router object. Load the actual module.
 issues_router = importlib.import_module("app.api.issues_router")
+
+
+@pytest.fixture(autouse=True)
+def _no_marker_write(monkeypatch):
+    """Phase 2b-2: the helper now stamps ``execution_state.dispatching`` before
+    it enqueues. These tests are about the ENQUEUE, so the marker write is
+    stubbed — otherwise every case would reach for a database."""
+
+    async def _merge(issue_id, patch):
+        return None
+
+    monkeypatch.setattr(issue_dispatch, "merge_execution_state", _merge)
 
 
 class _FakeClient:
@@ -28,7 +43,7 @@ class _FakeClient:
         return "fake-wf-handle"
 
 
-def test_dispatch_uses_client_when_set(monkeypatch):
+async def test_dispatch_uses_client_when_set(monkeypatch):
     """When a DBOSClient is constructed, dispatch enqueues via client.enqueue
     with EnqueueOptions(workflow_name="execute_issue", queue_name="dbos_dispatch",
     workflow_id=wf_id) and the issue_id positional — NOT DBOS.start_workflow."""
@@ -45,7 +60,7 @@ def test_dispatch_uses_client_when_set(monkeypatch):
         DBOS, "start_workflow", lambda *a, **k: called.__setitem__("start", True)
     )
 
-    issues_router._dispatch_execute_issue(12345, "issue-12345-abc")
+    await issues_router._dispatch_execute_issue(12345, "issue-12345-abc")
 
     assert called["start"] is False
     assert len(fake.calls) == 1
@@ -59,21 +74,21 @@ def test_dispatch_uses_client_when_set(monkeypatch):
     assert args == (12345, False)
 
 
-def test_dispatch_pins_app_version_when_present(monkeypatch):
+async def test_dispatch_pins_app_version_when_present(monkeypatch):
     fake = _FakeClient()
     monkeypatch.setattr(dbos_orchestrator, "_client", fake)
     monkeypatch.setattr(
         dbos_orchestrator, "_resolve_pinned_app_version", lambda: "deadbeef"
     )
 
-    issues_router._dispatch_execute_issue(7, "issue-7-xyz")
+    await issues_router._dispatch_execute_issue(7, "issue-7-xyz")
 
     options, args = fake.calls[0]
     assert options["app_version"] == "deadbeef"
     assert args == (7, False)
 
 
-def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
+async def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
     """Client None (today's reality) → existing SetWorkflowID + DBOS.start_workflow
     path with the same positional args. Zero behavior change."""
     monkeypatch.setattr(dbos_orchestrator, "_client", None)
@@ -85,7 +100,7 @@ def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
         DBOS, "start_workflow", lambda wf, *args: spy.append((wf, args))
     )
 
-    issues_router._dispatch_execute_issue(99, "issue-99-def")
+    await issues_router._dispatch_execute_issue(99, "issue-99-def")
 
     assert len(spy) == 1
     wf, args = spy[0]

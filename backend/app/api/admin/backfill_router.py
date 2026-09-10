@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.utils.admin_helpers import create_audit_log
+from app.workflows.backfill_agent_runs_issue_id import (
+    backfill_agent_runs_issue_id_workflow,
+)
 from app.workflows.backfill_canvas_upload_roles import (
     backfill_canvas_upload_roles_workflow,
 )
@@ -57,6 +60,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     "resource_prompt_origin": backfill_resource_prompt_origin_workflow,
     "canvas_upload_roles": backfill_canvas_upload_roles_workflow,
     "generated_inbox": backfill_generated_inbox,
+    "agent_runs_issue_id": backfill_agent_runs_issue_id_workflow,
 }
 
 

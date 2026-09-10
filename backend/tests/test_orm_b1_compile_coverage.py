@@ -102,7 +102,9 @@ async def test_dispatch_issue_writes_dbos_workflow_id_with_service_role(
         issues_router.issue_repository, "get_by_id", AsyncMock(return_value=issue_row)
     )
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: True)
-    monkeypatch.setattr(issues_router, "_dispatch_execute_issue", lambda *a, **k: None)
+    monkeypatch.setattr(
+        issues_router, "_dispatch_execute_issue", AsyncMock(return_value=None)
+    )
 
     session = _FakeSession()
     monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
@@ -129,7 +131,9 @@ async def test_relay_gateway_dispatch_issue_writes_dbos_workflow_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(dbos_orchestrator, "_client", None)
-    monkeypatch.setattr(issues_router, "_dispatch_execute_issue", lambda *a, **k: None)
+    monkeypatch.setattr(
+        issues_router, "_dispatch_execute_issue", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: True)
 
     session = _FakeSession()

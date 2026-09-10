@@ -46,8 +46,19 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
-    """Atomically claim an issue. False if someone else already holds the lock."""
-    from sqlalchemy import func, text, update
+    """Atomically claim an issue. False if someone else already holds the lock.
+
+    Phase 2b-2 §4.1: this is also where the dispatch window CLOSES. Between the
+    enqueue (``issue_dispatch.start_execute_issue``) and this step the issue has
+    neither a lock nor a run row, so ``execution_state.dispatching`` stands in
+    for both; it is removed here, in the same UPDATE that takes the lock,
+    because a separate write could be interleaved by the very fork the marker
+    exists to stop. Removed with jsonb ``-`` rather than merged to ``null``:
+    ``merge_execution_state`` cannot delete a key, and a lingering ``null``
+    would make every reader parse a marker that no longer means anything.
+    """
+    from sqlalchemy import Text, cast, func, literal, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
 
     from app.db.session import write_scope
     from app.models import Issues
@@ -58,7 +69,16 @@ async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
         result = await session.execute(
             update(Issues)
             .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
-            .values(execution_locked_at=func.now(), dbos_workflow_id=dbos_workflow_id)
+            .values(
+                execution_locked_at=func.now(),
+                dbos_workflow_id=dbos_workflow_id,
+                # Operands explicitly cast: an untyped bind against jsonb's
+                # overloaded ``-`` (text / text[] / integer) is ambiguous to
+                # the planner — same form as set_status's error-key removal.
+                execution_state=func.coalesce(
+                    Issues.execution_state, cast(literal("{}"), JSONB)
+                ).op("-", return_type=JSONB)(cast(literal("dispatching"), Text)),
+            )
         )
         locked = result.rowcount
     return locked > 0
@@ -320,6 +340,12 @@ async def run_issue_reply_step(
         trigger="issue_reply",
         chunk_callback=_cb,
         attachments=attachment_objects,
+        # phase 2b-2 §4.2: a reply turn is an issue run too. Without this the
+        # row is created with issue_id NULL and only route_finish_outcome's
+        # post-hoc backfill fills it — which never runs when the turn does not
+        # return (crash, cancel, empty output). Same hole as the dispatch path,
+        # different trigger.
+        issue_id=issue_id,
     )
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -637,10 +663,13 @@ PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
 
 async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
-    """Best-effort: stamp ``agent_runs.issue_id`` for the run that just
-    executed this issue's turn. See ``AgentRunsRepository.backfill_issue_id``
-    for why this is a post-hoc UPDATE rather than a RunRecorder constructor
-    kwarg."""
+    """Belt to the creation-time braces. Phase 2b-2 §4.2 made ``issue_id`` a
+    RunRecorder constructor kwarg on both issue paths (``run_issue_agent`` and
+    ``run_issue_reply_step``), so on those the column is already set and this
+    UPDATE's ``WHERE issue_id IS NULL`` makes it a no-op. It stays for the rows
+    that seam cannot reach — runs recorded before that change, and any future
+    issue-adjacent caller that forgets to pass it. Never raises: decoration,
+    not status routing."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     await get_agent_runs_repository().backfill_issue_id(run_id, issue_id)

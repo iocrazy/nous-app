@@ -184,14 +184,21 @@ async def _dispatch_node(issue_id: int, *, auto: bool) -> None:
     workflow — the SAME seam ``POST /issues/{id}/dispatch`` uses (#1400
     discipline: never a parallel dispatch path). ``auto`` marks the run so
     the quota counter (``agent_runs.trigger == 'issue_dispatch_auto'``) can
-    tell it apart from a manual "Run now"."""
+    tell it apart from a manual "Run now".
+
+    That shared seam is ``_dispatch_execute_issue``, not the endpoint's
+    ``start_execute_issue`` wrapper — this path builds its own workflow_id and
+    skips the wrapper's persist step. The phase 2b-2 ``dispatching`` marker
+    therefore lives on ``_dispatch_execute_issue`` itself, which is why an
+    autopilot dispatch is guarded against a concurrent fork exactly as a
+    manual one is."""
     import uuid as _uuid
 
     from app.api.issues_router import _dispatch_execute_issue
 
     workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
     try:
-        _dispatch_execute_issue(issue_id, workflow_id, auto=auto)
+        await _dispatch_execute_issue(issue_id, workflow_id, auto=auto)
     except Exception as exc:  # noqa: BLE001 — duplicate workflow_id is a soft success
         low = repr(exc).lower()
         if "already exists" not in low and "duplicate" not in low:

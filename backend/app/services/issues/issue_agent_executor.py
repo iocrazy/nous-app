@@ -213,6 +213,7 @@ async def run_issue_agent(
             attribution=attribution,
             fork_of=fork_of,
             fork_steer=steer_text is not None,
+            issue_id=iid,
         )
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)

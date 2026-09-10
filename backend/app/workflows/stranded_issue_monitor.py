@@ -224,7 +224,7 @@ async def stranded_issue_monitor_workflow(
         )
         if action == "redispatch":
             wf_id = await _prepare_redispatch(c["id"], c["redispatch_count"] + 1)
-            _dispatch_execute_issue(c["id"], wf_id)
+            await _dispatch_execute_issue(c["id"], wf_id)
             counts["redispatched"] += 1
             logger.info(f"[stranded] re-dispatched issue {c['id']} as {wf_id}")
         elif action == "giveup":

@@ -16,7 +16,6 @@ from typing import Any
 from sqlalchemy import cast, func, literal, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 
-from app.db.session import write_scope
 from app.models import Issues
 
 # A role identifier cannot be a bound parameter; this fixed fragment is the
@@ -37,6 +36,13 @@ def merge_stmt(issue_id: int, patch: dict[str, Any]):
 async def merge_execution_state(issue_id: int, patch: dict[str, Any]) -> None:
     if not patch:
         return
+    # Function-scope import, same idiom as issue_lifecycle: the scope helper is
+    # resolved per call so tests patch the SOURCE module (app.db.session) and
+    # every caller sees it. A module-level binding made which fake a test saw
+    # depend on whether this module happened to be imported before or after the
+    # patch — an order-dependent test is worse than no test.
+    from app.db.session import write_scope
+
     async with write_scope() as session:
         await session.execute(_AS_SERVICE_ROLE)
         await session.execute(merge_stmt(issue_id, patch))
@@ -79,6 +85,8 @@ def claim_budget_wrap_up_stmt(issue_id: int, run_id: Any):
 
 async def claim_budget_wrap_up(issue_id: int, run_id: Any) -> bool:
     """True iff this run now holds (or already held) the wrap-up grace."""
+    from app.db.session import write_scope
+
     async with write_scope() as session:
         await session.execute(_AS_SERVICE_ROLE)
         result = await session.execute(claim_budget_wrap_up_stmt(issue_id, run_id))

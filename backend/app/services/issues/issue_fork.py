@@ -27,6 +27,7 @@ from app.services.ai.runner.replay import (
     is_step_boundary,
     messages_from_events,
 )
+from app.services.issues.issue_dispatch import is_dispatching
 
 # What the rebuild reads; tool_call bodies (the bulk) never leave the DB.
 REPLAY_EVENT_TYPES = (
@@ -149,6 +150,12 @@ async def fork_run(
         raise ForkRejected("run_state_unavailable", 503, str(exc)) from exc
     if live:
         raise ForkRejected("run_live", 409, "pause or cancel the running run first")
+    # Phase 2b-2 §4.1: a dispatch already enqueued but not yet checked out has
+    # neither a run row (the check above) nor a lock (the check below). Forking
+    # into that window swings ai_session_id, and the workflow's own
+    # atomic_checkout then skips — losing the fork silently.
+    if is_dispatching(issue):
+        raise ForkRejected("issue_busy", 409, "a dispatch is in flight")
     # execute_issue holds execution_locked_at for its whole lifetime — also
     # while PARKED on a question (the agent_runs row is closed then, so the
     # check above cannot see it). A parked workflow is released deliberately

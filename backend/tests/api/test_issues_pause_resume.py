@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -73,7 +73,9 @@ def wired(monkeypatch):
     from app.services.infra import dbos_orchestrator
 
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: True)
-    dispatch = MagicMock()
+    # Async since phase 2b-2 — the seam writes the dispatching marker before
+    # it enqueues, so the stub has to be awaitable.
+    dispatch = AsyncMock()
     monkeypatch.setattr(r, "_dispatch_execute_issue", dispatch)
     persist = AsyncMock()
     monkeypatch.setattr(r, "_persist_workflow_id", persist)
@@ -143,7 +145,7 @@ async def test_resume_with_pending_inbox_items_redispatches(wired):
     # resumed_from_run_id is written BEFORE the dispatch, as the marker of a
     # resumed dispatch (None here: no prior run ended paused)
     wired.merge.assert_awaited_once_with(7, {"resumed_from_run_id": None})
-    wired.dispatch.assert_called_once_with(7, out.workflow_id)
+    wired.dispatch.assert_awaited_once_with(7, out.workflow_id)
     wired.persist.assert_awaited_once_with(7, out.workflow_id)
 
 
@@ -162,7 +164,7 @@ async def test_resume_after_a_paused_run_redispatches_with_its_id(wired):
         issue_id=7, conversation_id=55, limit=1
     )
     wired.merge.assert_awaited_once_with(7, {"resumed_from_run_id": "31"})
-    wired.dispatch.assert_called_once()
+    wired.dispatch.assert_awaited_once()
 
 
 async def test_resume_of_a_paused_but_idle_issue_just_clears_the_flag(wired):
@@ -176,7 +178,7 @@ async def test_resume_of_a_paused_but_idle_issue_just_clears_the_flag(wired):
     assert out.dispatched is False and out.workflow_id is None
     assert out.reason == "cleared"
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
     wired.merge.assert_not_awaited()
 
 
@@ -190,7 +192,7 @@ async def test_resume_while_the_run_has_not_observed_the_pause_withdraws_it(wire
     assert out.dispatched is False and out.workflow_id is None
     assert out.run_id == "31" and out.reason == "withdrawn"
     wired.runs.clear_pause_request.assert_awaited_once_with(31)
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
 
 
@@ -200,7 +202,7 @@ async def test_resume_of_an_unpaused_issue_with_nothing_pending_is_409(wired):
     assert ei.value.status_code == 409
     assert ei.value.detail["code"] == "not_paused"
     wired.issue_repo.set_paused_at.assert_not_awaited()
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
 
 
 async def test_resume_of_an_unpaused_issue_with_pending_items_redispatches(wired):
@@ -210,7 +212,7 @@ async def test_resume_of_an_unpaused_issue_with_pending_items_redispatches(wired
     out = await r.resume_issue(7, AUTH)
     assert out.dispatched is True
     wired.issue_repo.set_paused_at.assert_not_awaited()  # nothing to clear
-    wired.dispatch.assert_called_once()
+    wired.dispatch.assert_awaited_once()
 
 
 async def test_resume_needing_a_dispatch_without_dbos_is_503(wired, monkeypatch):
@@ -315,7 +317,7 @@ async def test_resume_with_a_parked_workflow_does_not_dispatch_a_second_one(wire
     assert out.dispatched is False and out.reason == "parked"
     assert out.workflow_id == "issue-7-old"
     wired.issue_repo.set_paused_at.assert_awaited_once_with(7, None)
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
     wired.persist.assert_not_awaited()
 
 
@@ -324,7 +326,7 @@ async def test_resume_with_a_lock_but_no_marker_reports_running(wired):
     wired.inbox.pending_count.return_value = 1
     out = await r.resume_issue(7, AUTH)
     assert out.dispatched is False and out.reason == "running"
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
 
 
 async def test_resume_of_an_unpaused_issue_with_a_live_run_does_not_dispatch(wired):
@@ -336,7 +338,7 @@ async def test_resume_of_an_unpaused_issue_with_a_live_run_does_not_dispatch(wir
     assert out.dispatched is False and out.reason == "running"
     assert out.run_id == "31"
     wired.runs.clear_pause_request.assert_not_awaited()
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()
     wired.issue_repo.set_paused_at.assert_not_awaited()
 
 
@@ -353,4 +355,4 @@ async def test_run_state_read_failure_is_503_and_changes_nothing(wired, endpoint
     assert ei.value.detail["code"] == "run_state_unavailable"
     wired.issue_repo.set_paused_at.assert_not_awaited()
     wired.runs.request_pause.assert_not_awaited()
-    wired.dispatch.assert_not_called()
+    wired.dispatch.assert_not_awaited()

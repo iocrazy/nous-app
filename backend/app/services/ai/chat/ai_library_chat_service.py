@@ -564,6 +564,7 @@ class AILibraryChatService:
         answer_to: Optional[str] = None,
         fork_of: Optional[tuple[int, int]] = None,
         fork_steer: bool = False,
+        issue_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -571,7 +572,12 @@ class AILibraryChatService:
 
         ``attribution`` (W3c) forwards a two-level cost tag to RunRecorder —
         the issue-dispatch path passes 'rule_owner' for routine/pipeline fires;
-        interactive chat leaves it None (→ direct_human)."""
+        interactive chat leaves it None (→ direct_human).
+
+        ``issue_id`` (phase 2b-2 §4.2) stamps agent_runs.issue_id at CREATION.
+        The post-turn ``backfill_issue_id`` stays as the belt for rows this
+        seam cannot reach, but it only runs after a turn RETURNS — a crash, a
+        cancel or a killed worker used to leave the link NULL forever."""
         from app.services.ai.chat.agent_concurrency import user_slot
 
         async with user_slot(str(user_id)):
@@ -588,6 +594,7 @@ class AILibraryChatService:
                 answer_to=answer_to,
                 fork_of=fork_of,
                 fork_steer=fork_steer,
+                issue_id=issue_id,
             )
 
     async def _run_session_turn_inner(
@@ -605,6 +612,7 @@ class AILibraryChatService:
         answer_to: Optional[str] = None,
         fork_of: Optional[tuple[int, int]] = None,
         fork_steer: bool = False,
+        issue_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -709,6 +717,7 @@ class AILibraryChatService:
             session_id=session_id,
             user_query=content,
             settings=settings,
+            issue_id=issue_id,
         )
 
         # Compose prompt with graph facts + user context injected after
@@ -1341,6 +1350,10 @@ class AILibraryChatService:
                 input_summary=content,
                 attribution=attribution,
                 metadata={"full_input": content},
+                # phase 2b-2 §4.2: the issue link is written HERE, not by the
+                # post-turn backfill — a run that never returns (crash, cancel,
+                # empty output) would otherwise keep issue_id NULL forever.
+                issue_id=int(issue_id) if issue_id else None,
                 # phase 2b-1 §2.3: a forked run points back at its origin
                 fork_of_run_id=int(fork_of[0]) if fork_of else None,
                 fork_at_seq=int(fork_of[1]) if fork_of else None,

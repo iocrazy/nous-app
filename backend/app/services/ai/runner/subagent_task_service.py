@@ -95,6 +95,7 @@ class SubAgentTaskService:
         parent_recorder: Optional[Any] = None,
         delegation_chain: tuple[str, ...] = (),
         max_parallel: int = DEFAULT_MAX_PARALLEL,
+        issue_id: Optional[int] = None,
     ) -> None:
         self.caller_agent_id = caller_agent_id
         self.caller_user_id = caller_user_id
@@ -113,6 +114,11 @@ class SubAgentTaskService:
         # because not every caller hands us a recorder (CLI / batch
         # spawns may not have one); we only roll up when present.
         self.parent_recorder = parent_recorder
+        # Phase 2b-2 §4.2: the issue this turn belongs to, inherited from the
+        # parent run via the wiring. A sub-run of an issue run IS part of that
+        # issue's tree; without this its agent_runs row has no issue link at
+        # all (the post-turn backfill only ever sees root runs).
+        self.issue_id = issue_id
 
     async def spawn(self, args: dict[str, Any]) -> dict[str, Any]:
         """Public entry: dispatch + roll observability up to the
@@ -310,6 +316,7 @@ class SubAgentTaskService:
                 parent_run_id=self.parent_run_id,
                 agent_depth=self.agent_depth + 1,
                 delegation_chain=self.delegation_chain,
+                issue_id=self.issue_id,
             )
         except Exception as exc:
             logger.exception("[subagent_task] stack build failed slug={}", slug)
@@ -353,6 +360,7 @@ class SubAgentTaskService:
                 trigger="subagent_task",
                 session_id=self.session_id,
                 team_id=None,
+                issue_id=self.issue_id,
                 **dispatch_scope.as_recorder_kwargs(),
                 model=model or None,
                 provider=provider,
