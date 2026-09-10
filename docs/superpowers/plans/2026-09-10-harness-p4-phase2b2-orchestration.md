@@ -1900,37 +1900,63 @@ $SSH 'docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz'
 $SSH 'docker exec nous-db psql -U postgres -p 55434 -d postgres -c "<SQL>"'
 ```
 
-- [ ] **Step 1: 部署确认**：T1–T6 每个 PR 合并后 `gh run list --workflow=deploy-gpu.yml --limit 3` 到 `completed success`；`readyz` 回 `{"status":"ready","dbos":"enabled"}`；容器内逐 Task 抓一个标识符证明代码真在里面（`docker exec nous-backend grep -c "def inbox_dispatch_workflow" /app/app/workflows/workforce_dispatch.py`、`grep -c "def claim_task" /app/app/repositories/agent_workforce_repository.py`、`grep -c "issue_wakeup" /app/app/workflows/scheduled_master.py`、`grep -c "class ScheduleWakeup" /app/app/services/ai/tools/*.py`）；前端 `curl -sS https://app.nous.ink/version.json` 的 `commitSha` = T6 的 merge SHA。
+- [x] **Step 1: 部署确认**：T1–T6 每个 PR 合并后 `gh run list --workflow=deploy-gpu.yml --limit 3` 到 `completed success`；`readyz` 回 `{"status":"ready","dbos":"enabled"}`；容器内逐 Task 抓一个标识符证明代码真在里面（`docker exec nous-backend grep -c "def inbox_dispatch_workflow" /app/app/workflows/workforce_dispatch.py`、`grep -c "def claim_task" /app/app/repositories/agent_workforce_repository.py`、`grep -c "issue_wakeup" /app/app/workflows/scheduled_master.py`、`grep -c "class ScheduleWakeup" /app/app/services/ai/tools/*.py`）；前端 `curl -sS https://app.nous.ink/version.json` 的 `commitSha` = T6 的 merge SHA。
 
-- [ ] **Step 2: 翻 `FEATURE_WORKFORCE_DELEGATE`**：没有 staging，所以顺序是「链路测试绿 → 单独翻开关 PR → 立刻验 ①」。翻之前先确认生效前状态（`docker exec nous-backend /app/.venv/bin/python -c "from app.core.config import settings; print(settings.FEATURE_WORKFORCE_DELEGATE)"` → `False`），合并部署后同一条命令 → `True`。⚠️ `secrets/backend.env` 若已有同名行会静默盖掉 `config.yml`：`docker exec nous-backend printenv | grep -i WORKFORCE`，有输出就先删那一行（CLAUDE.md 部署陷阱第一条）。
+- [x] **Step 2: 翻 `FEATURE_WORKFORCE_DELEGATE`**：没有 staging，所以顺序是「链路测试绿 → 单独翻开关 PR → 立刻验 ①」。翻之前先确认生效前状态（`docker exec nous-backend /app/.venv/bin/python -c "from app.core.config import settings; print(settings.FEATURE_WORKFORCE_DELEGATE)"` → `False`），合并部署后同一条命令 → `True`。⚠️ `secrets/backend.env` 若已有同名行会静默盖掉 `config.yml`：`docker exec nous-backend printenv | grep -i WORKFORCE`，有输出就先删那一行（CLAUDE.md 部署陷阱第一条）。
 
-- [ ] **Step 3: ① Delegate(await=false) 端到端**：建 issue 让 `script_ai` 调 `Skill(skill="task", await=false, subagent_type="general-purpose", description="…")`。证据链四段，每段留原文：
+- [x] **Step 3: ① Delegate(await=false) 端到端**：建 issue 让 `script_ai` 调 `Skill(skill="task", await=false, subagent_type="general-purpose", description="…")`。证据链四段，每段留原文：
   - 任务落库：`SELECT id, task_kind, phase, metadata->>'dispatched_at' FROM task_tracking WHERE task_kind='agent_task' ORDER BY created_at DESC LIMIT 3;` —— 建出来时 `dispatched_at` 为 NULL；
   - ≤10s 后同一条 `dispatched_at` 非空，且 `SELECT status FROM dbos.workflow_status WHERE workflow_uuid='workforce-<task_id>';` 存在；
   - 完成后 `SELECT lifecycle FROM agent_tasks_outbox…`（实际表名以 T3 实现为准）有 outbox 行；
   - `docker exec nous-worker curl -sS http://localhost:8080/api/v1/healthz` 里 `inflight_count` 与 `SELECT count(*) FROM task_tracking WHERE task_kind='agent_task' AND phase IN ('queued','in_progress')` 一致（⑧ 的一半）。
 
-- [ ] **Step 4: ② 后台子代理回父 run**：同一 issue，父 run 事件 `SELECT seq, event_type, payload->>'mode', payload->>'child_run_id' FROM agent_run_transcript_events WHERE run_id=<parent> ORDER BY seq;` 应见 `subagent_spawned{mode:async}`；子 run 行 `SELECT id, parent_run_id, issue_id FROM agent_runs WHERE parent_run_id=<parent>;`；issue 空闲后收件箱触发新一轮 → 新 run 事件里 `inbox_claimed{kind:subagent_result}`，父 run 上有 `subagent_done`；`view.children` 经 `GET /ai-library/runs/<parent>/view-at?seq=<末尾>` 读出 `{total,done,running,async_pending,last}` 与事件计数对得上。
+- [x] **Step 4: ② 后台子代理回父 run**：同一 issue，父 run 事件 `SELECT seq, event_type, payload->>'mode', payload->>'child_run_id' FROM agent_run_transcript_events WHERE run_id=<parent> ORDER BY seq;` 应见 `subagent_spawned{mode:async}`；子 run 行 `SELECT id, parent_run_id, issue_id FROM agent_runs WHERE parent_run_id=<parent>;`；issue 空闲后收件箱触发新一轮 → 新 run 事件里 `inbox_claimed{kind:subagent_result}`，父 run 上有 `subagent_done`；`view.children` 经 `GET /ai-library/runs/<parent>/view-at?seq=<末尾>` 读出 `{total,done,running,async_pending,last}` 与事件计数对得上。
 
-- [ ] **Step 5: ③ 续聊**：对 ② 的子 run 再 `Skill(skill="task", child_run_id="<child>", prompt="…")` 一次 → 新子 run `SELECT id, fork_of_run_id, parent_run_id FROM agent_runs WHERE fork_of_run_id=<child>;` 有行；父 run 事件 `subagent_spawned{continued_from:"<child>"}`；新子 run 的首批事件里能看到被重建的历史消息（`SELECT count(*) FROM agent_run_transcript_events WHERE run_id=<new_child> AND event_type IN ('user','assistant')`）。
+- [x] **Step 5: ③ 续聊**：对 ② 的子 run 再 `Skill(skill="task", child_run_id="<child>", prompt="…")` 一次 → 新子 run `SELECT id, fork_of_run_id, parent_run_id FROM agent_runs WHERE fork_of_run_id=<child>;` 有行；父 run 事件 `subagent_spawned{continued_from:"<child>"}`；新子 run 的首批事件里能看到被重建的历史消息（`SELECT count(*) FROM agent_run_transcript_events WHERE run_id=<new_child> AND event_type IN ('user','assistant')`）。
 
-- [ ] **Step 6: ④ 定时唤醒三态**：
+- [x] **Step 6: ④ 定时唤醒三态**：
   - 空闲到点：UI「⏰ Later → Custom」设 +2 分钟（或 `POST /schedules` 直调），到点后 `SELECT kind, body, meta->'source' FROM issue_messages WHERE issue_id=<id> ORDER BY created_at DESC LIMIT 2;` 见 `meta->'source'->>'kind' = 'schedule'` 的 comment 行，紧随一条新 run；新 run 首个 `user` 事件文本 = 唤醒文本；页面该 run 行头出 `Started By Wake-up`。
   - 运行中到点：先派发一轮长任务，再设 +1 分钟 → 新 run 事件里 `inbox_claimed{kind:'steer', content.source.kind:'schedule'}`。
   - agent 自设：提示模型用 `ScheduleWakeup` → 父 run `schedule_set{schedule_id, fire_at, note}`；`GET /issues/<id>/schedules` 列出该行；右栏块点取消 → `DELETE /schedules/<id>` 204 且 `SELECT enabled FROM user_schedules WHERE id='<id>'` 为 false 或行已删。
   - 一次性自禁：到点后 `SELECT enabled, pause_reason FROM user_schedules WHERE id='<id>';` → `false / fired_once`。
 
-- [ ] **Step 7: ⑤ 回填 + ⑥ 派发窗口**：
+- [x] **Step 7: ⑤ 回填 + ⑥ 派发窗口**：
   - 回填先 dry-run 后真跑，两次都记行数：`curl -sS -X POST "$API/admin/backfill" -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' -d '{"name":"agent_runs_issue_id","limit":5000,"dry_run":true}'` → 拿 `workflow_id`，结果在 `SELECT phase, metadata FROM task_tracking WHERE dbos_workflow_id='<wf>'`；`dry_run:false` 重跑；前后对照 `SELECT count(*) FROM agent_runs r JOIN issues i ON r.conversation_id=i.ai_session_id WHERE r.issue_id IS NULL;` 应归零。⚠️ 该端点走 `AdminAuthDep`，调试账号若非管理员则用 gpupc 上的管理员 token，拿不到就记为「未验 + 原因」，不要伪造。
   - ⑥：`POST /issues/<id>/dispatch` 后 **3 秒内** `POST /ai-library/runs/<run>/fork` → 期望 409 `issue_busy`（旧行为是静默 `{"skipped":true}`）；60 秒后同样调用不再 busy（TTL 过期）。
 
-- [ ] **Step 8: ⑦ 前端走查**：`cd frontend && npm run e2e:prod` 全过；再用临时 Playwright spec（**不入库**，理由同 2b-1：它建真 issue、花真钱）以 `frontend/e2e-prod/helpers.ts` 的 `loadProdCreds` 登录，访问 `/team/331438215859255/todolist/MH-<n>`，全部断言用 `toBeVisible`，截图到 `~/Downloads/2b2-ui-*.png`：① 子代理三态卡 + `subagent-open` 打开子 run 面板（头部含 `Sub-run #… · from run #… step N · Background`、`Back To Parent` 可点回）；② 收件箱行 `Sub-agent result · …`、Cockpit `cockpit-children` 读 `1/2 · 1 in background`；③ 作曲区 `Later` 弹层四个预设 + 说明句，定时后右栏 `Schedules` 块出现该行并可取消，Cockpit 副行 `Wakes at …`；④ 主页 Quick `Scheduled 1` 芯片可筛。与画板「二期 2b-2 · 编排（浅色）」两块稿逐项对照，差异写进完成账。
+- [x] **Step 8: ⑦ 前端走查**：`cd frontend && npm run e2e:prod` 全过；再用临时 Playwright spec（**不入库**，理由同 2b-1：它建真 issue、花真钱）以 `frontend/e2e-prod/helpers.ts` 的 `loadProdCreds` 登录，访问 `/team/331438215859255/todolist/MH-<n>`，全部断言用 `toBeVisible`，截图到 `~/Downloads/2b2-ui-*.png`：① 子代理三态卡 + `subagent-open` 打开子 run 面板（头部含 `Sub-run #… · from run #… step N · Background`、`Back To Parent` 可点回）；② 收件箱行 `Sub-agent result · …`、Cockpit `cockpit-children` 读 `1/2 · 1 in background`；③ 作曲区 `Later` 弹层四个预设 + 说明句，定时后右栏 `Schedules` 块出现该行并可取消，Cockpit 副行 `Wakes at …`；④ 主页 Quick `Scheduled 1` 芯片可筛。与画板「二期 2b-2 · 编排（浅色）」两块稿逐项对照，差异写进完成账。
 
-- [ ] **Step 9: 完成账 + 回写 + 记忆**：
+- [x] **Step 9: 完成账 + 回写 + 记忆**：
   - 本文件末尾追加「完成账」表：每个 Task 的 PR → merge SHA → 上线证据（容器内 grep / version.json）；⑧ 项验收表逐条给证据（run id / seq / SQL 输出 / 截图名），未验项写原因而不是留空。
   - 偏差全部回写 spec 与本计划的「实施记录」（尤其：`meta.source` 的实际键名与 `schedule_id` 类型、`POST /schedules` 是否接受无 `name` 的 body、`pending_wakeups` 最终落在哪个响应）。
   - 记忆：把 `project-harness-p4-phase2b1-in-progress` 改写为「2b-1 已上线并验收完毕 + 2b-2 状态」，下期入口写「第 3 期 产出与账」；`FEATURE_WORKFORCE_DELEGATE` 已翻 true 这条要单独一行（它改变生产行为，下次会话必须知道）。
   - Discord 通知按 CLAUDE.md 为**可选**：MCP 未登录就在回复里说明，不重试。
+
+---
+
+**完成账（2026-09-10，Task 7 真栈验收）**
+
+全部在生产栈（gpupc `nous-worker` / `cn.nous.ink:88`，调试账号，team 331438215859255，agent `script_ai`）用 API、SQL 与 Playwright 真跑。验收 agent 的逐项证据文件（`task-7-backend-evidence{,-2}.md`、`task-7-ui-{a,b}-evidence.md`）与截图 `~/Downloads/2b2-ui-{a,b}-*.png` 留在 SDD 工作区未入库——它们建真 issue、花真钱，不适合当门禁。三轮复验 + 7c 复验共四轮，最后两轮零新缺陷（7c 仅修一处 UI 摘要行）。
+
+| 项 | 证据 | 结论 |
+|---|---|---|
+| 部署 | 每个 Task 合并后 deploy-gpu success + readyz `ready/dbos enabled` + 容器内符号 grep；Task 6 起 deploy-pages 在真实托管 runner 成功，`version.json` 3d4cf72 → 0612d40 → b69236f（7b）→ eb04a9e（7c，readyz ready、容器内 `clip_claimed_text` 在） | PASS |
+| ① Delegate(await=false) | 开关 PR #2221 上线后生产零 persistent agent（缺陷 4）；7a 上线后 `persistent_agents=3`；H1：`agent_inbox` → `task_tracking` agent_task（含 parent_run_id）→ `workforce-<task>-1` SUCCESS → `agent_outbox` delivered，四段 SQL 记录 | PASS |
+| ② 后台子代理 | 首轮 FAIL（父 run 为 None，缺陷 1）；7a 后 E2：子 `parent_run_id`=父、`task_tracking.issue_id` 有值、`subagent_result` 入箱、新 run `inbox_claimed{subagent_result}`、父 `subagent_done`、`children done=1/async_pending=0`、`cost.by_child` 非空 | PASS |
+| ③ 续聊 child_run_id | 首轮 `not_your_child`（缺陷 D：所有权只认祖先链）；7b 改同 issue 所有权 → 第三轮：新子 run `fork_of_run_id`=首子、`parent_run_id`=新父、`subagent_spawned{continued_from}`、无 `not_your_child` | PASS |
+| ④ 定时唤醒 | F1 空闲到点：行 `fired_once`、评论行 `meta.source.kind=schedule`、新 run 首条 user 事件即唤醒文本；F2 运行中到点首轮 FAIL（收尾窗口搁浅，缺陷 2）→ 7a 后在 drain 轮 `inbox_claimed{steer, source.schedule}`；F3 agent `ScheduleWakeup` → `schedule_set`、`GET /issues/{id}/schedules` 列出、DELETE 后消失；F4 naive fire_at → 400 `fire_at_timezone_required`、`ai_transcription` → 400 `unsupported_task_type` | PASS |
+| ⑤ 回填 `agent_runs_issue_id` | admin 端点 403（需 admin 账号）→ 容器内 `/app/.venv/bin/python` 直调：dry-run 3 → 真跑 3 → 剩余 0；`agent_runs.issue_id` 非空 43 行 | PASS |
+| ⑥ 派发窗口 3s 内 fork | B：fork → 409 `issue_busy`「a dispatch is in flight」；`execution_state.dispatching` 在 `atomic_checkout` 写 `execution_locked_at` 的同一刻消失；resume 探不到（`not_paused` 在前，brief 偏差） | PASS |
+| ⑦ 前端 | `npm run e2e:prod` 3 passed；UI-A（唤醒）：Later 弹层四预设/说明/禁用态/Esc、真建一次性 → Schedules 块 → 取消、过去时间 → 可读错误、Quick `Scheduled 1` 可筛、agent 自设行；UI-B（子代理）：三态卡、Open Run → 子 run 面板 → Back To Parent、Cockpit `SUB-AGENTS 0/1 · 1 in background`、续聊芯片、唤醒芯片 + 单气泡、Fired 无 ✕；UI-C（7b 后）：收件箱行 «Sub-agent Result · summarize (Background) · ✓ Done · read before step 1» + 摘要 OK/DONE、卡花费 ¢0.021 与 DB 0.0213 对账、旧数据 ¢0.000 → `—`、子面板头 «from run #…» 真父 id、跨轮续聊芯片、`e2e:prod` 3 passed 1 skipped | PASS |
+| ⑧ readyz + inflight 派生 | `workforce/healthz` `launched=true`、派生 inflight、`persistent_agents=3`；`inbox_dispatch_workflow` 5 分钟 30/30 SUCCESS | PASS |
+| 7a 新项 | D2：两条搁浅行在重启后 ~1 分钟被 sweeper 派发（新 run `inbox_claimed` seq 2）；N1：评论回合后 `execution_state` 无 `dispatching`，完成后立即 fork 返 200 | PASS |
+| 7b 新项（第三轮） | 空闲投递：父完成 13s 后子结果入箱，2.82s 内由 workflow body `_dispatch_idle_wake` 领取（非 sweeper），30 分钟零 `is_workflow` 断言；`inbox_claimed{subagent_result}.content` 七键齐；`cost.by_child`=`subagent_done.cost_cents`=子 `agent_runs.cost_cents`（0.0213）；两轮各恰一条后续 run、sweeper `inbox_drained=0`；Delegate 行 `task_tracking.issue_id` 落库；运行中唤醒被同一 run 在 turn 1/step 2 领取 `source.schedule`；DBOS `workforce-<task>-1` 与 `subagent-wake-<task>` 各恰一条 SUCCESS | PASS |
+| 7c（第三轮 UI 缺陷 J） | 后台子代理卡片摘要行永不渲染：`stampResultSummaries` 只在同一 run 内配对，后台领取落在后续 run；修法 `subagent_done` 带有界 `summary`（复用 inbox 的 500 截断，崩溃回退 error 文本）+ fold 兜底、领取配对优先；#2227。上线后：新 issue 父 run `subagent_done{summary:"OK"}`（领取仍落在后续 run，跨 run 分裂复现但不再影响），卡片 «✓ Done · 8.9s · ¢0.023» 下摘要行 OK；旧 issue MH-90 卡片仍无摘要元素（事件不可变，负对照成立）；`e2e:prod` 3 passed | PASS |
+| G requeue | 无安全触发路径；DBOS 行 `workforce-<task>-1` 记录 | UNVERIFIED |
+
+**真栈才暴露的缺陷（全部已修，见 #2225 / #2226 / #2227）**：子代理/Delegate 父 run 在根 issue run 上为 None（且根 run 环检测一直关闭）；收尾窗口收件箱搁浅无兜底；后台任务行无 issue_id；生产零 persistent agent（162/163 在基线下未重跑、seed 不写列、健康端点 0 时静默）；唤醒来源写错读路径 + 双追加；sweeper drain 在 step 内派发（DBOS 断言被吞）；reply 接缝标记无清除者；worker 在 step 内对空闲 issue 派发；轮内 drain 与 sweeper 双跑；`_child_chain_ok` 只认祖先；envelope 无 cost；`inbox_claimed` 不带 content；`parentRunId` 硬编码；后台子代理卡片无摘要（跨 run 配对不可达）。
+
+**记小票（不在本期）**：心跳/stale worker 清扫零接线；收件箱 dedupe 并发唯一索引；`payload->>'issue_id'` 索引；运行中唤醒文本无线程镜像行；`active_parent_run_id` 两份实现无共享基类；`tests/workflows` 与 `test_issue_reply_resume` 同跑的顺序依赖假红；`limit=100` 派发清单无背压；无事件唤醒 run 无芯片。
 
 ---
 
