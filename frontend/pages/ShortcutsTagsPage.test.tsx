@@ -157,7 +157,7 @@ describe('ShortcutsTagsPage options', () => {
     fireEvent.click(screen.getByTestId('opt-summarize'));
     expect(await screen.findByText(/已保存/)).toBeTruthy();
     expect(saves(calls).map((c) => c.body)).toEqual([
-      { tags: [], rating: null, transcribe: false, summarize: true, analyze: false },
+      { tags: [], rating: null, transcribe: true, summarize: true, analyze: false },
     ]);
   });
 
@@ -257,6 +257,60 @@ describe('ShortcutsTagsPage options', () => {
     await screen.findByText(/已保存/);
     expect(analyze.getAttribute('aria-pressed')).toBe('false');
     expect(saves(calls).map((c) => (c.body as { analyze: boolean }).analyze)).toEqual([true, false]);
+  });
+
+  const pressed = (id: string) => screen.getByTestId(id).getAttribute('aria-pressed');
+
+  it('lights transcribe when analyze is turned on, in the same single save', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    fireEvent.click(screen.getByTestId('opt-analyze'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls).map((c) => c.body)).toEqual([
+      { tags: [], rating: null, transcribe: true, summarize: false, analyze: true },
+    ]);
+    expect(pressed('opt-transcribe')).toBe('true');
+    expect(pressed('opt-analyze')).toBe('true');
+  });
+
+  it('lights transcribe when summarize is turned on, in the same single save', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    fireEvent.click(screen.getByTestId('opt-summarize'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls).map((c) => c.body)).toEqual([
+      { tags: [], rating: null, transcribe: true, summarize: true, analyze: false },
+    ]);
+    expect(pressed('opt-transcribe')).toBe('true');
+  });
+
+  it('turns summarize and analyze off when transcribe is turned off', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    fireEvent.click(screen.getByTestId('opt-summarize'));
+    fireEvent.click(screen.getByTestId('opt-analyze'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls)).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('opt-transcribe'));
+    await waitFor(() => expect(saves(calls)).toHaveLength(3));
+    await screen.findByText(/已保存/);
+    expect(saves(calls).at(-1)?.body).toEqual({ tags: [], rating: null, transcribe: false, summarize: false, analyze: false });
+    expect(['opt-transcribe', 'opt-summarize', 'opt-analyze'].map(pressed)).toEqual(['false', 'false', 'false']);
+  });
+
+  it('keeps transcribe on when summarize is turned off', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    fireEvent.click(screen.getByTestId('opt-transcribe'));
+    fireEvent.click(screen.getByTestId('opt-summarize'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls)).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('opt-summarize'));
+    await waitFor(() => expect(saves(calls)).toHaveLength(3));
+    await screen.findByText(/已保存/);
+    expect(saves(calls).at(-1)?.body).toEqual({ tags: [], rating: null, transcribe: true, summarize: false, analyze: false });
+    expect(pressed('opt-transcribe')).toBe('true');
+    expect(pressed('opt-summarize')).toBe('false');
   });
 
   it('lays the three AI intents out as labelled icon toggles in one row', async () => {
@@ -403,5 +457,46 @@ describe('ShortcutsTagsPage search-or-create', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索标签...'), { target: { value: 'Birds' } });
     fireEvent.click(await screen.findByTestId('quick-create-btn'));
     expect(await screen.findByText(expected)).toBeTruthy();
+  });
+});
+
+describe('applyIntentDependencies', () => {
+  const base = { rating: 3, transcribe: false, summarize: false, analyze: false };
+  const load = async () => (await import('./ShortcutsTagsPage')).applyIntentDependencies;
+
+  it('lights transcribe when analyze turns on', async () => {
+    const apply = await load();
+    expect(apply(base, 'analyze', true)).toEqual({ rating: 3, transcribe: true, summarize: false, analyze: true });
+  });
+
+  it('lights transcribe when summarize turns on', async () => {
+    const apply = await load();
+    expect(apply(base, 'summarize', true)).toEqual({ rating: 3, transcribe: true, summarize: true, analyze: false });
+  });
+
+  it('turns summarize and analyze off with transcribe', async () => {
+    const apply = await load();
+    const prev = { rating: 3, transcribe: true, summarize: true, analyze: true };
+    expect(apply(prev, 'transcribe', false)).toEqual({ rating: 3, transcribe: false, summarize: false, analyze: false });
+  });
+
+  it('leaves transcribe alone when summarize or analyze turns off', async () => {
+    const apply = await load();
+    const prev = { rating: 3, transcribe: true, summarize: true, analyze: true };
+    expect(apply(prev, 'summarize', false)).toEqual({ rating: 3, transcribe: true, summarize: false, analyze: true });
+    expect(apply(prev, 'analyze', false)).toEqual({ rating: 3, transcribe: true, summarize: true, analyze: false });
+  });
+
+  it('changes nothing else when transcribe turns on', async () => {
+    const apply = await load();
+    expect(apply(base, 'transcribe', true)).toEqual({ rating: 3, transcribe: true, summarize: false, analyze: false });
+  });
+
+  it('passes rating through untouched and does not mutate the previous options', async () => {
+    const apply = await load();
+    const prev = Object.freeze({ rating: 2, transcribe: true, summarize: true, analyze: false });
+    expect(apply(prev, 'rating', 5)).toEqual({ rating: 5, transcribe: true, summarize: true, analyze: false });
+    expect(apply(prev, 'transcribe', false).rating).toBe(2);
+    expect(prev).toEqual({ rating: 2, transcribe: true, summarize: true, analyze: false });
   });
 });

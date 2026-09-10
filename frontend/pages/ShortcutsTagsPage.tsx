@@ -36,6 +36,18 @@ const AI_INTENTS: ReadonlyArray<{ key: IntentKey; Icon: LucideIcon; zh: string; 
   { key: 'analyze', Icon: ScanEye, zh: '解析', en: 'Analyze' },
 ];
 
+/**
+ * Next options after setting one key. Summary/analysis runs after transcription, so enabling
+ * either lights transcribe, and turning transcribe off turns both off — the saved state never
+ * breaks that dependency.
+ */
+export const applyIntentDependencies = <K extends keyof Options>(prev: Options, key: K, value: Options[K]): Options => {
+  const next: Options = { ...prev, [key]: value };
+  if ((key === 'summarize' || key === 'analyze') && value === true) return { ...next, transcribe: true };
+  if (key === 'transcribe' && value === false) return { ...next, summarize: false, analyze: false };
+  return next;
+};
+
 /** Wait after the last keystroke before asking MyMemory for a counterpart name. */
 const TRANSLATE_DEBOUNCE_MS = 600;
 
@@ -388,7 +400,7 @@ export const ShortcutsTagsPage: React.FC = () => {
   }, [selected, options, saveSelection]);
 
   const setOption = useCallback(<K extends keyof Options>(key: K, value: Options[K]) => {
-    const next: Options = { ...options, [key]: value };
+    const next = applyIntentDependencies(options, key, value);
     setOptions(next);
     saveSelection(selected, next);
   }, [selected, options, saveSelection]);
