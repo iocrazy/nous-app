@@ -110,8 +110,26 @@ class PromoteGeneratedMediaService:
             await conv_repo.is_team_member(team_id=source_scope_id, user_id=user_id)
         )
 
-    async def promote(self, *, gen_id: int, user_id: str, target_scope_id: int) -> dict:
-        """Promote a Tier-1 generation into a Tier-2 resource."""
+    async def promote(
+        self, *, gen_id: int, user_id: str, target_scope_id: Optional[int] = None
+    ) -> dict:
+        """Promote a Tier-1 generation into a Tier-2 resource.
+
+        ``target_scope_id`` defaults to the scope the generation ALREADY lives
+        in. `_registration_scope_id` (canvas_generation.py) settled this
+        argument on the registration side and its docstring says why: "a team
+        board checking its inputs against the team while filing its output in
+        one person's private inbox ... Two scopes for one run is not a
+        defensible split." Hardcoding the caller's personal team here put that
+        split back one layer later — a team board's generation, correctly
+        filed in the team's inbox, had its Tier-2 copy yanked into whichever
+        member happened to open an editor on it.
+
+        Callers that genuinely choose a destination still pass one: the chat
+        attachment endpoint takes ``body.scope_id``, and the inbox service is
+        handed the membership-gated ``?scope_id=``. The write-authorisation
+        gate below runs against whatever was chosen either way.
+        """
         gen = await self.gen_repo.get_by_id(gen_id)
         if gen is None:
             raise ValueError("generation not found")
@@ -166,6 +184,16 @@ class PromoteGeneratedMediaService:
                 conv_repo=conv_repo,
             ):
                 raise PermissionError("not authorised to access this generation")
+
+        # Resolved AFTER the read gate, so an unreadable generation is refused
+        # before its scope can steer anything. Raising on a scope-less row
+        # rather than falling back to personal: "we cannot name a destination"
+        # and "file it privately" are different answers, and only one of them
+        # is honest — same reason `_registration_scope_id` raises.
+        if target_scope_id is None:
+            if gen.get("scope_id") is None:
+                raise ValueError("generation has no scope to promote into")
+            target_scope_id = int(gen["scope_id"])
 
         is_target_personal = personal_team_id == target_scope_id
         is_target_team_member = await conv_repo.is_team_member(
