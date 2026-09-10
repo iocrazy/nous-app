@@ -1,7 +1,6 @@
-"""Outpaint derive service (Phase 3 Day 13 + 6f AI generative path).
+"""Outpaint transform shared by the canvas derive path (+ 6f AI generative path).
 
-Extends a source image's canvas and persists the result as a new sibling
-resource via the shared derive pipeline.
+Extends encoded image bytes by per-side padding.
 
 Fill modes
 ----------
@@ -23,18 +22,11 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any
 
 from loguru import logger
 
-from app.repositories.resources_repository import ResourcesRepository
-from app.services.canvas.derive_persistence import (
-    DeriveError,
-    ResourceRepoProtocol,
-    load_source_image,
-    persist_derived_image,
-)
+from app.services.canvas.derive_persistence import DeriveError
 from app.services.canvas.image_outpaint import (
     OutpaintError,
     Padding,
@@ -47,19 +39,6 @@ OutpaintDeriveError = DeriveError
 # Settings key for the nous-center outpaint workflow slug.
 # Keep unset (or empty) to use deterministic blur fill for all requests.
 _OUTPAINT_SLUG_KEY = "NOUS_CENTER_OUTPAINT_SLUG"
-
-
-@dataclass(frozen=True)
-class OutpaintDeriveResult:
-    resource: dict
-
-
-def _outpaint_filename(source_filename: str, override: Optional[str]) -> str:
-    if override:
-        return override
-    if not source_filename:
-        return "outpaint.png"
-    return f"outpaint-{source_filename}"
 
 
 async def run_outpaint_via_nous(
@@ -126,53 +105,6 @@ async def run_outpaint_via_nous(
         f"nous outpaint workflow completed but returned no decodable image "
         f"bytes (text_len={len(result.text)})"
     )
-
-
-async def derive_outpaint_resource(
-    *,
-    source_resource_id: str,
-    user_id: str,
-    padding: Padding,
-    prompt: Optional[str] = None,
-    mode: Literal["deterministic", "ai"] = "deterministic",
-    filename_override: Optional[str] = None,
-    repo: Optional[ResourceRepoProtocol] = None,
-) -> OutpaintDeriveResult:
-    """Extend ``source_resource_id`` by ``padding`` and persist as a new
-    sibling resource in the same scope.
-
-    When ``mode='ai'`` and ``prompt`` is provided, delegates to the
-    nous-center outpaint workflow.  Falls back to deterministic blur fill
-    silently on any nous-center error (no error propagates to the caller).
-
-    Raises:
-        OutpaintDeriveError: with the HTTP status the router should surface
-            (404 source missing, 400 invalid source / padding,
-            500 storage write failure).
-    """
-    repo = repo or ResourcesRepository()
-
-    source = await load_source_image(repo, source_resource_id)
-    image_bytes = await extend_image(
-        source.file_bytes,
-        source.mime_type,
-        padding,
-        prompt=prompt,
-        mode=mode,
-        label=str(source.resource.get("id")),
-    )
-
-    new_resource = await persist_derived_image(
-        repo,
-        user_id=user_id,
-        scope_id=source.scope_id,
-        folder_id=source.folder_id,
-        library_id=source.library_id,
-        filename=_outpaint_filename(source.filename, filename_override),
-        image_bytes=image_bytes,
-        mime_type=source.mime_type,
-    )
-    return OutpaintDeriveResult(resource=new_resource)
 
 
 async def extend_image(
