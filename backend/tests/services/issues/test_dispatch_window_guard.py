@@ -377,6 +377,12 @@ async def test_a_comment_lands_on_the_inbox_while_a_dispatch_is_in_flight(monkey
     store_cls = MagicMock(return_value=store)
     store_cls.display_attachments = staticmethod(lambda a: a)
     monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+    # Task 4 moved the busy branch's session append into
+    # services/issues/inbox_or_dispatch; patch the source module so every
+    # importer sees the same stand-in.
+    import app.services.ai.chat.conversations_ai_store as _store_mod
+
+    monkeypatch.setattr(_store_mod, "ConversationsAiStore", store_cls)
 
     inbox_id = await r._divert_to_inbox_if_running(
         5,
@@ -424,6 +430,12 @@ async def test_the_comment_guard_re_reads_the_issue_instead_of_trusting_its_call
     store_cls = MagicMock(return_value=store)
     store_cls.display_attachments = staticmethod(lambda a: a)
     monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+    # Task 4 moved the busy branch's session append into
+    # services/issues/inbox_or_dispatch; patch the source module so every
+    # importer sees the same stand-in.
+    import app.services.ai.chat.conversations_ai_store as _store_mod
+
+    monkeypatch.setattr(_store_mod, "ConversationsAiStore", store_cls)
 
     # The row the caller is holding is stale: it was loaded before the
     # dispatch. The database already knows better.
@@ -475,6 +487,12 @@ async def test_a_failed_re_read_falls_back_to_the_row_the_caller_had(monkeypatch
     store_cls = MagicMock(return_value=store)
     store_cls.display_attachments = staticmethod(lambda a: a)
     monkeypatch.setattr(r, "ConversationsAiStore", store_cls)
+    # Task 4 moved the busy branch's session append into
+    # services/issues/inbox_or_dispatch; patch the source module so every
+    # importer sees the same stand-in.
+    import app.services.ai.chat.conversations_ai_store as _store_mod
+
+    monkeypatch.setattr(_store_mod, "ConversationsAiStore", store_cls)
     monkeypatch.setattr(
         r.issue_repository, "get_by_id", AsyncMock(side_effect=RuntimeError("db"))
     )

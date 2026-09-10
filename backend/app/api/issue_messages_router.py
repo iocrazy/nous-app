@@ -552,24 +552,6 @@ def _resolve_owner(issue_row: dict) -> str:
     return str(owner_id)
 
 
-async def _fresh_issue_row(issue_id: int, fallback: dict) -> dict:
-    """Re-read the issue so the busy decision is made on current
-    ``execution_state``.
-
-    The same single-row PK read the caller already used (and the same one
-    ``_try_wake_waiting_workflow`` re-does before it acts), so this adds no new
-    query shape. Failure is not fatal: the caller's row is stale, not wrong,
-    and refusing to decide would lose the comment."""
-    try:
-        return await issue_repository.get_by_id(int(issue_id)) or fallback
-    except Exception as exc:  # noqa: BLE001 — a sharpening, not a dependency
-        logger.warning(
-            f"[issue_reply] issue {issue_id}: could not re-read before the "
-            f"inbox decision ({exc!r}); deciding on the caller's row"
-        )
-        return fallback
-
-
 async def _divert_to_inbox_if_running(
     issue_id: int,
     session_id: str,
@@ -596,39 +578,31 @@ async def _divert_to_inbox_if_running(
     typed-answer validation) while ``running_root_run_id`` beside it is read
     fresh, and an unattended dispatch landing in that gap has to be visible
     here. So the marker is re-read; a re-read that fails degrades to the
-    caller's row rather than losing the comment."""
-    from app.repositories.agent_run_inbox_repository import (
-        get_agent_run_inbox_repository,
-    )
-    from app.repositories.agent_runs_repository import get_agent_runs_repository
-    from app.services.issues.issue_dispatch import is_dispatching
+    caller's row rather than losing the comment.
 
-    running = await get_agent_runs_repository().running_root_run_id(
-        issue_id=issue_id, conversation_id=int(session_id)
-    )
-    dispatching = is_dispatching(await _fresh_issue_row(issue_id, issue_row))
-    if running is None and not paused and not dispatching:
-        return None
-    await ConversationsAiStore().append_user_message(
-        session_id=int(session_id),
-        user_id=owner_id,
-        content=body,
-        attachments=ConversationsAiStore.display_attachments(attachments_payload),
-    )
-    row = await get_agent_run_inbox_repository().enqueue(
-        target_kind="issue",
-        target_id=issue_id,
-        user_id=str(auth.user_id),
+    The decision itself lives in ``services/issues/inbox_or_dispatch`` — the
+    scheduled wake-up and the background sub-agent's result answer the same
+    question and must answer it identically. Two things stay comment-specific
+    and are passed in: the inbox row records the COMMENTER while the session
+    append (and the turn) run as the issue OWNER, and ``check_terminal`` is
+    off because a comment on a ``done`` issue wakes the agent on purpose
+    (``comment_trigger``'s docstring)."""
+    from app.services.issues.inbox_or_dispatch import divert_to_inbox_if_busy
+
+    result = await divert_to_inbox_if_busy(
+        issue_id,
         kind="steer",
         content={"body": body, "attachments": attachments_payload or []},
+        user_id=str(auth.user_id),
+        message_body=body,
+        session_id=session_id,
+        issue=issue_row,
+        attachments=attachments_payload,
+        append_as_user_id=owner_id,
+        paused=paused,
+        check_terminal=False,
     )
-    why = (
-        f"run {running}"
-        if running is not None
-        else ("issue paused" if paused else "dispatch in flight")
-    )
-    logger.info(f"[issue_reply] issue {issue_id}: diverted to inbox ({why})")
-    return str(row["id"])
+    return str(result.inbox_id) if result.inbox_id is not None else None
 
 
 @router.post(
@@ -778,19 +752,17 @@ async def post_issue_message(
         )
 
     # ── Wake path (Spec-1b) ───────────────────────────────────────────────
-    wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
-    try:
-        _dispatch_respond_to_issue_reply(
-            issue_id,
-            owner_id,
-            payload.body,
-            attachments_payload,
-            wf_id,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"
-        )
+    # Same helper the schedule wake-up and the background sub-agent result use
+    # for their idle branch, so all three mint the workflow id the same way.
+    from app.services.issues.inbox_or_dispatch import dispatch_issue_reply
+
+    dispatched = await dispatch_issue_reply(
+        issue_id,
+        user_id=owner_id,
+        body=payload.body,
+        attachments=attachments_payload,
+    )
+    if dispatched.mode != "dispatched":
         raise HTTPException(500, "failed to dispatch reply turn")
     if answer is not None:
         await _commit_typed_answer(answer)
