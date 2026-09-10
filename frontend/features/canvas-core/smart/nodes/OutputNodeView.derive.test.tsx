@@ -8,10 +8,10 @@ import { OutputNodeView } from './OutputNodeView';
 
 vi.mock('../../services/canvasService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/canvasService')>();
-  return { ...actual, deriveCanvasCrop: vi.fn() };
+  return { ...actual, deriveCanvasCrop: vi.fn(), deriveCanvasGrid: vi.fn() };
 });
 
-const { deriveCanvasCrop } = await import('../../services/canvasService');
+const { deriveCanvasCrop, deriveCanvasGrid } = await import('../../services/canvasService');
 
 const SOURCE = '/api/v1/generated-media/5/cover';
 const DERIVED = {
@@ -38,6 +38,7 @@ beforeEach(() => {
     } as DOMRect;
   };
   (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockReset();
+  (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockReset();
 });
 
 afterEach(() => {
@@ -154,5 +155,77 @@ describe('OutputNodeView — crop derives from the shown image', () => {
     );
     expect(inEditor.textContent).toMatch(/source image not found/);
     expect(nodeData().preview_url).toBe(SOURCE);
+  });
+});
+
+function editorError(): HTMLElement | null {
+  return within(screen.getByTestId('unified-image-editor')).queryByTestId('editor-commit-error');
+}
+
+describe('OutputNodeView — the dialog shows the CURRENT refusal only', () => {
+  it('a split refusal is forgotten once the editor closes', async () => {
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('at least one split line is required'),
+    );
+    const fullData = seedImageOutput();
+    render(
+      <Wrap>
+        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+      </Wrap>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }));
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/split line/));
+
+    fireEvent.click(screen.getByTestId('editor-cancel'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+    expect(editorError()).toBeNull();
+  });
+
+  it('a later split refusal replaces an earlier crop refusal', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('source image not found'),
+    );
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('at least one split line is required'),
+    );
+    cropAndApply(seedImageOutput());
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/source image not found/));
+
+    fireEvent.click(screen.getByTestId('editor-tab-split'));
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(editorError()?.textContent).toMatch(/split line/));
+    expect(editorError()?.textContent).not.toMatch(/source image not found/);
+  });
+});
+
+describe('OutputNodeView — a crop never drops images that land during the derive', () => {
+  it('keeps a generation result appended while the crop was in flight', async () => {
+    let resolveDerive: (value: typeof DERIVED) => void = () => {};
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<typeof DERIVED>((resolve) => {
+        resolveDerive = resolve;
+      }),
+    );
+    cropAndApply(seedImageOutput());
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+
+    // A generation result lands in the same node while the round trip runs.
+    const LANDED = { url: '/api/v1/generated-media/77/cover', kind: 'image' };
+    useCanvasCoreStore.getState().patchNode('o1', {
+      data: { images: [...(nodeData().images as unknown[]), LANDED] },
+    });
+    resolveDerive(DERIVED);
+
+    await waitFor(() => expect(nodeData().preview_url).toBe(DERIVED.url));
+    expect(nodeData().images).toEqual([{ url: DERIVED.url, kind: 'image', id: '901' }, LANDED]);
   });
 });

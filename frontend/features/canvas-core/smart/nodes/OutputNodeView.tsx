@@ -35,7 +35,7 @@ import { resolveSourceUrls } from '../promptInputs';
 import { swapEditedImage } from '../swapEditedImage';
 import { promptIdForOutput, regenerateForOutput } from '../regenerate';
 import { regenKey, useRegenStore } from '../regenStore';
-import type { OutputNodeData } from '../types';
+import type { GeneratedImageRef, OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { createMediaNodeFromFiles } from '../dropCreate';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
@@ -119,11 +119,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // primary. Every derive keys on THIS url — never on the node's legacy
   // resource_id, which only ever named the primary, and only after a promote.
   const editSourceUrl = editingUrl ?? primaryImageUrl;
-  // Leaving the editor forgets which item was being edited; otherwise the
-  // toolbar's Crop would reopen on a grid item double-clicked long ago.
-  useEffect(() => {
-    if (editorMode === null) setEditingUrl(null);
-  }, [editorMode]);
   const [upscaling, setUpscaling] = useState(false);
   // IC duplicateSmartNodeMediaToCanvas: drop the current image beside this
   // node as an independent media card (no re-upload — same durable url).
@@ -188,6 +183,41 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [outpaintOpen, setOutpaintOpen] = useState(false);
   const [outpaintCommitting, setOutpaintCommitting] = useState(false);
   const [outpaintError, setOutpaintError] = useState<string | null>(null);
+  // The dialog shows ONE reason (`commitError ?? gridError ?? …`), so a
+  // commit starts by forgetting every earlier failure — otherwise a crop
+  // refusal would mask the split refusal that followed it.
+  const clearCommitErrors = useCallback(() => {
+    setCommitError(null);
+    setGridError(null);
+    setMaskError(null);
+    setOutpaintError(null);
+  }, []);
+  // Leaving the editor forgets which item was being edited and why the last
+  // commit failed; otherwise the toolbar's Crop would reopen on a grid item
+  // double-clicked long ago, already showing a stale refusal.
+  useEffect(() => {
+    if (editorMode !== null) return;
+    setEditingUrl(null);
+    clearCommitErrors();
+  }, [editorMode, clearCommitErrors]);
+  // The node's slots as they are NOW. A commit awaits a round trip, and
+  // generation results keep landing in `images` meanwhile
+  // (appendGenerationResults); patching from the render-time closure would
+  // drop them.
+  const readCurrentSlots = useCallback((): {
+    preview_url: string | null;
+    images: GeneratedImageRef[];
+  } => {
+    const current = (
+      useCanvasCoreStore.getState().nodes.find((n) => (n as { id?: string }).id === id) as
+        | { data?: { preview_url?: string | null; images?: GeneratedImageRef[] | null } }
+        | undefined
+    )?.data;
+    return {
+      preview_url: current?.preview_url ?? null,
+      images: Array.isArray(current?.images) ? current.images : [],
+    };
+  }, [id]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const regenerating = useRegenStore((s) => !!s.running[regenKey(canvasId, id)]);
@@ -226,6 +256,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       void (async () => {
         try {
           setPixCommitting(true);
+          clearCommitErrors();
           const file = new File([composite], 'brush.png', { type: 'image/png' });
           // Classified at the point of upload: this composite is an INPUT the
           // editor baked, not something the user asked the library for. Left
@@ -234,7 +265,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           const item = await importCanvasMedia(file, canvasId, id, 'brush');
           patchData({
             images: [
-              ...((images as Array<{ url: string }>) ?? []),
+              ...readCurrentSlots().images,
               { url: item.url, kind: 'image', name: 'brush.png' },
             ],
           });
@@ -247,7 +278,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         }
       })();
     },
-    [editSourceUrl, canvasId, id, images, patchData],
+    [editSourceUrl, canvasId, id, clearCommitErrors, readCurrentSlots, patchData],
   );
   const handleResizeCommit = useCallback(
     (scale: number) => {
@@ -255,6 +286,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       void (async () => {
         try {
           setPixCommitting(true);
+          clearCommitErrors();
           const blob = await bakeResize(editSourceUrl, scale);
           const file = new File([blob], 'resized.png', { type: 'image/png' });
           // A resize is a product the user asked for — visible in the inbox,
@@ -262,7 +294,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           const item = await importCanvasMedia(file, canvasId, id, 'derived');
           patchData({
             images: [
-              ...((images as Array<{ url: string }>) ?? []),
+              ...readCurrentSlots().images,
               { url: item.url, kind: 'image', name: 'resized.png', id: item.id },
             ],
           });
@@ -275,7 +307,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         }
       })();
     },
-    [editSourceUrl, canvasId, id, images, patchData],
+    [editSourceUrl, canvasId, id, clearCommitErrors, readCurrentSlots, patchData],
   );
 
   const canRegenerate = !!promptIdForOutput(id);
@@ -343,25 +375,19 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     setEditorMode('crop');
   }, [canDerive]);
 
-  const closeEditor = useCallback(() => {
-    setEditorOpen(false);
-        setEditorMode(null);
-    setCommitError(null);
-  }, []);
-
   const handleCommit = useCallback(
     async (region: CropRegion) => {
       if (!canvasId || !editSourceUrl) return;
       try {
         setCommitting(true);
-        setCommitError(null);
+        clearCommitErrors();
         const derived = await deriveCanvasCrop(canvasId, editSourceUrl, region, {
           nodeId: id,
         });
         // Replace THE edited image (primary, one grid item, or a history
         // item) with its cropped copy — a durable generated-media url, no
         // session token.
-        patchData({ ...swapEditedImage({ preview_url, images }, editSourceUrl, derived) });
+        patchData({ ...swapEditedImage(readCurrentSlots(), editSourceUrl, derived) });
         setEditorOpen(false);
         setEditorMode(null);
       } catch (err) {
@@ -372,7 +398,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setCommitting(false);
       }
     },
-    [canvasId, editSourceUrl, id, preview_url, images, patchData],
+    [canvasId, editSourceUrl, id, clearCommitErrors, readCurrentSlots, patchData],
   );
 
   const openOutpaintEditor = useCallback(() => {
@@ -381,18 +407,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     setEditorMode('outpaint');
   }, [canDerive]);
 
-  const closeOutpaintEditor = useCallback(() => {
-    setOutpaintOpen(false);
-        setEditorMode(null);
-    setOutpaintError(null);
-  }, []);
-
   const handleOutpaintCommit = useCallback(
     async (padding: OutpaintPadding, prompt: string) => {
       if (!canvasId || !editSourceUrl) return;
       try {
         setOutpaintCommitting(true);
-        setOutpaintError(null);
+        clearCommitErrors();
         const derived = await deriveCanvasOutpaint(canvasId, editSourceUrl, padding, {
           nodeId: id,
           prompt: prompt || undefined,
@@ -431,7 +451,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setOutpaintCommitting(false);
       }
     },
-    [canvasId, editSourceUrl, id],
+    [canvasId, editSourceUrl, id, clearCommitErrors],
   );
 
   const openMaskEditor = useCallback(() => {
@@ -440,12 +460,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     setEditorMode('mask');
   }, [canCrop]);
 
-  const closeMaskEditor = useCallback(() => {
-    setMaskOpen(false);
-        setEditorMode(null);
-    setMaskError(null);
-  }, []);
-
   const handleMaskCommit = useCallback(
     async (
       strokes: MaskStroke[],
@@ -453,7 +467,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     ) => {
       try {
         setMaskCommitting(true);
-        setMaskError(null);
+        clearCommitErrors();
         // IC 生成遮罩: the black/white mask lands INSIDE this node, side by
         // side with the original (one node feeds 图1+图2 downstream) — not
         // as a separate card (2026-08-21 "遮罩直接在外面显示").
@@ -485,7 +499,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setMaskCommitting(false);
       }
     },
-    [id, canvasId, patchData],
+    [id, canvasId, clearCommitErrors, patchData],
   );
 
 
@@ -495,18 +509,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     setEditorMode('split');
   }, [canDerive]);
 
-  const closeGridEditor = useCallback(() => {
-    setGridOpen(false);
-        setEditorMode(null);
-    setGridError(null);
-  }, []);
-
   const handleGridCommit = useCallback(
     async (lines: GridLines) => {
       if (!canvasId || !editSourceUrl) return;
       try {
         setGridCommitting(true);
-        setGridError(null);
+        clearCommitErrors();
         const tiles = await deriveCanvasGrid(canvasId, editSourceUrl, lines, {
           nodeId: id,
         });
@@ -541,7 +549,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setGridCommitting(false);
       }
     },
-    [canvasId, editSourceUrl, id],
+    [canvasId, editSourceUrl, id, clearCommitErrors],
   );
 
   // Mount the floating toolbar only while the card is hovered / focused
