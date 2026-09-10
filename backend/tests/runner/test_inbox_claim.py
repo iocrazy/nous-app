@@ -113,7 +113,15 @@ async def test_root_run_claims_injects_and_records_coordinates():
     assert rec.events == [
         (
             "inbox_claimed",
-            {"inbox_id": "310819108761499", "kind": "steer", "turn": 1, "step": 3},
+            {
+                "inbox_id": "310819108761499",
+                "kind": "steer",
+                "turn": 1,
+                "step": 3,
+                # Task 7b defect G — WHAT was claimed, bounded. The shape per
+                # kind lives in tests/runner/test_inbox_claimed_content.py.
+                "content": {"text": "focus on act two"},
+            },
             1,
             3,
         )

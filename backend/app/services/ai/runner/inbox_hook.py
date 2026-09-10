@@ -62,6 +62,13 @@ class InboxClaimHook:
                     "kind": item.kind,
                     "turn": ctx.turn,
                     "step": ctx.step,
+                    # WHAT was claimed, bounded. Without it the trajectory fold
+                    # defaulted every field, and ``status`` defaults to
+                    # ``completed`` — a failed sub-agent rendered as ✓ Done
+                    # (Task 7b defect G). ``claimed_event_content`` owns the
+                    # shape and the truncation; this is the transcript's copy,
+                    # not the model's (that is ``render_inbox_message`` above).
+                    "content": inbox_mod.claimed_event_content(item),
                 },
                 turn=ctx.turn,
                 step=ctx.step,
