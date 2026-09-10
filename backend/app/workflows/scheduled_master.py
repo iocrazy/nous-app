@@ -742,13 +742,28 @@ async def _disable_schedule(
 _WAKEUP_DELIVERED = ("inbox", "dispatched")
 
 
+#: The only reasons that PROVE the target will never accept this wake-up. A
+#: whitelist, deliberately: `issue_unreadable` means the re-read itself failed
+#: (a Postgres blip), not that the issue is gone — a probe that could not reach
+#: its target has not proved the target is absent, and disabling on it would
+#: kill a user's wake-up for good over a transient error. Anything not listed
+#: here — including a reason added later that nobody taught this function — is
+#: treated as a failure, which retries and eventually trips the breaker. The
+#: safe default has to be the one that keeps the wake-up alive.
+_WAKEUP_PROVEN_TERMINAL_REASONS = frozenset({"issue_terminal", "issue_missing"})
+
+
 def _is_delivery_failure(result_mode: str, reason: Optional[str]) -> bool:
-    """A failed delivery arrives in TWO shapes and both must book a failure:
-    an exception (``result_mode='error'``) and the typed value
-    ``DeliverResult('skipped', reason='dispatch_failed: …')`` that the idle
-    branch returns instead of raising. Reading only the first is how a lost
-    wake-up came to look exactly like a delivered one."""
-    return result_mode == "error" or (reason or "").startswith("dispatch_failed")
+    """Did this delivery fail? Everything that is neither a delivery nor a
+    PROVEN-terminal target counts as one.
+
+    A failure arrives in two shapes and both must be booked: an exception
+    (``result_mode='error'``) and the typed value ``DeliverResult('skipped',
+    reason=…)`` the idle branch returns instead of raising. Reading only the
+    first is how a lost wake-up came to look exactly like a delivered one."""
+    if result_mode in _WAKEUP_DELIVERED:
+        return False
+    return (reason or "") not in _WAKEUP_PROVEN_TERMINAL_REASONS
 
 
 @DBOS.step()
@@ -768,8 +783,10 @@ async def finish_issue_wakeup_step(
       retries it, which is safe because the fire key makes the delivery
       idempotent; at ``_AUTO_PAUSE_THRESHOLD`` consecutive failures it pauses,
       the same breaker a routine gets.
-    * skipped for any other reason (a terminal issue discovered between the
+    * skipped for a PROVEN-terminal reason (the issue went away between the
       step and the delivery) → disabled with THAT reason, so the row says why.
+      Only the reasons in ``_WAKEUP_PROVEN_TERMINAL_REASONS`` qualify;
+      everything else falls into the failure branch above.
 
     Returns the outcome it wrote, for the log and for tests."""
     from sqlalchemy import update

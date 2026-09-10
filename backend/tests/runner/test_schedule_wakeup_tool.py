@@ -195,11 +195,42 @@ async def test_another_run_starts_from_zero(inserted):
 @pytest.mark.asyncio
 async def test_a_naive_fire_at_has_its_own_code_on_the_api_path():
     """The tool reads a naive time as UTC; the API refuses it — and must say
-    WHICH thing is wrong, or the UI shows "pick a time" to someone who did."""
-    from app.api.schedules_router import _bad_request
+    WHICH thing is wrong, or the UI shows "pick a time" to someone who did.
 
-    exc = _bad_request("fire_at_timezone_required", "x")
-    assert exc.detail["code"] == "fire_at_timezone_required"
+    Asserted through the real request path and the real error envelope: the
+    browser reads `details.code`, and a string detail would arrive there as a
+    bare `http_400` no matter what the raise site intended."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.schedules_router import router
+    from app.core.deps import get_auth
+    from app.core.exceptions import register_exception_handlers
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(router, prefix="/api/v1")
+
+    class _Auth:
+        user_id = "11111111-1111-4111-8111-111111111111"
+        email = "u@example.com"
+
+    async def _grant():
+        return _Auth()
+
+    app.dependency_overrides[get_auth] = _grant
+
+    naive = (datetime.now() + timedelta(hours=2)).isoformat()  # no offset
+    resp = TestClient(app).post(
+        "/api/v1/schedules",
+        json={
+            "task_type": "issue_wakeup",
+            "fire_at": naive,
+            "payload": {"issue_id": 123, "text": "check the render"},
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["details"]["code"] == "fire_at_timezone_required"
 
 
 @pytest.mark.asyncio

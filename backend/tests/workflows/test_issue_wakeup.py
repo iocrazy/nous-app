@@ -239,10 +239,39 @@ async def test_the_fifth_consecutive_failure_pauses_the_row(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_late_discovered_terminal_issue_disables_with_that_reason(fake_db):
-    await sm.finish_issue_wakeup_step("s1", "k", "skipped", "issue_terminal")
+@pytest.mark.parametrize("reason", ["issue_terminal", "issue_missing"])
+async def test_a_proven_terminal_target_disables_with_that_reason(fake_db, reason):
+    await sm.finish_issue_wakeup_step("s1", "k", "skipped", reason)
     assert fake_db.updates["s1"]["enabled"] is False
-    assert fake_db.updates["s1"]["pause_reason"] == "issue_terminal"
+    assert fake_db.updates["s1"]["pause_reason"] == reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["issue_unreadable", "something_new"])
+async def test_an_unproven_skip_keeps_the_wakeup_armed(monkeypatch, reason):
+    """`issue_unreadable` means the re-read FAILED, not that the issue is
+    gone — a Postgres blip would otherwise kill the wake-up for good. The
+    classifier is a whitelist of proven-terminal reasons for exactly this:
+    anything it has not been taught is a failure, and a failure retries."""
+    db = _FakeDb([_Result([1])])
+    monkeypatch.setattr(db_session, "read_scope", lambda: _Scope(db))
+    monkeypatch.setattr(db_session, "write_scope", lambda: _Scope(db))
+
+    await sm.finish_issue_wakeup_step("s1", "k", "skipped", reason)
+
+    assert "enabled" not in db.updates["s1"]
+    assert db.updates["s1"]["last_error"] == reason
+    sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "consecutive_fails=(public.user_schedules.consecutive_fails +" in sql
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_issue_is_counted_as_an_error_by_the_body(monkeypatch):
+    _patch_delivery(monkeypatch, _R("skipped", "issue_unreadable"))
+    _patch_finish(monkeypatch)
+    counters: Dict[str, Any] = {}
+    await sm._dispatch_routine_orders([_order()], counters)
+    assert counters["errors"] == 1
 
 
 # ── _dispatch_one wiring ────────────────────────────────────────────────────

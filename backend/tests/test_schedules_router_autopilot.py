@@ -425,6 +425,26 @@ async def test_giving_a_one_shot_a_cron_is_a_typed_400(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_patching_an_unknown_schedule_is_404_not_a_shape_complaint(monkeypatch):
+    """A foreign or missing id must not be answered by describing the shape of
+    a row the caller cannot see."""
+    read_session = _FakeSession(_Result([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(read_session))
+
+    def _explode():
+        raise AssertionError("write_scope must not open for an unseen row")
+
+    monkeypatch.setattr(mod, "write_scope", _explode)
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+
+    with pytest.raises(HTTPException) as exc:
+        await mod.update_schedule(
+            "sched-x", mod.ScheduleUpdatePayload(fire_at=later), _Auth(_ME)
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_giving_a_cron_row_a_fire_at_is_a_typed_400(monkeypatch):
     _patch_patch(
         monkeypatch,

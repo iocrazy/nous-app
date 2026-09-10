@@ -399,6 +399,11 @@ async def update_schedule(
     ):
         _validate_agent_routine_payload(fields["payload"])
 
+    # An id we could not read is 404 — answering it by describing the shape of
+    # a row the caller cannot see would both mislead and leak that it exists.
+    if needs_existing and existing_row is None:
+        raise HTTPException(404, "schedule not found")
+
     # A one-shot and a recurring row take different edits, and mixing them is
     # a typed 400 rather than a CHECK violation surfacing as a 500.
     is_once = existing_row is not None and not existing_row["cron_expr"]
