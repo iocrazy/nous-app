@@ -22,6 +22,20 @@ from app.repositories.agent_run_inbox_repository import (
 
 INBOX_FRAME = "inbox_message"
 
+#: Longest free text an ``inbox_claimed`` payload carries. A transcript row is
+#: written once and re-read on every replay, fold and export, so the projection
+#: is bounded — the whole body lives in ``agent_run_inbox`` and the UI links to
+#: it. 500 is enough for a sub-agent's answer to read as an answer.
+CLAIMED_TEXT_MAX = 500
+
+#: Longest ``description`` one carries. Smaller because it is a card TITLE, not
+#: an answer — and because it is the model's own ``Task(description=…)``
+#: argument with no schema bounding it, so "an agent puts 20 KB here" is a
+#: thing that happens, not a thing to hope about. It went in unclipped until
+#: the Task 7b review, while this file's own comments promised a bounded
+#: projection.
+CLAIMED_DESCRIPTION_MAX = 200
+
 
 @dataclass(frozen=True)
 class InboxItem:
@@ -60,6 +74,70 @@ class InboxItem:
             v = c["value"]
             return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
         return json.dumps(c, ensure_ascii=False, default=str)
+
+
+def _clip(text: Any, limit: int = CLAIMED_TEXT_MAX) -> str:
+    """``text`` as a string, bounded, saying so when it was cut. A silently
+    truncated summary reads as a complete short answer."""
+    s = "" if text is None else str(text)
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def claimed_event_content(item: InboxItem) -> dict[str, Any]:
+    """The bounded projection of ``item.content`` that rides on the
+    ``inbox_claimed`` transcript event.
+
+    NOT ``render_inbox_message`` — that one is what the MODEL reads and is
+    priced per turn; this one is what the transcript stores and the trajectory
+    folds. Keeping them apart is why the envelope's cost and token counts can
+    appear here without appearing in the model's context.
+
+    Until Task 7b the event carried no content at all, and every field the
+    frontend fold reads defaulted. Three of the defaults merely lost
+    information; ``status`` defaulted to ``completed``, so a FAILED sub-agent
+    rendered as ``✓ Done`` (2026-09-10 UI walkthrough, MH-80). Every key is
+    therefore always present, with ``None`` for "the envelope did not say" —
+    a reader must never have to tell that apart from "this arm forgot to ask".
+
+    ``source`` is passed through WHOLE and only when present: it is a small
+    fixed shape (``kind`` / ``schedule_id`` / ``created_by``), it is what the
+    wake-up provenance chip reads, and clipping it would corrupt an id.
+    """
+    c = item.content
+    if item.kind == "subagent_result":
+        return {
+            "child_run_id": c.get("child_run_id"),
+            "subagent_type": c.get("subagent_type"),
+            # Model-authored and unbounded upstream — clipped like any other
+            # free text, just to a title's length.
+            "description": _clip(c.get("description"), CLAIMED_DESCRIPTION_MAX),
+            "status": c.get("status"),
+            "summary": _clip(c.get("summary") or ""),
+            "cost_cents": c.get("cost_cents"),
+            "tokens_used": c.get("tokens_used"),
+        }
+
+    # Every other kind mig 461 allows (steer / answer / pause / resume /
+    # budget_reply) is one piece of text plus optional provenance. The text is
+    # read from the shapes those producers actually write — ``text`` from the
+    # wake-up and comment paths, ``body`` from the older steer shape, ``value``
+    # from an answer — and never from a JSON dump of the whole row, which would
+    # put bookkeeping like ``dedupe_key`` into the transcript forever.
+    text = c.get("text")
+    if text is None:
+        text = c.get("body")
+    if text is None and item.kind == "answer":
+        v = c.get("value")
+        text = (
+            v
+            if isinstance(v, str)
+            else (json.dumps(v, ensure_ascii=False) if v is not None else None)
+        )
+    out: dict[str, Any] = {"text": _clip(text)}
+    source = c.get("source")
+    if isinstance(source, dict):
+        out["source"] = source
+    return out
 
 
 def render_inbox_message(item: InboxItem) -> str:

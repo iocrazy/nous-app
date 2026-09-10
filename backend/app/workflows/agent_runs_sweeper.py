@@ -170,6 +170,15 @@ async def scan_idle_inbox_step() -> list[dict[str, Any]]:
     this is the backstop for everything that misses that window — a run that
     crashed, a dispatch that never started, a stream past the bound.
 
+    Being the BACKSTOP, it declines to race the primary: ``pending_issue_targets``
+    excludes issues holding ``execution_locked_at``. That lock is up for the
+    whole lifetime of ``execute_issue``, including the seconds between the
+    in-turn drain deciding to run one more turn and that turn's ``agent_runs``
+    row existing — a gap in which NONE of the three busy signals is raised. On
+    2026-09-10 a tick landed inside an 11 s one and bought a second billed turn
+    on an item the drain had already taken, which reached the user as an
+    unexplained "Continue working on this issue" (Task 7b defect C).
+
     ⚠️ **This function must never dispatch.** DBOS forbids ``start_workflow``
     from inside a step and asserts it with an EMPTY message, which the delivery
     path catches and returns as ``skipped/dispatch_failed:`` — the first cut of

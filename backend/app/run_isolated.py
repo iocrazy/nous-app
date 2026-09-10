@@ -37,7 +37,8 @@ Wire format (must match `isolated_runner.py`):
                "task_id": str|None,
                "run_id":  str|None,
                "error_code": str|None,
-               "error_message": str|None}
+               "error_message": str|None,
+               "idle_dispatch": {"issue_id": int, "user_id": str}|None}
     stderr: free-form logs (loguru output forwarded to parent)
     exit:   0 on success or expected failure (status surfaces in JSON);
             non-zero only when the script itself crashed (parent treats
@@ -114,6 +115,7 @@ async def _main_async() -> int:
                 "run_id": None,
                 "error_code": "runtime_error",
                 "error_message": f"{type(exc).__name__}: {exc}"[:500],
+                "idle_dispatch": None,
             }
         )
         return 1
@@ -128,6 +130,11 @@ async def _main_async() -> int:
         "run_id": result.get("run_id"),
         "error_code": None,
         "error_message": None,
+        # A background sub-agent's wake ORDER. This process has no DBOS
+        # context at all, so it could not act on it even if it wanted to —
+        # the parent's workflow body does. Dropping it here would be a
+        # wake-up that silently never happens in subprocess mode only.
+        "idle_dispatch": result.get("idle_dispatch"),
     }
     # `run_one_task` doesn't carry error_code/message back through its
     # return — they're written to the agent_tasks row directly. We don't
@@ -153,6 +160,7 @@ def main() -> None:
                 "run_id": None,
                 "error_code": "interrupted",
                 "error_message": "child received SIGINT",
+                "idle_dispatch": None,
             }
         )
         rc = 130  # POSIX convention for SIGINT

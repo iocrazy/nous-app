@@ -330,7 +330,7 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean;
         />
       )}
       {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
-      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} forkMarks={forkMarks} />
+      <TrajectoryRenderer events={shown} isRunning={isRunning && !replaying} forkMarks={forkMarks} runId={runId} />
     </div>
   );
 };

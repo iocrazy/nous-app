@@ -12,6 +12,7 @@ import type { AgentRunEvent } from '../../../types';
 import { foldEvents, type TrajectoryNode } from './foldEvents';
 import './nodes/builtins';
 import { trajectoryNodeFor } from './nodes/registry';
+import { TrajectoryRunContext } from './trajectoryRunContext';
 
 export interface TrajectoryRendererProps {
   events: AgentRunEvent[];
@@ -21,6 +22,11 @@ export interface TrajectoryRendererProps {
   hideWhenEmpty?: boolean;
   /** Phase 2b-1 §2: node.key → ids of runs forked at that boundary. */
   forkMarks?: Record<string, string[]>;
+  /** The run these events belong to. A sub-agent card names it when it opens
+   *  the child's panel — «from run #…» in that header (Task 7b defect H).
+   *  Surfaces that do not track a run id leave it unset and the header falls
+   *  back to a dash, as it always did. */
+  runId?: string | null;
 }
 
 export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
@@ -29,6 +35,7 @@ export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
   className = '',
   hideWhenEmpty = true,
   forkMarks,
+  runId = null,
 }) => {
   const nodes = useMemo(() => foldEvents(events, { isRunning }), [events, isRunning]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -43,15 +50,17 @@ export const TrajectoryRenderer: React.FC<TrajectoryRendererProps> = ({
 
   if (nodes.length === 0 && hideWhenEmpty) return null;
   return (
-    <div className={`flex flex-col gap-0.5 ${className}`} data-testid="trajectory">
-      {nodes.map((node) => {
-        const View = trajectoryNodeFor(node.kind);
-        if (!View) return null;
-        return (
-          <View key={node.key} node={node} expanded={expanded.has(node.key)} onToggle={toggle} marks={forkMarks?.[node.key]} />
-        );
-      })}
-    </div>
+    <TrajectoryRunContext.Provider value={runId}>
+      <div className={`flex flex-col gap-0.5 ${className}`} data-testid="trajectory">
+        {nodes.map((node) => {
+          const View = trajectoryNodeFor(node.kind);
+          if (!View) return null;
+          return (
+            <View key={node.key} node={node} expanded={expanded.has(node.key)} onToggle={toggle} marks={forkMarks?.[node.key]} />
+          );
+        })}
+      </div>
+    </TrajectoryRunContext.Provider>
   );
 };
 

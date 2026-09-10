@@ -352,6 +352,7 @@ async def build_agent_runner_stack(
         caller_user_id=user_id,
         parent_run_id=parent_run_id,
         agent_depth=agent_depth,
+        issue_id=issue_id,
     )
 
     # ── 4.5. MCP outbound registry (G1+G5) ───────────────────────────

@@ -68,6 +68,7 @@ from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     AgentWorkforceRepository,
     get_agent_workforce_repository,
+    payload_issue_id,
 )
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
@@ -98,6 +99,14 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
 
     Returns a small dict for observability:
       ``{"task_id": str, "status": str, "run_id": str|None}``
+
+    The background sub-agent branch adds ``idle_dispatch``
+    (``{"issue_id": int, "user_id": str} | None``) — an ORDER for the caller,
+    not something this function may carry out. Everything here executes inside
+    ``run_one_task_step`` (a ``@DBOS.step``), and starting a workflow from
+    inside a step is what DBOS asserts against; see ``_run_subagent_task``.
+    Other branches never wake an issue, so they omit the key and the body
+    reads it with ``.get``.
     """
     task_id_str = task.get("id")
     if not task_id_str:
@@ -236,6 +245,14 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             settings=settings,
             parent_run_id=parent_run_id,
             agent_depth=inherited_depth,
+            # The issue this delegation belongs to, carried on the payload
+            # since Task 7b defect F. It has to reach the delegated agent's
+            # OWN tool stack: if that agent delegates again, its Delegate tool
+            # reads this to stamp the next payload — hop 2 landed with a NULL
+            # ``task_tracking.issue_id`` until the review caught it, so an
+            # issue's delegated work was findable one level deep and no
+            # further. Also stamps the issue on any sub-run it spawns.
+            issue_id=payload_issue_id(payload),
         )
 
         composer = PromptComposer(agent_repo, skill_repo)
@@ -390,10 +407,19 @@ async def _run_subagent_task(
     task row is finalised with a typed ``error_code``.
 
     Delivery is TWO decisions on an issue target, not one. The inbox row is
-    the result itself and is written unconditionally — an idle issue would
-    otherwise have nothing to read the answer from. ``deliver_or_dispatch``
-    then answers the separate question of whether a turn should start now,
-    and ``already_enqueued`` keeps its busy branch from adding a second row.
+    the result itself and is written HERE, unconditionally — an idle issue
+    would otherwise have nothing to read the answer from. Whether a turn
+    should ALSO start now is the second decision, and this function does not
+    make it: it returns ``idle_dispatch``, the order that
+    ``agent_workforce_workflow``'s body carries out.
+
+    That split is route C, and it is not a preference. This whole function
+    runs inside ``run_one_task_step`` (a ``@DBOS.step``); the idle arm of
+    ``deliver_or_dispatch`` reaches ``DBOS.start_workflow``, which DBOS
+    refuses from inside a step — ``AssertionError: assert cur_ctx.is_workflow()``
+    on EVERY background result delivered to an idle issue (Task 7b defect B).
+    The Task 7a sweeper caught each one a minute later, so the only symptoms
+    were a delay and an ERROR with a full traceback per sub-agent.
 
     ``subagent_done`` goes on the PARENT run. That run may have ended turns
     ago; events outlive runs, and the fold counts a ``done`` with no matching
@@ -406,7 +432,6 @@ async def _run_subagent_task(
     )
     from app.services.ai.runner.run_recorder import RunEventWriter
     from app.services.ai.runner.subagent_task_service import SubAgentTaskService
-    from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
 
     started = time.monotonic()
     parent_run_id = payload.get("parent_run_id")
@@ -428,7 +453,12 @@ async def _run_subagent_task(
         await _finalise_subagent_task(
             workforce, task_id, ok=False, error_code="bad_subagent_payload"
         )
-        return {"task_id": str(task_id), "status": "failed", "run_id": None}
+        return {
+            "task_id": str(task_id),
+            "status": "failed",
+            "run_id": None,
+            "idle_dispatch": None,
+        }
 
     # ── run the child ────────────────────────────────────────────────
     failures: list[str] = []
@@ -506,21 +536,15 @@ async def _run_subagent_task(
             f"failed: {err}"
         )
 
-    if target_kind == "issue" and target_id is not None:
-        try:
-            await deliver_or_dispatch(
-                target_id,
-                kind="subagent_result",
-                content=content,
-                user_id=str(payload["user_id"]),
-                already_enqueued=True,
-            )
-        except Exception as err:  # noqa: BLE001 — the result IS already filed
-            logger.exception(
-                f"[agent-worker] subagent task {task_id}: could not decide "
-                f"whether to wake issue {target_id}: {err}"
-            )
-            failures.append("wake_failed")
+    # The wake ORDER, not the wake. Only an issue has turns to start, so a
+    # conversation target carries None — and the key is present either way:
+    # an absent key would leave the workflow body guessing whether this branch
+    # considered the question at all.
+    idle_dispatch: Optional[dict[str, Any]] = (
+        {"issue_id": int(target_id), "user_id": str(payload["user_id"])}
+        if target_kind == "issue" and target_id is not None
+        else None
+    )
 
     # ── always: the parent's transcript, then the task row ───────────
     if parent_run_id:
@@ -554,6 +578,7 @@ async def _run_subagent_task(
         "task_id": str(task_id),
         "status": "success" if ok else "failed",
         "run_id": content["child_run_id"],
+        "idle_dispatch": idle_dispatch,
     }
 
 

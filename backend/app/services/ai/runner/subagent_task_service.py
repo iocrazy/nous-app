@@ -84,6 +84,12 @@ ENVELOPE_KEYS = (
     "key_findings",
     "files_created",
     "tokens_used",
+    # What the child spent. The BACKGROUND path travels only in this envelope
+    # — the worker has no recorder to ask — so a key missing here is a cost
+    # that reaches the parent as a literal 0 while the child billed real cents
+    # (Task 7b defect A). The synchronous path reads the recorder directly and
+    # was never affected, which is why it went unnoticed.
+    "cost_cents",
     "sub_run_id",
     "status",
 )
@@ -113,11 +119,41 @@ def _tokens_of(recorder: Any) -> int:
         return 0
 
 
-def _cost_cents_of(recorder: Any) -> float:
-    """What the child cost, for the parent's ``cost.by_child`` breakdown.
-    The recorder computes it from its own token counters; a stand-in that
-    cannot is reported as 0.0 rather than crashing the emit."""
+def _as_int(raw: Any) -> Optional[int]:
+    """A Snowflake id as an int, or None when it is absent or unusable.
+
+    Ids cross this module as ints (asyncpg BIGINT) and as strings (payloads,
+    model arguments) interchangeably. None is the ONE answer for "no usable
+    value": an ownership check that cannot read an id must refuse, and telling
+    "absent" apart from "malformed" here would only give the caller a second
+    way to say no."""
+    if raw is None:
+        return None
     try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cost_cents_of(recorder: Any) -> float:
+    """What the child cost IN TOTAL, for the parent's ``cost.by_child``.
+
+    The folded view first: ``views["cost"]["spent_cents"]`` is ``own_cents``
+    plus everything the child's OWN children spent, kept in step by
+    ``recompute_spent`` as the run's ``step_end`` and ``subagent_done`` events
+    fold. ``by_child`` holds one number per child and that number is the
+    child's whole subtree, so a child that fanned out has to report the total —
+    ``compute_cost_cents()`` knows only its own tokens.
+
+    It falls back to ``compute_cost_cents()`` for a run that emitted no step
+    folds (and to a plain ``cost_cents`` attribute for a stand-in that has
+    neither). A recorder that cannot answer is reported as 0.0 rather than
+    crashing the emit."""
+    try:
+        folded = (getattr(recorder, "views", None) or {}).get("cost") or {}
+        spent = float(folded.get("spent_cents") or 0.0)
+        if spent:
+            return spent
         compute = getattr(recorder, "compute_cost_cents", None)
         if callable(compute):
             return float(compute() or 0.0)
@@ -195,6 +231,19 @@ class SubAgentTaskService:
         """
         rid = getattr(self.parent_recorder, "run_id", None)
         return str(rid) if rid else self.parent_run_id
+
+    @property
+    def active_issue_id(self) -> Optional[int]:
+        """The issue this turn belongs to, resolved the same way
+        ``active_parent_run_id`` is: the running recorder first, the
+        constructor value as the fallback for callers that have none (the
+        workforce worker rebuilds this service from a payload that already
+        carries it). ``None`` on a conversation-scoped or probe run.
+
+        Same source as ``_reply_target`` uses, deliberately: "which issue is
+        this" must not have two answers within one service."""
+        rec_issue = getattr(self.parent_recorder, "issue_id", None)
+        return _as_int(rec_issue if rec_issue is not None else self.issue_id)
 
     async def spawn(self, args: dict[str, Any]) -> dict[str, Any]:
         """Public entry: dispatch + roll observability up to the
@@ -752,34 +801,57 @@ class SubAgentTaskService:
     # ── continue (child_run_id) ───────────────────────────────────────
 
     async def _child_chain_ok(self, child_run_id: str) -> bool:
-        """True when ``child_run_id`` really descends from this parent run.
+        """True when ``child_run_id`` is this caller's to continue.
 
         The id comes from the model, so this is the guard that keeps
-        ``child_run_id`` from reading a stranger's transcript. Walk up
-        ``parent_run_id`` / ``fork_of_run_id`` (a continued round hangs off
-        the round before it, not off the parent) and stop at
-        ``MAX_PARENT_HOPS`` so a data cycle cannot spin here forever.
+        ``child_run_id`` from reading a stranger's transcript. TWO arms, and
+        a child that satisfies either is ours:
+
+        * **ancestry** — walk up ``parent_run_id`` / ``fork_of_run_id`` (a
+          continued round hangs off the round before it, not off the parent)
+          and stop at ``MAX_PARENT_HOPS`` so a data cycle cannot spin forever;
+        * **same issue** — the child's ``issue_id`` equals the issue this turn
+          belongs to.
+
+        The second arm is not a loosening for convenience: a BACKGROUND child
+        returns after the turn that spawned it has ended, so the only natural
+        way to continue it is the issue's next turn — a SIBLING of the spawner,
+        which the walk can never reach. Before Task 7b every such attempt was
+        refused with ``not_your_child`` (2026-09-10 acceptance: child hanging
+        off turn 1, request arriving on turn 2), which made background
+        continuation impossible rather than merely awkward.
+
+        A conversation-scoped run has no issue, so it keeps the ancestor rule
+        alone; a child whose own ``issue_id`` is NULL is an unanswered
+        question, not a match — adopting it would hand every unscoped run's
+        transcript to whichever issue asked first.
         """
-        parent_run_id = self.active_parent_run_id
-        if not parent_run_id:
-            return False
         from sqlalchemy import select
 
         from app.db.session import read_scope
         from app.models import AgentRuns
 
-        try:
-            target = int(parent_run_id)
-            cursor: Optional[int] = int(child_run_id)
-        except (TypeError, ValueError):
+        target = _as_int(self.active_parent_run_id)
+        my_issue = _as_int(self.active_issue_id)
+        if target is None and my_issue is None:
+            # Neither arm has anything to compare. Falling through would run
+            # the walk with ``target is None``, and a child whose
+            # ``parent_run_id`` is NULL would then match it.
+            return False
+        cursor = _as_int(child_run_id)
+        if cursor is None:
             return False
 
         try:
             async with read_scope() as session:
-                for _ in range(MAX_PARENT_HOPS):
+                for hop in range(MAX_PARENT_HOPS):
                     row = (
                         await session.execute(
-                            select(AgentRuns.parent_run_id, AgentRuns.fork_of_run_id)
+                            select(
+                                AgentRuns.parent_run_id,
+                                AgentRuns.fork_of_run_id,
+                                AgentRuns.issue_id,
+                            )
                             .where(AgentRuns.id == cursor)
                             .limit(1)
                         )
@@ -787,7 +859,15 @@ class SubAgentTaskService:
                     if row is None:
                         return False
                     parent, forked_from = row[0], row[1]
-                    if parent == target or forked_from == target:
+                    if hop == 0 and my_issue is not None:
+                        # The child's OWN row answers the issue arm, so it is
+                        # settled before a single hop is spent on it.
+                        child_issue = _as_int(row[2])
+                        if child_issue is not None and child_issue == my_issue:
+                            return True
+                    if target is not None and (
+                        parent == target or forked_from == target
+                    ):
                         return True
                     cursor = parent or forked_from
                     if cursor is None:
@@ -907,6 +987,9 @@ class SubAgentTaskService:
             "key_findings": [],
             "files_created": [],
             "tokens_used": tokens_used,
+            # Same source the synchronous path's ``subagent_done`` uses, so the
+            # two forms of the same child cannot name different numbers.
+            "cost_cents": _cost_cents_of(recorder) if recorder is not None else 0.0,
             "sub_run_id": str(sub_run_id) if sub_run_id else None,
             "status": status,
             **({"error": error} if error else {}),
@@ -922,6 +1005,9 @@ class SubAgentTaskService:
             "key_findings": [],
             "files_created": [],
             "tokens_used": 0,
+            # Nothing ran, so nothing was spent — but the key is present, so a
+            # reader never has to tell "no cost" apart from "no field".
+            "cost_cents": 0.0,
             "sub_run_id": None,
             "status": "failed",
             "error": error_msg,

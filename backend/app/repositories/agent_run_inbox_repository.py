@@ -100,7 +100,24 @@ def pending_issue_targets_stmt(limit: int):
     No aggregate over ``user_id``: Postgres has no ``min(uuid)``, and a stubbed
     session would happily compile one. The caller reads one pending row per
     target instead (bounded by the same limit).
+
+    An issue holding ``execution_locked_at`` is EXCLUDED (Task 7b defect C).
+    ``deliver_or_dispatch`` owns the three busy signals and this does not
+    re-implement them — but there is a fourth state none of them covers:
+    ``issue_lifecycle``'s in-turn drain has decided to run one more turn while
+    the new ``agent_runs`` row does not exist yet, so no root run is running,
+    nothing is paused, and no ``dispatching`` marker is up. The turn lock is
+    what IS held across that gap (``execute_issue`` keeps it for the whole
+    workflow), and on 2026-09-10 a sweeper tick landed in an 11 s one and
+    bought a second billed turn on an item the drain had already taken.
+
+    It belongs here rather than in ``_busy_reason``: this exclusion is the
+    BACKSTOP declining to race the primary, not a general statement that a
+    locked issue is busy — the reply path takes that same lock for itself.
     """
+    from app.models import Issues
+
+    locked_issue_ids = select(Issues.id).where(Issues.execution_locked_at.isnot(None))
     return (
         select(
             AgentRunInbox.target_id,
@@ -109,6 +126,7 @@ def pending_issue_targets_stmt(limit: int):
         )
         .where(AgentRunInbox.target_kind == "issue")
         .where(*_pending())
+        .where(AgentRunInbox.target_id.notin_(locked_issue_ids))
         .group_by(AgentRunInbox.target_id)
         .order_by(func.min(AgentRunInbox.created_at))
         .limit(int(limit))

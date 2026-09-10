@@ -234,6 +234,22 @@ describe('foldEvents — a background result reaches the card that spawned it', 
     }
   });
 
+  // The payload the backend really emits, copied from the 2026-09-10
+  // acceptance rather than idealised. `status` is 'success'/'failed' (the
+  // envelope's words), NOT the 'completed' the older cases here use — and the
+  // whole defect class was a fold that was right against a hand-written shape
+  // and wrong against this one (Task 7b defect G).
+  it('reads the real inbox_claimed content the backend emits', () => {
+    const nodes = foldEvents([
+      at(1, 'inbox_claimed', { inbox_id: '348057319832967', kind: 'subagent_result', turn: 1, step: 1, content: { child_run_id: '348057286155642', subagent_type: 'summarize', description: 'probe', status: 'success', summary: 'OK', cost_cents: 0.0236, tokens_used: 1725 } }),
+      at(2, 'inbox_claimed', { inbox_id: '348057933360727', kind: 'subagent_result', turn: 1, step: 1, content: { child_run_id: null, subagent_type: 'summarize', description: 'probe', status: 'failed', summary: '', cost_cents: 0, tokens_used: 0 } }),
+    ]);
+    expect(nodes[0]).toMatchObject({ kind: 'inbox', result: { subagentType: 'summarize', status: 'success', summary: 'OK', costCents: 0.0236, tokensUsed: 1725 } });
+    // MH-80: this one rendered as ✓ Done because `status` was absent and the
+    // fold's default is 'completed'. It has to survive as 'failed'.
+    expect(nodes[1]).toMatchObject({ kind: 'inbox', result: { status: 'failed', childRunId: null } });
+  });
+
   it('a failed child keeps its status — the card is the only place it shows', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 1 }, 1),
