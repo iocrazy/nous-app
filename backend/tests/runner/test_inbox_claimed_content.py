@@ -28,6 +28,7 @@ import datetime as dt
 import pytest
 
 from app.services.ai.runner.inbox import (
+    CLAIMED_DESCRIPTION_MAX,
     CLAIMED_TEXT_MAX,
     InboxItem,
     claimed_event_content,
@@ -115,6 +116,30 @@ def test_a_long_summary_is_truncated_and_says_so():
     )
     assert len(out["summary"]) <= CLAIMED_TEXT_MAX
     assert out["summary"].endswith("…")
+
+
+def test_the_model_authored_description_is_clipped_too():
+    """Task 7b review I2. ``description`` is the model's own
+    ``Task(description=…)`` argument — no schema bounds it, and an agent can
+    put kilobytes there. It rode into the transcript unclipped while both the
+    module docstring and ``CLAIMED_TEXT_MAX`` claimed the projection was
+    bounded, which is the kind of comment the next reader believes.
+
+    A card title needs far less room than an answer does, hence its own,
+    smaller cap."""
+    out = claimed_event_content(
+        _item(kind="subagent_result", content={"description": "d" * 5000})
+    )
+    assert len(out["description"]) <= CLAIMED_DESCRIPTION_MAX
+    assert CLAIMED_DESCRIPTION_MAX < CLAIMED_TEXT_MAX
+    assert out["description"].endswith("…")
+
+
+def test_a_short_description_is_left_alone():
+    out = claimed_event_content(
+        _item(kind="subagent_result", content=REAL_SUBAGENT_CONTENT)
+    )
+    assert out["description"] == "probe"
 
 
 def test_a_subagent_result_with_an_empty_envelope_still_has_every_key():

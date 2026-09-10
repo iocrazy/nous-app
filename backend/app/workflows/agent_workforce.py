@@ -167,11 +167,24 @@ async def _dispatch_idle_wake(result: dict[str, Any]) -> None:
     busy arm writes no second row (which is also why ``content`` is unused
     there and the order need not carry it into ``dbos.operation_outputs``).
 
+    ``dedupe_key`` because a BODY's writes are covered by no step record: a
+    worker that dies between the step's checkpoint and this workflow's end is
+    replayed with the SAME order, and the idle arm would otherwise mint
+    ``issue-reply-<id>-<uuid4>`` again — an id DBOS has never seen, so a second
+    turn starts and the user is billed for another unexplained "Continue
+    working on this issue". The key pins it to the workflow id instead, so the
+    second start collapses. It is derived only from the step's own result,
+    which is what makes it stable across a replay. (Under
+    ``already_enqueued=True`` the key touches only the dispatch arm; the busy
+    arm returns without writing anything.)
+
     Nothing here may raise. The child has run, its result is filed, and the
     task row is closed; a wake-up lost to a blip costs the sweeper's next
     tick, whereas failing the workflow would misreport work that succeeded.
     Both failure shapes are reported — an exception AND the typed value the
-    idle arm returns instead of raising."""
+    idle arm returns instead of raising. Every line names the TASK as well as
+    the issue: one issue can have several sub-agents out, and "the wake-up for
+    issue 7 failed" does not say which one."""
     order = (result or {}).get("idle_dispatch")
     if not order:
         return
@@ -179,6 +192,8 @@ async def _dispatch_idle_wake(result: dict[str, Any]) -> None:
     from app.services.issues.inbox_or_dispatch import deliver_or_dispatch
 
     issue_id = int(order["issue_id"])
+    task_id = str((result or {}).get("task_id") or "")
+    where = f"issue {issue_id} (task {task_id or '?'})"
     try:
         outcome = await deliver_or_dispatch(
             issue_id,
@@ -186,10 +201,15 @@ async def _dispatch_idle_wake(result: dict[str, Any]) -> None:
             content={},
             user_id=str(order["user_id"]),
             already_enqueued=True,
+            # No task id (a malformed result) → no key, i.e. today's behaviour.
+            # The alternative, a constant ``subagent-wake-``, would collapse
+            # UNRELATED dispatches into one — strictly worse than a replay
+            # buying one extra turn.
+            dedupe_key=f"subagent-wake-{task_id}" if task_id else None,
         )
     except Exception as err:  # noqa: BLE001 — booked, never swallowed
         logger.opt(exception=True).error(
-            f"[workforce] issue {issue_id}: the sub-agent result is filed but "
+            f"[workforce] {where}: the sub-agent result is filed but "
             f"the wake-up raised: {err}"
         )
         return
@@ -198,11 +218,11 @@ async def _dispatch_idle_wake(result: dict[str, Any]) -> None:
         "dispatch_failed"
     ):
         logger.error(
-            f"[workforce] issue {issue_id}: the sub-agent result is filed but "
+            f"[workforce] {where}: the sub-agent result is filed but "
             f"the wake-up failed: {outcome.reason}"
         )
     else:
         logger.info(
-            f"[workforce] issue {issue_id}: sub-agent result wake-up "
+            f"[workforce] {where}: sub-agent result wake-up "
             f"{outcome.mode}/{outcome.reason or outcome.workflow_id}"
         )

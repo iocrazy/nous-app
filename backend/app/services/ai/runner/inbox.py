@@ -28,6 +28,14 @@ INBOX_FRAME = "inbox_message"
 #: it. 500 is enough for a sub-agent's answer to read as an answer.
 CLAIMED_TEXT_MAX = 500
 
+#: Longest ``description`` one carries. Smaller because it is a card TITLE, not
+#: an answer — and because it is the model's own ``Task(description=…)``
+#: argument with no schema bounding it, so "an agent puts 20 KB here" is a
+#: thing that happens, not a thing to hope about. It went in unclipped until
+#: the Task 7b review, while this file's own comments promised a bounded
+#: projection.
+CLAIMED_DESCRIPTION_MAX = 200
+
 
 @dataclass(frozen=True)
 class InboxItem:
@@ -68,11 +76,11 @@ class InboxItem:
         return json.dumps(c, ensure_ascii=False, default=str)
 
 
-def _clip(text: Any) -> str:
-    """``text`` as a string, bounded by ``CLAIMED_TEXT_MAX``, saying so when it
-    was cut. A silently truncated summary reads as a complete short answer."""
+def _clip(text: Any, limit: int = CLAIMED_TEXT_MAX) -> str:
+    """``text`` as a string, bounded, saying so when it was cut. A silently
+    truncated summary reads as a complete short answer."""
     s = "" if text is None else str(text)
-    return s if len(s) <= CLAIMED_TEXT_MAX else s[: CLAIMED_TEXT_MAX - 1] + "…"
+    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def claimed_event_content(item: InboxItem) -> dict[str, Any]:
@@ -100,7 +108,9 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
         return {
             "child_run_id": c.get("child_run_id"),
             "subagent_type": c.get("subagent_type"),
-            "description": c.get("description"),
+            # Model-authored and unbounded upstream — clipped like any other
+            # free text, just to a title's length.
+            "description": _clip(c.get("description"), CLAIMED_DESCRIPTION_MAX),
             "status": c.get("status"),
             "summary": _clip(c.get("summary") or ""),
             "cost_cents": c.get("cost_cents"),

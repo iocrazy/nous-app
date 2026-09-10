@@ -278,7 +278,7 @@ async def test_payload_carries_the_callers_issue_id():
 
 
 async def test_a_conversation_scoped_delegation_carries_a_null_issue_id():
-    """The key is present and null rather than absent: ``_payload_issue_id``
+    """The key is present and null rather than absent: ``payload_issue_id``
     reads it either way, and a reader should not have to tell "no issue" apart
     from "this path forgot to answer"."""
     rec = _Rec(900)
@@ -303,8 +303,202 @@ async def test_the_task_row_links_to_the_issue_the_payload_names():
     """The other half of the chain: the inbox payload reaches ``create_task``
     verbatim (``inbox_processor._spawn_task_from_message``), which writes the
     column. Pinned here so the two halves cannot drift apart silently."""
-    from app.repositories.agent_workforce_repository import _payload_issue_id
+    from app.repositories.agent_workforce_repository import payload_issue_id
 
-    assert _payload_issue_id({"issue_id": 348057232833870}) == 348057232833870
-    assert _payload_issue_id({"issue_id": None}) is None
-    assert _payload_issue_id({}) is None
+    assert payload_issue_id({"issue_id": 348057232833870}) == 348057232833870
+    assert payload_issue_id({"issue_id": None}) is None
+    assert payload_issue_id({}) is None
+
+
+# ── the second hop keeps the issue (Task 7b review, Minor 2) ────────────
+
+
+async def test_a_delegated_agent_that_delegates_again_still_carries_the_issue():
+    """`create_task` writes `task_tracking.issue_id` from the payload, and the
+    worker rebuilds the delegated agent's own tool stack from that payload —
+    so if it drops `issue_id` there, hop 2 lands with a NULL issue link even
+    though hop 1 now has one. The fix for defect F only reached the first hop.
+    """
+    from unittest.mock import patch
+    from uuid import uuid4 as _uuid4
+
+    from app.services.workforce.agent_worker import run_one_task
+
+    agent_id = _uuid4()
+    task_id = str(_uuid4())
+    task = {
+        "id": task_id,
+        "agent_id": str(agent_id),
+        "user_id": str(_uuid4()),
+        "lifecycle_status": "assigned",
+        "workforce_workflow_id": f"workforce-{task_id}-1",
+        # The shape hop 1 writes, now that Delegate stamps the issue on it.
+        "payload": {
+            "prompt": "summarise",
+            "parent_run_id": "900",
+            "delegated_at_depth": 0,
+            "issue_id": 348057232833870,
+        },
+    }
+
+    workforce = MagicMock()
+    workforce.claim_task = AsyncMock(return_value=task)
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": "ob-1"})
+
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value={
+            "id": str(agent_id),
+            "slug": "summarize",
+            "name": "summarize",
+            "model": "m",
+            "persistent": True,
+            "fallback_models": [],
+            "budget_per_run_cents": None,
+        }
+    )
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(return_value={"content": "OK"})
+    stack = MagicMock()
+    stack.runner = runner
+    stack.graph_facts = []
+    stack.user_context = None
+    stack.primary_model = "m"
+    stack.fallback_chain_active = False
+    build = AsyncMock(return_value=stack)
+
+    recorder = MagicMock()
+    recorder.run_id = 51
+    recorder.prompt_tokens = 1
+    recorder.completion_tokens = 1
+    recorder.set_summaries = MagicMock()
+
+    class _CM:
+        async def __aenter__(self):
+            return recorder
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with (
+        patch(
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_skill_repository",
+            return_value=MagicMock(),
+        ),
+        patch("app.services.workforce.agent_worker.build_agent_runner_stack", build),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=_CM()),
+        patch(
+            "app.services.workforce.agent_worker._lookup_inbox_message",
+            AsyncMock(return_value=None),
+        ),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(agent_id=agent_id, agent_slug="summarize", model="m")
+        )
+        PC.return_value = composer
+        out = await run_one_task(task)
+
+    assert out["status"] == "done"
+    assert build.await_args.kwargs["issue_id"] == 348057232833870
+
+
+async def test_a_payload_without_an_issue_builds_the_stack_with_none():
+    """Negative control: a chat-originated delegation has no issue, and the
+    worker must not invent one."""
+    from unittest.mock import patch
+    from uuid import uuid4 as _uuid4
+
+    from app.services.workforce.agent_worker import run_one_task
+
+    agent_id = _uuid4()
+    task_id = str(_uuid4())
+    task = {
+        "id": task_id,
+        "agent_id": str(agent_id),
+        "user_id": str(_uuid4()),
+        "lifecycle_status": "assigned",
+        "workforce_workflow_id": f"workforce-{task_id}-1",
+        "payload": {"prompt": "summarise", "issue_id": None},
+    }
+
+    workforce = MagicMock()
+    workforce.claim_task = AsyncMock(return_value=task)
+    workforce.update_task_status = AsyncMock(return_value=True)
+    workforce.enqueue_outbox = AsyncMock(return_value={"id": "ob-1"})
+    agent_repo = MagicMock()
+    agent_repo.get_by_id = AsyncMock(
+        return_value={
+            "id": str(agent_id),
+            "slug": "summarize",
+            "name": "summarize",
+            "model": "m",
+            "persistent": True,
+            "fallback_models": [],
+            "budget_per_run_cents": None,
+        }
+    )
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(return_value={"content": "OK"})
+    stack = MagicMock()
+    stack.runner = runner
+    stack.graph_facts = []
+    stack.user_context = None
+    stack.primary_model = "m"
+    stack.fallback_chain_active = False
+    build = AsyncMock(return_value=stack)
+    recorder = MagicMock()
+    recorder.run_id = 51
+    recorder.prompt_tokens = 1
+    recorder.completion_tokens = 1
+    recorder.set_summaries = MagicMock()
+
+    class _CM:
+        async def __aenter__(self):
+            return recorder
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with (
+        patch(
+            "app.services.workforce.agent_worker.get_agent_workforce_repository",
+            return_value=workforce,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.workforce.agent_worker.get_skill_repository",
+            return_value=MagicMock(),
+        ),
+        patch("app.services.workforce.agent_worker.build_agent_runner_stack", build),
+        patch("app.services.workforce.agent_worker.PromptComposer") as PC,
+        patch("app.services.workforce.agent_worker.RunRecorder", return_value=_CM()),
+        patch(
+            "app.services.workforce.agent_worker._lookup_inbox_message",
+            AsyncMock(return_value=None),
+        ),
+        patch("app.services.workforce.agent_worker._attach_to_parent_run", AsyncMock()),
+    ):
+        composer = MagicMock()
+        composer.compose = AsyncMock(
+            return_value=MagicMock(agent_id=agent_id, agent_slug="summarize", model="m")
+        )
+        PC.return_value = composer
+        await run_one_task(task)
+
+    assert build.await_args.kwargs["issue_id"] is None

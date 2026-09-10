@@ -68,6 +68,7 @@ from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     AgentWorkforceRepository,
     get_agent_workforce_repository,
+    payload_issue_id,
 )
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
@@ -244,6 +245,14 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             settings=settings,
             parent_run_id=parent_run_id,
             agent_depth=inherited_depth,
+            # The issue this delegation belongs to, carried on the payload
+            # since Task 7b defect F. It has to reach the delegated agent's
+            # OWN tool stack: if that agent delegates again, its Delegate tool
+            # reads this to stamp the next payload — hop 2 landed with a NULL
+            # ``task_tracking.issue_id`` until the review caught it, so an
+            # issue's delegated work was findable one level deep and no
+            # further. Also stamps the issue on any sub-run it spawns.
+            issue_id=payload_issue_id(payload),
         )
 
         composer = PromptComposer(agent_repo, skill_repo)

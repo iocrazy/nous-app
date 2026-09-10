@@ -220,6 +220,91 @@ async def test_the_workflow_body_dispatches_the_order_outside_every_step(
     assert seen[0][1]["user_id"] == "u-1"
 
 
+async def test_the_dispatch_is_idempotent_across_a_body_replay(monkeypatch):
+    """Task 7b review I1. The body's writes are covered by no step record, so
+    a worker that dies between the step's checkpoint and the workflow's end
+    makes DBOS replay this — with the SAME order. Without a ``dedupe_key`` the
+    idle arm mints ``issue-reply-<id>-<uuid4>`` each time, DBOS sees a workflow
+    id it has never seen, and the user is billed a second unexplained
+    "Continue working on this issue". The key is what collapses the second
+    start, and it must be derived only from the step's own result."""
+    keys: list = []
+
+    async def _deliver(issue_id, **kw):
+        keys.append(kw.get("dedupe_key"))
+        return DeliverResult("dispatched", workflow_id="issue-reply-1")
+
+    async def _step(task):
+        return {
+            "task_id": "6aff8295-3f20-4536-96b2-051e3f8b6f8a",
+            "status": "success",
+            "run_id": "52",
+            "idle_dispatch": {"issue_id": 7, "user_id": "u-1"},
+        }
+
+    import app.services.issues.inbox_or_dispatch as deliver_mod
+
+    monkeypatch.setattr(wf, "run_one_task_step", _step)
+    monkeypatch.setattr(deliver_mod, "deliver_or_dispatch", _deliver)
+
+    body = _body(wf.agent_workforce_workflow)
+    await body({"id": "t-1", "agent_id": "a"})
+    await body({"id": "t-1", "agent_id": "a"})
+
+    assert (
+        keys == ["subagent-wake-6aff8295-3f20-4536-96b2-051e3f8b6f8a"] * 2
+    ), "a replay must ask for the SAME workflow id, or DBOS starts a second turn"
+
+
+async def test_every_wake_log_names_the_task_not_only_the_issue(monkeypatch):
+    """Task 7b review, Minor 1. One issue can have several sub-agents out;
+    «the wake-up for issue 7 failed» does not say which one, and the task id
+    is right there in the result."""
+    from loguru import logger
+
+    import app.services.issues.inbox_or_dispatch as deliver_mod
+
+    async def _step(task):
+        return {
+            "task_id": "6aff8295",
+            "status": "success",
+            "run_id": "52",
+            "idle_dispatch": {"issue_id": 7, "user_id": "u-1"},
+        }
+
+    outcomes = {
+        "ok": lambda: DeliverResult("dispatched", workflow_id="wf-1"),
+        "typed": lambda: DeliverResult("skipped", reason="dispatch_failed: boom"),
+    }
+    monkeypatch.setattr(wf, "run_one_task_step", _step)
+
+    for name, make in outcomes.items():
+
+        async def _deliver(issue_id, _make=make, **kw):
+            return _make()
+
+        monkeypatch.setattr(deliver_mod, "deliver_or_dispatch", _deliver)
+        lines: list[str] = []
+        sink = logger.add(lines.append, level="INFO", format="{message}")
+        try:
+            await _body(wf.agent_workforce_workflow)({"id": "t-1", "agent_id": "a"})
+        finally:
+            logger.remove(sink)
+        assert "6aff8295" in "".join(lines), name
+
+    async def _boom(issue_id, **kw):
+        raise RuntimeError("pg is down")
+
+    monkeypatch.setattr(deliver_mod, "deliver_or_dispatch", _boom)
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        await _body(wf.agent_workforce_workflow)({"id": "t-1", "agent_id": "a"})
+    finally:
+        logger.remove(sink)
+    assert "6aff8295" in "".join(lines), "raised"
+
+
 async def test_no_order_means_no_dispatch(monkeypatch):
     called = MagicMock()
 
