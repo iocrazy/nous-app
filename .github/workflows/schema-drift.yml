@@ -68,6 +68,12 @@ on:
       - 'backend/tests/db/test_canvas_asset_refs_integration.py'
       - 'backend/tests/db/test_conversations_store_question_integration.py'
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
+      # Lives under tests/integration/, not tests/db/ — the step below names it
+      # explicitly, so this entry is what makes a change to it trigger a run.
+      - 'backend/tests/integration/test_agent_workforce_repository_orm.py'
+      # The repository whose statements that file executes. Its unit tests stub
+      # the session, so a change here reaches Postgres nowhere else.
+      - 'backend/app/repositories/agent_workforce_repository.py'
       # The statements that integration file executes (phase 2a question stamp).
       - 'backend/app/services/ai/chat/conversations_ai_store.py'
       - 'backend/app/repositories/agent_run_inbox_repository.py'
@@ -115,7 +121,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all ten, so it has to re-run
+      # to it changes what "green" means for all eleven, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong twice (it said "eight" when there were
       # seven, then "nine" when there were eight — each edit trusted the
@@ -414,3 +420,23 @@ jobs:
           # from its cover and reference files, or whether the eleven projected
           # columns — prompt_origin among them — all exist.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_prompt_catalog_repository_integration.py -v
+
+      - name: Exercise the workforce dispatch statements against the built schema (2b-2 T3)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place AgentWorkforceRepository's ORM statements execute.
+          # Its unit tests hand every statement to a fake session and grep the
+          # compiled SQL, which cannot settle any of: whether claim_task's two
+          # CAS arms really partition (a fresh queued row claimed, a foreign
+          # workflow refused, this workflow's own replay re-admitted WITHOUT
+          # knocking in_progress back to assigned), whether UPDATE ... RETURNING
+          # a whole entity yields something .scalars().first() can map, whether
+          # `metadata ->> 'dispatched_at' IS NULL` really excludes a stamped row
+          # from the dispatch list, or whether `coalesce(metadata,'{}') || patch`
+          # preserves agent_payload while replacing the stamp. Get any of those
+          # wrong and the chain still passes every unit test while dispatching
+          # nothing — the failure this whole task exists to prevent.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/integration/test_agent_workforce_repository_orm.py -v

@@ -92,14 +92,28 @@ async def agent_id(integration_db_url):
 
 @pytest.fixture
 async def user_id(integration_db_url):
-    """A real auth.users id (task_tracking.user_id FK → auth.users). Skips if
-    the DB has none."""
+    """A real auth.users id (task_tracking.user_id FK → auth.users).
+
+    Seeds a throwaway row when the database has none, the same way ``agent_id``
+    above seeds an agent. It used to ``pytest.skip`` instead — harmless against
+    a populated dev database, fatal on the ephemeral schema-drift one, which is
+    built from the baseline and is therefore ALWAYS empty. Six tests take this
+    fixture, including all three dispatch round-trips, so skipping would have
+    left the file passing on CI while the statements it exists to execute never
+    ran. ``pytest-no-full-skip.sh`` cannot catch that: seven other tests pass,
+    so the step is green. A fixture that skips is a fixture that can hide."""
     conn = await asyncpg.connect(integration_db_url)
     try:
         uid = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
-        if uid is None:
-            pytest.skip("need >=1 auth.users row to satisfy task_tracking.user_id FK")
-        yield uid
+        if uid is not None:
+            yield uid
+            return
+        seeded = uuid.uuid4()
+        await conn.execute("INSERT INTO auth.users (id) VALUES ($1)", seeded)
+        try:
+            yield seeded
+        finally:
+            await conn.execute("DELETE FROM auth.users WHERE id = $1", seeded)
     finally:
         await conn.close()
 
