@@ -229,3 +229,92 @@ describe('OutputNodeView — a crop never drops images that land during the deri
     expect(nodeData().images).toEqual([{ url: DERIVED.url, kind: 'image', id: '901' }, LANDED]);
   });
 });
+
+const ITEM2 = '/api/v1/generated-media/6/cover';
+
+function renderTwoImages(legacy: Record<string, unknown> = {}) {
+  const fullData = seedImageOutput({
+    images: [
+      { url: SOURCE, kind: 'image' },
+      { url: ITEM2, kind: 'image' },
+    ],
+    ...legacy,
+  });
+  render(
+    <Wrap>
+      <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+    </Wrap>,
+  );
+}
+
+function openLightboxOnSecondItem() {
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  const lightbox = screen.getByTestId('output-lightbox');
+  fireEvent.click(within(lightbox).getByRole('button', { name: 'Next' }));
+  expect(within(lightbox).getByTestId('lightbox-counter').textContent).toBe('2 / 2');
+}
+
+function pickLightboxTool(name: string) {
+  fireEvent.click(
+    within(screen.getByTestId('lightbox-edit-bar')).getByRole('button', { name }),
+  );
+  expect(screen.queryByTestId('output-lightbox')).toBeNull();
+}
+
+describe('OutputNodeView — an edit acts on the image being viewed', () => {
+  it('lightbox Crop on item 2 derives from item 2, not the primary', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Crop');
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith('4242', ITEM2, expect.anything(), {
+      nodeId: 'o1',
+    });
+  });
+
+  it('lightbox Split on item 2 splits item 2', async () => {
+    (deriveCanvasGrid as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Split');
+    fireEvent.click(screen.getByTestId('grid-preset-2x2'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasGrid).toHaveBeenCalledTimes(1));
+    expect((deriveCanvasGrid as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe(ITEM2);
+  });
+
+  it('lightbox Mask on item 2 opens the editor on item 2', () => {
+    renderTwoImages();
+    openLightboxOnSecondItem();
+    pickLightboxTool('Mask');
+
+    const editor = screen.getByTestId('unified-image-editor');
+    const srcs = within(editor)
+      .getAllByRole('img')
+      .map((img) => img.getAttribute('src') ?? '');
+    expect(srcs.some((src) => src.includes('/generated-media/6/'))).toBe(true);
+    expect(srcs.some((src) => src.includes('/generated-media/5/'))).toBe(false);
+  });
+
+  it('a grid item does not inherit the primary legacy crop region', async () => {
+    (deriveCanvasCrop as ReturnType<typeof vi.fn>).mockResolvedValueOnce(DERIVED);
+    renderTwoImages({ crop_region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } });
+    fireEvent.doubleClick(
+      within(screen.getByTestId('output-images-grid')).getAllByRole('img')[1],
+    );
+    fireEvent.click(screen.getByTestId('editor-tab-crop'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    await waitFor(() => expect(deriveCanvasCrop).toHaveBeenCalledTimes(1));
+    expect(deriveCanvasCrop).toHaveBeenCalledWith(
+      '4242',
+      ITEM2,
+      { x: 0, y: 0, width: 1, height: 1 },
+      { nodeId: 'o1' },
+    );
+  });
+});

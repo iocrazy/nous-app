@@ -120,6 +120,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // resource_id, which only ever named the primary, and only after a promote.
   const editSourceUrl = editingUrl ?? primaryImageUrl;
   const [upscaling, setUpscaling] = useState(false);
+  // Declared before the handlers that report through them (upscale, As Asset).
+  const { t } = useTranslation();
+  const toast = useOptionalToast();
   // IC duplicateSmartNodeMediaToCanvas: drop the current image beside this
   // node as an independent media card (no re-upload — same durable url).
   const handleDuplicate = useCallback(() => {
@@ -165,12 +168,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         });
       } catch (err) {
         console.error('upscale failed:', err);
+        // Never silent: a refusal (e.g. 404 on a generation this user cannot
+        // read) is a real outcome of the click.
+        toast?.addToast(
+          t('canvas.upscale.failed', 'Upscale failed: {{reason}}', {
+            reason: err instanceof Error ? err.message : String(err),
+          }),
+          'error',
+        );
       } finally {
         setUpscaling(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview_url, images, id, patchData]);
+  }, [preview_url, images, id, patchData, toast, t]);
   const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -334,8 +345,6 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // the key DISABLED WITH A REASON rather than hidden. Same for a canvas
   // opened outside a `/team/:teamId` route: `/api/v1/assets` is scoped per
   // request and an empty `scope_id` is a 403, not an unscoped query.
-  const { t } = useTranslation();
-  const toast = useOptionalToast();
   const { scopeId } = useCanvasScope();
   const generationId =
     (images?.[0] as { id?: string } | undefined)?.id ??
@@ -374,6 +383,16 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     setCommitError(null);
     setEditorMode('crop');
   }, [canDerive]);
+
+  /** A lightbox tool edits the item on screen, not the primary: point the
+   *  editor at it, then open the mode. */
+  const editViewedItem = useCallback(
+    (open: () => void) => (item: LightboxItem) => {
+      setEditingUrl(item.url);
+      open();
+    },
+    [],
+  );
 
   const handleCommit = useCallback(
     async (region: CropRegion) => {
@@ -835,7 +854,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           src={editSourceUrl ?? ''}
           alt={preview_text || 'Output preview'}
           initialMode={editorMode ?? 'preview'}
-          cropInitialRegion={crop_region ?? undefined}
+          // The legacy crop_region described the PRIMARY picture only; a grid
+          // or history item opens on its full frame.
+          cropInitialRegion={
+            editSourceUrl === preview_url ? (crop_region ?? undefined) : undefined
+          }
           outpaintInitialPrompt={preview_text}
           onClose={() => {
             setEditorMode(null);
@@ -892,9 +915,13 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               ? undefined
               : {
                   ...(canDerive
-                    ? { crop: openEditor, expand: openOutpaintEditor, split: openGridEditor }
+                    ? {
+                        crop: editViewedItem(openEditor),
+                        expand: editViewedItem(openOutpaintEditor),
+                        split: editViewedItem(openGridEditor),
+                      }
                     : {}),
-                  ...(canCrop ? { mask: openMaskEditor } : {}),
+                  ...(canCrop ? { mask: editViewedItem(openMaskEditor) } : {}),
                 }
           }
           meta={(() => {

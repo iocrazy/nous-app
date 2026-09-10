@@ -62,13 +62,14 @@ export interface OutputLightboxProps {
   onRegenerate?: () => void;
   regenerating?: boolean;
   /** Editing tools (IC ⑧ 图片编辑系统): rendered as a tab bar in the
-   *  header; picking one closes the lightbox and opens that editor.
+   *  header; picking one closes the lightbox and opens that editor on the
+   *  item on screen, which is handed to the action.
    *  Absent → preview-only lightbox (media/group previews). */
   editActions?: {
-    crop?: () => void;
-    expand?: () => void;
-    mask?: () => void;
-    split?: () => void;
+    crop?: (item: LightboxItem) => void;
+    expand?: (item: LightboxItem) => void;
+    mask?: (item: LightboxItem) => void;
+    split?: (item: LightboxItem) => void;
   };
 }
 
@@ -88,12 +89,12 @@ export function OutputLightbox({
   editActions,
   onFrameExported,
 }: OutputLightboxProps) {
-  const pickTool = (fn?: () => void) => () => {
-    if (!fn) return;
-    onClose();
-    fn();
-  };
   const current = items[index];
+  const pickTool = (fn?: (item: LightboxItem) => void) => () => {
+    if (!fn || !current) return;
+    onClose();
+    fn(current);
+  };
   const [resolution, setResolution] = useState<string>('');
   const [compareOn, setCompareOn] = useState(false);
   // IC 360 panorama: offered for keyword names or ~2:1 equirect images;

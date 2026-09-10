@@ -3589,6 +3589,9 @@
         "provider_no_refs": "model takes no references"
       }
     },
+    "upscale": {
+      "failed": "Upscale failed: {{reason}}"
+    },
     "asAsset": {
       "action": "As Asset",
       "noScope": "Open this canvas from a workspace to save assets",
