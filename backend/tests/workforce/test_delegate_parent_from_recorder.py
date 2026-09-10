@@ -257,3 +257,54 @@ def test_binding_survives_a_runner_with_no_delegate_tool():
         skill_tool=SimpleNamespace(subagent_task=None), delegate_tool=None
     )
     AgentRunner._bind_turn_recorder(runner, _Rec(900))  # must not raise
+
+
+# ── the issue the delegated task belongs to (Task 7b defect F) ──────────
+
+
+async def test_payload_carries_the_callers_issue_id():
+    """``create_task`` writes ``task_tracking.issue_id`` from
+    ``payload['issue_id']`` (Task 7a defect 3), and Delegate's payload had no
+    such key — so every delegated task landed with a NULL issue link while a
+    background ``Task`` spawn landed with one. Looking up an issue's delegated
+    work found nothing (2026-09-10 acceptance, `75eece7b-…`).
+
+    Same source as ``active_parent_run_id``: the running recorder first."""
+    svc, workforce = _service(parent_run_id=None, recorder=_Rec(900))
+    out = await _delegate(svc)
+    assert "error" not in out, out
+    payload = workforce.enqueue_inbox.await_args.kwargs["payload"]
+    assert payload["issue_id"] == 7
+
+
+async def test_a_conversation_scoped_delegation_carries_a_null_issue_id():
+    """The key is present and null rather than absent: ``_payload_issue_id``
+    reads it either way, and a reader should not have to tell "no issue" apart
+    from "this path forgot to answer"."""
+    rec = _Rec(900)
+    rec.issue_id = None
+    svc, workforce = _service(parent_run_id=None, recorder=rec)
+    await _delegate(svc)
+    payload = workforce.enqueue_inbox.await_args.kwargs["payload"]
+    assert "issue_id" in payload and payload["issue_id"] is None
+
+
+async def test_the_constructor_value_is_the_fallback_without_a_recorder():
+    """The workforce worker rebuilds this service from a payload and has no
+    recorder — the same fallback ``active_parent_run_id`` uses."""
+    svc, workforce = _service(parent_run_id="900", recorder=None)
+    svc.issue_id = 348057232833870
+    await _delegate(svc)
+    payload = workforce.enqueue_inbox.await_args.kwargs["payload"]
+    assert payload["issue_id"] == 348057232833870
+
+
+async def test_the_task_row_links_to_the_issue_the_payload_names():
+    """The other half of the chain: the inbox payload reaches ``create_task``
+    verbatim (``inbox_processor._spawn_task_from_message``), which writes the
+    column. Pinned here so the two halves cannot drift apart silently."""
+    from app.repositories.agent_workforce_repository import _payload_issue_id
+
+    assert _payload_issue_id({"issue_id": 348057232833870}) == 348057232833870
+    assert _payload_issue_id({"issue_id": None}) is None
+    assert _payload_issue_id({}) is None

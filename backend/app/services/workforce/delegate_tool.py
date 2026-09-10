@@ -120,11 +120,15 @@ class DelegateToolService:
         agent_repo: Optional[AgentRepository] = None,
         workforce_repo: Optional[AgentWorkforceRepository] = None,
         parent_recorder: Optional[Any] = None,
+        issue_id: Optional[int] = None,
     ) -> None:
         self.caller_agent_id = caller_agent_id
         self.caller_user_id = caller_user_id
         self.parent_run_id = parent_run_id
         self.agent_depth = agent_depth
+        # The issue this turn belongs to. Fallback for callers with no
+        # recorder; see active_issue_id.
+        self.issue_id = issue_id
         self.agent_repo = agent_repo or get_agent_repository()
         self.workforce_repo = workforce_repo or get_agent_workforce_repository()
         # The turn's RunRecorder, bound by AgentRunner._bind_turn_recorder once
@@ -158,6 +162,34 @@ class DelegateToolService:
             if rid
             else (str(self.parent_run_id) if self.parent_run_id else None)
         )
+
+    @property
+    def active_issue_id(self) -> Optional[int]:
+        """The issue this turn belongs to — the running recorder first, the
+        constructor value as the fallback, exactly like
+        ``active_parent_run_id``.
+
+        It rides into the inbox payload so ``create_task`` can write
+        ``task_tracking.issue_id`` (Task 7a defect 3 wrote that column FROM the
+        payload, and Delegate's payload had no such key). Until Task 7b every
+        delegated task therefore landed with a NULL issue link while a
+        background ``Task`` spawn landed with one, and looking up an issue's
+        delegated work found nothing.
+
+        ``None`` on a conversation-scoped or CLI run; the key is still written,
+        so "no issue" and "this path forgot to answer" stay distinguishable."""
+        raw = getattr(self.parent_recorder, "issue_id", None)
+        if raw is None:
+            raw = self.issue_id
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            # A link is decoration; a bad value must never sink the delegation
+            # that carries the actual work.
+            logger.warning(f"[delegate] unusable issue_id {raw!r}; payload left null")
+            return None
 
     async def execute(self, args: Dict[str, Any]) -> Dict[str, Any]:
         # Audit #4 fail-closed gate: the inbox→worker execution chain is not
@@ -260,6 +292,9 @@ class DelegateToolService:
             "delegated_at_depth": self.agent_depth,
             "await": await_result,
             "parent_run_id": self.active_parent_run_id,
+            # ``create_task`` writes task_tracking.issue_id from this key, so
+            # a delegated task is findable from the issue that asked for it.
+            "issue_id": self.active_issue_id,
         }
 
         inbox_row = await self.workforce_repo.enqueue_inbox(
