@@ -85,10 +85,14 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
      "items": [{"content": "string", "active_form": "string (optional)"}],
      "id":    "integer",
      "subagent_type": "string", "prompt": "string", "description": "string",
-     "tasks": [{"subagent_type": "string", "prompt": "string", "description": "string (optional)"}]}}}
+     "tasks": [{"subagent_type": "string", "prompt": "string", "description": "string (optional)"}],
+     "await": "boolean — false 则后台跑，结果晚些以收件箱消息到达，而不是这次调用的返回值",
+     "child_run_id": "string — 续跑某个更早的子 run，而不是新开一个"}}}
 ```
 
-`subagent_type` / `prompt` / `description` / `tasks` 只对 `skill="task"`（同步派子 agent）有意义，与 todo 的四个参数同一天补齐、同一理由。
+`subagent_type` / `prompt` / `description` / `tasks` 只对 `skill="task"`（派子 agent）有意义，与 todo 的四个参数同一天补齐、同一理由。
+
+`await` / `child_run_id`（2026-09-10，harness 二期 2b-2）也只对 `skill="task"` 有意义。省略 `await` 等于 `true` —— 没听说过这个参数的模型拿到的仍是原来的同步行为。`await=false` 的返回值是 `{"status": "queued", "task_id": …}`，**`sub_run_id` 是 `null`**：那一刻还没有子 run。三条拒绝也从这里回给模型：`no_reply_target`（结果没有可投递的目标）、`async_not_allowed_for_subagent`（子 agent 不能再派后台子 agent）、`continue_not_allowed_in_fanout`（`tasks` 与 `child_run_id` 同时出现）。
 
 `op` / `items` / `id` 只对 `skill="todo"` 有意义，2026-09-06 起才声明——此前模型只看得到 `skill` 与 `file`，内建 todo 的参数全靠猜：doubao lite 把 `"?op=replace&items=…"` 塞进 `file` 连错四次，整轮没有一个 todo 快照，任务卡的 n/m 也就从未出现。模型用不了它没被展示的参数，这不是提示词问题。
 
@@ -99,6 +103,36 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 #### KV Cache effect
 
 `tools` 在多数 provider 侧位于系统消息之前的前缀里，所以**改这份 schema 的任何一个字都会让全部 agent 的前缀一次性失效**——这是一次性的，之后逐轮不变。本模块不为它计指纹（`_prefix_fingerprint()` 不吃 tools），因为它对所有 agent 恒等，没有跨 agent 串味的问题。
+
+### 收件箱消息框 `<inbox_message>`（步骤边界注入的 user 消息）
+
+#### What the model sees
+
+`runner/inbox.py::render_inbox_message` 在步骤边界把每条领到的收件箱行渲染成一条 user 消息。我们拥有这个框（登记在 `OWNED_FRAMES`），属性走 `escape_frame_attr`、正文走 `escape_frame_prose`：
+
+```
+<inbox_message kind="steer" at="2026-09-05T00:00:00+00:00">
+{正文}
+</inbox_message>
+```
+
+`kind="subagent_result"`（2026-09-10，harness 二期 2b-2）多带两个属性，正文只有子 agent 的 summary：
+
+```
+<inbox_message kind="subagent_result" at="…" child_run_id="52" subagent_type="librarian">
+found three docs
+</inbox_message>
+```
+
+`child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。信封里其余字段（`status` / `cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
+
+#### Token effect
+
+每条一个框，长度就是那条消息的正文长度。`subagent_result` 只放 summary，所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
+
+#### KV Cache effect
+
+**append-only**：这些框作为新的 user 消息追加在历史末尾，不改写更早的 token，因此不使 provider 前缀失效。本模块不为它计指纹。
 
 ### 工具 schema：`AskUser`（请求的 `tools` 参数，两条路都有）
 

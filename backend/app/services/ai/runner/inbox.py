@@ -49,6 +49,11 @@ class InboxItem:
         """Human text of the item: ``content.body`` for steers, the answer
         value for answers, else the whole content as JSON."""
         c = self.content
+        if self.kind == "subagent_result":
+            # The envelope's other fields (cost, tokens, status) are already
+            # in the frame's attributes or of no use to the model — putting
+            # the whole JSON here would burn tokens on nothing it can act on.
+            return str(c.get("summary") or "")
         if isinstance(c.get("body"), str):
             return c["body"]
         if self.kind == "answer" and "value" in c:
@@ -63,8 +68,19 @@ def render_inbox_message(item: InboxItem) -> str:
     through ``escape_frame_prose`` so user text can neither close the frame
     nor forge a sibling element inside it."""
     at = item.created_at.isoformat() if item.created_at else ""
+    extra = ""
+    if item.kind == "subagent_result":
+        # Which child this is, so the parent can name it in the next turn or
+        # continue it with ``child_run_id``. The slug came from the model's own
+        # Task call, so it is escaped like any other attacker-reachable value.
+        c = item.content
+        extra = (
+            f' child_run_id="{escape_frame_attr(str(c.get("child_run_id") or ""))}"'
+            f' subagent_type="{escape_frame_attr(str(c.get("subagent_type") or ""))}"'
+        )
     return (
-        f'<{INBOX_FRAME} kind="{escape_frame_attr(item.kind)}" at="{escape_frame_attr(at)}">\n'
+        f'<{INBOX_FRAME} kind="{escape_frame_attr(item.kind)}"'
+        f' at="{escape_frame_attr(at)}"{extra}>\n'
         f"{escape_frame_prose(item.body())}\n"
         f"</{INBOX_FRAME}>"
     )

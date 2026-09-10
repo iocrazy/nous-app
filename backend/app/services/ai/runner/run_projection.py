@@ -41,7 +41,15 @@ def empty_views() -> Views:
             "retry": None,
             "context": None,
             "blocked": None,
-            "children": {"total": 0, "done": 0},
+            # phase 2b-2 §2.4: sync children are ``running``, background
+            # ones ``async_pending``; ``last`` is what a collapsed row shows.
+            "children": {
+                "total": 0,
+                "done": 0,
+                "running": 0,
+                "async_pending": 0,
+                "last": None,
+            },
             "ended": None,
             "inbox_pending": 0,
             "budget": None,
@@ -59,6 +67,9 @@ def empty_views() -> Views:
             "by_model": {},
             "budget_cents": None,
             "pct": None,
+            # phase 2b-2: cents per child run, so a fan-out's cost is
+            # attributable rather than only totalled.
+            "by_child": {},
         },
     }
 
@@ -121,6 +132,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     question,
     retry,
     step,
+    subagents,
     todo,
     tools,
     turn_end,
