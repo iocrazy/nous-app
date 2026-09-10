@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, Request
 from loguru import logger
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.boundary import ValidatedURL
 from app.core.deps import AuthDep
@@ -30,7 +30,38 @@ def _coerce_str_to_list(v):
     return v
 
 
-class MediaFetchRequest(BaseModel):
+INTENT_TAG_NAMES: dict[str, str] = {
+    "transcribe": "Transcript",
+    "summarize": "Summary",
+    "analyze": "Analyze",
+}
+
+
+class AiIntentFields(BaseModel):
+    """显式 AI 意图（spec 2026-09-10）。三个布尔映射到 Pipeline 组的系统标签
+    Transcript / Summary / Analyze；rating 写 resources.rating。快捷指令传的是
+    文本，所以 "1"/"0"/"true"/"false" 由 pydantic 默认强转，空串 rating 视为无。"""
+
+    transcribe: bool = False
+    summarize: bool = False
+    analyze: bool = False
+    rating: Optional[int] = Field(None, ge=0, le=5)
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def _blank_rating_is_none(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
+
+
+def intent_tag_names(*, transcribe: bool, summarize: bool, analyze: bool) -> list[str]:
+    """(transcribe, summarize, analyze) → 需要挂上的系统标签英文名，顺序固定。"""
+    flags = {"transcribe": transcribe, "summarize": summarize, "analyze": analyze}
+    return [INTENT_TAG_NAMES[key] for key, on in flags.items() if on]
+
+
+class MediaFetchRequest(AiIntentFields):
     """Video fetch request"""
 
     url: str
@@ -46,7 +77,7 @@ class MediaFetchRequest(BaseModel):
         return _coerce_str_to_list(v) if v is not None else v
 
 
-class BatchFetchRequest(BaseModel):
+class BatchFetchRequest(AiIntentFields):
     """Batch fetch request"""
 
     urls: list[str]
