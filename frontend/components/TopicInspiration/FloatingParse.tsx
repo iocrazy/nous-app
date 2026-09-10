@@ -69,6 +69,9 @@ export const FloatingParse: React.FC<{
   const pickerTags = useMemo(() => allTags.filter((tg) => tg.group_name !== PIPELINE_TAG_GROUP), [allTags]);
 
   const detection = useMemo(() => detectParseMode(input), [input]);
+  // 批量走进程内下载器，到不了 DBOS download_workflow 的 AI 链（裁定 R20）——
+  // 意图按钮在批量模式下禁用，批量提交也不带意图字段，免得「点了却什么都没发生」。
+  const aiIntentsAvailable = detection.mode === 'single';
 
   // Load tags once on mount
   useEffect(() => {
@@ -99,7 +102,6 @@ export const FloatingParse: React.FC<{
           video_bool: true,
           cover_bool: true,
           tag_ids: selectedTagIds,
-          ...intents,
         });
         setResult({
           kind: 'batch',
@@ -229,7 +231,7 @@ export const FloatingParse: React.FC<{
                 <div className="text-[11px] text-content-3 mb-1">AI Processing</div>
                 <div className="grid grid-cols-3 gap-1.5">
                   {AI_INTENTS.map(({ key, label, Icon }) => {
-                    const active = intents[key];
+                    const active = intents[key] && aiIntentsAvailable;
                     return (
                       <button
                         key={key}
@@ -237,8 +239,10 @@ export const FloatingParse: React.FC<{
                         data-testid={`ai-intent-${key}`}
                         aria-label={`AI intent: ${label}`}
                         aria-pressed={active}
+                        disabled={!aiIntentsAvailable}
+                        aria-disabled={!aiIntentsAvailable}
                         onClick={() => setIntents((prev) => ({ ...prev, [key]: !prev[key] }))}
-                        className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${
+                        className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                           active
                             ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
                             : 'bg-island-2 text-content-2 border-line'
@@ -250,6 +254,11 @@ export const FloatingParse: React.FC<{
                     );
                   })}
                 </div>
+                {!aiIntentsAvailable && (
+                  <div className="text-[11px] text-content-3 mt-1">
+                    {t('topic.aiSingleLinkOnly', 'AI processing runs for single links only')}
+                  </div>
+                )}
               </div>
 
               {/* Tag picker */}
