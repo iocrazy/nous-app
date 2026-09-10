@@ -246,12 +246,9 @@ async def _validate_issue_wakeup_payload(
     fire_at = payload.fire_at
     if fire_at is None:
         raise _bad_request("fire_at_required", "issue_wakeup requires fire_at")
-    if fire_at.tzinfo is None:
-        # A distinct code: `fire_at_required` on a time the user DID pick
-        # makes the UI say "pick a time" to someone who just did.
-        raise _bad_request(
-            "fire_at_timezone_required", "fire_at must carry a timezone offset"
-        )
+    # The window check owns the tz-aware rule too, and gives it its OWN code:
+    # `fire_at_required` on a time the user DID pick would make the UI say
+    # "pick a time" to someone who just did.
     _validate_fire_at_window(fire_at)
 
     text = _validate_wakeup_payload_fields(body)
