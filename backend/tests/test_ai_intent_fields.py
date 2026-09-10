@@ -170,12 +170,12 @@ def test_single_fetch_path_is_wired_for_intents_and_rating():
 
 
 @pytest.mark.asyncio
-async def test_batch_attach_after_save_attaches_tags_and_rating():
+async def test_batch_attach_after_save_attaches_tags_and_rating(caplog):
     from app.api import media_batch_router as b
 
     res_repo = MagicMock()
     res_repo.get_resource_by_platform_id = AsyncMock(side_effect=[None, {"id": 99}])
-    res_repo.update_resource = AsyncMock(return_value={})
+    res_repo.update_resource = AsyncMock(return_value={"id": 99, "rating": 5})
     tags_repo = MagicMock()
     tags_repo.bulk_add_tags_to_resource = AsyncMock()
     with (
@@ -195,6 +195,7 @@ async def test_batch_attach_after_save_attaches_tags_and_rating():
     )
     attach_names.assert_awaited_once_with("99", ["cats"], "u1")
     res_repo.update_resource.assert_awaited_once_with("99", {"rating": 5})
+    assert not [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")]
 
 
 @pytest.mark.asyncio
@@ -230,8 +231,86 @@ async def test_batch_attach_after_save_warns_when_rating_not_written(caplog):
         return_value=res_repo,
     ):
         ok = await b.attach_after_save("pid1", None, None, "u1", rating=2)
-    assert ok is True
+    assert ok is False
     assert "rating not written" in caplog.text
+
+
+def _attach_repos(*, bulk_add: AsyncMock, update: AsyncMock):
+    res_repo = MagicMock()
+    res_repo.get_resource_by_platform_id = AsyncMock(return_value={"id": 99})
+    res_repo.update_resource = update
+    tags_repo = MagicMock()
+    tags_repo.bulk_add_tags_to_resource = bulk_add
+    return res_repo, tags_repo
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_contains_tag_failure(caplog):
+    """F1：Starlette 顺序跑后台任务且无守卫——这里抛错会让同批后续 URL 的
+    process_video 全部跳过（点数已扣）。标签写失败必须容纳并记 ERROR，评级照写。"""
+    from app.api import media_batch_router as b
+
+    res_repo, tags_repo = _attach_repos(
+        bulk_add=AsyncMock(side_effect=RuntimeError("tags down")),
+        update=AsyncMock(return_value={"id": 99, "rating": 4}),
+    )
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo,
+        ),
+        patch.object(b, "get_tags_repository", return_value=tags_repo),
+    ):
+        ok = await b.attach_after_save("pid1", ["11"], None, "u1", rating=4)
+
+    assert ok is False
+    res_repo.update_resource.assert_awaited_once_with("99", {"rating": 4})
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert errors and "tags down" in errors[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_contains_rating_failure(caplog):
+    from app.api import media_batch_router as b
+
+    res_repo, tags_repo = _attach_repos(
+        bulk_add=AsyncMock(return_value=[{"tag_id": 11}]),
+        update=AsyncMock(side_effect=RuntimeError("db down")),
+    )
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo,
+        ),
+        patch.object(b, "get_tags_repository", return_value=tags_repo),
+    ):
+        ok = await b.attach_after_save("pid1", ["11"], None, "u1", rating=4)
+
+    assert ok is False
+    tags_repo.bulk_add_tags_to_resource.assert_awaited_once()
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_contains_lookup_failure(caplog):
+    """资源查询本身抛错也不许冒出去——记 ERROR、按预算继续轮询，最终返回 False。"""
+    from app.api import media_batch_router as b
+
+    res_repo = MagicMock()
+    res_repo.get_resource_by_platform_id = AsyncMock(side_effect=RuntimeError("boom"))
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo,
+        ),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        ok = await b.attach_after_save(
+            "pid1", ["11"], None, "u1", rating=None, attempts=2
+        )
+
+    assert ok is False
+    assert any(r.levelname == "ERROR" for r in caplog.records)
 
 
 def test_batch_route_is_wired_for_intents():
@@ -305,3 +384,65 @@ async def test_batch_route_survives_intent_resolution_failure(caplog):
     assert "[Fetch/Batch] intent tag resolution failed (non-fatal): db down" in (
         caplog.text
     )
+
+
+async def _run_celery_batch_route(
+    b, *, names_mock: AsyncMock, **request_fields
+) -> MagicMock:
+    """use_celery 分支：桩掉逐 URL 入队，返回 enqueue_parse_for_user 的 mock。"""
+    from fastapi import BackgroundTasks
+
+    from app.api.media_fetch_helpers import BatchFetchRequest
+
+    request = BatchFetchRequest(
+        urls=["https://v.douyin.com/a/", "https://v.douyin.com/b/"],
+        use_celery=True,
+        **request_fields,
+    )
+    enqueue = MagicMock(side_effect=["wf1", "wf2"])
+    with (
+        patch.object(b, "resolve_intent_tag_ids", new=AsyncMock(return_value=["11"])),
+        patch.object(b, "resolve_tag_names_to_ids", new=names_mock),
+        patch.object(b, "resolve_team_id", new=AsyncMock(return_value=None)),
+        patch.object(b, "PointsService"),
+        patch("app.workflows.parse.enqueue_parse_for_user", new=enqueue),
+    ):
+        resp = await b.fetch_videos_batch(
+            request, BackgroundTasks(), MagicMock(user_id="u1"), None, MagicMock()
+        )
+    assert resp["workflow_ids"] == ["wf1", "wf2"]
+    return enqueue
+
+
+@pytest.mark.asyncio
+async def test_celery_batch_forwards_merged_tag_ids_and_rating():
+    """裁定 R21：use_celery 批量是唯一能到 AI 链的批量分支，必须把
+    tag_ids（用户 id + 意图 id + 标签名解析出的 id）与 rating 带进 parse_workflow。"""
+    from app.api import media_batch_router as b
+
+    names = AsyncMock(return_value=["5", "42"])
+    enqueue = await _run_celery_batch_route(
+        b, names_mock=names, tag_ids=["5"], tags=["cats"], transcribe=True, rating=2
+    )
+
+    names.assert_awaited_once_with(["cats"], "u1")
+    assert enqueue.call_count == 2
+    for call in enqueue.call_args_list:
+        kwargs = call.kwargs["kwargs"]
+        assert kwargs["tag_ids"] == ["5", "11", "42"]
+        assert kwargs["rating"] == 2
+
+
+@pytest.mark.asyncio
+async def test_celery_batch_survives_tag_name_resolution_failure(caplog):
+    from app.api import media_batch_router as b
+
+    names = AsyncMock(side_effect=RuntimeError("db down"))
+    enqueue = await _run_celery_batch_route(
+        b, names_mock=names, tags=["cats"], analyze=True
+    )
+
+    for call in enqueue.call_args_list:
+        assert call.kwargs["kwargs"]["tag_ids"] == ["11"]
+        assert call.kwargs["kwargs"]["rating"] is None
+    assert "tag-name resolution failed (non-fatal): db down" in caplog.text

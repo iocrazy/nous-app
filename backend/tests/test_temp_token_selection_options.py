@@ -125,3 +125,16 @@ async def test_get_selection_rejects_unknown_field():
         with pytest.raises(HTTPException) as exc:
             await get_selection("tok", format="text", field="mood")
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_selection_text_csv_never_parses_options():
+    """裁定 R22：format=text 的 CSV 老路径不解析 options——坏掉的 options 也不影响它。"""
+    from app.api.temp_token_router import get_selection
+
+    data = {**TOKEN_DATA, "selection": ["a", "b"], "options": {"rating": 99}}
+    with patch(
+        "app.api.temp_token_router._get_token_data", new=AsyncMock(return_value=data)
+    ):
+        resp = await get_selection("tok", format="text", field=None)
+    assert resp.body == b"a,b"

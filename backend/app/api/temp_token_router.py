@@ -280,8 +280,8 @@ async def get_selection(
 
     data = await _get_token_data(token)
     tags = data.get("selection") or []
-    options = _options_from(data)
 
+    # 选项只在用得到的分支里解析：format=text 的 CSV 老路径保持零改动。
     if format == "text":
         if field is None:
             return PlainTextResponse(",".join(tags))
@@ -290,6 +290,6 @@ async def get_selection(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown field '{field}'; expected one of {', '.join(SELECTION_FIELDS)}",
             )
-        return PlainTextResponse(_field_as_text(options, field))
+        return PlainTextResponse(_field_as_text(_options_from(data), field))
 
-    return SelectionResponse(tags=tags, **options.model_dump())
+    return SelectionResponse(tags=tags, **_options_from(data).model_dump())

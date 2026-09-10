@@ -6,6 +6,9 @@ Media Batch Router
 Endpoints for batch fetching media and debug raw-parse.
 """
 
+import asyncio
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from loguru import logger
 
@@ -13,6 +16,7 @@ from app.api.media_fetch_helpers import (
     BatchFetchRequest,
     resolve_and_attach_tags,
     resolve_intent_tag_ids,
+    resolve_tag_names_to_ids,
     resolve_team_id,
 )
 from app.boundary import validate_url_async
@@ -26,9 +30,79 @@ from app.services.media.parsers.douyin_parse.parse_chain import fetch_douyin_det
 from app.services.media.parsers.media_service import MediaService
 from app.services.modules.gate import require_module
 
+if TYPE_CHECKING:
+    from app.repositories.resources_repository import ResourcesRepository
+
 router = APIRouter(dependencies=[Depends(require_module("media-parser"))])
 
 TAGS_FETCH = ["Video Fetch"]
+
+
+async def _find_resource_by_platform_id(
+    res_repo: "ResourcesRepository",
+    platform_id: str,
+    attempts: int,
+    poll_seconds: float,
+) -> dict | None:
+    """在预算内轮询资源。查询抛错记 ERROR 后按下一轮继续——绝不冒出去。"""
+    for attempt in range(1, attempts + 1):
+        try:
+            resource = await res_repo.get_resource_by_platform_id(platform_id)
+        except Exception as e:
+            logger.error(
+                f"[Fetch/Batch] resource lookup failed for {platform_id} "
+                f"(attempt {attempt}/{attempts}): {e}"
+            )
+            resource = None
+        if resource:
+            return resource
+        if attempt < attempts:
+            await asyncio.sleep(poll_seconds)
+    return None
+
+
+async def _attach_writes(
+    res_repo: "ResourcesRepository",
+    rid: str,
+    tag_ids: list[str] | None,
+    tag_names: list[str] | None,
+    user_id: str,
+    rating: int | None,
+) -> tuple[list[str], list[str]]:
+    """三处写入各自容纳异常：标签失败不挡评级，反之亦然。返回 (landed, failed)。"""
+    landed: list[str] = []
+    failed: list[str] = []
+    if tag_ids:
+        try:
+            await get_tags_repository().bulk_add_tags_to_resource(
+                rid, tag_ids, source="manual"
+            )
+            landed.append("tags")
+        except Exception as e:
+            logger.error(f"[Fetch/Batch] tag ids not attached to resource {rid}: {e}")
+            failed.append("tags")
+    if tag_names:
+        try:
+            await resolve_and_attach_tags(rid, tag_names, user_id)
+            landed.append("names")
+        except Exception as e:
+            logger.error(f"[Fetch/Batch] tag names not attached to resource {rid}: {e}")
+            failed.append("names")
+    if rating is not None:
+        try:
+            # update_resource 对 scope 看不见的行返回 {} 而不 raise——没写进去不能静默。
+            if await res_repo.update_resource(rid, {"rating": rating}):
+                landed.append("rating")
+            else:
+                logger.warning(
+                    f"[Fetch/Batch] rating not written for resource {rid} "
+                    f"(row missing or out of scope)"
+                )
+                failed.append("rating")
+        except Exception as e:
+            logger.error(f"[Fetch/Batch] rating not written for resource {rid}: {e}")
+            failed.append("rating")
+    return landed, failed
 
 
 async def attach_after_save(
@@ -42,34 +116,44 @@ async def attach_after_save(
     poll_seconds: float = 1.0,
 ) -> bool:
     """批量抓取是 background 保存资源，所以标签 / 评级只能等资源出现后再挂。
-    ``tag_ids`` 已含意图映射出的系统标签 id。返回是否在预算内等到了资源。"""
-    import asyncio
+    ``tag_ids`` 已含意图映射出的系统标签 id。
 
+    Starlette 顺序执行 BackgroundTasks 且不设守卫——这里一旦 raise，同批后续 URL
+    的 process_video 全被跳过（点数已扣）。所以本函数绝不 raise：每处写入各自
+    容纳并记 ERROR。返回 True 仅当资源找到且每一项请求的写入都落地。"""
     from app.repositories.resources_repository import ResourcesRepository
 
-    res_repo = ResourcesRepository()
-    for _ in range(attempts):
-        resource = await res_repo.get_resource_by_platform_id(platform_id)
-        if resource:
-            rid = str(resource["id"])
-            if tag_ids:
-                await get_tags_repository().bulk_add_tags_to_resource(
-                    rid, tag_ids, source="manual"
-                )
-            if tag_names:
-                await resolve_and_attach_tags(rid, tag_names, user_id)
-            if rating is not None:
-                # update_resource 对 scope 看不见的行返回 {} 而不 raise——没写进去不能静默。
-                if not await res_repo.update_resource(rid, {"rating": rating}):
-                    logger.warning(
-                        f"[Fetch/Batch] rating not written for resource {rid} "
-                        f"(row missing or out of scope)"
-                    )
-            logger.info(f"Tags/rating attached to resource {rid} for {platform_id}")
-            return True
-        await asyncio.sleep(poll_seconds)
-    logger.warning(f"Timeout attaching tags for {platform_id}")
-    return False
+    try:
+        res_repo = ResourcesRepository()
+    except Exception as e:
+        logger.error(f"[Fetch/Batch] cannot attach for {platform_id}: {e}")
+        return False
+
+    resource = await _find_resource_by_platform_id(
+        res_repo, platform_id, attempts, poll_seconds
+    )
+    if not resource:
+        logger.warning(f"Timeout attaching tags for {platform_id}")
+        return False
+
+    if resource.get("id") is None:
+        logger.error(f"[Fetch/Batch] resource for {platform_id} has no id: {resource}")
+        return False
+    rid = str(resource["id"])
+    landed, failed = await _attach_writes(
+        res_repo, rid, tag_ids, tag_names, user_id, rating
+    )
+    if failed:
+        logger.warning(
+            f"[Fetch/Batch] resource {rid} for {platform_id}: "
+            f"landed={landed or 'nothing'}, failed={failed}"
+        )
+        return False
+    logger.info(
+        f"[Fetch/Batch] resource {rid} for {platform_id}: "
+        f"landed={landed or 'nothing requested'}"
+    )
+    return True
 
 
 @router.post("/fetch/batch", tags=TAGS_FETCH)
@@ -125,6 +209,19 @@ async def fetch_videos_batch(
 
         from app.workflows.parse import enqueue_parse_for_user
 
+        # 与单链路 handle_media_fetch_dispatch 同口径：标签名先解析成 id（缺失自动建），
+        # 与用户 tag_ids + 意图 id 一起走 tag_ids 通道；解析失败不致命。
+        dispatch_tag_ids = list(effective_tag_ids)
+        if request.tags:
+            try:
+                for tid in await resolve_tag_names_to_ids(request.tags, auth.user_id):
+                    if tid not in dispatch_tag_ids:
+                        dispatch_tag_ids.append(tid)
+            except Exception as e:
+                logger.warning(
+                    f"[Fetch/Batch] tag-name resolution failed (non-fatal): {e}"
+                )
+
         wf_ids: list[str] = []
         for u in request.urls:
             try:
@@ -136,6 +233,8 @@ async def fetch_videos_batch(
                         "user_id": auth.user_id,
                         "video_bool": request.video_bool,
                         "cover_bool": request.cover_bool,
+                        "tag_ids": dispatch_tag_ids,
+                        "rating": request.rating,
                     },
                 )
                 wf_ids.append(wid)
