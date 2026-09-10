@@ -37,9 +37,12 @@ def _reset_rate_limit_history() -> None:
 @pytest.fixture(autouse=True)
 def _enable_delegate(monkeypatch) -> None:
     """Audit #4: Delegate is gated off by default in prod
-    (FEATURE_WORKFORCE_DELEGATE). These tests pin the feature-ON contract;
-    the default-off gate is covered by test_delegate_disabled_by_default."""
-    monkeypatch.setenv("FEATURE_WORKFORCE_DELEGATE", "1")
+    (settings.FEATURE_WORKFORCE_DELEGATE). These tests pin the feature-ON
+    contract; the default-off gate is covered by
+    test_delegate_disabled_by_default."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "FEATURE_WORKFORCE_DELEGATE", True)
 
 
 def _build_repos(*, target: dict | None = None):
@@ -474,7 +477,9 @@ async def test_delegate_disabled_by_default(monkeypatch):
     """With FEATURE_WORKFORCE_DELEGATE unset, execute() fail-closes before
     touching repos — the inbox→worker chain isn't wired, so a queued
     delegation would orphan forever."""
-    monkeypatch.delenv("FEATURE_WORKFORCE_DELEGATE", raising=False)
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "FEATURE_WORKFORCE_DELEGATE", False)
     svc, agent_repo, workforce, *_ = _service(
         target={"id": str(uuid4()), "slug": "summary", "is_persistent": True}
     )

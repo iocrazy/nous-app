@@ -122,14 +122,16 @@ sweeper/state-machine layers depend on these soft-fail contracts.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import Text, cast, func, literal, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
@@ -184,6 +186,20 @@ LIFECYCLE_TO_STATUS: Dict[str, str] = {
 # 后 dbos_workflow_id 没 gen_random_uuid default）。
 def _new_task_id() -> str:
     return str(uuid.uuid4())
+
+
+def _jsonb_merge(column: Any, patch: Dict[str, Any]) -> Any:
+    """``coalesce(col, '{}') || <patch>`` — an in-place JSONB key merge.
+
+    The coalesce is load-bearing, not decoration: ``task_tracking.metadata`` is
+    NULLABLE (only a server_default fills it), and ``NULL || x`` is NULL in
+    Postgres. Without it a row that somehow carries a NULL metadata would
+    swallow every stamp silently — a ``dispatched_at`` that never lands means
+    the dispatch tick re-enqueues that row on every single tick, forever."""
+    empty = cast(literal("{}"), JSONB)
+    return func.coalesce(column, empty).op("||", return_type=JSONB)(
+        cast(literal(json.dumps(patch)), JSONB)
+    )
 
 
 def tt_row_to_task_shape(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -652,42 +668,107 @@ class AgentWorkforceRepository:
             logger.exception(f"Failed to create task (agent={agent_id}): {e}")
             return None
 
-    async def claim_next_queued(self, *, agent_id: UUID) -> Optional[Dict[str, Any]]:
-        """Atomic claim: pick the oldest queued task for this agent and flip to
-        'assigned' (CAS guard on phase). Caller holds the advisory lock."""
+    async def claim_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """CAS claim by id: queued → assigned, or None if someone got there first.
+
+        Replaces the by-agent ``claim_next_queued`` (zero production callers —
+        the dedup that actually ran was ``run_one_task``'s read-then-check,
+        which is not atomic). The dispatcher already picked WHICH task; the only
+        question left is whether this worker owns it.
+
+        One UPDATE ... RETURNING, no preceding SELECT: the read-then-write it
+        replaces left a window in which two workers both saw ``queued``."""
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             async with write_scope() as session:
-                picked = await session.execute(
-                    select(TaskTracking.dbos_workflow_id, TaskTracking.metadata_)
-                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
-                    .where(TaskTracking.agent_id == str(agent_id))
-                    .where(TaskTracking.phase == "queued")
-                    .order_by(TaskTracking.created_at.asc())
-                    .limit(1)
-                )
-                first = picked.first()
-                if first is None:
-                    return None
-                task_id = first[0]
-                existing_md: Dict[str, Any] = dict(first[1] or {})
-                existing_md["assigned_at"] = now_iso
-
                 updated = await session.execute(
                     sa_update(TaskTracking)
-                    .where(TaskTracking.dbos_workflow_id == task_id)
-                    .where(TaskTracking.phase == "queued")  # CAS guard
+                    .where(TaskTracking.dbos_workflow_id == str(task_id))
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .where(TaskTracking.phase == "queued")  # the CAS
                     .values(
                         phase="assigned",
                         status=LIFECYCLE_TO_STATUS["assigned"],
-                        metadata_=existing_md,
+                        metadata_=_jsonb_merge(
+                            TaskTracking.metadata_, {"assigned_at": now_iso}
+                        ),
                     )
                     .returning(TaskTracking)
                 )
                 return _task_shape(updated.scalars().first())
         except Exception as e:
-            logger.exception(f"Failed to claim queued task (agent={agent_id}): {e}")
+            logger.exception(f"Failed to claim task {task_id}: {e}")
             return None
+
+    async def list_undispatched_queued_tasks(
+        self, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Queued agent_tasks nobody has enqueued yet — the dispatch tick's work
+        list. Not just this tick's new rows: a task created outside the inbox
+        path (a background sub-agent, phase 2b-2 §2.2) is picked up here too."""
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TaskTracking)
+                        .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                        .where(TaskTracking.phase == "queued")
+                        .where(
+                            TaskTracking.metadata_.op("->>", return_type=Text)(
+                                cast(literal("dispatched_at"), Text)
+                            ).is_(None)
+                        )
+                        .order_by(TaskTracking.created_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [s for s in (_task_shape(r) for r in rows) if s]
+
+    async def mark_dispatched(self, task_id: str) -> None:
+        """Stamp ``metadata.dispatched_at`` so the next tick skips this row.
+
+        Best effort: DBOS pins the workflow id to ``workforce-<task_id>``, so a
+        lost stamp costs one extra enqueue that DBOS dedups — never a double
+        run. Merged with ``||`` rather than read-modify-write so a concurrent
+        metadata write (current_run_id, agent_result) is not clobbered."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == str(task_id))
+                    .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                    .values(
+                        metadata_=_jsonb_merge(
+                            TaskTracking.metadata_, {"dispatched_at": now_iso}
+                        )
+                    )
+                )
+        except Exception as e:
+            logger.exception(f"Failed to mark task {task_id} dispatched: {e}")
+
+    async def count_inflight_agent_tasks(self) -> int:
+        """Live agent_tasks, derived from the table rather than counted in this
+        process. The estimate this replaces only ever incremented (nothing
+        decremented on a terminal state), so it was a monotonically rising
+        number wearing a gauge's name.
+
+        ⚠️ DELIBERATELY does NOT follow this file's swallow-and-return-a-
+        fallback convention. Its consumer is a health probe, and ``0`` would
+        read as "the queue is empty" — the most reassuring possible answer to
+        "I could not reach the database". Let it raise; the probe reports the
+        gauge as unavailable and stays honest about not knowing."""
+        async with read_scope() as session:
+            total = await session.scalar(
+                select(func.count())
+                .select_from(TaskTracking)
+                .where(TaskTracking.task_kind == TASK_KIND_AGENT)
+                .where(TaskTracking.phase.in_(("queued", "in_progress")))
+            )
+        return int(total or 0)
 
     async def update_task_status(
         self,
@@ -821,6 +902,10 @@ class AgentWorkforceRepository:
                 md: Dict[str, Any] = dict((md_row[0] if md_row else None) or {})
                 md.pop("current_run_id", None)
                 md.pop("assigned_at", None)
+                # The dispatch tick skips rows that carry ``dispatched_at``.
+                # Leaving the stamp on a requeued task makes it queued forever
+                # and enqueued never — a stall with no error on any surface.
+                md.pop("dispatched_at", None)
 
                 upd = await session.execute(
                     sa_update(TaskTracking)

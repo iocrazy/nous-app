@@ -9,7 +9,7 @@ instances, so ``_orm_obj_to_dict`` yields a parity dict) — covering the contra
 corners the state machine and dispatcher depend on WITHOUT a live DB:
 
     - claim_next_unread  → CAS guard binds status='unread'
-    - claim_next_queued  → CAS guard binds phase='queued'
+    - claim_task         → single CAS UPDATE ... RETURNING on phase='queued'
     - enqueue_inbox      → dedup collision falls back to lookup
     - create_task        → self-references root_task_id when tree root
     - update_task_status → terminal status binds completed_at
@@ -53,7 +53,7 @@ class _Scalars:
 class _Result:
     """A stand-in for a SQLAlchemy Result. ``scalars`` feeds
     ``.scalars().first()/.all()``; ``first`` feeds ``.first()`` (the tuple-row
-    selects in claim_next_queued / update_task_status / requeue_task)."""
+    selects in update_task_status / requeue_task)."""
 
     def __init__(
         self, *, scalars: Optional[list[Any]] = None, first: Any = None
@@ -275,22 +275,132 @@ async def test_create_task_preserves_explicit_root(repo, monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_claim_next_queued_uses_cas_guard(repo, monkeypatch):
-    """A4: CAS guard is on the phase column (task_tracking) — phase preserves
-    the 8-state lifecycle precision after the agent_tasks merge."""
+async def test_claim_task_is_a_single_cas_update_with_returning(repo, monkeypatch):
+    """2b-2 T3: claim-by-id replaces the by-agent ``claim_next_queued``.
+
+    The dispatcher already picked WHICH task; the only question left is whether
+    this worker owns it. One UPDATE ... RETURNING does that atomically — the
+    read-then-check it replaces (``run_one_task``'s ``get_task`` + phase test)
+    was not atomic, so two workers could both pass it."""
     task_id = str(uuid4())
     updated = TaskTracking(dbos_workflow_id=task_id, phase="assigned", metadata_={})
-    # 1st execute (select dbos_workflow_id, metadata_).first() → tuple;
-    # 2nd execute (update returning) → updated row.
-    session = _FakeSession([_Result(first=(task_id, {})), _Result(scalars=[updated])])
+    session = _FakeSession([_Result(scalars=[updated])])
     _patch_scopes(monkeypatch, session)
 
-    await repo.claim_next_queued(agent_id=uuid4())
+    out = await repo.claim_task(task_id)
 
-    upd_params = session.params[1]
+    assert out is not None and out["lifecycle_status"] == "assigned"
+    # ONE statement — no separate SELECT to race against.
+    assert len(session.sql) == 1
+    sql = session.sql[0]
+    assert "UPDATE public.task_tracking" in sql
+    assert "RETURNING" in sql
+    p = session.params[0]
     # CAS guard binds phase='queued' in the WHERE; SET phase='assigned'.
-    assert upd_params["phase_1"] == "queued"
-    assert upd_params["phase"] == "assigned"
+    assert p["phase_1"] == "queued"
+    assert p["phase"] == "assigned"
+    assert p["dbos_workflow_id_1"] == task_id
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_task_returns_none_when_someone_else_won(repo, monkeypatch):
+    """Zero rows updated == another worker holds it. Not an error."""
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+    assert await repo.claim_task(str(uuid4())) is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_list_undispatched_queued_tasks_filters_on_missing_stamp(
+    repo, monkeypatch
+):
+    """The dispatch tick's work list: queued agent_tasks with no
+    ``metadata.dispatched_at``. The ``->>`` IS NULL is the whole point — a row
+    already enqueued must not be enqueued again on the next tick."""
+    row = TaskTracking(dbos_workflow_id=str(uuid4()), phase="queued", metadata_={})
+    session = _FakeSession([_Result(scalars=[row])])
+    _patch_scopes(monkeypatch, session)
+
+    out = await repo.list_undispatched_queued_tasks(limit=7)
+
+    assert len(out) == 1
+    sql = session.sql[0]
+    assert "->>" in sql
+    assert "IS NULL" in sql
+    p = session.params[0]
+    assert p["phase_1"] == "queued"
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+    assert p["param_1"] == "dispatched_at"  # the ->> key
+    assert p["param_2"] == 7  # the LIMIT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_mark_dispatched_merges_the_stamp_without_clobbering(repo, monkeypatch):
+    """JSONB ``||`` merge, not a read-modify-write: unrelated metadata keys
+    (agent_payload, current_run_id) survive, and no interleaving write is lost
+    between a SELECT and an UPDATE that never happen."""
+    session = _FakeSession([_Result(scalars=[])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.mark_dispatched(str(uuid4()))
+
+    assert len(session.sql) == 1
+    sql = session.sql[0]
+    assert "UPDATE public.task_tracking" in sql
+    assert "||" in sql
+    assert "dispatched_at" in str(session.params[0])
+    # Lifecycle columns are NOT touched — this is a metadata-only stamp.
+    assert "phase" not in session.params[0]
+    assert "status" not in session.params[0]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_inflight_agent_tasks_is_derived_from_live_phases(
+    repo, monkeypatch
+):
+    session = _FakeSession([], scalar_values=[4])
+    _patch_scopes(monkeypatch, session)
+
+    assert await repo.count_inflight_agent_tasks() == 4
+
+    p = session.params[0]
+    assert set(p["phase_1"]) == {"queued", "in_progress"}
+    assert p["task_kind_1"] == mod.TASK_KIND_AGENT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_count_inflight_propagates_failure_instead_of_returning_zero(
+    repo, monkeypatch
+):
+    """Deliberate departure from this file's soft-fail convention.
+
+    Returning 0 for "I could not read the table" is indistinguishable from
+    "the queue is empty" — the caller is a health probe, and handing it a
+    reassuring zero on a dead connection is the empty-output-is-not-a-negative-
+    result trap in miniature. It raises; the probe reports the gauge missing."""
+    session = _FakeSession([])
+
+    async def _boom(stmt):
+        raise RuntimeError("connection reset")
+
+    session.scalar = _boom
+    _patch_scopes(monkeypatch, session)
+
+    with pytest.raises(RuntimeError):
+        await repo.count_inflight_agent_tasks()
+
+
+@pytest.mark.unit
+def test_claim_next_queued_is_gone():
+    """The by-agent claim had zero production callers and is deleted, not
+    deprecated — leaving it invites a second, non-atomic claim path."""
+    assert not hasattr(AgentWorkforceRepository, "claim_next_queued")
 
 
 def _update_status_session() -> _FakeSession:
@@ -347,6 +457,32 @@ async def test_requeue_task_only_acts_on_in_flight_states(repo, monkeypatch):
     p = session.params[1]  # the UPDATE
     assert set(p["phase_1"]) == {"assigned", "in_progress"}
     assert p["phase"] == "queued"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_requeue_task_clears_the_dispatch_stamp(repo, monkeypatch):
+    """A reaped task goes back to 'queued' — and must become visible to the
+    dispatch tick again. The tick skips rows carrying ``dispatched_at``, so a
+    requeue that leaves the stamp in place produces a task that is queued
+    forever and enqueued never: a silent stall with no error anywhere."""
+    md = {
+        "agent_payload": {"prompt": "x"},
+        "assigned_at": "2026-09-10T00:00:00+00:00",
+        "dispatched_at": "2026-09-10T00:00:00+00:00",
+        "current_run_id": "7",
+    }
+    session = _FakeSession([_Result(first=(md,)), _Result(scalars=["t"])])
+    _patch_scopes(monkeypatch, session)
+
+    await repo.requeue_task(uuid4())
+
+    written = session.params[1]["metadata"]
+    assert "dispatched_at" not in written
+    assert "assigned_at" not in written
+    assert "current_run_id" not in written
+    # Business payload survives — requeue is not a reset.
+    assert written["agent_payload"] == {"prompt": "x"}
 
 
 # ─── outbox ───────────────────────────────────────────────────────────

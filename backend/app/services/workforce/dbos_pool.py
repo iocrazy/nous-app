@@ -1,20 +1,27 @@
-"""DbosAgentWorkforcePool — drop-in replacement for AgentWorkerPool
-that enqueues into the DBOS `agent_workforce` queue.
+"""DbosAgentWorkforcePool — enqueues agent tasks onto the DBOS
+`agent_workforce` queue.
 
-Same dispatch interface (`dispatch / inflight_count / known_agents /
-shutdown`) so WorkforceScheduler can swap pools without further code
-changes. Production lifespan picks one based on
-``settings.WORKFORCE_USE_DBOS_QUEUE`` (default off → AgentWorkerPool;
-on → DbosAgentWorkforcePool).
+This is now the ONLY pool. The in-process ``AgentWorkerPool`` it was written
+to stand in for, and the ``WorkforceScheduler`` that would have chosen between
+them, were deleted in phase 2b-2 T3 — nothing had imported either since PR-D8
+Phase 3 moved dispatch onto DBOS-scheduled workflows. The swap point and the
+``WORKFORCE_USE_DBOS_QUEUE`` switch are gone with them; do not reintroduce a
+"pluggable pool" seam for a second implementation that does not exist.
 
-Shutdown semantics differ slightly from the legacy pool:
+Its caller is the workflow BODY of ``inbox_dispatch_workflow``
+(``app/workflows/workforce_dispatch.py``) — never a ``@DBOS.step``, which
+cannot start a workflow (CLAUDE.md route C).
+
+Lifecycle semantics:
     - We don't track in-flight asyncio.Tasks here — DBOS owns that.
     - shutdown() just flips a closed flag so dispatch() rejects new
       enqueues. In-flight workflows continue under DBOS control until
       they finish or DBOS itself stops.
-    - inflight_count is a best-effort estimate via the local counter
-      (incremented at enqueue, decremented when DBOS reports terminal).
-      For exact counts, query DBOS.list_workflows(queue_name=...).
+    - inflight_count is DERIVED from task_tracking on every call (an async
+      method, not a property). It used to be a local counter incremented at
+      enqueue and decremented "when DBOS reports terminal" — except nothing
+      ever reported terminal, so it only rose. A gauge that cannot fall is
+      worse than no gauge: it reads as a stuck queue forever.
 """
 
 from __future__ import annotations
@@ -29,27 +36,21 @@ logger = logging.getLogger(__name__)
 
 
 class DbosAgentWorkforcePool:
-    """Same shape as AgentWorkerPool — enqueues to DBOS instead of
-    asyncio.create_task.
+    """Enqueues onto DBOS instead of running work in this process.
 
-    The ``runner`` constructor arg is accepted for interface parity but
-    NOT used: the workflow body is fixed (``agent_workforce_workflow``
-    delegates to ``app.services.workforce.agent_worker.run_one_task``).
-    Tests that need to stub the runner should patch
-    ``run_one_task`` directly.
+    The ``runner`` constructor arg is accepted but NOT used: the workflow body
+    is fixed (``agent_workforce_workflow`` delegates to
+    ``app.services.workforce.agent_worker.run_one_task``). Tests that need to
+    stub the runner should patch ``run_one_task`` directly. It survives only
+    because callers construct the pool positionally; it is not a seam.
     """
 
     def __init__(self, runner: Any = None) -> None:
         # runner ignored — workflow body is import-bound.
         self._runner = runner
         self._closed = False
-        # Best-effort in-flight count. The authoritative source is
-        # `DBOS.list_workflows(queue_name='agent_workforce', status='RUNNING')`
-        # but that's a sys_db read; the counter is enough for /healthz.
-        self._inflight_estimate: int = 0
-        # Track agent_ids we've ever enqueued for — matches
-        # AgentWorkerPool's ``known_agents`` introspection so existing
-        # tests/healthz keep working.
+        # Track agent_ids we've ever enqueued for — an introspection aid for
+        # this pool instance only, NOT a cluster-wide fact.
         self._known_agents: set[UUID] = set()
 
     async def dispatch(self, task: dict[str, Any]) -> None:
@@ -92,7 +93,6 @@ class DbosAgentWorkforcePool:
                 # Enqueue is sync — returns a WorkflowHandle without
                 # blocking on the workflow body. DBOS schedules it.
                 agent_workforce_queue.enqueue(agent_workforce_workflow, task)
-            self._inflight_estimate += 1
             logger.debug(
                 f"[dbos-workforce-pool] enqueued task={task_id_raw} "
                 f"agent={agent_id} wf_id={workflow_id}"
@@ -113,12 +113,20 @@ class DbosAgentWorkforcePool:
                     f"[dbos-workforce-pool] enqueue failed for task={task_id_raw}: {err}"
                 )
 
-    @property
-    def inflight_count(self) -> int:
-        """Best-effort estimate. Matches AgentWorkerPool's interface but
-        isn't exact — DBOS workers can finish workflows we don't see
-        promptly. /healthz consumers should not alert on small drift."""
-        return max(0, self._inflight_estimate)
+    async def inflight_count(self) -> int:
+        """Live agent_tasks, derived from task_tracking — NOT counted in this
+        process. Async, and a method rather than a property, because it is a
+        DB read.
+
+        The estimate this replaces only ever incremented (nothing decremented
+        it on a terminal state), so it was a monotonically rising number
+        wearing a gauge's name — a health consumer reading it would report a
+        permanently growing backlog on a completely idle system."""
+        from app.repositories.agent_workforce_repository import (
+            get_agent_workforce_repository,
+        )
+
+        return await get_agent_workforce_repository().count_inflight_agent_tasks()
 
     @property
     def known_agents(self) -> set[UUID]:
@@ -128,8 +136,8 @@ class DbosAgentWorkforcePool:
 
     async def shutdown(self, drain_timeout: float = 5.0) -> None:
         """Flip closed; DBOS owns the workflow lifecycle so we don't
-        wait for in-flight runs. drain_timeout kept for interface
-        parity with AgentWorkerPool but ignored.
+        wait for in-flight runs. drain_timeout is ignored (kept so existing
+        call sites need no edit).
 
         DBOS itself stops via ``shutdown_dbos()`` in the lifespan
         teardown, which drains its workers cleanly."""

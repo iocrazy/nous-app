@@ -2,7 +2,7 @@
 
 Where M2 stops: it wrote inbox/task/outbox tables + a state machine,
 but nothing actually picked tasks off the queue and ran them. This
-module is what the AgentWorkerPool dispatches to. It mirrors the
+module is what ``agent_workforce_workflow`` dispatches to. It mirrors the
 ChatPanel chat path (compose → AgentRunner.run_turn → RunRecorder)
 but reads input from ``agent_tasks.payload`` and writes output to
 ``agent_outbox`` so the calling agent can see the result.
@@ -10,7 +10,7 @@ but reads input from ``agent_tasks.payload`` and writes output to
 ## Lifecycle of a task as it flows through here
 
     queued (set by inbox processor)
-        ↓ claim_next_queued — CAS guard, flips to 'assigned'
+        ↓ claim_task — CAS guard, flips to 'assigned'
     assigned
         ↓ this module enters
     in_progress  ← started_at set
@@ -40,6 +40,18 @@ The state machine doesn't run on failure paths from this module — task
 lifecycle and worker state are tracked separately. Worker state moves
 (idle → working → idle) are wired in by the inbox processor (M2) when
 it claims an unread message.
+
+## Why this module PATCHes phase/status directly (route C rule 2 exception)
+
+Route C rule 2 forbids business code from writing task_tracking's lifecycle
+columns — ``mirror_dbos_lifecycle_to_tracking`` owns them. It cannot own THESE
+rows: a workforce task's DBOS workflow id is ``workforce-<task_id>``, while
+``task_tracking.dbos_workflow_id`` holds the application-level uuid4 the
+repository minted at create time. They never match, the trigger's join finds
+nothing, and the row would sit at ``queued`` for the whole run. These writes
+are deliberate, not drift. Changing the workflow-id scheme re-opens the
+decision: matching ids would hand phase back to the trigger, and these
+UPDATEs would start fighting it.
 """
 
 from __future__ import annotations
@@ -105,16 +117,15 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         )
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
 
-    # Flip queued/assigned → in_progress. The CAS inside update_task_status
-    # accepts any current state for the new value, but we also want to
-    # bail if someone else already moved it past 'assigned'.
-    fresh = await workforce.get_task(task_id)
-    if not fresh or fresh.get("lifecycle_status") not in ("queued", "assigned"):
-        logger.info(
-            f"[agent-worker] task {task_id} no longer claimable "
-            f"(status={fresh.get('lifecycle_status') if fresh else 'gone'})"
-        )
+    # Take ownership atomically: queued → assigned in ONE UPDATE. Losing the
+    # race returns None. This replaced a read-then-check (get_task, then test
+    # the phase) that two workers could both pass — the window between the
+    # read and the first write was never guarded.
+    claimed = await workforce.claim_task(str(task_id))
+    if claimed is None:
+        logger.info(f"[agent-worker] task {task_id} not claimable (already taken)")
         return {"task_id": str(task_id), "status": "skipped", "reason": "not_claimable"}
+    task = {**task, **claimed}
 
     # Resolve the agent record for model + budget + identity.
     agent_repo = get_agent_repository()

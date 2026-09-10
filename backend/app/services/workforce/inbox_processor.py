@@ -7,11 +7,12 @@ Runs once per beat tick. Per agent with unread messages:
     3. Create an agent_task from the message payload
     4. Mark the inbox message processed and link to the task
 
-The actual LLM work (the running of that task) happens in a separate
-Celery task dispatched after the row is created — the processor is
-queue-shaping only, not execution. This separation matches paperclip's
-"inbox-then-task" pattern: the inbox is the durable mailbox, the task
-queue is the unit of execution.
+The processor is queue-SHAPING only, never execution and never dispatch. The
+row it creates is picked up by the same scheduled tick that invoked it
+(``workflows/workforce_dispatch.py``), which enqueues it onto the DBOS
+``agent_workforce`` queue from the workflow BODY. This separation matches
+paperclip's "inbox-then-task" pattern: the inbox is the durable mailbox, the
+task queue is the unit of execution.
 
 Failure handling: any exception inside one agent's processing is logged
 and skipped — other agents in the tick continue. The state machine
@@ -51,16 +52,9 @@ class InboxProcessor:
         self,
         repo: Optional[AgentWorkforceRepository] = None,
         state_machine: Optional[WorkerStateMachine] = None,
-        dispatcher: Optional[Any] = None,
     ) -> None:
         self.repo = repo or get_agent_workforce_repository()
         self.state_machine = state_machine or WorkerStateMachine(repo=self.repo)
-        # M3: paperclip-style direct hand-off to AgentWorkerPool.
-        # When set, every successfully-created task is dispatched to be
-        # run immediately (no polling lag). Backward compatible — when
-        # None, behaviour matches M2 (task lands queued, ran by separate
-        # poller). Tests that don't care about dispatch can leave it None.
-        self.dispatcher = dispatcher
 
     # ────────────────────────────────────────────────────────────
     # Tick entry point
@@ -176,19 +170,12 @@ class InboxProcessor:
             status="processed",
         )
 
-        # M3: hand off to the worker pool so the LLM call fires now,
-        # not on the next polling cycle. Failure here is non-fatal — task
-        # row is already 'queued' in the DB, a polling fallback (or the
-        # next inbox tick when the agent is idle again) can pick it up.
-        if self.dispatcher is not None:
-            try:
-                await self.dispatcher.dispatch(task)
-            except Exception as err:  # pragma: no cover — defensive
-                logger.warning(
-                    f"[inbox] dispatcher.dispatch failed for task "
-                    f"{task['id']}: {err}"
-                )
-
+        # No hand-off here. The row is now 'queued' with no dispatched_at, and
+        # the same tick that called us lists it and enqueues it from the
+        # workflow BODY (workflows/workforce_dispatch.py). Dispatching from
+        # inside this call would put an enqueue inside a @DBOS.step, which
+        # route C forbids — and having two dispatch paths for one row is how
+        # you get a task enqueued twice or, when the caller forgets, never.
         return True
 
     async def _handle_cancel(self, agent_id: UUID, message: Dict[str, Any]) -> bool:

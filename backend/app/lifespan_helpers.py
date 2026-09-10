@@ -17,7 +17,7 @@ The fix is to split lifespan work into three buckets:
   bounds self-registration.
 * **LONGRUNNING** — daemon coroutines that live for the process lifetime.
   Two sub-kinds: components with their own start/stop protocol
-  (WorkforceScheduler, SsrfProxy, PrometheusPusher, bounds heartbeat)
+  (SsrfProxy, PrometheusPusher, bounds heartbeat)
   manage themselves and stay outside this module; bare daemon loops
   (reap sweep, stall detector) are registry-owned via
   `spawn(..., long_running=True)` so they get snapshot visibility and

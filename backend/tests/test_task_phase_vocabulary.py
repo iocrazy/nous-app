@@ -267,6 +267,19 @@ _LITERAL_ALLOWLIST: dict[tuple[str, frozenset[str]], str] = {
         "这类行的 phase 全由该文件写、trigger 不参与（migration 200）。"
         "换成 ACTIVE_PHASES 会漏掉 assigned、并误伤 waiting_for_other / blocked。"
     ),
+    (
+        "repositories/agent_workforce_repository.py",
+        frozenset({"queued", "in_progress"}),
+    ): (
+        "同上，是 agent_task 的 8 状态 lifecycle —— ``count_inflight_agent_tasks`` "
+        "的 WHERE 里 task_kind == 'agent_task' 已把行限定死，而这套词汇里根本没有 "
+        "'processing'（那是 DBOS 侧的值，由 trigger 写给 workflow 行）。"
+        "取 queued + in_progress 是照 spec 定的口径（等着跑 + 正在跑）。"
+        "⚠️ 'assigned' 不在内：正常情况下它只存在于 claim 与 in_progress 之间的"
+        "一瞬，但 worker 在这中间崩掉的话，任务会停在 assigned 直到心跳清扫把它 "
+        "requeue —— 那段时间这个计数看不见它。改口径前先想清楚这个 gauge 是"
+        "「占执行槽位的」还是「没走完的」。"
+    ),
 }
 
 

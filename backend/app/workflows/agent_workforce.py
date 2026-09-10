@@ -1,14 +1,13 @@
-"""agent_workforce DBOS workflow + queue — port of the in-process
-``AgentWorkerPool`` dispatch path (``app/services/workforce``).
+"""agent_workforce DBOS workflow + queue — the execution path for agent tasks.
 
-The legacy pool was a paperclip-style asyncio scheduler: per-agent
-``asyncio.Lock`` for in-process serialization, ``asyncio.create_task``
-for fire-and-forget dispatch, no cross-process coordination. It was
-already a step up from M2 Celery beat (per the scheduler.py docstring),
-but every uvicorn worker has its own pool — so two pods could run the
-same agent at once; only the PG row CAS in
-``AgentWorkforceRepository.claim_next_queued`` prevented duplicate
-work, not concurrent runs.
+It began as a port of the in-process ``AgentWorkerPool``
+(``app/services/workforce/worker_pool.py``), a paperclip-style asyncio
+scheduler: per-agent ``asyncio.Lock`` for in-process serialization,
+``asyncio.create_task`` for fire-and-forget dispatch, no cross-process
+coordination. Every uvicorn worker had its own pool, so two pods could run the
+same agent at once. That module and its scheduler were deleted in harness
+2b-2 T3 — this is the only path now, and the comparisons below are history,
+not a choice still on the table.
 
 DBOS Queue gives us:
     - **per-worker** concurrency cap (`worker_concurrency=N`, see note
@@ -37,9 +36,9 @@ Concurrency tuning rationale:
       Today we run one DBOS worker per pod, so per-worker == global.
       Duplicate-run prevention does NOT rely on the queue regardless —
       it is the PG row-level CAS in
-      ``AgentWorkforceRepository.claim_next_queued`` / ``update_task_status``
-      (a second worker that dequeues the same agent short-circuits in
-      ``run_one_task`` if the task is no longer ``queued``).
+      ``AgentWorkforceRepository.claim_task`` / ``update_task_status``
+      (a second worker that dequeues the same agent loses the claim UPDATE
+      in ``run_one_task`` and returns ``status='skipped'``).
 """
 
 from __future__ import annotations
@@ -123,16 +122,16 @@ async def run_one_task_step(task: dict[str, Any]) -> dict[str, Any]:
 
 @DBOS.workflow()
 async def agent_workforce_workflow(task: dict[str, Any]) -> dict[str, Any]:
-    """DBOS port of the AgentWorkerPool dispatch.
+    """Run one agent task under DBOS.
 
-    Recommended workflow_id: ``f"workforce-{task['id']}"`` so a
-    duplicate enqueue (broker hiccup, scheduler tick collision)
-    short-circuits to the cached result instead of re-executing.
+    Required workflow_id: ``f"workforce-{task['id']}"`` so a duplicate enqueue
+    (broker hiccup, a replayed dispatch tick) short-circuits to the cached
+    result instead of re-executing. ``DbosAgentWorkforcePool.dispatch`` sets
+    it; nothing else enqueues onto this queue.
 
-    Recommended queue_partition_key: ``task['agent_id']`` so two
-    enqueues for the same agent serialise globally — replaces the
-    in-process per-agent lock from AgentWorkerPool with a stronger
-    cluster-wide guarantee.
+    Required queue_partition_key: ``task['agent_id']`` so two enqueues for the
+    same agent serialise — this took over from the deleted pool's in-process
+    per-agent lock, with a cluster-wide guarantee instead of a per-process one.
 
     Returns the same shape as run_one_task:
         {"task_id": str, "status": str, "run_id": str|None}"""

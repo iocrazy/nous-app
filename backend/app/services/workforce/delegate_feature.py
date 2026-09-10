@@ -1,38 +1,43 @@
 """Feature gate for the Workforce Delegate tool (harness audit #4).
 
-The Delegate → agent_inbox → workforce-queue → agent_workforce_workflow
-execution chain is built and registered, but NOT fully wired: the
-DBOS-scheduled inbox processor runs without a dispatcher
-(``workforce_dispatch.py`` constructs ``InboxProcessor()`` with no dispatcher),
-so a delegated task is created in ``task_tracking`` and then orphaned —
-never enqueued, never executed, and an ``await=true`` Delegate call times out
-forever.
+The Delegate → agent_inbox → task_tracking → DBOS ``agent_workforce_workflow``
+→ ``run_one_task`` chain is WIRED as of phase 2b-2 T3. The four wires this
+module used to wait on are all in place:
 
-Until that last wire is connected, advertising Delegate to the LLM is a silent
-footgun: a user-facing agent can call it, get ``status="queued"``, and the work
-never runs. This flag keeps the front door shut so the UI is honest — off
-(default) means the tool is not advertised AND ``execute()`` fail-closes with a
-clear message.
+  1. the scheduled inbox tick shapes a dispatch queue
+     (``workforce_dispatch.inbox_dispatch_tick_step``) and the workflow BODY
+     enqueues it through ``DbosAgentWorkforcePool`` — never the step, which
+     route C forbids from starting a workflow;
+  2. ``AgentWorkforceRepository.mark_dispatched`` stamps what went out so the
+     next tick does not re-enqueue it;
+  3. ``inflight_count`` is derived from ``task_tracking`` instead of a local
+     counter that only ever rose;
+  4. the dead by-agent ``claim_next_queued`` is replaced by ``claim_task``, a
+     single CAS UPDATE that ``run_one_task`` actually calls.
 
-Flip ``FEATURE_WORKFORCE_DELEGATE`` truthy only once the execution path is
-actually wired end-to-end:
-  1. give the scheduled InboxProcessor a ``DbosAgentWorkforcePool`` dispatcher,
-  2. enqueue the workflow from the workflow body, NOT inside the ``@DBOS.step``
-     (CLAUDE.md route C: never dispatch a workflow from within a step),
-  3. make ``DbosAgentWorkforcePool.inflight_count`` decrement on terminal state,
-  4. decide whether to wire or delete the dead ``claim_next_queued`` CAS guard.
+What is NOT yet done is the part no unit test can supply: a real-stack run
+proving a delegated task travels the whole chain on the deployed worker
+(phase 2b-2 T7). Until that run, the flag stays false — advertising Delegate
+over an unproven chain is the same silent footgun as before: the model gets
+``status="queued"`` and the user gets nothing.
+
+Off (default) means the tool is not advertised to the LLM AND ``execute()``
+fail-closes with a clear message.
 """
 
 from __future__ import annotations
 
-import os
-
-_TRUTHY = {"1", "true", "yes", "on"}
+from app.core.config import settings
 
 
 def delegate_feature_enabled() -> bool:
-    """True only when ``FEATURE_WORKFORCE_DELEGATE`` is explicitly enabled."""
-    return os.getenv("FEATURE_WORKFORCE_DELEGATE", "").strip().lower() in _TRUTHY
+    """True only when ``FEATURE_WORKFORCE_DELEGATE`` is explicitly enabled.
+
+    Read from settings (config.yml / env / .env), not a bare ``os.getenv`` —
+    so it resolves once at startup like every other FEATURE_* flag rather than
+    changing under a running process.
+    """
+    return bool(settings.FEATURE_WORKFORCE_DELEGATE)
 
 
 __all__ = ["delegate_feature_enabled"]

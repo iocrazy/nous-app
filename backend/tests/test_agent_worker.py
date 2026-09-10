@@ -112,7 +112,7 @@ async def test_happy_path_queued_to_done_with_outbox():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -193,7 +193,7 @@ async def test_refuses_non_persistent_agent():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -255,8 +255,11 @@ async def test_skips_task_no_longer_claimable():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    # Task is already done (someone else processed it).
-    workforce.get_task = AsyncMock(return_value={**task, "lifecycle_status": "done"})
+    # The CAS lost: another worker flipped queued → assigned first, so the
+    # UPDATE matched zero rows. Zero rows is the ONLY honest signal here — the
+    # read-then-check this replaced could see 'assigned' and still be the
+    # second worker to act on it.
+    workforce.claim_task = AsyncMock(return_value=None)
     workforce.update_task_status = AsyncMock(return_value=True)
 
     with patch(
@@ -266,6 +269,8 @@ async def test_skips_task_no_longer_claimable():
         result = await run_one_task(task)
 
     assert result["status"] == "skipped"
+    assert result["reason"] == "not_claimable"
+    workforce.claim_task.assert_awaited_once_with(task["id"])
     workforce.update_task_status.assert_not_called()
 
 
@@ -280,7 +285,7 @@ async def test_empty_prompt_fails_fast():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -316,7 +321,7 @@ async def test_run_turn_exception_marks_failed():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)
@@ -390,7 +395,7 @@ async def test_outbox_routes_to_agent_when_sender_kind_agent():
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
-    workforce.get_task = AsyncMock(
+    workforce.claim_task = AsyncMock(
         return_value={**task, "lifecycle_status": "assigned"}
     )
     workforce.update_task_status = AsyncMock(return_value=True)

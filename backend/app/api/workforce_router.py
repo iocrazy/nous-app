@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import column, func, select
@@ -44,6 +44,8 @@ from app.repositories.agent_workforce_repository import (
     get_agent_workforce_repository,
     tt_row_to_task_shape,
 )
+from app.services.infra.dbos_orchestrator import is_launched as dbos_is_launched
+from app.services.workforce.dbos_pool import DbosAgentWorkforcePool
 
 router = APIRouter(prefix="/workforce", tags=["workforce"])
 
@@ -65,12 +67,16 @@ def _serialize_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-# Tunables for the healthz overall verdict.
-# Inbox cadence is 10s + LLM-call latency. 5 minutes without a tick is
-# clearly broken; under 90s is normal idle. Recent inbox processing is
-# only checked when we have agents at all — empty queue is healthy.
-_HEALTH_DEGRADED_AFTER_S = 90
-_HEALTH_DOWN_AFTER_S = 300
+# Tunable for the healthz overall verdict. Inbox cadence is 10s + LLM-call
+# latency, so 5 minutes of zero processed rows while the queue is non-empty is
+# clearly broken. Only checked when persistent agents exist at all — an empty
+# queue on a deployed-but-unused system is healthy, not stalled.
+#
+# Two tick-staleness thresholds used to sit here (_HEALTH_DEGRADED_AFTER_S /
+# _HEALTH_DOWN_AFTER_S). They described the in-process WorkforceScheduler's
+# last_tick timestamp; that scheduler is gone (2b-2 T3) and DBOS exposes no
+# per-process equivalent, so they went with it rather than lingering as
+# constants nothing reads.
 _HEALTH_RECENT_WINDOW_S = 300
 
 
@@ -384,18 +390,31 @@ async def clear_inbox(
 
 
 @router.get("/healthz")
-async def workforce_healthz(request: Request) -> dict[str, Any]:
+async def workforce_healthz() -> dict[str, Any]:
     """Operational health snapshot for the workforce runtime.
 
     Three signals:
-      * scheduler: alive + recent tick. ``alive=False`` or
-        ``seconds_since_last_tick > 300`` → ``status='down'``.
+      * dispatcher: is DBOS usable from this process, and how many agent
+        tasks are live. ``launched=False`` → ``status='down'``.
       * recent_inbox_throughput: count of inbox rows processed in the
         last 5 min. Only flagged when there's at least one persistent
         agent — empty queues on a deployed-but-unused system are fine.
       * supabase: a light SELECT 1 on ai_agents to confirm the DB is
         reachable from the API container (workforce can't run without
         it, so this surfaces as ``down``).
+
+    ⚠️ What ``launched`` does NOT say: that the scheduled dispatch tick is
+    firing. The ticks run under the worker role; this endpoint answers from
+    whichever process serves it. The signal that actually catches a stalled
+    dispatcher is the throughput check below (persistent agents + a non-empty
+    queue + zero rows processed in the window → ``degraded``). Do not promote
+    ``launched`` into a liveness claim it cannot make.
+
+    Until phase 2b-2 T3 this section read ``app.state.workforce_scheduler``,
+    which nothing had set since PR-D8 Phase 3 replaced the in-process
+    ``WorkforceScheduler`` with DBOS-scheduled workflows. It never raised — it
+    just answered ``down`` on every single call. An unconditional verdict is
+    not a probe.
 
     Intentionally NOT auth-gated: monitors / NAS healthchecks need to
     poll without juggling tokens. The data exposed (counters + latency)
@@ -405,38 +424,25 @@ async def workforce_healthz(request: Request) -> dict[str, Any]:
     issues: list[str] = []
     response: dict[str, Any] = {"status": overall, "issues": issues}
 
-    # 1. Scheduler in-process state.
-    scheduler = getattr(request.app.state, "workforce_scheduler", None)
-    if scheduler is None:
-        response["scheduler"] = {"alive": False, "note": "not started"}
-        issues.append("scheduler not initialised")
+    # 1. Dispatch runtime: DBOS reachability + the derived in-flight gauge.
+    launched = dbos_is_launched()
+    inflight: Optional[int] = None
+    try:
+        inflight = await DbosAgentWorkforcePool().inflight_count()
+    except Exception as err:
+        # A gauge we cannot read is a missing number, not a dead service — and
+        # this endpoint must never 500 at a monitor.
+        logger.warning(f"[workforce] inflight gauge unavailable: {err}")
+        issues.append(f"inflight gauge unavailable: {type(err).__name__}")
+        overall = "degraded"
+    response["dispatcher"] = {
+        "engine": "dbos",
+        "launched": launched,
+        "inflight_agent_tasks": inflight,
+    }
+    if not launched:
+        issues.append("dbos not launched — no workforce task can execute here")
         overall = "down"
-    else:
-        snap = scheduler.health_snapshot()
-        response["scheduler"] = snap
-        if not snap["alive"]:
-            issues.append("scheduler task not running")
-            overall = "down"
-        elif (
-            snap["seconds_since_last_tick"] is not None
-            and snap["seconds_since_last_tick"] > _HEALTH_DOWN_AFTER_S
-        ):
-            issues.append(
-                f"no scheduler tick for {snap['seconds_since_last_tick']:.0f}s"
-            )
-            overall = "down"
-        elif (
-            snap["seconds_since_last_tick"] is not None
-            and snap["seconds_since_last_tick"] > _HEALTH_DEGRADED_AFTER_S
-        ):
-            issues.append(
-                f"scheduler tick stale ({snap['seconds_since_last_tick']:.0f}s)"
-            )
-            overall = "degraded"
-        if snap.get("last_error"):
-            issues.append(f"last tick error: {snap['last_error']}")
-            if overall == "healthy":
-                overall = "degraded"
 
     # 2. DB reachability + recent inbox throughput.
     try:
