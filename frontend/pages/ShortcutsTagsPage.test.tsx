@@ -76,7 +76,7 @@ describe('ShortcutsTagsPage options', () => {
   it('hides Pipeline-group tags', async () => {
     mockFetch();
     await renderPage();
-    // The options row "转录" is a text label, not a button; a tag chip's accessible name is "转录 9".
+    // The options row has a "转录" icon toggle (accessible name "转录"); a tag chip's accessible name is "转录 9".
     expect(screen.queryAllByRole('button', { name: /转录\s*9/ })).toHaveLength(0);
     expect(screen.queryByText('Pipeline')).toBeNull();
   });
@@ -85,7 +85,7 @@ describe('ShortcutsTagsPage options', () => {
     const calls = mockFetch();
     await renderPage();
     fireEvent.click(screen.getAllByText('猫')[0]);
-    fireEvent.click(screen.getByTestId('opt-transcribe-1'));
+    fireEvent.click(screen.getByTestId('opt-transcribe'));
     fireEvent.click(screen.getByTestId('opt-rating-4'));
     // Saves are serialized, so later POSTs go out as earlier ones settle; "saved"
     // only shows once the latest one has landed.
@@ -97,8 +97,9 @@ describe('ShortcutsTagsPage options', () => {
       { tags: ['Cats'], rating: null, transcribe: true, summarize: false, analyze: false },
       { tags: ['Cats'], rating: 4, transcribe: true, summarize: false, analyze: false },
     ]);
-    expect(screen.getByTestId('opt-rating-4').getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByTestId('opt-rating-0').getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByTestId('opt-rating-4').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('opt-rating-5').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('opt-transcribe').getAttribute('aria-pressed')).toBe('true');
     await screen.findByText(/已保存/);
   });
 
@@ -118,7 +119,7 @@ describe('ShortcutsTagsPage options', () => {
     mockFetch({ selectionStatus: 401 });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await renderPage();
-    fireEvent.click(screen.getByTestId('opt-summarize-1'));
+    fireEvent.click(screen.getByTestId('opt-summarize'));
     expect(await screen.findByText(/保存失败/)).toBeTruthy();
     expect(screen.queryByText(/已保存/)).toBeNull();
     expect(console.error).toHaveBeenCalled();
@@ -135,7 +136,7 @@ describe('ShortcutsTagsPage options', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await renderPage();
     fireEvent.click(screen.getAllByText('猫')[0]); // POST #1 — held in flight
-    fireEvent.click(screen.getByTestId('opt-analyze-1')); // POST #2 — queued behind #1
+    fireEvent.click(screen.getByTestId('opt-analyze')); // POST #2 — queued behind #1
     await waitFor(() => expect(releases).toHaveLength(1));
     await act(async () => {
       releases[0](new Response('{}', { status: 500 })); // stale failure lands
@@ -153,7 +154,7 @@ describe('ShortcutsTagsPage options', () => {
   it('shows the save status for an options-only selection', async () => {
     const calls = mockFetch();
     await renderPage();
-    fireEvent.click(screen.getByTestId('opt-summarize-1'));
+    fireEvent.click(screen.getByTestId('opt-summarize'));
     expect(await screen.findByText(/已保存/)).toBeTruthy();
     expect(saves(calls).map((c) => c.body)).toEqual([
       { tags: [], rating: null, transcribe: false, summarize: true, analyze: false },
@@ -174,7 +175,7 @@ describe('ShortcutsTagsPage options', () => {
     await renderPage();
     fireEvent.click(screen.getAllByText('猫')[0]); // POST #1 — held in flight
     fireEvent.click(screen.getByTestId('opt-rating-5')); // change #2 — must wait
-    fireEvent.click(screen.getByTestId('opt-transcribe-1')); // change #3 — must wait
+    fireEvent.click(screen.getByTestId('opt-transcribe')); // change #3 — must wait
     await act(async () => {}); // flush microtasks: nothing queued may leak out early
     expect(bodies).toHaveLength(1);
     await act(async () => {
@@ -222,6 +223,74 @@ describe('ShortcutsTagsPage options', () => {
     // Only the "saved → idle" timer may remain; each link's timeout is cleared on settle.
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  const starsPressed = () =>
+    [1, 2, 3, 4, 5].map((n) => screen.getByTestId(`opt-rating-${n}`).getAttribute('aria-pressed'));
+
+  it('rates with one tap on a star, and tapping the same star again clears the rating', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    fireEvent.click(screen.getByTestId('opt-rating-3'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls).at(-1)?.body).toEqual({ tags: [], rating: 3, transcribe: false, summarize: false, analyze: false });
+    expect(starsPressed()).toEqual(['true', 'true', 'true', 'false', 'false']);
+    expect(screen.getByTestId('opt-rating-3').getAttribute('aria-label')).toBe('3 星');
+
+    fireEvent.click(screen.getByTestId('opt-rating-3'));
+    await screen.findByText(/已保存/);
+    expect(saves(calls)).toHaveLength(2);
+    expect(saves(calls).at(-1)?.body).toEqual({ tags: [], rating: null, transcribe: false, summarize: false, analyze: false });
+    expect(starsPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+  });
+
+  it('toggles an AI intent icon on and off, with aria-pressed following', async () => {
+    const calls = mockFetch();
+    await renderPage();
+    const analyze = screen.getByTestId('opt-analyze');
+    expect(analyze.getAttribute('type')).toBe('button');
+    expect(analyze.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(analyze);
+    await screen.findByText(/已保存/);
+    expect(analyze.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(analyze);
+    await screen.findByText(/已保存/);
+    expect(analyze.getAttribute('aria-pressed')).toBe('false');
+    expect(saves(calls).map((c) => (c.body as { analyze: boolean }).analyze)).toEqual([true, false]);
+  });
+
+  it('lays the three AI intents out as labelled icon toggles in one row', async () => {
+    mockFetch();
+    await renderPage();
+    const ids = ['opt-transcribe', 'opt-summarize', 'opt-analyze'];
+    const buttons = ids.map((id) => screen.getByTestId(id));
+    expect(buttons.map((b) => b.textContent)).toEqual(['转录', '总结', '解析']);
+    buttons.forEach((b) => expect(b.querySelector('svg')).not.toBeNull());
+    const row = buttons[0].parentElement!;
+    expect(buttons.every((b) => b.parentElement === row)).toBe(true);
+  });
+
+  it('has no yes/no pills and no "none" rating chip', async () => {
+    mockFetch();
+    await renderPage();
+    expect(screen.queryAllByText(/^(否|是|无)$/)).toHaveLength(0);
+    expect(screen.queryByTestId('opt-rating-0')).toBeNull();
+    expect(screen.queryByTestId('opt-transcribe-1')).toBeNull();
+  });
+
+  it('keeps the rating label and all five stars on one non-wrapping row', async () => {
+    mockFetch();
+    await renderPage();
+    const stars = [1, 2, 3, 4, 5].map((n) => screen.getByTestId(`opt-rating-${n}`));
+    // jsdom has no layout, so pin the structure: one shared container that never wraps.
+    const starBox = stars[0].parentElement!;
+    expect(stars.every((s) => s.parentElement === starBox)).toBe(true);
+    const row = screen.getByRole('group', { name: '评级' });
+    expect(row.contains(starBox)).toBe(true);
+    for (const el of [starBox, row]) {
+      expect(el.className).toMatch(/\bflex-nowrap\b/);
+      expect(el.className).not.toMatch(/\bflex-wrap\b/);
+    }
   });
 
   it('keeps the Pipeline group out of the create-form group dropdown', async () => {

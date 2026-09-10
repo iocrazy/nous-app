@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X } from 'lucide-react';
+import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X, Star, FileText, BookOpen, ScanEye } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { UiSelect } from '../components/ui';
 import { PIPELINE_TAG_GROUP } from '../utils/aiIntents';
 
@@ -21,11 +22,19 @@ interface TagGroup {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-/** Single-choice processing options saved together with the tag selection. */
+/** Processing options saved together with the tag selection. */
 type Options = { rating: number | null; transcribe: boolean; summarize: boolean; analyze: boolean };
 const DEFAULT_OPTIONS: Options = { rating: null, transcribe: false, summarize: false, analyze: false };
-/** `id` is the stable data-testid suffix: rating None→0, 1–5; booleans No→0, Yes→1. */
-type Choice<K extends keyof Options> = { id: number; value: Options[K]; text: string };
+
+const RATING_STARS = [1, 2, 3, 4, 5] as const;
+
+type IntentKey = 'transcribe' | 'summarize' | 'analyze';
+/** Icon toggles, left to right; icons match the AI status badges on resource cards (CompactMediaCard). */
+const AI_INTENTS: ReadonlyArray<{ key: IntentKey; Icon: LucideIcon; zh: string; en: string }> = [
+  { key: 'transcribe', Icon: FileText, zh: '转录', en: 'Transcribe' },
+  { key: 'summarize', Icon: BookOpen, zh: '总结', en: 'Summary' },
+  { key: 'analyze', Icon: ScanEye, zh: '解析', en: 'Analyze' },
+];
 
 /** Wait after the last keystroke before asking MyMemory for a counterpart name. */
 const TRANSLATE_DEBOUNCE_MS = 600;
@@ -330,7 +339,7 @@ export const ShortcutsTagsPage: React.FC = () => {
   // Each link catches its own failure, so the chain itself never rejects.
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
 
-  // 单次 POST 全字段：标签 + 四项单选。后端每次整体替换，所以五个键必须都发；空标签也照发。
+  // 单次 POST 全字段：标签 + 评级 + 三项 AI 开关。后端每次整体替换，所以五个键必须都发；空标签也照发。
   const saveSelection = useCallback((nextTags: Set<string>, nextOptions: Options) => {
     if (!token) return;
     const seq = ++saveSeqRef.current;
@@ -449,42 +458,7 @@ export const ShortcutsTagsPage: React.FC = () => {
     }
   };
 
-  const yesNo: Choice<'transcribe' | 'summarize' | 'analyze'>[] = [
-    { id: 0, value: false, text: lang === 'zh' ? '否' : 'No' },
-    { id: 1, value: true, text: lang === 'zh' ? '是' : 'Yes' },
-  ];
-  const ratingChoices: Choice<'rating'>[] = [
-    { id: 0, value: null, text: lang === 'zh' ? '无' : 'None' },
-    ...[1, 2, 3, 4, 5].map((v) => ({ id: v, value: v, text: '★'.repeat(v) })),
-  ];
-
-  const renderOptionRow = <K extends keyof Options>(key: K, label: string, choices: Choice<K>[]) => (
-    <div className="flex items-center gap-2" role="radiogroup" aria-label={label}>
-      <span className="w-12 shrink-0 text-xs text-ink-400">{label}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {choices.map((c) => {
-          const active = options[key] === c.value;
-          return (
-            <button
-              key={c.id}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              data-testid={`opt-${key}-${c.id}`}
-              onClick={() => setOption(key, c.value)}
-              className={`px-2.5 py-1 rounded-full border text-xs transition-colors ${
-                active
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
-                  : 'bg-ink-800 text-ink-300 border-ink-700'
-              }`}
-            >
-              {c.text}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
+  const ratingLabel = lang === 'zh' ? '评级' : 'Rating';
 
   const countSuffix = selected.size > 0 ? ` (${selected.size})` : '';
 
@@ -541,11 +515,57 @@ export const ShortcutsTagsPage: React.FC = () => {
       </div>
 
       {/* Processing options — replace picking Transcript/Summary/Analyze as tags */}
-      <div className="px-4 py-3 border-b border-ink-800 space-y-2.5">
-        {renderOptionRow('rating', lang === 'zh' ? '评级' : 'Rating', ratingChoices)}
-        {renderOptionRow('transcribe', lang === 'zh' ? '转录' : 'Transcribe', yesNo)}
-        {renderOptionRow('summarize', lang === 'zh' ? '总结' : 'Summarize', yesNo)}
-        {renderOptionRow('analyze', lang === 'zh' ? '解析' : 'Analyze', yesNo)}
+      <div className="px-4 py-3 border-b border-ink-800 space-y-3">
+        {/* Rating: one row that never wraps (label 48px + 5×36px stars fits a 390px screen). */}
+        <div role="group" aria-label={ratingLabel} className="flex flex-nowrap items-center gap-2">
+          <span className="w-12 shrink-0 text-xs text-ink-400">{ratingLabel}</span>
+          <div className="flex flex-nowrap items-center gap-1">
+            {RATING_STARS.map((n) => {
+              const lit = options.rating !== null && n <= options.rating;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  aria-pressed={lit}
+                  aria-label={lang === 'zh' ? `${n} 星` : `${n} ${n === 1 ? 'star' : 'stars'}`}
+                  data-testid={`opt-rating-${n}`}
+                  // Tapping the current rating again clears it — there is no separate "none" chip.
+                  onClick={() => setOption('rating', options.rating === n ? null : n)}
+                  className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-colors active:bg-ink-800"
+                >
+                  <Star
+                    size={22}
+                    aria-hidden="true"
+                    className={lit ? 'fill-current text-[var(--accent-text)]' : 'text-ink-500'}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {/* AI intents: three icon toggles in one row — lit means on. */}
+        <div role="group" aria-label={lang === 'zh' ? 'AI 处理' : 'AI processing'} className="grid grid-cols-3 gap-2">
+          {AI_INTENTS.map(({ key, Icon, zh, en }) => {
+            const on = options[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={on}
+                data-testid={`opt-${key}`}
+                onClick={() => setOption(key, !on)}
+                className={`h-10 min-w-0 flex items-center justify-center gap-1.5 px-2 rounded-lg border text-xs transition-colors ${
+                  on
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
+                    : 'bg-ink-800 text-ink-400 border-ink-700'
+                }`}
+              >
+                <Icon size={16} aria-hidden="true" className="shrink-0" />
+                <span className="truncate">{lang === 'zh' ? zh : en}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Create tag form */}
