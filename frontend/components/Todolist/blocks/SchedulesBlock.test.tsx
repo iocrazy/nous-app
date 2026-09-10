@@ -120,6 +120,37 @@ describe('SchedulesBlockView', () => {
     expect(await screen.findByTestId('schedules-error')).toBeInTheDocument();
   });
 
+  // Task 7a defect 8a: a fired row used to render an ACTIVE ✕, so the block
+  // said "2 wake-ups, both cancellable" while the home Quick chip counted the
+  // one that is still pending. Two surfaces, two different meanings.
+  it('a fired row reads as fired and cannot be cancelled', async () => {
+    listIssueSchedules.mockResolvedValue([
+      { ...once, enabled: false, pause_reason: 'fired_once' },
+    ]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    const row = await screen.findByTestId('schedule-row');
+    expect(row).toHaveAttribute('data-enabled', 'false');
+    expect(screen.getByTestId('schedule-status')).toHaveTextContent('Fired');
+    expect(screen.queryByTestId('schedule-cancel')).toBeNull();
+  });
+
+  it('a row paused for another reason says which', async () => {
+    listIssueSchedules.mockResolvedValue([
+      { ...once, enabled: false, pause_reason: 'budget' },
+    ]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    expect(await screen.findByTestId('schedule-status')).toHaveTextContent('Paused: budget');
+    expect(screen.queryByTestId('schedule-cancel')).toBeNull();
+  });
+
+  it('a still-armed row keeps its cancel button and shows no status label', async () => {
+    listIssueSchedules.mockResolvedValue([once]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    await screen.findByTestId('schedule-row');
+    expect(screen.getByTestId('schedule-cancel')).toBeInTheDocument();
+    expect(screen.queryByTestId('schedule-status')).toBeNull();
+  });
+
   it('sits in the context rail between Budget and Links', () => {
     expect(schedulesBlock.zone).toBe('context');
     expect(schedulesBlock.order).toBeGreaterThan(50);

@@ -11,3 +11,27 @@ export function fmtWhen(iso: string | null | undefined): string {
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? new Date(ms).toLocaleString() : iso;
 }
+
+/**
+ * The same instant, narrow enough for a thread row: date + HH:mm, no seconds.
+ *
+ * `fmtWhen`'s full `toLocaleString()` is the widest form a locale has, and in
+ * the trajectory's column it shared a flex row with the note — both were
+ * `truncate`, so both collapsed to ellipses and the row said nothing (Task 7a
+ * defect 8b). Callers that shorten a time this way should keep the full one
+ * reachable (a `title`), never drop it.
+ *
+ * Same contract as `fmtWhen` at the edges: nothing → em dash, unparseable →
+ * the raw string, because "what the server sent" beats "Invalid Date".
+ */
+export function fmtWhenCompact(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  return new Date(ms).toLocaleString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}

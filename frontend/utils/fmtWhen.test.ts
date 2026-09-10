@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fmtWhen } from './fmtWhen';
+import { fmtWhen, fmtWhenCompact } from './fmtWhen';
 
 describe('fmtWhen', () => {
   it('renders a real instant in local time', () => {
@@ -12,5 +12,25 @@ describe('fmtWhen', () => {
   it('has an em dash for nothing at all', () => {
     expect(fmtWhen(null)).toBe('—');
     expect(fmtWhen(undefined)).toBe('—');
+  });
+});
+
+describe('fmtWhenCompact', () => {
+  // The clock convention stays the READER's (12h or 24h, per locale) — that
+  // is the whole point of rendering in local time. What is asserted is the
+  // property the row needs: a date, the minute, no seconds, and shorter than
+  // the full form.
+  it('keeps the date and the minute but drops the seconds', () => {
+    const iso = '2026-09-11T01:23:45Z';
+    const out = fmtWhenCompact(iso);
+    const d = new Date(iso);
+    expect(out).not.toMatch(/:\d\d:\d\d/);
+    expect(out).toContain(String(d.getDate()));
+    expect(out).toContain(String(d.getMinutes()).padStart(2, '0'));
+    expect(out.length).toBeLessThan(fmtWhen(iso).length);
+  });
+  it('keeps the same contract for things that are not instants', () => {
+    expect(fmtWhenCompact('soon')).toBe('soon');
+    expect(fmtWhenCompact(null)).toBe('—');
   });
 });

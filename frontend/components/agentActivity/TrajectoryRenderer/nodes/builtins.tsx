@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, Clock, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
 
 import { schedulesService } from '../../../../services/schedulesService';
-import { fmtWhen } from '../../../../utils/fmtWhen';
+import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
 import { useChildRun } from '../../../Todolist/childRunContext';
 import type {
   BudgetNode,
@@ -324,7 +324,12 @@ export const ScheduleNodeView: React.FC<NodeProps<ScheduleNode>> = ({ node }) =>
   const [cancelled, setCancelled] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [pending, setPending] = React.useState(false);
-  const when = fmtWhen(node.fireAt);
+  // Compact in the row, full in the tooltip: at thread width the absolute
+  // timestamp and the note were both `truncate` and BOTH collapsed to
+  // ellipses, which left the row with no information at all (Task 7a defect
+  // 8b). Shortening a value is only safe when the full one stays reachable.
+  const when = fmtWhenCompact(node.fireAt);
+  const whenFull = fmtWhen(node.fireAt);
   const cancel = async (): Promise<void> => {
     if (pending || cancelled) return;
     setPending(true);
@@ -341,10 +346,16 @@ export const ScheduleNodeView: React.FC<NodeProps<ScheduleNode>> = ({ node }) =>
   };
   return (
     <div className="rounded-md bg-info-soft/50" data-testid="traj-schedule" data-cancelled={cancelled ? 'true' : 'false'}>
-      <Row className="text-info">
-        <Clock size={12} className="shrink-0" />
-        <span className="truncate">{t('schedule.agentSet', 'Agent scheduled a wake-up · {{at}}', { at: when })}</span>
-        {node.note && <span className="truncate text-ink-400">{node.note}</span>}
+      <Row className="items-start text-info">
+        <Clock size={12} className="mt-0.5 shrink-0" />
+        <span data-testid="traj-schedule-at" title={whenFull} className="shrink-0">
+          {t('schedule.agentSet', 'Agent scheduled a wake-up · {{at}}', { at: when })}
+        </span>
+        {node.note && (
+          <span data-testid="traj-schedule-note" title={node.note} className="min-w-0 break-words text-ink-400">
+            {node.note}
+          </span>
+        )}
         {!cancelled && (
           <button
             type="button"

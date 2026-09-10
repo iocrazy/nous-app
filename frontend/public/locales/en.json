@@ -5806,7 +5806,10 @@
     "routine": "Routine",
     "title": "Schedules",
     "add": "+ Later",
-    "empty": "No Wake-ups Scheduled"
+    "empty": "No Wake-ups Scheduled",
+    "fired": "Fired",
+    "paused": "Paused",
+    "pausedReason": "Paused: {{reason}}"
   },
   "later": {
     "button": "Later",
