@@ -58,6 +58,18 @@ def _derived_filename(source_filename: str, override: Optional[str]) -> str:
     return f"crop-{source_filename}"
 
 
+def crop_image(file_bytes: bytes, mime_type: str | None, region: CropRegion) -> bytes:
+    """Crop encoded image bytes by a normalized region.
+
+    Shared by the resource derive path and the canvas derive path; the
+    ``400 crop failed: …`` mapping lives here so both answer the same way.
+    """
+    try:
+        return crop_normalized(file_bytes, region, mime_type=mime_type)
+    except Exception as exc:
+        raise CropDeriveError(status_code=400, detail=f"crop failed: {exc}") from exc
+
+
 async def derive_crop_resource(
     *,
     source_resource_id: str,
@@ -77,10 +89,7 @@ async def derive_crop_resource(
     repo = repo or ResourcesRepository()
 
     source = await load_source_image(repo, source_resource_id)
-    try:
-        cropped = crop_normalized(source.file_bytes, region, mime_type=source.mime_type)
-    except Exception as exc:
-        raise CropDeriveError(status_code=400, detail=f"crop failed: {exc}") from exc
+    cropped = crop_image(source.file_bytes, source.mime_type, region)
 
     new_resource = await persist_derived_image(
         repo,

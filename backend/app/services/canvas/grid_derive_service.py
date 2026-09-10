@@ -55,6 +55,46 @@ class GridDeriveResult:
     tiles: list[GridTileResult]
 
 
+@dataclass(frozen=True)
+class GridTileImage:
+    row: int
+    col: int
+    image_bytes: bytes
+
+
+def split_image_by_lines(
+    file_bytes: bytes,
+    mime_type: str | None,
+    *,
+    xs: Sequence[float],
+    ys: Sequence[float],
+) -> list[GridTileImage]:
+    """Split encoded image bytes along normalized lines, row-major.
+
+    Every tile is cropped in memory before returning, so a bad region fails
+    the whole call before any caller persists a single tile.
+    """
+    try:
+        tiles = tiles_from_lines(xs=list(xs), ys=list(ys))
+    except GridSplitError as exc:
+        raise GridDeriveError(status_code=400, detail=str(exc)) from exc
+    try:
+        return [
+            GridTileImage(
+                row=tile.row,
+                col=tile.col,
+                image_bytes=crop_normalized(
+                    file_bytes, tile.region, mime_type=mime_type
+                ),
+            )
+            for tile in tiles
+        ]
+    except Exception as exc:
+        raise GridDeriveError(
+            status_code=400, detail=f"grid crop failed: {exc}"
+        ) from exc
+
+
 def _tile_filename(prefix: str, row: int, col: int, source_filename: str) -> str:
     """``{prefix}-r{row}c{col}-{source}`` with 1-based row/col, keeping
     the source extension so the persisted bytes match the encoding."""
@@ -82,26 +122,13 @@ async def derive_grid_resources(
     repo = repo or ResourcesRepository()
 
     source = await load_source_image(repo, source_resource_id)
-    try:
-        tiles = tiles_from_lines(xs=list(xs), ys=list(ys))
-    except GridSplitError as exc:
-        raise GridDeriveError(status_code=400, detail=str(exc)) from exc
-
-    # Crop every tile up front: any pixel-level failure rejects the
-    # request before the first DB write.
-    try:
-        blobs = [
-            crop_normalized(source.file_bytes, tile.region, mime_type=source.mime_type)
-            for tile in tiles
-        ]
-    except Exception as exc:
-        raise GridDeriveError(
-            status_code=400, detail=f"grid crop failed: {exc}"
-        ) from exc
+    tile_images = split_image_by_lines(
+        source.file_bytes, source.mime_type, xs=xs, ys=ys
+    )
 
     prefix = filename_prefix or _DEFAULT_PREFIX
     results: list[GridTileResult] = []
-    for tile, blob in zip(tiles, blobs):
+    for tile in tile_images:
         new_resource = await persist_derived_image(
             repo,
             user_id=user_id,
@@ -109,7 +136,7 @@ async def derive_grid_resources(
             folder_id=source.folder_id,
             library_id=source.library_id,
             filename=_tile_filename(prefix, tile.row, tile.col, source.filename),
-            image_bytes=blob,
+            image_bytes=tile.image_bytes,
             mime_type=source.mime_type,
         )
         results.append(
@@ -117,7 +144,7 @@ async def derive_grid_resources(
         )
 
     return GridDeriveResult(
-        rows=len({t.row for t in tiles}),
-        cols=len({t.col for t in tiles}),
+        rows=len({t.row for t in tile_images}),
+        cols=len({t.col for t in tile_images}),
         tiles=results,
     )
