@@ -210,3 +210,23 @@ async def test_for_run_seeds_own_cents_from_a_pre_change_runs_total(monkeypatch)
     w = await rr.RunEventWriter.for_run(7)
     assert w.views["cost"]["own_cents"] == 12.5
     assert w.views["cost"]["spent_cents"] == 12.5
+
+
+def test_the_issue_queries_still_exclude_child_runs():
+    """Load-bearing since review I2 gave background children an ``issue_id``.
+
+    A child's spend reaches the issue exactly once — through its parent's
+    ``by_child`` and so through the parent's ``cost_cents``. If either of
+    these two queries stopped filtering to root runs, the child's own row
+    would be summed a second time and every fan-out would double-bill.
+    """
+    import inspect
+
+    from app.repositories import agent_runs_repository as repo
+
+    for fn in (
+        repo.AgentRunsRepository.list_for_issue,
+        repo.AgentRunsRepository.spent_cents_for_issue,
+    ):
+        src = inspect.getsource(fn)
+        assert "parent_run_id.is_(None)" in src, fn.__name__
