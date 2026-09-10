@@ -27,6 +27,15 @@
 > - §5：主页 Quick 芯片纯前端从列表行算，没有可用字段——issue 列表项加 `pending_wakeups: int`（`list_for_user` 一次聚合），T6 因此是小全栈任务；「由定时唤醒开始」芯片不能从 run 事件推（首条 `user` 事件只是文本），改读紧邻在前的 `meta.source.kind === "schedule"` 线程行；`IssueReplyBox` 现无 `issueId` prop，要从 `IssueDetailView` 传入；`schedulesService.create` 要求 `name`/`cron_expr`，前端另写 `createIssueWakeup`；`subagent_done` 可能落在比派出更晚的 step，折叠要跨所有 step 节点找卡。
 > - 本期没有给 `run_turn` 结果加任何标志（派出/完成都是事件），`test_turn_end_reasons.py` 不动。
 
+> **T1 实施记录（2026-09-10，mig 461 已落地）—— 七处与计划不同**
+> 1. **`cron_or_once` 的写法按计划是漏的，已修**：`(payload->>'once') = 'true'` 在没有 `once` 键时求值为 NULL，而 **Postgres 把 NULL 的 CHECK 当作满足**——一条 `task_type='issue_wakeup'`、`cron_expr IS NULL`、payload 里没声明一次性的行会被放行，而它永远不会重新上弦。改成 `coalesce(payload->>'once','') = 'true'`。（`task_type='download'` 两种写法都拒绝：`FALSE AND NULL` 是 FALSE，不是 NULL。）真库正反两向都验过，源码守卫钉住这个 `coalesce`。
+> 2. **`models/storyboard.py::UserSchedules.cron_expr` 必须同 PR 改成 `Mapped[Optional[str]]`**，计划的文件清单漏了它。schema-drift 的第 3 关逐列比对 nullability 且**没有豁免名单**，`ALTER COLUMN … DROP NOT NULL` 不配模型就是红。突变验过：改回非空 → `test_nullability_matches` 只报这一列。
+> 3. **`DROP FUNCTION bump_agent_tasks_updated_at()` 一并做掉**：mig 159 只为 `agent_tasks` 建了这个 trigger 函数，全仓再无第二处挂它，DROP TABLE 之后它是纯孤儿（真库确认表没了函数还在）。
+> 4. **`tests/models/test_transcript_event_types_phase2a.py` 新增 `_first_array()`**：既有 `_literals` 断言「恰好一个 `ARRAY[...]`」，而 461 有两个（事件白名单 + inbox kind）。只把 `test_migration_and_orm_event_type_sets_are_identical` 切到取第一个数组，`_literals` 本身不放宽——放宽会污染 459/460 的调用方。本 Task 唯一一处改既有测试助手。
+> 5. **`agent_run_inbox.kind` 的 ORM 镜像测试已补**（`tests/db/test_migration_461_orchestration.py::test_inbox_kind_orm_literal_matches_the_migration_exactly`）：schema-drift 只比列不比 CHECK 体，事件类型那个镜像测试只管另一张表，此前这两份清单没有任何东西绑住。
+> 6. **还有第三个 pin，计划没点到：`tests/db/test_migration_460_event_type_fork.py::test_460_matches_the_orm_check_literal_exactly`**（全量套件才暴露）。它断言 460 的字面量集**等于** ORM——那句话只在「460 是最新的」时才等价于「ORM 跟得上最新迁移」，461 一来必红，而且每加一次白名单迁移就要再改一次。改成子集断言（460 admitted 的一个都不许从 ORM 掉出去）并改名 `test_460_literals_all_survive_in_the_orm_check`；「等于最新」这件事只留在 `LATEST_MIGRATION` 那一处。突变验过：从 ORM 摘掉 `fork` → 该测试红。**后续白名单迁移照此办理——新迁移的文件里写等号，旧迁移的文件里写包含。**
+> 7. **schema-drift 本机真跑过，不是 skip**：照 `schema-drift.yml` 的配方起 `pgvector/pgvector:pg17` → `ci_bootstrap.sql` → `schema_baseline.sql` → watermark 364 之上 102 个迁移（含 461）全部 `ON_ERROR_STOP=1` 通过，`INTEGRATION_DATABASE_URL` 指过去后 8 个 gate 全绿（不是 7 skipped）。三个 CHECK 与 (d) 的自禁 UPDATE 都在真库上做了正反对照。
+
 ## 1. 接活 workforce 链（前置，T3）
 
 **原则**：一条链只有一个执行入口（DBOS scheduled tick → enqueue → `agent_workforce_workflow` → `run_one_task`），死组件与假承诺一起清掉。
@@ -41,7 +50,7 @@
 - 特性开关：`FEATURE_WORKFORCE_DELEGATE` 从裸 `os.getenv` 迁进 `settings`（`config.yml` 键 `FEATURE_WORKFORCE_DELEGATE: false`），真栈验证链路后在 T7 翻成 `true`（单独 PR）。
 - 删除 `services/workforce/scheduler.py`、`worker_pool.py`（in-process pool，生产不用）与 `tests/test_workforce_scheduler.py`；`DbosAgentWorkforcePool` 成为唯一 pool。
 - 新增链路测试 `tests/workflows/test_workforce_chain.py`：假 repo 里放一条 unread inbox → 跑 `inbox_dispatch_workflow` 的 body（DBOS 桩）→ 断言 `dispatch` 被以该 task 调用一次、且不在 step 内；再喂 `agent_workforce_workflow` → `run_one_task` 用 `claim_task` 拿到 `assigned` 并写 outbox。
-- 顺带：mig 200 承诺的 `DROP TABLE agent_tasks` 在 mig 461 兑现（无写入方、无读方；realtime 发布守卫脚本的期望表清单同步去掉）。
+- 顺带：mig 200 承诺的 `DROP TABLE agent_tasks` 在 mig 461 兑现（**已落地**）。全仓对该表名的引用只剩 docstring，零 SQL 命中；两个 FK 都是自引用，随表消失，不需要 CASCADE。ORM 模型 `models/agents.py::AgentTasks` 与 `models/__init__.py` 的导出同 PR 删除（schema-drift 两向零容忍）。⚠️ `check-realtime-publication-drift.sh` **没有期望表清单**——它扫的是前端 `table: '…'` 订阅，而前端从不订阅 `agent_tasks`，所以那个脚本不用改（表从 publication 里自动消失，真库确认）。mig 159 建的 `bump_agent_tasks_updated_at()` 同批 DROP。
 
 ## 2. 子代理：后台 + 续聊（T4）
 
@@ -141,7 +150,7 @@
 
 | 项 | 变更 |
 |---|---|
-| mig 461 | 事件白名单加 `subagent_spawned / subagent_done / schedule_set`；`agent_run_inbox.kind` 加 `subagent_result`；`user_schedules.cron_expr` 可空 + CHECK；存量不支持 task_type 自禁；`DROP TABLE IF EXISTS agent_tasks` |
+| mig 461 ✅ | 事件白名单加 `subagent_spawned / subagent_done / schedule_set`；`agent_run_inbox.kind` 加 `subagent_result`；`user_schedules.cron_expr` 可空 + `user_schedules_cron_or_once` CHECK（`once` 的比较必须 `coalesce`，见 T1 实施记录第 1 条）；存量 `ai_transcription` / `ai_visual_analysis` 自禁并写 `pause_reason='task_type_unsupported'`；`DROP TABLE IF EXISTS agent_tasks` + 孤儿 `bump_agent_tasks_updated_at()`。ORM 侧同 PR：删 `AgentTasks` 模型与导出、两个 CHECK 字面量追加、`UserSchedules.cron_expr` 改可空 |
 | `Skill(skill="task")` | `+await`, `+child_run_id` |
 | 新工具 `ScheduleWakeup` | issue 根 run 专有 |
 | `POST /schedules` | `+task_type=issue_wakeup`（一次性 `fire_at`）；白名单改由引擎注册表导出 |
