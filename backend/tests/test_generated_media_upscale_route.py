@@ -104,7 +104,7 @@ async def test_upscale_route_runs_cli_and_registers_result(
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["data"]["url"] == "/api/v1/generated-media/991/file"
+    assert body["data"]["url"] == "/api/v1/generated-media/991/cover"
     assert seen["cli"] == (str(src), "4k")
     assert seen["register"]["scope_id"] == 99
 
