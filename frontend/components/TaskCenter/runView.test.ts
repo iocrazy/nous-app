@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState , childrenState, wakeupsState } from './runView';
+import { budgetState, childrenState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState, wakeupsState } from './runView';
 
 const view = {
   v: 1,

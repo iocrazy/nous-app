@@ -342,6 +342,19 @@ class IssueRepository:
 
         ``payload ->> 'issue_id'`` yields TEXT, so the ids are bound as
         strings: a bigint bind compiles fine and matches nothing.
+
+        DELIBERATELY not filtered by schedule owner. Visibility here is the
+        ISSUE's, the same rule ``GET /issues/{id}/schedules`` follows: a
+        teammate who can read the issue should see that something is about to
+        wake it, whoever armed it. Adding a ``user_id`` predicate would make
+        the chip disagree with the panel it links to — this is not a leak to
+        be "fixed".
+
+        TODO(perf): no index serves ``payload->>'issue_id'`` today
+        (``user_schedules`` has only ``idx_user_schedules_due`` and
+        ``idx_user_schedules_user``), so this is a seq scan on every list page.
+        Fine while the table is small; the fix is an expression index in its
+        own migration, not a change here.
         """
         if not items:
             return

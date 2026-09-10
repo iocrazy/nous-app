@@ -2,10 +2,11 @@
  * Context block: everything timed on this issue (harness 2b-2 §5-2) — the
  * one-shot wake-ups armed against it and the routine that created it.
  *
- * Empty means gone: an issue with nothing scheduled should not carry an empty
- * card down the rail (same rule as AttentionStrip). A read that FAILED is not
- * empty though — that gets said out loud, because "no wake-ups" and "I could
- * not find out" are answers a person acts on differently.
+ * The card stays even with nothing on it: an issue with no wake-ups is
+ * precisely when someone wants to arm one, so the "+ Later" entry point has
+ * to be reachable there (it is the only place other than the composer). A
+ * read that FAILED says so rather than showing an empty list — "no wake-ups"
+ * and "I could not find out" are answers a person acts on differently.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -67,8 +68,6 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     [],
   );
 
-  if (items.length === 0 && !error) return null;
-
   return (
     <RailCard title={t('schedule.title', 'Schedules')} testId="detail-schedules-panel">
       {items.map((row) => {
@@ -98,6 +97,11 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </div>
         );
       })}
+      {items.length === 0 && !error && (
+        <p data-testid="schedules-empty" className="py-1 text-[12px] text-ink-500">
+          {t('schedule.empty', 'No Wake-ups Scheduled')}
+        </p>
+      )}
       {error && (
         <p data-testid="schedules-error" className="mt-1 break-words text-[11px] text-danger">
           {error === 'load'

@@ -34,7 +34,9 @@ vi.mock('../../../services/schedulesService', async (importOriginal) => {
     schedulesService: { ...mod.schedulesService, remove: (...a: unknown[]) => remove(...a) },
   };
 });
-vi.mock('../LaterPopover', () => ({ LaterPopover: () => <div data-testid="later-popover" /> }));
+vi.mock('../LaterPopover', () => ({
+  LaterPopover: ({ text }: { text: string }) => <div data-testid="later-popover" data-text={text} />,
+}));
 
 const ISSUE_ID = 347474243723822;
 
@@ -78,11 +80,21 @@ describe('SchedulesBlockView', () => {
     expect(rows[1].textContent).toContain('Routine');
   });
 
-  it('renders nothing at all when there is nothing timed', async () => {
+  // I-4: an issue with nothing scheduled is exactly when a person wants to
+  // schedule something, so the entry point has to exist there.
+  it('with nothing timed it still offers a way to arm one', async () => {
     listIssueSchedules.mockResolvedValue([]);
-    const { container } = render(<SchedulesBlockView ctx={ctx()} />);
-    await waitFor(() => expect(listIssueSchedules).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    render(<SchedulesBlockView ctx={ctx()} />);
+    expect(await screen.findByTestId('schedules-empty')).toHaveTextContent('No Wake-ups Scheduled');
+    expect(screen.getByTestId('schedules-add')).toBeInTheDocument();
+    expect(screen.queryByTestId('schedule-row')).toBeNull();
+  });
+
+  it('+ Later opens a popover with an empty note, not the composer draft', async () => {
+    listIssueSchedules.mockResolvedValue([]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    fireEvent.click(await screen.findByTestId('schedules-add'));
+    expect(screen.getByTestId('later-popover')).toHaveAttribute('data-text', '');
   });
 
   it('cancelling deletes that schedule and drops the row', async () => {

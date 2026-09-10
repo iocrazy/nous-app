@@ -69,16 +69,58 @@ export interface ScheduleUpdatePayload {
   timezone?: string;
 }
 
+/** A refusal the caller can BRANCH on, rather than a string to print.
+ *  Mirrors IssueControlError / RunForkRejectedError. */
+export class ScheduleRejectedError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'ScheduleRejectedError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * Turn a non-2xx into a typed error. Production wraps every HTTPException in
+ * the ErrorResponse envelope (`app/core/exceptions.py`):
+ * `{success, error, code: "http_<status>", request_id, details: <exc.detail>}`
+ * — and `schedules_router._bad_request` always puts the typed `{code,message}`
+ * under `details`. A bare FastAPI `{detail: …}` is accepted too.
+ *
+ * The raw body never leaves this function: it carries a request_id and the
+ * whole internal envelope, which is not something to paint into a popover.
+ */
+async function reject(res: Response): Promise<never> {
+  let code = `http_${res.status}`;
+  let message = `${res.status} ${res.statusText}`;
+  try {
+    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
+    const detail = body?.details ?? body?.detail;
+    if (detail && typeof detail === 'object') {
+      const d = detail as { code?: unknown; message?: unknown };
+      if (typeof d.code === 'string' && d.code) code = d.code;
+      if (typeof d.message === 'string' && d.message) message = d.message;
+    } else if (typeof detail === 'string' && detail) {
+      message = detail;
+    } else if (typeof body?.error === 'string' && body.error) {
+      message = body.error;
+    }
+  } catch (err) {
+    // Not JSON at all (a gateway's HTML, say) — keep the status line.
+    console.error('[schedulesService] error body was not JSON', err);
+  }
+  throw new ScheduleRejectedError(code, res.status, message);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${base()}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...headers, ...(init?.headers ?? {}) },
   });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Schedules API ${res.status}: ${txt || res.statusText}`);
-  }
+  if (!res.ok) return reject(res);
   if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 }

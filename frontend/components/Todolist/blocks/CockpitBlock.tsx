@@ -30,7 +30,6 @@ import { isReplaying, useReplay } from '../replayContext';
 import { questionFromMarker, questionFromRunView } from '../questionTypes';
 import { formatCents } from './BudgetBlock';
 
-
 const PHASE_TONE: Record<string, string> = {
   running: 'text-ok bg-ok-soft border-ok-line',
   waiting_input: 'text-warn bg-warn-soft border-warn-line',

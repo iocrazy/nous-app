@@ -3,9 +3,10 @@
  * Pure, and computed from a passed-in `now` so the tests are not at the
  * mercy of the clock.
  *
- * Tonight disappears once it has gone by: the backend rejects a `fire_at` in
- * the past (`fire_at_in_past`), and a button that can only fail is worse
- * than no button.
+ * Tonight disappears once it has gone by: `_validate_fire_at_window` in
+ * `schedules_router.py` rejects any `fire_at` outside `now < t <= now + 30d`
+ * with `fire_at_out_of_range`, and a button that can only fail is worse than
+ * no button.
  */
 export interface WakeupPreset {
   key: 'in1h' | 'tonight' | 'tomorrow';
