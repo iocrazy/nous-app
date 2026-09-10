@@ -39,6 +39,28 @@ export interface StepSummary {
   finishReason: string | null;
 }
 
+/**
+ * A sub-agent this step dispatched (harness 2b-2 §5-1). Keyed by whichever
+ * identifier the spawn carried: a foreground child has a `child_run_id`
+ * immediately, a background one is only a workforce `task_id` until its
+ * result comes back.
+ */
+export interface SubagentChild {
+  key: string;
+  childRunId: string | null;
+  taskId: string | null;
+  mode: 'sync' | 'async';
+  subagentType: string;
+  description: string;
+  /** The run this child continues, when it is a continuation. */
+  continuedFrom: string | null;
+  /** Null = still going (foreground waiting / background queued). */
+  status: string | null;
+  costCents: number | null;
+  tokensUsed: number | null;
+  durationMs: number | null;
+}
+
 export interface StepNode {
   kind: 'step';
   key: string;
@@ -50,6 +72,8 @@ export interface StepNode {
   startedAt: string | null;
   lines: StepLine[];
   summary: StepSummary;
+  /** Sub-agents dispatched by this step, in dispatch order. */
+  children: SubagentChild[];
 }
 
 export interface UserNode {
@@ -59,6 +83,24 @@ export interface UserNode {
   at: string | null;
 }
 
+/** Where a claimed steer came from, when it did not come from a person typing. */
+export interface InboxSource {
+  kind: string;
+  scheduleId: string | null;
+  createdBy: string | null;
+}
+
+/** The payload of a `subagent_result` inbox row — a finished background child. */
+export interface SubagentResult {
+  childRunId: string | null;
+  subagentType: string;
+  description: string;
+  status: string;
+  summary: string;
+  costCents: number | null;
+  tokensUsed: number | null;
+}
+
 export interface InboxNode {
   kind: 'inbox';
   key: string;
@@ -66,6 +108,19 @@ export interface InboxNode {
   turn: number | null;
   step: number | null;
   at: string | null;
+  /** Set only on `kind === 'subagent_result'`. */
+  result: SubagentResult | null;
+  /** Set when the claimed item names its origin (a schedule, today). */
+  source: InboxSource | null;
+}
+
+/** An agent-set wake-up (harness 2b-2 §5-2), folded from `schedule_set`. */
+export interface ScheduleNode {
+  kind: 'schedule';
+  key: string;
+  scheduleId: string;
+  fireAt: string | null;
+  note: string;
 }
 
 export interface BudgetNode {
@@ -103,6 +158,7 @@ export type TrajectoryNode =
   | UserNode
   | StepNode
   | InboxNode
+  | ScheduleNode
   | BudgetNode
   | TurnEndNode
   | DeniedNode
@@ -147,6 +203,18 @@ const arr = (v: unknown): unknown[] => {
 };
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
 
+/**
+ * Every identity a sub-agent event can be keyed by, in preference order.
+ * A foreground spawn has a `child_run_id` from the start; a BACKGROUND spawn
+ * has only the workforce `task_id` (no run exists yet) while its `done`
+ * carries both — so a card is matched on any id the two events share, never
+ * on one field alone.
+ */
+const childKeys = (p: Record<string, unknown>): string[] => {
+  const ids = [str(p.child_run_id), str(p.task_id)].filter((v): v is string => v !== null);
+  return ids.map((id) => `child:${id}`);
+};
+
 function emptySummary(): StepSummary {
   return {
     tools: 0,
@@ -171,6 +239,7 @@ function newStep(turn: number, step: number, model: string | null, at: string | 
     startedAt: at,
     lines: [],
     summary: emptySummary(),
+    children: [],
   };
 }
 
@@ -345,16 +414,94 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         break;
       }
 
-      case 'inbox_claimed':
+      case 'inbox_claimed': {
+        // `content` is a nested payload field — a JSON string on the real
+        // wire (see `obj`), an object in tests written against the API shape.
+        const content = obj(p.content) ?? {};
+        const src = obj(content.source);
+        const inboxKind = str(p.kind) ?? 'steer';
         nodes.push({
           kind: 'inbox',
           key: `seq:${ev.seq}`,
-          inboxKind: str(p.kind) ?? 'steer',
+          inboxKind,
           turn: num(ev.turn) ?? num(p.turn),
           step: num(ev.step) ?? num(p.step),
           at: ev.created_at ?? null,
+          source: src
+            ? { kind: str(src.kind) ?? '', scheduleId: str(src.schedule_id), createdBy: str(src.created_by) }
+            : null,
+          result:
+            inboxKind === 'subagent_result'
+              ? {
+                  childRunId: str(content.child_run_id),
+                  subagentType: str(content.subagent_type) ?? 'subagent',
+                  description: str(content.description) ?? '',
+                  status: str(content.status) ?? 'completed',
+                  summary: str(content.summary) ?? '',
+                  costCents: num(content.cost_cents),
+                  tokensUsed: num(content.tokens_used),
+                }
+              : null,
         });
         break;
+      }
+
+      case 'subagent_spawned': {
+        const node = ensureStep(ev, null);
+        const key = childKeys(p)[0];
+        // A spawn with no identifier draws nothing: better one missing card
+        // than a card that cannot be opened.
+        if (!key) break;
+        if (node.children.some((c) => c.key === key)) break;
+        node.children.push({
+          key,
+          childRunId: str(p.child_run_id),
+          taskId: str(p.task_id),
+          mode: p.mode === 'async' ? 'async' : 'sync',
+          subagentType: str(p.subagent_type) ?? 'subagent',
+          description: str(p.description) ?? '',
+          continuedFrom: str(p.continued_from),
+          status: null,
+          costCents: null,
+          tokensUsed: null,
+          durationMs: null,
+        });
+        break;
+      }
+
+      case 'subagent_done': {
+        const keys = childKeys(p);
+        if (keys.length === 0) break;
+        // A background child's `done` lands in a LATER step than its spawn —
+        // the parent has walked on by the time the result comes back. Search
+        // every step, not just the current one.
+        for (const n of nodes) {
+          if (n.kind !== 'step') continue;
+          const child = n.children.find((c) => keys.includes(c.key));
+          if (!child) continue;
+          child.status = str(p.status) ?? 'completed';
+          child.costCents = num(p.cost_cents);
+          child.tokensUsed = num(p.tokens_used);
+          child.durationMs = num(p.duration_ms);
+          if (!child.childRunId) child.childRunId = str(p.child_run_id);
+          break;
+        }
+        break;
+      }
+
+      case 'schedule_set': {
+        const scheduleId = str(p.schedule_id);
+        if (scheduleId) {
+          nodes.push({
+            kind: 'schedule',
+            key: `seq:${ev.seq}`,
+            scheduleId,
+            fireAt: str(p.fire_at),
+            note: str(p.note) ?? '',
+          });
+        }
+        break;
+      }
 
       case 'budget_check': {
         const action = p.action === 'halt' ? 'halt' : 'warn';

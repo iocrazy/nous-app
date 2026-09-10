@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState } from './runView';
+import { budgetState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState , childrenState, wakeupsState } from './runView';
 
 const view = {
   v: 1,
@@ -71,5 +71,44 @@ describe('toolsState (harness 2b-1 §3)', () => {
     expect(toolsState({} as never)).toBeNull();
     expect(toolsState({ tools: { timed_out: 'x' } } as never)).toBeNull();
     expect(toolsState(null)).toBeNull();
+  });
+});
+
+
+describe('childrenState / wakeupsState (harness 2b-2 §5)', () => {
+  it('a run that dispatched nothing has no sub-agent state at all', () => {
+    // Same rule as the Tools cell: zero is not a number worth a cell.
+    expect(childrenState({ children: { total: 0, done: 0, running: 0, async_pending: 0, last: null } } as never)).toBeNull();
+    expect(childrenState({} as never)).toBeNull();
+    expect(childrenState(null)).toBeNull();
+  });
+
+  it('fills missing counters with 0 and keeps `last`', () => {
+    expect(childrenState({ children: { total: 2, done: 1, last: { child_run_id: '9', subagent_type: 'librarian', status: 'completed' } } } as never)).toEqual({
+      total: 2, done: 1, running: 0, async_pending: 0,
+      last: { child_run_id: '9', subagent_type: 'librarian', status: 'completed' },
+    });
+  });
+
+  it('wake-ups come back soonest first; anything not a list is empty', () => {
+    const view = {
+      wakeups: [
+        { schedule_id: 'b', fire_at: '2026-09-12T09:00:00Z', note: 'later' },
+        { schedule_id: 'a', fire_at: '2026-09-11T01:00:00Z', note: 'sooner' },
+        { schedule_id: 'junk', note: 'no time' },
+      ],
+    };
+    expect(wakeupsState(view as never).map((w) => w.schedule_id)).toEqual(['a', 'b']);
+    expect(wakeupsState({ wakeups: 'nope' } as never)).toEqual([]);
+    expect(wakeupsState(null)).toEqual([]);
+  });
+
+  it('does not reorder the caller\'s array in place', () => {
+    const wakeups = [
+      { schedule_id: 'b', fire_at: '2026-09-12T09:00:00Z', note: '' },
+      { schedule_id: 'a', fire_at: '2026-09-11T01:00:00Z', note: '' },
+    ];
+    wakeupsState({ wakeups } as never);
+    expect(wakeups.map((w) => w.schedule_id)).toEqual(['b', 'a']);
   });
 });

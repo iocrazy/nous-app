@@ -144,3 +144,73 @@ describe('foldEvents — tool timeouts (harness 2b-1 §3)', () => {
     expect(failed.detail?.timedOut).toBe(false);
   });
 });
+
+describe('foldEvents — sub-agents and schedules (harness 2b-2)', () => {
+  // The parent run's own coordinates, as the backend writes them: `step` is a
+  // real column on the event row, ids are strings on the wire.
+  const at = (n: number, event_type: string, payload: Record<string, unknown> = {}, step?: number): AgentRunEvent =>
+    ({ seq: n, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  it('folds subagent_spawned/done into the step that dispatched them, three states', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'subagent_spawned', { child_run_id: '347786145852739', mode: 'sync', subagent_type: 'librarian', description: 'Find the deck' }, 1),
+      at(3, 'subagent_spawned', { task_id: 'tk-9', mode: 'async', subagent_type: 'archivist', description: 'Sweep old runs' }, 1),
+      at(4, 'subagent_done', { child_run_id: '347786145852739', mode: 'sync', status: 'completed', cost_cents: 0.03, tokens_used: 1200, duration_ms: 8400 }, 1),
+    ], { isRunning: true });
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.children).toEqual([
+      { key: 'child:347786145852739', childRunId: '347786145852739', taskId: null, mode: 'sync', subagentType: 'librarian', description: 'Find the deck', continuedFrom: null, status: 'completed', costCents: 0.03, tokensUsed: 1200, durationMs: 8400 },
+      { key: 'child:tk-9', childRunId: null, taskId: 'tk-9', mode: 'async', subagentType: 'archivist', description: 'Sweep old runs', continuedFrom: null, status: null, costCents: null, tokensUsed: null, durationMs: null },
+    ]);
+  });
+
+  // The real background contract: the spawn knows only the workforce task id
+  // (no run exists yet), the done knows BOTH — so the match has to try the
+  // task id too, and it has to look in an earlier step.
+  it('finds the card in an EARLIER step when a background done lands later', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'subagent_spawned', { task_id: 'tk-9', mode: 'async', subagent_type: 'archivist', description: 'Sweep' }, 1),
+      at(3, 'step_end', { turn: 1, step: 1 }, 1),
+      at(4, 'step_start', { turn: 1, step: 2 }, 2),
+      at(5, 'subagent_done', { task_id: 'tk-9', child_run_id: '55', mode: 'async', status: 'completed', cost_cents: 0.01, tokens_used: 40, duration_ms: 900 }, 2),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    const first = steps[0];
+    if (first.kind !== 'step') throw new Error();
+    expect(first.children[0].status).toBe('completed');
+    expect(first.children[0].durationMs).toBe(900);
+    // the run id the done brought back is what makes the card openable
+    expect(first.children[0].childRunId).toBe('55');
+    const second = steps[1];
+    if (second.kind !== 'step') throw new Error();
+    expect(second.children).toEqual([]);
+  });
+
+  it('keeps a continued child tagged with the run it continues', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', {}, 1),
+      at(2, 'subagent_spawned', { child_run_id: '9', mode: 'sync', subagent_type: 'librarian', description: 'more', continued_from: '7' }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.children[0].continuedFrom).toBe('7');
+  });
+
+  it('reads a subagent_result inbox row and a schedule-sourced steer', () => {
+    const nodes = foldEvents([
+      at(1, 'inbox_claimed', { inbox_id: 'i1', kind: 'subagent_result', turn: 1, step: 4, content: { child_run_id: '9', subagent_type: 'librarian', description: 'Find the deck', status: 'completed', summary: 'Found 3 decks', cost_cents: 0.03, tokens_used: 900 } }),
+      at(2, 'inbox_claimed', { inbox_id: 'i2', kind: 'steer', turn: 1, step: 3, content: { text: 'ping', source: { kind: 'schedule', schedule_id: 'sc-1', created_by: 'user' } } }),
+    ]);
+    expect(nodes[0]).toMatchObject({ kind: 'inbox', inboxKind: 'subagent_result', result: { childRunId: '9', subagentType: 'librarian', status: 'completed', summary: 'Found 3 decks' } });
+    expect(nodes[1]).toMatchObject({ kind: 'inbox', inboxKind: 'steer', source: { kind: 'schedule', scheduleId: 'sc-1', createdBy: 'user' } });
+  });
+
+  it('folds schedule_set into its own node', () => {
+    expect(foldEvents([at(1, 'schedule_set', { schedule_id: 'sc-2', fire_at: '2026-09-11T01:00:00Z', note: 'check the render' })])[0])
+      .toEqual({ kind: 'schedule', key: 'seq:1', scheduleId: 'sc-2', fireAt: '2026-09-11T01:00:00Z', note: 'check the render' });
+  });
+});

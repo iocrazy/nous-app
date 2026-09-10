@@ -38,6 +38,22 @@ export interface RunBudget {
   spent_cents: number | null;
 }
 
+/** The sub-agent counters the backend folds per run (harness 2b-2). */
+export interface RunChildren {
+  total: number;
+  done: number;
+  running: number;
+  async_pending: number;
+  last: { child_run_id: string; subagent_type: string; status: string } | null;
+}
+
+/** An armed one-shot wake-up pointing at this run's issue. */
+export interface RunWakeup {
+  schedule_id: string;
+  fire_at: string;
+  note: string;
+}
+
 export interface RunEnded {
   reason: string;
   [k: string]: unknown;
@@ -51,7 +67,8 @@ export interface RunView {
   retry: RunRetry | null;
   context: RunContext | null;
   blocked: { code?: string; message?: string } | null;
-  children: { total: number; done: number };
+  /** harness 2b-2 §5-1: sub-agents this run dispatched. */
+  children: RunChildren;
   ended: RunEnded | null;
   inbox_pending: number;
   budget: RunBudget | null;
@@ -62,6 +79,8 @@ export interface RunView {
   fork?: { of_run_id: number; at_seq: number } | null;
   /** Phase 2b-1 §3: per-run tool timeout gauge. */
   tools?: { timed_out: number; last_timed_out: string | null } | null;
+  /** harness 2b-2 §5-2: wake-ups still armed on this run's issue. */
+  wakeups?: RunWakeup[] | null;
   revision: number;
 }
 
@@ -168,6 +187,31 @@ export function toolsState(view: RunView | null): { timed_out: number; last_time
   const t = view?.tools;
   if (!t || typeof t.timed_out !== 'number') return null;
   return { timed_out: t.timed_out, last_timed_out: typeof t.last_timed_out === 'string' ? t.last_timed_out : null };
+}
+
+/**
+ * The sub-agent gauge, or null when this run dispatched none — the Cockpit
+ * cell exists only when there is something to count (same rule as Tools).
+ * Missing counters read as 0 rather than hiding the whole cell: a backend
+ * that folded `total` but not `running` should still show 1/2, not nothing.
+ */
+export function childrenState(view: RunView | null): RunChildren | null {
+  const c = view?.children;
+  if (!c || typeof c.total !== 'number' || !Number.isFinite(c.total) || c.total <= 0) return null;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const last = c.last && typeof c.last === 'object' ? c.last : null;
+  return { total: c.total, done: n(c.done), running: n(c.running), async_pending: n(c.async_pending), last };
+}
+
+/** Armed wake-ups, soonest first. Rows without a time are dropped: an
+ *  undated wake-up has nothing to display and would sort arbitrarily. */
+export function wakeupsState(view: RunView | null): RunWakeup[] {
+  const raw = view?.wakeups;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((w): w is RunWakeup => !!w && typeof w === 'object' && typeof (w as RunWakeup).fire_at === 'string')
+    .slice()
+    .sort((a, b) => a.fire_at.localeCompare(b.fire_at));
 }
 
 export function currentStep(view: RunView | null): { turn: number | null; step: number | null; model: string | null } | null {
