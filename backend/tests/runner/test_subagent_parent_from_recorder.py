@@ -181,8 +181,10 @@ async def test_child_chain_check_walks_up_to_the_running_run(monkeypatch):
 
     class _Session:
         async def execute(self, stmt):
-            # the child's (parent_run_id, fork_of_run_id)
-            return SimpleNamespace(first=lambda: (900, None))
+            # the child's (parent_run_id, fork_of_run_id, issue_id) — the
+            # walker selects all three since Task 7b defect D, and a stub one
+            # column short refuses every check instead of answering it
+            return SimpleNamespace(first=lambda: (900, None, None))
 
     class _Scope:
         async def __aenter__(self):

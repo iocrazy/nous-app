@@ -113,6 +113,22 @@ def _tokens_of(recorder: Any) -> int:
         return 0
 
 
+def _as_int(raw: Any) -> Optional[int]:
+    """A Snowflake id as an int, or None when it is absent or unusable.
+
+    Ids cross this module as ints (asyncpg BIGINT) and as strings (payloads,
+    model arguments) interchangeably. None is the ONE answer for "no usable
+    value": an ownership check that cannot read an id must refuse, and telling
+    "absent" apart from "malformed" here would only give the caller a second
+    way to say no."""
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _cost_cents_of(recorder: Any) -> float:
     """What the child cost, for the parent's ``cost.by_child`` breakdown.
     The recorder computes it from its own token counters; a stand-in that
@@ -195,6 +211,19 @@ class SubAgentTaskService:
         """
         rid = getattr(self.parent_recorder, "run_id", None)
         return str(rid) if rid else self.parent_run_id
+
+    @property
+    def active_issue_id(self) -> Optional[int]:
+        """The issue this turn belongs to, resolved the same way
+        ``active_parent_run_id`` is: the running recorder first, the
+        constructor value as the fallback for callers that have none (the
+        workforce worker rebuilds this service from a payload that already
+        carries it). ``None`` on a conversation-scoped or probe run.
+
+        Same source as ``_reply_target`` uses, deliberately: "which issue is
+        this" must not have two answers within one service."""
+        rec_issue = getattr(self.parent_recorder, "issue_id", None)
+        return _as_int(rec_issue if rec_issue is not None else self.issue_id)
 
     async def spawn(self, args: dict[str, Any]) -> dict[str, Any]:
         """Public entry: dispatch + roll observability up to the
@@ -752,34 +781,57 @@ class SubAgentTaskService:
     # ── continue (child_run_id) ───────────────────────────────────────
 
     async def _child_chain_ok(self, child_run_id: str) -> bool:
-        """True when ``child_run_id`` really descends from this parent run.
+        """True when ``child_run_id`` is this caller's to continue.
 
         The id comes from the model, so this is the guard that keeps
-        ``child_run_id`` from reading a stranger's transcript. Walk up
-        ``parent_run_id`` / ``fork_of_run_id`` (a continued round hangs off
-        the round before it, not off the parent) and stop at
-        ``MAX_PARENT_HOPS`` so a data cycle cannot spin here forever.
+        ``child_run_id`` from reading a stranger's transcript. TWO arms, and
+        a child that satisfies either is ours:
+
+        * **ancestry** — walk up ``parent_run_id`` / ``fork_of_run_id`` (a
+          continued round hangs off the round before it, not off the parent)
+          and stop at ``MAX_PARENT_HOPS`` so a data cycle cannot spin forever;
+        * **same issue** — the child's ``issue_id`` equals the issue this turn
+          belongs to.
+
+        The second arm is not a loosening for convenience: a BACKGROUND child
+        returns after the turn that spawned it has ended, so the only natural
+        way to continue it is the issue's next turn — a SIBLING of the spawner,
+        which the walk can never reach. Before Task 7b every such attempt was
+        refused with ``not_your_child`` (2026-09-10 acceptance: child hanging
+        off turn 1, request arriving on turn 2), which made background
+        continuation impossible rather than merely awkward.
+
+        A conversation-scoped run has no issue, so it keeps the ancestor rule
+        alone; a child whose own ``issue_id`` is NULL is an unanswered
+        question, not a match — adopting it would hand every unscoped run's
+        transcript to whichever issue asked first.
         """
-        parent_run_id = self.active_parent_run_id
-        if not parent_run_id:
-            return False
         from sqlalchemy import select
 
         from app.db.session import read_scope
         from app.models import AgentRuns
 
-        try:
-            target = int(parent_run_id)
-            cursor: Optional[int] = int(child_run_id)
-        except (TypeError, ValueError):
+        target = _as_int(self.active_parent_run_id)
+        my_issue = _as_int(self.active_issue_id)
+        if target is None and my_issue is None:
+            # Neither arm has anything to compare. Falling through would run
+            # the walk with ``target is None``, and a child whose
+            # ``parent_run_id`` is NULL would then match it.
+            return False
+        cursor = _as_int(child_run_id)
+        if cursor is None:
             return False
 
         try:
             async with read_scope() as session:
-                for _ in range(MAX_PARENT_HOPS):
+                for hop in range(MAX_PARENT_HOPS):
                     row = (
                         await session.execute(
-                            select(AgentRuns.parent_run_id, AgentRuns.fork_of_run_id)
+                            select(
+                                AgentRuns.parent_run_id,
+                                AgentRuns.fork_of_run_id,
+                                AgentRuns.issue_id,
+                            )
                             .where(AgentRuns.id == cursor)
                             .limit(1)
                         )
@@ -787,7 +839,15 @@ class SubAgentTaskService:
                     if row is None:
                         return False
                     parent, forked_from = row[0], row[1]
-                    if parent == target or forked_from == target:
+                    if hop == 0 and my_issue is not None:
+                        # The child's OWN row answers the issue arm, so it is
+                        # settled before a single hop is spent on it.
+                        child_issue = _as_int(row[2])
+                        if child_issue is not None and child_issue == my_issue:
+                            return True
+                    if target is not None and (
+                        parent == target or forked_from == target
+                    ):
                         return True
                     cursor = parent or forked_from
                     if cursor is None:
