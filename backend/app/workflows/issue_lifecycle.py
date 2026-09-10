@@ -313,6 +313,7 @@ async def run_issue_reply_step(
     user_id: str,
     reply_text: str,
     attachments: Optional[list[dict]] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Run one reply turn, streaming token deltas + the final message to Redis.
 
@@ -352,6 +353,10 @@ async def run_issue_reply_step(
         # return (crash, cancel, empty output). Same hole as the dispatch path,
         # different trigger.
         issue_id=issue_id,
+        # Task 7a defect 6: provenance for the user message this turn opens
+        # with. The turn is the ONLY writer of that message (defect 7), so if
+        # it does not carry the source, nothing downstream can.
+        message_source=source,
     )
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -522,6 +527,7 @@ async def respond_to_issue_reply(
     user_id: str,
     reply_text: str,
     attachments: Optional[list[dict]] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Spec-1b: run one agent turn in response to a human reply on an issue.
     Serialized per issue via the turn lock; does NOT change issue status —
@@ -534,6 +540,14 @@ async def respond_to_issue_reply(
     ``attachments`` (added in sub-plan 3, Task 5) is a list of serialised
     AttachmentRequest dicts forwarded to run_session_turn so the agent turn
     can process images/PDFs pasted or dragged into the reply box.
+
+    ``source`` (Task 7a defect 6) is the provenance of the reply text — a
+    scheduled wake-up's ``{"kind": "schedule", …}``. It is BOUND to the turn
+    callable rather than added to ``_run_reply_turns``' signature: that
+    function takes its ``run_turn`` injected and every test fake implements
+    the exact kwarg set, so widening it there would break fakes that have
+    nothing to do with provenance. A reply with no provenance keeps handing
+    over the bare step, so the ordinary path is byte-for-byte what it was.
     """
     session_id = await ensure_issue_session_step(issue_id)
     auto_close = await load_auto_close_flag()
@@ -545,7 +559,11 @@ async def respond_to_issue_reply(
             reply_text,
             session_id=session_id,
             acquire=acquire_turn_lock,
-            run_turn=run_issue_reply_step,
+            run_turn=(
+                functools.partial(run_issue_reply_step, source=source)
+                if source
+                else run_issue_reply_step
+            ),
             release=clear_lock,
             sleep=DBOS.sleep_async,
             load_issue=load_issue,

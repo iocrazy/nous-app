@@ -168,10 +168,13 @@ async def test_idle_issue_records_the_body_then_dispatches(monkeypatch):
         source={"kind": "schedule", "schedule_id": "s1", "created_by": "agent"},
     )
     assert out.mode == "dispatched" and out.workflow_id
-    # The thread row lands BEFORE the dispatch — a turn that starts first
-    # would render a reply to a message nobody can see.
+    # The mirror row lands BEFORE the dispatch — the thread record must not
+    # trail the turn it describes.
     assert order.index("thread") < order.index("dispatch")
-    store.append_user_message.assert_awaited_once()
+    # …and the CONVERSATION message is not written here. The turn appends it
+    # (once, carrying the provenance); doing it here as well put the same
+    # sentence in the thread twice — Task 7a defect 7.
+    store.append_user_message.assert_not_awaited()
     assert rows[0]["meta"] == {
         "source": {"kind": "schedule", "schedule_id": "s1", "created_by": "agent"}
     }

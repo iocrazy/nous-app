@@ -67,10 +67,18 @@ async def deliver_or_dispatch(
     busy, or as a fresh agent turn while it is idle.
 
     ``message_body`` is the human-readable text this delivery carries. On the
-    idle branch it is recorded in the thread BEFORE the turn starts (a turn
-    that begins first would answer a message nobody can see) and handed to
-    that turn as the reply body. ``source`` is its provenance, e.g.
-    ``{"kind": "schedule", "schedule_id": …, "created_by": "agent"}``.
+    idle branch the ``issue_messages`` mirror row is written BEFORE the
+    dispatch, and the body is handed to the turn, which appends it to the
+    conversation itself (once) before answering it. ``source`` is its
+    provenance, e.g.
+    ``{"kind": "schedule", "schedule_id": …, "created_by": "agent"}``; it
+    rides down to that single append so the thread the UI reads can tell a
+    wake-up from a person typing (Task 7a defect 6).
+
+    This path used to append the body to the conversation here AS WELL, and
+    the turn appended it again 189 ms later — two identical "You commented"
+    bubbles, and the same sentence twice in the agent's own history (defect
+    7). One writer only.
 
     ``dedupe_key`` makes the delivery idempotent on BOTH arms, for a caller
     whose delivery can be REPLAYED — a DBOS workflow BODY resumed after a
@@ -101,18 +109,15 @@ async def deliver_or_dispatch(
         return diverted
 
     if message_body:
-        await _append_thread_message(
-            issue_id,
-            session_id=session_id,
-            user_id=user_id,
-            body=message_body,
-            source=source,
+        await _mirror_to_issue_messages(
+            issue_id, user_id=user_id, body=message_body, source=source
         )
     return await dispatch_issue_reply(
         issue_id,
         user_id=_owner_of(issue) or user_id,
         body=message_body or "",
         workflow_id=dedupe_key,
+        source=source,
     )
 
 
@@ -224,6 +229,7 @@ async def dispatch_issue_reply(
     body: str = "",
     attachments: Optional[list] = None,
     workflow_id: Optional[str] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> DeliverResult:
     """The idle half. A unique workflow id per dispatch by DEFAULT — a fixed
     one would dedup in DBOS and the re-dispatch would become a silent no-op.
@@ -238,6 +244,11 @@ async def dispatch_issue_reply(
     that carries no text (a background sub-agent's result, which the run reads
     off the inbox instead) starts on the same continuation nudge the bounded
     continuation loop uses.
+
+    ``source`` is the body's provenance, forwarded to the workflow so the user
+    message the turn appends carries it (Task 7a defect 6). Nothing here reads
+    it — this is a pass-through, and the value's shape is owned by the
+    delivery caller.
     """
     from app.services.issues.issue_agent_executor import CONTINUATION_NUDGE
     from app.services.issues.issue_reply_dispatch import (
@@ -247,7 +258,7 @@ async def dispatch_issue_reply(
     wf_id = workflow_id or f"issue-reply-{issue_id}-{uuid.uuid4()}"
     try:
         dispatch_respond_to_issue_reply(
-            issue_id, user_id, body or CONTINUATION_NUDGE, attachments, wf_id
+            issue_id, user_id, body or CONTINUATION_NUDGE, attachments, wf_id, source
         )
     except Exception as exc:  # noqa: BLE001 — typed failure, never silent
         logger.opt(exception=True).error(
@@ -298,27 +309,28 @@ async def _append_to_conversation(
     )
 
 
-async def _append_thread_message(
+async def _mirror_to_issue_messages(
     issue_id: int,
     *,
-    session_id: Optional[str],
     user_id: str,
     body: str,
     source: Optional[dict[str, Any]],
 ) -> None:
-    """Record ``body`` in both places the thread is read from: the session
-    (what the agent's history reloads) and ``issue_messages`` (which carries
-    the provenance the UI chips read).
+    """Record ``body`` in ``issue_messages`` — the mirror, not the delivery.
+
+    It does NOT append to the conversation. The turn this delivery is about to
+    start appends the user message itself, and doing it here as well is how
+    the same sentence landed in the thread twice (Task 7a defect 7). The
+    provenance goes onto BOTH copies: this row's ``meta.source`` for the
+    legacy read path and the audit trail, and the conversation message's own
+    ``metadata_json.source`` (written by the turn) for the path the UI
+    actually reads.
 
     ``issue_messages`` has NO ``author_kind`` column — mig 205 gave it only
     ``kind`` / ``author_user_id`` / ``author_agent_id`` / ``body`` / ``meta``.
     Provenance therefore lives at ``meta.source``, and the key is absent — not
     null — when there is nothing to say.
     """
-    if session_id:
-        await _append_to_conversation(
-            session_id=session_id, user_id=user_id, body=body, attachments=None
-        )
     await _insert_issue_message(
         issue_id=issue_id,
         kind="comment",

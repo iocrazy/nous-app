@@ -109,9 +109,19 @@ class MessageStore(Protocol):
         ...
 
     async def append_user_message(
-        self, *, session_id: int, user_id: str, content: str
+        self,
+        *,
+        session_id: int,
+        user_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Insert a user-role message. Returns the inserted row."""
+        """Insert a user-role message. Returns the inserted row.
+
+        ``metadata`` is the message's own provenance (e.g. a scheduled
+        wake-up's ``{"source": …}``); it must come back as ``metadata_json``
+        on the next read, or nothing downstream can tell a wake-up from a
+        person typing."""
         ...
 
     # ── phase 2a: typed question parked on the latest assistant message ──

@@ -636,6 +636,7 @@ class ConversationsAiStore:
         user_id: str,
         content: str,
         attachments: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Insert a user-role message via the shared ConversationRepository
         (atomic seq allocation + read-cursor advance).
@@ -645,6 +646,15 @@ class ConversationsAiStore:
         ``body['attachments']`` so history reloads can re-render the image
         chips in the user bubble; the vision pipeline resolves the actual
         bytes separately from the request's attachments.
+
+        ``metadata`` is provenance for the message itself, stored under
+        ``body['meta']`` — which is exactly where ``_to_legacy_message_shape``
+        reconstructs ``metadata_json`` from, so it comes back on every read of
+        this conversation. Today's caller is a scheduled wake-up passing
+        ``{"source": {...}}``: before Task 7a that provenance was written only
+        into ``issue_messages``, a table the modern read path never touches,
+        so the UI's "Started By Wake-up" chip had no input and could not
+        render on production at all.
         """
         from app.repositories.conversation_repository import (
             get_conversation_repository,
@@ -653,6 +663,8 @@ class ConversationsAiStore:
         body: Dict[str, Any] = {"text": content}
         if attachments:
             body["attachments"] = attachments
+        if metadata:
+            body["meta"] = metadata
         row = await get_conversation_repository().send_message(
             conversation_id=_bigint(session_id),
             sender_id=user_id,
@@ -669,7 +681,7 @@ class ConversationsAiStore:
             "agent_id": None,
             "prompt_tokens": None,
             "completion_tokens": None,
-            "metadata_json": None,
+            "metadata_json": metadata or None,
             "attachments": attachments or None,
             "created_at": row.get("created_at"),
         }

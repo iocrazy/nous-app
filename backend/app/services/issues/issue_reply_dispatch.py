@@ -26,6 +26,7 @@ def dispatch_respond_to_issue_reply(
     body: str,
     attachments: Optional[list],
     wf_id: str,
+    source: Optional[dict] = None,
 ) -> None:
     """Dispatch the respond_to_issue_reply DBOS workflow under a pinned wf id.
 
@@ -34,7 +35,12 @@ def dispatch_respond_to_issue_reply(
     queue. Otherwise (client is None — today's reality) fall back to the
     in-process `SetWorkflowID + DBOS.start_workflow` path. Zero behavior change
     while the client stays None. Positional args preserved exactly:
-    (issue_id, owner_id, body, attachments).
+    (issue_id, owner_id, body, attachments, source).
+
+    ``source`` (Task 7a defect 6) is the reply text's provenance, carried to
+    the workflow so the ONE user message it appends can say where it came
+    from. Trailing and defaulted, so a workflow recovered from a row enqueued
+    before this argument existed replays with ``None`` instead of failing.
     """
     from app.services.infra.dbos_orchestrator import (
         _resolve_pinned_app_version,
@@ -53,7 +59,9 @@ def dispatch_respond_to_issue_reply(
         pinned = _resolve_pinned_app_version()
         if pinned:
             opts["app_version"] = pinned
-        client.enqueue(EnqueueOptions(**opts), issue_id, owner_id, body, attachments)
+        client.enqueue(
+            EnqueueOptions(**opts), issue_id, owner_id, body, attachments, source
+        )
         return
 
     with SetWorkflowID(wf_id):
@@ -63,6 +71,7 @@ def dispatch_respond_to_issue_reply(
             owner_id,
             body,
             attachments,
+            source,
         )
 
 
