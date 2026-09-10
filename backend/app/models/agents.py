@@ -530,7 +530,9 @@ class AgentRunTranscriptEvents(Base):
             " 'step_start'::text, 'step_end'::text, 'inbox_claimed'::text,"
             " 'deliverable'::text, 'budget_check'::text,"
             " 'question_asked'::text, 'question_answered'::text,"
-            " 'capability_denied'::text, 'fork'::text])",
+            " 'capability_denied'::text, 'fork'::text,"
+            " 'subagent_spawned'::text, 'subagent_done'::text,"
+            " 'schedule_set'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(
@@ -563,108 +565,6 @@ class AgentRunTranscriptEvents(Base):
     step: Mapped[Optional[int]] = mapped_column(
         Integer, comment="453: step = one LLM call + its tool executions"
     )
-
-
-class AgentTasks(Base):
-    __tablename__ = "agent_tasks"
-    __table_args__ = (
-        CheckConstraint(
-            "lifecycle_status = ANY (ARRAY['queued'::text, 'assigned'::text, 'in_progress'::text,"
-            " 'waiting_for_other'::text, 'blocked'::text, 'done'::text, 'failed'::text, 'cancelled'::text])",
-            name="agent_tasks_lifecycle_status_check",
-        ),
-        ForeignKeyConstraint(
-            ["agent_id"],
-            ["public.ai_agents.id"],
-            ondelete="CASCADE",
-            name="agent_tasks_agent_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["current_run_id"],
-            ["public.agent_runs.id"],
-            ondelete="SET NULL",
-            name="agent_tasks_current_run_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["inbox_message_id"],
-            ["public.agent_inbox.id"],
-            ondelete="SET NULL",
-            name="agent_tasks_inbox_message_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["parent_task_id"],
-            ["public.agent_tasks.id"],
-            ondelete="SET NULL",
-            name="agent_tasks_parent_task_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["root_task_id"],
-            ["public.agent_tasks.id"],
-            ondelete="SET NULL",
-            name="agent_tasks_root_task_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="agent_tasks_pkey"),
-        Index(
-            "agent_tasks_issue_id_idx",
-            "issue_id",
-            postgresql_where="(issue_id IS NOT NULL)",
-        ),
-        Index(
-            "idx_tasks_active",
-            "agent_id",
-            "started_at",
-            postgresql_where="(lifecycle_status = ANY (ARRAY['in_progress'::text, 'waiting_for_other'::text]))",
-        ),
-        Index(
-            "idx_tasks_queue",
-            "agent_id",
-            "created_at",
-            postgresql_where="(lifecycle_status = ANY (ARRAY['queued'::text, 'assigned'::text]))",
-        ),
-        Index("idx_tasks_user_recent", "user_id", "created_at"),
-        {
-            "comment": "M2 Persistent Workforce: per-agent task queue with lifecycle state machine.",
-            "schema": "public",
-        },
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    agent_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    lifecycle_status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'queued'::text")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    parent_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    root_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    inbox_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-    title: Mapped[Optional[str]] = mapped_column(Text)
-    result: Mapped[Optional[dict]] = mapped_column(JSONB)
-    error_code: Mapped[Optional[str]] = mapped_column(Text)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    assigned_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
-    started_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
-    ended_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
-    issue_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        comment=(
-            "Back-reference to issues.id. agent_tasks rows that originate from a "
-            "chat_delegate or agent_dispatch issue link back here."
-        ),
-    )
-    current_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class AgentPermissionAudits(Base):
@@ -711,7 +611,8 @@ class AgentRunInbox(Base):
         ),
         CheckConstraint(
             "kind = ANY (ARRAY['steer'::text, 'answer'::text, 'pause'::text,"
-            " 'resume'::text, 'budget_reply'::text])",
+            " 'resume'::text, 'budget_reply'::text,"
+            " 'subagent_result'::text])",
             name="agent_run_inbox_kind_check",
         ),
         ForeignKeyConstraint(

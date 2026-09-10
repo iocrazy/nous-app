@@ -55,14 +55,13 @@ class UserSchedules(Base):
         Uuid, primary_key=True, server_default=text("gen_random_uuid()")
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    cron_expr: Mapped[str] = mapped_column(
+    cron_expr: Mapped[Optional[str]] = mapped_column(
         Text,
-        nullable=False,
         comment=(
-            "5-field cron expression in UTC (m h dom mon dow). Validated by\n"
-            "     croniter on insert/update at the service layer (DB doesn't parse\n"
-            '     cron). Examples: "0 9 * * *" daily 9am UTC, "*/15 * * * *" every\n'
-            '     15 min, "0 0 * * 0" weekly Sunday midnight.'
+            "5-field UTC cron. NULLABLE since 461: a one-time issue_wakeup gives "
+            "next_fire_at directly and self-disables after firing. The "
+            "cron_or_once CHECK keeps NULL out of every recurring task_type, "
+            "where it would silently never re-arm."
         ),
     )
     task_type: Mapped[str] = mapped_column(Text, nullable=False)

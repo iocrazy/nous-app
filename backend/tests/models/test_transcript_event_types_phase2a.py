@@ -27,8 +27,9 @@ MIGRATION = (
     / "459_transcript_event_types_phase2a.sql"
 )
 # The allowlist is re-declared whole by each migration that touches it; the
-# ORM literal must equal the LATEST one (460 admitted fork, phase 2b-1).
-LATEST_MIGRATION = MIGRATION.parent / "460_transcript_event_type_fork.sql"
+# ORM literal must equal the LATEST one (461 admitted the phase-2b-2
+# orchestration events).
+LATEST_MIGRATION = MIGRATION.parent / "461_harness_p4_phase2b2_orchestration.sql"
 _ARRAY = re.compile(r"ARRAY\[(.*?)\]", re.DOTALL)
 _LITERAL = re.compile(r"'([a-z_]+)'::text")
 
@@ -38,6 +39,21 @@ def _literals(sql: str) -> frozenset[str]:
     assert (
         len(arrays) == 1
     ), f"expected exactly one ARRAY[...] literal, got {len(arrays)}"
+    found = _LITERAL.findall(arrays[0])
+    assert len(found) == len(set(found)), "duplicate event type literal"
+    return frozenset(found)
+
+
+def _first_array(sql: str) -> frozenset[str]:
+    """Literals of the FIRST ARRAY[...] only.
+
+    ``_literals`` demands exactly one array, which is right for a migration
+    that touches nothing but this allowlist. From 461 the allowlist migration
+    also re-declares ``agent_run_inbox.kind``, so the event-type comparison
+    slices the first array instead of loosening ``_literals`` for every caller.
+    """
+    arrays = _ARRAY.findall(sql)
+    assert arrays, "expected at least one ARRAY[...] literal"
     found = _LITERAL.findall(arrays[0])
     assert len(found) == len(set(found)), "duplicate event type literal"
     return frozenset(found)
@@ -85,7 +101,7 @@ def test_migration_and_orm_event_type_sets_are_identical():
     """Either side gaining or losing a literal is drift; nothing else checks it.
     Compares the LATEST allowlist migration (each one re-declares the whole
     CHECK), not 459."""
-    assert _literals(LATEST_MIGRATION.read_text(encoding="utf-8")) == _literals(
+    assert _first_array(LATEST_MIGRATION.read_text(encoding="utf-8")) == _literals(
         _orm_check_sql()
     )
 
