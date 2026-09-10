@@ -167,3 +167,141 @@ def test_single_fetch_path_is_wired_for_intents_and_rating():
     assert (
         "set_rating_step(resource_id=str(resource_id), rating=int(rating))" in wf_text
     )
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_attaches_tags_and_rating():
+    from app.api import media_batch_router as b
+
+    res_repo = MagicMock()
+    res_repo.get_resource_by_platform_id = AsyncMock(side_effect=[None, {"id": 99}])
+    res_repo.update_resource = AsyncMock(return_value={})
+    tags_repo = MagicMock()
+    tags_repo.bulk_add_tags_to_resource = AsyncMock()
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo,
+        ),
+        patch.object(b, "get_tags_repository", return_value=tags_repo),
+        patch.object(b, "resolve_and_attach_tags", new=AsyncMock()) as attach_names,
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        ok = await b.attach_after_save("pid1", ["11", "33"], ["cats"], "u1", rating=5)
+
+    assert ok is True
+    tags_repo.bulk_add_tags_to_resource.assert_awaited_once_with(
+        "99", ["11", "33"], source="manual"
+    )
+    attach_names.assert_awaited_once_with("99", ["cats"], "u1")
+    res_repo.update_resource.assert_awaited_once_with("99", {"rating": 5})
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_gives_up_after_attempts():
+    from app.api import media_batch_router as b
+
+    res_repo = MagicMock()
+    res_repo.get_resource_by_platform_id = AsyncMock(return_value=None)
+    with (
+        patch(
+            "app.repositories.resources_repository.ResourcesRepository",
+            return_value=res_repo,
+        ),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        ok = await b.attach_after_save(
+            "pid1", ["11"], None, "u1", rating=None, attempts=3
+        )
+    assert ok is False
+    assert res_repo.get_resource_by_platform_id.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_batch_attach_after_save_warns_when_rating_not_written(caplog):
+    """update_resource 对 scope 看不见的行返回 {} 而不 raise——rating 没写进去不能静默。"""
+    from app.api import media_batch_router as b
+
+    res_repo = MagicMock()
+    res_repo.get_resource_by_platform_id = AsyncMock(return_value={"id": 99})
+    res_repo.update_resource = AsyncMock(return_value={})
+    with patch(
+        "app.repositories.resources_repository.ResourcesRepository",
+        return_value=res_repo,
+    ):
+        ok = await b.attach_after_save("pid1", None, None, "u1", rating=2)
+    assert ok is True
+    assert "rating not written" in caplog.text
+
+
+def test_batch_route_is_wired_for_intents():
+    import inspect
+
+    from app.api import media_batch_router as b
+
+    src = inspect.getsource(b.fetch_videos_batch)
+    assert "await resolve_intent_tag_ids(" in src
+    assert "attach_after_save," in src
+    assert "rating=request.rating" in src
+
+
+async def _run_batch_route(b, *, intent_ids_mock: AsyncMock, **request_fields):
+    """直接调 fetch_videos_batch（绕过 Depends），抓取链桩成一条成功解析，
+    返回 (响应, 已登记的 attach_after_save 后台任务列表)。"""
+    from fastapi import BackgroundTasks
+
+    from app.api.media_fetch_helpers import BatchFetchRequest
+
+    request = BatchFetchRequest(urls=["https://v.douyin.com/abc/"], **request_fields)
+    background = BackgroundTasks()
+    parsed = {"platform_id": "pid1", "title": "Test Video"}
+    with (
+        patch.object(b, "resolve_intent_tag_ids", new=intent_ids_mock),
+        patch.object(b, "resolve_team_id", new=AsyncMock(return_value=None)),
+        patch.object(b, "PointsService"),
+        patch.object(
+            b,
+            "fetch_douyin_detail",
+            new=AsyncMock(return_value=({}, parsed, "abogus")),
+        ),
+    ):
+        resp = await b.fetch_videos_batch(
+            request, background, MagicMock(user_id="u1"), None, MagicMock()
+        )
+    attach = [t for t in background.tasks if t.func is b.attach_after_save]
+    return resp, attach
+
+
+@pytest.mark.asyncio
+async def test_batch_route_merges_intent_ids_and_forwards_rating():
+    from app.api import media_batch_router as b
+
+    intent = AsyncMock(return_value=["5", "11"])
+    resp, attach = await _run_batch_route(
+        b, intent_ids_mock=intent, tag_ids=["5"], transcribe=True, rating=3
+    )
+
+    assert resp["submitted"] == 1
+    intent.assert_awaited_once_with(transcribe=True, summarize=False, analyze=False)
+    assert len(attach) == 1
+    assert attach[0].args == ("pid1", ["5", "11"], None, "u1")
+    assert attach[0].kwargs == {"rating": 3}
+
+
+@pytest.mark.asyncio
+async def test_batch_route_survives_intent_resolution_failure(caplog):
+    """裁定 R2：意图查询抛错不许 500 整个批次——记 WARNING、按无意图 id 继续。"""
+    from app.api import media_batch_router as b
+
+    intent = AsyncMock(side_effect=RuntimeError("db down"))
+    resp, attach = await _run_batch_route(
+        b, intent_ids_mock=intent, tag_ids=["5"], analyze=True, rating=1
+    )
+
+    assert resp["submitted"] == 1
+    assert len(attach) == 1
+    assert attach[0].args == ("pid1", ["5"], None, "u1")
+    assert attach[0].kwargs == {"rating": 1}
+    assert "[Fetch/Batch] intent tag resolution failed (non-fatal): db down" in (
+        caplog.text
+    )

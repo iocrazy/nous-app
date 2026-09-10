@@ -12,6 +12,7 @@ from loguru import logger
 from app.api.media_fetch_helpers import (
     BatchFetchRequest,
     resolve_and_attach_tags,
+    resolve_intent_tag_ids,
     resolve_team_id,
 )
 from app.boundary import validate_url_async
@@ -30,6 +31,47 @@ router = APIRouter(dependencies=[Depends(require_module("media-parser"))])
 TAGS_FETCH = ["Video Fetch"]
 
 
+async def attach_after_save(
+    platform_id: str,
+    tag_ids: list[str] | None,
+    tag_names: list[str] | None,
+    user_id: str,
+    *,
+    rating: int | None,
+    attempts: int = 10,
+    poll_seconds: float = 1.0,
+) -> bool:
+    """批量抓取是 background 保存资源，所以标签 / 评级只能等资源出现后再挂。
+    ``tag_ids`` 已含意图映射出的系统标签 id。返回是否在预算内等到了资源。"""
+    import asyncio
+
+    from app.repositories.resources_repository import ResourcesRepository
+
+    res_repo = ResourcesRepository()
+    for _ in range(attempts):
+        resource = await res_repo.get_resource_by_platform_id(platform_id)
+        if resource:
+            rid = str(resource["id"])
+            if tag_ids:
+                await get_tags_repository().bulk_add_tags_to_resource(
+                    rid, tag_ids, source="manual"
+                )
+            if tag_names:
+                await resolve_and_attach_tags(rid, tag_names, user_id)
+            if rating is not None:
+                # update_resource 对 scope 看不见的行返回 {} 而不 raise——没写进去不能静默。
+                if not await res_repo.update_resource(rid, {"rating": rating}):
+                    logger.warning(
+                        f"[Fetch/Batch] rating not written for resource {rid} "
+                        f"(row missing or out of scope)"
+                    )
+            logger.info(f"Tags/rating attached to resource {rid} for {platform_id}")
+            return True
+        await asyncio.sleep(poll_seconds)
+    logger.warning(f"Timeout attaching tags for {platform_id}")
+    return False
+
+
 @router.post("/fetch/batch", tags=TAGS_FETCH)
 async def fetch_videos_batch(
     request: BatchFetchRequest,
@@ -43,6 +85,21 @@ async def fetch_videos_batch(
 
     Parse multiple video links at once, suitable for batch collection.
     """
+    # 显式意图 → Pipeline 系统标签 id，与用户 tag_ids 去重合并。查询失败不许 500 整个批次。
+    effective_tag_ids = list(request.tag_ids or [])
+    try:
+        intent_ids = await resolve_intent_tag_ids(
+            transcribe=request.transcribe,
+            summarize=request.summarize,
+            analyze=request.analyze,
+        )
+    except Exception as e:
+        logger.warning(f"[Fetch/Batch] intent tag resolution failed (non-fatal): {e}")
+        intent_ids = []
+    for tid in intent_ids:
+        if tid not in effective_tag_ids:
+            effective_tag_ids.append(tid)
+
     points_service = PointsService()
     _team_id = await resolve_team_id(auth.user_id, raw_request)
     _batch_points_cost = 0
@@ -138,47 +195,14 @@ async def fetch_videos_batch(
                         MediaService.process_video, platform_id, parsed_data
                     )
 
-                    if request.tag_ids or request.tags:
-
-                        async def _attach_tags_after_save(
-                            pid: str,
-                            t_ids: list[str] | None,
-                            t_names: list[str] | None,
-                            uid: str,
-                        ):
-                            import asyncio
-
-                            from app.repositories.resources_repository import (
-                                ResourcesRepository,
-                            )
-
-                            res_repo = ResourcesRepository()
-                            for _ in range(10):
-                                resource = await res_repo.get_resource_by_platform_id(
-                                    pid
-                                )
-                                if resource:
-                                    rid = str(resource["id"])
-                                    if t_ids:
-                                        tags_repo = get_tags_repository()
-                                        await tags_repo.bulk_add_tags_to_resource(
-                                            rid, t_ids, source="manual"
-                                        )
-                                    if t_names:
-                                        await resolve_and_attach_tags(rid, t_names, uid)
-                                    logger.info(
-                                        f"Tags attached to resource {rid} for {pid}"
-                                    )
-                                    return
-                                await asyncio.sleep(1)
-                            logger.warning(f"Timeout attaching tags for {pid}")
-
+                    if effective_tag_ids or request.tags or request.rating is not None:
                         background_tasks.add_task(
-                            _attach_tags_after_save,
+                            attach_after_save,
                             platform_id,
-                            request.tag_ids,
+                            effective_tag_ids,
                             request.tags,
                             auth.user_id,
+                            rating=request.rating,
                         )
 
                     published_at = parsed_data.get("published_at")
