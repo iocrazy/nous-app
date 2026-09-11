@@ -12,18 +12,33 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import en from '../../../../public/locales/en.json';
+import zh from '../../../../public/locales/zh.json';
 import type { OutputCitation, StepNode } from '../foldEvents';
 import { OutputCitations } from './builtins';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: unknown, opts?: unknown) => {
-      const template = typeof fallback === 'string' ? fallback : key;
-      const vars = (typeof fallback === 'object' ? fallback : opts) as Record<string, unknown> | undefined;
-      return vars ? template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => String(vars[k] ?? `{{${k}}}`)) : template;
-    },
-  }),
-}));
+// Resolved against the REAL shipped English copy, with i18next's plural-suffix
+// lookup, because the plural forms are the thing under test: a `{{count}}` key
+// with no `_one` / `_other` renders "References 1 outputs" for the commonest
+// case of all (真机那一轮引用的就是 1 件). A hand-written template in the mock
+// would hide exactly that — the same reason `AISettings.governance.test` reads
+// this file instead of its own table.
+vi.mock('react-i18next', () => {
+  const lookup = (key: string): unknown =>
+    key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], en);
+  const t = (key: string, fallback?: unknown, opts?: unknown) => {
+    const vars = (typeof fallback === 'object' && fallback ? fallback : opts) as
+      | Record<string, unknown>
+      | undefined;
+    const count = vars?.count;
+    const suffixed =
+      typeof count === 'number' ? lookup(`${key}_${count === 1 ? 'one' : 'other'}`) : undefined;
+    const resolved = suffixed ?? lookup(key);
+    const template = typeof resolved === 'string' ? resolved : typeof fallback === 'string' ? fallback : key;
+    return vars ? template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => String(vars[k] ?? `{{${k}}}`)) : template;
+  };
+  return { useTranslation: () => ({ t }) };
+});
 
 const CITED: OutputCitation[] = [
   { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
@@ -44,6 +59,27 @@ describe('OutputCitations', () => {
     const el = screen.getByTestId('output-citations');
     expect(el.textContent).toContain('References 2 outputs');
     expect(el.textContent).toContain('pinned to version');
+  });
+
+  it('says "1 output", not "1 outputs" — the commonest case of all', () => {
+    render(<OutputCitations node={step([CITED[0]])} />);
+    const el = screen.getByTestId('output-citations');
+    expect(el.textContent).toContain('References 1 output ');
+    expect(el.textContent).not.toContain('1 outputs');
+  });
+
+  it('ships both plural forms in both locales, and no bare key', () => {
+    // zh has no plural category so its two forms read the same — but the key
+    // SETS must match (`i18n-rendering` 的结构守卫), which is how the
+    // neighbouring mentionCount / revisions / provenanceVersions pairs are
+    // written too. The bare `cited` must be gone: with `{{count}}` passed,
+    // i18next looks up the suffixed key first and only falls back to the bare
+    // one — leaving it would hide a missing plural form.
+    expect(en.outputs.cited_one).toContain('{{count}} output ');
+    expect(en.outputs.cited_other).toContain('{{count}} outputs ');
+    expect(zh.outputs.cited_one).toBe(zh.outputs.cited_other);
+    expect('cited' in en.outputs).toBe(false);
+    expect('cited' in zh.outputs).toBe(false);
   });
 
   it('names each cited version the way the composer chip did', () => {
