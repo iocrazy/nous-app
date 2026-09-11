@@ -24,6 +24,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { ExternalLink, GitCompare, PlayCircle, Sparkles } from 'lucide-react';
 
 import {
@@ -156,12 +157,18 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {/* A LINK, not a button: middle-click and copy-address are what a
               reader does with "open the issue that made this". Rendered only
-              when somebody handed one over — see the note at the top. */}
+              when somebody handed one over — see the note at the top.
+
+              `Link`, not a bare `<a>`: this block mounts INSIDE the canvas
+              editor (ShotNodeView) and the script sheet, so a document reload
+              would throw away the graph the reader is standing in. It still
+              emits a real `href`, so middle-click and copy-address behave the
+              way the paragraph above promises. */}
           {issueUrl ? (
-            <a data-testid="output-provenance-issue" href={issueUrl} className={BTN}>
+            <Link data-testid="output-provenance-issue" to={issueUrl} className={BTN}>
               <ExternalLink size={11} />
               {t('outputs.provenanceOpenIssue', 'Open Issue')}
-            </a>
+            </Link>
           ) : (
             <span
               data-testid="output-provenance-issue-unlinked"
