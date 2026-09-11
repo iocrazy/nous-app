@@ -51,15 +51,39 @@ def test_every_registrar_calls_the_registry():
     assert missing == [], f"这些写入点不再登记产出：{missing}"
 
 
+#: 允许出现 run_deliverables 写入的两个文件：repository 自己与登记口。
+WRITE_SITES = [
+    "app/repositories/run_deliverables_repository.py",
+    "app/services/deliverables/registry.py",
+]
+
+
 def test_the_registry_is_the_only_writer_of_run_deliverables():
-    """行只许从 ``RunDeliverablesRepository`` 出去，而那个 repository 只许
-    被登记口调用。第二个写入方意味着版本链有第二套算法。"""
-    callers = sorted(
+    """版本链只许有一套算法，所以**写**只许出现在这两个文件里。
+
+    ⚠️ 扫的是写入本身（``insert_version(``），不是类名 ``RunDeliverablesRepository``。
+    3a 的三个血缘端点与 Generated 卡的来源行都是这张表的合法**读者**；按类名扫
+    等于把每个新读者都判成越权写入，那条守卫的结局必然是被一路放宽到形同虚设。
+    读者随便加，写入口仍然只有一个。
+    """
+    writers = sorted(
         _rel(p)
         for p in APP.rglob("*.py")
-        if "RunDeliverablesRepository" in p.read_text(encoding="utf-8")
+        if "insert_version(" in p.read_text(encoding="utf-8")
     )
-    assert callers == [
-        "app/repositories/run_deliverables_repository.py",
-        "app/services/deliverables/registry.py",
-    ], callers
+    assert writers == WRITE_SITES, writers
+
+
+def test_nothing_inserts_run_deliverables_rows_behind_the_repository():
+    """第二条腿：绕开 repository 直接用 ORM 插行同样是第二套版本算法。
+
+    单扫方法名拦不住 ``insert(RunDeliverables)`` —— 那正是 ``insert_version``
+    自己用的写法，复制到别处不会碰到上面那条断言。
+    """
+    offenders = sorted(
+        _rel(p)
+        for p in APP.rglob("*.py")
+        if "insert(RunDeliverables)" in p.read_text(encoding="utf-8")
+        and _rel(p) not in WRITE_SITES
+    )
+    assert offenders == [], f"这些文件绕开 repository 直接插行：{offenders}"
