@@ -12,12 +12,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('./parserService', () => ({ getAuthHeaders: async () => ({ Authorization: 'Bearer t' }) }));
 
-const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl } = await import('./outputsService');
+const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl, invalidateOutputLineage, clearOutputLineageCache } = await import('./outputsService');
 
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  // The lineage cache outlives a test the way it outlives a component. Without
+  // this every case after the first would assert against a cached answer and
+  // stop exercising the transport at all.
+  clearOutputLineageCache();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -133,5 +137,131 @@ describe('resolveMediaUrl', () => {
 
   it('does not double the slash when the base carries one', () => {
     expect(resolveMediaUrl('api/v1/generated-media/500/cover')).toBe('http://api.test/api/v1/generated-media/500/cover');
+  });
+});
+
+/**
+ * The lineage cache (3a Task 6, fix round 1).
+ *
+ * `OutputProvenance` mounts once PER OBJECT — one per shot on a canvas, one
+ * per scene in a script sheet. Without sharing, opening a 40-shot canvas fires
+ * 40 requests, nearly all of them 404 `not_registered` because most objects
+ * were written by a person; and `EditorShell` keys the scene subtree on
+ * `rollbackNonce`, so one rollback remounts every block and fires the whole
+ * set again.
+ *
+ * So the unit under test is not "does it fetch" but "how MANY times" — which
+ * is why every case counts `fetchMock.mock.calls.length` rather than
+ * inspecting a response.
+ */
+describe('outputsService — the lineage request cache', () => {
+  const chain = (v = 2) => ({
+    kind: 'script_shot',
+    ref_id: '9',
+    latest_version: v,
+    versions: [{ ...version, version: v }],
+  });
+
+  const notRegistered = () =>
+    json(404, {
+      success: false,
+      error: '404 Not Found',
+      code: 'http_404',
+      request_id: 'r-1',
+      details: { code: 'not_registered', message: 'script_shot/9 is not in the deliverable registry' },
+    });
+
+  it('serves concurrent callers for one object from a single request', async () => {
+    // Forty shot nodes mount in the same tick. One request, forty answers.
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    const answers = await Promise.all(
+      Array.from({ length: 40 }, () => getOutputLineage('script_shot', '9')),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(answers.every((a) => a.latest_version === 2)).toBe(true);
+  });
+
+  it('asks nothing at all on a remount after the first answer settled', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    await getOutputLineage('script_shot', '9');
+    fetchMock.mockClear();
+    await getOutputLineage('script_shot', '9');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('caches `not_registered` exactly like an answer', async () => {
+    // The whole point. "A person wrote this" is a FACT about the object, and
+    // the common one — re-asking it on every remount is the retry storm this
+    // cache exists to stop.
+    fetchMock.mockResolvedValueOnce(notRegistered());
+    const first = await getOutputLineage('script_shot', '9').catch((e) => e);
+    expect(first.code).toBe('not_registered');
+    fetchMock.mockClear();
+    const second = await getOutputLineage('script_shot', '9').catch((e) => e);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(second.code).toBe('not_registered');
+    expect(second).toBeInstanceOf(OutputsError);
+  });
+
+  it('keys the cache by kind AND id, so two objects are two requests', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    await getOutputLineage('script_shot', '9');
+    await getOutputLineage('script_scene', '9');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a transient failure instead of freezing it for the page', async () => {
+    // Deliberately NOT cached. `not_registered` is a fact about the object; a
+    // 502 from a gateway is a fact about the last five seconds, and holding it
+    // for the life of the page would leave "Could not read where this came
+    // from" on screen until the user navigated away.
+    fetchMock.mockResolvedValueOnce(new Response('<html>gateway</html>', { status: 502 }));
+    expect((await getOutputLineage('script_shot', '9').catch((e) => e)).code).toBe('http_502');
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    expect((await getOutputLineage('script_shot', '9')).latest_version).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-asks after the object is invalidated', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, chain(2)));
+    await getOutputLineage('script_shot', '9');
+    invalidateOutputLineage('script_shot', '9');
+    fetchMock.mockResolvedValueOnce(json(200, chain(3)));
+    expect((await getOutputLineage('script_shot', '9')).latest_version).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates ONE object, leaving its neighbours cached', async () => {
+    // A revert touches one scene. Dropping the whole map would turn that into
+    // the 60-request reload this cache was added to prevent.
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    fetchMock.mockResolvedValueOnce(json(200, { ...chain(), ref_id: '10' }));
+    await getOutputLineage('script_shot', '9');
+    await getOutputLineage('script_shot', '10');
+    fetchMock.mockClear();
+
+    invalidateOutputLineage('script_shot', '9');
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    await getOutputLineage('script_shot', '9');
+    await getOutputLineage('script_shot', '10');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidating something never asked about is a no-op, not a throw', () => {
+    expect(() => invalidateOutputLineage('script_shot', 'never-seen')).not.toThrow();
+  });
+
+  it('hands every concurrent caller the SAME rejection object', async () => {
+    // Sharing one promise means sharing one error. A caller that branched on
+    // `instanceof OutputsError` must still see one.
+    fetchMock.mockResolvedValueOnce(notRegistered());
+    const [a, b] = await Promise.all([
+      getOutputLineage('script_shot', '9').catch((e) => e),
+      getOutputLineage('script_shot', '9').catch((e) => e),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b);
+    expect(a).toBeInstanceOf(OutputsError);
   });
 });
