@@ -125,14 +125,25 @@ async def _stamp_seq(repo: Any, row: DeliverableRow, recorder: Any) -> None:
     （遥测不连坐一次运行）——那条事件不在 transcript 里，给它编一个 seq 比
     留 NULL 更糟：NULL 说的是「不知道」，错的数字说的是「就在那一步」。
 
-    失败只记 WARNING：行和事件都已经在库里了。
+    **失败的处理跟着同文件 ``_insert_next_version`` 的先例分两支**：
+
+    - 在调用方的事务里（``in_unit_of_work()``）：**照抛**。失败的 UPDATE 刚把
+      那个 session 弄废了，吞掉它只是把错误推迟到后面某条无关语句上变成
+      ``PendingRollbackError``——把原始错误交出去才说得清发生了什么。
+      产物已经存在的写入点用 ``register_deliverable_best_effort``，由它记 ERROR。
+    - 不在事务里：只记 WARNING。没有东西被弄废，行和事件都已经在库里，
+      少一个定位字段不该把一次成功的登记判成失败。
     """
+    from app.db.session import in_unit_of_work
+
     seq = getattr(recorder, "last_event_seq", None)
     if not isinstance(seq, int) or isinstance(seq, bool):
         return
     try:
         await repo.set_seq(row_id=row.id, seq=seq)
     except Exception as exc:  # noqa: BLE001 — 见 docstring
+        if in_unit_of_work():
+            raise
         logger.warning(
             f"[deliverables] {row.kind}/{row.ref_id} v{row.version}: could not "
             f"stamp seq {seq} onto row {row.id}: {exc!r} — the row and the "

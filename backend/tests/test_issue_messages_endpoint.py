@@ -24,8 +24,6 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
-
 from app.api.issue_messages_router import list_issue_messages
 
 # ─── helpers ────────────────────────────────────────────────────────────
@@ -456,3 +454,56 @@ async def test_legacy_table_rows_still_deserialize_without_attachments():
         created_at=_dt(),
     )
     assert IssueMessage.model_validate(obj, from_attributes=True).attachments is None
+
+
+async def test_session_path_coerces_number_shaped_ids_on_the_wire():
+    """修复轮 1 / I1：附件里的 Snowflake 以 JSONB **number** 到达时，端点
+    交出去的仍必须是字符串。夹具照真实 wire 形状写（number），不照前端
+    书写习惯「美化」成字符串 —— 那正是 2026-08-12 分镜画布事故的病根。"""
+    issue_id = 348392006624870
+    session_id = 987654321012345
+    session_user_id = uuid4()
+
+    issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
+    message_rows = [
+        {
+            "id": 323848780659604,
+            "session_id": session_id,
+            "role": "user",
+            "content": "cite it",
+            "agent_id": None,
+            "metadata_json": None,
+            "attachments": [
+                {
+                    "kind": "output_ref",
+                    "ref_kind": "script_shot",
+                    "ref_id": 337650953731886,
+                    "version": 2,
+                    "title": "MEDIUM",
+                },
+                # 一条畸形的邻居：整段历史不许因此 500，好的那条照常返回
+                {"kind": "output_ref", "version": "not-an-int"},
+            ],
+            "created_at": datetime.now(timezone.utc),
+        }
+    ]
+
+    store = _fake_conversations_store(session_row, message_rows)
+    with (
+        patch(
+            "app.api.issue_messages_router.issue_repository.get_by_id",
+            AsyncMock(return_value=issue_row),
+        ),
+        patch(
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
+        ),
+    ):
+        result = await list_issue_messages(issue_id, _make_auth(session_user_id))
+
+    atts = result.model_dump()["messages"][0]["attachments"]
+    assert len(atts) == 1
+    assert atts[0]["ref_id"] == "337650953731886"
+    assert int(atts[0]["ref_id"]) == 337650953731886  # 精度没丢
+    assert atts[0]["version"] == 2

@@ -331,3 +331,58 @@ async def test_a_rejected_event_never_stamps_a_stale_seq(repo_spy):
     )
     assert out is not None
     assert repo_spy.seq_calls == []
+
+
+# ─── 修复轮 1 / I3：回写失败的吞错策略跟着同文件的先例走 ────────────────
+
+
+async def test_a_failed_stamp_inside_an_ambient_transaction_is_raised(
+    repo_spy, emit_spy, monkeypatch
+):
+    """在调用方的事务里，失败的 UPDATE 已经把那个 session 弄废了。吞掉它
+    只会让后面某条无关语句抛 ``PendingRollbackError``——与 10 行之下的
+    ``_insert_next_version`` 同一条理由，所以同一个处理：交出去。"""
+    from app.db import session as dbs
+
+    monkeypatch.setattr(dbs, "in_unit_of_work", lambda: True)
+    repo_spy.raise_on_set_seq = True
+
+    with pytest.raises(RuntimeError, match="update failed"):
+        await register_deliverable(run_id=777, kind="script_shot", ref_id="9")
+
+    # 行与事件照旧先发生——抛出的是回写那一步，不是登记本身。
+    assert len(repo_spy.inserts) == 1
+    assert emit_spy.events[-1].type == "deliverable"
+
+
+async def test_the_best_effort_wrapper_absorbs_that_raise(
+    repo_spy, emit_spy, monkeypatch
+):
+    """产物已经存在的写入点用 best_effort：它把这个 raise 记成 ERROR，
+    不让一次成功的产出被判成失败。"""
+    from app.db import session as dbs
+    from app.services.deliverables.registry import register_deliverable_best_effort
+
+    monkeypatch.setattr(dbs, "in_unit_of_work", lambda: True)
+    repo_spy.raise_on_set_seq = True
+
+    assert (
+        await register_deliverable_best_effort(
+            run_id=777, kind="script_shot", ref_id="9"
+        )
+        is None
+    )
+
+
+async def test_outside_a_transaction_a_failed_stamp_stays_a_warning(
+    repo_spy, emit_spy, monkeypatch
+):
+    """没有 ambient 事务时没有东西被弄废，行与事件都在——只记 WARNING。"""
+    from app.db import session as dbs
+
+    monkeypatch.setattr(dbs, "in_unit_of_work", lambda: False)
+    repo_spy.raise_on_set_seq = True
+
+    out = await register_deliverable(run_id=777, kind="script_shot", ref_id="9")
+    assert out is not None and out.version == 1
+    assert emit_spy.events[-1].type == "deliverable"
