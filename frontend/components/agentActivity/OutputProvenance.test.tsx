@@ -11,8 +11,10 @@
  *
  * The service is mocked at the module boundary and answers the REAL wire shape
  * of `GET /api/v1/outputs/{kind}/{ref_id}` — ids as strings (Snowflake
- * BIGINTs), `versions` newest first, `title` nullable, and NO `deep_link` or
- * issue key, because that endpoint does not carry one.
+ * BIGINTs), `versions` newest first, `title` nullable, and since 3a Task 3b
+ * every version carrying `issue_key` and a finished `deep_link`, both `null`
+ * when the run answers to no issue. The backend never assembles that URL out
+ * of `issue_id`, and neither does this block: an absent link stays absent.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -43,6 +45,8 @@ const version = (v: number, over: Record<string, unknown> = {}) => ({
   parent_version: v > 1 ? v - 1 : null,
   run_id: '727145299382534100',
   issue_id: '727145299382534000',
+  issue_key: 'MH-91',
+  deep_link: '/team/424242424242/todolist/MH-91?step=4',
   seq: null,
   turn: null,
   step: 4,
@@ -135,21 +139,38 @@ describe('OutputProvenance', () => {
     );
   });
 
-  it('links to the issue only when the host could resolve a link', async () => {
-    renderBlock({ issueHref: '/team/9/todolist/MH-91' });
+  it('follows the lineage\u2019s own deep link when the host supplies none', async () => {
+    // Task 3b put a finished URL on every version. The object pages this
+    // block ships on know nothing about issues, so without this the link is
+    // permanently disabled on exactly the objects that HAVE an issue.
+    renderBlock();
     const link = await screen.findByTestId('output-provenance-issue');
-    expect(link.getAttribute('href')).toBe('/team/9/todolist/MH-91');
+    expect(link.getAttribute('href')).toBe('/team/424242424242/todolist/MH-91?step=4');
+    expect(screen.queryByTestId('output-provenance-issue-unlinked')).toBeNull();
+  });
+
+  it('lets a host that knows better override the lineage\u2019s link', async () => {
+    // The prop stays an override rather than a fallback: a host mounted ON an
+    // issue page already knows which issue the reader came from.
+    renderBlock({ issueHref: '/team/9/todolist/MH-7' });
+    const link = await screen.findByTestId('output-provenance-issue');
+    expect(link.getAttribute('href')).toBe('/team/9/todolist/MH-7');
   });
 
   it('never builds an issue URL out of an issue_id', async () => {
-    // The lineage response carries `issue_id` and no key or deep link. The
-    // route is `/team/:teamId/todolist/:identifier`, keyed by the issue KEY —
-    // a URL assembled from the snowflake would 404 or, worse, land on some
-    // other issue. Absent beats invented.
+    // A run with no issue — or an issue with no key or no team — comes back
+    // with `deep_link: null`, and the block leaves it null. The route is
+    // `/team/:teamId/todolist/:identifier`, keyed by the issue KEY; a URL
+    // assembled from the snowflake would 404 or, worse, land on some other
+    // issue. Absent beats invented.
+    getOutputLineage.mockResolvedValue(
+      lineage([version(2, { issue_key: null, deep_link: null }), version(1, { issue_key: null, deep_link: null })]),
+    );
     renderBlock();
     await screen.findByTestId('output-provenance');
-    const link = screen.queryByTestId('output-provenance-issue');
-    expect(link?.getAttribute('href') ?? null).toBeNull();
+    expect(screen.queryByTestId('output-provenance-issue')).toBeNull();
+    const disabled = screen.getByTestId('output-provenance-issue-unlinked');
+    expect(disabled.getAttribute('title')).toBeTruthy();
     expect(screen.getByTestId('output-provenance').innerHTML).not.toContain('727145299382534000');
   });
 

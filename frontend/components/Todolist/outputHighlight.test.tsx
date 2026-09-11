@@ -36,6 +36,7 @@ const { OutputCards } = await import('../agentActivity/TrajectoryRenderer/nodes/
 
 const version = (v: number, parent: number | null) => ({
   id: `d${v}`, version: v, parent_version: parent, run_id: '347786145852700', issue_id: '5',
+  issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${v}`,
   seq: v, turn: 1, step: v, title: `S3 · Shot #1`, model: 'qwen-image', cost_cents: null,
   created_at: '2026-09-10T01:00:00Z',
 });

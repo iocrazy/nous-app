@@ -8,8 +8,10 @@
  * than through a rendered popover.
  *
  * Wire shape copied from `GET /api/v1/issues/{id}/outputs`: every id is a
- * STRING (Snowflake BIGINT), `title` may be null, and `versions` arrives
- * newest first as the endpoint orders it.
+ * STRING (Snowflake BIGINT), `title` may be null, `versions` arrives newest
+ * first as the endpoint orders it, and every version carries `issue_key` plus
+ * a finished `deep_link` — both null on a run that answers to no issue, which
+ * is why IMAGE below (a canvas-lane run) has neither.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -22,6 +24,8 @@ const version = (v: number, over: Record<string, unknown> = {}) => ({
   parent_version: v > 1 ? v - 1 : null,
   run_id: '727145299382534100',
   issue_id: '727145299382534000',
+  issue_key: 'MH-91',
+  deep_link: `/team/424242424242/todolist/MH-91?step=${v}`,
   seq: null,
   turn: null,
   step: v,
@@ -45,7 +49,8 @@ const IMAGE: OutputObject = {
   ref_id: '727145299382534888',
   title: 'Ava on the pier',
   latest_version: 1,
-  versions: [version(1, { title: 'Ava on the pier' })],
+  // A canvas-lane run: no issue, so no key and no link.
+  versions: [version(1, { title: 'Ava on the pier', issue_id: null, issue_key: null, deep_link: null })],
 };
 
 describe('toMentionRows', () => {

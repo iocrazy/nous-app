@@ -37,6 +37,7 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
 
 const v = (version: number, parent: number | null): OutputLineage['versions'][number] => ({
   id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: '5',
+  issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
   cost_cents: 0.42, created_at: '2026-09-10T01:00:00Z',
 });
