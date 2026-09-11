@@ -25,7 +25,7 @@ intentional (see
 If that happens, just re-run the script.
 
 After pulling new code, re-run the script, then hit the reload icon on the
-extension card. The popup header shows `v1.3.1 (<commit>)` so you can tell at a
+extension card. The popup header shows `v1.4.0 (<commit>)` so you can tell at a
 glance which build is loaded — if that commit does not match `git log -1`, the
 release copy is stale and needs a re-run. A `-dirty` suffix means it was built
 with uncommitted changes.
@@ -56,6 +56,13 @@ popup then shows the bare version with no commit.
 - **Right-click** on any page → **Push to Nous**
 - **Keyboard shortcut**: `Alt+M`
 - Or open the popup, pick tags, and click **Push to Nous**
+
+In the popup, above the Push button:
+
+- **Rating** — five stars in one row; tap a star to rate, tap the same star again to clear
+- **Transcribe / Summary / Analyze** — icon toggles sent as the `transcribe` / `summarize` / `analyze` request fields. Summary or Analyze turns Transcribe on too; turning Transcribe off turns both off
+- Tags in the `Pipeline` group (Transcript / Summary / Analyze) are hidden from the tag list, search, and the create-tag group dropdown — the toggles replace them
+- Tags and options are kept after a successful push (the popup never resets its selection), so pushing another URL reuses them
 
 The extension sends the current page URL to Nous. If the URL is a supported video platform (Douyin, Xiaohongshu, Bilibili, etc.), Nous will parse and download it.
 
@@ -95,10 +102,14 @@ The import runs in the background service worker, so closing the popup does not 
 
 ## Manual test checklist
 
-No automated test harness exists for this vanilla-JS extension (no build step) — verify with `node --check <file>.js` on every touched file, then walk through this checklist against a real backend:
+The extension has no build step. The pure Push-tab logic in `intents.js` (intent dependencies, request fields, Pipeline filter, error-envelope messages) is unit-tested with `node --test scripts/extension-intents.test.cjs`; for everything else run `node --check <file>.js` on every touched file, then walk through this checklist against a real backend:
 
 - [ ] `chrome://extensions` → reload the unpacked extension, confirm the popup header version matches `chrome-extension/manifest.json`'s `version` field — the `release/chrome-extension/` build also appends a `(<commit>)` suffix, while loading the `chrome-extension/` source folder directly does not
 - [ ] Settings: enter API URL / API Key / Web URL, Save, reopen popup → all three persist
+- [ ] Push tab: no Pipeline tags in the list, Frequently Used, search results, or the "+" group dropdown; searching "Summary" says it is an AI option instead of offering Create
+- [ ] Rating: stars stay on one row; tap 3 → stars 1–3 lit; tap 3 again → none lit
+- [ ] Toggles: Summary on → Transcribe lights too; Transcribe off → Summary and Analyze go dark; Analyze off leaves Transcribe on
+- [ ] Push with rating + toggles → the new resource has the rating and the Transcript / Summary / Analyze pipeline tags; a failing push shows the server's error text (never "undefined")
 - [ ] Right-click an image on any page → **Analyze Prompt (nous)** appears in the context menu and only for images (not on plain page right-click)
 - [ ] Click it → panel opens top-right, dark card, progress bar animates through "Uploading image…" → "Starting analysis…" → "Analyzing image…"
 - [ ] On completion: 中文/EN/JSON tabs all populated and switchable; JSON tab is pretty-printed and read-only; category/aspect-ratio chips show when present
