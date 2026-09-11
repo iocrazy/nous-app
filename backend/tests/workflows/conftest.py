@@ -91,24 +91,76 @@ def _restore_registry(snapshot: tuple | None) -> None:
         live_pollers[:] = pollers
 
 
+def _restore_parent_attributes(names) -> None:
+    """Re-point each parent package's attribute at the restored submodule.
+
+    Putting a module object back into ``sys.modules`` only fixes one of the two
+    ways Python hands out a module. The import system also binds each submodule
+    as an *attribute of its parent package*, and ``import app.workflows`` /
+    ``from app import workflows`` read that attribute rather than
+    ``sys.modules``. A purge-and-reimport rebinds it to the new module, and the
+    parent is usually outside the purged set -- ``app`` is never deleted, so
+    nothing puts its ``workflows`` attribute back.
+
+    Leaving it split is the same bug one level up: ``sys.modules`` says old,
+    attribute traversal says new. ``mock.patch`` resolving through
+    ``sys.modules`` is what makes the reply-resume test pass, but any consumer
+    that traverses attributes would get the other module and silently diverge.
+
+    Sorted so parents are fixed before their children, and every lookup goes
+    through ``sys.modules`` so a parent that was itself restored is already the
+    restored object by the time its children are re-pointed.
+    """
+    for name in sorted(names):
+        parent_name, _, leaf = name.rpartition(".")
+        if not parent_name:
+            continue
+        parent = sys.modules.get(parent_name)
+        module = sys.modules.get(name)
+        if parent is None or module is None:
+            continue
+        if getattr(parent, leaf, None) is not module:
+            setattr(parent, leaf, module)
+
+
+def restore_modules(before: dict) -> None:
+    """Restore both views of every module in ``before`` whose identity moved.
+
+    ``before`` maps dotted name -> the module object that was in
+    ``sys.modules`` beforehand. Exposed (public name) so the guard test in this
+    directory can exercise the restore directly rather than re-deriving it.
+    """
+    for name, module in before.items():
+        if sys.modules.get(name) is not module:
+            sys.modules[name] = module
+    _restore_parent_attributes(before.keys())
+
+
+def snapshot_modules() -> dict:
+    """The ``sys.modules`` entries this directory's reload tests may disturb."""
+    return {name: mod for name, mod in sys.modules.items() if _is_watched(name)}
+
+
 @pytest.fixture(autouse=True)
 def _restore_workflow_module_identity():
     """Put back every ``app.workflows*`` module object the test swapped out.
+
+    Both ways Python hands out a module are restored: the ``sys.modules`` entry
+    and the parent package's attribute (see ``_restore_parent_attributes``).
+    Fixing only the first leaves the two views disagreeing.
 
     Entries the test *added* are left in place -- re-importing a module that
     was not loaded before is not a leak, and dropping it would only force a
     pointless re-import later. Only entries whose identity changed (or which
     were deleted outright) are restored.
     """
-    before = {name: mod for name, mod in sys.modules.items() if _is_watched(name)}
+    before = snapshot_modules()
     registry_snapshot = _snapshot_registry()
     role_before = os.environ.get("MEDIAHUB_ROLE")
     try:
         yield
     finally:
-        for name, module in before.items():
-            if sys.modules.get(name) is not module:
-                sys.modules[name] = module
+        restore_modules(before)
         _restore_registry(registry_snapshot)
         if role_before is None:
             os.environ.pop("MEDIAHUB_ROLE", None)
