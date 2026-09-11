@@ -17,7 +17,7 @@ from loguru import logger
 from sqlalchemy import and_, func, insert, not_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 
-from app.db.session import read_scope, write_scope
+from app.db.session import in_unit_of_work, read_scope, write_scope
 from app.models import AgentRunInbox, ConversationAiMeta, Conversations
 
 Target = tuple[str, int]
@@ -252,6 +252,14 @@ class AgentRunInboxRepository:
                 # this conflict is some OTHER constraint (the kind CHECK, a
                 # dead claimed_run_id). Reinterpreting it as "somebody beat
                 # me to it" would hand the caller an unrelated row.
+                raise
+            if in_unit_of_work():
+                # No own transaction to discard: the conflict just aborted the
+                # CALLER's, so the re-read would land on that same session and
+                # raise PendingRollbackError. Doomed by construction, not a
+                # second failure worth diagnosing — attempting it would only
+                # print "the re-read failed too" and point the next reader at
+                # the database. Same reading as AssetsRepository.create.
                 raise
             winner = None
             try:

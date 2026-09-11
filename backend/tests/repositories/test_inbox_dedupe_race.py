@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, PendingRollbackError
 
 from app.repositories import agent_run_inbox_repository as repo
 
@@ -127,6 +127,47 @@ async def test_a_conflict_nobody_can_explain_is_re_raised(monkeypatch):
 
     with pytest.raises(IntegrityError):
         await _enqueue()
+
+
+async def test_under_an_ambient_unit_of_work_the_doomed_re_read_is_not_attempted(
+    monkeypatch,
+):
+    """UoW 下这次冲突已经把**调用方的**事务弄废了：回读会落在同一个 abort 掉
+    的 session 上抛 PendingRollbackError。那次查询是注定失败的，不是第二个值
+    得诊断的故障——所以根本不该发起，日志里更不该出现「re-read failed too」
+    这种把人引向连接/数据库的句子。照 AssetsRepository.create 的先例
+    （判据 app/db/session.py::in_unit_of_work）。
+
+    桩里第三步真的抛 PendingRollbackError，这样两条断言各自都有牙：拿掉守卫
+    会同时多出一条语句和一行误导日志。
+    """
+    from loguru import logger as loguru_logger
+
+    from app.db import session as session_mod
+
+    session = _Session(
+        [
+            _Result([]),  # 查：没有
+            _conflict(),  # 插：唯一索引挡下，调用方的事务就此作废
+            PendingRollbackError(  # 回读若真发起，只会撞上这个
+                "Can't reconnect until invalid transaction is rolled back."
+            ),
+        ]
+    )
+    _patch(monkeypatch, session)
+    seen: list[str] = []
+    handler_id = loguru_logger.add(lambda m: seen.append(str(m)), level="DEBUG")
+    token = session_mod._request_session.set(object())
+    try:
+        with pytest.raises(IntegrityError):
+            await _enqueue()
+    finally:
+        session_mod._request_session.reset(token)
+        loguru_logger.remove(handler_id)
+
+    assert len(session.statements) == 2, "注定失败的回读根本不该发起"
+    assert not [line for line in seen if "re-read failed" in line], seen
+    assert not [line for line in seen if "lost the race" in line], seen
 
 
 async def test_without_a_key_a_conflict_is_never_reinterpreted(monkeypatch):
