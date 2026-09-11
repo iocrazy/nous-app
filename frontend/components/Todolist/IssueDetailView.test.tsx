@@ -5,6 +5,7 @@
  * 不断言栅格布局本身 —— 布局用 CSS 媒体查询表达，jsdom 里没有意义。
  */
 
+import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -700,6 +701,37 @@ describe('IssueDetailView — lineage deep link (?step)', () => {
     renderAt('/team/9/todolist/NOUS-1');
     await waitFor(() => expect(stepNode(2)).not.toBeNull());
     expect(stepNode(2)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('survives StrictMode: the doubled mount/cleanup/mount still opens the step', async () => {
+    // `index.tsx` wraps the app in <React.StrictMode>, so in development every
+    // effect runs mount → cleanup → mount. The search starts on the first
+    // pass, the cleanup cancels it, and a "we already did this" ref used to
+    // block the second pass — leaving `?step=` permanently dead on exactly the
+    // machine where a human verifies it by hand.
+    progressState.value = mkProgress();
+    // TWICE: StrictMode mounts the tree twice, so the thread fetches twice.
+    // A single `…Once` would leave the second mount — the one that survives —
+    // with an empty thread, and the test would fail for a reason that has
+    // nothing to do with the anchor.
+    const thread = { messages: [runMessage({ id: 'm-strict', agent_run_id: '501' })] };
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce(thread);
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1?step=2']}>
+          <Routes>
+            <Route
+              path="/team/:teamId/todolist/:identifier"
+              element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </React.StrictMode>,
+    );
+    await settleUntil(() => steps(2).some(isOpen));
+    expect(steps(2).some(isOpen)).toBe(true);
   });
 
   it('a replay link still wins: `run`+`seq` seeks and does not chase a step', async () => {

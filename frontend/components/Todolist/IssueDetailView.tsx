@@ -191,16 +191,23 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // an older one, e.g. a fork's origin (drawn in the detached panel).
   const deepLinked = useRef(false);
   const stepFocus = useRef<(() => void) | null>(null);
+  // The step anchor is spent only once it has actually OPENED a step. Latching
+  // on "we started looking" is what made this dead under StrictMode, which
+  // runs every effect mount → cleanup → mount: pass one started the search,
+  // the cleanup cancelled it, and pass two was turned away by the latch.
+  const stepOpened = useRef(false);
   useEffect(() => () => stepFocus.current?.(), []);
   useEffect(() => {
-    if (deepLinked.current || !progressLoaded) return;
+    if (!progressLoaded) return;
     const run = searchParams.get('run');
     const seq = Number(searchParams.get('seq'));
-    deepLinked.current = true;
     if (run && Number.isFinite(seq) && seq > 0) {
+      if (deepLinked.current) return;
+      deepLinked.current = true;
       void seekReplay(run, seq);
       return;
     }
+    if (stepOpened.current) return;
     const raw = searchParams.get('step');
     if (raw === null) return;
     const step = Number(raw);
@@ -211,10 +218,19 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     const turn = rawTurn === null ? null : Number(rawTurn);
     // Steps and turns are 0-based, so the guard is `>= 0`, not truthiness.
     if (Number.isInteger(step) && step >= 0) {
-      stepFocus.current = focusTrajectoryStep({
-        step,
-        turn: turn !== null && Number.isInteger(turn) && turn >= 0 ? turn : null,
-      });
+      // Cancel any search already in flight before starting another: a
+      // re-run that just overwrote the ref would orphan a timer that keeps
+      // unfolding groups in a tree nobody is looking at.
+      stepFocus.current?.();
+      stepFocus.current = focusTrajectoryStep(
+        {
+          step,
+          turn: turn !== null && Number.isInteger(turn) && turn >= 0 ? turn : null,
+        },
+        () => {
+          stepOpened.current = true;
+        },
+      );
     }
   }, [progressLoaded, searchParams, seekReplay]);
   // A STRICTLY NEWER run appeared while replaying the previously-newest one:

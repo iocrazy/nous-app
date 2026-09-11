@@ -93,8 +93,16 @@ export interface StepCoordinate {
  * Start chasing a step. Returns a canceller the caller MUST run on unmount —
  * a pending timer that fires into a torn-down tree is the leak this shape
  * exists to prevent.
+ *
+ * `onSettled` fires exactly once, when the step was actually opened. It is
+ * what lets a caller tell "this link is spent" from "the search was cut short
+ * before it found anything" — React's StrictMode cuts every effect short once
+ * in development, and a caller that latched on *starting* would never retry.
  */
-export function focusTrajectoryStep(where: StepCoordinate): () => void {
+export function focusTrajectoryStep(
+  where: StepCoordinate,
+  onSettled?: () => void,
+): () => void {
   const { step } = where;
   if (typeof document === 'undefined' || !Number.isInteger(step) || step < 0) {
     return () => undefined;
@@ -104,7 +112,13 @@ export function focusTrajectoryStep(where: StepCoordinate): () => void {
   const deadline = Date.now() + DEADLINE_MS;
   const tick = () => {
     timer = null;
-    if (cancelled || openStep(where)) return;
+    if (cancelled) return;
+    if (openStep(where)) {
+      // Only NOW is the deep link spent. Reporting it any earlier would let a
+      // caller mark the job done for a search that never found its step.
+      onSettled?.();
+      return;
+    }
     // Not there yet — it may be folded rather than unrendered. Unfold on
     // EVERY failed pass, not once: the thread re-renders while its rows load,
     // and a card that remounts comes back collapsed (its expanded flag is
