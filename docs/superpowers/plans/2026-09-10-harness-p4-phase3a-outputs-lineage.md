@@ -1212,15 +1212,15 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 
 ### Task 8: 真栈验收 + 完成账
 
-- [ ] **Step 1: 等两条部署链**
+- [x] **Step 1: 等两条部署链**
 
 每个 Task 合并后 `gh run list --workflow=deploy-gpu.yml --limit 2` 与 `deploy-pages.yml` 到 success；探 `readyz`（`dbos: enabled`）+ 容器内符号 `grep -c register_deliverable /app/app/services/library/generated_media_service.py`。
 
-- [ ] **Step 2: 按 spec §8 八项逐条真跑**
+- [x] **Step 2: 按 spec §8 八项逐条真跑**
 
 建真 issue、花真钱，prompt 要小。逐项记 done / 证据（id、SQL、截图）/ PASS·FAIL·UNVERIFIED 到 `.superpowers/sdd/<workspace>/task-8-evidence.md`。**负向对照必须做**：人手改同一对象后 `SELECT count(*) FROM run_deliverables WHERE kind=… AND ref_id=…` 不变。
 
-- [ ] **Step 3: 缺陷修复轮**
+- [x] **Step 3: 缺陷修复轮**
 
 真栈揪出的缺陷按 2b-2 的节奏走（7a/7b/7c 三轮的形状）：独立 PR、opus 评审、合并、再复验，直到一轮零新缺陷。
 
@@ -1233,3 +1233,58 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 `npm run e2e:prod` 绿；记忆改 shipped；销毁 worktree；SDD 工作区保留证据文件。
 
 ---
+
+---
+
+**完成账（2026-09-11，Task 8 真栈验收）**
+
+全部在生产栈（gpupc `nous-worker` / `cn.nous.ink:88`，调试账号，team 331438215859255，agent `script_ai`）用 API、SQL 与 Playwright 真跑。验收 agent 的逐项证据文件（`task-8-backend-evidence.md`、`task-8-ui-evidence.md`）与截图 `~/Downloads/3a-ui-*.png` 留在 SDD 工作区未入库——它们建真 issue、花真钱，不适合当门禁。
+
+**PR 清单**：#2239 spec+plan、#2240 T1 mig 462、#2242 T2 登记口、#2243 T3 三端点、#2249 T3b 血缘补 issue_key/deep_link、#2244 T4 引用附件与框、#2245 T5 线程产出卡、#2248 T6 引用页签与来源块、#2250 T6b 来源块读 deep_link、#2246 T7 两张小票；master 045be0e3；前端 `version.json` 045be0e。
+
+| 项（spec §8） | 证据 | 结论 |
+|---|---|---|
+| 部署 | 每个 PR 合并后 deploy-gpu success + readyz `ready/dbos enabled` + 容器内符号 grep（`register_deliverable` / `fold_deliverable` / `not_registered` / `refuse_citations_without_issue` / `slug: Optional` / `issue_links.py`）；deploy-pages `version.json` 09f1139 → c7cca44 → 045be0e；生产库 462 五列三索引齐 | PASS |
+| ① agent 生成图登记 v1 | **UNVERIFIED**：GenerateImage 需 agent `capabilities.media.image`，生产 18 个 agent 全为 false；验收 agent 的权限门拒绝了「PATCH 共享预设」与「建私有 throwaway agent」两条路，控制器不代做（peer 权限不绕过）。需要人给一个私有 throwaway agent 开该能力后重跑 ①③⑥正向 | UNVERIFIED（待人授权） |
+| ② 同对象二改 → v2 | MH-94（348392006624870）分镜 337650953731886：v1/v2、`parent_version=1`、两个 run；`GET /outputs/script_shot/<id>` 版本倒序；`/diff?from=1&to=2` 两侧 `available:true` 文本不同；`deliverable` 事件 9 键；`view.outputs {total:1, revised:1}`；无产出的 run `outputs: null`；每版带 `issue_key="MH-94"`、`deep_link=/team/331438215859255/todolist/MH-94?step=1`（T3b） | PASS |
+| ③ 分镜出图（DBOS）带 run | 与 ① 同一阻塞；`run_id/turn/step` 接线在容器内可见但未真跑 | UNVERIFIED（待人授权） |
+| ④ 人手改同对象 → 零新行 | 人手 PATCH 分镜后 `count(*)` 不变 | PASS |
+| ⑤ @引用产出（空闲路径） | `output_ref` 落库 201、附件含 `title`；让 agent 原样回显框证明模型看到 `<output kind="script_shot" ref="337650953731886" version="1" title="MEDIUM"/>`（框在系统消息里，不在 transcript 事件）；四个负向全部类型化：`version:99` / 跨 issue → `output_ref_unresolvable`，9 条 → `output_ref_limit_exceeded`，chat 会话入口 → `output_ref_unresolvable` | PASS |
+| ⑥ Generated 来源行反查 | 负向半：3a 之前的老卡三字段全 null、label「Chat generation」；正向半与 ① 同一阻塞 | 半 PASS / 半 UNVERIFIED |
+| ⑦ 未登记 / 未知 kind | `GET /outputs/script_shot/999999999` 404 `details.code=not_registered`；未知 kind 400 `unknown_kind` | PASS |
+| ⑧ 健康 | readyz ready；一小时内 `application_logs` ERROR 含 deliverable 为 0；worker 日志无 `register_deliverable` ERROR | PASS |
+
+**真栈才暴露的缺陷**（T8a 修）：`GET /issues/{id}/messages` 读模型无 `attachments` 键，引用 chip 刷新即丢；`run_deliverables.seq` 无写方、wire 上恒 null。
+
+**验收方案两处更正**：chat 路由是 `POST /ai-library/sessions/{id}/chat`；`<referenced_outputs>` 在系统消息里，不能从 transcript 事件里找。
+
+**前端路（Playwright 真登录 `app.nous.ink` 045be0e，MH-94 同一分镜被推到 v5，截图 15 张）**
+
+| 检查（spec §5 两块稿） | 证据 | 结论 |
+|---|---|---|
+| 1 线程产出卡 | `output-card` ×2→5：`v1`（`data-state=new`，ok 色板）/ `v2 ← v1`（`revised`，warn 色板，仅修订卡有 Diff）；花费 `—`；卡挂在产出它的 STEP 1 下 | PASS |
+| 2 Cockpit 产出格 | 发帖触发一轮、页内每 1.2 s 轮询 240 s：`cockpit-steps=1` 全程、`cockpit-outputs=0` 全程；`/progress` 的 `current_run.view.outputs` 恒 null，而 `view-at?seq=999` 现折出 `{total:1,revised:1}`，生产库 `view` 的 17 个键里无 `outputs` → 独立 writer 镜像的 `outputs` 被活 recorder 的整值镜像覆盖（children 有 `refold_children`，outputs 没有）；负向对照 MH-93 四个 testid 全 0 | **FAIL（高，T8c 修）** |
+| 3 右栏产出块 / 悬停高亮 / 差异弹层 / Esc | rail 顺序 `Progress → Outputs → Deliverables → Budget → Schedules`；悬停 `outputs-row` → 恰 1 张卡 `data-highlighted=true`（最新版）；弹层两栏、`data-diff="add"` 三段 ok 色；版本 chips 单栏切换；`Revert To v1` disabled + `title="Arrives with 3b"`；Esc 关 | PASS |
+| 3b 弹层 «Open Run #» | 线程入口 enabled 且真开出 `detached-run-panel`；**右栏入口恒 disabled**（`contextBlocks` 在两个 `ChildRunContext.Provider` 之外，title 在这一页上说谎） | **FAIL（中，T8c 修）** |
+| 4 媒体卡缩略图 | team/个人 scope 零 `generated_media` 产出（同 ①③ 阻塞） | UNVERIFIED |
+| 5 @ 引用产出 | `resource-picker-tab-outputs` → 两行、最新在前、旧版折在 `OLDER` 下；选中 → `@MEDIUM v2` chip（三属性齐）；⌘↩ 201、chip 清空、**下一轮真触发并产出 v3**；agent 回显 `<referenced_outputs>…version="1"…` | PASS |
+| 5b 线程里人的消息显示 chip | 线程渲染为纯文本，只剩孤立 `@`；`GET /issues/{id}/messages` 无 `attachments` 键 | **FAIL（中，T8a 后端投影 + T8b 线程渲染）** |
+| 5c 下一轮第 1 步下「引用 N 件」行 | 未实现：`outputs.*` 45 个 key 无此文案、fold 无分支（`STEP 1 · 1 outputs` 是既有的助手输出计数，标签撞名） | **FAIL（中，T8c 补）** |
+| 5d >8 上限 | 对象只有 5 版，凑不出第 9 条 | NOT OBSERVED（单测覆盖） |
+| 6 对象页来源块 + «Open Issue» SPA | 画布分镜节点 `Made By An Agent · 2 versions · Step 1`，三按钮齐；`href` 逐字 `/team/331438215859255/todolist/MH-94?step=1`（= 后端 `deep_link`）；点击后 URL 变、issue 页挂载、`window` 标记存活（非整页重载）；人手分镜节点零来源块零错误 | PASS |
+| 7 Generated 卡来源行 | 零 `source.kind=agent_run` 样本 | UNVERIFIED |
+| 8 `npm run e2e:prod` | 第二轮零重试 3 passed | PASS |
+
+**偏差（对照 §5 两块稿，全部记小票不修）**：卡上无「新建 / 修订」字样（状态靠 `data-state`+色板+`v2 ← v1` 文字）；卡元信息无模型（null 条件渲染）与步号（由卡位表达）；来源块无花费；选中 outputs/assets 页签后编辑器里的 `@` 不删（资源页签走 `insertResourceRef` 会删，既有同病）。
+
+**真机才暴露的缺陷（前端路）**：Cockpit 产出格结构性永不渲染（镜像覆盖）；右栏 «Open Run #» 恒禁用（provider 范围）；「引用 N 件」行未实现。→ T8c。
+
+**缺陷修复轮（Task 8 Step 3，三个 PR，全部 opus 评审 + 突变 + 真 PG）**
+
+| PR | 修什么 | 评审轮次 | 状态 |
+|---|---|---|---|
+| #2251 T8a（后端） | `GET /issues/{id}/messages` 投影 `attachments`（全 Optional 读模型、老行 `null`、逐条校验畸形值只丢那一条并 WARNING、JSONB number → string 钉子、`data_url` 负向 + 白名单镜像守卫）；`run_deliverables.seq` 由 `_stamp_seq` 在事件落地后 best-effort 回写（`in_unit_of_work()` 下重抛，与 `_insert_next_version` 同策）；真 PG 集成 +2 | 1 轮 | 合并 25432518，deploy-gpu success |
+| #2252 T8b（前后端） | 终审三 Important + Minor：逐对象血缘对 `issue_id ≠` 门控议题的旧版置空 `issue_key`/`deep_link`（刻意比泄露面宽）；线程渲染只读引用 chip；深链 `?step=`（+`&turn=`）经 `focusTrajectoryStep` 锚到那一步——先摊开含目标的 run-group（每张只摊一次）、`(turn,step)` 对不上退回 step-only、只在定位成功后落 `deepLinked`；Generated 卡来源行 `· run #末六位 · step n` | 2 轮 | 合并 9413676b，两链 success |
+| #2253 T8c（前后端） | 真机三缺陷：活路径两条产出通道把自己的 recorder 交给登记口 + 镜像前重折 `view.outputs`；**顺带根治两 writer seq 相撞**（`RunEventWriter.append` 撞 sqlstate 23505 且约束名对得上时从 DB `max(seq)+1` 重播、有界重试 3 次，`SUBAGENT_EVENT_TYPES` 重放退居第二道网；真 PG 用例挂进 schema-drift 并在 CI 首跑 2 PASSED）；`ChildRunContext.Provider` 上提到共同祖先、非 timeline 页签点 Open Run 先切页签；`referenced_outputs` 随 `user` 事件 payload 落 transcript、第 1 步下渲染 `References N outputs · pinned to version`（`_one`/`_other`） | 2 轮 + 1 次 rebase 冲突（与 T8b 同文件尾追加的测试块） | 合并 7974e49b |
+
+**真栈才暴露、spec/plan 都没写的一条（写进 spec §2 实施记录）**：`run_deliverables` 之外还有一条隐性契约——同一个 run 的 transcript 由两个 writer 写（活 recorder 与 `for_run`），`UNIQUE(run_id, seq)` 让后者每登记一次都吃掉前者的下一条事件。3a 之前 workforce 的 `subagent_done` 也走这条路，靠 `SUBAGENT_EVENT_TYPES` 白名单重放兜住；现在两种 writer 都在 `append` 里按 23505 重播计数器，白名单不再承重。
