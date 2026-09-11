@@ -5555,6 +5555,8 @@
     }
   },
   "issueDetail": {
+    "outputs": "产出",
+    "outputsRevised": "{{n}} 个修订",
     "tools": "工具",
     "toolsTimedOut_one": "{{count}} 个超时",
     "toolsTimedOut_other": "{{count}} 个超时",
@@ -5838,5 +5840,34 @@
       "unknown": "定时创建失败（{{code}}）",
       "generic": "定时创建失败"
     }
+  },
+  "outputs": {
+    "openRun": "打开运行 #{{run}}",
+    "openRunHint": "这里没有打开运行面板",
+    "version": "v{{n}}",
+    "replaced": "v{{n}} ← v{{prev}}",
+    "revisions_one": "{{count}} 次修订",
+    "revisions_other": "{{count}} 次修订",
+    "open": "打开",
+    "diff": "对比",
+    "revert": "回滚到 v{{n}}",
+    "revertHint": "3b 阶段上线",
+    "changeCount": "+{{added}} / −{{removed}} 词",
+    "truncated": "文本过长，无法整篇比对——这里只显示改动的前一部分。",
+    "noSnapshot": "这个版本没有留下快照",
+    "noLedger": "账本里没有记录这个版本的内容",
+    "notFound": "这个版本指向的对象已不存在",
+    "unavailable": "这个版本无法还原",
+    "noPreview": "这个版本没有预览图",
+    "loadFailed": "读取本议题的产出失败。",
+    "errorNotRegistered": "这个对象不在产出登记表里——没有任何记录说明它是被生成的。",
+    "errorVersionNotFound": "这个版本不在该对象的版本链里。",
+    "errorCode": "读取产出失败（{{code}}）",
+    "errorGeneric": "读取产出失败。",
+    "kindMedia": "图片",
+    "kindShot": "分镜",
+    "kindScene": "场次",
+    "kindChapter": "章节",
+    "kindOther": "产出"
   }
 }

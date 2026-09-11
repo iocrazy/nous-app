@@ -54,6 +54,20 @@ export interface RunWakeup {
   note: string;
 }
 
+/**
+ * Outputs an agent registered this run (harness 3a §5). `total` counts every
+ * version, `revised` only the ones that replaced an earlier version — three
+ * drafts of one shot are `total: 3, revised: 2`.
+ *
+ * The fold also keeps a `seen` list to dedupe its own bookkeeping; that key
+ * is deliberately NOT on this type — nothing in the UI has any use for it.
+ */
+export interface RunOutputs {
+  total: number;
+  revised: number;
+  last: { kind: string; ref_id: string; version: number; title: string | null } | null;
+}
+
 export interface RunEnded {
   reason: string;
   [k: string]: unknown;
@@ -81,6 +95,10 @@ export interface RunView {
   tools?: { timed_out: number; last_timed_out: string | null } | null;
   /** harness 2b-2 §5-2: wake-ups still armed on this run's issue. */
   wakeups?: RunWakeup[] | null;
+  /** harness 3a §5: what this run registered. OPTIONAL — a run older than the
+   *  registry has no such key, and a required field would make the whole
+   *  view fail to read and blank the entire Cockpit. */
+  outputs?: (RunOutputs & { seen?: string[] }) | null;
   revision: number;
 }
 
@@ -201,6 +219,20 @@ export function childrenState(view: RunView | null): RunChildren | null {
   const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const last = c.last && typeof c.last === 'object' ? c.last : null;
   return { total: c.total, done: n(c.done), running: n(c.running), async_pending: n(c.async_pending), last };
+}
+
+/**
+ * The outputs gauge, or null when this run registered nothing — the Cockpit
+ * cell exists only when there is something to count (same rule as Tools and
+ * Sub-agents). A missing `revised` reads as 0 rather than hiding the cell:
+ * a backend that folded `total` alone should still show the count.
+ */
+export function outputsState(view: RunView | null): RunOutputs | null {
+  const o = view?.outputs;
+  if (!o || typeof o.total !== 'number' || !Number.isFinite(o.total) || o.total <= 0) return null;
+  const revised = typeof o.revised === 'number' && Number.isFinite(o.revised) ? o.revised : 0;
+  const last = o.last && typeof o.last === 'object' ? o.last : null;
+  return { total: o.total, revised, last };
 }
 
 /** Armed wake-ups, soonest first. Rows without a time are dropped: an

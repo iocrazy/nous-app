@@ -304,3 +304,111 @@ describe('foldEvents — a background result reaches the card that spawned it', 
     expect(nodes.filter((n) => n.kind === 'inbox')).toHaveLength(1);
   });
 });
+
+describe('foldEvents — deliverables (harness 3a §5)', () => {
+  // Same shape the backend writes: `step` is a real column on the event row,
+  // every id is a string on the wire.
+  const at = (n: number, event_type: string, payload: Record<string, unknown> = {}, step?: number): AgentRunEvent =>
+    ({ seq: n, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  it('hangs an output card on the step that produced it', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.outputs).toEqual([
+      {
+        key: 'generated_media:77:1',
+        kind: 'generated_media',
+        refId: '77',
+        version: 1,
+        parentVersion: null,
+        title: 'S3 · Shot #1',
+        model: null,
+        costCents: null,
+      },
+    ]);
+  });
+
+  it('keeps a revision with the version it replaced, and the spend that made it', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'deliverable', { kind: 'script_shot', ref_id: '9', version: 2, parent_version: 1, title: 'Shot 4', model: 'qwen-max', cost_cents: 0.42 }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.outputs[0]).toMatchObject({ version: 2, parentVersion: 1, model: 'qwen-max', costCents: 0.42 });
+  });
+
+  it('attaches a late deliverable to its own step, not the last one', () => {
+    // 分镜出图走 DBOS：登记事件可能在后面的步骤开始之后才落库。它必须回到
+    // 第 1 步（与 subagent_done 同族的乱序），而不是堆在最后一步，也不能
+    // 凭空开出第三个步骤。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1 }, 1),
+      at(3, 'step_start', { turn: 1, step: 2 }, 2),
+      at(4, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1 }, 1),
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].outputs).toHaveLength(1);
+    expect(steps[1].outputs).toHaveLength(0);
+  });
+
+  it('ignores a deliverable with no ref_id, no kind, or no version', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'deliverable', { kind: 'generated_media', version: 1 }, 1),
+      at(3, 'deliverable', { ref_id: '77', version: 1 }, 1),
+      at(4, 'deliverable', { kind: 'generated_media', ref_id: '77' }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.outputs).toEqual([]);
+  });
+
+  it('a coordinate naming a step that never started lands on the last step, never a phantom one', () => {
+    // 修复轮 1：`ensureStep` would close the live step and OPEN one at the
+    // unknown coordinate — the live marker then sits on an empty fake node.
+    // A deliverable may never open a step: it hangs on its own, else the last.
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1 }, 1),
+      at(3, 'step_start', { turn: 1, step: 2 }, 2),
+      at(4, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1 }, 9),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[1].outputs).toHaveLength(1);
+    expect(steps[0].outputs).toHaveLength(0);
+    // the live step is still the real one
+    expect(steps[1].live).toBe(true);
+  });
+
+  it('a deliverable with no coordinates at all still lands somewhere', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      { seq: 2, event_type: 'deliverable', payload: { kind: 'script_shot', ref_id: '9', version: 1 }, step: null, turn: null, created_at: '' } as AgentRunEvent,
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(1);
+    if (steps[0].kind !== 'step') throw new Error();
+    expect(steps[0].outputs).toHaveLength(1);
+  });
+
+  it('does not draw the same version twice when the event is replayed', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1 }, 1),
+      at(3, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1 }, 1),
+    ]);
+    const step = nodes[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.outputs).toHaveLength(1);
+  });
+});

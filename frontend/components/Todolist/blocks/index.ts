@@ -8,6 +8,7 @@ import { budgetBlock } from './BudgetBlock';
 import { cockpitBlock } from './CockpitBlock';
 import { deliverablesBlock } from './DeliverablesBlock';
 import { linksBlock } from './LinksBlock';
+import { outputsBlock } from './OutputsBlock';
 import { schedulesBlock } from './SchedulesBlock';
 import { stageBriefBlock } from './StageBriefBlock';
 import { statusBlock } from './StatusBlock';
@@ -18,6 +19,7 @@ export const BUILTIN_ISSUE_BLOCKS = [
   statusBlock,
   stageBriefBlock,
   deliverablesBlock,
+  outputsBlock,
   subtasksBlock,
   budgetBlock,
   schedulesBlock,
