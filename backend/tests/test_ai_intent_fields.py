@@ -496,3 +496,111 @@ async def test_celery_batch_survives_tag_name_resolution_failure(caplog):
         assert call.kwargs["kwargs"]["tag_ids"] == ["11"]
         assert call.kwargs["kwargs"]["rating"] is None
     assert "tag-name resolution failed (non-fatal): db down" in caplog.text
+
+
+# ---- 快捷指令把选择页 ?format=json 整段响应贴进 tags（2026-09-10 生产事故） ----
+
+_PROD_SELECTION_BODY_TAGS = (
+    '{"analyze":false,"tags":["APP","ComfyUI"],'
+    '"transcribe":false,"summarize":false,"rating":null}'
+)
+
+
+def test_fetch_request_unpacks_exact_production_selection_body():
+    """生产原样请求体：旧逻辑按逗号拆出六个垃圾标签，真标签与四个选项全丢。"""
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest.model_validate(
+        {"url": "https://v.douyin.com/x/", "tags": _PROD_SELECTION_BODY_TAGS}
+    )
+    assert req.tags == ["APP", "ComfyUI"]
+    assert (req.transcribe, req.summarize, req.analyze, req.rating) == (
+        False,
+        False,
+        False,
+        None,
+    )
+
+
+def test_fetch_request_selection_body_supplies_intents_and_rating():
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest(
+        url="https://v.douyin.com/x/",
+        tags='{"tags":["A"],"rating":4,"transcribe":true,"analyze":true,'
+        '"summarize":false}',
+    )
+    assert req.tags == ["A"]
+    assert (req.transcribe, req.summarize, req.analyze, req.rating) == (
+        True,
+        False,
+        True,
+        4,
+    )
+
+
+def test_fetch_request_explicit_fields_beat_embedded_selection():
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest(
+        url="https://v.douyin.com/x/",
+        tags='{"tags":["A"],"rating":4,"transcribe":true}',
+        transcribe=False,
+        rating=2,
+    )
+    assert req.tags == ["A"]
+    assert req.transcribe is False
+    assert req.rating == 2
+
+
+def test_fetch_request_selection_body_tags_string_is_comma_split():
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest(
+        url="https://v.douyin.com/x/", tags='{"tags":" A, ,B ","summarize":true}'
+    )
+    assert req.tags == ["A", "B"]
+    assert req.summarize is True
+
+
+def test_fetch_request_accepts_json_array_string_tags():
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest(url="https://v.douyin.com/x/", tags=' ["A", " B ", ""]')
+    assert req.tags == ["A", "B"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ['{"foo":1}', "{broken", "[broken", '["A", 1]', '{"tags":[1,2]}'],
+)
+def test_fetch_request_rejects_json_looking_tags_instead_of_comma_split(bad):
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    with pytest.raises(ValidationError) as exc:
+        MediaFetchRequest(url="https://v.douyin.com/x/", tags=bad)
+    assert "tags" in str(exc.value)
+
+
+def test_fetch_request_plain_comma_string_tags_unchanged():
+    from app.api.media_fetch_helpers import MediaFetchRequest
+
+    req = MediaFetchRequest(url="https://v.douyin.com/x/", tags="A, B", tag_ids="1,2")
+    assert req.tags == ["A", "B"]
+    assert req.tag_ids == ["1", "2"]
+    assert MediaFetchRequest(url="https://v.douyin.com/x/", tags=["A"]).tags == ["A"]
+
+
+def test_batch_fetch_request_unpacks_selection_body():
+    from app.api.media_fetch_helpers import BatchFetchRequest
+
+    req = BatchFetchRequest.model_validate(
+        {
+            "urls": ["https://v.douyin.com/x/"],
+            "tags": '{"tags":["A","B"],"rating":5,"analyze":true}',
+            "analyze": False,
+        }
+    )
+    assert req.tags == ["A", "B"]
+    assert req.rating == 5
+    assert req.analyze is False

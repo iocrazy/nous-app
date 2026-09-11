@@ -6,11 +6,12 @@ Media Fetch Helpers
 Shared helper functions and models used by media fetch routes.
 """
 
-from typing import Optional
+import json
+from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Request
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.boundary import ValidatedURL
 from app.core.deps import AuthDep
@@ -61,36 +62,111 @@ def intent_tag_names(*, transcribe: bool, summarize: bool, analyze: bool) -> lis
     return [INTENT_TAG_NAMES[key] for key, on in flags.items() if on]
 
 
-class MediaFetchRequest(AiIntentFields):
+# 快捷指令会把选择页 GET /auth/temp-token/{token}/selection?format=json 的整段
+# 响应文本原样贴进 tags（2026-09-10 生产事故：按逗号拆出六个垃圾标签，真标签与
+# 四个选项全丢）。这里把该形状拆回 tags + 四个选项；显式请求字段永远优先。
+SELECTION_OPTION_FIELDS: tuple[str, ...] = (
+    "rating",
+    "transcribe",
+    "summarize",
+    "analyze",
+)
+
+
+def _stripped_tag_list(values: list) -> list:
+    """去空白、丢空串；非字符串原样留给 list[str] 校验去拒绝。"""
+    stripped = [v.strip() if isinstance(v, str) else v for v in values]
+    return [v for v in stripped if not (isinstance(v, str) and not v)]
+
+
+def _unpack_selection_tags(data: Any) -> Any:
+    """tags 是选择页 JSON 对象（带 "tags" 键）时拆开；其余一律原样返回。"""
+    if not isinstance(data, dict) or not isinstance(data.get("tags"), str):
+        return data
+    text = data["tags"].strip()
+    if not text.startswith("{"):
+        return data
+    try:
+        selection = json.loads(text)
+    except json.JSONDecodeError:
+        return data  # 交给 tags 字段校验器给出 422
+    if not isinstance(selection, dict) or "tags" not in selection:
+        return data
+
+    embedded = selection["tags"]
+    if isinstance(embedded, str):
+        embedded = _coerce_str_to_list(embedded)
+    elif isinstance(embedded, list):
+        embedded = _stripped_tag_list(embedded)
+    options = {
+        key: selection[key]
+        for key in SELECTION_OPTION_FIELDS
+        if key not in data and selection.get(key) is not None
+    }
+    return {**data, **options, "tags": embedded}
+
+
+def _coerce_tags(v: Any) -> Any:
+    """tags 字段：JSON 数组串 → 列表；形似 JSON 却拆不开的串 → 422；其余走逗号拆分。"""
+    if not isinstance(v, str):
+        return v
+    text = v.strip()
+    if not text.startswith(("{", "[")):
+        return _coerce_str_to_list(v)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"tags looks like JSON but is not valid JSON ({exc.msg}); send a list, "
+            "a comma-separated string, or the tag-picker selection object"
+        ) from exc
+    if isinstance(parsed, dict):
+        raise ValueError(
+            'tags JSON object must be the tag-picker selection shape with a "tags" key'
+        )
+    if not isinstance(parsed, list) or not all(isinstance(t, str) for t in parsed):
+        raise ValueError("tags JSON array must contain only strings")
+    return _stripped_tag_list(parsed)
+
+
+class FetchTagFields(AiIntentFields):
+    """单条 / 批量抓取共用的标签字段与校验。"""
+
+    tags: Optional[list[str]] = None
+    tag_ids: Optional[list[str]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def unpack_selection_json(cls, data: Any) -> Any:
+        return _unpack_selection_tags(data)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def accept_tags_string(cls, v: Any) -> Any:
+        return _coerce_tags(v) if v is not None else v
+
+    @field_validator("tag_ids", mode="before")
+    @classmethod
+    def accept_comma_string(cls, v: Any) -> Any:
+        return _coerce_str_to_list(v) if v is not None else v
+
+
+class MediaFetchRequest(FetchTagFields):
     """Video fetch request"""
 
     url: str
     video_bool: bool = True
     cover_bool: bool = True
     use_celery: bool = False
-    tags: Optional[list[str]] = None
-    tag_ids: Optional[list[str]] = None
-
-    @field_validator("tags", "tag_ids", mode="before")
-    @classmethod
-    def accept_comma_string(cls, v):
-        return _coerce_str_to_list(v) if v is not None else v
 
 
-class BatchFetchRequest(AiIntentFields):
+class BatchFetchRequest(FetchTagFields):
     """Batch fetch request"""
 
     urls: list[str]
     video_bool: bool = True
     cover_bool: bool = True
     use_celery: bool = False
-    tags: Optional[list[str]] = None
-    tag_ids: Optional[list[str]] = None
-
-    @field_validator("tags", "tag_ids", mode="before")
-    @classmethod
-    def accept_comma_string(cls, v):
-        return _coerce_str_to_list(v) if v is not None else v
 
 
 # ============================================
