@@ -15,7 +15,38 @@ from __future__ import annotations
 from typing import Any, Optional
 from uuid import UUID
 
+from loguru import logger
+
 from app.schemas.issue_message import IssueMessage, IssueMessageKind
+
+
+def _display_attachments(
+    raw: Any, *, message_id: Any
+) -> Optional[list[dict[str, Any]]]:
+    """The row's stored display attachments, or ``None``.
+
+    ``ConversationsAiStore`` already hands back ``body['attachments'] or None``,
+    so the common cases are a list of small dicts or nothing at all. Anything
+    else can only come from a row written outside that contract; it is dropped
+    with a warning rather than raising, because a single malformed legacy row
+    must not make an entire issue's thread unreadable. The warning is what
+    keeps that from being a silent swallow — the drift stays findable.
+    """
+    if not raw:
+        return None
+    if not isinstance(raw, list):
+        logger.warning(
+            f"[issue_message] message {message_id}: attachments is "
+            f"{type(raw).__name__}, not a list — dropped"
+        )
+        return None
+    kept = [a for a in raw if isinstance(a, dict)]
+    if len(kept) != len(raw):
+        logger.warning(
+            f"[issue_message] message {message_id}: dropped "
+            f"{len(raw) - len(kept)} non-dict attachment(s)"
+        )
+    return kept or None
 
 
 def map_ai_message_to_issue_message(
@@ -81,4 +112,10 @@ def map_ai_message_to_issue_message(
         from_status=from_status,
         to_status=to_status,
         created_at=row["created_at"],
+        # 三期 3a Task 8a: the citation chip (and every other stored chip) has
+        # to survive a reload. The store persists these on user-role messages;
+        # before this they were written and never read back.
+        attachments=_display_attachments(
+            row.get("attachments"), message_id=row.get("id")
+        ),
     )

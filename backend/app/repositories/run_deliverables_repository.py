@@ -15,7 +15,7 @@ import datetime as _dt
 import decimal as _decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc, insert, select
+from sqlalchemy import desc, insert, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models.agents import AgentRuns, RunDeliverables
@@ -71,6 +71,21 @@ class RunDeliverablesRepository:
                 )
             ).scalar_one()
             return _row(row)
+
+    async def set_seq(self, *, row_id: Any, seq: int) -> None:
+        """把 ``deliverable`` 事件的 seq 补回这一行。
+
+        登记口的顺序是「先插行、再落事件」（反过来会出现没有行的事件），
+        所以插入那一刻 seq 还不存在，只能事后补一次 UPDATE。调用方把失败
+        当成 WARNING 而不是错误——行与事件都已经落库，缺一个定位字段不该
+        让一次成功的登记看起来失败了。
+        """
+        async with write_scope() as session:
+            await session.execute(
+                update(RunDeliverables)
+                .where(RunDeliverables.id == int(row_id))
+                .values(seq=int(seq))
+            )
 
     async def list_for_issue(self, issue_id: Any) -> List[Dict[str, Any]]:
         """本 issue 全部产出。issue 归属经 run 反查——

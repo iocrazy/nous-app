@@ -329,3 +329,130 @@ async def test_legacy_path_reads_issue_messages_when_no_session():
         issue_id
         in captured["stmt"].compile(dialect=postgresql.dialect()).params.values()
     )
+
+
+# ─── attachments on the read path (3a Task 8a, defect 1) ────────────────
+
+
+async def test_session_path_returns_the_stored_output_ref_attachment():
+    """Real-stack defect: POST stored the citation, GET never handed it back,
+    so the chip could not survive a reload. The row shape here is exactly what
+    ``ConversationsAiStore._to_legacy_message_shape`` returns (``attachments``
+    straight off ``body``), with the ids as the store delivers them."""
+    issue_id = 348392006624870
+    session_id = 987654321012345
+    session_user_id = uuid4()
+
+    issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
+    message_rows = [
+        {
+            "id": 323848780659604,
+            "session_id": session_id,
+            "role": "user",
+            "content": "compare this with the new one",
+            "agent_id": None,
+            "metadata_json": None,
+            "attachments": [
+                {
+                    "kind": "output_ref",
+                    "ref_kind": "script_shot",
+                    "ref_id": "337650953731886",
+                    "version": 1,
+                    "title": "MEDIUM",
+                }
+            ],
+            "created_at": datetime.now(timezone.utc),
+        }
+    ]
+
+    store = _fake_conversations_store(session_row, message_rows)
+    with (
+        patch(
+            "app.api.issue_messages_router.issue_repository.get_by_id",
+            AsyncMock(return_value=issue_row),
+        ),
+        patch(
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
+        ),
+    ):
+        result = await list_issue_messages(issue_id, _make_auth(session_user_id))
+
+    wire = result.model_dump()["messages"][0]["attachments"][0]
+    assert wire == {
+        "kind": "output_ref",
+        "ref_kind": "script_shot",
+        "ref_id": "337650953731886",
+        "version": 1,
+        "title": "MEDIUM",
+        # the read model's other keys are present-and-null, never invented
+        "resource_id": None,
+        "asset_id": None,
+        "loadout_id": None,
+        "mime": None,
+        "alt_text": None,
+        "name": None,
+    }
+
+
+async def test_session_path_row_without_attachments_reads_back_as_null():
+    """Every message predating 3a has no ``attachments`` key at all; the
+    endpoint must answer ``null`` (the chosen convention) rather than fail."""
+    issue_id = 42
+    session_id = 987654321012345
+    session_user_id = uuid4()
+
+    issue_row = _fake_issue(ai_session_id=session_id, user_id=session_user_id)
+    session_row = {"id": session_id, "user_id": str(session_user_id)}
+    message_rows = [
+        {
+            "id": 323848780659605,
+            "session_id": session_id,
+            "role": "user",
+            "content": "old comment",
+            "agent_id": None,
+            "metadata_json": {},
+            "created_at": datetime.now(timezone.utc),
+        }
+    ]
+
+    store = _fake_conversations_store(session_row, message_rows)
+    with (
+        patch(
+            "app.api.issue_messages_router.issue_repository.get_by_id",
+            AsyncMock(return_value=issue_row),
+        ),
+        patch(
+            "app.api.issue_messages_router.ConversationsAiStore",
+            return_value=store,
+        ),
+    ):
+        result = await list_issue_messages(issue_id, _make_auth(session_user_id))
+
+    assert result.messages[0].attachments is None
+    assert result.model_dump()["messages"][0]["attachments"] is None
+
+
+async def test_legacy_table_rows_still_deserialize_without_attachments():
+    """``issue_messages`` has no such column — a row from it must validate
+    against the widened read model unchanged."""
+    from types import SimpleNamespace
+
+    from app.schemas.issue_message import IssueMessage
+
+    obj = SimpleNamespace(
+        id=str(uuid4()),
+        issue_id=42,
+        kind="comment",
+        author_user_id=str(uuid4()),
+        author_agent_id=None,
+        body="Legacy comment",
+        meta={},
+        duration_seconds=None,
+        agent_run_id=None,
+        from_status=None,
+        to_status=None,
+        created_at=_dt(),
+    )
+    assert IssueMessage.model_validate(obj, from_attributes=True).attachments is None

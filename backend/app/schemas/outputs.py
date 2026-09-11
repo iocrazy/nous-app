@@ -44,6 +44,12 @@ class OutputVersion(BaseModel):
     issue_id: Optional[str] = None
     issue_key: Optional[str] = None
     deep_link: Optional[str] = None
+    # The ``deliverable`` event's own seq on the run's transcript — the
+    # pointer from this row to the moment it was registered. Written by
+    # ``registry._stamp_seq`` right after the event lands (the row exists
+    # first, so it cannot be known at insert time), and ``None`` whenever
+    # no event was persisted: a run with no live writer, or an insert that
+    # failed. Never a guess — null means 'not known', not 'step zero'.
     seq: Optional[int] = None
     turn: Optional[int] = None
     step: Optional[int] = None

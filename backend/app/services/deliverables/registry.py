@@ -1,7 +1,11 @@
 """产出登记的唯一入口（harness p4 §1-④ / 三期 3a spec §1）。
 
-没登记 = 不存在。三件事一次做完：算版本 → 插行 → 在 run 的
-transcript 上落一条 ``deliverable`` 事件。
+没登记 = 不存在。四件事一次做完：算版本 → 插行 → 在 run 的
+transcript 上落一条 ``deliverable`` 事件 → 把那条事件的 seq 回写到行上。
+
+**顺序不许颠倒**：行先于事件（反过来会出现「有事件没有行」），所以插行那
+一刻 seq 还不存在，只能事后补一次 UPDATE——``run_deliverables.seq`` 的唯一
+写入方就是 ``_stamp_seq``，补不上只记 WARNING。
 
 **``run_id`` 为空即 no-op**：人手编辑、画布保存、前端直传都会流经同一个
 写入点，它们不是 agent 产出，不占版本号，也不该在任何 run 上留事件。
@@ -87,8 +91,9 @@ async def register_deliverable(
         step=step,
     )
 
-    await emit(
-        recorder if recorder is not None else await _writer_for(rid),
+    rec = recorder if recorder is not None else await _writer_for(rid)
+    recorded = await emit(
+        rec,
         "deliverable",
         {
             "kind": kind,
@@ -104,7 +109,35 @@ async def register_deliverable(
         turn=turn,
         step=step,
     )
+    if recorded:
+        await _stamp_seq(repo, row, rec)
     return row
+
+
+async def _stamp_seq(repo: Any, row: DeliverableRow, recorder: Any) -> None:
+    """把刚落下的那条事件的 seq 回写到登记行上。
+
+    行先于事件（见 ``register_deliverable`` 的顺序），所以插行时 seq 还不
+    存在；``run_deliverables.seq`` 的唯一写入方就是这里。
+
+    **拿不到就不写**：只有真正报得出 seq 的 recorder 才算数。
+    ``RunEventWriter.append`` 插失败时返回 ``None`` 而 ``emit`` 仍报 True
+    （遥测不连坐一次运行）——那条事件不在 transcript 里，给它编一个 seq 比
+    留 NULL 更糟：NULL 说的是「不知道」，错的数字说的是「就在那一步」。
+
+    失败只记 WARNING：行和事件都已经在库里了。
+    """
+    seq = getattr(recorder, "last_event_seq", None)
+    if not isinstance(seq, int) or isinstance(seq, bool):
+        return
+    try:
+        await repo.set_seq(row_id=row.id, seq=seq)
+    except Exception as exc:  # noqa: BLE001 — 见 docstring
+        logger.warning(
+            f"[deliverables] {row.kind}/{row.ref_id} v{row.version}: could not "
+            f"stamp seq {seq} onto row {row.id}: {exc!r} — the row and the "
+            "event are both intact, only the pointer between them is missing"
+        )
 
 
 async def _insert_next_version(repo: Any, *, kind: str, ref_id: str, **values: Any):
@@ -190,6 +223,10 @@ class _LateRecorder:
 
     def __init__(self, writer: Any) -> None:
         self._writer = writer
+        #: seq of the last event this recorder actually persisted — ``None``
+        #: when the insert failed (``append`` returns None then). Mirrors
+        #: ``RunRecorder.last_event_seq`` so the registry reads one name.
+        self.last_event_seq: Optional[int] = None
 
     async def record_event(
         self,
@@ -199,7 +236,9 @@ class _LateRecorder:
         turn: Optional[int] = None,
         step: Optional[int] = None,
     ) -> None:
-        await self._writer.append(event_type, payload, turn=turn, step=step)
+        self.last_event_seq = await self._writer.append(
+            event_type, payload, turn=turn, step=step
+        )
 
 
 async def _writer_for(run_id: Any) -> Optional[_LateRecorder]:

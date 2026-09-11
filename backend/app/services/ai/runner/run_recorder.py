@@ -141,6 +141,10 @@ class RunRecorder:
     _last_heartbeat_monotonic: float = field(default=0.0, init=False)
     _cancelled: bool = field(default=False, init=False)
     _event_seq: int = field(default=0, init=False)
+    # seq of the last event actually PERSISTED — None when nothing was
+    # recorded yet or the insert failed. Distinct from _event_seq, which
+    # is the writer's counter and advances even on a failed insert.
+    _last_event_seq: Optional[int] = field(default=None, init=False)
     _event_writer: Optional["RunEventWriter"] = field(
         default=None, init=False, repr=False
     )
@@ -419,7 +423,9 @@ class RunRecorder:
         """
         if self.run_id is None:
             return
-        await self._writer().append(event_type, payload, turn=turn, step=step)
+        self._last_event_seq = await self._writer().append(
+            event_type, payload, turn=turn, step=step
+        )
         self._event_seq = self._writer().seq
 
     def _writer(self) -> "RunEventWriter":
@@ -430,6 +436,18 @@ class RunRecorder:
                 value_max_chars=self.EVENT_VALUE_MAX_CHARS,
             )
         return self._event_writer
+
+    @property
+    def last_event_seq(self) -> Optional[int]:
+        """The seq the LAST ``record_event`` actually wrote — ``None`` when
+        this recorder recorded nothing or the insert failed. A caller that
+        must point back at its own event reads it right after the call (the
+        deliverable registry stamps it onto ``run_deliverables.seq``).
+
+        Deliberately not ``next_event_seq - 1``: that counter advances even
+        when the insert failed, so it would name an event no transcript has.
+        """
+        return self._last_event_seq
 
     @property
     def next_event_seq(self) -> Optional[int]:
