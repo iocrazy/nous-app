@@ -582,4 +582,16 @@ def test_workflow_module_untouched_by_a6():
     from app.workflows.script_shot_generate import script_shot_generate_workflow
 
     params = list(inspect.signature(script_shot_generate_workflow).parameters)
-    assert params == ["shot_id", "model", "provider", "user_id"]
+    # 3a (harness p4 phase 3a, Task 2) is the deliberate, reviewed edit this pin
+    # exists to force: the dispatching run's coordinates now ride through DBOS
+    # so the produced image can be registered as that run's deliverable. All
+    # three are keyword-defaulted, so frozen inputs from before 3a still load.
+    assert params == [
+        "shot_id",
+        "model",
+        "provider",
+        "user_id",
+        "run_id",
+        "turn",
+        "step",
+    ]

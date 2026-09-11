@@ -24,6 +24,7 @@ from app.boundary import MaxBytesExceededError, cap_aiter
 from app.core.config import settings
 from app.db.session import write_scope
 from app.models import GeneratedMedia
+from app.services.deliverables.registry import register_deliverable_best_effort
 from app.services.library.media_storage import (
     CHAT_MEDIA_BUCKET,
     chat_media_store,
@@ -264,6 +265,12 @@ class GenerationOrigin:
     parent_resource_id: Optional[int] = None
     derivation_kind: Optional[str] = None
     conversation_id: Optional[int] = None
+    # 3a: the dsh coordinates of the step that produced this. They exist so the
+    # deliverable card can hang off the right step in the transcript — a run id
+    # alone puts every output of a 40-step run in one undifferentiated pile.
+    # Only the agent lanes set them; every other caller leaves them None.
+    turn: Optional[int] = None
+    step: Optional[int] = None
     # The asset a run was launched FROM. Goes in the COLUMN, which is what
     # ``GET /generated?source_asset_id=`` filters on and what the asset sheet's
     # generation history reads. Writers that only stamp it into ``params``
@@ -358,7 +365,33 @@ async def register_generated_media(
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()
-    return dict(row) if row is not None else {}
+    out = dict(row) if row is not None else {}
+    if out.get("id") is not None:
+        # 唯一入口在这里叠上去：11 个调用点一个都不用改，它们的区别只剩
+        # origin.run_id 有没有值。判空的责任在登记口一处——每个调用点各自
+        # 记得判，就是「没登记 = 不存在」被悄悄破掉的方式。
+        await register_deliverable_best_effort(
+            run_id=origin.run_id,
+            kind="generated_media",
+            ref_id=str(out["id"]),
+            title=_first_line(origin.prompt),
+            model=origin.model,
+            # 今天没有任何调用点填 origin.cost_cents，所以媒体类产出的花费
+            # 在血缘里是空的（UI 显 —）。不伪造一个数字（小票已记）。
+            cost_cents=origin.cost_cents,
+            turn=origin.turn,
+            step=origin.step,
+        )
+    return out
+
+
+def _first_line(prompt: Optional[str]) -> Optional[str]:
+    """产出卡的标题取提示词首行。整段提示词当标题会把列表撑成一堵墙，
+    而首行恰好是人写提示词时的主语句。"""
+    if not prompt:
+        return None
+    lines = prompt.strip().splitlines()
+    return lines[0] if lines else None
 
 
 def _safe_filename(name: str) -> str:

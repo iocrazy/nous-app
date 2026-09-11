@@ -179,6 +179,9 @@ async def persist_generation(
     model: str,
     provider: Optional[str],
     user_id: Optional[str],
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, str]:
     """Persist the provider's ephemeral image through the generated-media store.
 
@@ -237,6 +240,11 @@ async def persist_generation(
                     model=model,
                     provider=provider,
                     derivation_kind="shot_generate",
+                    # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
+                    # 产出的图永远没有 run 可挂（真栈缺口，spec §1.3）。
+                    run_id=run_id,
+                    turn=turn,
+                    step=step,
                 ),
             )
             gen_id = row.get("id")
@@ -290,6 +298,12 @@ async def script_shot_generate_workflow(
     model: str = _DEFAULT_MODEL,
     provider: Optional[str] = _DEFAULT_PROVIDER,
     user_id: Optional[str] = None,
+    # 3a: the dispatching run, threaded through so the produced image can be
+    # registered against it. DBOS freezes a workflow's input, so these are
+    # keyword-defaulted — older frozen inputs simply have no coordinates.
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, Any]:
     """DBOS orchestrator: shot → generated image url on the shot row.
 
@@ -302,7 +316,9 @@ async def script_shot_generate_workflow(
     ``user_id`` is optional (frozen DBOS input compat)."""
     try:
         provider_url = await generate_shot_image_step(shot_id, model, provider, user_id)
-        urls = await persist_generation(shot_id, provider_url, model, provider, user_id)
+        urls = await persist_generation(
+            shot_id, provider_url, model, provider, user_id, run_id, turn, step
+        )
         await mark_shot_done(shot_id, urls["image_url"], urls["thumbnail_url"])
         return {
             "status": "success",

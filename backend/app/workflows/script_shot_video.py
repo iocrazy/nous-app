@@ -134,6 +134,9 @@ async def persist_video_generation(
     model: Optional[str],
     provider: Optional[str],
     user_id: Optional[str],
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> str:
     """Persist the local clip through the generated-media store → durable URL.
 
@@ -173,6 +176,11 @@ async def persist_video_generation(
                 model=model,
                 provider=provider,
                 derivation_kind="shot_video",
+                # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
+                # 产出的视频永远没有 run 可挂（真栈缺口，spec §1.3）。
+                run_id=run_id,
+                turn=turn,
+                step=step,
             ),
         )
         gen_id = row.get("id")
@@ -210,6 +218,11 @@ async def script_shot_video_workflow(
     model: Optional[str] = None,
     provider: Optional[str] = None,
     user_id: Optional[str] = None,
+    # 3a: the dispatching run, threaded through so the produced clip can be
+    # registered against it. Keyword-defaulted for frozen DBOS input compat.
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, Any]:
     """DBOS orchestrator: shot → generated video url on the shot row.
 
@@ -223,7 +236,7 @@ async def script_shot_video_workflow(
     compat) but a real value is required to persist."""
     local_path = await generate_shot_video_step(shot_id, model, provider, user_id)
     video_url = await persist_video_generation(
-        shot_id, local_path, model, provider, user_id
+        shot_id, local_path, model, provider, user_id, run_id, turn, step
     )
     await mark_shot_video_done(shot_id, video_url)
     return {"status": "success", "shot_id": shot_id, "video_url": video_url}

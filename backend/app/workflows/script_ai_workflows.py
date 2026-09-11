@@ -64,12 +64,28 @@ async def script_ai_expand_step(
 
 
 @DBOS.step()
-async def script_ai_expand_persist(chapter_id: str, html: str) -> dict[str, Any]:
-    """Persist the expanded content onto the chapter."""
+async def script_ai_expand_persist(
+    chapter_id: str,
+    html: str,
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
+) -> dict[str, Any]:
+    """Persist the expanded content onto the chapter.
+
+    3a: the chapter write has no run id of its own anywhere in its call chain,
+    so the run is threaded down from the workflow and handed to the service as
+    an attribution argument."""
     from app.services.storyboard.script.script_service import ScriptService
 
     script_svc = ScriptService()
-    await script_svc.update_chapter(chapter_id, {"content": html})
+    await script_svc.update_chapter(
+        chapter_id,
+        {"content": html},
+        attributed_to_run_id=run_id,
+        turn=turn,
+        step=step,
+    )
     return {"status": "success", "chapter_id": chapter_id}
 
 
@@ -81,6 +97,20 @@ async def script_expand_chapter_workflow(
     summary: str,
     context: Optional[str] = None,
     user_id: Optional[str] = None,
+    # 3a: the dispatching run, for deliverable attribution. Keyword-defaulted
+    # for frozen DBOS input compat.
+    #
+    # ⚠️ NO CALLER PASSES THIS TODAY. The only dispatcher of this workflow is
+    # ``app/api/script_ai_router.py`` (the human "expand" / "branch" buttons),
+    # and a REST request has no agent run behind it — so every chapter write
+    # registers nothing, and ``script_chapter`` lineage is empty in practice.
+    # The plumbing is kept deliberately (3a spec lists the kind, and the review
+    # ruling was: keep it, do not invent a producer). When an agent tool or
+    # workflow starts expanding chapters, it passes its run id here and the
+    # whole chain — service attribution argument included — already works.
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, Any]:
     """Expand a chapter summary into full screenplay HTML, then persist it.
 
@@ -89,7 +119,7 @@ async def script_expand_chapter_workflow(
     - side-effects: updates one row in script_chapters (content column)
     """
     html = await script_ai_expand_step(title, summary, context, user_id)
-    return await script_ai_expand_persist(chapter_id, html)
+    return await script_ai_expand_persist(chapter_id, html, run_id, turn, step)
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +168,9 @@ async def script_ai_branches_persist(
     chapter_id: str,
     branch_type: str,
     branches: list[dict[str, Any]],
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, Any]:
     """Create one chapter node per branch, offset from the parent position."""
     from app.services.storyboard.script.script_service import ScriptService
@@ -160,7 +193,13 @@ async def script_ai_branches_persist(
             "position_x": parent_x + x_offset,
             "position_y": parent_y + BRANCH_Y_OFFSET,
         }
-        result = await script_svc.create_chapter(script_id, chapter_data)
+        result = await script_svc.create_chapter(
+            script_id,
+            chapter_data,
+            attributed_to_run_id=run_id,
+            turn=turn,
+            step=step,
+        )
         created_ids.append(result.get("id", ""))
     return {
         "status": "success",
@@ -179,6 +218,20 @@ async def script_create_branches_workflow(
     branch_type: str = "choice",
     context: Optional[str] = None,
     user_id: Optional[str] = None,
+    # 3a: the dispatching run, for deliverable attribution. Keyword-defaulted
+    # for frozen DBOS input compat.
+    #
+    # ⚠️ NO CALLER PASSES THIS TODAY. The only dispatcher of this workflow is
+    # ``app/api/script_ai_router.py`` (the human "expand" / "branch" buttons),
+    # and a REST request has no agent run behind it — so every chapter write
+    # registers nothing, and ``script_chapter`` lineage is empty in practice.
+    # The plumbing is kept deliberately (3a spec lists the kind, and the review
+    # ruling was: keep it, do not invent a producer). When an agent tool or
+    # workflow starts expanding chapters, it passes its run id here and the
+    # whole chain — service attribution argument included — already works.
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, Any]:
     """Generate alternative story branches, then create chapter nodes.
 
@@ -191,5 +244,5 @@ async def script_create_branches_workflow(
         title, summary, branch_count, branch_type, context, user_id
     )
     return await script_ai_branches_persist(
-        script_id, chapter_id, branch_type, branches
+        script_id, chapter_id, branch_type, branches, run_id, turn, step
     )

@@ -151,6 +151,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     budget,
     compaction,
     context,
+    deliverables,
     fork,
     inbox,
     question,

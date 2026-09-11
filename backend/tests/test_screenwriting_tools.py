@@ -965,7 +965,7 @@ async def test_apply_edit_runs_the_ops_write_inside_caller_scope():
         finally:
             order.append("exit")
 
-    async def _apply(scope, scene, edits, *, quoted_base_version, actor):
+    async def _apply(scope, scene, edits, *, quoted_base_version, actor, step=None):
         order.append("apply_element_edit")
         return gateway_mod.EditApplied(
             scene_id=_SCENE_ID,

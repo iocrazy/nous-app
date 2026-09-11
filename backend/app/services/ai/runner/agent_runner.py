@@ -918,7 +918,9 @@ class AgentRunner:
                             tool_name,
                             self.generate_image_handler(
                                 args,
-                                self._media_run_context(recorder, composed),
+                                self._media_run_context(
+                                    recorder, composed, step=iteration
+                                ),
                             ),
                         )
                 elif tool_name == "GenerateVideo":
@@ -932,14 +934,16 @@ class AgentRunner:
                             tool_name,
                             self.generate_video_handler(
                                 args,
-                                self._media_run_context(recorder, composed),
+                                self._media_run_context(
+                                    recorder, composed, step=iteration
+                                ),
                             ),
                         )
                 elif tool_name in SCREENWRITING_TOOL_NAMES:
                     result = await self._timed(
                         tool_name,
                         self._dispatch_screenwriting(
-                            tool_name, args, recorder, composed
+                            tool_name, args, recorder, composed, step=iteration
                         ),
                     )
                 elif is_mcp:
@@ -1368,6 +1372,7 @@ class AgentRunner:
         args: dict,
         recorder: Optional[RunRecorder],
         composed: "ComposedSystemPrompt",
+        step: Optional[int] = None,
     ) -> dict:
         """Run one A4 screenwriting tool.
 
@@ -1435,7 +1440,9 @@ class AgentRunner:
         if handler is None:  # pragma: no cover — names come from one frozenset
             return {"ok": False, "error": f"unknown screenwriting tool {tool_name}"}
         try:
-            return await handler(args, self._media_run_context(recorder, composed))
+            return await handler(
+                args, self._media_run_context(recorder, composed, step=step)
+            )
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.warning(f"[AgentRunner] {tool_name} raised: {exc!r}")
             return {
@@ -1445,7 +1452,10 @@ class AgentRunner:
             }
 
     def _media_run_context(
-        self, recorder: Optional[RunRecorder], composed: "ComposedSystemPrompt"
+        self,
+        recorder: Optional[RunRecorder],
+        composed: "ComposedSystemPrompt",
+        step: Optional[int] = None,
     ) -> dict:
         """Build a run-context dict for media generation handlers.
 
@@ -1458,6 +1468,11 @@ class AgentRunner:
             "user_id": str(recorder.user_id) if recorder else None,
             "team_id": recorder.team_id if recorder else None,
             "agent_id": str(composed.agent_id),
+            # 产出登记要坐标才能把卡挂到正确的那一步（3a）。turn 与
+            # ``_step_started`` 同源：目前恒为 1，改它要一起改。没有 recorder
+            # 就没有 run，那一路的产出不该假装属于某个 turn。
+            "turn": 1 if recorder else None,
+            "step": step,
         }
 
     async def _preflight_compact_and_budget(
@@ -2018,7 +2033,9 @@ class AgentRunner:
                             tool_name,
                             self.generate_image_handler(
                                 args,
-                                self._media_run_context(recorder, composed),
+                                self._media_run_context(
+                                    recorder, composed, step=iteration
+                                ),
                             ),
                         )
                 elif tool_name == "GenerateVideo":
@@ -2032,14 +2049,16 @@ class AgentRunner:
                             tool_name,
                             self.generate_video_handler(
                                 args,
-                                self._media_run_context(recorder, composed),
+                                self._media_run_context(
+                                    recorder, composed, step=iteration
+                                ),
                             ),
                         )
                 elif tool_name in SCREENWRITING_TOOL_NAMES:
                     result = await self._timed(
                         tool_name,
                         self._dispatch_screenwriting(
-                            tool_name, args, recorder, composed
+                            tool_name, args, recorder, composed, step=iteration
                         ),
                     )
                 elif is_mcp:

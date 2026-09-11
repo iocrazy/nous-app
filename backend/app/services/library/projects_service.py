@@ -1457,7 +1457,15 @@ class ProjectsService:
                 await start_workflow_routed(
                     "script_shot_generate",
                     dbos_workflow_callable=script_shot_generate_workflow,
-                    dbos_workflow_kwargs={"shot_id": shot_id, "user_id": user_id},
+                    dbos_workflow_kwargs={
+                        "shot_id": shot_id,
+                        "user_id": user_id,
+                        # 3a: batch auto-storyboard is a human action too —
+                        # explicit None, same reading as the /generate route.
+                        "run_id": None,
+                        "turn": None,
+                        "step": None,
+                    },
                     workflow_id=wf_id,
                 )
                 task_ids.append(task_id)

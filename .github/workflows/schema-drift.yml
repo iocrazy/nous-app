@@ -68,6 +68,7 @@ on:
       - 'backend/tests/db/test_canvas_asset_refs_integration.py'
       - 'backend/tests/db/test_conversations_store_question_integration.py'
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
+      - 'backend/tests/db/test_run_deliverables_repository_integration.py'
       # Lives under tests/integration/, not tests/db/ — the step below names it
       # explicitly, so this entry is what makes a change to it trigger a run.
       - 'backend/tests/integration/test_agent_workforce_repository_orm.py'
@@ -77,6 +78,11 @@ on:
       # The statements that integration file executes (phase 2a question stamp).
       - 'backend/app/services/ai/chat/conversations_ai_store.py'
       - 'backend/app/repositories/agent_run_inbox_repository.py'
+      # The deliverables repository + the registry's retry loop. Both are
+      # pure ORM/behaviour whose unit tests stub the session, so the step
+      # below is the only place Postgres ever sees them (3a Task 2).
+      - 'backend/app/repositories/run_deliverables_repository.py'
+      - 'backend/app/services/deliverables/registry.py'
       # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
       # project-entity migration workflow imported `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module, and the step that
@@ -340,6 +346,21 @@ jobs:
           # indexes free/hold names, that ON CONFLICT finds the real index, or
           # that a raise inside unit_of_work() rolls the whole batch back.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_assets_repository_integration.py -v
+
+      - name: Exercise the deliverables repository against the built schema (mig 453/462)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place RunDeliverablesRepository's ORM statements execute.
+          # Its unit tests stub the session, so nothing else proves that
+          # INSERT...RETURNING(RunDeliverables) yields an entity, that NUMERIC
+          # cost_cents leaves as a JSON-safe float while BIGINT ids leave as
+          # strings, that the 462 unique index really rejects a duplicate
+          # (kind, ref_id, version) — the registry's whole race story — or that
+          # the two agent_runs JOINs produce the order Task 3 paginates on.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
 
       - name: Exercise the canvas→asset ref mirror against the built schema (mig 445)
         working-directory: backend

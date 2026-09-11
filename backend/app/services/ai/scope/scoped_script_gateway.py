@@ -109,7 +109,7 @@ _WRITABLE_SHOT_FIELDS = (
 )
 
 
-def _ledger_run_id(scope: AgentRunScope) -> Optional[int]:
+def ledger_run_id(scope: AgentRunScope) -> Optional[int]:
     """账本/归属用的 BIGINT run id；测试路径的 sentinel run_id="0"（见
     agent_run_scope._SENTINEL_RUN_ID）没有对应 agent_runs 行，写了会 FK
     违约——返回 None 表示这次写入不记账、不归属。"""
@@ -837,7 +837,7 @@ async def create_shot(
         values["scene_id"] = scene.id
         values["shot_number"] = base_num + 1
         values["sort_order"] = base_sort + _SORT_ORDER_STEP
-        rid = _ledger_run_id(scope)
+        rid = ledger_run_id(scope)
         if rid is not None:
             values["created_by_agent_run_id"] = rid
         row = (
@@ -894,7 +894,7 @@ async def update_shot(
     values = _writable(fields)
     if not values:
         return None
-    rid = _ledger_run_id(scope)
+    rid = ledger_run_id(scope)
     async with write_scope() as session:
         # Locked read of the pre-update values, over the full writable set
         # (not just `values`) — cheap and lets before_json below select
@@ -943,7 +943,8 @@ async def update_shot(
         shot.id,
         sorted(values),
     )
-    return _shot_dict(row, await scene_no_for_shot(scope, shot))
+    scene_no = await scene_no_for_shot(scope, shot)
+    return _shot_dict(row, scene_no)
 
 
 async def set_shot_status(
@@ -1016,6 +1017,11 @@ async def episode_id_for_script(script_id: Any) -> Optional[int]:
 
 __all__ = [
     "MAX_LIST_SCENES",
+    # Public since 3a: the shot-generate dispatcher needs the SAME reading of
+    # "is there a real run behind this" as the ledger does. Two copies of that
+    # rule would drift, and the sentinel run_id "0" is exactly the case a
+    # second copy gets wrong.
+    "ledger_run_id",
     "EditApplied",
     "EditRefused",
     "SceneSummary",

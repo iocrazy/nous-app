@@ -146,6 +146,11 @@ async def test_generate_shot_sets_generating_and_threads_wf_id(
     assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
         "shot_id": _SHOT,
         "user_id": _USER,
+        # 3a: a human click has no agent run — written down as an explicit
+        # None, so "this lane has no run" is a decision, not an omission.
+        "run_id": None,
+        "turn": None,
+        "step": None,
     }
 
 
@@ -848,6 +853,11 @@ async def test_generate_video_dispatches_and_threads_wf_id(
     assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
         "shot_id": _SHOT,
         "user_id": _USER,
+        # 3a: a human click has no agent run — written down as an explicit
+        # None, so "this lane has no run" is a decision, not an omission.
+        "run_id": None,
+        "turn": None,
+        "step": None,
     }
 
 
