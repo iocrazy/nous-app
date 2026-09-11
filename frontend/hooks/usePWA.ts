@@ -11,10 +11,10 @@ const SHORTCUTS_PREFIX = '/shortcuts';
 
 /**
  * The iOS Shortcuts picker (/shortcuts/*) opens inside Shortcuts' embedded web
- * view, which is closed seconds after the pick. A new Workbox SW has to
- * precache the whole build before it can activate, so it never finishes there
- * and an installed old SW keeps serving the stale shell forever. The HTML is
- * served network-fresh, so without a SW the picker is always current.
+ * view, which is closed seconds after the pick. It needs no offline support,
+ * and registering a SW there only leaves a worker behind in that web view's
+ * storage. The HTML is served network-fresh and the SW never serves the app
+ * shell (see vite.config.ts), so without a SW the picker is always current.
  */
 export const shouldRegisterServiceWorker = (pathname: string): boolean =>
   pathname !== SHORTCUTS_PREFIX && !pathname.startsWith(`${SHORTCUTS_PREFIX}/`);
