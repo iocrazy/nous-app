@@ -340,6 +340,46 @@ Use the ResourceFetch tool to load any of these on demand:
 
 本模块不缓存资产内容：每轮从活数据重新组装，所以资产表里的编辑对下一条消息立即可见，没有失效步骤。
 
+### `<referenced_outputs>`（仅当本轮有被引用的产出版本）
+
+#### What the model sees
+
+人在 issue 回复里 @ 了一个**已登记产出的某一版**（三期 3a Task 4）。框里只有坐标，**没有内容**。真实渲染结果逐字如下：
+
+```markdown
+<referenced_outputs>
+  <output kind="script_shot" ref="9" version="2" title="S3 · Shot #1"/>
+  <output kind="generated_media" ref="88213" version="1"/>
+</referenced_outputs>
+
+Each <output/> above is a CITATION the human made — one specific version of an object, not its content. The content is NOT in this context: read the object itself with the tools you already have.
+```
+
+三条形状约定：
+
+- **框里每一行都是自闭合的 `<output/>`，没有正文也没有子元素。** 这不是「内容写得比较少」，是契约：引用给的是坐标，正文要模型自己用既有工具去读。`tests/services/ai/prompts/test_referenced_outputs_frame.py` 按行正则钉住这一条——把内容塞进框的实现在那里转红。
+- **`kind` 是产出的四类之一**（`generated_media` / `script_shot` / `script_scene` / `script_chapter`，见 `../../deliverables/kinds.py`）。四类之外在发帖口就被拒，进不到这里。
+- **`title` 为空时整个属性省略，不渲染成空串。** `title=""` 读起来像「它的标题就是空字符串」，缺席才是「登记时没给标题」（与 `<available_resources>` 的 `primary_resource_id` 同一条规则）。标题是**发帖那一刻**从登记表抄下来的快照，对象事后改名不会追改这条引用——引用记录的是人当时指的那个东西。
+
+**所有属性值都过 `escape_frame_attr`**，包括看起来机器生成的那些：`title` 来自登记行，而那个值本身是模型或用户写的。框名 `referenced_outputs` 登记在 `../../../boundary/frame_markers.py` 的 `OWNED_FRAMES` 里，所以标题里的字面 `</referenced_outputs>` 关不掉框，换行也被压平、伪造不出第二条目录行。
+
+**本轮没有引用时整块返回空字符串**，系统消息与这个框存在之前逐字相同——全文 pin 因此没有 diff。若哪天 pin 有了 diff，说明框被无条件渲染了，那是缺陷，不是刷新快照的理由。
+
+#### Token effect
+
+- **每条 `<output/>` 约 25-40 token**。标题在登记口就被截到 `TITLE_MAX = 120` 字符（`../../deliverables/kinds.py`），纯 ASCII 下约 30 token，全中文最坏接近 120。
+- **条数上限 8**（`../chat/output_ref_resolver.py` 的 `MAX_OUTPUT_REF_ATTACHMENTS`）。封的是**数据库往返**——每个被引对象一次 `lineage_for`（同一对象引多版合并成一次）。⚠️ 与 `MAX_ASSET_REF_ATTACHMENTS` 数值相同但是两个常量，两者封的成本不是一回事。超出是**类型化 400**（`output_ref_limit_exceeded`），不是静默截断——后者正是 binary 桶那条 Known Limitation 记着的缺口。
+- **不随产出大小增长。** 引用一段五万字的剧本和引用一行分镜花的 token 一模一样，因为框里本来就没有内容。这是选这个形状而不是「把被引版本贴进上下文」的全部理由。
+- 框后那一句固定文案约 45 token，同样只在本轮有引用时出现。
+
+#### KV Cache effect
+
+它和 `<available_resources>` 一样**拼在系统消息尾巴上，位于 `<!-- CACHE_BOUNDARY -->` 之后**，所以逐轮变化不影响稳定前缀。
+
+**放在边界之后是刻意的，不是顺手。** 引用逐条评论都不同（这一条 @ 了 v2，下一条什么都没 @），放进边界之前的前缀里，等于每引用一次就让整个身份 + skill 清单的前缀失效一次——`<available_workers>` 之所以能待在边界之前，正因为它**不**这样逐轮变。
+
+本模块不缓存登记表内容：框是每轮从本轮附件重新拼的，附件里的坐标与标题快照来自发帖口那一次校验。
+
 ## Known Limitations and Deferred Work
 
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
@@ -351,4 +391,8 @@ Use the ResourceFetch tool to load any of these on demand:
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **资产的主图可能「有」却「取不到」，此时条目被降级渲染**。`has_image` 由解析器用**系统作用域**读 `resources` 算出（资产的文件行是经资产可读的，不是经调用者的 team 成员关系），而 `ResourceFetch` 只认本轮可访问集合——两者会不一致，最典型的是系统预设资产，它的文件落在用户不属于的 scope 里。`ai_library_chat_service._merge_asset_primaries` 在这种情况下把条目改写成 `has_image="false"` 且**省掉 `primary_resource_id`**（即上面那条「没有图可取」的形状），并向用户回一条 `asset_no_primary_image`。宁可少给一张图，也不给模型一个用了就失败的 id。
 - **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 的 reason 词表里，`asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得再给词表加一个值（词表现在是五个：四个来自 `asset_ref_resolver`，第五个 `attachment_limit_exceeded` 由 chat service 的 `asset_ref` 条数上限产出）。
+- **被转进收件箱的评论，其 `output_ref` 引用不会渲染成 `<referenced_outputs>`**。一条评论在 root run 忙时会进 `agent_run_inbox`，而 `render_inbox_message`（`../runner/inbox.py`）只渲染正文——附件躺在 `content.attachments` 里没有消费方。⚠️ `resource_ref` / `asset_ref` 在这条路上同样如此，是 P4 之前就有的缺口；显式记在这里，是因为「两个入口只接一个」这类缺口在本仓出现过多次。
+- **聊天面板一侧的引用是被「拒绝」而不是「校验」的**（3a 修复轮 1）。`AILibraryChatService.chat` 碰到 `output_ref` 附件直接回 400 `output_ref_unresolvable`（消息说 citations require an issue context），轮次一次都不开始。理由是引用在 3a 里按定义就是 issue 作用域的——解析器校验的正是「这一版的 run 属于本 issue」——而聊天会话没有 issue 可比；在那里编一套「拿 session 的 run 当 issue 用」的第二套归属语义，比拒绝更糟。⚠️ 所以聊天面板**今天不能引用产出**，这是本期的范围边界，不是缺陷。引用哪天变成非 issue 作用域，改的是 `refuse_citations_without_issue` 一个函数。
+- **legacy 路径（issue 没有 assignee agent）根本不转发附件**，所以那条路上的引用既不被校验也不到达任何人。这对所有附件 kind 都成立，不是 `output_ref` 引进的；在那里加校验只会给出「引用有效」的假保证，因为它随后照样被丢掉。
+- **`script_chapter` 今天没有生产者**，所以引用它必然是 `output_ref_unresolvable`。没有特判——登记表说没有就是没有。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。

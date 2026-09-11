@@ -176,7 +176,30 @@ class AttachmentRequest(BaseModel):
         "(the only value v1 clients send) means the asset's default loadout.",
     )
 
-    @field_validator("resource_id", "asset_id", "loadout_id", mode="before")
+    # 三期 3a Task 4: @-reference a registered OUTPUT version (kind='output_ref')
+    ref_kind: Optional[str] = Field(
+        default=None,
+        description="Deliverable kind for kind='output_ref' — one of "
+        "generated_media / script_shot / script_scene / script_chapter.",
+    )
+    ref_id: Optional[str] = Field(
+        default=None,
+        description="The cited object's id for kind='output_ref'.",
+    )
+    version: Optional[int] = Field(
+        default=None,
+        description="Which version of that object is cited (1-based). A "
+        "citation names one specific version, so this is required for "
+        "kind='output_ref'.",
+    )
+    title: Optional[str] = Field(
+        default=None,
+        description="Display title for kind='output_ref'. Client-supplied "
+        "values are IGNORED and overwritten with the registry row's title at "
+        "post time — the thread must render what was actually registered.",
+    )
+
+    @field_validator("resource_id", "asset_id", "loadout_id", "ref_id", mode="before")
     @classmethod
     def _coerce_ref_id_str(cls, v: Any) -> Any:
         """Accept a Snowflake sent as a JSON number.

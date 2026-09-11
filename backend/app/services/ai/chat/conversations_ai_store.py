@@ -116,6 +116,12 @@ _DISPLAY_ATTACHMENT_KEYS = (
     "mime",
     "alt_text",
     "name",
+    # 三期 3a Task 4 — ``output_ref`` 引用的坐标 + 发帖时抄下的标题。标题存在
+    # 这里，是为了线程重载时 chip 不用再查一次登记表。
+    "ref_kind",
+    "ref_id",
+    "version",
+    "title",
 )
 
 

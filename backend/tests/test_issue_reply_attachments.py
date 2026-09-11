@@ -62,6 +62,12 @@ def test_issue_message_post_attachments_serializable_as_dicts():
     # asset resolver (P5 ruling H — chat only this round). An issue reply that
     # sent `kind='asset_ref'` would fall through to the binary path and come
     # back as a typed "unsupported attachment kind" failure, not a silent drop.
+    #
+    # 三期 3a Task 4 added ref_kind / ref_id / version / title for
+    # `kind='output_ref'`. Those four ARE honoured on this wire — the issue
+    # message endpoint resolves them against the deliverables registry and
+    # refuses an unresolvable citation with a typed 400 — which is why they sit
+    # beside the asset keys rather than under the caveat above.
     assert raw == [
         {
             "kind": "image",
@@ -74,5 +80,9 @@ def test_issue_message_post_attachments_serializable_as_dicts():
             "scope": None,
             "asset_id": None,
             "loadout_id": None,
+            "ref_kind": None,
+            "ref_id": None,
+            "version": None,
+            "title": None,
         }
     ]

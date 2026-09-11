@@ -937,3 +937,71 @@ def render_available_resources(
             "as unavailable. none/failed means nothing has been generated yet."
         )
     return "\n".join(lines)
+
+
+# ── <referenced_outputs> — 三期 3a Task 4 ────────────────────────────────────
+
+#: 我们拥有的框名，登记在 ``OWNED_FRAMES`` 里。
+#:
+#: ⚠️ 下面的渲染把开闭标记**写成字面量**而不是用这个常量拼 f-string，这是
+#: 刻意的：`test_frame_escape_wiring.py` 的登记守卫是**扫源码里的 `</name>`
+#: 字面量**，f-string 拼出来的标记它一个都看不见。`render_available_resources`
+#: 一直是字面量写法，所以一直在守卫覆盖内；`runner/inbox.py` 的
+#: `<inbox_message>` 用 f-string，因此**不在**覆盖内（它已登记，所以今天没
+#: 出问题，但守卫并没有在保护它）。
+REFERENCED_OUTPUTS_FRAME = "referenced_outputs"
+
+#: 框后面那一句。没有它，模型只看到三个属性，最可能的读法是「这些内容已经
+#: 在上下文里了」——然后它开始凭标题编内容。一句话说清「这是坐标不是内容」
+#: 比省下这 40 个 token 值。
+_REFERENCED_OUTPUTS_NOTE = (
+    "Each <output/> above is a CITATION the human made — one specific version "
+    "of an object, not its content. The content is NOT in this context: read "
+    "the object itself with the tools you already have."
+)
+
+
+def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
+    """Render the ``<referenced_outputs>`` block for this turn's citations.
+
+    ``refs`` are ``output_ref_resolver.ChatOutputRef`` values. They are typed
+    as ``Any`` on purpose: importing that dataclass at runtime would drag the
+    deliverables registry (and its repository) into every import of this
+    module, and this function only ever reads four attributes off it.
+
+    **Coordinates only, never content.** One self-closing ``<output/>`` per
+    citation, and nothing else inside the frame — that is the whole contract
+    (三期 3a spec §5). Putting the cited version's text in here would charge
+    the turn full price for something the model can fetch on demand, and would
+    put a stale copy of a revised object in front of it.
+
+    Every attribute goes through ``escape_frame_attr``, including the ones
+    that look machine-generated: ``title`` is copied from a registry row whose
+    value came from a model or a user, and picking per-attribute is how the
+    next attribute added here ends up raw.
+
+    ``title`` is omitted rather than rendered empty when the registry row has
+    none — ``title=""`` reads as "its title is the empty string", absence
+    reads as "it was never given one" (same rule as ``primary_resource_id``
+    in ``render_available_resources``).
+
+    Returns the empty string when the turn cites nothing, so a turn without a
+    citation is byte-for-byte what it was before this frame existed.
+    """
+    if not refs:
+        return ""
+    lines = ["<referenced_outputs>"]
+    for ref in refs:
+        attrs = [
+            f'kind="{escape_frame_attr(ref.ref_kind)}"',
+            f'ref="{escape_frame_attr(ref.ref_id)}"',
+            f'version="{escape_frame_attr(ref.version)}"',
+        ]
+        title = getattr(ref, "title", None)
+        if title is not None:
+            attrs.append(f'title="{escape_frame_attr(title)}"')
+        lines.append(f"  <output {' '.join(attrs)}/>")
+    lines.append("</referenced_outputs>")
+    lines.append("")
+    lines.append(_REFERENCED_OUTPUTS_NOTE)
+    return "\n".join(lines)
