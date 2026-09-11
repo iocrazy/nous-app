@@ -48,6 +48,8 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         # harness p4 §1-③: a claimed inbox item injected at a step boundary
         "inbox_message",
         "pending_followups",
+        # 三期 3a-④: 本轮被人引用的产出版本（只有坐标，没有内容）
+        "referenced_outputs",
         "scene_elements",
         "user_context",
         "user_instruction",

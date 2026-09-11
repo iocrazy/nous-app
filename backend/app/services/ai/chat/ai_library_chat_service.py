@@ -43,6 +43,10 @@ from app.services.ai.chat.asset_ref_resolver import (
 )
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
+from app.services.ai.chat.output_ref_resolver import ATTACHMENT_KIND as OUTPUT_REF_KIND
+from app.services.ai.chat.output_ref_resolver import (
+    output_refs_from_attachments,
+)
 from app.services.ai.chat.resource_ref_resolver import (
     fetch_resource_meta,
     resolve_resource_refs,
@@ -55,6 +59,7 @@ from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
     render_available_resources,
+    render_referenced_outputs,
 )
 from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in tests
     AgentRunner,
@@ -905,8 +910,9 @@ class AILibraryChatService:
                     {"role": role, "content": msg.get("content") or ""}
                 )
 
-        # S4 Task 6 / P5 Task 3: split attachments by kind before resolution.
-        # THREE buckets, each explicit — a kind that falls through to
+        # S4 Task 6 / P5 Task 3 / 三期 3a Task 4: split attachments by kind
+        # before resolution.
+        # FOUR buckets, each explicit — a kind that falls through to
         # `binary_atts` by accident does not fail quietly, it fails wrongly:
         # chat_attachment_resolver raises "unsupported attachment kind" and the
         # user is told their attachment could not be READ, when in fact their
@@ -915,6 +921,8 @@ class AILibraryChatService:
         #                  lazily via the ResourceFetch tool during the turn)
         #   asset_ref    → asset_ref_resolver (library entity → consistency
         #                  prompt + a primary image folded in below)
+        #   output_ref   → <referenced_outputs> (coordinates of one registered
+        #                  output version; never its content)
         #   everything else → the existing G2 binary path (image/pdf/audio)
         #
         # `binary_source_index` maps a binary failure's index back to the
@@ -939,6 +947,7 @@ class AILibraryChatService:
         # send 200 copies of one id and still spend 200 slots' worth of
         # request body, which is the thing being bounded.
         ref_atts: list = []
+        output_ref_atts: list = []
         binary_atts: list = []
         binary_source_index: list[int] = []
         asset_att_indices: list[int] = []
@@ -962,6 +971,13 @@ class AILibraryChatService:
                     )
                     continue
                 asset_att_indices.append(_i)
+            elif _kind == OUTPUT_REF_KIND:
+                # 三期 3a Task 4 — a citation of one registered output version.
+                # A FOURTH explicit bucket, for the reason the comment above
+                # gives: falling through to `binary_atts` would tell the user
+                # their attachment could not be READ, when their reference was
+                # never resolved at all.
+                output_ref_atts.append(_att)
             else:
                 binary_atts.append(_att)
                 binary_source_index.append(_i)
@@ -1040,6 +1056,27 @@ class AILibraryChatService:
                     update={
                         "system_message": (
                             composed.system_message + "\n\n" + resources_block
+                        )
+                    }
+                )
+
+        # 三期 3a Task 4 — citations of registered outputs. Post-boundary like
+        # the block above (it changes every turn), and rendered ONLY when this
+        # turn carries one: a turn without a citation must stay byte-for-byte
+        # what it was, which is also why the full-text prompt pin sees no diff.
+        #
+        # No database round trip here. The coordinates and the title were
+        # validated and stamped at the posting endpoint; this frame delivers
+        # coordinates only, so re-reading the registry per turn would buy
+        # nothing the model can see (see `output_refs_from_attachments`).
+        if output_ref_atts:
+            output_refs = output_refs_from_attachments(output_ref_atts)
+            outputs_block = render_referenced_outputs(output_refs)
+            if outputs_block:
+                composed = composed.model_copy(
+                    update={
+                        "system_message": (
+                            composed.system_message + "\n\n" + outputs_block
                         )
                     }
                 )

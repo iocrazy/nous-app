@@ -60,6 +60,10 @@ from app.schemas.issue_message import (
     IssueMessagePostResponse,
 )
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+from app.services.ai.chat.output_ref_resolver import (
+    OutputRefRefused,
+    resolve_output_refs,
+)
 from app.services.issues.comment_trigger import (
     apply_suppression,
     compute_comment_trigger,
@@ -618,6 +622,24 @@ async def post_issue_message(
     attachments_payload = (
         [a.model_dump() for a in payload.attachments] if payload.attachments else None
     )
+
+    # 三期 3a Task 4: an `output_ref` attachment cites ONE version of a
+    # registered output. Validated HERE, before anything is persisted or
+    # dispatched, because an unresolvable citation must reach the user as a
+    # typed 400 rather than being dropped on the way to the agent (CLAUDE.md
+    # 「触发路径必须类型化失败回显」). The resolution also stamps each citation
+    # with the registry row's title, so the thread renders without a second
+    # lookup. The logic lives in the resolver layer beside `resource_ref` and
+    # `asset_ref`; the router only translates the refusal.
+    try:
+        _outputs = await resolve_output_refs(attachments_payload, issue_id=issue_id)
+    except OutputRefRefused as exc:
+        # `detail` is a DICT: production wraps every HTTPException in the
+        # ErrorResponse envelope and only a dict survives, under `details`.
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "message": exc.message}
+        ) from exc
+    attachments_payload = _outputs.attachments
 
     # Phase 2a: an answer to a parked typed question is validated and
     # recorded here, then travels down the ordinary wake path below.
