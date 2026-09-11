@@ -69,6 +69,12 @@ on:
       - 'backend/tests/db/test_conversations_store_question_integration.py'
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
       - 'backend/tests/db/test_run_deliverables_repository_integration.py'
+      - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
+      # The writer whose seq-conflict retry that file is the only real-driver
+      # proof of: a stub can raise IntegrityError on command, but only Postgres
+      # + asyncpg answer whether a UNIQUE (run_id, seq) violation actually
+      # ARRIVES as one at the except clause.
+      - 'backend/app/services/ai/runner/run_recorder.py'
       # Lives under tests/integration/, not tests/db/ — the step below names it
       # explicitly, so this entry is what makes a change to it trigger a run.
       - 'backend/tests/integration/test_agent_workforce_repository_orm.py'
@@ -127,10 +133,10 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all eleven, so it has to re-run
+      # to it changes what "green" means for all thirteen, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong twice (it said "eight" when there were
-      # seven, then "nine" when there were eight — each edit trusted the
+      # seven, "nine" when there were eight, then "eleven" when there were thirteen — each edit trusted the
       # previous number instead of counting). Recount, do not increment:
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
@@ -361,6 +367,23 @@ jobs:
           # (kind, ref_id, version) — the registry's whole race story — or that
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
+
+      - name: Exercise the transcript seq-conflict retry against the built schema (mig 397)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place RunEventWriter's seq-conflict retry meets a real
+          # unique index. Its unit test builds one in a stub and raises
+          # IntegrityError by hand, which pins the retry LOGIC but says nothing
+          # about the question that matters: does a UNIQUE (run_id, seq)
+          # violation actually reach `except IntegrityError` through asyncpg +
+          # SQLAlchemy, carrying sqlstate 23505? If it arrived as anything
+          # else the retry would never fire, the unit tests would stay green,
+          # and production would keep swallowing one transcript event per
+          # deliverable registered mid-turn (真栈 run 348401200407189).
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_transcript_seq_conflict_integration.py -v
 
       - name: Exercise the canvas→asset ref mirror against the built schema (mig 445)
         working-directory: backend

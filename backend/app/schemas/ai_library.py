@@ -498,3 +498,11 @@ class ComposedSystemPrompt(BaseModel):
     prefix_fingerprint: str = ""  # M1.B: stable prefix hash
     dynamic_fingerprint: str = ""  # M1.B: prefix + memory recall hash
     recalled_memory_ids: list[UUID] = Field(default_factory=list)
+    # 三期 3a T8c: the output versions this turn cites, as
+    # ``{kind, ref_id, version, title}``. Carried beside the prompt the way
+    # ``timeout_sec`` is — it is not prompt text (the frame the model reads is
+    # already spliced into ``system_message``); it rides here so the runner can
+    # put it on the turn's ``user`` transcript event, which is what the person
+    # reading the run sees. Empty on every turn that cites nothing, and the
+    # runner then writes no key at all.
+    referenced_outputs: list[dict] = Field(default_factory=list)

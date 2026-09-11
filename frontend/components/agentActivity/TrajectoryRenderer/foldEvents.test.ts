@@ -412,3 +412,75 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     expect(step.outputs).toHaveLength(1);
   });
 });
+
+describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
+  // spec §5 稿二：消费了引用的那一轮，第 1 步下要有一行「引用 N 件」，注明
+  // 按版本锁定。坐标随 `user` 事件的 payload 到达（后端 T8c 那一半）。
+  const ev = (seq: number, event_type: string, payload: Record<string, unknown>, step?: number): AgentRunEvent =>
+    ({ seq, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  const CITED = [
+    { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM' },
+    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' },
+  ];
+
+  it('hangs this turn’s citations on the step that consumed them', () => {
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'revise this', referenced_outputs: CITED }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+      ev(3, 'step_end', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toEqual([
+      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
+      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+    ]);
+  });
+
+  it('reads the payload field when it arrives JSON-stringified', () => {
+    // `_truncate_payload` stringifies any nested value over the cap; the list
+    // must read the same either way (与 `usage` / `todos` 同族).
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'revise this', referenced_outputs: JSON.stringify(CITED) }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toHaveLength(2);
+  });
+
+  it('gives the citations to STEP 1 only, never to later steps', () => {
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'go', referenced_outputs: CITED }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+      ev(3, 'step_end', { turn: 1, step: 1 }, 1),
+      ev(4, 'step_start', { turn: 1, step: 2 }, 2),
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].citations).toHaveLength(2);
+    expect(steps[1].citations).toBeUndefined();
+  });
+
+  it('leaves an old run without the key exactly as it renders today', () => {
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'go' }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toBeUndefined();
+  });
+
+  it('drops an entry missing a coordinate rather than drawing an unopenable one', () => {
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'go', referenced_outputs: [{ kind: 'script_shot', version: 1 }, ...CITED] }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toHaveLength(2);
+  });
+});

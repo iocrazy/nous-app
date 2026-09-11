@@ -11,8 +11,11 @@ transcript 上落一条 ``deliverable`` 事件 → 把那条事件的 seq 回写
 写入点，它们不是 agent 产出，不占版本号，也不该在任何 run 上留事件。
 空的写法有三种（``None`` / ``""`` / 测试 sentinel ``"0"``），都算空。
 
-**事件可能落在已经结束的 run 上**：分镜出图走 DBOS，父 run 早已收工。
-这条路与 workforce 写 ``subagent_done`` 的完全一样——``RunEventWriter.for_run``。
+**没有 recorder 时事件走 ``RunEventWriter.for_run``**：分镜出图走 DBOS，
+登记发生在另一个进程/另一个时刻。这条路与 workforce 写 ``subagent_done`` 的
+完全一样。⚠️ 那时父 run **不一定已经结束** —— `GenerateShotImage` 只确认
+dispatch 就返回，所以两个 writer 同时在一个 run 上是真实情形；见
+``_writer_for`` 的 docstring 与 ``RunEventWriter.append`` 的 seq 重试。
 
 **kind 错是接线 bug，不是数据问题**：四类之外一律 ``ValueError``。静默跳过
 会让那条路的产出永远不存在而没有任何地方说得出来（「触发路径必须类型化
@@ -253,8 +256,16 @@ class _LateRecorder:
 
 
 async def _writer_for(run_id: Any) -> Optional[_LateRecorder]:
-    """活着的 run 会把自己的 recorder 传进来；走到这里的是 DBOS 侧的
-    迟到事件——父 run 早已结束，只能按 seq 续写并折进它**存下来的** views。
+    """没有 recorder 可用时的写入口：按 seq 续写并折进那个 run **存下来的**
+    views。
+
+    ⚠️ **别读成「父 run 一定已经结束」**（T8c 修复轮 1 更正）。`GenerateShotImage`
+    只确认 dispatch 就返回，父 run 继续迭代，所以 DBOS 侧那次
+    `register_generated_media`（`workflows/script_shot_generate.py` /
+    `script_shot_video.py`）完全可能落在父 run 仍然活着时 —— 同一个 run 上两个
+    writer。两半都在 `RunEventWriter` 里兜住了：`append` 撞唯一索引会重新播种
+    并重试（谁都不吃掉谁的事件），`refold_external_slices` 在镜像前重折两边都能
+    碰的切片，而那次撞车本身就是「有第二个 writer」的通知。
 
     拿不到写入口时返回 ``None``：登记的行已经落库（表是唯一真相），
     少一条 transcript 事件不该把一次成功的产出变成失败。"""

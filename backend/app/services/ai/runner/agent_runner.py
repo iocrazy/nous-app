@@ -198,6 +198,23 @@ def _last_user_text(user_messages: list[dict]) -> str:
     return ""
 
 
+def _user_event_payload(
+    composed: ComposedSystemPrompt, user_messages: list[dict]
+) -> dict:
+    """The turn-opening ``user`` event (三期 3a T8c 缺陷 4).
+
+    ``referenced_outputs`` is written ONLY when this turn cites something. A
+    turn without citations must produce byte-for-byte the payload it always
+    did: old runs and uncited new ones then render identically, and no reader
+    grows a branch for "the key is there but empty".
+    """
+    payload: dict = {"content": _last_user_text(user_messages)}
+    cited = getattr(composed, "referenced_outputs", None)
+    if cited:
+        payload["referenced_outputs"] = list(cited)
+    return payload
+
+
 def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
     """Q5: check if a tool name maps to a registered MCP server.
 
@@ -620,7 +637,7 @@ class AgentRunner:
         # Streaming runs skip the final 'assistant' event — the chat layer
         # persists the full message itself; tool_call events below are the
         # part the Transcript adds over chat history.
-        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
+        await emit_event(recorder, "user", _user_event_payload(composed, user_messages))
 
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
@@ -1473,6 +1490,15 @@ class AgentRunner:
             # 就没有 run，那一路的产出不该假装属于某个 turn。
             "turn": 1 if recorder else None,
             "step": step,
+            # 3a T8c 缺陷 1：登记口没拿到 recorder 就退回
+            # ``RunEventWriter.for_run`` —— 同一个 run 上的**第二个** writer。
+            # 它把 ``view.outputs`` 折进 ``metadata_json``，活 recorder 的下
+            # 一次镜像（写的是整个 ``view`` 值）再原样抹掉，于是座舱那一格
+            # 唯一的数据源永远是空的；两个 writer 各记各的 seq，活 recorder
+            # 的下一条 insert 还会撞唯一索引被丢掉。把活 recorder 交出去，
+            # 这两半一起消失。⚠️ 只有**活着的**那条路有 recorder 可交；迟到
+            # 的登记（run 已结束）照旧走 ``for_run``，那时没有第二个 writer。
+            "recorder": recorder,
         }
 
     async def _preflight_compact_and_budget(
@@ -1696,7 +1722,7 @@ class AgentRunner:
 
         # P3 transcript (mig 285): open the event stream with the user turn.
         # Best-effort — record_event never raises.
-        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
+        await emit_event(recorder, "user", _user_event_payload(composed, user_messages))
 
         # Wave G (G3): per-run loop guard. Detects "same (tool, args)
         # called >= N times in last M calls" and warns the LLM mid-run

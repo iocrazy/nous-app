@@ -315,6 +315,29 @@ def output_refs_from_attachments(
     return out
 
 
+def citations_for_transcript(refs: Sequence[ChatOutputRef]) -> List[dict]:
+    """本轮引用 → ``user`` 事件 payload 上那一段（三期 3a T8c 缺陷 4）。
+
+    与 ``<referenced_outputs>`` 框是同一批坐标的两个读者：框给**模型**，这份
+    给**人**（线程里第 1 步下的「引用 N 件」行）。两者从同一个
+    ``ChatOutputRef`` 序列投影出来，所以不会出现「模型看到 3 件、UI 说 2 件」。
+
+    ``ref_id`` 一律字符串：它是 Snowflake BIGINT，落进 JSON number 会在浏览器
+    里丢精度（本仓 ``bigIntSafeFetch`` 存在的同一个理由）。``version`` 是小
+    整数，照旧是 number。
+
+    ``title`` 为空时**键省略**，与 ``_stamped`` 同一口径：缺席说的是「没有标
+    题」，空串说的是「标题就是空的」。
+    """
+    out: List[dict] = []
+    for ref in refs:
+        item = {"kind": ref.ref_kind, "ref_id": str(ref.ref_id), "version": ref.version}
+        if ref.title is not None:
+            item["title"] = ref.title
+        out.append(item)
+    return out
+
+
 def refuse_citations_without_issue(attachments: Optional[Sequence[Any]]) -> None:
     """在**没有 issue 可作用域**的入口上，任何引用一律类型化拒绝。
 
@@ -359,6 +382,7 @@ __all__ = [
     "MAX_OUTPUT_REF_ATTACHMENTS",
     "UNRESOLVABLE",
     "ChatOutputRef",
+    "citations_for_transcript",
     "OutputRefRefused",
     "OutputRefResolution",
     "output_ref_http_400",

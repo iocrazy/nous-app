@@ -50,6 +50,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from app.services.ai.runner.run_projection import apply as apply_projection
 from app.services.ai.runner.run_projection import empty_views, recompute_spent
@@ -797,7 +798,7 @@ class RunRecorder:
         # finished mid-run put its ``subagent_done`` in the transcript, never
         # in these in-memory views, and this is the last chance to bill it.
         if self._event_writer is not None:
-            await self._event_writer.refold_children()
+            await self._event_writer.refold_external_slices()
         folded = self._event_writer.views["cost"] if self._event_writer else None
         own_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
@@ -988,6 +989,60 @@ async def event_writer_for_run(run_id: Any) -> "RunEventWriter":
 #: re-read from the transcript rather than trusted from memory.
 SUBAGENT_EVENT_TYPES = ("subagent_spawned", "subagent_done")
 
+#: Every event type a SECOND writer can put on a run's transcript, hence every
+#: view slice the mirror has to re-read instead of trusting memory.
+#: ``deliverable`` joins the two sub-agent types for the same reason: the
+#: deliverables registry falls back to ``RunEventWriter.for_run`` whenever no
+#: recorder is handed to it (三期 3a T8c 缺陷 1 — the folded ``view.outputs``
+#: was mirrored by that second writer and wiped by the live recorder's next
+#: whole-value mirror, so the cockpit's outputs cell could never render).
+EXTERNALLY_WRITTEN_EVENT_TYPES = (*SUBAGENT_EVENT_TYPES, "deliverable")
+
+#: Postgres ``unique_violation``. The ONLY IntegrityError that means "another
+#: writer took my seq" — the same table also carries an ``event_type`` CHECK
+#: allowlist, a ``run_id`` FK and three NOT NULLs, and each of those is an
+#: IntegrityError too. Treating one of THOSE as a race would log three "another
+#: writer is on this run" warnings that send the next reader hunting for a
+#: second writer that does not exist, pay two doomed retries, and latch
+#: ``foreign_writer_seen`` on for the rest of the run.
+_UNIQUE_VIOLATION_SQLSTATE = "23505"
+
+#: The unique index the retry is about. asyncpg puts the violated constraint's
+#: name on the original error; when it is present and names something else, the
+#: conflict is not ours. Absent (another driver, a wrapped error) it is not
+#: treated as disqualifying — the sqlstate above is the load-bearing check.
+_SEQ_UNIQUE_CONSTRAINT = "agent_run_transcript_events_run_id_seq_key"
+
+#: How many times ``append`` re-seeds its counter and retries after losing the
+#: ``(run_id, seq)`` race. Bounded because the alternative failure — a genuine
+#: constraint problem that looks like a conflict — must not spin: three tries
+#: cover a second writer landing one or two events between our read and our
+#: insert, and anything beyond that is a different bug that should surface as
+#: the ordinary "insert failed" warning.
+_SEQ_CONFLICT_ATTEMPTS = 3
+
+
+def _is_seq_conflict(err: IntegrityError) -> bool:
+    """True only for ``UNIQUE (run_id, seq)`` — "someone else took my number".
+
+    Read off the DRIVER's original error, not the message text: asyncpg exposes
+    ``sqlstate``, psycopg ``pgcode``, and both name the violated constraint.
+    Every other IntegrityError this table can raise (the ``event_type`` CHECK
+    allowlist, the ``run_id`` FK, three NOT NULLs) is a wiring bug, and a wiring
+    bug diagnosed as a race is worse than one diagnosed as nothing: the log then
+    names a second writer that does not exist.
+
+    The sqlstate is the load-bearing check. The constraint name only ever
+    DISQUALIFIES — when the driver supplies one and it is a different index. A
+    driver that supplies none leaves the decision to the sqlstate.
+    """
+    orig = getattr(err, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if sqlstate != _UNIQUE_VIOLATION_SQLSTATE:
+        return False
+    name = getattr(orig, "constraint_name", None)
+    return name is None or name == _SEQ_UNIQUE_CONSTRAINT
+
 
 class RunEventWriter:
     """The one write path onto a run's transcript + its folded views.
@@ -1011,21 +1066,42 @@ class RunEventWriter:
         self.views: dict[str, Any] = empty_views()
         self._pending_mirror = False
         # Sub-agent events this writer folded but could NOT persist (the
-        # insert-failure branch below). ``refold_children`` rebuilds those two
-        # slices from the transcript, so anything missing from it has to be
-        # replayed on top or it would be dropped on the next mirror.
+        # insert-failure branch below). ``refold_external_slices`` rebuilds
+        # those two slices from the transcript, so anything missing from it
+        # has to be replayed on top or it would be dropped on the next mirror.
         # Edge: an insert that raised may still have COMMITTED (an ambiguous
         # failure — the connection dropped after the write). The event is then
         # both in the transcript and here, so the counters inflate by one;
         # ``by_child`` is keyed and stays exact, which is the half that bills.
         self._unpersisted_subagent: list[tuple[str, dict[str, Any]]] = []
+        # True once an insert lost the ``(run_id, seq)`` race — proof that a
+        # SECOND writer is on this run. It is the only such signal available in
+        # memory, and ``refold_external_slices`` uses it to open its guard: a
+        # run whose outputs are ALL written by the other writer has nothing else
+        # to go on (T8c 修复轮 1).
+        self._seq_conflicts = 0
+
+    @property
+    def foreign_writer_seen(self) -> bool:
+        """Another writer has taken a seq on this run during this writer's life."""
+        return self._seq_conflicts > 0
 
     @classmethod
     async def for_run(cls, run_id: Any) -> "RunEventWriter":
-        """A writer for a run that already ended (answering a parked question,
-        FinishIssue options → question_asked). Continues the run's seq and
-        folds onto its STORED views — a fresh writer would mirror an empty
-        projection over ``metadata_json.view`` and erase the run's history."""
+        """A writer for a run this process does not own: the deliverables
+        registry, workforce's ``subagent_done``, a parked question being
+        answered, FinishIssue options → ``question_asked``.
+
+        ⚠️ **The run may still be RUNNING.** ``GenerateShotImage`` dispatches to
+        DBOS and the parent keeps iterating, so its ``register_generated_media``
+        can land while the parent's own recorder is live — two writers, one run.
+        Both halves of that are handled: ``append`` re-seeds and retries on the
+        unique-index collision, and ``refold_external_slices`` rebuilds the
+        slices either writer can touch.
+
+        Continues the run's seq and folds onto its STORED views — a fresh writer
+        would mirror an empty projection over ``metadata_json.view`` and erase
+        the run's history."""
         from sqlalchemy import func, select
 
         from app.db import session as _dbs
@@ -1072,45 +1148,131 @@ class RunEventWriter:
         step: Optional[int] = None,
     ) -> Optional[int]:
         """Insert the row, fold, mirror. Returns the seq, or None when the
-        insert failed (folded locally, not mirrored — see below)."""
-        self.seq += 1
-        seq = self.seq
-        try:
-            from sqlalchemy import insert
+        insert failed (folded locally, not mirrored — see below).
 
-            from app.db.session import write_scope
-            from app.models import AgentRunTranscriptEvents
+        **Seq collisions are retried, not lost** (T8c 修复轮 1). Two writers
+        can be on one run at once — the live recorder and anything going
+        through ``for_run`` (the deliverables registry, workforce, a parked
+        question) — and each holds its own counter. ``for_run`` seeds from
+        ``max(seq)``, so whichever writer moves second asks for a seq the other
+        already took and hits ``UNIQUE (run_id, seq)`` (mig 397). Before this,
+        that event was gone: the failure branch below logged a warning and
+        returned, and only ``SUBAGENT_EVENT_TYPES`` were replayed, so a
+        ``tool_call`` / ``assistant`` / ``deliverable`` simply vanished from the
+        transcript. 真栈 run 348401200407189 (``deliverable(4) tool_call(5)``)
+        shows exactly that — the gapless numbering is the evidence of the
+        swallowed row, not evidence that nothing happened.
 
-            async with write_scope() as session:
-                await session.execute(
-                    insert(AgentRunTranscriptEvents).values(
-                        run_id=self.run_id,
-                        seq=seq,
-                        event_type=event_type,
-                        payload=_truncate_payload(payload, self.value_max_chars),
-                        turn=turn,
-                        step=step,
+        So on a conflict the counter is RE-SEEDED from the database and the
+        insert retried, bounded by ``_SEQ_CONFLICT_ATTEMPTS``. Both writers get
+        this, because both go through here.
+        """
+        for attempt in range(1, _SEQ_CONFLICT_ATTEMPTS + 1):
+            self.seq += 1
+            seq = self.seq
+            try:
+                from sqlalchemy import insert
+
+                from app.db.session import write_scope
+                from app.models import AgentRunTranscriptEvents
+
+                async with write_scope() as session:
+                    await session.execute(
+                        insert(AgentRunTranscriptEvents).values(
+                            run_id=self.run_id,
+                            seq=seq,
+                            event_type=event_type,
+                            payload=_truncate_payload(payload, self.value_max_chars),
+                            turn=turn,
+                            step=step,
+                        )
                     )
+            except IntegrityError as err:
+                if not _is_seq_conflict(err):
+                    # A different constraint — a wiring bug, not a race. Same
+                    # path as any other failed insert, and deliberately NOT
+                    # counted as a foreign writer: that flag latches the refold
+                    # guard open for the rest of the run.
+                    logger.warning(
+                        f"[RunEventWriter] insert rejected (run={self.run_id} "
+                        f"seq={seq} type={event_type}): {err}"
+                    )
+                    return self._insert_failed(event_type, payload, seq)
+                # Someone else is writing this run. Say so — both that it
+                # happened and which event nearly went missing — then re-seed
+                # and try again. The re-seed READ is the whole point: our
+                # counter is stale by however many seqs the other writer took.
+                self._seq_conflicts += 1
+                logger.warning(
+                    f"[RunEventWriter] seq {seq} already taken on run "
+                    f"{self.run_id} (type={event_type}, attempt {attempt}/"
+                    f"{_SEQ_CONFLICT_ATTEMPTS}) — another writer is on this "
+                    f"run; re-seeding from the transcript: {err}"
                 )
+                if attempt == _SEQ_CONFLICT_ATTEMPTS:
+                    return self._insert_failed(event_type, payload, seq)
+                reseeded = await self._max_persisted_seq()
+                if reseeded is None:
+                    # Cannot re-seed (the read failed). Retrying with the same
+                    # stale counter would only collide again.
+                    return self._insert_failed(event_type, payload, seq)
+                self.seq = reseeded
+                continue
+            except Exception as err:  # noqa: BLE001 — telemetry never fails a run
+                logger.warning(
+                    f"[RunEventWriter] insert failed (run={self.run_id} "
+                    f"seq={seq} type={event_type}): {err}"
+                )
+                return self._insert_failed(event_type, payload, seq)
+            await self._fold_and_mirror(event_type, payload, seq)
+            return seq
+        return None  # pragma: no cover — the loop returns on every path
+
+    async def _max_persisted_seq(self) -> Optional[int]:
+        """The highest seq the transcript actually holds, or ``None`` when the
+        read itself failed (which is NOT the same as "the run has no events" —
+        that answers 0)."""
+        try:
+            from sqlalchemy import func, select
+
+            from app.db.session import read_scope
+            from app.models.agents import AgentRunTranscriptEvents
+
+            async with read_scope() as session:
+                found = (
+                    await session.execute(
+                        select(func.max(AgentRunTranscriptEvents.seq)).where(
+                            AgentRunTranscriptEvents.run_id == self.run_id
+                        )
+                    )
+                ).scalar()
+            return int(found or 0)
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(
-                f"[RunEventWriter] insert failed (run={self.run_id} seq={seq} "
-                f"type={event_type}): {err}"
+                f"[RunEventWriter] could not re-seed seq (run={self.run_id}): {err}"
             )
-            # No row → no MIRROR: metadata_json.view must never claim an event
-            # the transcript does not hold (a late append losing a seq race
-            # lands here). The in-memory view still folds, because in-process
-            # readers (the park reading view.question, the budget hook reading
-            # cost) must see what happened in this process even with the DB
-            # down. Callers get None instead of a seq that names no row.
-            nxt = apply_projection(self.views, event_type, payload, seq=seq)
-            if nxt is not self.views:
-                self.views = nxt
-            if event_type in SUBAGENT_EVENT_TYPES:
-                self._unpersisted_subagent.append((event_type, dict(payload)))
             return None
-        await self._fold_and_mirror(event_type, payload, seq)
-        return seq
+
+    def _insert_failed(
+        self, event_type: str, payload: dict[str, Any], seq: int
+    ) -> None:
+        """No row → no MIRROR: ``metadata_json.view`` must never claim an event
+        the transcript does not hold. The in-memory view still folds, because
+        in-process readers (the park reading ``view.question``, the budget hook
+        reading cost) must see what happened in this process even with the DB
+        down. Callers get ``None`` instead of a seq that names no row.
+
+        ``_unpersisted_subagent`` is the sub-agent replay list. Since the seq
+        retry above, it is a SECOND net rather than the only one — it still
+        matters for the genuinely-unwritable case (the DB is down), where
+        billing must not lose a child's cost.
+        """
+        nxt = apply_projection(self.views, event_type, payload, seq=seq)
+        if nxt is not self.views:
+            self.views = nxt
+        if event_type in SUBAGENT_EVENT_TYPES:
+            self._unpersisted_subagent.append((event_type, dict(payload)))
+        return None
 
     def fold_local(self, kind: str, payload: dict[str, Any]) -> None:
         """Fold a local measurement (no event row). Mirrored with the next
@@ -1132,9 +1294,10 @@ class RunEventWriter:
         if event_type == "subagent_done":
             await self._sync_cost_column()
 
-    async def refold_children(self) -> None:
-        """Rebuild ``view.children`` and ``cost.by_child`` from the persisted
-        transcript, then recompute ``cost.spent_cents``.
+    async def refold_external_slices(self) -> None:
+        """Rebuild the slices a SECOND writer can touch — ``view.children`` /
+        ``cost.by_child`` and ``view.outputs`` — from the persisted transcript,
+        then recompute ``cost.spent_cents``.
 
         TWO writers touch those two slices on one run: the parent's own
         recorder (these in-memory views, mirrored as WHOLE values) and the
@@ -1144,14 +1307,48 @@ class RunEventWriter:
         parent was still running left ``async_pending`` stuck at +1 and its
         cost out of the parent's total.
 
+        ``view.outputs`` is the same defect one slice over (三期 3a T8c 缺陷 1,
+        真栈 run 348401200407189): the deliverables registry writes its
+        ``deliverable`` event through ``RunEventWriter.for_run`` unless the
+        live recorder is handed to it, and the live mirror then erased the
+        outputs slice — ``metadata_json->'view'`` held 17 keys and ``outputs``
+        was never one of them, so the cockpit's outputs cell, whose ONLY
+        source is that slice, could not render on any run.
+
+        ONE query feeds both: the fold registry already owns the per-event
+        logic (``folds/deliverables.py``), so the scratch projection replays
+        every externally-written type and each slice is lifted off it.
+
         Race-free by construction: both writers only ever APPEND, and
         ``append`` inserts the row BEFORE folding, so every event in these
         in-memory views is already in the transcript. The one exception is an
         event whose insert failed — folded in memory, no row — which is why
         ``_unpersisted_subagent`` is replayed on top.
 
-        Skipped entirely when this run has no children, so the overwhelming
-        majority of runs never pay for the query.
+        **What the guard costs, precisely.** The query runs on a mirror when
+        ANY of these is true, and a mirror happens on every append that changes
+        the view:
+
+        * this writer has folded a sub-agent event (``children.total`` > 0);
+        * this writer has folded a deliverable (``outputs.total`` > 0);
+        * an append lost the ``(run_id, seq)`` race, i.e. a second writer is
+          demonstrably on this run (``foreign_writer_seen``);
+        * a sub-agent event failed to persist and is queued for replay.
+
+        So a run with no sub-agents, no outputs and no competing writer pays
+        ZERO extra reads — still the overwhelming majority. A run that has any
+        of them pays ONE indexed read (``run_id`` + ``event_type IN``) per
+        mirror from that point on, i.e. roughly one per remaining event. That
+        is a real cost and it is the price of the slice being correct; it is
+        bounded by the run's own event count, not by the transcript's size.
+
+        The collision signal is what closes the last hole. Before it, the
+        pre-check read only MEMORY, so a run whose outputs were ALL written by
+        another writer (a turn that only calls ``GenerateShotImage``: the DBOS
+        lane registers through ``for_run`` while the parent still runs) never
+        opened the guard and had its ``view.outputs`` wiped by the next
+        whole-value mirror. That second writer necessarily takes a seq this one
+        wanted, so the conflict IS the notification.
 
         The WHOLE body is under one guard, including the pre-check that reads
         the stored ``children.total`` and the final slice assignments. Both
@@ -1164,7 +1361,13 @@ class RunEventWriter:
         """
         try:
             children = self.views["view"].get("children") or {}
-            if not int(children.get("total") or 0) and not self._unpersisted_subagent:
+            outputs = self.views["view"].get("outputs") or {}
+            if (
+                not int(children.get("total") or 0)
+                and not int(outputs.get("total") or 0)
+                and not self.foreign_writer_seen
+                and not self._unpersisted_subagent
+            ):
                 return
 
             from sqlalchemy import select
@@ -1183,7 +1386,7 @@ class RunEventWriter:
                             .where(AgentRunTranscriptEvents.run_id == self.run_id)
                             .where(
                                 AgentRunTranscriptEvents.event_type.in_(
-                                    SUBAGENT_EVENT_TYPES
+                                    EXTERNALLY_WRITTEN_EVENT_TYPES
                                 )
                             )
                             .order_by(AgentRunTranscriptEvents.seq.asc())
@@ -1203,10 +1406,19 @@ class RunEventWriter:
 
             self.views["view"]["children"] = scratch["view"]["children"]
             self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            refolded_outputs = scratch["view"].get("outputs")
+            if refolded_outputs:
+                # ONLY when the log produced one. A ``deliverable`` whose
+                # insert failed folded in memory without a row, and the
+                # transcript cannot know about it — assigning an empty slice
+                # over it would delete a count nothing can rebuild, while
+                # leaving it is the same "degrade to what we have" the
+                # failed-read branch below takes.
+                self.views["view"]["outputs"] = refolded_outputs
             recompute_spent(self.views["cost"])
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(
-                f"[RunEventWriter] children re-fold skipped (run={self.run_id}): {err}"
+                f"[RunEventWriter] external re-fold skipped (run={self.run_id}): {err}"
             )
 
     async def _sync_cost_column(self) -> None:
@@ -1281,7 +1493,7 @@ class RunEventWriter:
     async def _mirror(self) -> None:
         # The mirror writes WHOLE ``view`` / ``cost`` values, so the two
         # externally-written slices are re-read from the event log first.
-        await self.refold_children()
+        await self.refold_external_slices()
         try:
             from app.db.session import write_scope
 

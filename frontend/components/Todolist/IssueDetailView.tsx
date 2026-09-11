@@ -263,7 +263,20 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // re-reads instead of showing a list that is already out of date.
   const [schedulesRefresh, setSchedulesRefresh] = useState(0);
   const childRunState = useMemo<ChildRunState>(
-    () => ({ current: childRun, open: setChildRun, close: () => setChildRun(null) }),
+    () => ({
+      current: childRun,
+      // Opening a sub-run also SWITCHES TO THE TIMELINE (3a T8c 修复轮 1).
+      // `DetachedRunPanel` only mounts under the timeline tab, while the rail
+      // that can ask for it renders on both tabs — so asking from "Related
+      // work" used to set the state and mount nothing, a silent no-op. The
+      // panel belongs to the timeline, so the request takes the reader there
+      // rather than failing quietly or going back to a disabled button.
+      open: (origin: ChildRunOrigin) => {
+        setTab('timeline');
+        setChildRun(origin);
+      },
+      close: () => setChildRun(null),
+    }),
     [childRun],
   );
 
@@ -598,8 +611,18 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
       <div className="flex-1 overflow-y-auto">
         {/* A2: two columns from md up — conversation left, progress rail right.
-            Below md the rail stacks under the article (single column). */}
-        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 md:grid md:grid-cols-[1.5fr_1fr] md:gap-6 md:items-start">
+            Below md the rail stacks under the article (single column).
+
+            ONE child-run provider wraps BOTH columns (3a T8c 缺陷 2). It used
+            to sit twice inside the article — around the cockpit and around the
+            thread — so the rail's blocks rendered outside every provider,
+            `useChildRun()` handed them null, and the «Open Run» button in the
+            dialog they open was permanently disabled with "The run panel is
+            not open here" — on the very page that holds the panel. The panel
+            is page state, so its context belongs at the page level, not once
+            per consumer. */}
+        <ChildRunContext.Provider value={childRunState}>
+          <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 md:grid md:grid-cols-[1.5fr_1fr] md:gap-6 md:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-3">
             <IssueStatusIcon status={issue.status} size={15} />
@@ -627,13 +650,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
           {/* Zone: cockpit — registered blocks (issueBlocks.ts); today one block
               reading the rollup through runView selectors. */}
-          <ChildRunContext.Provider value={childRunState}>
-            <ReplayContext.Provider value={replay}>
-              {cockpitBlocks.map((b) => (
-                <b.component key={b.id} ctx={blockCtx} />
-              ))}
-            </ReplayContext.Provider>
-          </ChildRunContext.Provider>
+          <ReplayContext.Provider value={replay}>
+            {cockpitBlocks.map((b) => (
+              <b.component key={b.id} ctx={blockCtx} />
+            ))}
+          </ReplayContext.Provider>
           {forkAt && (
             <ForkRunDialog
               stepLabel={forkAt.label}
@@ -727,7 +748,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
-                  <ChildRunContext.Provider value={childRunState}>
                   <ReplayContext.Provider value={replay}>
                     {detachedRunId && <DetachedRunPanel runId={detachedRunId} />}
                     {childRun && (
@@ -746,7 +766,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                       aiSessionId={issue.raw.ai_session_id}
                     />
                   </ReplayContext.Provider>
-                  </ChildRunContext.Provider>
                 )}
               {agentLive && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">
@@ -771,7 +790,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <b.component key={b.id} ctx={blockCtx} />
           ))}
         </aside>
-        </div>
+          </div>
+        </ChildRunContext.Provider>
       </div>
 
       {/* Composer keeps the article column's width — it belongs to the

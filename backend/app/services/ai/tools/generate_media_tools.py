@@ -84,6 +84,10 @@ class GenerateMediaTools:
                     turn=run_context.get("turn"),
                     step=run_context.get("step"),
                 ),
+                # 3a T8c: the live run's own recorder, so the deliverable
+                # event folds into this run's views instead of a second
+                # writer's — see ``register_generated_media``.
+                recorder=run_context.get("recorder"),
             )
             return {
                 "ok": True,
@@ -137,6 +141,10 @@ class GenerateMediaTools:
                     turn=run_context.get("turn"),
                     step=run_context.get("step"),
                 ),
+                # 3a T8c: the live run's own recorder, so the deliverable
+                # event folds into this run's views instead of a second
+                # writer's — see ``register_generated_media``.
+                recorder=run_context.get("recorder"),
             )
             return {
                 "ok": True,
