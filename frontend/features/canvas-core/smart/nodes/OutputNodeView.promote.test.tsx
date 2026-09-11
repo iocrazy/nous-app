@@ -10,14 +10,12 @@ import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputNodeView } from './OutputNodeView';
 
 vi.mock('../mediaEditBridge', () => ({
-  ensureResourceId: vi.fn(() => Promise.resolve('777')),
-  // The node reads this too (P4 Task 6): "As Asset" recovers the
+  // The node reads this (P4 Task 6): "As Asset" recovers the
   // `generated_media` id from a durable url when the image ref carries none.
   // A partial mock of a module the component imports is a missing-export
   // crash, not a missing feature — so the stub has to grow with the module.
   genIdFromDurableUrl: vi.fn(() => null),
 }));
-import { ensureResourceId } from '../mediaEditBridge';
 vi.mock('../../services/canvasService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/canvasService')>();
   return {
@@ -80,7 +78,6 @@ describe('OutputNodeView width + promote', () => {
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     expect(screen.getByTestId('editor-tab-split')).toBeInTheDocument();
     await Promise.resolve();
-    expect(ensureResourceId).not.toHaveBeenCalled();
     const data = (useCanvasCoreStore.getState().nodes[0] as { data: { resource_id?: string } }).data;
     expect(data.resource_id).toBeUndefined();
   });

@@ -249,21 +249,6 @@ export async function dispatchTimelineRun(
   return taskId;
 }
 
-/** Promote a generated-media row into a resources row (B3 media-edit
- *  bridge, backend #1901): returns the new/existing resource id the
- *  derive-* endpoints accept. */
-export async function promoteGeneration(genId: string): Promise<string> {
-  const response = await apiFetch(`/api/v1/generated-media/${genId}/promote`, {
-    method: 'POST',
-  });
-  const json = (await response.json()) as {
-    data?: { promoted_resource_id?: string };
-  };
-  const id = json?.data?.promoted_resource_id;
-  if (!id) throw new Error('promote returned no resource id');
-  return id;
-}
-
 /** IC 放大: jimeng image_upscale on a durable generation → new gen url. */
 export async function upscaleGeneration(
   genId: string,

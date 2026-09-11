@@ -4313,13 +4313,23 @@ grep -rn "promoteGeneration\b" frontend --include='*.ts' --include='*.tsx' | gre
 
 Expected: 前两条**无输出**；第三条只剩 `canvasGenerationService.ts` 的定义与 `mediaEditBridge(.test).ts`——那就连 `promoteGeneration` 一起删；若还有别的调用方，保留它并在 PR 描述里写明。任一前两条有输出：停下，先迁移那个调用方。
 
-生产侧再确认 24 小时内没人打旧端点（gateway / backend 日志）：
+生产侧再确认最近 7 天没人打旧端点——查 `api_request_logs` 表，**不要查容器日志**：`nous-backend` 的容器日志里不带请求行，`docker logs … | grep 'POST /api/v1/resources/…' | wc -l` 永远打印 `0`，那个闸门是探不到信号的假绿。
 
 ```bash
-ssh gpupc "docker logs --since 24h nous-backend 2>&1 | grep -E 'POST /api/v1/resources/[0-9]+/derive-(crop|grid|outpaint|mask-cutout)' | wc -l"
+# Mac mini 上 gpupc 的 ssh 短名是 ubuntu（`ssh gpupc` 走的是另一个假 IP）；
+# 换成你手上这台机器实际能连通的主机名即可。
+ssh ubuntu "docker exec -i nous-db psql -U postgres -p 55434 -d postgres -tA" <<'SQL'
+SELECT COUNT(*)
+FROM api_request_logs
+WHERE method = 'POST'
+  AND path ~ '^/api/v1/resources/[^/]+/derive-'
+  AND "timestamp" >= now() - interval '7 days';
+SQL
 ```
 
-Expected: `0`。非 0 就推迟 PR5，查是谁在调。
+`{resource_id}` 是字符串路径参数，正则用 `[^/]+` 而不是 `[0-9]+`，否则非数字 id 会漏计。
+
+Expected: `0`。**同一条查询要带正向对照**——把 `resources` 那行换成新端点 `path ~ '^/api/v1/canvases/[^/]+/derive-'` 再跑一次，必须是正数；只有旧端点 0 而新端点也 0，说明是查询/表本身没数据，不构成"没人在调"的证据（2026-09-10 实测：旧 0、新 7）。非 0 就推迟 PR5，把 `COUNT(*)` 换成 `path, status_code, "timestamp"` 查是谁在调。
 
 - [ ] **Step 2: 先补 AI 扩图成功路径测试（旧文件里唯一还没被 Task 1 覆盖的行为）**
 

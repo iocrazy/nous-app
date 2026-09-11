@@ -14,8 +14,9 @@ export class MaskExportError extends Error {}
 
 /**
  * Draw `strokes` at (width × height) pixels and return the PNG as
- * raw base64 (no data-URL prefix) — the shape the derive endpoint's
- * `mask_png_base64` field wants.
+ * raw base64 (no data-URL prefix) — the shape the mask commit path
+ * decodes back into a PNG file and uploads as the canvas's mask item
+ * (`role='mask'`), which then feeds the next generation.
  *
  * Throws MaskExportError when a 2D context is unavailable or the
  * dimensions are degenerate.

@@ -1,4 +1,4 @@
-"""Pure pixel transforms shared by the resource and canvas derive paths."""
+"""Pure pixel transforms used by the canvas derive path."""
 
 from __future__ import annotations
 
@@ -102,4 +102,38 @@ async def test_extend_image_ai_mode_falls_back_when_nous_unconfigured() -> None:
             label="gen:5",
         )
     nous.assert_awaited_once()
+    assert _size(out) == (200, 50)
+
+
+async def test_extend_image_ai_mode_uses_nous_bytes_when_available() -> None:
+    ai_bytes = _png(7, 7)
+    with patch(
+        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
+        new=AsyncMock(return_value=ai_bytes),
+    ) as nous:
+        out = await extend_image(
+            _png(100, 50),
+            "image/png",
+            Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
+            prompt="a windswept meadow",
+            mode="ai",
+            label="gen:5",
+        )
+    assert out == ai_bytes
+    assert nous.await_args.kwargs["prompt"] == "a windswept meadow"
+
+
+async def test_extend_image_deterministic_mode_never_calls_nous() -> None:
+    with patch(
+        "app.services.canvas.outpaint_derive_service.run_outpaint_via_nous",
+        new=AsyncMock(),
+    ) as nous:
+        out = await extend_image(
+            _png(100, 50),
+            "image/png",
+            Padding(left=0.5, top=0.0, right=0.5, bottom=0.0),
+            prompt="ignored",
+            mode="deterministic",
+        )
+    nous.assert_not_awaited()
     assert _size(out) == (200, 50)
