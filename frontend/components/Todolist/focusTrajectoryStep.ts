@@ -30,17 +30,27 @@ const DEADLINE_MS = 10_000;
  * Both testids: the live step carries its own, and a link to the step being
  * executed right now is the normal case for a just-generated output.
  *
- * When the link names a `turn`, it is part of the match — a node's identity is
+ * When the link names a `turn`, it REFINES the match — a node's identity is
  * the pair (see `foldEvents`), so a two-turn run draws two "step 2"s and the
- * step alone would land on whichever comes last. No turn in the link (every
- * row registered before the builder sent one) keeps the old step-only rule. */
+ * step alone would land on whichever comes last.
+ *
+ * It is a refinement and never a precondition: when nothing carries that turn
+ * — a transcript folded before `data-turn` existed, or a link naming a turn
+ * this run never had — the search falls back to the step alone. A new link
+ * must not be weaker than the one-key link it replaced; landing on the right
+ * step of the wrong turn beats landing at the top of the issue. */
 function stepNodes({ step, turn }: StepCoordinate): HTMLElement[] {
-  const at = turn != null ? `[data-step="${step}"][data-turn="${turn}"]` : `[data-step="${step}"]`;
-  return [
+  const query = (at: string) => [
     ...document.querySelectorAll<HTMLElement>(
       `[data-testid="traj-step"]${at}, [data-testid="traj-step-live"]${at}`,
     ),
   ];
+  const onStep = `[data-step="${step}"]`;
+  if (turn != null) {
+    const exact = query(`${onStep}[data-turn="${turn}"]`);
+    if (exact.length > 0) return exact;
+  }
+  return query(onStep);
 }
 
 /**

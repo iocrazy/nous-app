@@ -138,4 +138,26 @@ describe('focusTrajectoryStep', () => {
     cancel();
   });
 
+  it('falls back to step-only when nothing carries the named turn', async () => {
+    // A transcript folded before `data-turn` existed — or a link naming a turn
+    // this run never had. The turn is a refinement, never a precondition: the
+    // new link must not be weaker than the one-key link it replaced.
+    const node = drawStep({ step: 2 });
+    const clicked = vi.fn();
+    node.querySelector('button')!.addEventListener('click', clicked);
+    const cancel = focusTrajectoryStep({ step: 2, turn: 1 });
+    expect(clicked).toHaveBeenCalledTimes(1);
+    cancel();
+  });
+
+  it('prefers the exact (turn, step) over the fallback when both could match', async () => {
+    const legacy = drawStep({ step: 2 });
+    const exact = drawStep({ step: 2, turn: 1 });
+    const hits: string[] = [];
+    legacy.querySelector('button')!.addEventListener('click', () => hits.push('legacy'));
+    exact.querySelector('button')!.addEventListener('click', () => hits.push('exact'));
+    const cancel = focusTrajectoryStep({ step: 2, turn: 1 });
+    expect(hits).toEqual(['exact']);
+    cancel();
+  });
 });
