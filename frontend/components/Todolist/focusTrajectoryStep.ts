@@ -25,13 +25,20 @@
 const POLL_MS = 120;
 const DEADLINE_MS = 10_000;
 
-/** The step nodes for `step`, in document order. Both testids: the live step
- *  carries its own, and a link to the step being executed right now is the
- *  normal case for a just-generated output. */
-function stepNodes(step: number): HTMLElement[] {
+/** The step nodes for this coordinate, in document order.
+ *
+ * Both testids: the live step carries its own, and a link to the step being
+ * executed right now is the normal case for a just-generated output.
+ *
+ * When the link names a `turn`, it is part of the match — a node's identity is
+ * the pair (see `foldEvents`), so a two-turn run draws two "step 2"s and the
+ * step alone would land on whichever comes last. No turn in the link (every
+ * row registered before the builder sent one) keeps the old step-only rule. */
+function stepNodes({ step, turn }: StepCoordinate): HTMLElement[] {
+  const at = turn != null ? `[data-step="${step}"][data-turn="${turn}"]` : `[data-step="${step}"]`;
   return [
     ...document.querySelectorAll<HTMLElement>(
-      `[data-testid="traj-step"][data-step="${step}"], [data-testid="traj-step-live"][data-step="${step}"]`,
+      `[data-testid="traj-step"]${at}, [data-testid="traj-step-live"]${at}`,
     ),
   ];
 }
@@ -58,11 +65,11 @@ function expandRunGroups(): void {
 }
 
 /** Expand + scroll, once the node is there. `false` means "not yet". */
-function openStep(step: number): boolean {
+function openStep(where: StepCoordinate): boolean {
   // The LAST match: the thread runs oldest-first, and several runs of one
   // issue each have a step N. The link carries no run id, so the newest run
   // that reached that step is the best answer available.
-  const node = stepNodes(step).at(-1);
+  const node = stepNodes(where).at(-1);
   if (!node) return false;
   const toggle = node.querySelector<HTMLElement>('button[aria-expanded]');
   // Only ever opens. A live step is already expanded by the renderer, and
@@ -75,12 +82,20 @@ function openStep(step: number): boolean {
   return true;
 }
 
+/** Where a lineage link points. `turn` is absent on rows registered before
+ *  the link builder carried it — then the step alone is all there is. */
+export interface StepCoordinate {
+  step: number;
+  turn?: number | null;
+}
+
 /**
- * Start chasing `step`. Returns a canceller the caller MUST run on unmount —
+ * Start chasing a step. Returns a canceller the caller MUST run on unmount —
  * a pending timer that fires into a torn-down tree is the leak this shape
  * exists to prevent.
  */
-export function focusTrajectoryStep(step: number): () => void {
+export function focusTrajectoryStep(where: StepCoordinate): () => void {
+  const { step } = where;
   if (typeof document === 'undefined' || !Number.isInteger(step) || step < 0) {
     return () => undefined;
   }
@@ -89,7 +104,7 @@ export function focusTrajectoryStep(step: number): () => void {
   const deadline = Date.now() + DEADLINE_MS;
   const tick = () => {
     timer = null;
-    if (cancelled || openStep(step)) return;
+    if (cancelled || openStep(where)) return;
     // Not there yet — it may be folded rather than unrendered. Unfold on
     // EVERY failed pass, not once: the thread re-renders while its rows load,
     // and a card that remounts comes back collapsed (its expanded flag is

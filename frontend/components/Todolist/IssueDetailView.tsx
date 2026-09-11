@@ -204,8 +204,18 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     const raw = searchParams.get('step');
     if (raw === null) return;
     const step = Number(raw);
-    // Steps are 0-based, so the guard is `>= 0`, not truthiness.
-    if (Number.isInteger(step) && step >= 0) stepFocus.current = focusTrajectoryStep(step);
+    // `turn` is the other half of a step's identity (the trajectory keys its
+    // nodes by the pair). Optional: links built before the builder sent it —
+    // and every row with no recorded turn — carry the step alone.
+    const rawTurn = searchParams.get('turn');
+    const turn = rawTurn === null ? null : Number(rawTurn);
+    // Steps and turns are 0-based, so the guard is `>= 0`, not truthiness.
+    if (Number.isInteger(step) && step >= 0) {
+      stepFocus.current = focusTrajectoryStep({
+        step,
+        turn: turn !== null && Number.isInteger(turn) && turn >= 0 ? turn : null,
+      });
+    }
   }, [progressLoaded, searchParams, seekReplay]);
   // A STRICTLY NEWER run appeared while replaying the previously-newest one:
   // that position (and its URL) is stale. A replay of an older run (fork

@@ -16,7 +16,7 @@ One version, on the wire (3a Task 3b added the last two keys)::
       "title": "S1 · Shot 3", "model": "qwen-max", "cost_cents": 1.25,
       "created_at": "2026-09-13T00:00:00+00:00",
       "issue_key": "MH-91",
-      "deep_link": "/team/424242424242/todolist/MH-91?step=3"
+      "deep_link": "/team/424242424242/todolist/MH-91?step=3&turn=2"
     }
 
 ``team_id`` is deliberately NOT in that shape. It arrives on the row, feeds the
@@ -81,6 +81,9 @@ def version_of(
         team_id=row_team if row_team is not None else team_id,
         issue_key=out.get("issue_key"),
         step=out.get("step"),
+        # (turn, step) is the trajectory's node key — the step alone is
+        # ambiguous on any run that took more than one turn (3a Task 8b).
+        turn=out.get("turn"),
     )
     return out
 

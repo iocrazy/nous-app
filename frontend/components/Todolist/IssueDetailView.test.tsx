@@ -96,12 +96,26 @@ const OLD_RUN_EVENTS = [
   { seq: 8, event_type: 'step_start', payload: { turn: 1, step: 4 }, created_at: '' },
 ];
 const OLD_RUN_IDS = new Set(['401', '402']);
+// One run, two turns — the shape that makes a bare `?step=` ambiguous: the
+// trajectory keys its nodes by (turn, step), so this transcript draws TWO
+// "step 2" nodes.
+const TWO_TURN_EVENTS = [
+  { seq: 1, event_type: 'user', payload: { content: 'go' }, created_at: '' },
+  { seq: 2, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '' },
+  { seq: 4, event_type: 'step_start', payload: { turn: 1, step: 2 }, created_at: '' },
+  { seq: 6, event_type: 'step_start', payload: { turn: 2, step: 1 }, created_at: '' },
+  { seq: 8, event_type: 'step_start', payload: { turn: 2, step: 2 }, created_at: '' },
+];
 vi.mock('../../services/aiLibraryService', () => ({
   aiLibraryService: {
     cancelRun: vi.fn(async () => undefined),
     getRunViewAt: (...a: [string, number]) => getRunViewAt(...a),
     getRunEvents: vi.fn(async (runId: string) => {
-      const items = OLD_RUN_IDS.has(String(runId)) ? OLD_RUN_EVENTS : RUN_EVENTS;
+      const items = String(runId) === '601'
+        ? TWO_TURN_EVENTS
+        : OLD_RUN_IDS.has(String(runId))
+          ? OLD_RUN_EVENTS
+          : RUN_EVENTS;
       return { items, count: items.length, has_more: false };
     }),
     getRunForks: vi.fn(async () => ({ items: [] })),
@@ -662,6 +676,22 @@ describe('IssueDetailView — lineage deep link (?step)', () => {
     // id, so which of them the anchor lands on is undetermined by design. What
     // must hold is that the reader arrives at an open step.
     expect(steps(4).some(isOpen)).toBe(true);
+  });
+
+  it('uses the turn to pick BETWEEN two nodes with the same step number', async () => {
+    // `foldEvents` keys a node by (turn, step), so a two-turn run draws two
+    // "step 2"s. Step alone lands on whichever the page finds last, which is
+    // turn 2 here — so a link to turn 1 is only honoured if the turn is read.
+    progressState.value = mkProgress({ current_run: { ...mkProgress().current_run, id: '601' } });
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [runMessage({ id: 'm-601', agent_run_id: '601' })],
+    });
+    renderAt('/team/9/todolist/NOUS-1?step=2&turn=1');
+    await settleUntil(() => steps(2).length >= 2 && steps(2).some(isOpen));
+    const byTurn = (n: number) =>
+      document.querySelector(`[data-testid="traj-step"][data-step="2"][data-turn="${n}"]`) as HTMLElement;
+    expect(isOpen(byTurn(1))).toBe(true);
+    expect(isOpen(byTurn(2))).toBe(false);
   });
 
   it('leaves every step folded when the URL names none', async () => {

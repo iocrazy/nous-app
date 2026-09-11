@@ -155,13 +155,22 @@ def test_lineage_carries_the_issue_key_and_a_deep_link(monkeypatch):
         _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()["versions"][0]
     )
     assert top["issue_key"] == ISSUE_KEY
-    assert top["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3"
+    assert top["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
 
 
 def test_the_step_anchor_is_part_of_the_link(monkeypatch):
     """A run of thirty steps opens on the step that produced THIS version, not
-    at the top of the issue."""
-    rows = [_row(1, step=7)]
+    at the top of the issue. The turn rides along: the trajectory keys its
+    nodes by ``(turn, step)``, so a multi-turn run has several step 7s."""
+    rows = [_row(1, step=7, turn=4)]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    assert body["versions"][0]["deep_link"].endswith("?step=7&turn=4")
+
+
+def test_a_version_with_no_turn_keeps_the_one_key_anchor(monkeypatch):
+    """Rows registered before ``turn`` was recorded. The link is exactly what
+    it was — never ``&turn=None``."""
+    rows = [_row(1, step=7, turn=None)]
     body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
     assert body["versions"][0]["deep_link"].endswith("?step=7")
 
@@ -240,6 +249,7 @@ def test_the_lineage_link_is_byte_identical_to_the_generated_inbox_one(monkeypat
             "issue_key": row["issue_key"],
             "agent_name": "Script Ai",
             "step": row["step"],
+            "turn": row["turn"],
         },
     )
     assert top["deep_link"] == card["deep_link"]
@@ -359,7 +369,7 @@ def test_an_older_version_on_another_issue_loses_its_key_and_link(monkeypatch):
     body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
     newest, older = body["versions"]
     assert newest["issue_key"] == ISSUE_KEY
-    assert newest["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3"
+    assert newest["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
     assert older["issue_key"] is None
     assert older["deep_link"] is None
     # The bare id stays, exactly as it did before this fix: Task 3b's ruling

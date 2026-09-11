@@ -172,8 +172,8 @@ async def test_every_version_carries_its_issue_key_and_deep_link(monkeypatch):
     # step is the version number in this fixture — each version opens on the
     # step that produced it.
     assert [v["deep_link"] for v in shot9["versions"]] == [
-        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=2",
-        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=1",
+        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=2&turn=1",
+        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=1&turn=1",
     ]
 
 

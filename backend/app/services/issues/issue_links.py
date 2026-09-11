@@ -24,9 +24,13 @@ from typing import Any, Optional
 
 
 def issue_deep_link(
-    *, team_id: Any, issue_key: Any, step: Optional[int] = None
+    *,
+    team_id: Any,
+    issue_key: Any,
+    step: Optional[int] = None,
+    turn: Optional[int] = None,
 ) -> Optional[str]:
-    """``/team/{team_id}/todolist/{issue_key}`` (+ ``?step=`` when known).
+    """``/team/{team_id}/todolist/{issue_key}`` (+ ``?step=&turn=`` when known).
 
     ``team_id`` is accepted as ``Any`` on purpose: ``issues.team_id`` comes
     back a native int from the issue repository and a string from the
@@ -34,13 +38,21 @@ def issue_deep_link(
 
     ``step`` is compared against ``None``, not truth-tested — steps are
     0-based, so ``if step:`` would silently drop every link to a run's first
-    step.
+    step. ``turn`` is read the same way, for the same reason.
+
+    **``turn`` only rides along with a step.** The trajectory keys its nodes by
+    the PAIR ``(turn, step)``, so a run that took three turns draws three
+    "step 2" nodes and the step alone lands on whichever the page finds first
+    (3a Task 8b). Alone, though, a turn names no position — emitting it would
+    leave a query key the page can only ignore, so it is dropped with the step.
     """
     if not team_id or not issue_key:
         return None
     url = f"/team/{team_id}/todolist/{issue_key}"
     if step is not None:
         url += f"?step={step}"
+        if turn is not None:
+            url += f"&turn={turn}"
     return url
 
 
