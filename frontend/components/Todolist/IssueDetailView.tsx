@@ -26,6 +26,7 @@ import './blocks';
 import { useIssueProgress } from './useIssueProgress';
 import { isIssueLive } from './issuePhase';
 import { DetachedRunPanel, IssueChatThread } from './IssueChatThread';
+import { focusTrajectoryStep } from './focusTrajectoryStep';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
@@ -177,16 +178,34 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     },
     [setSearchParams, addToast, t],
   );
-  // Deep link: `?run=&seq=` — honoured once, after the rollup has loaded. Any
-  // run of the issue may be named: the newest one (scrubber on its row) or an
-  // older one, e.g. a fork's origin (drawn in the detached panel).
+  // Deep link, honoured once after the rollup has loaded, in two shapes:
+  //
+  //   `?run=&seq=`  the replay link — names WHICH run, so it wins outright.
+  //   `?step=`      what every lineage / Generated-card link carries (3a Task
+  //                 3b). It names no run, so it cannot be seeked: it opens the
+  //                 step node itself. Read at all only since Task 8b — before
+  //                 that the anchor was built, sent, and dropped on arrival,
+  //                 landing every provenance click at the top of the issue.
+  //
+  // Any run of the issue may be named: the newest one (scrubber on its row) or
+  // an older one, e.g. a fork's origin (drawn in the detached panel).
   const deepLinked = useRef(false);
+  const stepFocus = useRef<(() => void) | null>(null);
+  useEffect(() => () => stepFocus.current?.(), []);
   useEffect(() => {
     if (deepLinked.current || !progressLoaded) return;
     const run = searchParams.get('run');
     const seq = Number(searchParams.get('seq'));
     deepLinked.current = true;
-    if (run && Number.isFinite(seq) && seq > 0) void seekReplay(run, seq);
+    if (run && Number.isFinite(seq) && seq > 0) {
+      void seekReplay(run, seq);
+      return;
+    }
+    const raw = searchParams.get('step');
+    if (raw === null) return;
+    const step = Number(raw);
+    // Steps are 0-based, so the guard is `>= 0`, not truthiness.
+    if (Number.isInteger(step) && step >= 0) stepFocus.current = focusTrajectoryStep(step);
   }, [progressLoaded, searchParams, seekReplay]);
   // A STRICTLY NEWER run appeared while replaying the previously-newest one:
   // that position (and its URL) is stale. A replay of an older run (fork

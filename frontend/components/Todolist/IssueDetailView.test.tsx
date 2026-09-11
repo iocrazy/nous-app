@@ -535,3 +535,75 @@ describe('IssueDetailView — fork refusal', () => {
     expect(screen.getByTestId('fork-dialog')).toBeTruthy();
   });
 });
+
+
+// ── harness 3a Task 8b: the `?step=` half of a lineage deep link ────────────
+//
+// `issue_links.issue_deep_link` has appended `?step=N` since Task 3b, and spec
+// §4 promises the link "锚到那一步". The page read `run`/`seq` and nothing
+// else, so every link built from an object's provenance landed at the top of
+// the issue — the anchor was written, sent, and silently dropped on arrival.
+describe('IssueDetailView — lineage deep link (?step)', () => {
+  function runMessage(over: Record<string, unknown> = {}) {
+    return {
+      id: 'm-run',
+      issue_id: 1,
+      kind: 'agent_run',
+      author_user_id: null,
+      author_agent_id: 'a1',
+      agent_run_id: '501',
+      content: null,
+      body: null,
+      created_at: '2026-08-03T00:00:00Z',
+      meta: { status: 'completed' },
+      ...over,
+    };
+  }
+
+  function renderAt(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route
+            path="/team/:teamId/todolist/:identifier"
+            element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const stepNode = (n: number) =>
+    document.querySelector(`[data-testid="traj-step"][data-step="${n}"]`) as HTMLElement | null;
+
+  it('opens the step the link named, and leaves the others folded', async () => {
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1?step=2');
+    await waitFor(() => expect(stepNode(2)).not.toBeNull());
+    await waitFor(() =>
+      expect(stepNode(2)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('true'),
+    );
+    // Exactly as wide as the promise: the anchor opens ONE step, it does not
+    // unfold the whole run.
+    expect(stepNode(1)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('leaves every step folded when the URL names none', async () => {
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1');
+    await waitFor(() => expect(stepNode(2)).not.toBeNull());
+    expect(stepNode(2)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('a replay link still wins: `run`+`seq` seeks and does not chase a step', async () => {
+    // Both keys on one URL is not a shape we build, but `run`/`seq` is the
+    // more specific instruction — it names WHICH run.
+    getRunViewAt.mockClear();
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1?run=501&seq=4&step=2');
+    await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('501', 4));
+  });
+});
