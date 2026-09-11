@@ -61,11 +61,42 @@ describe('usePWA', () => {
   });
 });
 
-describe('vite.config workbox navigateFallbackDenylist', () => {
-  it('keeps /shortcuts/ navigations off the SW-cached app shell', () => {
-    const config = fs.readFileSync(path.resolve(__dirname, '../vite.config.ts'), 'utf8');
-    const denylist = config.match(/navigateFallbackDenylist:\s*\[[^\n]*\]/);
-    expect(denylist, 'navigateFallbackDenylist not found').not.toBeNull();
-    expect(denylist![0]).toContain('/^\\/shortcuts\\//');
+describe('vite.config workbox: navigations are network-only, precache is tiny', () => {
+  // Pin code, not prose: whole-line comments may name the old options.
+  const code = fs
+    .readFileSync(path.resolve(__dirname, '../vite.config.ts'), 'utf8')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+
+  it('disables navigateFallback explicitly — the SW never answers a navigation with a cached shell', () => {
+    // Omitting the key is NOT enough: vite-plugin-pwa defaults it to
+    // 'index.html', which registers a precached-shell NavigationRoute ahead of
+    // every runtime rule (and throws at SW startup once index.html is no
+    // longer precached). Only an explicit null turns it off.
+    expect(code).toMatch(/\bnavigateFallback:\s*null\s*,/);
+    expect(code).not.toMatch(/\bnavigateFallback(Allow|Deny)list\s*:/);
+  });
+
+  it('routes navigations NetworkOnly with an /offline.html fallback as the first runtime rule', () => {
+    const start = code.indexOf('runtimeCaching:');
+    expect(start, 'runtimeCaching not found').toBeGreaterThanOrEqual(0);
+    const runtime = code.slice(start);
+    const rules = runtime.split(/\burlPattern\s*:/).slice(1);
+    expect(rules.length, 'no runtimeCaching rules').toBeGreaterThan(0);
+    const first = rules[0];
+    expect(first).toMatch(/^\s*\(\{\s*request\s*\}\)\s*=>\s*request\.mode\s*===\s*'navigate'/);
+    expect(first).toMatch(/handler:\s*'NetworkOnly'/);
+    expect(first).toMatch(/precacheFallback:\s*\{\s*fallbackURL:\s*'\/offline\.html'\s*\}/);
+  });
+
+  it('precaches only small static files — no index.html, no JS/CSS bundles', () => {
+    const match = code.match(/globPatterns:\s*\[([^\]]*)\]/);
+    expect(match, 'globPatterns not found').not.toBeNull();
+    const patterns = [...match![1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    expect(patterns).toContain('offline.html');
+    for (const pattern of patterns) {
+      expect(pattern).not.toMatch(/index\.html|assets|\bjs\b|\bcss\b|\*\.html|\{[^}]*html/);
+    }
   });
 });

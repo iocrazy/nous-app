@@ -58,13 +58,23 @@ export default defineConfig(({ mode }) => {
         },
       },
       VitePWA({
-        // ``autoUpdate`` instead of ``prompt`` — the prompt path leaves the
-        // new SW in a waiting state until the user clicks an "update"
-        // button we never wired up, so SW caches drift forever and old
-        // precache manifests reference chunks (e.g. ``minus-Du63Q9Ce.js``)
-        // that no longer exist after a redeploy → 404 + bad-precaching-
-        // response in console. autoUpdate + skipWaiting + clientsClaim
-        // makes a fresh SW take over on the next navigation.
+        // The service worker is deliberately thin: it never serves the app
+        // itself, it only keeps an offline page and a few icons around.
+        //
+        // Why: a SW that precaches the build and answers navigations from
+        // that precache pins the device to whatever build it installed. The
+        // replacement SW has to download the whole build before it can
+        // activate, and short-lived contexts (iOS Shortcuts' embedded web
+        // view closes seconds after opening, a tab closed right after launch)
+        // never let it finish — so the old shell kept being served on every
+        // navigation. Cloudflare Pages already serves the
+        // HTML network-fresh (max-age=0, must-revalidate) and the hashed
+        // /assets/ files as immutable, so the browser HTTP cache handles
+        // speed and every navigation loads the build that is live right now.
+        //
+        // ``autoUpdate`` + skipWaiting + clientsClaim: with a precache of a
+        // handful of small files a new SW installs and takes over within
+        // seconds of being fetched, with no prompt.
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
         manifest: {
@@ -84,31 +94,52 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
+          // Precache ONLY small static files that don't change per build.
+          // Never index.html (a cached shell is exactly what pins old builds)
+          // and never /assets/** JS/CSS (that is what made each update
+          // download ~230 files before it could activate). offline.html is
+          // self-contained (inline CSS/SVG) and backs the navigation fallback
+          // below.
+          globPatterns: [
+            'offline.html',
+            'favicon.svg',
+            'apple-touch-icon-180x180.png',
+            'pwa-*.png',
+            'icons/*.svg',
+          ],
           // version.json must always be network-fresh — it's how a running
           // tab learns a newer build is live. Never precache it.
           globIgnores: ['**/version.json'],
-          // Discard caches from previous SW versions on activation so the
-          // new manifest doesn't try to reuse stale 404'd chunk URLs.
+          // On activation the precache drops every entry that is not in the
+          // new manifest (that is how devices on the old SW shed the big
+          // precache), and cleanupOutdatedCaches also deletes precaches left
+          // behind by older Workbox versions.
           cleanupOutdatedCaches: true,
           // Activate the new SW immediately, then take over already-open
           // tabs. Without these, the user has to close every tab before
           // the new SW kicks in.
           skipWaiting: true,
           clientsClaim: true,
-          navigateFallback: '/index.html',
-          // /shortcuts/ opens in iOS Shortcuts' embedded web view, which closes before a new SW can install — never serve it the cached shell.
-          navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//, /^\/shortcuts\//],
+          // Must be an explicit null, not omitted: vite-plugin-pwa defaults
+          // it to 'index.html', which registers a cached-shell navigation
+          // route ahead of every runtimeCaching rule — and, with index.html
+          // no longer precached, makes the SW throw on startup. Navigations
+          // are handled by the first runtime rule below instead.
+          navigateFallback: null,
           runtimeCaching: [
-            // NOTE: do NOT add a CacheFirst rule for /assets/. Vite emits
-            // content-hashed bundles (index-<hash>.js) that VitePWA already
-            // precaches via the manifest, which is regenerated every build so
-            // a new deploy ships new hashes + a fresh manifest. A CacheFirst
-            // runtimeCaching rule on /assets/ overrides that: it serves the
-            // OLD cached bundle and never fetches the new hash, so even after
-            // the SW updates (skipWaiting/clientsClaim) the app keeps running
-            // stale code until the user manually clears the SW. This was the
-            // cause of users being stuck on old builds (e.g. the dropped
-            // teams.is_personal query 400ing long after the fix shipped).
+            // Page navigations (including /shortcuts/*) always go to the
+            // network. The only thing the SW adds is a friendly offline page
+            // instead of the browser's error when the network is down.
+            // Keep this rule first so no later pattern can claim a navigation.
+            {
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkOnly',
+              options: { precacheFallback: { fallbackURL: '/offline.html' } },
+            },
+            // NOTE: do NOT add a caching rule for /assets/. Those files are
+            // content-hashed and immutable on Cloudflare Pages, so the HTTP
+            // cache already serves them instantly; a SW cache on top only
+            // adds a way to run stale code.
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'StaleWhileRevalidate',
