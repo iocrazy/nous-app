@@ -60,9 +60,9 @@ async function pushUrl(tabId, url) {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
-      const detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
-      await showToast(tabId, `Push failed: ${detail}`, 'error');
+      // Production errors are the ErrorResponse envelope (no `detail`), which
+      // this used to render as "Push failed: undefined".
+      await showToast(tabId, `Push failed: ${await readErrorDetail(response)}`, 'error');
       return;
     }
 

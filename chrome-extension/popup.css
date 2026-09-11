@@ -386,7 +386,9 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-height: 260px;
+  /* 200 (was 260): the processing options below took the difference, so the
+     Push view stays under Chrome's 600px popup ceiling without a scrollbar. */
+  max-height: 200px;
   overflow-y: auto;
   margin-bottom: 12px;
   padding-right: 4px;
@@ -448,6 +450,133 @@ button:disabled {
 .tag-pill .count {
   font-size: 10px;
   opacity: 0.5;
+}
+
+/* Processing options (rating + AI intents), directly above Push.
+   Palette is the popup's existing indigo accent + zinc neutrals — no new hues. */
+.push-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Hidden without display:none — some engines skip <use> references into an
+   undisplayed <svg>. */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.push-options svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.rating-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-label {
+  width: 48px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rating-stars {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.star-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: #52525b;
+}
+
+.star-btn:hover {
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.star-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.star-btn.lit,
+.star-btn.lit:hover {
+  color: #818cf8;
+}
+
+.star-btn.lit svg {
+  fill: currentColor;
+}
+
+.intent-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.intent-btn {
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  background: #18181b;
+  color: #71717a;
+  font-size: 12px;
+}
+
+.intent-btn:hover {
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.intent-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.intent-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intent-btn.on,
+.intent-btn.on:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #818cf8;
 }
 
 .push-btn {

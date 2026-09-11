@@ -1,3 +1,13 @@
+// Pure helpers from intents.js (loaded before this file in popup.html).
+const {
+  PIPELINE_TAG_GROUP,
+  DEFAULT_OPTIONS,
+  applyIntentDependencies,
+  buildIntentFields,
+  filterPickableTags,
+  describeErrorBody,
+} = globalThis.MediaHubIntents;
+
 // Elements — Settings
 const settingsView = document.getElementById('settingsView');
 const apiUrlInput = document.getElementById('apiUrl');
@@ -15,6 +25,8 @@ const tagsContainer = document.getElementById('tagsContainer');
 const pushBtn = document.getElementById('pushBtn');
 const pushStatus = document.getElementById('pushStatus');
 const settingsToggle = document.getElementById('settingsToggle');
+const starButtons = Array.from(document.querySelectorAll('#pushOptions .star-btn'));
+const intentButtons = Array.from(document.querySelectorAll('#pushOptions .intent-btn'));
 
 // Elements — search-or-create bar (static, outside the re-rendered tag list)
 const quickCreateBar = document.getElementById('quickCreateBar');
@@ -48,14 +60,17 @@ let quickTranslateTimer = null;
 // push keys on "the search found nothing", which is only a real signal if we
 // hold the real list. On a failed load every query looks like zero results.
 let tagsLoaded = false;
+// Rating + AI intents for the next push. Replaced (never mutated) through
+// setPushOption so the Summary/Analyze → Transcribe dependency always holds.
+let pushOptions = DEFAULT_OPTIONS;
 
 // Show the extension version beside the header — read at runtime from the
 // manifest so it never drifts from manifest.json.
 //
 // Prefer version_name: scripts/package-extension.sh stamps it onto the COPY in
-// release/ as "1.3.1 (aefb817e)" so the popup says exactly which commit is
+// release/ as "1.4.0 (aefb817e)" so the popup says exactly which commit is
 // installed. The fallback matters — loading this folder directly (the debug
-// path) has no version_name, and must show "v1.3.1", never "vundefined".
+// path) has no version_name, and must show "v1.4.0", never "vundefined".
 const versionEl = document.getElementById('appVersion');
 if (versionEl && chrome.runtime && chrome.runtime.getManifest) {
   const manifest = chrome.runtime.getManifest();
@@ -227,14 +242,26 @@ function matchesQuery(tag, q) {
 // app's TagsSettings noExactMatch rule — the backend 409s on a duplicate name,
 // so an exact match must suppress the Create affordance. Empty query counts as
 // "matched" so a blank search never offers Create.
+//
+// Deliberately checks ALL tags, hidden Pipeline ones included: this is a
+// duplicate-name guard, not a search, and the server's name check covers
+// system tags — offering "Create Summary" would only earn a 409.
+function isExactNameMatch(tag, q) {
+  return (tag.name || '').toLowerCase() === q || (tag.name_zh || '').toLowerCase() === q;
+}
+
 function hasExactMatch(query) {
   const q = (query || '').trim().toLowerCase();
   if (!q) return true;
-  return allTags.some(
-    (tag) =>
-      (tag.name || '').toLowerCase() === q ||
-      (tag.name_zh || '').toLowerCase() === q,
-  );
+  return allTags.some((tag) => isExactNameMatch(tag, q));
+}
+
+// Does the query name a hidden Pipeline tag exactly ("Summary", "总结")? Lets
+// the empty state and Push point at the toggles instead of a dead end.
+function namesPipelineTag(query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return false;
+  return allTags.some((tag) => tag.group_name === PIPELINE_TAG_GROUP && isExactNameMatch(tag, q));
 }
 
 function renderTags(tags) {
@@ -242,7 +269,9 @@ function renderTags(tags) {
 
   const rawQuery = tagQuery.trim();
   const q = rawQuery.toLowerCase();
-  const filtered = tags.filter(tag => matchesQuery(tag, q));
+  // Pipeline tags never list, search, or rank (Frequently Used derives from
+  // `filtered` too) — the toggles above Push carry those intents.
+  const filtered = filterPickableTags(tags).filter(tag => matchesQuery(tag, q));
 
   // Search-or-create: when the query matches no tag exactly, offer a
   // "Create <query>" affordance. It sits above the results and fully replaces
@@ -255,7 +284,9 @@ function renderTags(tags) {
     if (!showCreate) {
       const empty = document.createElement('div');
       empty.className = 'tags-empty';
-      empty.textContent = q ? 'No tags match your search' : 'No tags yet';
+      empty.textContent = namesPipelineTag(rawQuery)
+        ? `"${rawQuery}" is an AI option now: use the toggles below`
+        : q ? 'No tags match your search' : 'No tags yet';
       tagsContainer.appendChild(empty);
     }
     return;
@@ -445,8 +476,7 @@ async function quickCreateTag(rawQuery, counterpart = '') {
         // showing a bare 403.
         detail = 'API key lacks Manage Tags scope';
       } else {
-        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-        detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        detail = await readErrorMessage(res);
       }
       throw new Error(detail);
     }
@@ -478,6 +508,50 @@ function updatePushBtn() {
     : 'Push to MediaHub';
 }
 
+// --- Processing options (rating + AI intents) ---
+// Static markup in popup.html; this only keeps lit / aria-pressed in sync.
+function renderPushOptions() {
+  for (const btn of starButtons) {
+    const n = Number(btn.dataset.rating);
+    const lit = pushOptions.rating !== null && n <= pushOptions.rating;
+    btn.classList.toggle('lit', lit);
+    btn.setAttribute('aria-pressed', String(lit));
+  }
+  for (const btn of intentButtons) {
+    const on = pushOptions[btn.dataset.intent] === true;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', String(on));
+  }
+}
+
+function setPushOption(key, value) {
+  pushOptions = applyIntentDependencies(pushOptions, key, value);
+  renderPushOptions();
+}
+
+for (const btn of starButtons) {
+  btn.addEventListener('click', () => {
+    const n = Number(btn.dataset.rating);
+    // Tapping the current rating again clears it — there is no "none" chip.
+    setPushOption('rating', pushOptions.rating === n ? null : n);
+  });
+}
+
+for (const btn of intentButtons) {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.intent;
+    setPushOption(key, pushOptions[key] !== true);
+  });
+}
+
+renderPushOptions();
+
+// Response body → readable message (ErrorResponse envelope aware).
+async function readErrorMessage(res) {
+  const body = await res.json().catch(() => null);
+  return describeErrorBody(body, res.status);
+}
+
 // --- Push Action ---
 pushBtn.addEventListener('click', async () => {
   const urlToPush = (currentUrlEl.value || '').trim();
@@ -503,8 +577,20 @@ pushBtn.addEventListener('click', async () => {
   // tagsLoaded gates the whole thing: after a failed tag fetch allTags is [],
   // so every query would read as "zero results" and Push would mint a tag that
   // may well already exist (409 → the push is blocked for no good reason).
+  //
+  // "Results" means what the list showed, so hidden Pipeline tags don't count;
+  // but a query naming one exactly ("Summary") must not mint a tag either (the
+  // server 409s on the name) — stop and point at the toggle instead.
   const pendingTag = tagSearch.value.trim();
-  const pendingHasMatch = allTags.some((t) => matchesQuery(t, pendingTag.toLowerCase()));
+  if (namesPipelineTag(pendingTag)) {
+    pushStatus.textContent = `"${pendingTag}" is an AI option: use the toggles, then clear the search`;
+    pushStatus.className = 'status error';
+    pushBtn.disabled = false;
+    updatePushBtn();
+    return;
+  }
+  const pendingHasMatch = filterPickableTags(allTags)
+    .some((t) => matchesQuery(t, pendingTag.toLowerCase()));
   if (tagsLoaded && pendingTag && !pendingHasMatch) {
     pushBtn.textContent = `Creating "${pendingTag}"...`;
     // Carry the create bar's counterpart through: if the user pressed "=" (or
@@ -528,15 +614,16 @@ pushBtn.addEventListener('click', async () => {
   const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
 
   try {
-    // Push URL with tags in a single request
+    // Push URL with tags + processing options in a single request. Only set
+    // options travel (rating when chosen, intents when on), so a push with
+    // nothing set is byte-identical to pre-1.4.0.
     const fetchBody = {
       url: urlToPush,
       video_bool: true,
       cover_bool: true,
+      ...(selectedTags.size > 0 ? { tag_ids: Array.from(selectedTags) } : {}),
+      ...buildIntentFields(pushOptions),
     };
-    if (selectedTags.size > 0) {
-      fetchBody.tag_ids = Array.from(selectedTags);
-    }
 
     const res = await fetch(`${config.apiUrl}/api/v1/media/fetch`, {
       method: 'POST',
@@ -548,10 +635,12 @@ pushBtn.addEventListener('click', async () => {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+      throw new Error(await readErrorMessage(res));
     }
 
+    // Tags and options deliberately stay as they are after a success (the
+    // popup has never reset its selection here), so a follow-up push of
+    // another URL reuses them.
     pushStatus.textContent = 'Pushed!';
     pushStatus.className = 'status success';
 
@@ -638,9 +727,13 @@ function populateGroupDropdown() {
   // Real groups first (includes empty ones). If /tags/groups failed, fall back
   // to the names reachable through the loaded tags so the dropdown degrades
   // instead of going blank.
+  // The Pipeline group is excluded from both sources: its tags are hidden, so
+  // filing a new tag there would make it vanish from the picker.
   const source = allGroups.length
-    ? allGroups.map((g) => ({ id: String(g.id), name: g.name }))
-    : allTags
+    ? allGroups
+        .filter((g) => g.name !== PIPELINE_TAG_GROUP)
+        .map((g) => ({ id: String(g.id), name: g.name }))
+    : filterPickableTags(allTags)
         .filter((t) => t.group_name && t.group_id)
         .map((t) => ({ id: String(t.group_id), name: t.group_name }));
 
@@ -739,8 +832,7 @@ createTagBtn.addEventListener('click', async () => {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
-      throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+      throw new Error(await readErrorMessage(res));
     }
 
     const created = await res.json();

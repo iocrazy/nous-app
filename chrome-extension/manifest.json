@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MediaHub Push",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Push video URLs and scan page images into MediaHub.",
   "permissions": [
     "storage",
