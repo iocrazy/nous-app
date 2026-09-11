@@ -32,6 +32,8 @@ pytestmark = pytest.mark.unit
 ME = "11111111-1111-1111-1111-111111111111"
 SOMEONE_ELSE = "22222222-2222-2222-2222-222222222222"
 ISSUE_ID = "348087075560200"
+ISSUE_KEY = "MH-91"
+TEAM_ID = "424242424242"
 RUN_ID = "913402881190401"
 
 
@@ -54,6 +56,10 @@ def _row(version: int, **over) -> dict:
         "step": 3,
         "created_at": f"2026-09-1{version}T00:00:00+00:00",
         "issue_id": ISSUE_ID,
+        "issue_key": ISSUE_KEY,
+        # Internal to the join: the link builder needs a team, but the team is
+        # not part of the version's public shape (see ``lineage_view``).
+        "team_id": TEAM_ID,
     }
     row.update(over)
     return row
@@ -138,6 +144,104 @@ def test_lineage_carries_the_lineage_columns(monkeypatch):
     assert top["model"] == "qwen-max"
     assert top["cost_cents"] == 1.25
     assert top["turn"] == 2 and top["step"] == 3
+
+
+def test_lineage_carries_the_issue_key_and_a_deep_link(monkeypatch):
+    """3a Task 3b: ``issue_id`` alone is unusable — the issue route is keyed by
+    the identifier inside a team, so the panel could only ever draw a disabled
+    button. The endpoint now says WHICH issue and WHERE it lives."""
+    top = (
+        _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()["versions"][0]
+    )
+    assert top["issue_key"] == ISSUE_KEY
+    assert top["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3"
+
+
+def test_the_step_anchor_is_part_of_the_link(monkeypatch):
+    """A run of thirty steps opens on the step that produced THIS version, not
+    at the top of the issue."""
+    rows = [_row(1, step=7)]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    assert body["versions"][0]["deep_link"].endswith("?step=7")
+
+
+def test_a_version_with_no_step_links_to_the_issue_without_an_anchor(monkeypatch):
+    rows = [_row(1, step=None)]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    assert body["versions"][0]["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}"
+
+
+def test_a_run_with_no_issue_has_neither_key_nor_link(monkeypatch):
+    """A canvas or chat lane run answers to no issue. Both fields are None —
+    never a URL assembled from a run id."""
+    rows = [_row(1, issue_id=None, issue_key=None, team_id=None)]
+    top = (
+        _client(monkeypatch, rows, owner=ME)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()["versions"][0]
+    )
+    assert top["issue_id"] is None
+    assert top["issue_key"] is None and top["deep_link"] is None
+
+
+def test_an_issue_without_an_identifier_gets_no_link(monkeypatch):
+    """The id is not a substitute for the key: ``/todolist/348087075560200``
+    resolves to nothing, and a dead link reads worse than a disabled button."""
+    rows = [_row(1, issue_key=None)]
+    top = (
+        _client(monkeypatch, rows)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()["versions"][0]
+    )
+    assert top["issue_id"] == ISSUE_ID
+    assert top["issue_key"] is None and top["deep_link"] is None
+
+
+def test_an_issue_with_no_team_keeps_the_key_but_builds_no_link(monkeypatch):
+    """A personal-scope issue has ``team_id IS NULL``. The key is still a fact
+    worth printing; the URL is not buildable, so it stays None."""
+    rows = [_row(1, team_id=None)]
+    top = (
+        _client(monkeypatch, rows)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()["versions"][0]
+    )
+    assert top["issue_key"] == ISSUE_KEY
+    assert top["deep_link"] is None
+
+
+def test_team_id_never_reaches_the_wire(monkeypatch):
+    """It feeds the link builder and nothing else — the version's public shape
+    is an explicit projection, not ``dict(row)``."""
+    top = (
+        _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()["versions"][0]
+    )
+    assert "team_id" not in top
+
+
+def test_the_lineage_link_is_byte_identical_to_the_generated_inbox_one(monkeypatch):
+    """ONE builder. The Generated card and the lineage panel describe the same
+    row, so they must print the same string — a second builder would drift by a
+    query string and nothing would fail."""
+    from app.services.library.generated_source import describe_source
+
+    row = _row(3)
+    top = (
+        _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()["versions"][0]
+    )
+    card = describe_source(
+        {"origin_kind": "agent_run", "id": "500"},
+        canvas_names={},
+        team_id=row["team_id"],
+        provenance={
+            "run_id": row["run_id"],
+            "issue_id": row["issue_id"],
+            "issue_key": row["issue_key"],
+            "agent_name": "Script Ai",
+            "step": row["step"],
+        },
+    )
+    assert top["deep_link"] == card["deep_link"]
 
 
 def test_unregistered_object_is_404_not_empty(monkeypatch):

@@ -96,12 +96,27 @@ class RunDeliverablesRepository:
 
     async def lineage_for(self, *, kind: str, ref_id: Any) -> List[Dict[str, Any]]:
         """一个对象的整条版本链，新的在前。带上每版所属 issue——
-        血缘页要说的正是「这一版是哪次工作产的」。"""
+        血缘页要说的正是「这一版是哪次工作产的」。
+
+        issue 侧是 **outer** join：没有 issue 的 run（画布 / 聊天道）照样有
+        产出，内连接会让它们整条链消失。逐行连是必须的——同一个对象的两版
+        可以出自两个 issue 的 run（见集成测试 case 6）。
+
+        ``issue_key`` / ``team_id`` 是给 deep link 用的（3a Task 3b）：
+        前端 issue 路由按 ``MH-n`` + team 寻址，``issue_id`` 拼不出可用 URL。
+        ``team_id`` 到 ``lineage_view`` 为止，不上线。
+        """
         async with read_scope() as session:
             rows = (
                 await session.execute(
-                    select(RunDeliverables, AgentRuns.issue_id)
+                    select(
+                        RunDeliverables,
+                        AgentRuns.issue_id,
+                        Issues.identifier,
+                        Issues.team_id,
+                    )
                     .join(AgentRuns, AgentRuns.id == RunDeliverables.run_id)
+                    .outerjoin(Issues, Issues.id == AgentRuns.issue_id)
                     .where(RunDeliverables.kind == kind)
                     .where(RunDeliverables.ref_id == str(ref_id))
                     .order_by(desc(RunDeliverables.version))
@@ -111,8 +126,10 @@ class RunDeliverablesRepository:
                 {
                     **_row(row),
                     "issue_id": str(issue_id) if issue_id is not None else None,
+                    "issue_key": identifier,
+                    "team_id": str(team_id) if team_id is not None else None,
                 }
-                for row, issue_id in rows
+                for row, issue_id, identifier, team_id in rows
             ]
 
     async def provenance_for(

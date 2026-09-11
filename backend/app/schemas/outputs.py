@@ -20,14 +20,30 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class OutputVersion(BaseModel):
     """One row of ``run_deliverables``, decorated with the issue its run
-    belonged to. ``issue_id`` is ``None`` for a run that answers to no issue
-    (a canvas or chat lane run)."""
+    belonged to. All three issue fields are ``None`` for a run that answers to
+    no issue (a canvas or chat lane run).
+
+    ``issue_key`` (``MH-n``) and ``deep_link`` landed in 3a Task 3b. The panel
+    cannot route on ``issue_id``: the issue page is ``/team/{team}/todolist/
+    {key}``, so an id-only URL 404s or lands on an unrelated issue. The backend
+    therefore hands over a finished link or none at all — built by the same
+    ``issue_deep_link`` the Generated inbox card uses, so the two never drift::
+
+        "issue_key": "MH-91",
+        "deep_link": "/team/424242424242/todolist/MH-91?step=3"
+
+    ``deep_link`` is ``None`` when the run has no issue, when the issue has no
+    identifier, or when it has no team — never a URL assembled from the
+    snowflake. The team's own id does not cross the wire.
+    """
 
     id: str
     version: int
     parent_version: Optional[int] = None
     run_id: str
     issue_id: Optional[str] = None
+    issue_key: Optional[str] = None
+    deep_link: Optional[str] = None
     seq: Optional[int] = None
     turn: Optional[int] = None
     step: Optional[int] = None
