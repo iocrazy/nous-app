@@ -33,7 +33,18 @@ import { createResourceMentionExtension } from '../chat/ChatInputResourceMention
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
 import type { AssetGridRow } from '../assets/AssetGridPicker';
 import { useMentionAssetsTab } from '../chat/useMentionAssetsTab';
-import { MAX_ASSET_REF_ATTACHMENTS } from '../chat/attachmentLimits';
+import { useMentionOutputsTab } from '../chat/useMentionOutputsTab';
+import type { OutputMentionRow } from '../chat/outputMentionRows';
+import {
+  stageOutput,
+  toOutputAttachment,
+  toStagedOutput,
+  type StagedOutputRef,
+} from '../chat/stagedOutputs';
+import {
+  MAX_ASSET_REF_ATTACHMENTS,
+  MAX_OUTPUT_REF_ATTACHMENTS,
+} from '../chat/attachmentLimits';
 import {
   stageAsset as stageAssetInto,
   toAssetAttachment,
@@ -42,6 +53,7 @@ import {
 import { useToast } from '../Toast';
 import type {
   AssetRefAttachment,
+  OutputRefAttachment,
   ResourceRefAttachment,
   ResourceSearchResult,
 } from '../../types';
@@ -62,7 +74,8 @@ import type { CommentTriggerPreview } from '../../services/issueMessageService';
 export type ComposerAttachment =
   | StagedAttachment
   | ResourceRefAttachment
-  | AssetRefAttachment;
+  | AssetRefAttachment
+  | OutputRefAttachment;
 
 interface IssueReplyBoxProps {
   agents: AgentRef[];
@@ -146,6 +159,11 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   // path and carries a different snapshot, and folding the two together would
   // make every consumer re-derive which kind it is holding.
   const [stagedAssets, setStagedAssets] = useState<StagedAssetRef[]>([]);
+  // Output CITATIONS staged for this comment (3a Task 6). A third list for the
+  // same reason assets got a second one, one step further out: a citation
+  // carries no bytes at all and is validated against THIS ISSUE by a resolver
+  // nothing else here answers to.
+  const [stagedOutputs, setStagedOutputs] = useState<StagedOutputRef[]>([]);
   // Store WHICH agent the user skipped, not a bare flag: if the assignee changes
   // between the preview and the send, `suppressed` below stops matching and the
   // chip re-arms itself, so a skip aimed at agent A can never silently swallow
@@ -202,7 +220,10 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     const text = editor.getText().trim();
     const refs = collectRefs(editor);
     if (
-      (!text && refs.length === 0 && stagedAssets.length === 0)
+      (!text
+        && refs.length === 0
+        && stagedAssets.length === 0
+        && stagedOutputs.length === 0)
       || submitting
       || uploading
     ) {
@@ -213,7 +234,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
       await onSubmit(
         text,
         agentId,
-        [...stagedAttachments, ...refs, ...stagedAssets.map(toAssetAttachment)],
+        [
+          ...stagedAttachments,
+          ...refs,
+          ...stagedAssets.map(toAssetAttachment),
+          ...stagedOutputs.map(toOutputAttachment),
+        ],
         suppressed && suppressedAgentId ? [suppressedAgentId] : undefined,
       );
       editor.commands.clearContent(true);
@@ -221,6 +247,10 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
       // Cleared only on SUCCESS — the catch below keeps everything staged so a
       // rejected send can be retried without re-picking.
       setStagedAssets([]);
+      // Same rule, and it matters more here: a refused citation rejects the
+      // WHOLE comment, so a retry that had to re-pick every reference would
+      // punish the writer for the server's one objection.
+      setStagedOutputs([]);
       // One-shot: the next comment starts armed again.
       setSuppressedAgentId(null);
     } catch {
@@ -233,6 +263,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     onSubmit,
     stagedAssets,
     stagedAttachments,
+    stagedOutputs,
     submitting,
     suppressed,
     suppressedAgentId,
@@ -397,6 +428,10 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   // and closing resets the tab, so the two reference each other. The ref breaks
   // that cycle without making either one re-created on every render.
   const mentionAssetsReset = useRef<() => void>(() => {});
+  // The Outputs tab's own reset, broken out of the same cycle for the same
+  // reason. Closing the picker must forget BOTH tabs — leaving one of them
+  // active would reopen the popover on a body the reader did not choose.
+  const mentionOutputsReset = useRef<() => void>(() => {});
 
   /**
    * Close, and forget which tab was open.
@@ -409,6 +444,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   const closeMentionPicker = useCallback(() => {
     setMentionOpen(false);
     mentionAssetsReset.current();
+    mentionOutputsReset.current();
   }, []);
 
   // Close the picker on Escape or click-outside (mirrors AIChatPanel).
@@ -483,6 +519,37 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     [stagedAssets, addToast, t, closeMentionPicker],
   );
 
+  /**
+   * Picking an output STAGES a citation, version and all.
+   *
+   * The cap is enforced here as well as on the server, and the two refusals
+   * differ in kind from the asset one: past `MAX_OUTPUT_REF_ATTACHMENTS` the
+   * server rejects the WHOLE comment (`output_ref_limit_exceeded`) rather than
+   * dropping the extras, and an issue reply runs asynchronously in a DBOS
+   * workflow this composer never hears back from. Without this check the ninth
+   * pick would be a silent no-op that produces a comment the writer believes
+   * was sent and that never posts.
+   */
+  const handleMentionOutputSelect = useCallback(
+    (row: OutputMentionRow) => {
+      const next = stageOutput(stagedOutputs, toStagedOutput(row));
+      if (next === null) {
+        addToast(
+          t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
+            n: MAX_OUTPUT_REF_ATTACHMENTS,
+          }),
+          'error',
+        );
+        return;
+      }
+      setStagedOutputs(next);
+      closeMentionPicker();
+      setMentionQuery('');
+      editorRef.current?.commands.focus();
+    },
+    [stagedOutputs, addToast, t, closeMentionPicker],
+  );
+
   // The Assets tab itself — state, transport and key routing shared with
   // AIChatPanel, so the two composers cannot drift about what mentioning an
   // asset searches or which keys the grid claims.
@@ -490,13 +557,31 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     pickerOpen: mentionOpen,
     onSelect: handleMentionAssetSelect,
   });
+  // The Outputs tab. Only this composer has one: citations are issue-scoped,
+  // and the chat panel — which has no issue behind it — refuses the kind.
+  const mentionOutputs = useMentionOutputsTab({
+    pickerOpen: mentionOpen,
+    issueId: issueId ?? null,
+    query: mentionQuery,
+    onSelect: handleMentionOutputSelect,
+  });
   useEffect(() => {
     mentionAssetsReset.current = mentionAssets.reset;
   }, [mentionAssets.reset]);
-  // Same reason as `submitRef`: the editor's key handler closure is built once.
   useEffect(() => {
-    mentionKeyRef.current = mentionAssets.handleKey;
-  }, [mentionAssets.handleKey]);
+    mentionOutputsReset.current = mentionOutputs.reset;
+  }, [mentionOutputs.reset]);
+  // Same reason as `submitRef`: the editor's key handler closure is built once.
+  //
+  // Chained, not replaced. Each tab answers false unless it is the one
+  // showing, so the order is not a priority — it is two independent refusals,
+  // and whichever tab is open claims the key. Dropping either from the chain
+  // would leave that tab's arrows dead with nothing on screen saying why.
+  const assetsKey = mentionAssets.handleKey;
+  const outputsKey = mentionOutputs.handleKey;
+  useEffect(() => {
+    mentionKeyRef.current = (key) => assetsKey(key) || outputsKey(key);
+  }, [assetsKey, outputsKey]);
 
   return (
     <div
@@ -513,12 +598,40 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
             counts={mentionData.counts}
             activeKind={mentionActiveKind}
             onKindChange={(kind) => {
+              // Going back to a resource kind leaves BOTH extra tabs. Missing
+              // one would light two tabs at once over a single set of arrow
+              // keys.
               mentionAssets.deactivate();
+              mentionOutputs.deactivate();
               setMentionActiveKind(kind);
             }}
             onSelect={handleMentionSelect}
             activeIndex={mentionActiveIndex}
-            assets={mentionAssets.assets}
+            assets={{
+              ...mentionAssets.assets,
+              // Activating one extra tab leaves the other. The two are
+              // different populations sharing one keyboard, so both lit would
+              // mean two bodies on screen and Enter picking from whichever the
+              // code reached first.
+              onActivate: () => {
+                mentionOutputs.deactivate();
+                mentionAssets.assets.onActivate();
+              },
+            }}
+            // Only where an issue backs the composer. Without one every
+            // citation would come back `output_ref_unresolvable`, so offering
+            // the tab would be offering a control that cannot work.
+            outputs={
+              issueId != null
+                ? {
+                    ...mentionOutputs.outputs,
+                    onActivate: () => {
+                      mentionAssets.deactivate();
+                      mentionOutputs.outputs.onActivate();
+                    },
+                  }
+                : undefined
+            }
           />
         </div>
       )}
@@ -538,6 +651,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
           onChange={setStagedAttachments}
           assets={stagedAssets}
           onAssetsChange={setStagedAssets}
+          outputs={stagedOutputs}
+          onOutputsChange={setStagedOutputs}
           disabled={inputBlocked}
         />
       </div>

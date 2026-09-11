@@ -62,6 +62,11 @@ const UNREVIEWED: GeneratedItem = {
     shot_id: null,
     conversation_id: null,
     deep_link: '/team/727145299382534200/canvas/325005725244722?node=n9',
+    // Null on every non-`agent_run` row: `describe_source` only reads the
+    // run_deliverables provenance in that one arm.
+    issue_id: null,
+    run_id: null,
+    step: null,
   },
   title: 'Prompt 0',
 };
@@ -83,6 +88,9 @@ const SAVED: GeneratedItem = {
     shot_id: null,
     conversation_id: null,
     deep_link: null,
+    issue_id: null,
+    run_id: null,
+    step: null,
   },
   title: 'Prompt 1',
 };
@@ -196,6 +204,73 @@ describe('GeneratedCard — source line', () => {
 
     expect(screen.queryByRole('button', { name: /Chat upload/ })).toBeNull();
     expect(screen.getByText('Chat upload')).toBeTruthy();
+  });
+
+  /**
+   * `agent_run` rows (harness 3a Task 3 + 6). The backend now looks the row up
+   * in `run_deliverables` and fills `issue_id / run_id / step / deep_link`, so
+   * "which run made this picture?" is answerable from the inbox. Wire shape
+   * copied from `describe_source`: ids are STRINGS, `step` is a number, and
+   * `deep_link` is null whenever the provenance lookup found nothing.
+   */
+  const AGENT_RUN: GeneratedItem = {
+    ...UNREVIEWED,
+    source: {
+      kind: 'agent_run',
+      label: 'Script AI · MH-91',
+      canvas_id: null,
+      node_id: null,
+      shot_id: null,
+      conversation_id: null,
+      deep_link: '/team/727145299382534200/todolist/MH-91?step=4',
+      issue_id: '727145299382534000',
+      run_id: '727145299382534100',
+      step: 4,
+    },
+  };
+
+  it('links an agent run to the issue that produced it', () => {
+    render(<GeneratedCard item={AGENT_RUN} selected={false} teamId="t1" {...handlers()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Script AI · MH-91/ }));
+    expect(navigate).toHaveBeenCalledWith('/team/727145299382534200/todolist/MH-91?step=4');
+  });
+
+  it('says the link opens an ISSUE, not "where this was generated"', () => {
+    // One hint for two destinations would tell the reader a canvas opens when
+    // an issue does. The canvas hint is keyed off `node_id`, which an
+    // agent_run row does not have, so without its own arm this row would
+    // inherit the vague fallback.
+    render(<GeneratedCard item={AGENT_RUN} selected={false} teamId="t1" {...handlers()} />);
+    const source = screen.getByRole('button', { name: /Script AI · MH-91/ });
+    expect(source.getAttribute('title')).toBe('Opens the issue whose run produced this');
+  });
+
+  it('stays plain text for a historical agent_run with no provenance', () => {
+    // Every row generated before the registry existed has `deep_link: null`
+    // and null ids. That is normal history, not a fault — and a button that
+    // navigated nowhere would be worse than a label.
+    const historical: GeneratedItem = {
+      ...AGENT_RUN,
+      source: {
+        ...AGENT_RUN.source,
+        label: 'Chat generation',
+        deep_link: null,
+        issue_id: null,
+        run_id: null,
+        step: null,
+      },
+    };
+    render(<GeneratedCard item={historical} selected={false} teamId="t1" {...handlers()} />);
+    expect(screen.queryByRole('button', { name: /Chat generation/ })).toBeNull();
+    expect(screen.getByText('Chat generation')).toBeTruthy();
+  });
+
+  it('never shows a raw snowflake in the source line', () => {
+    // `issue_id` and `run_id` are provenance for the LINK, not words for a
+    // reader. The label is the only thing that gets printed.
+    render(<GeneratedCard item={AGENT_RUN} selected={false} teamId="t1" {...handlers()} />);
+    expect(screen.queryByText(/727145299382534000/)).toBeNull();
+    expect(screen.queryByText(/727145299382534100/)).toBeNull();
   });
 });
 

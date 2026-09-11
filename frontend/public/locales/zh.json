@@ -2140,6 +2140,7 @@
       "confirmDelete": "确认删除",
       "openCanvasNodeHint": "跳转到画布中的该节点",
       "openSourceHint": "跳转到生成来源",
+      "openIssueHint": "跳转到生成它的那个议题",
       "open": "预览 {{title}}"
     },
     "batch": {
@@ -5842,6 +5843,29 @@
     }
   },
   "outputs": {
+    "refError": {
+      "unresolvable": "其中一条产出引用读不到——它可能已被改版或删除。评论没有发出。",
+      "limitExceeded": "一条评论最多引用 {{n}} 个产出。评论没有发出。",
+      "unknown": "这条引用被拒绝了（{{code}}）。评论没有发出。"
+    },
+    "mentionTab": "产出",
+    "mentionLoading": "加载中…",
+    "mentionEmpty": "本议题还没有产出",
+    "mentionError": "读取本议题的产出失败",
+    "mentionOlder": "旧版本",
+    "mentionCount_one": "{{count}} 个产出",
+    "mentionCount_other": "{{count}} 个产出",
+    "citationRemove": "移除这条引用",
+    "citationLimit": "一条评论最多引用 {{n}} 个产出",
+    "provenance": "由 Agent 生成",
+    "provenanceOpenIssue": "打开议题",
+    "provenanceOpenRun": "打开运行",
+    "provenanceDiff": "对比",
+    "provenanceStep": "第 {{n}} 步",
+    "provenanceNoLink": "生成它的议题没有可跳转的链接",
+    "provenanceFailed": "读取来源失败。",
+    "provenanceVersions_one": "{{count}} 个版本",
+    "provenanceVersions_other": "{{count}} 个版本",
     "openRun": "打开运行 #{{run}}",
     "openRunHint": "这里没有打开运行面板",
     "version": "v{{n}}",

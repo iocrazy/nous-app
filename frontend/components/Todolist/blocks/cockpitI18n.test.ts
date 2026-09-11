@@ -76,3 +76,60 @@ describe('the outputs copy exists in both locales (harness 3a §5)', () => {
     expect(zh.issueDetail.outputs).not.toBe(en.issueDetail.outputs);
   });
 });
+
+describe('the citation + provenance copy exists in both locales (harness 3a Task 6)', () => {
+  // Task 6 adds three user-visible surfaces: the @-picker's Outputs tab, the
+  // staged-citation chip, and the object-page provenance block. A key present
+  // in `en` alone renders English inside a Chinese UI; one missing from both
+  // renders the raw dotted path at a user.
+  const TASK6_KEYS = [
+    'mentionTab', 'mentionLoading', 'mentionEmpty', 'mentionError', 'mentionOlder',
+    'citationRemove', 'citationLimit',
+    'provenance', 'provenanceOpenIssue', 'provenanceOpenRun', 'provenanceDiff',
+    'provenanceStep', 'provenanceNoLink', 'provenanceFailed',
+  ];
+
+  it.each(['en', 'zh'])('%s has every Task 6 key', (lang) => {
+    const o = load(lang).outputs;
+    for (const key of TASK6_KEYS) expect(typeof o?.[key]).toBe('string');
+  });
+
+  it.each(['en', 'zh'])('%s refuses a citation in words, with the cap interpolated', (lang) => {
+    const r = load(lang).outputs.refError as unknown as Record<string, string>;
+    expect(typeof r.unresolvable).toBe('string');
+    expect(r.limitExceeded).toContain('{{n}}');
+    // The digit would go stale the day the cap moves — the backend mirror test
+    // pins this from the other side too.
+    expect(r.limitExceeded).not.toContain('8');
+    expect(r.unknown).toContain('{{code}}');
+  });
+
+  it.each(['en', 'zh'])('%s pluralises the two counted phrases as _one/_other pairs', (lang) => {
+    const o = load(lang).outputs;
+    for (const base of ['mentionCount', 'provenanceVersions']) {
+      expect(o[`${base}_one`]).toContain('{{count}}');
+      expect(o[`${base}_other`]).toContain('{{count}}');
+      expect(o[base]).toBeUndefined();
+    }
+  });
+
+  it('the generated card has its own issue hint, distinct from the canvas one', () => {
+    // One hint for two destinations would tell a reader the link opens a
+    // canvas when it opens an issue.
+    for (const lang of ['en', 'zh']) {
+      const card = load(lang).generated as unknown as Record<string, Record<string, string>>;
+      expect(typeof card.card.openIssueHint).toBe('string');
+      expect(card.card.openIssueHint).not.toBe(card.card.openCanvasNodeHint);
+      expect(card.card.openIssueHint).not.toBe(card.card.openSourceHint);
+    }
+  });
+
+  it('zh is a translation, not a copy of the English', () => {
+    const en = load('en').outputs;
+    const zh = load('zh').outputs;
+    expect(zh.provenance).not.toBe(en.provenance);
+    expect(zh.mentionEmpty).not.toBe(en.mentionEmpty);
+    expect((zh.refError as unknown as Record<string, string>).unresolvable)
+      .not.toBe((en.refError as unknown as Record<string, string>).unresolvable);
+  });
+});

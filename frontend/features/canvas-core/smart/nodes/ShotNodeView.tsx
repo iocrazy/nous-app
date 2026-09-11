@@ -80,6 +80,7 @@ import { dispatchGenerations, pollGeneration } from '../../services/canvasGenera
 import { requestPromoteShot } from '../promoteShotBus';
 import { requestOpenShotInList } from '../openShotInListBus';
 import { registerActiveShotPoll, unregisterActiveShotPoll } from '../genResume';
+import { OutputProvenance } from '../../../../components/agentActivity/OutputProvenance';
 
 const CANVAS_CHIP =
   'nodrag rounded-full border border-canvas-line bg-transparent px-2 py-0.5 text-[11px] text-canvas-text hover:border-canvas-strong/50 focus-visible:ring-1 focus-visible:ring-canvas-strong/40';
@@ -479,6 +480,14 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
           >
             {generating ? t('canvas.shotNode.generating') : t('canvas.generate')}
           </button>
+
+          {/* Where this shot came from (3a Task 6). `shot_id` IS the registry's
+              `ref_id` for `script_shot` — `screenwriting_tools` registers with
+              exactly this value — so no translation is needed. Renders nothing
+              at all for a shot a person wrote, which is most of them. */}
+          {shot_id && (
+            <OutputProvenance kind="script_shot" refId={String(shot_id)} className="nodrag mt-2" />
+          )}
         </div>
       )}
 

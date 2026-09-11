@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image, Video, Music, LayoutGrid, Shapes } from 'lucide-react';
+import { FileText, Image, Video, Music, LayoutGrid, Shapes, FileOutput } from 'lucide-react';
 import type { ResourceSearchResult, ResourceSearchResponse } from '../../types';
 import { resourceProcessingState } from './resourceStatus';
 import { ResourceThumb } from './ResourceThumb';
@@ -10,6 +10,11 @@ import {
   type AssetGridQuery,
   type AssetGridRow,
 } from '../assets/AssetGridPicker';
+import {
+  OutputMentionList,
+  type OutputMentionListHandle,
+} from './OutputMentionList';
+import type { OutputMentionRow } from './outputMentionRows';
 
 function _formatSize(n: number | null): string {
   if (!n) return '';
@@ -62,6 +67,35 @@ export interface AssetsTabProps {
   pickerRef?: React.Ref<AssetGridPickerHandle>;
 }
 
+/**
+ * The Outputs tab (harness 3a Task 6) — this issue's registered outputs.
+ *
+ * OPTIONAL, and more narrowly so than Assets: citations are ISSUE-SCOPED (the
+ * resolver's whole check is "was this version produced on this issue"), so the
+ * chat panel — which has no issue behind it — passes this prop not at all and
+ * its composer refuses `output_ref` outright. The issue reply box is the only
+ * host with a third tab.
+ *
+ * Owned by the parent for the same reason `active` is on the assets tab: the
+ * parent routes the arrow keys, and a tab this component kept to itself would
+ * leave the keyboard aimed at whichever body the parent guessed.
+ */
+export interface OutputsTabProps {
+  active: boolean;
+  onActivate: () => void;
+  /** One row per citable VERSION, latest-first with the older ones folded —
+   *  already built by `toMentionRows`, so the popover never re-derives which
+   *  version is current. */
+  rows: OutputMentionRow[];
+  loading: boolean;
+  /** One readable line, or null. An empty list and a failed read are
+   *  different answers and the body says which. */
+  error: string | null;
+  onSelect: (row: OutputMentionRow) => void;
+  /** Handle for the parent's ↑↓/Enter routing. */
+  listRef?: React.Ref<OutputMentionListHandle>;
+}
+
 /** The dropdown asks for at most this many rows; the grid caps what it draws
  *  at `ASSET_GRID_LIMIT`. 24 is the router's own default. */
 const ASSET_SEARCH_LIMIT = 24;
@@ -100,6 +134,8 @@ interface Props {
   activeIndex?: number;
   /** Omit to render the resource tabs alone. */
   assets?: AssetsTabProps;
+  /** Omit on every host without an issue behind it. */
+  outputs?: OutputsTabProps;
 }
 
 export function ResourcePickerSuggestion({
@@ -112,9 +148,17 @@ export function ResourcePickerSuggestion({
   onSelect,
   activeIndex = 0,
   assets,
+  outputs,
 }: Props): React.ReactElement {
   const { t } = useTranslation();
   const assetsActive = Boolean(assets?.active);
+  const outputsActive = Boolean(outputs?.active);
+  // Any tab that is not one of the five resource KINDS. Named once so the
+  // three places that ask "is the resource list the body right now?" cannot
+  // answer differently — the bug a third tab invites is exactly that: the tab
+  // strip learns about it, one body condition does not, and two lists render
+  // at once under one set of arrow keys.
+  const otherTabActive = assetsActive || outputsActive;
 
   const tabs: {
     key: Props['activeKind'];
@@ -154,7 +198,7 @@ export function ResourcePickerSuggestion({
             data-kind={tab.key || 'all'}
             onClick={() => onKindChange(tab.key)}
             className={`text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-              !assetsActive && activeKind === tab.key
+              !otherTabActive && activeKind === tab.key
                 ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-400 hover:text-ink-200'
             }`}
@@ -187,6 +231,28 @@ export function ResourcePickerSuggestion({
             )}
           </button>
         )}
+        {/* Outputs last of all. A third population again — not files, not
+            library entities, but the things THIS ISSUE's agents made — and the
+            only one scoped to the page the composer is sitting on. No count
+            badge: the number is the rows already loaded for this issue rather
+            than an answer to the typed query, and a badge that did not move
+            with the search would read as a stale claim. */}
+        {outputs && (
+          <button
+            data-kind="outputs"
+            data-testid="resource-picker-tab-outputs"
+            aria-pressed={outputsActive}
+            onClick={outputs.onActivate}
+            className={`text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+              outputsActive
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                : 'text-ink-400 hover:text-ink-200'
+            }`}
+          >
+            <FileOutput size={11} />
+            {t('outputs.mentionTab', 'Outputs')}
+          </button>
+        )}
       </div>
 
       {assets && (
@@ -215,7 +281,21 @@ export function ResourcePickerSuggestion({
         />
       )}
 
-      {assetsActive ? null : items.length === 0 ? (
+      {outputs && (
+        // Rendered unconditionally and told whether its tab is showing, for
+        // the same reason the asset grid is: inactive means it draws nothing
+        // while keeping the highlight the reader left it on.
+        <OutputMentionList
+          ref={outputs.listRef}
+          active={outputsActive}
+          rows={outputs.rows}
+          loading={outputs.loading}
+          error={outputs.error}
+          onPick={outputs.onSelect}
+        />
+      )}
+
+      {otherTabActive ? null : items.length === 0 ? (
         <div className="px-3 py-6 text-center text-[12px] text-ink-500">
           {loading ? '…' : t('chat.mentionPicker.noResults', { q: query })}
         </div>
@@ -283,14 +363,21 @@ export function ResourcePickerSuggestion({
 
       <div className="px-2 py-1 text-[10px] text-ink-500 border-t border-ink-800 flex justify-between">
         <span data-testid="resource-picker-count">
-          {assetsActive
+          {outputsActive
+            ? outputs !== undefined
+              && outputs.rows.length > 0
+              && t('outputs.mentionCount', {
+                count: outputs.rows.length,
+                defaultValue: `${outputs.rows.length} outputs`,
+              })
+            : assetsActive
             ? assets?.count !== null &&
               assets !== undefined &&
               t('chat.mentionPicker.assetsCount', {
                 count: assets.count as number,
                 defaultValue: `${assets.count} assets`,
               })
-            : items.length > 0 && `${items.length} of ${counts.all}`}
+              : items.length > 0 && `${items.length} of ${counts.all}`}
         </span>
         {/* Assets tab ONLY. The hint promises `↑↓ navigate · ↵ insert`, and
             `AIChatPanel.handleMentionKey` takes the arrow keys over only when
@@ -301,7 +388,10 @@ export function ResourcePickerSuggestion({
             tabs is the other way to make this true; it is not a ten-line
             change (parent-owned index, per-tab reset, Enter routing), so the
             lie goes rather than the feature getting half-built. */}
-        {assetsActive && <span>{t('chat.mentionPicker.hintKbd')}</span>}
+        {/* The two tabs that actually move a highlight with ↑↓ and insert on
+            ↵. The five resource tabs still pin `activeIndex` at 0, so printing
+            it there would promise behaviour that does not exist. */}
+        {otherTabActive && <span>{t('chat.mentionPicker.hintKbd')}</span>}
       </div>
     </div>
   );

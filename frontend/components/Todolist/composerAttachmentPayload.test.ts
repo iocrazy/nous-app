@@ -95,3 +95,59 @@ describe('toIssueAttachmentPayload', () => {
     expect(toIssueAttachmentPayload([])).toBeUndefined();
   });
 });
+
+/**
+ * Citations (harness 3a Task 6).
+ *
+ * Wire shape copied from `output_ref_resolver._stamped`, which is what the
+ * backend STORES: `kind / ref_kind / ref_id / version / title`. Note `title`,
+ * not `name` — every other reference kind names its snapshot `name`, and a
+ * mapper that reached for the familiar field would post an attachment whose
+ * every required coordinate is present except the one the resolver reads for
+ * the chip's words. `ref_id` is a STRING (Snowflake).
+ */
+describe('toIssueAttachmentPayload — output citations', () => {
+  const CITATION: ComposerAttachment = {
+    kind: 'output_ref',
+    ref_kind: 'script_shot',
+    ref_id: '727145299382534999',
+    version: 2,
+    title: 'S3 · Shot #1',
+  };
+
+  it('maps an output reference by kind, id and version', () => {
+    // Missing this branch does not throw: `AttachmentRequest` has every field
+    // Optional, so the server accepts `{kind:'output_ref'}` with no
+    // coordinates and refuses it as `output_ref_unresolvable` — a refusal the
+    // user reads as "the thing I pointed at is gone".
+    expect(toIssueAttachmentPayload([CITATION])).toEqual([
+      {
+        kind: 'output_ref',
+        ref_kind: 'script_shot',
+        ref_id: '727145299382534999',
+        version: 2,
+        title: 'S3 · Shot #1',
+      },
+    ]);
+  });
+
+  it('keeps the version that was cited, not the object', () => {
+    // A citation is version-locked on purpose: the object may be revised
+    // after the comment is posted, and the comment still means v2.
+    const [out] = toIssueAttachmentPayload([{ ...CITATION, version: 1 }])!;
+    expect(out).toMatchObject({ ref_id: '727145299382534999', version: 1 });
+  });
+
+  it('does not fall through to the file branch', () => {
+    // The failure this guards: the trailing `return {kind, url, mime}` accepts
+    // any unrecognised kind, so a forgotten branch posts `{kind:'output_ref',
+    // url: undefined}` — well-formed, accepted, and pointing at nothing.
+    const [out] = toIssueAttachmentPayload([CITATION])!;
+    expect(out).not.toHaveProperty('url');
+  });
+
+  it('carries citations alongside the other three kinds, in order', () => {
+    const kinds = toIssueAttachmentPayload([FILE, RESOURCE, ASSET, CITATION])!.map((a) => a.kind);
+    expect(kinds).toEqual(['image', 'resource_ref', 'asset_ref', 'output_ref']);
+  });
+});

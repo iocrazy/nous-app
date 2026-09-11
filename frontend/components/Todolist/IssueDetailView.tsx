@@ -44,6 +44,7 @@ import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from './chil
 import { ReplayContext, type ReplayState } from './replayContext';
 import { ForkRunDialog } from './ForkRunDialog';
 import { forkErrorText } from './forkErrors';
+import { replyErrorText } from './outputRefErrors';
 
 interface IssueDetailViewProps {
   issue: UiIssue;
@@ -439,7 +440,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       // discards the optimistic id.
       await refresh();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Send failed', 'error');
+      // A refused CITATION gets its own sentence: the server's message names a
+      // kind and a snowflake, and it is the one refusal that rejects the whole
+      // comment rather than degrading it (3a Task 6). Every other failure
+      // keeps its own words.
+      addToast(replyErrorText(err, t), 'error');
       throw err; // signal failure to keep textarea content
     }
   };
