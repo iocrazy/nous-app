@@ -20,6 +20,7 @@ import {
   getOutputDiff,
   getOutputLineage,
   OutputsError,
+  resolveMediaUrl,
   type OutputDiff,
   type OutputDiffSide,
   type OutputVersion,
@@ -114,7 +115,9 @@ const Unavailable: React.FC<{ side: OutputDiffSide; t: T }> = ({ side, t }) => (
 );
 
 const MediaSide: React.FC<{ side: OutputDiffSide; t: T }> = ({ side, t }) => {
-  if (!side.media?.cover_url && !side.media?.stream_url) {
+  // The wire carries these relative; resolve before they reach the DOM.
+  const src = resolveMediaUrl(side.media?.cover_url) ?? resolveMediaUrl(side.media?.stream_url);
+  if (!src) {
     return (
       <div className="rounded border border-ink-800 bg-ink-900/60 p-3 text-[12px] text-ink-500">
         {t('outputs.noPreview', 'No preview for this version')}
@@ -124,7 +127,7 @@ const MediaSide: React.FC<{ side: OutputDiffSide; t: T }> = ({ side, t }) => {
   return (
     <img
       data-testid="output-diff-media"
-      src={side.media.cover_url ?? side.media.stream_url ?? ''}
+      src={src}
       alt={side.title ?? `v${side.version}`}
       className="max-h-[46vh] w-full rounded border border-ink-800 object-contain"
     />

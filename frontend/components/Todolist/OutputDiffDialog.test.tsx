@@ -13,6 +13,7 @@ import { ChildRunContext, type ChildRunState } from './childRunContext';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
+vi.mock('../../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: unknown, vars?: Record<string, unknown>) => {
@@ -85,13 +86,17 @@ describe('OutputDiffDialog', () => {
   it('draws both media sides as thumbnails', async () => {
     getOutputDiff.mockResolvedValueOnce({
       kind: 'generated_media', ref_id: '77', content_type: 'media',
-      from: { ...side(1, null), media: { id: '77', media_kind: 'image', mime: 'image/png', cover_url: '/api/v1/resources/77/cover', stream_url: null } },
-      to: { ...side(2, null), media: { id: '78', media_kind: 'image', mime: 'image/png', cover_url: '/api/v1/resources/78/cover', stream_url: null } },
+      from: { ...side(1, null), media: { id: '77', media_kind: 'image', mime: 'image/png', cover_url: '/api/v1/generated-media/500/cover', stream_url: null } },
+      to: { ...side(2, null), media: { id: '78', media_kind: 'image', mime: 'image/png', cover_url: '/api/v1/generated-media/501/cover', stream_url: null } },
     } satisfies OutputDiff);
     render(<OutputDiffDialog kind="generated_media" refId="77" onClose={vi.fn()} />);
     const shots = await screen.findAllByTestId('output-diff-media');
     expect(shots).toHaveLength(2);
-    expect(shots[0].getAttribute('src')).toBe('/api/v1/resources/77/cover');
+    // The wire is relative; a bare /api/... would hit the Pages origin and
+    // come back as index.html, so the dialog resolves it against the API.
+    expect(shots[0].getAttribute('src')).toBe('http://api.test/api/v1/generated-media/500/cover');
+    expect(shots[1].getAttribute('src')).toBe('http://api.test/api/v1/generated-media/501/cover');
+    expect(shots[0].getAttribute('src')?.startsWith('/')).toBe(false);
   });
 
   it('a single-version object shows that one version, and asks for no false pair', async () => {
@@ -176,5 +181,19 @@ describe('OutputDiffDialog — Open Run (修复轮 1, spec §5)', () => {
     const btn = await screen.findByTestId('output-open-run');
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(btn.getAttribute('title')).toBeTruthy();
+  });
+});
+
+describe('OutputDiffDialog — media URLs (修复轮 2)', () => {
+  it('passes an already-absolute cover through untouched, and falls back to the stream URL', async () => {
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'generated_media', ref_id: '77', content_type: 'media',
+      from: { ...side(1, null), media: { id: '77', media_kind: 'image', mime: 'image/png', cover_url: 'https://cdn.example.com/a.png', stream_url: null } },
+      to: { ...side(2, null), media: { id: '78', media_kind: 'video', mime: 'video/mp4', cover_url: null, stream_url: '/api/v1/generated-media/501/stream' } },
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="generated_media" refId="77" onClose={vi.fn()} />);
+    const shots = await screen.findAllByTestId('output-diff-media');
+    expect(shots[0].getAttribute('src')).toBe('https://cdn.example.com/a.png');
+    expect(shots[1].getAttribute('src')).toBe('http://api.test/api/v1/generated-media/501/stream');
   });
 });

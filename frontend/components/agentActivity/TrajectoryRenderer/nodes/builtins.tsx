@@ -10,7 +10,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, Mes
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
-import { getApiUrl } from '../../../../utils/apiConfig';
+import { resolveMediaUrl } from '../../../../services/outputsService';
 import { useChildRun } from '../../../Todolist/childRunContext';
 import { useHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputDiffDialog } from '../../../Todolist/OutputDiffDialog';
@@ -310,15 +310,14 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
  * row reads `—`, never `¢0.000`.
  */
 /**
- * A generated image's cover, absolute so it reaches the API host. A bare
- * `/api/...` would resolve against the Pages origin, which answers every
- * unknown path with index.html (CLAUDE.md「VITE_API_URL 不能留空」) — same
- * rule `getResourceCoverUrl` follows. `ref_id` IS the generated_media id, so
- * this is the URL shape the diff endpoint returns for the same row.
+ * A generated image's cover. `ref_id` IS the generated_media id, so this is
+ * the very URL the diff endpoint returns for the same row — built in the wire's
+ * relative shape and put through `resolveMediaUrl`, the one place that knows a
+ * bare `/api/...` would hit the Pages origin instead of the API.
  */
 function outputThumbUrl(card: OutputCard): string | null {
   if (card.kind !== 'generated_media') return null;
-  return `${getApiUrl()}/api/v1/generated-media/${encodeURIComponent(card.refId)}/cover`;
+  return resolveMediaUrl(`/api/v1/generated-media/${encodeURIComponent(card.refId)}/cover`);
 }
 
 /** 56×40 so a row of cards keeps the thread's rhythm; a cover that 404s or is

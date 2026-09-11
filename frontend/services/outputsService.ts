@@ -88,6 +88,27 @@ export interface OutputDiff {
   to: OutputDiffSide;
 }
 
+/**
+ * Make a backend media URL usable in an `<img>` / `<video>`.
+ *
+ * The backend builds these RELATIVE (`/api/v1/generated-media/{id}/cover`,
+ * see `app/services/deliverables/diff.py`), and the app is served from a
+ * different origin than the API — on Cloudflare Pages `public/_redirects`
+ * sends `/*` to `index.html`, so a bare `/api/...` comes back as HTML and the
+ * image silently fails to load. Prefixing is the FRONTEND's job (same rule
+ * `getResourceCoverUrl` follows), and it happens here only: the card
+ * thumbnail and the dialog both call this, so there is one place to be right.
+ *
+ * Anything already absolute — `https:`, `data:`, `blob:`, protocol-relative —
+ * passes through untouched.
+ */
+export function resolveMediaUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url)) return url;
+  const base = getApiUrl().replace(/\/+$/, '');
+  return url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+}
+
 /** A refusal the caller can BRANCH on. Mirrors ScheduleRejectedError. */
 export class OutputsError extends Error {
   readonly code: string;

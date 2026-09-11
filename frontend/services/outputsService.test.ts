@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('./parserService', () => ({ getAuthHeaders: async () => ({ Authorization: 'Bearer t' }) }));
 
-const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError } = await import('./outputsService');
+const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl } = await import('./outputsService');
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -106,5 +106,32 @@ describe('outputsService', () => {
     fetchMock.mockResolvedValueOnce(json(200, { kind: 'script_shot', ref_id: 'a/b', latest_version: 1, versions: [] }));
     await getOutputLineage('script_shot', 'a/b');
     expect(fetchMock.mock.calls[0][0]).toBe('http://api.test/api/v1/outputs/script_shot/a%2Fb');
+  });
+});
+
+describe('resolveMediaUrl', () => {
+  // The backend returns media URLs RELATIVE (`diff.py` builds
+  // `/api/v1/generated-media/{id}/cover`), and the frontend is served from a
+  // different origin — on Cloudflare Pages `/* → index.html` swallows `/api/*`
+  // and the <img> gets HTML back. Prefixing is the frontend's job, here only.
+  it('makes a backend-relative path absolute against the API origin', () => {
+    expect(resolveMediaUrl('/api/v1/generated-media/500/cover')).toBe('http://api.test/api/v1/generated-media/500/cover');
+  });
+
+  it('leaves an already-absolute URL exactly as it is', () => {
+    expect(resolveMediaUrl('https://cdn.example.com/x.png')).toBe('https://cdn.example.com/x.png');
+    expect(resolveMediaUrl('//cdn.example.com/x.png')).toBe('//cdn.example.com/x.png');
+    expect(resolveMediaUrl('data:image/png;base64,AAA')).toBe('data:image/png;base64,AAA');
+    expect(resolveMediaUrl('blob:http://api.test/abc')).toBe('blob:http://api.test/abc');
+  });
+
+  it('nothing in, nothing out — the caller draws a placeholder instead', () => {
+    expect(resolveMediaUrl(null)).toBeNull();
+    expect(resolveMediaUrl(undefined)).toBeNull();
+    expect(resolveMediaUrl('')).toBeNull();
+  });
+
+  it('does not double the slash when the base carries one', () => {
+    expect(resolveMediaUrl('api/v1/generated-media/500/cover')).toBe('http://api.test/api/v1/generated-media/500/cover');
   });
 });
