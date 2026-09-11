@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from app.services.issues.issue_links import issue_deep_link
+
 _UNTITLED = "Untitled canvas"
 
 # The ``origin_kind`` written when a My Uploads resource is registered so it can
@@ -69,10 +71,10 @@ def describe_source(
         # inbox even though run_deliverables had held the answer all along.
         if prov:
             label = f"{prov.get('agent_name') or 'Agent'} · {issue_key or 'Run'}"
-            if issue_key:
-                deep_link = f"/team/{team_id}/todolist/{issue_key}"
-                if step is not None:
-                    deep_link += f"?step={step}"
+            # The SAME builder the lineage endpoints use (3a Task 3b): this card
+            # and the object's provenance block describe one row from two
+            # directions and must print one URL.
+            deep_link = issue_deep_link(team_id=team_id, issue_key=issue_key, step=step)
         else:
             label = "Chat generation"
     elif kind == "chat_upload":

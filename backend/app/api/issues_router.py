@@ -781,6 +781,10 @@ async def list_issue_outputs(issue_id: int, auth: AuthDep) -> IssueOutputsRespon
 
     Ownership goes through the run: ``run_deliverables`` has no ``issue_id``
     column, and ``agent_runs.issue_id`` is the single truth (spec §3).
+
+    The issue's key and team come from the row already loaded for the
+    visibility check above, not from a per-row JOIN: every row here belongs to
+    THIS issue by construction, so one lookup is the whole answer (3a Task 3b).
     """
     existing = await issue_repository.get_by_id(issue_id)
     if not existing:
@@ -789,7 +793,14 @@ async def list_issue_outputs(issue_id: int, auth: AuthDep) -> IssueOutputsRespon
         )
     await _assert_visibility(existing, auth)
     rows = await get_run_deliverables_repository().list_for_issue(issue_id)
-    return IssueOutputsResponse(items=group_by_object(rows, issue_id=str(issue_id)))
+    return IssueOutputsResponse(
+        items=group_by_object(
+            rows,
+            issue_id=str(issue_id),
+            issue_key=existing.get("identifier"),
+            team_id=existing.get("team_id"),
+        )
+    )
 
 
 #: How long a stopped schedule keeps showing on its issue. Long enough to

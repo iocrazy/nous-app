@@ -24,6 +24,12 @@ pytestmark = pytest.mark.unit
 ME = "11111111-1111-1111-1111-111111111111"
 RUN_A = "913402881190401"
 RUN_B = "913402881190402"
+ISSUE_ID = 348087075560200
+ISSUE_KEY = "MH-91"
+#: ``issues.team_id`` stays a NATIVE int out of the issue repository (the
+#: BIGINT parity rule) — the link builder has to cope with that, not with a
+#: string the test invented.
+TEAM_ID = 424242424242
 
 
 class _Auth:
@@ -69,12 +75,23 @@ class _Repo:
         return list(self.rows)
 
 
-def _patch(monkeypatch, *, visible=True, issue=True, repo=None):
+def _patch(
+    monkeypatch,
+    *,
+    visible=True,
+    issue=True,
+    repo=None,
+    identifier=ISSUE_KEY,
+    team_id=TEAM_ID,
+):
     repo = repo or _Repo()
 
     class _Issues:
         async def get_by_id(self, issue_id):
-            return {"id": issue_id} if issue else None
+            if not issue:
+                return None
+            # The SELECT *-shaped row the repository really returns.
+            return {"id": issue_id, "identifier": identifier, "team_id": team_id}
 
     async def _visible(row, user_id):
         return visible
@@ -137,3 +154,46 @@ async def test_a_missing_issue_is_404(monkeypatch):
         await mod.list_issue_outputs(348087075560200, _Auth())
     assert exc.value.status_code == 404
     assert repo.seen == []
+
+
+# ── issue key + deep link (3a Task 3b) ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_every_version_carries_its_issue_key_and_deep_link(monkeypatch):
+    """The panel's ``Open Issue`` needs ``/team/{team}/todolist/{key}``; the
+    issue_id it used to get cannot build that. The issue is already loaded for
+    the visibility check, so this costs no extra query — no per-row re-JOIN."""
+    _patch(monkeypatch)
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+
+    shot9 = body["items"][1]
+    assert [v["issue_key"] for v in shot9["versions"]] == [ISSUE_KEY, ISSUE_KEY]
+    # step is the version number in this fixture — each version opens on the
+    # step that produced it.
+    assert [v["deep_link"] for v in shot9["versions"]] == [
+        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=2",
+        f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_issue_without_an_identifier_gets_no_key_and_no_link(monkeypatch):
+    """Never a URL built from the snowflake: ``/todolist/348087075560200``
+    resolves to nothing."""
+    _patch(monkeypatch, identifier=None)
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+    top = body["items"][0]["versions"][0]
+    assert top["issue_key"] is None and top["deep_link"] is None
+    assert top["issue_id"] == str(ISSUE_ID)
+
+
+@pytest.mark.asyncio
+async def test_a_personal_issue_keeps_its_key_but_has_no_link(monkeypatch):
+    """``team_id IS NULL`` on a personal-scope issue. The key is still worth
+    printing; the URL is not buildable."""
+    _patch(monkeypatch, team_id=None)
+    top = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()["items"][0][
+        "versions"
+    ][0]
+    assert top["issue_key"] == ISSUE_KEY and top["deep_link"] is None

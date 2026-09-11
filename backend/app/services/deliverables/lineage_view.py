@@ -6,21 +6,41 @@ a version is (三期 3a spec §4).
 
 No IO: the repository has already stringified ids, floated ``cost_cents`` and
 ISO-formatted ``created_at``. Nothing here re-derives those.
+
+One version, on the wire (3a Task 3b added the last two keys)::
+
+    {
+      "id": "700000000000003", "version": 3, "parent_version": 2,
+      "run_id": "913402881190401", "issue_id": "348087075560200",
+      "seq": 3, "turn": 2, "step": 3,
+      "title": "S1 · Shot 3", "model": "qwen-max", "cost_cents": 1.25,
+      "created_at": "2026-09-13T00:00:00+00:00",
+      "issue_key": "MH-91",
+      "deep_link": "/team/424242424242/todolist/MH-91?step=3"
+    }
+
+``team_id`` is deliberately NOT in that shape. It arrives on the row, feeds the
+link builder, and stops here: the reader needs somewhere to go, not the team's
+id.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from app.services.issues.issue_links import issue_deep_link
+
 #: The version fields that cross the wire. An explicit projection, not
-#: ``dict(row)``: the row carries columns (and a joined ``issue_id``) whose
-#: membership in the public shape should be a decision, not a leak.
+#: ``dict(row)``: the row carries columns (and a joined ``issue_id`` /
+#: ``issue_key`` / ``team_id``) whose membership in the public shape should be a
+#: decision, not a leak.
 _VERSION_KEYS = (
     "id",
     "version",
     "parent_version",
     "run_id",
     "issue_id",
+    "issue_key",
     "seq",
     "turn",
     "step",
@@ -32,21 +52,45 @@ _VERSION_KEYS = (
 
 
 def version_of(
-    row: Dict[str, Any], *, issue_id: Optional[str] = None
+    row: Dict[str, Any],
+    *,
+    issue_id: Optional[str] = None,
+    issue_key: Optional[str] = None,
+    team_id: Any = None,
 ) -> Dict[str, Any]:
     """One row → one ``OutputVersion`` dict.
 
-    ``issue_id`` fills in for the per-issue reader, whose rows were selected BY
-    an issue and therefore do not carry the join back (spec §3: the table has
-    no ``issue_id`` column — ``agent_runs.issue_id`` is the only truth)."""
+    The three keyword defaults fill in for the per-issue reader, whose rows were
+    selected BY an issue and therefore do not carry the join back (spec §3: the
+    table has no ``issue_id`` column — ``agent_runs.issue_id`` is the only
+    truth). That reader has already loaded its issue for the visibility check,
+    so it hands the identity over rather than paying for a per-row re-JOIN.
+
+    ``deep_link`` comes from the one shared builder, out of the issue KEY and a
+    team — never out of ``issue_id``, which no route accepts. It is ``None``
+    whenever either is missing, which is the normal state of a run that answers
+    to no issue at all.
+    """
     out = {key: row.get(key) for key in _VERSION_KEYS}
     if out.get("issue_id") is None and issue_id is not None:
         out["issue_id"] = str(issue_id)
+    if out.get("issue_key") is None and issue_key is not None:
+        out["issue_key"] = issue_key
+    row_team = row.get("team_id")
+    out["deep_link"] = issue_deep_link(
+        team_id=row_team if row_team is not None else team_id,
+        issue_key=out.get("issue_key"),
+        step=out.get("step"),
+    )
     return out
 
 
 def group_by_object(
-    rows: List[Dict[str, Any]], *, issue_id: Optional[str] = None
+    rows: List[Dict[str, Any]],
+    *,
+    issue_id: Optional[str] = None,
+    issue_key: Optional[str] = None,
+    team_id: Any = None,
 ) -> List[Dict[str, Any]]:
     """Group rows into one entry per ``(kind, ref_id)``, versions newest first.
 
@@ -64,7 +108,9 @@ def group_by_object(
             key,
             {"kind": key[0], "ref_id": key[1], "title": None, "versions": []},
         )
-        entry["versions"].append(version_of(row, issue_id=issue_id))
+        entry["versions"].append(
+            version_of(row, issue_id=issue_id, issue_key=issue_key, team_id=team_id)
+        )
     items: List[Dict[str, Any]] = []
     for entry in grouped.values():
         entry["versions"].sort(key=lambda v: v.get("version") or 0, reverse=True)

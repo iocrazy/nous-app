@@ -27,8 +27,10 @@ the same one CLAUDE.md's "读正常 ≠ 服务正常" warns about. Specifically:
     ``ref_id`` (case 3).
   * the two JOINs onto ``agent_runs`` (``list_for_issue`` / ``lineage_for``)
     have to produce the ordering Task 3 paginates on, and ``lineage_for``'s
-    two-entity ``select(Model, Column)`` returns Rows that unpack — a different
-    result shape from the single-entity selects above (cases 5, 6).
+    multi-entity ``select(Model, Column, Column, Column)`` returns Rows that
+    unpack — a different result shape from the single-entity selects above, and
+    its OUTER join onto ``issues`` (Task 3b's ``issue_key`` / ``team_id``) must
+    not drop the rows of a run that answers to no issue (cases 5, 6).
 
 Transport: asyncpg on ``INTEGRATION_DATABASE_URL`` for fixture setup and for the
 assertions; the repository itself goes through ``app.db.session`` (SQLAlchemy
@@ -164,12 +166,21 @@ async def fx(pg) -> Dict[str, Any]:
     issue_b = await _mk_issue(990_002)
     run_a = await _mk_run(issue_a)
     run_b = await _mk_run(issue_b)
+
+    async def _key(issue_id: int) -> str:
+        return await pg.fetchval(
+            "SELECT identifier FROM public.issues WHERE id = $1", issue_id
+        )
+
     try:
         yield {
             "run_a": run_a,
             "run_b": run_b,
             "issue_a": issue_a,
             "issue_b": issue_b,
+            # The identifiers Postgres stored, for the deep-link join (Task 3b).
+            "key_a": await _key(issue_a),
+            "key_b": await _key(issue_b),
         }
     finally:
         # ON DELETE CASCADE takes the deliverables with the runs; agent_runs
@@ -403,8 +414,8 @@ async def test_list_for_issue_joins_through_the_run_and_filters(orm_dsn, fx):
 
 @_skip
 async def test_lineage_for_returns_the_chain_newest_first_with_its_issue(orm_dsn, fx):
-    """``select(Model, Column)`` returns Rows that unpack — a different result
-    shape from every single-entity select above."""
+    """``select(Model, Column, …)`` returns Rows that unpack — a different
+    result shape from every single-entity select above."""
     repo = _repo()
     ref = _uniq("gm")
 
@@ -441,6 +452,43 @@ async def test_lineage_for_returns_the_chain_newest_first_with_its_issue(orm_dsn
     assert chain[0]["issue_id"] == str(fx["issue_b"])
     assert chain[1]["issue_id"] == str(fx["issue_a"])
     assert chain[0]["parent_version"] == 1 and chain[1]["parent_version"] is None
+    # Task 3b: the outer join onto issues carries the KEY the frontend route
+    # needs. Per row, because two versions of one object can come from runs on
+    # two different issues — exactly the case above.
+    assert chain[0]["issue_key"] == fx["key_b"]
+    assert chain[1]["issue_key"] == fx["key_a"]
+    # These fixture issues have no team, so the link is honestly unbuildable.
+    assert chain[0]["team_id"] is None
+
+
+@_skip
+async def test_lineage_for_keeps_a_run_that_answers_to_no_issue(orm_dsn, fx, pg):
+    """The issues join is OUTER on purpose. An inner join would make a canvas
+    or chat lane run's whole version chain vanish — a 404 ``not_registered`` on
+    an object that IS registered, which is the worst answer of the three."""
+    repo = _repo()
+    ref = _uniq("gm")
+    await pg.execute(
+        "UPDATE public.agent_runs SET issue_id = NULL WHERE id = $1", fx["run_a"]
+    )
+    await repo.insert_version(
+        run_id=fx["run_a"],
+        kind="generated_media",
+        ref_id=ref,
+        version=1,
+        parent_version=None,
+        title="orphan",
+        model=None,
+        cost_cents=None,
+        turn=1,
+        step=1,
+    )
+
+    chain = await repo.lineage_for(kind="generated_media", ref_id=ref)
+
+    assert [r["version"] for r in chain] == [1]
+    assert chain[0]["issue_id"] is None
+    assert chain[0]["issue_key"] is None and chain[0]["team_id"] is None
 
 
 @_skip
