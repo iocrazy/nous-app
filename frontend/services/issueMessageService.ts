@@ -57,6 +57,17 @@ export interface IssueMessage {
   from_status: string | null;
   to_status: string | null;
   created_at: string;
+  /**
+   * What was attached when this row was posted, projected back by
+   * `GET /issues/{id}/messages` (3a Task 8a). Optional AND nullable on
+   * purpose: every row written before the projection existed simply has no
+   * key, and the thread must render those exactly as it always did — an
+   * absent citation is history, not a fault.
+   *
+   * Same union the composer posts, so the two halves of one round trip cannot
+   * drift into two ideas of what an attachment is.
+   */
+  attachments?: IssueMessageAttachment[] | null;
 }
 
 /** True when a schedule firing wrote this row. */

@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Zap, ChevronRight, ChevronDown, Clock, Paperclip, GitFork } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
+import { OutputChipBody } from '../chat/OutputChipBody';
 import { simulateAgentRunComplete, startedByWakeup } from '../../services/issueMessageService';
 import type { ChildRunOrigin } from './childRunContext';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
@@ -521,7 +522,34 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
             {msg.body}
           </div>
         )}
+        <CitationChips msg={msg} />
       </div>
+    </div>
+  );
+};
+
+/**
+ * The citations this comment was posted with (3a Task 8b).
+ *
+ * The composer has drawn these chips since Task 6, but the thread dropped
+ * them: scrolling back, "tighten this one" pointed at nothing. Same component
+ * as the composer's — one chip, one reading of `@<title> v<n>` — minus the X:
+ * a sent comment is a record, not a draft.
+ */
+const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
+  const cites = (msg.attachments ?? []).filter((a) => a.kind === 'output_ref');
+  if (cites.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1" data-testid="comment-citations">
+      {cites.map((c) => (
+        <OutputChipBody
+          key={`${c.ref_kind}:${c.ref_id}:${c.version}`}
+          refKind={c.ref_kind}
+          refId={c.ref_id}
+          version={c.version}
+          title={c.title}
+        />
+      ))}
     </div>
   );
 };
