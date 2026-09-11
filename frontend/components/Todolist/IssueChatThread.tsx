@@ -541,9 +541,12 @@ const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
   if (cites.length === 0) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-1" data-testid="comment-citations">
-      {cites.map((c) => (
+      {cites.map((c, i) => (
         <OutputChipBody
-          key={`${c.ref_kind}:${c.ref_id}:${c.version}`}
+          // The index is part of the key on purpose: two citations of the
+          // same version are one string otherwise, and React reuses state
+          // between children that claim the same key.
+          key={`${c.ref_kind}:${c.ref_id}:${c.version}:${i}`}
           refKind={c.ref_kind}
           refId={c.ref_id}
           version={c.version}

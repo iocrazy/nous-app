@@ -90,6 +90,24 @@ describe('IssueChatThread — citation chips', () => {
     expect(chips.map((c) => c.getAttribute('data-ref'))).toEqual(['9', '10']);
   });
 
+  it('two citations of the SAME version each get their own React key', () => {
+    // The key was `kind:ref:version`, which is the same string twice here.
+    // React renders both children anyway, so the only observable is the
+    // duplicate-key error it logs — and a colliding key makes React reuse and
+    // reorder state between the two on any later update.
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    try {
+      const { container } = draw(comment({ attachments: [CITATION, { ...CITATION }] }));
+      expect(container.querySelectorAll('[data-testid="staged-output-chip"]').length).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.filter((e) => /same key/i.test(e))).toEqual([]);
+  });
+
   it('a message with no attachments key renders exactly as it always did', () => {
     // Every row written before Task 6 — and every plain comment since.
     const { container } = draw(comment());
