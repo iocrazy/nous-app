@@ -216,6 +216,17 @@ export function TodolistPage() {
     return () => { cancelled = true; };
   }, [refreshIssues, addToast, teamId]);
 
+  // Every fetch that maps a row reads the maps from here rather than closing
+  // over them. The agent / project maps land a beat AFTER the single-issue
+  // fetch (two endpoints racing one), so listing them as effect deps would
+  // re-run the fetch, flip `selectedLoading` back to true and unmount the
+  // whole detail subtree — taking the user's half-typed comment and any open
+  // dialog with it. A late map is new display text, never a reason to reload.
+  const mapsRef = useRef({ agentsById, projectsById });
+  useEffect(() => {
+    mapsRef.current = { agentsById, projectsById };
+  }, [agentsById, projectsById]);
+
   // Fetch single issue when :identifier set
   useEffect(() => {
     if (!identifier) {
@@ -229,7 +240,8 @@ export function TodolistPage() {
       try {
         const raw = await getIssueByIdentifier(identifier);
         if (cancelled) return;
-        setSelectedIssue(toUiIssue(raw, agentsById, projectsById));
+        const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
+        setSelectedIssue(toUiIssue(raw, agentMap, projectMap));
       } catch (err) {
         if (cancelled) return;
         setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
@@ -238,7 +250,7 @@ export function TodolistPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [identifier, agentsById, projectsById]);
+  }, [identifier]);
 
   // ── Live-row single-issue refetch ────────────────────────────────────
   // mergeRealtimeIssue stops the running chip flickering by carrying the
@@ -248,12 +260,6 @@ export function TodolistPage() {
   // last REST fetch saw until the user navigated away. For live rows the event
   // is a refetch signal, not data — same posture as TaskManagerContext.
   const refetchTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
-  // Read inside the timer callback so a fetch scheduled before the agent /
-  // project maps resolved still maps its result against the current ones.
-  const mapsRef = useRef({ agentsById, projectsById });
-  useEffect(() => {
-    mapsRef.current = { agentsById, projectsById };
-  }, [agentsById, projectsById]);
   // Lets the Realtime handler consult the current row without reading it
   // inside a setState updater (which React may invoke more than once).
   const issuesRef = useRef<UiIssue[]>(issues);
