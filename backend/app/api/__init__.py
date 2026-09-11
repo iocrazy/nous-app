@@ -202,8 +202,10 @@ api_router.include_router(router=ideation_router, tags=["Ideation"])
 
 # Issues — top-level user-visible entity (PR-D6)
 from app.api.issues_router import router as issues_router  # noqa: E402
+from app.api.outputs_router import router as outputs_router  # noqa: E402
 
 api_router.include_router(router=issues_router, tags=["Issues"])
+api_router.include_router(router=outputs_router, tags=["Outputs"])
 from app.api.issue_progress_router import router as issue_progress_router  # noqa: E402
 
 api_router.include_router(router=issue_progress_router, tags=["Issues"])

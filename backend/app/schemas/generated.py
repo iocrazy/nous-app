@@ -87,6 +87,12 @@ class GeneratedSource(BaseModel):
 
     ``deep_link`` is ``None`` for kinds that have no route today (shot, chat) —
     never an invented URL.
+
+    ``issue_id`` / ``run_id`` / ``step`` are the 3a run provenance, filled only
+    for ``agent_run`` rows that are actually in ``run_deliverables``. They stay
+    ``None`` for everything else, historical rows included — a card with no
+    provenance is normal history, not a fault. Ids are strings: they are
+    Snowflake BIGINTs.
     """
 
     kind: str
@@ -96,6 +102,9 @@ class GeneratedSource(BaseModel):
     shot_id: Optional[str] = None
     conversation_id: Optional[str] = None
     deep_link: Optional[str] = None
+    issue_id: Optional[str] = None
+    run_id: Optional[str] = None
+    step: Optional[int] = None
 
 
 class GeneratedItem(BaseModel):

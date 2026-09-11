@@ -29,6 +29,9 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
+from app.repositories.run_deliverables_repository import (
+    get_run_deliverables_repository,
+)
 from app.schemas.issue import (
     DispatchBlockedReason,
     DispatchPreview,
@@ -44,6 +47,8 @@ from app.schemas.issue import (
     PausedIssueItem,
     PausedListResponse,
 )
+from app.schemas.outputs import IssueOutputsResponse
+from app.services.deliverables.lineage_view import group_by_object
 from app.services.issues.issue_visibility import is_issue_visible
 from app.services.modules.gate import require_module
 from app.workflows.issue_lifecycle import execute_issue
@@ -759,6 +764,32 @@ async def list_issue_pipeline_runs(issue_id: int, auth: AuthDep):
     runs = await pipeline_repository.list_runs_for_parent(issue_id)
     items = [PipelineRun.model_validate(await _enrich_run(r)) for r in runs]
     return PipelineRunListResponse(items=items)
+
+
+@router.get("/{issue_id}/outputs", response_model=IssueOutputsResponse)
+async def list_issue_outputs(issue_id: int, auth: AuthDep) -> IssueOutputsResponse:
+    """Everything this issue produced, grouped by ``(kind, ref_id)``.
+
+    The panel's unit is the OBJECT: three revisions of one shot are one entry
+    with three versions, not three entries — otherwise "what did this issue
+    produce" reads as more work than actually happened.
+
+    An issue with no outputs is an empty list, NOT a 404: the issue exists and
+    is visible, it simply produced nothing yet. (The per-object endpoint is the
+    opposite — see ``outputs_router`` — because there "no rows" means the
+    object was never registered, which is a different fact.)
+
+    Ownership goes through the run: ``run_deliverables`` has no ``issue_id``
+    column, and ``agent_runs.issue_id`` is the single truth (spec §3).
+    """
+    existing = await issue_repository.get_by_id(issue_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
+        )
+    await _assert_visibility(existing, auth)
+    rows = await get_run_deliverables_repository().list_for_issue(issue_id)
+    return IssueOutputsResponse(items=group_by_object(rows, issue_id=str(issue_id)))
 
 
 #: How long a stopped schedule keeps showing on its issue. Long enough to

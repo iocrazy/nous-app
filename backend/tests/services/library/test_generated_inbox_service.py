@@ -795,6 +795,11 @@ async def test_a_wire_shape_row_round_trips_through_generated_item():
         "shot_id",
         "conversation_id",
         "deep_link",
+        # 3a run provenance — always present as keys, filled only for an
+        # agent_run row that is actually in the deliverable registry.
+        "issue_id",
+        "run_id",
+        "step",
     }
 
 

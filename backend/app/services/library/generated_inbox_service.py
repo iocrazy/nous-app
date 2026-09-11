@@ -51,6 +51,8 @@ import datetime
 from pathlib import PurePosixPath
 from typing import Any, Optional
 
+from loguru import logger
+
 from app.db.session import unit_of_work
 from app.repositories.canvas_repository import CanvasRepository
 from app.repositories.generated_media_repository import (
@@ -58,6 +60,9 @@ from app.repositories.generated_media_repository import (
     GeneratedMediaRepository,
 )
 from app.repositories.resources_repository import ResourcesRepository
+from app.repositories.run_deliverables_repository import (
+    get_run_deliverables_repository,
+)
 from app.schemas.assets import AssetCreate, AttachFileRequest
 from app.schemas.generated import (
     BatchRequest,
@@ -132,8 +137,43 @@ def _title_source_from_filename(filename: Any) -> Optional[str]:
     return stem or None
 
 
+async def _provenance_for(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Which run produced each ``agent_run`` row on this page (3a).
+
+    One query per page, and only when the page actually contains an agent-made
+    row — the other origins never read it.
+
+    Best-effort on purpose: rows generated before the registry existed are
+    simply not in it, and a lookup that fails must not take the whole inbox
+    down with it. The failure is LOGGED, not swallowed — the card quietly
+    losing its provenance line is a visible-enough symptom, but only if there
+    is a log line to correlate it with.
+    """
+    wanted = [
+        str(r["id"])
+        for r in rows
+        if r.get("origin_kind") == "agent_run" and r.get("id") is not None
+    ]
+    if not wanted:
+        return {}
+    try:
+        return await get_run_deliverables_repository().provenance_for(
+            kind="generated_media", ref_ids=wanted
+        )
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.opt(exception=True).warning(
+            f"[generated] deliverable provenance lookup failed for "
+            f"{len(wanted)} row(s): {exc!r}"
+        )
+        return {}
+
+
 def _build_item(
-    row: dict[str, Any], *, canvas_names: dict[str, str], team_id: str
+    row: dict[str, Any],
+    *,
+    canvas_names: dict[str, str],
+    team_id: str,
+    provenance: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Repo row → validated ``GeneratedItem`` dict (source + title attached).
 
@@ -146,7 +186,12 @@ def _build_item(
     return GeneratedItem.model_validate(
         {
             **row,
-            "source": describe_source(row, canvas_names=canvas_names, team_id=team_id),
+            "source": describe_source(
+                row,
+                canvas_names=canvas_names,
+                team_id=team_id,
+                provenance=provenance,
+            ),
             "title": derive_title(
                 row.get("prompt"),
                 str(row.get("media_kind") or ""),
@@ -179,12 +224,22 @@ class GeneratedInboxService:
     async def _decorate(
         self, rows: list[dict[str, Any]], team_id: str
     ) -> list[dict[str, Any]]:
-        """Attach source/title to a page of rows with ONE canvas-name query."""
+        """Attach source/title to a page of rows with ONE canvas-name query and
+        ONE deliverable-registry lookup."""
         ids = sorted(
             {int(r["canvas_id"]) for r in rows if r.get("canvas_id") is not None}
         )
         names = await self.canvases.names_by_ids(ids)
-        return [_build_item(r, canvas_names=names, team_id=team_id) for r in rows]
+        provenance = await _provenance_for(rows)
+        return [
+            _build_item(
+                r,
+                canvas_names=names,
+                team_id=team_id,
+                provenance=provenance.get(str(r.get("id"))),
+            )
+            for r in rows
+        ]
 
     async def _promoted_resource(
         self, gen_id: int | str, scope_id: int, user_id: str

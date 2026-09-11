@@ -19,6 +19,8 @@ from sqlalchemy import desc, insert, select
 
 from app.db.session import read_scope, write_scope
 from app.models.agents import AgentRuns, RunDeliverables
+from app.models.ai import AiAgents
+from app.models.reviews import Issues
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 _DELIVERABLE_N2A = _name_to_attr(RunDeliverables)
@@ -112,6 +114,55 @@ class RunDeliverablesRepository:
                 }
                 for row, issue_id in rows
             ]
+
+    async def provenance_for(
+        self, *, kind: str, ref_ids: List[Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """「哪次运行产出了这一件」——按 ref_id 反查，一页一次查询。
+
+        给 Generated 收件箱的来源行用：卡上要印的是 agent 名与 issue 编号，
+        所以 run 之外还带出 ``issues.identifier`` 与 ``ai_agents.name``
+        （都 outer join —— 没有 issue 的 run 照样要能说出自己是哪个 run）。
+
+        同一对象有多版时取**最新版**的坐标：卡描述的是那张图现在的来历。
+        查不到的 ref_id 不出现在返回里；调用方据此退回平文本标签。
+        """
+        wanted = [str(r) for r in ref_ids if r is not None]
+        if not wanted:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        RunDeliverables.ref_id,
+                        RunDeliverables.run_id,
+                        RunDeliverables.version,
+                        RunDeliverables.step,
+                        RunDeliverables.turn,
+                        AgentRuns.issue_id,
+                        Issues.identifier,
+                        AiAgents.name,
+                    )
+                    .join(AgentRuns, AgentRuns.id == RunDeliverables.run_id)
+                    .outerjoin(Issues, Issues.id == AgentRuns.issue_id)
+                    .outerjoin(AiAgents, AiAgents.id == AgentRuns.agent_id)
+                    .where(RunDeliverables.kind == kind)
+                    .where(RunDeliverables.ref_id.in_(wanted))
+                    .order_by(RunDeliverables.ref_id, RunDeliverables.version)
+                )
+            ).all()
+        # ORDER BY version ASC + 覆盖写 = 每个 ref_id 留下最新版。
+        out: Dict[str, Dict[str, Any]] = {}
+        for ref_id, run_id, _version, step, turn, issue_id, identifier, name in rows:
+            out[str(ref_id)] = {
+                "run_id": str(run_id),
+                "issue_id": str(issue_id) if issue_id is not None else None,
+                "issue_key": identifier,
+                "agent_name": name,
+                "step": step,
+                "turn": turn,
+            }
+        return out
 
 
 def get_run_deliverables_repository() -> RunDeliverablesRepository:
