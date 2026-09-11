@@ -227,30 +227,63 @@ export function TodolistPage() {
     mapsRef.current = { agentsById, projectsById };
   }, [agentsById, projectsById]);
 
+  // Bumped by every request and by the effect's teardown, so a response only
+  // lands if nothing newer has been asked for since — the single fetch path is
+  // shared by the URL effect and by the post-dispatch re-read.
+  const selectedReqRef = useRef(0);
+  const selectedIssueRef = useRef<UiIssue | null>(selectedIssue);
+  useEffect(() => {
+    selectedIssueRef.current = selectedIssue;
+  }, [selectedIssue]);
+
+  /**
+   * The one place the open issue is fetched. Every trigger goes through here.
+   *
+   * `selectedLoading` and `selectedError` gate the ENTIRE detail subtree (see
+   * the two early returns below), so flipping either one for a refetch of the
+   * issue already on screen unmounts `IssueDetailView` — taking a half-typed
+   * comment and any open dialog with it. Only a request for a DIFFERENT issue
+   * (or the first one) may show the placeholder; a same-issue refetch updates
+   * state in place and, if it fails, leaves the slightly stale row standing
+   * rather than replacing it with an error page. This is structural: it holds
+   * for triggers that don't exist yet (Realtime re-read, post-dispatch, …),
+   * not just for the ones wired today.
+   */
+  const loadSelectedIssue = useCallback(async (wanted: string) => {
+    const seq = ++selectedReqRef.current;
+    const inPlace = selectedIssueRef.current?.identifier === wanted;
+    if (!inPlace) {
+      setSelectedLoading(true);
+      setSelectedError(null);
+    }
+    try {
+      const raw = await getIssueByIdentifier(wanted);
+      if (selectedReqRef.current !== seq) return;
+      const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
+      setSelectedIssue(toUiIssue(raw, agentMap, projectMap));
+    } catch (err) {
+      if (selectedReqRef.current !== seq) return;
+      if (inPlace) {
+        // Non-fatal on purpose: the row is already on screen, just a beat
+        // stale. Same posture as the live-row refetch below.
+        console.error('[TodolistPage] selected issue refetch failed', err);
+        return;
+      }
+      setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
+    } finally {
+      if (selectedReqRef.current === seq && !inPlace) setSelectedLoading(false);
+    }
+  }, []);
+
   // Fetch single issue when :identifier set
   useEffect(() => {
     if (!identifier) {
       setSelectedIssue(null);
-      return;
+      return undefined;
     }
-    let cancelled = false;
-    setSelectedLoading(true);
-    setSelectedError(null);
-    (async () => {
-      try {
-        const raw = await getIssueByIdentifier(identifier);
-        if (cancelled) return;
-        const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
-        setSelectedIssue(toUiIssue(raw, agentMap, projectMap));
-      } catch (err) {
-        if (cancelled) return;
-        setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
-      } finally {
-        if (!cancelled) setSelectedLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [identifier]);
+    void loadSelectedIssue(identifier);
+    return () => { selectedReqRef.current += 1; };
+  }, [identifier, loadSelectedIssue]);
 
   // ── Live-row single-issue refetch ────────────────────────────────────
   // mergeRealtimeIssue stops the running chip flickering by carrying the
@@ -427,11 +460,7 @@ export function TodolistPage() {
             setNewIssueOpen(true);
           }}
           onIssueDispatched={() => {
-            if (identifier) {
-              getIssueByIdentifier(identifier).then((raw) => {
-                setSelectedIssue(toUiIssue(raw, agentsById, projectsById));
-              }).catch(() => { /* ignore — Realtime will sync eventually */ });
-            }
+            if (identifier) void loadSelectedIssue(identifier);
           }}
         />
         {newIssueOpen && (

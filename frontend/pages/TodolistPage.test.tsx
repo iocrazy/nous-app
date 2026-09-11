@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Issue } from '../services/issuesService';
@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
   listAgents: vi.fn(),
   fetchProjects: vi.fn(),
   getIssueProgress: vi.fn(),
+  getDispatchPreview: vi.fn(),
+  dispatchIssue: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -67,8 +69,8 @@ vi.mock('../services/issuesService', async (importOriginal) => ({
   getIssueProgress: (...a: unknown[]) => h.getIssueProgress(...a),
   createIssue: vi.fn(),
   updateIssue: vi.fn(async () => ({})),
-  getDispatchPreview: vi.fn(async () => null),
-  dispatchIssue: vi.fn(async () => ({})),
+  getDispatchPreview: (...a: unknown[]) => h.getDispatchPreview(...a),
+  dispatchIssue: (...a: unknown[]) => h.dispatchIssue(...a),
 }));
 
 // Spread the real module: IssueChatThread calls helpers this file never stubs.
@@ -214,6 +216,8 @@ describe('TodolistPage — agent / project map 晚到不得重挂载详情子树
     h.getIssue.mockImplementation(async () => mkIssue());
     h.listIssues.mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 });
     h.getIssueProgress.mockResolvedValue(null);
+    h.getDispatchPreview.mockResolvedValue({ will_start: true, agent_id: 'a1', blocked_reason: null });
+    h.dispatchIssue.mockImplementation(async () => mkIssue({ status: 'in_progress' }));
     // …the two maps land about a second later, under the test's control.
     h.listAgents.mockReturnValue(agentsDeferred.promise);
     h.fetchProjects.mockReturnValue(projectsDeferred.promise);
@@ -240,6 +244,52 @@ describe('TodolistPage — agent / project map 晚到不得重挂载详情子树
     expect(screen.getByTestId('issue-context-rail').getAttribute('data-probe')).toBe('typed-comment');
     // The cause, not just the symptom: a late map must not re-run the fetch.
     expect(h.getIssueByIdentifier).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 结构性护栏：`selectedLoading` 是整棵子树的开关，所以**任何**重新抓取
+   * 同一个 issue 的触发源都不许把它拉回 true。这里用最便宜的真实触发源
+   * (Dispatch → Start working → onIssueDispatched 回读) 走一遍：回读确实
+   * 发生了，而详情节点必须原地不动。
+   */
+  it('keeps the detail subtree mounted across a same-issue refetch (dispatch re-read)', async () => {
+    renderPage();
+
+    const first = await screen.findByTestId('issue-context-rail');
+    first.setAttribute('data-probe', 'typed-comment');
+    await act(async () => {
+      agentsDeferred.resolve([AGENT]);
+      projectsDeferred.resolve([PROJECT]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(h.listIssues).toHaveBeenCalled());
+    const before = h.getIssueByIdentifier.mock.calls.length;
+
+    // Title matched loosely: the issue was mapped before the agent map landed,
+    // so the assignee still renders under the "Agent" fallback name — the
+    // display-name staleness this fix trades for keeping the subtree alive.
+    // The re-read is held in flight on purpose: that window — request sent,
+    // response not back — IS the failure mode. Letting it resolve inside the
+    // same batch would let React coalesce the placeholder frame away and the
+    // test would pass on code that tears the subtree down in production.
+    const refetch = deferred<Issue>();
+    h.getIssueByIdentifier.mockReturnValueOnce(refetch.promise);
+
+    fireEvent.click(screen.getByTitle(/^Dispatch to /));
+    const confirm = await screen.findByText('Start working');
+    await act(async () => { fireEvent.click(confirm); });
+
+    // The re-read really happened — without this the assertions below would
+    // pass on a page that simply never refetched.
+    await waitFor(() => expect(h.getIssueByIdentifier.mock.calls.length).toBeGreaterThan(before));
+    expect(h.getIssueByIdentifier).toHaveBeenLastCalledWith('MH-94');
+
+    // While it is still in flight:
+    expect(screen.getByTestId('issue-context-rail')).toBe(first);
+    // …and after it lands, state updated in place.
+    await act(async () => { refetch.resolve(mkIssue({ status: 'in_progress' })); });
+    expect(screen.getByTestId('issue-context-rail')).toBe(first);
+    expect(screen.getByTestId('issue-context-rail').getAttribute('data-probe')).toBe('typed-comment');
   });
 
   it('still refetches and remounts when the identifier itself changes', async () => {
