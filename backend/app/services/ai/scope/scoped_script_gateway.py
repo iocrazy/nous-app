@@ -72,7 +72,6 @@ from app.repositories.script_scene_repository import (
     VersionConflict,
     get_script_scene_repository,
 )
-from app.services.deliverables.registry import register_deliverable_best_effort
 from app.services.script.scene_numbering import (
     derive_shot_label,
     effective_scene_number,
@@ -108,80 +107,6 @@ _WRITABLE_SHOT_FIELDS = (
     "lighting",
     "description",
 )
-
-
-async def _scene_title(scope: AgentRunScope, scene: Any) -> str:
-    """「S3 · INT. CAFE - DAY」——场次号 + 场景头，够人在血缘里认出是哪一场。"""
-    scene_no = await scene_no_for(scope, scene)
-    heading = " ".join(
-        str(part)
-        for part in (
-            getattr(scene, "heading_int_ext", None),
-            getattr(scene, "location_text", None),
-        )
-        if part
-    )
-    time_of_day = getattr(scene, "time_of_day", None)
-    if time_of_day:
-        heading = f"{heading} - {time_of_day}" if heading else str(time_of_day)
-    return f"S{scene_no} · {heading}" if heading else f"S{scene_no}"
-
-
-def _shot_title(scene_no: Any, row: Any) -> str:
-    """「S3 · Shot 1 · MS」——血缘端点没有标题就只能显示一个裸 id。"""
-    parts = [f"S{scene_no}", f"Shot {getattr(row, 'shot_number', '') or '?'}"]
-    shot_type = getattr(row, "shot_type", None)
-    if shot_type:
-        parts.append(str(shot_type))
-    return " · ".join(parts)
-
-
-async def _register_after_write(
-    scope: AgentRunScope,
-    *,
-    kind: str,
-    ref_id: Any,
-    title: Any,
-    step: Optional[int] = None,
-) -> None:
-    """3a: register a content write as this run's deliverable — AFTER it landed.
-
-    Two things this exists to get right, both about the write having already
-    committed by the time we get here:
-
-    - ``title`` may be a coroutine (the scene title needs a read). It is
-      awaited INSIDE the guard: a transient read failure here must not turn a
-      committed edit into a reported failure, or the agent retries and the
-      same change is written twice.
-    - No run → return before touching anything. The human editor lane and
-      the test sentinel run id both land here; they should cost zero reads.
-    """
-    if ledger_run_id(scope) is None:
-        if hasattr(title, "close"):
-            title.close()  # never awaited — don't leak a "never awaited" warning
-        return
-    try:
-        resolved = await title if hasattr(title, "__await__") else title
-    except Exception as exc:  # noqa: BLE001 — the write already committed
-        logger.error(
-            "[scoped_script_gateway] %s %s: title lookup failed (%r) — "
-            "registering without a title",
-            kind,
-            ref_id,
-            exc,
-        )
-        resolved = None
-    await register_deliverable_best_effort(
-        run_id=scope.run_id,
-        kind=kind,
-        ref_id=str(ref_id),
-        title=resolved,
-        turn=1,
-        # NOT off ``scope`` — that is the server-bound AUTHORIZATION identity
-        # and has no per-call telemetry on it. The step comes down from the
-        # tool's run_context, which is where the runner put it.
-        step=step,
-    )
 
 
 def ledger_run_id(scope: AgentRunScope) -> Optional[int]:
@@ -667,7 +592,6 @@ async def apply_element_edit(
     *,
     quoted_base_version: Optional[int] = None,
     actor: str,
-    step: Optional[int] = None,
 ) -> EditOutcome:
     """Rewrite the text of specific elements of an already-resolved scene,
     under the element-level precondition documented above.
@@ -816,15 +740,6 @@ async def apply_element_edit(
         list(target_ids),
         rebased_from,
     )
-    # 3a：只有真正写进去的那条路登记——上面每个 EditRefused 都是「什么都没写」，
-    # 给一个不存在的版本登记比不登记更糟。
-    await _register_after_write(
-        scope,
-        kind="script_scene",
-        ref_id=scene.id,
-        title=_scene_title(scope, scene),  # awaited inside the guard
-        step=step,
-    )
     return EditApplied(
         scene_id=scene.id,
         element_ids=target_ids,
@@ -889,11 +804,7 @@ def _writable(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 async def create_shot(
-    scope: AgentRunScope,
-    scene: ResolvedScene,
-    fields: dict[str, Any],
-    *,
-    step: Optional[int] = None,
+    scope: AgentRunScope, scene: ResolvedScene, fields: dict[str, Any]
 ) -> dict[str, Any]:
     """Append one shot card to an already-resolved scene.
 
@@ -967,23 +878,11 @@ async def create_shot(
         scene.id,
         row.id,
     )
-    # 3a：产出登记。run_id 为空（人手车道 / 测试 sentinel）时是 no-op。
-    await _register_after_write(
-        scope,
-        kind="script_shot",
-        ref_id=row.id,
-        title=_shot_title(scene_no, row),
-        step=step,
-    )
     return _shot_dict(row, scene_no)
 
 
 async def update_shot(
-    scope: AgentRunScope,
-    shot: ResolvedShot,
-    fields: dict[str, Any],
-    *,
-    step: Optional[int] = None,
+    scope: AgentRunScope, shot: ResolvedShot, fields: dict[str, Any]
 ) -> Optional[dict[str, Any]]:
     """Update the parameter tags / description of an already-resolved shot.
 
@@ -1045,14 +944,6 @@ async def update_shot(
         sorted(values),
     )
     scene_no = await scene_no_for_shot(scope, shot)
-    # 3a：改内容 = 新版本。``set_shot_status`` 刻意不在此列。
-    await _register_after_write(
-        scope,
-        kind="script_shot",
-        ref_id=shot.id,
-        title=_shot_title(scene_no, row),
-        step=step,
-    )
     return _shot_dict(row, scene_no)
 
 

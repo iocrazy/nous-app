@@ -17,7 +17,12 @@ ALLOWED_INSERTERS = {
 #: 否则「没登记 = 不存在」就只是一句口号。
 REGISTRARS = {
     "app/services/library/generated_media_service.py": "generated_media",
-    "app/services/ai/scope/scoped_script_gateway.py": "script_shot / script_scene",
+    # NOT the gateway: its writes run inside caller_scope(authenticated), where
+    # run_deliverables' service_role-only RLS turns the registration into a
+    # 42501 that also aborts the caller's still-open transaction. The tool
+    # registers after the `async with` exits — see
+    # test_registration_outside_caller_scope.py.
+    "app/services/ai/tools/screenwriting_tools.py": "script_shot / script_scene",
     "app/services/storyboard/script/script_service.py": "script_chapter",
 }
 

@@ -99,6 +99,15 @@ async def script_expand_chapter_workflow(
     user_id: Optional[str] = None,
     # 3a: the dispatching run, for deliverable attribution. Keyword-defaulted
     # for frozen DBOS input compat.
+    #
+    # ⚠️ NO CALLER PASSES THIS TODAY. The only dispatcher of this workflow is
+    # ``app/api/script_ai_router.py`` (the human "expand" / "branch" buttons),
+    # and a REST request has no agent run behind it — so every chapter write
+    # registers nothing, and ``script_chapter`` lineage is empty in practice.
+    # The plumbing is kept deliberately (3a spec lists the kind, and the review
+    # ruling was: keep it, do not invent a producer). When an agent tool or
+    # workflow starts expanding chapters, it passes its run id here and the
+    # whole chain — service attribution argument included — already works.
     run_id: Optional[int] = None,
     turn: Optional[int] = None,
     step: Optional[int] = None,
@@ -211,6 +220,15 @@ async def script_create_branches_workflow(
     user_id: Optional[str] = None,
     # 3a: the dispatching run, for deliverable attribution. Keyword-defaulted
     # for frozen DBOS input compat.
+    #
+    # ⚠️ NO CALLER PASSES THIS TODAY. The only dispatcher of this workflow is
+    # ``app/api/script_ai_router.py`` (the human "expand" / "branch" buttons),
+    # and a REST request has no agent run behind it — so every chapter write
+    # registers nothing, and ``script_chapter`` lineage is empty in practice.
+    # The plumbing is kept deliberately (3a spec lists the kind, and the review
+    # ruling was: keep it, do not invent a producer). When an agent tool or
+    # workflow starts expanding chapters, it passes its run id here and the
+    # whole chain — service attribution argument included — already works.
     run_id: Optional[int] = None,
     turn: Optional[int] = None,
     step: Optional[int] = None,

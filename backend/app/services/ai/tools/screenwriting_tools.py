@@ -69,6 +69,7 @@ from app.services.ai.scope.script_selection import (
     resolve_selection,
     selection_from_run_context,
 )
+from app.services.deliverables.registry import register_deliverable_best_effort
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,59 @@ async def _bound_scope(run_context: dict) -> Optional[AgentRunScope]:
     return scope
 
 
+def _shot_deliverable_title(shot: dict) -> Optional[str]:
+    """「S3 · Shot 1 · MS」，全部取自网关刚返回的那个 dict —— 零额外读库。"""
+    parts = [p for p in (shot.get("shot_label"), shot.get("shot_type")) if p]
+    return " · ".join(str(p) for p in parts) or None
+
+
+def _scene_deliverable_title(scene_no: Any, scene: Any) -> str:
+    """「S3 · INT. CAFE - DAY」。``scene_no`` 是 caller_scope 里已经读到的。"""
+    heading = " ".join(
+        str(part)
+        for part in (
+            getattr(scene, "heading_int_ext", None),
+            getattr(scene, "location_text", None),
+        )
+        if part
+    )
+    time_of_day = getattr(scene, "time_of_day", None)
+    if time_of_day:
+        heading = f"{heading} - {time_of_day}" if heading else str(time_of_day)
+    return f"S{scene_no} · {heading}" if heading else f"S{scene_no}"
+
+
+async def _register_write(
+    scope: AgentRunScope,
+    run_context: dict,
+    *,
+    kind: str,
+    ref_id: Any,
+    title: Optional[str],
+) -> None:
+    """3a：把一次已经**提交**的写入登记成这个 run 的产出。
+
+    ⚠️ 必须在 ``caller_scope`` 的 ``async with`` **退出之后**调用，绝不在里面。
+    ``caller_scope`` 把自己发布成 ambient session，里面的 ``write_scope()``
+    会 join 那个 ``authenticated`` 事务；而 ``run_deliverables`` 只有
+    service_role 策略（mig 453:126-129），``agent_run_transcript_events`` 也
+    没给 ``authenticated`` 的 INSERT 策略 —— 登记会拿 42501，**并且把调用方
+    还没提交的事务一起弄废**，退出时连分镜/场次的写入一起回滚。best-effort
+    吞得掉那个异常，吞不掉已经作废的事务。
+
+    同族先例见 ``caller_scope`` 的 docstring：``agent_run_events`` 的
+    best-effort 审计写入同样必须跑在 postgres 上。
+    """
+    await register_deliverable_best_effort(
+        run_id=scope.run_id,
+        kind=kind,
+        ref_id=str(ref_id),
+        title=title,
+        turn=run_context.get("turn"),
+        step=run_context.get("step"),
+    )
+
+
 class ScreenwritingTools:
     """Handlers for the five A4 tools plus A6's GenerateShotImage. Stateless — one instance per turn is
     fine, and so is a module-level singleton; all per-run state comes from
@@ -303,9 +357,7 @@ class ScreenwritingTools:
             # the calling user; WITH CHECK on script_shots refuses a write that
             # would land outside the caller's tenant.
             async with caller_scope(scope.user_id):
-                shot = await gateway.create_shot(
-                    scope, scene, args, step=run_context.get("step")
-                )
+                shot = await gateway.create_shot(scope, scene, args)
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.exception("[screenwriting] CreateShot failed scene=%s", scene.id)
             return {
@@ -313,6 +365,14 @@ class ScreenwritingTools:
                 "error": f"could not create the shot: {exc.__class__.__name__}",
                 "error_code": "write_failed",
             }
+        # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。
+        await _register_write(
+            scope,
+            run_context,
+            kind="script_shot",
+            ref_id=shot.get("shot_id"),
+            title=_shot_deliverable_title(shot),
+        )
         return {"ok": True, "scene_id": str(scene.id), "shot": shot}
 
     async def generate_shot_image(self, args: dict, run_context: dict) -> dict:
@@ -488,9 +548,7 @@ class ScreenwritingTools:
             # RLS 第三层 (PR-2b): the UPDATE (and its scene-number read) run as
             # the calling user.
             async with caller_scope(scope.user_id):
-                updated = await gateway.update_shot(
-                    scope, shot, args, step=run_context.get("step")
-                )
+                updated = await gateway.update_shot(scope, shot, args)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[screenwriting] UpdateShot failed shot=%s", shot.id)
             return {
@@ -498,6 +556,16 @@ class ScreenwritingTools:
                 "error": f"could not update the shot: {exc.__class__.__name__}",
                 "error_code": "write_failed",
             }
+        if updated is not None:
+            # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。``None`` 是
+            # 「没有可写字段」的 no-op，不是新版本。
+            await _register_write(
+                scope,
+                run_context,
+                kind="script_shot",
+                ref_id=updated.get("shot_id"),
+                title=_shot_deliverable_title(updated),
+            )
         if updated is None:
             return {
                 "ok": False,
@@ -695,12 +763,20 @@ class ScreenwritingTools:
                 edits,
                 quoted_base_version=base_version,
                 actor=_edit_actor(scope),
-                step=run_context.get("step"),
             )
             if isinstance(outcome, gateway.EditRefused):
                 return outcome.as_dict()
             scene_no = await gateway.scene_no_for(scope, scene)
 
+        # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。EditRefused 已经在
+        # 上面返回了——「什么都没写」不该留下一个版本。
+        await _register_write(
+            scope,
+            run_context,
+            kind="script_scene",
+            ref_id=scene.id,
+            title=_scene_deliverable_title(scene_no, scene),
+        )
         return {
             "ok": True,
             "applied": True,
