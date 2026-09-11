@@ -47,13 +47,14 @@ class _UniqueSeqDb:
             params = stmt.compile().params
             key = (params["run_id"], params["seq"])
             if any((r["run_id"], r["seq"]) == key for r in self.rows):
-                raise IntegrityError(
-                    "INSERT",
-                    {},
-                    Exception(
-                        "duplicate key value violates unique constraint "
-                        '"uq_agent_run_transcript_events_run_seq"'
-                    ),
+                # ⚠️ 必须带 ``sqlstate`` 与 ``constraint_name`` —— 实现读的是
+                # **驱动给的原始错误**，不是消息文本。抛一个裸 Exception 的桩
+                # 会让重试分支永不命中，测试却仍然「红得像修好了」。
+                raise _integrity(
+                    "23505",
+                    "duplicate key value violates unique constraint "
+                    '"agent_run_transcript_events_run_id_seq_key"',
+                    constraint="agent_run_transcript_events_run_id_seq_key",
                 )
             self.rows.append(
                 {
@@ -184,14 +185,102 @@ async def test_a_collision_opens_the_refold_guard(monkeypatch):
     assert outputs["total"] == 1
 
 
-async def test_a_non_conflict_insert_failure_still_takes_the_old_path(monkeypatch):
-    """重试只对唯一索引冲突。别的写失败（库挂了）照旧走「折内存、不镜像、
-    返回 None」—— 那条契约（transcript 没有的事件，镜像绝不声称有）没变。"""
+async def test_a_dead_database_still_takes_the_old_path(monkeypatch):
+    """库挂了照旧走「折内存、不镜像、返回 None」—— 那条契约（transcript 没有
+    的事件，镜像绝不声称有）没变。"""
+    writer = _writer_against(monkeypatch, RuntimeError("pg is down"))
+    assert await writer.append("user", {"content": "go"}) is None
+
+
+async def test_a_non_unique_integrity_error_is_not_retried(monkeypatch):
+    """**只有 `(run_id, seq)` 的唯一违规才是 seq 竞争。**
+
+    同一张表上还有 `event_type` 的 CHECK 白名单、`run_id` 的 FK、三处 NOT
+    NULL —— 这些违规同样是 `IntegrityError`。把它们当成竞争处理有三个真实代价：
+    刷三条「另一个 writer 在这个 run 上」的 WARNING（**诊断是假的**，会把下一
+    个人送去找一个不存在的第二 writer）、多付两次重播种读与两次注定失败的
+    insert、以及把 `foreign_writer_seen` 永久抬成真，让重折守卫此后每次 append
+    都多付一次读。
+
+    典型触发者是接线 bug：新加了事件类型却忘了进 mig 的 CHECK 白名单
+    （本仓 mig 285→397 正栽过这一类）。
+    """
+    calls: list = []
+    writer = _writer_against(
+        monkeypatch,
+        _integrity("23514", 'new row violates check constraint "ck_event_type"'),
+        calls=calls,
+    )
+
+    assert await writer.append("weird_new_type", {"x": 1}) is None
+    # 一次 insert，不重试；没有重播种读。
+    assert len([c for c in calls if c.startswith("INSERT")]) == 1
+    assert [c for c in calls if c.startswith("SELECT")] == []
+    assert writer.foreign_writer_seen is False
+
+
+async def test_a_non_unique_integrity_error_never_opens_the_refold_guard(monkeypatch):
+    """守卫开着的代价是这个 run 剩下的每次 append 各一次读。一个 CHECK 违规
+    不该买单，因为它根本不意味着有第二个 writer。"""
+    calls: list = []
+    writer = _writer_against(
+        monkeypatch, _integrity("23503", "violates foreign key constraint"), calls=calls
+    )
+    await writer.append("tool_call", {"name": "X"})
+
+    calls.clear()
+    await writer.refold_external_slices()
+    assert calls == [], f"the guard opened on a non-conflict failure: {calls}"
+
+
+async def test_a_unique_violation_on_another_index_is_not_a_seq_race(monkeypatch):
+    """23505 是必要条件，不是充分条件。驱动报出**哪个**约束时就用它排除 ——
+    别的唯一索引违规同样不意味着有人抢了我的号。
+
+    ⚠️ 驱动**不报**约束名时不算否定证据（别的驱动、被包了一层的错误），那时
+    由 sqlstate 定夺 —— 见 ``_is_seq_conflict`` 的 docstring。
+    """
+    calls: list = []
+    writer = _writer_against(
+        monkeypatch,
+        _integrity(
+            "23505",
+            'duplicate key value violates unique constraint "uq_something_else"',
+            constraint="uq_something_else",
+        ),
+        calls=calls,
+    )
+
+    assert await writer.append("user", {"content": "go"}) is None
+    assert [c for c in calls if c.startswith("SELECT")] == []
+    assert writer.foreign_writer_seen is False
+
+
+def _integrity(
+    sqlstate: str, message: str, *, constraint: str | None = None
+) -> IntegrityError:
+    """SQLAlchemy 包着 asyncpg 原始异常的真实形状：``orig`` 带 ``sqlstate``，
+    唯一违规还带 ``constraint_name``。实现读的正是这两个属性。"""
+
+    class _Orig(Exception):
+        def __init__(self) -> None:
+            super().__init__(message)
+            self.sqlstate = sqlstate
+            self.constraint_name = constraint
+
+    return IntegrityError("INSERT", {}, _Orig())
+
+
+def _writer_against(monkeypatch, error: Exception, *, calls: list | None = None):
+    """每次 execute 都抛同一个错误的 writer。``calls`` 记下语句种类，用来断言
+    「重试了几次」与「重播种读了没有」。"""
     from app.db import session as dbs
 
     class _S:
         async def execute(self, stmt, *a, **k):
-            raise RuntimeError("pg is down")
+            if calls is not None:
+                calls.append(str(stmt).lstrip().upper().replace("PUBLIC.", "")[:6])
+            raise error
 
     @contextlib.asynccontextmanager
     async def _scope():
@@ -199,9 +288,7 @@ async def test_a_non_conflict_insert_failure_still_takes_the_old_path(monkeypatc
 
     monkeypatch.setattr(dbs, "read_scope", _scope)
     monkeypatch.setattr(dbs, "write_scope", _scope)
-
-    writer = rr.RunEventWriter(7, seq_start=0)
-    assert await writer.append("user", {"content": "go"}) is None
+    return rr.RunEventWriter(7, seq_start=0)
 
 
 _DELIVERABLE = {

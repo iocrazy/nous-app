@@ -998,6 +998,21 @@ SUBAGENT_EVENT_TYPES = ("subagent_spawned", "subagent_done")
 #: whole-value mirror, so the cockpit's outputs cell could never render).
 EXTERNALLY_WRITTEN_EVENT_TYPES = (*SUBAGENT_EVENT_TYPES, "deliverable")
 
+#: Postgres ``unique_violation``. The ONLY IntegrityError that means "another
+#: writer took my seq" — the same table also carries an ``event_type`` CHECK
+#: allowlist, a ``run_id`` FK and three NOT NULLs, and each of those is an
+#: IntegrityError too. Treating one of THOSE as a race would log three "another
+#: writer is on this run" warnings that send the next reader hunting for a
+#: second writer that does not exist, pay two doomed retries, and latch
+#: ``foreign_writer_seen`` on for the rest of the run.
+_UNIQUE_VIOLATION_SQLSTATE = "23505"
+
+#: The unique index the retry is about. asyncpg puts the violated constraint's
+#: name on the original error; when it is present and names something else, the
+#: conflict is not ours. Absent (another driver, a wrapped error) it is not
+#: treated as disqualifying — the sqlstate above is the load-bearing check.
+_SEQ_UNIQUE_CONSTRAINT = "agent_run_transcript_events_run_id_seq_key"
+
 #: How many times ``append`` re-seeds its counter and retries after losing the
 #: ``(run_id, seq)`` race. Bounded because the alternative failure — a genuine
 #: constraint problem that looks like a conflict — must not spin: three tries
@@ -1005,6 +1020,28 @@ EXTERNALLY_WRITTEN_EVENT_TYPES = (*SUBAGENT_EVENT_TYPES, "deliverable")
 #: insert, and anything beyond that is a different bug that should surface as
 #: the ordinary "insert failed" warning.
 _SEQ_CONFLICT_ATTEMPTS = 3
+
+
+def _is_seq_conflict(err: IntegrityError) -> bool:
+    """True only for ``UNIQUE (run_id, seq)`` — "someone else took my number".
+
+    Read off the DRIVER's original error, not the message text: asyncpg exposes
+    ``sqlstate``, psycopg ``pgcode``, and both name the violated constraint.
+    Every other IntegrityError this table can raise (the ``event_type`` CHECK
+    allowlist, the ``run_id`` FK, three NOT NULLs) is a wiring bug, and a wiring
+    bug diagnosed as a race is worse than one diagnosed as nothing: the log then
+    names a second writer that does not exist.
+
+    The sqlstate is the load-bearing check. The constraint name only ever
+    DISQUALIFIES — when the driver supplies one and it is a different index. A
+    driver that supplies none leaves the decision to the sqlstate.
+    """
+    orig = getattr(err, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if sqlstate != _UNIQUE_VIOLATION_SQLSTATE:
+        return False
+    name = getattr(orig, "constraint_name", None)
+    return name is None or name == _SEQ_UNIQUE_CONSTRAINT
 
 
 class RunEventWriter:
@@ -1151,6 +1188,16 @@ class RunEventWriter:
                         )
                     )
             except IntegrityError as err:
+                if not _is_seq_conflict(err):
+                    # A different constraint — a wiring bug, not a race. Same
+                    # path as any other failed insert, and deliberately NOT
+                    # counted as a foreign writer: that flag latches the refold
+                    # guard open for the rest of the run.
+                    logger.warning(
+                        f"[RunEventWriter] insert rejected (run={self.run_id} "
+                        f"seq={seq} type={event_type}): {err}"
+                    )
+                    return self._insert_failed(event_type, payload, seq)
                 # Someone else is writing this run. Say so — both that it
                 # happened and which event nearly went missing — then re-seed
                 # and try again. The re-seed READ is the whole point: our
