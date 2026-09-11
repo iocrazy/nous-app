@@ -96,7 +96,8 @@ export default defineConfig(({ mode }) => {
           skipWaiting: true,
           clientsClaim: true,
           navigateFallback: '/index.html',
-          navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//],
+          // /shortcuts/ opens in iOS Shortcuts' embedded web view, which closes before a new SW can install — never serve it the cached shell.
+          navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/stream\//, /^\/shortcuts\//],
           runtimeCaching: [
             // NOTE: do NOT add a CacheFirst rule for /assets/. Vite emits
             // content-hashed bundles (index-<hash>.js) that VitePWA already

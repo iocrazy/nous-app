@@ -7,6 +7,18 @@ import { registerSW } from 'virtual:pwa-register';
 // background auto-update reliable.
 const UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 min
 
+const SHORTCUTS_PREFIX = '/shortcuts';
+
+/**
+ * The iOS Shortcuts picker (/shortcuts/*) opens inside Shortcuts' embedded web
+ * view, which is closed seconds after the pick. A new Workbox SW has to
+ * precache the whole build before it can activate, so it never finishes there
+ * and an installed old SW keeps serving the stale shell forever. The HTML is
+ * served network-fresh, so without a SW the picker is always current.
+ */
+export const shouldRegisterServiceWorker = (pathname: string): boolean =>
+  pathname !== SHORTCUTS_PREFIX && !pathname.startsWith(`${SHORTCUTS_PREFIX}/`);
+
 /**
  * Register the service worker and keep it auto-updating in the BACKGROUND.
  *
@@ -17,9 +29,16 @@ const UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 min
  * foreground) so it never gets pinned to a stale version. The manual
  * "Clear cache & reload" escape for an already-stuck SW lives in Settings
  * (see utils/swReset).
+ *
+ * Skipped entirely on /shortcuts/* (see shouldRegisterServiceWorker). This
+ * does NOT unregister an existing SW — the same origin's main PWA shares it.
  */
 export function usePWA() {
   useEffect(() => {
+    // Read once at mount: the picker is a standalone page, never navigated to
+    // client-side from the app.
+    if (!shouldRegisterServiceWorker(window.location.pathname)) return;
+
     let reg: ServiceWorkerRegistration | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
 
