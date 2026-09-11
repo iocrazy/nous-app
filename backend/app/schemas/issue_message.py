@@ -22,6 +22,45 @@ class IssueMessageKind(str, Enum):
     SYSTEM_STATUS = "system_status"
 
 
+class IssueMessageAttachment(BaseModel):
+    """One attachment as STORED on a message, handed back on every read.
+
+    Field-for-field the whitelist ``ConversationsAiStore._DISPLAY_ATTACHMENT_KEYS``
+    persists under ``body['attachments']`` — nothing here is invented, and the
+    write-side names come from ``AttachmentRequest``. What that whitelist
+    deliberately drops stays dropped: no ``data_url`` (bytes never enter the
+    store), no ``url``, no ``scope``.
+
+    Every stored kind shares this one shape: ``image`` / ``video`` / ``pdf``
+    (file bubbles), ``resource_ref``, ``asset_ref``, and — 三期 3a Task 4 —
+    ``output_ref``, whose ``ref_kind`` / ``ref_id`` / ``version`` / ``title``
+    are the citation chip's whole input. ``title`` is the snapshot taken at
+    post time, which is why the thread needs no second query to render it.
+
+    EVERY field is optional, ``kind`` included. This is a READ model over rows
+    written by several versions of several writers: one legacy or malformed
+    row must degrade to nulls, never make an entire issue's history 500. For
+    the same reason ``coerce_numbers_to_str`` is on — a Snowflake that reached
+    JSONB as a number (``ref_id`` / ``resource_id`` / ``asset_id``) comes back
+    as the string the rest of the API speaks.
+    """
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
+    kind: Optional[str] = None
+    resource_id: Optional[str] = None
+    asset_id: Optional[str] = None
+    loadout_id: Optional[str] = None
+    mime: Optional[str] = None
+    alt_text: Optional[str] = None
+    name: Optional[str] = None
+    # kind='output_ref' — the cited version's coordinates + its title snapshot.
+    ref_kind: Optional[str] = None
+    ref_id: Optional[str] = None
+    version: Optional[int] = None
+    title: Optional[str] = None
+
+
 class IssueMessage(BaseModel):
     # agent_run_id is a BIGINT Snowflake (mig 232) modelled as str; DB rows
     # deliver it as an int, so opt into int→str coercion.
@@ -46,6 +85,13 @@ class IssueMessage(BaseModel):
     from_status: Optional[str] = None
     to_status: Optional[str] = None
     created_at: datetime
+    # Display attachments stored with the message (user-role rows only).
+    # ``None`` — never ``[]`` — when the row has none: the store itself
+    # returns ``body.get("attachments") or None``, and every message written
+    # before 3a has no such key, so "absent" is the honest answer rather than
+    # "had some, none survived". Pinned by
+    # tests/test_issue_message_mapper.py::test_a_row_without_attachments_reads_back_as_null.
+    attachments: Optional[List[IssueMessageAttachment]] = None
 
     @field_validator("id", mode="before")
     @classmethod

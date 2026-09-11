@@ -25,6 +25,10 @@ class RepoSpy:
         self.latest_calls: list[tuple[str, str]] = []
         self.latest_version_returns: Any = None
         self.raise_integrity_on: set[int] = set()
+        #: ``(row_id, seq)`` per ``set_seq`` — the seq back-fill that can only
+        #: happen after the event exists (the row is inserted first).
+        self.seq_calls: list[tuple[str, int]] = []
+        self.raise_on_set_seq = False
         self._ids = itertools.count(1000)
 
     async def latest_version(self, *, kind: str, ref_id: str) -> Optional[int]:
@@ -43,6 +47,11 @@ class RepoSpy:
             raise IntegrityError("INSERT", {}, Exception("duplicate key"))
         return {"id": next(self._ids), **values}
 
+    async def set_seq(self, *, row_id: Any, seq: int) -> None:
+        self.seq_calls.append((str(row_id), seq))
+        if self.raise_on_set_seq:
+            raise RuntimeError("update failed")
+
 
 @dataclass
 class SpiedEvent:
@@ -57,6 +66,11 @@ class EmitSpy:
 
     def __init__(self) -> None:
         self.events: list[SpiedEvent] = []
+        #: The seq the last recorded event took — both real recorders expose
+        #: it (``RunRecorder.last_event_seq`` / ``_LateRecorder``), and the
+        #: registry reads it to stamp ``run_deliverables.seq``. ``None`` until
+        #: something is recorded, exactly like the real ones.
+        self.last_event_seq: Optional[int] = None
 
     async def record_event(
         self,
@@ -67,6 +81,7 @@ class EmitSpy:
         step: Optional[int] = None,
     ) -> None:
         self.events.append(SpiedEvent(event_type, payload, turn, step))
+        self.last_event_seq = len(self.events)
 
 
 @pytest.fixture

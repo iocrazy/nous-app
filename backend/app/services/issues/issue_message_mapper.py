@@ -15,7 +15,66 @@ from __future__ import annotations
 from typing import Any, Optional
 from uuid import UUID
 
-from app.schemas.issue_message import IssueMessage, IssueMessageKind
+from loguru import logger
+from pydantic import ValidationError
+
+from app.schemas.issue_message import (
+    IssueMessage,
+    IssueMessageAttachment,
+    IssueMessageKind,
+)
+
+
+def _display_attachments(
+    raw: Any, *, message_id: Any, issue_id: Any
+) -> Optional[list[IssueMessageAttachment]]:
+    """The row's stored display attachments, or ``None``.
+
+    ``ConversationsAiStore`` already hands back ``body['attachments'] or None``,
+    so the common cases are a list of small dicts or nothing at all. Anything
+    else can only come from a row written outside that contract.
+
+    **Validated one entry at a time, on purpose.** Handing the whole list to
+    pydantic means one badly typed value (``version: "oops"``) raises for the
+    WHOLE message — and, through the list endpoint, for the whole issue's
+    history. The container check alone was not enough: it caught a non-list
+    and non-dict members, while the dangerous half is a well-shaped dict with
+    a wrong value type. A rejected entry is dropped; its siblings survive.
+
+    Dropping is never silent: every drop logs a WARNING naming the issue, the
+    message and (for a validation failure) the offending fields, so a writer
+    that starts storing the wrong shape stays findable.
+    """
+    if not raw:
+        return None
+    if not isinstance(raw, list):
+        logger.warning(
+            f"[issue_message] issue {issue_id} message {message_id}: attachments "
+            f"is {type(raw).__name__}, not a list — dropped"
+        )
+        return None
+    kept: list[IssueMessageAttachment] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            logger.warning(
+                f"[issue_message] issue {issue_id} message {message_id}: "
+                f"attachment #{index} is {type(entry).__name__}, not an object "
+                "— dropped"
+            )
+            continue
+        try:
+            kept.append(IssueMessageAttachment.model_validate(entry))
+        except ValidationError as exc:
+            fields = ", ".join(
+                ".".join(str(part) for part in err["loc"]) or "<root>"
+                for err in exc.errors()
+            )
+            logger.warning(
+                f"[issue_message] issue {issue_id} message {message_id}: "
+                f"attachment #{index} does not validate ({fields}) — dropped; "
+                f"{exc.error_count()} error(s)"
+            )
+    return kept or None
 
 
 def map_ai_message_to_issue_message(
@@ -81,4 +140,10 @@ def map_ai_message_to_issue_message(
         from_status=from_status,
         to_status=to_status,
         created_at=row["created_at"],
+        # 三期 3a Task 8a: the citation chip (and every other stored chip) has
+        # to survive a reload. The store persists these on user-role messages;
+        # before this they were written and never read back.
+        attachments=_display_attachments(
+            row.get("attachments"), message_id=row.get("id"), issue_id=issue_id
+        ),
     )

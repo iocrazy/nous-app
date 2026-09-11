@@ -351,6 +351,55 @@ async def test_the_registry_recovers_from_that_conflict_on_a_real_db(orm_dsn, fx
 
 
 # ---------------------------------------------------------------------------
+# case 4b — set_seq (三期 3a Task 8a): the only writer of run_deliverables.seq
+# ---------------------------------------------------------------------------
+
+
+@_skip
+async def test_set_seq_writes_the_column_and_touches_nothing_else(orm_dsn, fx, pg):
+    """The registry inserts the row BEFORE the event exists, so ``seq`` can
+    only be filled by this UPDATE afterwards. Until Task 8a there was no
+    writer at all and the documented wire field was always null."""
+    repo = _repo()
+    ref = _uniq("shot")
+    row = await repo.insert_version(
+        run_id=fx["run_a"],
+        kind="script_shot",
+        ref_id=ref,
+        version=1,
+        parent_version=None,
+        title="S3 · Shot 1 · MS",
+        model=None,
+        cost_cents=None,
+        turn=1,
+        step=3,
+    )
+    assert row["seq"] is None  # nothing knows the seq at insert time
+
+    await repo.set_seq(row_id=row["id"], seq=4)
+
+    stored = await pg.fetchrow(
+        "SELECT seq, version, title, turn, step FROM public.run_deliverables "
+        "WHERE id = $1",
+        int(row["id"]),
+    )
+    assert stored["seq"] == 4
+    # The back-fill must not disturb the row it points into.
+    assert (stored["version"], stored["turn"], stored["step"]) == (1, 1, 3)
+    assert stored["title"] == "S3 · Shot 1 · MS"
+    # And it is visible to the read path the wire contract is served from.
+    chain = await repo.lineage_for(kind="script_shot", ref_id=ref)
+    assert [v["seq"] for v in chain] == [4]
+
+
+@_skip
+async def test_set_seq_on_a_row_that_is_gone_is_a_no_op_not_an_error(orm_dsn, fx):
+    """The registry treats a failed stamp as a WARNING; an UPDATE matching no
+    row must therefore be silent rather than raise."""
+    await _repo().set_seq(row_id=1, seq=9)
+
+
+# ---------------------------------------------------------------------------
 # cases 5, 6 — the two JOINs onto agent_runs
 # ---------------------------------------------------------------------------
 

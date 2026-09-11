@@ -93,3 +93,58 @@ async def test_for_run_on_a_run_with_no_events_starts_at_zero(monkeypatch):
     monkeypatch.setattr(dbs, "read_scope", _rs)
     w = await rr.RunEventWriter.for_run(8)
     assert w.seq == 0 and w.views == rr.empty_views()
+
+
+# ─── last_event_seq (三期 3a Task 8a, defect 2) ─────────────────────────
+
+
+async def test_last_event_seq_names_the_event_that_was_written():
+    """A caller that must point back at its own event (the deliverable
+    registry stamps it onto ``run_deliverables.seq``) reads this after
+    ``record_event``."""
+
+    class _W:
+        def __init__(self) -> None:
+            self.seq = 5
+
+        async def append(self, event_type, payload, *, turn=None, step=None):
+            self.seq += 1
+            return self.seq
+
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    rec.run_id = "777"
+    rec._event_writer = _W()
+
+    assert rec.last_event_seq is None  # nothing recorded yet
+    await rec.record_event("deliverable", {"kind": "script_shot"}, turn=1, step=3)
+    assert rec.last_event_seq == 6
+    await rec.record_event("deliverable", {"kind": "script_shot"})
+    assert rec.last_event_seq == 7
+
+
+async def test_last_event_seq_stays_none_when_the_insert_failed():
+    """``append`` returns None on a failed insert — the transcript holds no
+    such event, so naming its seq would point at nothing. ``next_event_seq``
+    (the counter) still advances, which is exactly why the two are separate."""
+
+    class _W:
+        def __init__(self) -> None:
+            self.seq = 5
+
+        async def append(self, event_type, payload, *, turn=None, step=None):
+            self.seq += 1
+            return None
+
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    rec.run_id = "777"
+    rec._event_writer = _W()
+
+    await rec.record_event("deliverable", {"kind": "script_shot"})
+    assert rec.last_event_seq is None
+    assert rec.next_event_seq == 7
+
+
+async def test_a_recorder_with_no_run_records_nothing_and_reports_no_seq():
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    await rec.record_event("deliverable", {"kind": "script_shot"})
+    assert rec.last_event_seq is None
