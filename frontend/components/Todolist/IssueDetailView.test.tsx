@@ -129,6 +129,46 @@ vi.mock('../../services/aiLibraryService', () => ({
   },
 }));
 
+// harness 3a T8c 缺陷 2 — the rail's Outputs card and the dialog it opens.
+// Defaults are the "this issue produced nothing" shape, so every OTHER test in
+// this file keeps rendering the page it used to. A bare `vi.fn()` resolves to
+// undefined and the block's `rows.length` then throws inside the view.
+const listIssueOutputs = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
+const getOutputLineage = vi.fn();
+const getOutputDiff = vi.fn();
+vi.mock('../../services/outputsService', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../services/outputsService')>();
+  return {
+    ...mod,
+    listIssueOutputs: (...a: unknown[]) => listIssueOutputs(...a),
+    getOutputLineage: (...a: unknown[]) => getOutputLineage(...a),
+    getOutputDiff: (...a: unknown[]) => getOutputDiff(...a),
+  };
+});
+
+const outputVersion = (version: number, parent: number | null) => ({
+  id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: '1',
+  issue_key: 'NOUS-1', deep_link: `/team/9/todolist/NOUS-1?step=${version}`, seq: version,
+  turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max', cost_cents: 0.42,
+  created_at: '2026-09-10T01:00:00Z',
+});
+const diffSide = (version: number, text: string) => ({
+  version, run_id: '347786145852700', issue_id: '1', created_at: '2026-09-10T01:00:00Z',
+  model: 'qwen-max', cost_cents: 0.42, title: `Shot #1 v${version}`, text, media: null,
+  available: true, unavailable_reason: null,
+});
+
+function stubOutputs() {
+  listIssueOutputs.mockResolvedValue([
+    { kind: 'script_shot', ref_id: '9', title: 'Shot #1', latest_version: 2, versions: [outputVersion(2, 1), outputVersion(1, null)] },
+  ]);
+  getOutputLineage.mockResolvedValue({ kind: 'script_shot', ref_id: '9', latest_version: 2, versions: [outputVersion(2, 1), outputVersion(1, null)] });
+  getOutputDiff.mockResolvedValue({
+    kind: 'script_shot', ref_id: '9', content_type: 'text',
+    from: diffSide(1, 'the quick brown fox'), to: diffSide(2, 'the quick red fox'),
+  });
+}
+
 function mkProgress(over: Record<string, unknown> = {}) {
   return {
     issue_id: '1',
@@ -742,5 +782,35 @@ describe('IssueDetailView — lineage deep link (?step)', () => {
     (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
     renderAt('/team/9/todolist/NOUS-1?run=501&seq=4&step=2');
     await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('501', 4));
+
+// ── harness 3a T8c 缺陷 2：右栏与线程共用同一个子 run 上下文 ─────────────────
+//
+// 真机实测：同一个 issue 页、同一秒，线程入口点开的差异弹层里 «Open Run #»
+// 可点，右栏产出块点开的那个恒禁用，title 写着「The run panel is not open
+// here」—— 而 run 面板就在这一页上。根因是 `useChildRun()` 在 provider 之外
+// 返回 null，右栏的 contextBlocks 渲染在两处 provider 之外。
+//
+// 这个测试只能在**整页**上写：把弹层单独渲染进一个 provider 里，两种接法都
+// 是绿的（`OutputDiffDialog.test` 正是这么做的，它在坏版本上照样通过）。
+describe('IssueDetailView — 右栏产出块开出的弹层能打开 run 面板', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress();
+    stubOutputs();
+  });
+
+  it('«Open Run» from the rail is enabled and opens the run panel', async () => {
+    renderDetail(mkIssue());
+
+    const row = await screen.findByTestId('outputs-row');
+    fireEvent.click(row);
+    await screen.findByTestId('output-diff');
+
+    const openRun = await screen.findByTestId('output-open-run');
+    expect((openRun as HTMLButtonElement).disabled).toBe(false);
+    expect(openRun.getAttribute('title')).toBeNull();
+
+    fireEvent.click(openRun);
+    await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
   });
 });
