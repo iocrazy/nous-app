@@ -66,6 +66,25 @@ export interface SubagentChild {
   durationMs: number | null;
 }
 
+/**
+ * One version of one object this step registered (harness 3a §5). The card is
+ * the only place a person sees that the agent produced something durable, so
+ * it carries the whole identity — an id without a kind, or a kind without a
+ * version, draws nothing rather than a card that cannot be opened.
+ */
+export interface OutputCard {
+  /** `${kind}:${refId}:${version}` — the same key the backend folds `seen` by. */
+  key: string;
+  kind: string;
+  refId: string;
+  version: number;
+  /** The version this one replaced; null on a first registration. */
+  parentVersion: number | null;
+  title: string | null;
+  model: string | null;
+  costCents: number | null;
+}
+
 export interface StepNode {
   kind: 'step';
   key: string;
@@ -79,6 +98,8 @@ export interface StepNode {
   summary: StepSummary;
   /** Sub-agents dispatched by this step, in dispatch order. */
   children: SubagentChild[];
+  /** Outputs this step registered, in registration order (harness 3a §5). */
+  outputs: OutputCard[];
 }
 
 export interface UserNode {
@@ -245,6 +266,7 @@ function newStep(turn: number, step: number, model: string | null, at: string | 
     lines: [],
     summary: emptySummary(),
     children: [],
+    outputs: [],
   };
 }
 
@@ -284,6 +306,21 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
   };
 
   /**
+   * An existing step at these coordinates, wherever it sits in the list.
+   * A deliverable registered through DBOS can land after a LATER step has
+   * already started (the storyboard render finishes long after the turn that
+   * asked for it), and it belongs to the step that produced it — not to
+   * whichever step happens to be last, and not to a phantom new one.
+   */
+  const stepAt = (turn: number, step: number): StepNode | null => {
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const n = nodes[i];
+      if (n.kind === 'step' && n.turn === turn && n.step === step) return n;
+    }
+    return null;
+  };
+
+  /**
    * The step an activity belongs to. Explicit `step` coordinate first, the
    * tool call's `iteration` second (same counter, older rows). The run path
    * records tool calls and the assistant text AFTER `step_end`, so a
@@ -297,6 +334,13 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
     if (current && (coord === null || coord === current.step)) return current;
     const prev = lastStep();
     if (prev && (coord === null || prev.step === coord)) return prev;
+    // An out-of-order event naming a step that already exists goes home to
+    // it; only a genuinely unseen coordinate opens a step. Leaves `current`
+    // open on purpose — a late row about an old step ends nothing.
+    if (coord !== null) {
+      const earlier = stepAt(num(ev.turn) ?? 1, coord);
+      if (earlier) return earlier;
+    }
     closeCurrent();
     current = newStep(num(ev.turn) ?? 1, coord ?? stepCount + 1, null, ev.created_at ?? null);
     stepCount += 1;
@@ -497,6 +541,32 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           if (!child.childRunId) child.childRunId = str(p.child_run_id);
           break;
         }
+        break;
+      }
+
+      case 'deliverable': {
+        const kind = str(p.kind);
+        const refId = str(p.ref_id);
+        const version = num(p.version);
+        // A card that cannot be opened is worse than no card: all three or
+        // nothing.
+        if (!kind || !refId || version === null) break;
+        // Coordinates first — the registration may cross DBOS and arrive
+        // after the run walked on, and `ensureStep` takes it back to the step
+        // that actually produced it.
+        const node = ensureStep(ev, null);
+        const key = `${kind}:${refId}:${version}`;
+        if (node.outputs.some((o) => o.key === key)) break;
+        node.outputs.push({
+          key,
+          kind,
+          refId,
+          version,
+          parentVersion: num(p.parent_version),
+          title: str(p.title),
+          model: str(p.model),
+          costCents: num(p.cost_cents),
+        });
         break;
       }
 

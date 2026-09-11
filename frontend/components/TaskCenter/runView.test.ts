@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetState, childrenState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState, wakeupsState } from './runView';
+import { budgetState, childrenState, outputsState, contextGauge, currentStep, endedReason, retryState, selectRunCost, selectRunView, stepProgress, toolsState, wakeupsState } from './runView';
 
 const view = {
   v: 1,
@@ -110,5 +110,34 @@ describe('childrenState / wakeupsState (harness 2b-2 §5)', () => {
     ];
     wakeupsState({ wakeups } as never);
     expect(wakeups.map((w) => w.schedule_id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('outputsState (harness 3a §5)', () => {
+  const last = { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' };
+
+  it('reads the folded counters and the last object', () => {
+    expect(outputsState({ outputs: { total: 3, revised: 1, last, seen: ['generated_media:77:1'] } } as never)).toEqual({
+      total: 3,
+      revised: 1,
+      last,
+    });
+  });
+
+  it('a run that registered nothing takes no cell', () => {
+    // Same rule as Tools and Sub-agents: zero is not worth a cell, and a run
+    // older than the registry has no `outputs` key at all.
+    expect(outputsState({ outputs: { total: 0, revised: 0, last: null, seen: [] } } as never)).toBeNull();
+    expect(outputsState({} as never)).toBeNull();
+    expect(outputsState(null)).toBeNull();
+  });
+
+  it('fills a missing revised counter with 0 rather than hiding the cell', () => {
+    expect(outputsState({ outputs: { total: 2 } } as never)).toEqual({ total: 2, revised: 0, last: null });
+  });
+
+  it('does not leak the bookkeeping `seen` list to components', () => {
+    const state = outputsState({ outputs: { total: 1, revised: 0, last, seen: ['generated_media:77:1'] } } as never);
+    expect(state && 'seen' in state).toBe(false);
   });
 });

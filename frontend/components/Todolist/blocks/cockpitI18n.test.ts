@@ -40,3 +40,38 @@ describe('issueDetail.toolsTimedOut is a plural pair (harness 2b-1 §3)', () => 
     expect(load('zh').trajectory.timedOut).not.toBe(load('en').trajectory.timedOut);
   });
 });
+
+
+describe('the outputs copy exists in both locales (harness 3a §5)', () => {
+  // Every key the cell, the block, the cards and the dialog ask for. A key
+  // that exists in `en` alone renders English inside a Chinese UI; a key
+  // missing from both renders the raw dotted path.
+  const OUTPUTS_KEYS = [
+    'version', 'replaced', 'open', 'diff', 'revert', 'revertHint', 'changeCount', 'truncated',
+    'noSnapshot', 'noLedger', 'notFound', 'unavailable', 'noPreview', 'loadFailed',
+    'errorNotRegistered', 'errorVersionNotFound', 'errorCode', 'errorGeneric',
+    'kindMedia', 'kindShot', 'kindScene', 'kindChapter', 'kindOther',
+  ];
+
+  it.each(['en', 'zh'])('%s has the outputs namespace and the cockpit cell copy', (lang) => {
+    const all = load(lang);
+    for (const key of OUTPUTS_KEYS) expect(typeof all.outputs?.[key]).toBe('string');
+    expect(typeof all.issueDetail.outputs).toBe('string');
+    expect(all.issueDetail.outputsRevised).toContain('{{n}}');
+  });
+
+  it.each(['en', 'zh'])('%s pluralises the revision count as a _one/_other pair', (lang) => {
+    const o = load(lang).outputs;
+    expect(o.revisions_one).toContain('{{count}}');
+    expect(o.revisions_other).toContain('{{count}}');
+    expect(o.revisions).toBeUndefined();
+  });
+
+  it('zh is a translation, not a copy of the English', () => {
+    const en = load('en');
+    const zh = load('zh');
+    expect(zh.outputs.loadFailed).not.toBe(en.outputs.loadFailed);
+    expect(zh.outputs.errorNotRegistered).not.toBe(en.outputs.errorNotRegistered);
+    expect(zh.issueDetail.outputs).not.toBe(en.issueDetail.outputs);
+  });
+});

@@ -6,16 +6,18 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronDown, ChevronRight, Clock, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
 import { useChildRun } from '../../../Todolist/childRunContext';
+import { OutputDiffDialog } from '../../../Todolist/OutputDiffDialog';
 import type {
   BudgetNode,
   DeniedNode,
   ErrorNode,
   InboxNode,
+  OutputCard,
   ScheduleNode,
   StepLine,
   StepNode,
@@ -285,9 +287,90 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
           )}
         </div>
       )}
-      {/* Outside the `open` block on purpose: a dispatched sub-agent is the
-          one thing about a collapsed step you still need to see. */}
+      {/* Outside the `open` block on purpose: a dispatched sub-agent and a
+          registered output are the two things about a collapsed step you
+          still need to see. */}
       <SubagentCards node={node} />
+      <OutputCards node={node} />
+    </div>
+  );
+};
+
+/**
+ * What this step registered (harness 3a §5). Two states, and the difference
+ * is the whole point: a FIRST registration means the agent made something
+ * that did not exist, a REVISION means it replaced something that did — and
+ * the card has to say which version it replaced, or the reader cannot tell a
+ * third draft from a third object.
+ *
+ * `Open` shows that one version on its own; `Diff` (revisions only) puts it
+ * beside the version it replaced. Spend follows fmtChildCents: an unpriced
+ * row reads `—`, never `¢0.000`.
+ */
+export const OutputCards: React.FC<{ node: StepNode }> = ({ node }) => {
+  const { t } = useTranslation();
+  // Which card's dialog is open, and whether it was opened as a comparison.
+  const [open, setOpen] = React.useState<{ card: OutputCard; compare: boolean } | null>(null);
+  if (node.outputs.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 px-2.5 pb-1.5 pl-7" data-testid="output-cards">
+      {node.outputs.map((o) => {
+        const revised = o.version > 1;
+        const parent = o.parentVersion ?? o.version - 1;
+        return (
+          <div
+            key={o.key}
+            data-testid="output-card"
+            data-state={revised ? 'revised' : 'new'}
+            data-kind={o.kind}
+            className={`rounded-md border px-2 py-1 text-[11px] ${
+              revised ? 'border-warn-line bg-warn-soft/40 text-warn' : 'border-ok-line bg-ok-soft/40 text-ink-300'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              <FileOutput size={11} className="shrink-0" />
+              <span className="shrink-0 font-medium tabular-nums">
+                {revised
+                  ? t('outputs.replaced', 'v{{n}} ← v{{prev}}', { n: o.version, prev: parent })
+                  : t('outputs.version', 'v{{n}}', { n: o.version })}
+              </span>
+              <span className="truncate text-ink-400">{o.title ?? `${o.kind.replace(/_/g, ' ')} #${o.refId}`}</span>
+              {o.model && <span className="shrink-0 truncate text-ink-500">{o.model}</span>}
+              <span className="ml-auto shrink-0 tabular-nums text-ink-500">{fmtChildCents(o.costCents)}</span>
+              <button
+                type="button"
+                data-testid="output-open"
+                className="shrink-0 underline decoration-dotted"
+                onClick={() => setOpen({ card: o, compare: false })}
+              >
+                {t('outputs.open', 'Open')}
+              </button>
+              {revised && (
+                <button
+                  type="button"
+                  data-testid="output-diff-open"
+                  className="shrink-0 underline decoration-dotted"
+                  onClick={() => setOpen({ card: o, compare: true })}
+                >
+                  {t('outputs.diff', 'Diff')}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {open && (
+        <OutputDiffDialog
+          kind={open.card.kind}
+          refId={open.card.refId}
+          title={open.card.title}
+          initialTo={open.card.version}
+          // Comparing is the dialog's default (it picks the parent itself);
+          // pinning both ends to one version is what makes `Open` a single pane.
+          initialFrom={open.compare ? undefined : open.card.version}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 };

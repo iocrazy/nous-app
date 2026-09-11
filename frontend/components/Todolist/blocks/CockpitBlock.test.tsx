@@ -257,3 +257,54 @@ describe('CockpitBlockView — sub-agents and wake-ups (harness 2b-2 §5)', () =
     expect(screen.queryByTestId('cockpit-wakeup')).toBeNull();
   });
 });
+
+// ── harness 3a §5: Outputs cell ─────────────────────────────────────────────
+describe('CockpitBlockView — outputs (harness 3a §5)', () => {
+  const base = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0, running: 0, async_pending: 0, last: null }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
+
+  it('counts what the run registered and says how many were revisions', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = {
+      ...base,
+      outputs: { total: 3, revised: 1, last: { kind: 'generated_media', ref_id: '77', version: 2, title: 'Shot #1' }, seen: [] },
+    };
+    render(<CockpitBlockView ctx={c} />);
+    const cell = screen.getByTestId('cockpit-outputs');
+    expect(cell.textContent).toContain('3');
+    expect(cell.textContent).toContain('1 revised');
+  });
+
+  it('no cell when the run registered nothing, and none at all for a run older than the registry', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, outputs: { total: 0, revised: 0, last: null, seen: [] } };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.queryByTestId('cockpit-outputs')).toBeNull();
+    cleanup();
+    const old = ctx('running');
+    old.rollup!.current_run!.view = { ...base };
+    render(<CockpitBlockView ctx={old} />);
+    expect(screen.queryByTestId('cockpit-outputs')).toBeNull();
+    // the four fixed cells still read — an absent key must not blank the cockpit
+    expect(screen.getByTestId('cockpit-steps')).toBeTruthy();
+  });
+
+  it('drops the revised note when nothing was replaced', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, outputs: { total: 2, revised: 0, last: null, seen: [] } };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.getByTestId('cockpit-outputs').textContent).not.toContain('revised');
+  });
+
+  it('widens the grid to seven columns when all three conditional cells are on', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = {
+      ...base,
+      tools: { timed_out: 1, last_timed_out: 'ResourceFetch' },
+      children: { total: 1, done: 1, running: 0, async_pending: 0, last: null },
+      outputs: { total: 1, revised: 0, last: null, seen: [] },
+    };
+    const { container } = render(<CockpitBlockView ctx={c} />);
+    // Tailwind never scans a template string, so the literal has to be there.
+    expect(container.querySelector('.sm\\:grid-cols-7')).toBeTruthy();
+  });
+});

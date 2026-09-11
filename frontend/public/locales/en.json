@@ -5555,6 +5555,8 @@
     }
   },
   "issueDetail": {
+    "outputs": "Outputs",
+    "outputsRevised": "{{n}} revised",
     "tools": "Tools",
     "toolsTimedOut_one": "{{count}} timed out",
     "toolsTimedOut_other": "{{count}} timed out",
@@ -5838,5 +5840,32 @@
       "unknown": "Could not schedule that wake-up ({{code}})",
       "generic": "Could not schedule that wake-up."
     }
+  },
+  "outputs": {
+    "version": "v{{n}}",
+    "replaced": "v{{n}} ← v{{prev}}",
+    "revisions_one": "{{count}} revision",
+    "revisions_other": "{{count}} revisions",
+    "open": "Open",
+    "diff": "Diff",
+    "revert": "Revert To v{{n}}",
+    "revertHint": "Arrives with 3b",
+    "changeCount": "+{{added}} / −{{removed}} words",
+    "truncated": "This text is too long to compare in full — only the first part of the change is shown.",
+    "noSnapshot": "No snapshot was kept for this version",
+    "noLedger": "No ledger entry records this version’s content",
+    "notFound": "The object this version points at is gone",
+    "unavailable": "This version could not be reconstructed",
+    "noPreview": "No preview for this version",
+    "loadFailed": "Could not read this issue’s outputs.",
+    "errorNotRegistered": "This object is not in the deliverable registry — nothing recorded producing it.",
+    "errorVersionNotFound": "That version is not in this object’s chain.",
+    "errorCode": "Could not read this output ({{code}})",
+    "errorGeneric": "Could not read this output.",
+    "kindMedia": "Image",
+    "kindShot": "Shot",
+    "kindScene": "Scene",
+    "kindChapter": "Chapter",
+    "kindOther": "Output"
   }
 }

@@ -16,6 +16,7 @@ import {
   childrenState,
   contextGauge,
   currentStep,
+  outputsState,
   retryState,
   selectRunView,
   stepProgress,
@@ -44,6 +45,7 @@ const GRID_COLS: Record<number, string> = {
   4: 'sm:grid-cols-4',
   5: 'sm:grid-cols-5',
   6: 'sm:grid-cols-6',
+  7: 'sm:grid-cols-7',
 };
 
 const Cell: React.FC<React.PropsWithChildren<{ label: string; testId: string; bar?: { pct: number; tone: string } }>> = ({
@@ -103,6 +105,8 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // harness 2b-2 §5-1: a sub-agent cell only when this run dispatched one,
   // and the next armed wake-up on the subline.
   const children = childrenState(view);
+  // harness 3a §5: an outputs cell only once this run registered something.
+  const outputs = outputsState(view);
   const wakeups = wakeupsState(view);
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
@@ -261,10 +265,10 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         </div>
       )}
-      {/* Four fixed cells plus the two conditional ones — the column count
+      {/* Four fixed cells plus the three conditional ones — the column count
           follows what is actually rendered, so a cell never sits alone on a
           half-empty row. */}
-      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (children ? 1 : 0)]}`}>
+      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0)]}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -321,6 +325,18 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
                 {t('issueDetail.subagentsBackground', '{{count}} in background', { count: children.async_pending })}
               </div>
             )}
+          </Cell>
+        )}
+        {outputs && (
+          <Cell label={t('issueDetail.outputs', 'Outputs')} testId="cockpit-outputs">
+            {outputs.total}
+            {outputs.revised > 0 && (
+              <span className="text-ink-500 text-[12px]">
+                {' · '}
+                {t('issueDetail.outputsRevised', '{{n}} revised', { n: outputs.revised })}
+              </span>
+            )}
+            {outputs.last?.title && <div className="text-[11px] text-ink-500 truncate">{outputs.last.title}</div>}
           </Cell>
         )}
       </div>
