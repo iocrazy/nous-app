@@ -53,15 +53,26 @@ function stepNodes({ step, turn }: StepCoordinate): HTMLElement[] {
  * not exist in the DOM. Polling alone would just time out: the answer is not
  * "wait longer", it is "the thing is folded".
  *
- * Only currently-collapsed toggles are clicked, so calling it repeatedly is
- * idempotent while the search runs; the search's own deadline is what stops
- * it, and a group the reader folds back afterwards stays folded.
+ * Each card is unfolded AT MOST ONCE per search, tracked by element identity:
+ *
+ * * a group the reader folds back stays folded — the search runs for up to ten
+ *   seconds, and a card that springs open again on every 120ms pass, with
+ *   nothing on screen saying why, is the page fighting its reader;
+ * * a card that REMOUNTED collapsed is a different element, so it is unfolded
+ *   again — that collapse is the thread re-rendering while its rows load, not
+ *   a decision anybody made.
+ *
+ * A `WeakSet` because the entries are DOM nodes whose lifetime is React's.
  */
-function expandRunGroups(): void {
+function expandRunGroups(seen: WeakSet<HTMLElement>): void {
   const folded = document.querySelectorAll<HTMLElement>(
     '[data-testid="run-group-toggle"][aria-expanded="false"]',
   );
-  folded.forEach((toggle) => toggle.click());
+  folded.forEach((toggle) => {
+    if (seen.has(toggle)) return;
+    seen.add(toggle);
+    toggle.click();
+  });
 }
 
 /** Expand + scroll, once the node is there. `false` means "not yet". */
@@ -109,6 +120,9 @@ export function focusTrajectoryStep(
   }
   let timer: ReturnType<typeof setTimeout> | null = null;
   let cancelled = false;
+  // Per search, not per module: a later deep link is entitled to unfold the
+  // same cards again.
+  const unfolded = new WeakSet<HTMLElement>();
   const deadline = Date.now() + DEADLINE_MS;
   const tick = () => {
     timer = null;
@@ -119,11 +133,10 @@ export function focusTrajectoryStep(
       onSettled?.();
       return;
     }
-    // Not there yet — it may be folded rather than unrendered. Unfold on
-    // EVERY failed pass, not once: the thread re-renders while its rows load,
-    // and a card that remounts comes back collapsed (its expanded flag is
-    // local `useState`), so a single early click is silently undone.
-    expandRunGroups();
+    // Not there yet — it may be folded rather than unrendered. Checked on
+    // every failed pass because the thread re-renders while its rows load, but
+    // each card is only ever clicked once (see `expandRunGroups`).
+    expandRunGroups(unfolded);
     if (Date.now() >= deadline) return;
     timer = setTimeout(tick, POLL_MS);
   };

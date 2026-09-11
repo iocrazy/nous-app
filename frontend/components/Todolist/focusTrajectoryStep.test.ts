@@ -29,6 +29,18 @@ function drawStep({ step, turn }: { step: number; turn?: number }): HTMLElement 
 
 const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A run-group header that behaves like the real one: clicking it flips its
+ *  own `aria-expanded`, the way React would. */
+function drawRunGroupToggle(): { toggle: HTMLElement; unfolded: ReturnType<typeof vi.fn> } {
+  const toggle = document.createElement('button');
+  toggle.setAttribute('data-testid', 'run-group-toggle');
+  toggle.setAttribute('aria-expanded', 'false');
+  const unfolded = vi.fn(() => toggle.setAttribute('aria-expanded', 'true'));
+  toggle.addEventListener('click', unfolded);
+  document.body.appendChild(toggle);
+  return { toggle, unfolded };
+}
+
 afterEach(() => {
   document.body.innerHTML = '';
 });
@@ -89,15 +101,41 @@ describe('focusTrajectoryStep', () => {
   });
 
   it('unfolds a collapsed run-group while it searches', async () => {
-    const toggle = document.createElement('button');
-    toggle.setAttribute('data-testid', 'run-group-toggle');
-    toggle.setAttribute('aria-expanded', 'false');
-    const unfolded = vi.fn();
-    toggle.addEventListener('click', unfolded);
-    document.body.appendChild(toggle);
+    const { toggle, unfolded } = drawRunGroupToggle();
     const cancel = focusTrajectoryStep({ step: 9 });
     await tick(200);
     expect(unfolded).toHaveBeenCalled();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     cancel();
   });
+
+  it('unfolds each card ONCE — a group the reader folds back stays folded', async () => {
+    // The search runs for up to ten seconds. Re-clicking every collapsed
+    // toggle on every 120ms pass would mean a reader who folds a group back
+    // during that window watches it spring open again, repeatedly, with
+    // nothing on screen explaining why.
+    const { toggle, unfolded } = drawRunGroupToggle();
+    const cancel = focusTrajectoryStep({ step: 9 });
+    expect(unfolded).toHaveBeenCalledTimes(1);
+    // The reader folds it back.
+    toggle.setAttribute('aria-expanded', 'false');
+    await tick(400);
+    expect(unfolded).toHaveBeenCalledTimes(1);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    cancel();
+  });
+
+  it('unfolds a card that REMOUNTED collapsed, even after an earlier one', async () => {
+    // A remount is a different element, and its collapsed state is not the
+    // reader\'s decision — it is the thread re-rendering while rows load.
+    const first = drawRunGroupToggle();
+    const cancel = focusTrajectoryStep({ step: 9 });
+    expect(first.unfolded).toHaveBeenCalledTimes(1);
+    first.toggle.remove();
+    const second = drawRunGroupToggle();
+    await tick(400);
+    expect(second.unfolded).toHaveBeenCalledTimes(1);
+    cancel();
+  });
+
 });
