@@ -2141,7 +2141,9 @@
       "openCanvasNodeHint": "Opens the canvas at this node",
       "openSourceHint": "Opens where this was generated",
       "openIssueHint": "Opens the issue whose run produced this",
-      "open": "Preview {{title}}"
+      "open": "Preview {{title}}",
+      "sourceRun": "run #{{run}}",
+      "sourceStep": "step {{n}}"
     },
     "batch": {
       "selected": "{{n}} selected",

@@ -2141,7 +2141,9 @@
       "openCanvasNodeHint": "跳转到画布中的该节点",
       "openSourceHint": "跳转到生成来源",
       "openIssueHint": "跳转到生成它的那个议题",
-      "open": "预览 {{title}}"
+      "open": "预览 {{title}}",
+      "sourceRun": "运行 #{{run}}",
+      "sourceStep": "第 {{n}} 步"
     },
     "batch": {
       "selected": "已选 {{n}} 项",

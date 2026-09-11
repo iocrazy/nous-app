@@ -265,6 +265,33 @@ describe('GeneratedCard — source line', () => {
     expect(screen.getByText('Chat generation')).toBeTruthy();
   });
 
+  /**
+   * 3a §5 wants the source line to read "谁 · issue · run #… · 第几步". The
+   * backend has sent `run_id` / `step` since Task 3, and the card printed
+   * neither: two cards from two different runs of the same issue were the
+   * same four words, and "which run made THIS one?" was still unanswerable
+   * without opening the issue.
+   */
+  it('names the run and the step after the label', () => {
+    render(<GeneratedCard item={AGENT_RUN} selected={false} teamId="t1" {...handlers()} />);
+    const source = screen.getByRole('button', { name: /Script AI · MH-91/ });
+    expect(source.textContent).toBe('Script AI · MH-91 · run #534100 · step 4');
+  });
+
+  it('prints step 0 — steps are 0-based, and the first one is not "no step"', () => {
+    const first: GeneratedItem = { ...AGENT_RUN, source: { ...AGENT_RUN.source, step: 0 } };
+    render(<GeneratedCard item={first} selected={false} teamId="t1" {...handlers()} />);
+    expect(screen.getByRole('button', { name: /Script AI/ }).textContent).toContain('step 0');
+  });
+
+  it('a row with no run provenance keeps the bare label', () => {
+    // Canvas rows, historical rows: nothing to append, and a trailing
+    // separator would read as a truncated line.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+    const source = screen.getByRole('button', { name: /EP1 · Storyboard · Canvas/ });
+    expect(source.textContent).toBe('EP1 · Storyboard · Canvas');
+  });
+
   it('never shows a raw snowflake in the source line', () => {
     // `issue_id` and `run_id` are provenance for the LINK, not words for a
     // reader. The label is the only thing that gets printed.
