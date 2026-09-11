@@ -1224,7 +1224,7 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 
 真栈揪出的缺陷按 2b-2 的节奏走（7a/7b/7c 三轮的形状）：独立 PR、opus 评审、合并、再复验，直到一轮零新缺陷。
 
-- [ ] **Step 4: 完成账**
+- [x] **Step 4: 完成账**
 
 写进本 plan 末尾：八项验收表 + 真栈才暴露的缺陷清单 + 记小票；spec 的「实施记录」同步。
 
@@ -1288,3 +1288,20 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 | #2253 T8c（前后端） | 真机三缺陷：活路径两条产出通道把自己的 recorder 交给登记口 + 镜像前重折 `view.outputs`；**顺带根治两 writer seq 相撞**（`RunEventWriter.append` 撞 sqlstate 23505 且约束名对得上时从 DB `max(seq)+1` 重播、有界重试 3 次，`SUBAGENT_EVENT_TYPES` 重放退居第二道网；真 PG 用例挂进 schema-drift 并在 CI 首跑 2 PASSED）；`ChildRunContext.Provider` 上提到共同祖先、非 timeline 页签点 Open Run 先切页签；`referenced_outputs` 随 `user` 事件 payload 落 transcript、第 1 步下渲染 `References N outputs · pinned to version`（`_one`/`_other`） | 2 轮 + 1 次 rebase 冲突（与 T8b 同文件尾追加的测试块） | 合并 7974e49b |
 
 **真栈才暴露、spec/plan 都没写的一条（写进 spec §2 实施记录）**：`run_deliverables` 之外还有一条隐性契约——同一个 run 的 transcript 由两个 writer 写（活 recorder 与 `for_run`），`UNIQUE(run_id, seq)` 让后者每登记一次都吃掉前者的下一条事件。3a 之前 workforce 的 `subagent_done` 也走这条路，靠 `SUBAGENT_EVENT_TYPES` 白名单重放兜住；现在两种 writer 都在 `append` 里按 23505 重播计数器，白名单不再承重。
+
+**真机复验（Task 8 Step 3 收口，生产 7974e49，花费 ¢0.531 / 4 轮）**
+
+| 项 | 证据 | 结论 |
+|---|---|---|
+| Cockpit 产出格 | 发帖触发一轮：`/progress` 的 `current_run.view.outputs` 在 9.1 s 变非空；页内 `cockpit-outputs` 8.1–13.2 s 可见，文字 `OUTPUTS 1 · 1 revised MEDIUM`；生产库 `view.outputs` 非空；transcript seq 1–12 无缝隙、`deliverable` 在 4 | PASS |
+| 线程引用 chip 刷新后仍在 | 7 条评论中 3 条带 `comment-citations`，chip `@MEDIUM v1`、`ref_id` 字符串、无 X；`GET /issues/{id}/messages` 返回 `attachments` | PASS |
+| 「引用 N 件」行 | 消费引用的那轮第 1 步下 `References 1 output · pinned to version` + `@MEDIUM v5`（本轮产出 v6，引用钉在 v5）；`user` 事件 payload 带 `referenced_outputs` | PASS |
+| `?step=` 深链 | href `/team/331438215859255/todolist/MH-94?step=1&turn=1`；SPA 标记存活；只展开链接指的那一步并滚入视野；直开 URL 同样 | PASS |
+| 弹层 «Open Run #» | 右栏入口 enabled → `detached-run-panel`；Related work 页签点击先切回 Timeline 再出面板 | PASS |
+| 跨议题旧版置空 | 新建 MH-95 让同一分镜产出 v7 后，逐对象血缘把 MH-94 的六版 `issue_key`/`deep_link` 全部置空、`issue_id` 保留（门控 = 最新版所在议题，即已裁定的「比泄露面宽」；精确化记小票） | PASS |
+| Generated 卡来源行 | 全库零 `generated_media` 产出（①③ 同一阻塞） | UNVERIFIED |
+| `npm run e2e:prod` | 3 passed 1 skipped，零重试 | PASS |
+
+**复验新发现（与本波无关；勘察定为既有——2026-05-05 `0a2caed4` 首次接线即如此、#1384 加了第二触发源；顺手修于 T8d PR #2254）**：issue 详情页加载约 1 s 后整棵子树被替换一次，正在输入的评论与打开的弹层被静默清空（复验因此浪费一轮 ¢0.12）。`<aside>`（`IssueDetailView.tsx:786`）本身被替换，病根在挂载点上游。
+
+**观察**：`staged-output-chip` testid 一名两用（作曲区暂存与线程历史 chip 共用组件），测试要靠 `comment-citations`/`staged-output-chip-remove` 区分；MH-93 无 project 绑定，screenwriting 工具一律 `scope_unbound`，不能再当跨议题样本；MH-95 为复验新建，分镜 337650953731886 的最新版 v7 现挂在它名下。
