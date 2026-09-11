@@ -98,7 +98,7 @@
 - Consumes: 453 建好的 `run_deliverables`（`id/run_id/seq/kind/ref_id/version/parent_version/created_at`）；461 已放行的 `deliverable` 事件类型。
 - Produces: 列 `title/model/cost_cents/turn/step`；约束 `run_deliverables_kind_ref_version_key`（T2 的并发闸门靠它）；索引 `idx_run_deliverables_ref_latest`（T3 的「取最新版」靠它）；`agent_run_inbox_dedupe_live_key`（T2/T4 的投递幂等靠它）。
 
-- [ ] **Step 1: 取号并确认 461 仍是最后一个**
+- [x] **Step 1: 取号并确认 461 仍是最后一个**
 
 ```bash
 cd /Volumes/program/project-code/repos/nous-app && git fetch origin
@@ -106,7 +106,7 @@ ls supabase/migrations | tail -3   # 期望最后一个是 461_harness_p4_phase2
 ```
 若已出现 462，本 Task 全部编号顺延为下一个空号，并同步改 `LATEST_MIGRATION`。
 
-- [ ] **Step 2: 写迁移（照 461 的幂等写法，不 SET ROLE）**
+- [x] **Step 2: 写迁移（照 461 的幂等写法，不 SET ROLE）**
 
 ```sql
 -- 462: harness 第五轮 · 三期 3a —— 产出登记（列与唯一约束）
@@ -147,7 +147,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_run_inbox_dedupe_live_key
 COMMIT;
 ```
 
-- [ ] **Step 3: 写会失败的迁移测试**
+- [x] **Step 3: 写会失败的迁移测试**
 
 ```python
 # backend/tests/db/test_migration_462_deliverables.py
@@ -187,12 +187,12 @@ def test_no_set_role_and_single_transaction():
     assert sql.count("BEGIN;") == 1 and sql.count("COMMIT;") == 1
 ```
 
-- [ ] **Step 4: 跑它，确认红**
+- [x] **Step 4: 跑它，确认红**
 
 Run: `cd backend && uv run pytest tests/db/test_migration_462_deliverables.py -q`
 Expected: FAIL（文件不存在 / 断言不满足）→ 写完 Step 2 的文件后再跑，全绿。
 
-- [ ] **Step 5: ORM 镜像（同 PR，门禁不许拆）**
+- [x] **Step 5: ORM 镜像（同 PR，门禁不许拆）**
 
 `backend/app/models/agents.py` 的 `RunDeliverables` 追加：
 
@@ -234,7 +234,7 @@ Expected: FAIL（文件不存在 / 断言不满足）→ 写完 Step 2 的文件
 ```
 `decimal` / `Numeric` 若文件顶部未导入则一并加。
 
-- [ ] **Step 6: 迁移号钉住测试推进**
+- [x] **Step 6: 迁移号钉住测试推进**
 
 `backend/tests/models/test_transcript_event_types_phase2a.py:32` 改成 462 的路径，并把注释里的「461 admitted…」续写一句「462 只补列，不动白名单」。⚠️ 462 里**没有** `ARRAY[...]`，而 `_first_array` 断言恰好一个——所以这个常量只能指向**最近一次重写白名单的迁移**。结论：**本 Task 不动它**，只在 462 的头注释里写明「不重写事件白名单」，并加一条测试锁住这个前提：
 
@@ -248,7 +248,7 @@ def test_462_does_not_touch_the_event_allowlist():
     assert "agent_run_transcript_events" not in sql
 ```
 
-- [ ] **Step 7: 收件箱 enqueue 捕获唯一冲突（让索引真的有用）**
+- [x] **Step 7: 收件箱 enqueue 捕获唯一冲突（让索引真的有用）**
 
 `agent_run_inbox_repository.py::enqueue`，在 `insert` 外面包一层：
 
@@ -279,7 +279,7 @@ def test_462_does_not_touch_the_event_allowlist():
 ```
 并把 `dedupe_lookup_stmt` docstring 里「Best-effort by construction… without a unique index two SIMULTANEOUS enqueues can both miss」改写为现状：索引已在（462），查-插仍保留是为了省一次异常路径。
 
-- [ ] **Step 8: 竞态测试（先红）**
+- [x] **Step 8: 竞态测试（先红）**
 
 ```python
 # backend/tests/repositories/test_inbox_dedupe_race.py
@@ -293,14 +293,14 @@ async def test_two_simultaneous_enqueues_yield_one_row(monkeypatch, inbox_repo):
 ```
 Run: `uv run pytest tests/repositories/test_inbox_dedupe_race.py -q` → 先红（两行不同 id），实现后绿。
 
-- [ ] **Step 9: 全量 + lint**
+- [x] **Step 9: 全量 + lint**
 
 ```bash
 cd backend && uv run pytest -q -p no:cacheprovider --deselect tests/api/test_distribution_music_search.py --deselect tests/api/test_distribution_topic_suggest.py tests
 uv run black --check app tests && uv run isort --check-only app tests && uv run ruff check app tests && uv run flake8 app tests
 ```
 
-- [ ] **Step 10: 突变记录（至少 3 处，各证转红）**
+- [x] **Step 10: 突变记录（至少 3 处，各证转红）**
 
 | 突变 | 应转红的测试 |
 |---|---|
@@ -308,7 +308,7 @@ uv run black --check app tests && uv run isort --check-only app tests && uv run 
 | dedupe 索引去掉 `WHERE … expired_at IS NULL` | `test_inbox_dedupe_index_only_covers_live_rows` |
 | `enqueue` 去掉 `except IntegrityError` 分支 | `test_two_simultaneous_enqueues_yield_one_row` |
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add supabase/migrations/462_harness_p4_phase3a_deliverables.sql backend/app/models/agents.py backend/app/repositories/agent_run_inbox_repository.py backend/tests
@@ -333,7 +333,7 @@ git commit -m "feat(db): 迁移 462 产出血缘列 + 版本唯一索引 + 收�
 - Consumes: T1 的列与唯一索引；`events.emit(recorder, type, payload, turn=, step=)`（`services/ai/runner/events.py:22`）；`RunEventWriter.for_run(run_id)`（写到已结束的 run 上，2b-2 的 `subagent_done` 同款）；`clip_claimed_text`（`services/ai/runner/inbox.py`）。
 - Produces: `register_deliverable(...) -> DeliverableRow | None`；`deliverable` 事件载荷 `{kind, ref_id, version, parent_version, title, model, cost_cents, turn, step}`；`view.outputs = {total, revised, last}`（T3 的端点与 T5 的 UI 都读这两样）。
 
-- [ ] **Step 1: 先写会失败的登记口契约测试**
+- [x] **Step 1: 先写会失败的登记口契约测试**
 
 ```python
 # backend/tests/services/deliverables/test_registry.py
@@ -388,12 +388,12 @@ async def test_title_is_clipped_to_120(repo_spy, emit_spy):
     assert len(emit_spy.events[-1].payload["title"]) == 120
 ```
 
-- [ ] **Step 2: 跑它，确认红**
+- [x] **Step 2: 跑它，确认红**
 
 Run: `cd backend && uv run pytest tests/services/deliverables/test_registry.py -q`
 Expected: FAIL `ModuleNotFoundError: app.services.deliverables`
 
-- [ ] **Step 3: 写 kinds 与 repository**
+- [x] **Step 3: 写 kinds 与 repository**
 
 ```python
 # backend/app/services/deliverables/kinds.py
@@ -483,7 +483,7 @@ class RunDeliverablesRepository:
 ```
 （`_row` 照同目录既有 repository 的写法：`{c.name: getattr(row, c.name) for c in row.__table__.columns}`，`Decimal` 转 `float`，`BIGINT` 转 `str`——**id 一律 str，照 Snowflake 精度纪律**。）
 
-- [ ] **Step 4: 写登记口**
+- [x] **Step 4: 写登记口**
 
 ```python
 # backend/app/services/deliverables/registry.py
@@ -600,11 +600,11 @@ async def _insert_next_version(repo, *, kind, ref_id, **values) -> DeliverableRo
 ```
 `_writer_for(run_id)` 返回一个最小适配对象，把 `record_event` 代理到 `RunEventWriter.for_run(int(run_id)).append(...)`——这样 `emit` 的「recorder 没有 `record_event` 就静默」语义对两条路都成立。
 
-- [ ] **Step 5: 跑 Step 1 的测试，全绿**
+- [x] **Step 5: 跑 Step 1 的测试，全绿**
 
 Run: `cd backend && uv run pytest tests/services/deliverables -q`
 
-- [ ] **Step 6: 接线一——`generated_media`（先写测试）**
+- [x] **Step 6: 接线一——`generated_media`（先写测试）**
 
 ```python
 # backend/tests/services/deliverables/test_wiring_generated_media.py
@@ -651,7 +651,7 @@ async def test_canvas_generation_registers_nothing(register_spy, insert_stub):
 ```
 ⚠️ `_insert_uploaded_row` **不登记**（上传不是 agent 产出）——用一条测试钉住。
 
-- [ ] **Step 7: 接线一续——坐标进 `run_context`**
+- [x] **Step 7: 接线一续——坐标进 `run_context`**
 
 `agent_runner.py:1447` 改签名并补两个键：
 
@@ -672,7 +672,7 @@ async def test_canvas_generation_registers_nothing(register_spy, insert_stub):
 ```
 四个调用点（`:921,935,2021,2035`）传 `iteration`。`generate_media_tools.py` 的两处 `GenerationOrigin(...)` 补 `turn=run_context.get("turn"), step=run_context.get("step")`。
 
-- [ ] **Step 8: 接线二——分镜出图/出视频把 run 坐标穿过 DBOS**
+- [x] **Step 8: 接线二——分镜出图/出视频把 run 坐标穿过 DBOS**
 
 ⚠️ 要加宽的是**四个 enqueue 站点**（出图三个、出视频一个），不是两个；agent 工具侧那个 enqueue 手里已经有 `scope.run_id`，今天只写进了 task_tracking 的 metadata。逐个补齐，漏一个就是那条路的产出永远无 run 可挂。
 
@@ -695,7 +695,7 @@ async def test_canvas_generation_registers_nothing(register_spy, insert_stub):
 ```
 测试：`tests/workflows/test_shot_generate_carries_run.py` —— 派发方构造的 payload 必含三个键；workflow 把它们放进 origin。**先红**（今天 payload 里没有）。
 
-- [ ] **Step 9: 接线三——分镜 / 场景 / 章节**
+- [x] **Step 9: 接线三——分镜 / 场景 / 章节**
 
 `scoped_script_gateway` 的写点里**只有改内容的三处登记**——`set_shot_status` 只改状态，状态不是新版本（它今天连 `script_shot_ops` 账本行都不写，那是另一张小票，不在本期）。三处各调一次：
 
@@ -712,7 +712,7 @@ async def test_canvas_generation_registers_nothing(register_spy, insert_stub):
 场景两处同形（`kind="script_scene"`，`ref_id=scene_id`，标题取场次号 + 名）；章节两处**整条调用链都取不到 run id**：给两个 workflow 加 keyword-only 的 `run_id/turn/step`，并给 `ScriptService.update_chapter` / `create_chapter` 加一个署名参数（`attributed_to_run_id`），由派发方传入。签名改动波及既有调用方，全部显式改完再跑全量——默认值设 `None` 以免漏改处静默变成「不登记」。
 测试 `test_wiring_script.py`：三类各一条「写一次 ⇒ 一行一事件」+ 一条「`run_id=None` ⇒ 零行零事件」。
 
-- [ ] **Step 10: fold（先写测试）**
+- [x] **Step 10: fold（先写测试）**
 
 ```python
 # backend/tests/runner/test_fold_deliverables.py
@@ -775,7 +775,7 @@ def fold_deliverable(views, payload):
 ```
 `run_projection.py:150` 的显式 import 列表加 `deliverables`。
 
-- [ ] **Step 11: 咽喉点守卫（源码扫描）**
+- [x] **Step 11: 咽喉点守卫（源码扫描）**
 
 ```python
 # backend/tests/services/deliverables/test_choke_point_guard.py
@@ -806,7 +806,7 @@ def test_register_generated_media_calls_the_registry():
     assert "register_deliverable(" in src
 ```
 
-- [ ] **Step 12: 全量 + lint + 突变**
+- [x] **Step 12: 全量 + lint + 突变**
 
 | 突变 | 应转红 |
 |---|---|
@@ -817,7 +817,7 @@ def test_register_generated_media_calls_the_registry():
 | shot workflow 的 origin 去掉 `run_id=payload.get("run_id")` | `test_shot_generate_carries_run` |
 | `register_generated_media` 把登记挪到 `_insert_uploaded_row` 里 | 上传零登记那条 |
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add backend/app/services/deliverables backend/app/repositories/run_deliverables_repository.py backend/app/services/ai backend/app/workflows backend/app/services/library backend/tests
@@ -838,7 +838,7 @@ git commit -m "feat(harness): 产出登记口叠在既有写入点上——版�
 - Consumes: T2 的 `RunDeliverablesRepository.{list_for_issue,lineage_for}`。
 - Produces: 三个端点的响应形状（T5/T6 的 service 按它写）；`GeneratedSource` 新字段 `issue_id / run_id / step`（T6 的卡按它渲染）。
 
-- [ ] **Step 1: 先写端点测试（红）**
+- [x] **Step 1: 先写端点测试（红）**
 
 ```python
 # backend/tests/api/test_outputs_router.py
@@ -863,13 +863,13 @@ def test_diff_rejects_a_version_that_does_not_exist(client, seeded_deliverables)
 ```
 ⚠️ 错误体是 `ErrorResponse` 外壳，类型化码在 `details.code`（CLAUDE.md 2026-09-09 真栈教训），`raise HTTPException(status_code=404, detail={"code": "not_registered"})`——**detail 必须是 dict**。
 
-- [ ] **Step 2: 实现三个端点**
+- [x] **Step 2: 实现三个端点**
 
 `GET /api/v1/issues/{id}/outputs` 挂在 `issues_router`（与 `/schedules` 同族，复用 `_assert_visibility`）：按 `(kind, ref_id)` 分组，每组 `latest` + `versions[]`。
 `GET /api/v1/outputs/{kind}/{ref_id}`、`/diff` 挂新 router；可见性 = 该产出所属 run 的 issue 可见性（无 issue 的 run → 仅本人）。
 `diff.py`：`script_*` 从 `script_ops` / `script_shot_ops` 的 `before_json/after_json` 取两版文本；`generated_media` 取两行的 `id` 与封面 URL。
 
-- [ ] **Step 3: Generated 来源行**
+- [x] **Step 3: Generated 来源行**
 
 ```python
     elif kind == "agent_run":
@@ -883,7 +883,7 @@ def test_diff_rejects_a_version_that_does_not_exist(client, seeded_deliverables)
 ```
 `issue_id` / `step` 从 `run_deliverables`（`kind='generated_media'`, `ref_id=<row id>`）反查一次；查不到就退回今天的平文本（**不报错**：历史行没有登记是正常的）。
 
-- [ ] **Step 4: 全量 + lint + 突变**
+- [x] **Step 4: 全量 + lint + 突变**
 
 | 突变 | 应转红 |
 |---|---|
@@ -891,7 +891,7 @@ def test_diff_rejects_a_version_that_does_not_exist(client, seeded_deliverables)
 | 版本排序改成升序 | `test_lineage_returns_versions_newest_first` |
 | `issue_id` 以 int 返回 | 该字段的 str 断言 |
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(api): 产出血缘三端点 + Generated 卡来源行反查（三期 3a Task 3）"
@@ -912,7 +912,7 @@ git commit -m "feat(api): 产出血缘三端点 + Generated 卡来源行反查�
 - Consumes: T2 的登记表（校验引用存在）、T3 的 `lineage_for`。
 - Produces: 附件 wire 形状 `{kind:"output_ref", ref_kind, ref_id, version}`（T6 的映射分支按它写）；提示词新框。
 
-- [ ] **Step 1: 测试（红）**
+- [x] **Step 1: 测试（红）**
 
 ```python
 def test_unresolvable_output_ref_is_a_typed_400(client):
@@ -939,22 +939,22 @@ def test_title_with_a_closing_marker_cannot_break_out(composed_prompt_with_hosti
         "<referenced_outputs>")[1].split("</referenced_outputs>")[0]
 ```
 
-- [ ] **Step 2: 实现**
+- [x] **Step 2: 实现**
 
 附件解析：`output_ref` → 查登记表，`(ref_kind, ref_id, version)` 不存在或其 run 不属于本 issue ⇒ 400 类型化；存在则把 `{kind, ref_id, version, title}` 存进消息 `attachments`。
 `prompt_composer`：本轮消息带 `output_ref` 时渲染新框；标题走 `escape_frame_attr`。
 `frame_markers.OWNED_FRAMES` 加 `referenced_outputs`（不加 `test_frame_escape_wiring.py::test_every_frame_rendered_in_prompt_code_is_registered` 直接拒绝）。
 
-- [ ] **Step 3: 全文 pin**
+- [x] **Step 3: 全文 pin**
 
 Run: `cd backend && uv run pytest tests/services/ai/prompts/test_system_message_pin.py -q`
 无引用的普通轮次**不应**有 diff（新框只在有引用时出现）。若有 diff，说明框无条件渲染了——那是缺陷，不是刷新快照的理由。
 
-- [ ] **Step 4: README 三问**
+- [x] **Step 4: README 三问**
 
 `prompts/README.md` 加一段：What the model sees（贴出框的字面量）、Token effect（每条引用一行、条数由用户选择上限决定、不含内容所以不随产出大小增长）、KV Cache effect（框在缓存边界之后的 request instructions 段，不破坏稳定前缀）。
 
-- [ ] **Step 5: 突变 + Commit**
+- [x] **Step 5: 突变 + Commit**
 
 | 突变 | 应转红 |
 |---|---|
@@ -983,7 +983,7 @@ git commit -m "feat(harness): @引用产出的 output_ref 附件与 <referenced_
 - Consumes: T2 的事件载荷与 `view.outputs`；T3 的三个端点。
 - Produces: `data-testid="output-card" / "cockpit-outputs" / "outputs-block" / "output-diff"`（T8 真栈走查按它抓）。
 
-- [ ] **Step 1: fold 用例（先红）**
+- [x] **Step 1: fold 用例（先红）**
 
 ```ts
 // foldEvents.test.ts
@@ -1055,11 +1055,11 @@ export interface OutputCard {
 ```
 `newStep()` 里给 `outputs: []`（与 `children: []` 并列）。
 
-- [ ] **Step 2: 渲染卡（照 `SubagentCards` 的结构与色板）**
+- [x] **Step 2: 渲染卡（照 `SubagentCards` 的结构与色板）**
 
 `builtins.tsx` 加 `OutputCards`，`StepNodeView` 在 `<SubagentCards …/>` 之后渲染它。两态：`version === 1` 用 `border-ok-line bg-ok-soft/40`，`> 1` 用 `border-warn-line bg-warn-soft/40` 并显示 `v{n} ← v{n-1}`。右侧「Open」；修订才有「Diff」。花费为 0/空显示 `—`（照 7c 的 `fmtChildCents` 教训，`¢0.000` 是骗人的）。
 
-- [ ] **Step 3: `runView.ts` 选择器**
+- [x] **Step 3: `runView.ts` 选择器**
 
 ```ts
 /** Outputs an agent registered this run (harness 3a). `total` includes every
@@ -1078,7 +1078,7 @@ export function outputsState(view: RunView | null): RunOutputs | null {
 ```
 `RunView` 加 `outputs?: RunOutputs | null`（**可选**：旧 run 的 metadata 里没有这个键，必选会让整张 Cockpit 变 null）。
 
-- [ ] **Step 4: Cockpit 第 5 格**
+- [x] **Step 4: Cockpit 第 5 格**
 
 ```tsx
       <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0)]}`}>
@@ -1098,15 +1098,15 @@ export function outputsState(view: RunView | null): RunOutputs | null {
         )}
 ```
 
-- [ ] **Step 5: 右栏「产出」块**
+- [x] **Step 5: 右栏「产出」块**
 
 `OutputsBlock.tsx`：`id: 'outputs'`（⚠️ 不能叫 `deliverables`——`registerIssueBlock` 对重复 id **直接抛错**，而那个 id 已被项目阶段文件夹占用），`zone: 'context'`, `order: 25`，`match: (ctx) => true`（任何 issue 都可能有产出；无产出时组件返回 null）。读 `GET /issues/{id}/outputs`，按对象分组，行内显示 `v{n}`，点开差异弹层。
 
-- [ ] **Step 6: 差异弹层与 diff 工具**
+- [x] **Step 6: 差异弹层与 diff 工具**
 
 `outputDiff.ts` 纯函数（词级 LCS，无外部依赖），自带测试：空对空、全增、全删、中间替换、极长文本（截断而不是卡死）。`OutputDiffDialog.tsx` 照既有弹层的 Esc / 焦点陷阱写法。媒体类两栏缩略图；「Revert To v1」按钮 **disabled**，`title` 写明「Arrives with 3b」（与资产库 P2 的占位同族做法，别当坏按钮修）。
 
-- [ ] **Step 7: 全量前端 + lint + 突变**
+- [x] **Step 7: 全量前端 + lint + 突变**
 
 ```bash
 cd frontend && npx vitest run && npx eslint <改动文件> && npx tsc --noEmit
@@ -1119,7 +1119,7 @@ cd frontend && npx vitest run && npx eslint <改动文件> && npx tsc --noEmit
 | `OutputsBlock` 的 id 改成 `deliverables` | 注册重复 id 的抛错用例 |
 | 花费 0 显示 `¢0.000` | 卡片 `—` 用例 |
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git commit -m "feat(ui): 线程产出卡 + Cockpit 产出格 + 右栏产出块 + 版本差异弹层（三期 3a Task 5）"
@@ -1141,7 +1141,7 @@ git commit -m "feat(ui): 线程产出卡 + Cockpit 产出格 + 右栏产出块 +
 - Consumes: T3 的 `GET /issues/{id}/outputs` 与 `GET /outputs/{kind}/{ref_id}`；T4 的附件 wire 形状。
 - Produces: `ComposerAttachment` 新成员 `output_ref`。
 
-- [ ] **Step 1: 映射器分支（先红）**
+- [x] **Step 1: 映射器分支（先红）**
 
 ```ts
 // composerAttachmentPayload.test.ts
@@ -1156,19 +1156,19 @@ it('maps an output reference by kind, id and version', () => {
 });
 ```
 
-- [ ] **Step 2: 「产出」页签**
+- [x] **Step 2: 「产出」页签**
 
 `useMentionOutputsTab.ts` 照 `useMentionAssetsTab.ts` 的状态 / 传输 / 键盘路由写；数据源 `GET /issues/{id}/outputs`，默认只列每个对象的最新版，旧版折在下面一组（标 `Older`）。`ResourcePickerSuggestion` 的页签数组加一项——⚠️ 它今天是两页签的硬编码数组，加第三项要同时改键盘左右切换的取模。
 
-- [ ] **Step 3: 对象页来源块**
+- [x] **Step 3: 对象页来源块**
 
 `OutputProvenance.tsx`：入参 `{ kind, refId }`，读 `GET /outputs/{kind}/{ref_id}`；404 `not_registered` ⇒ 渲染 null（人手创建的对象没有来源，这不是错误）；其余错误 ⇒ 一行可读提示，不静默。
 
-- [ ] **Step 4: Generated 卡来源行**
+- [x] **Step 4: Generated 卡来源行**
 
 `GeneratedCard.tsx` 的 source 区：有 `deep_link` 就渲染成链接（今天只在 canvas 分支有），标签用 T3 的新字段拼「Agent · MH-91 · run #… · step N」。
 
-- [ ] **Step 5: 前端全量 + lint + 突变 + Commit**
+- [x] **Step 5: 前端全量 + lint + 突变 + Commit**
 
 | 突变 | 应转红 |
 |---|---|
@@ -1189,11 +1189,11 @@ git commit -m "feat(ui): @引用产出页签 + 对象页来源块 + Generated �
 - Modify: `backend/app/api/ai_library_router.py`（agents 列表的 `slug` 过滤）
 - Test: `backend/tests/api/test_agents_list_filters.py`
 
-- [ ] **Step 1: 顺序假红查根因**
+- [x] **Step 1: 顺序假红查根因**
 
 先复现：`uv run pytest tests/workflows tests/services/issues/test_issue_reply_resume.py -q` 红，单跑各自绿。查共享状态（DBOS 单例、`app.state`、模块级缓存），**修隔离而不是加 `-p no:randomly`**（关掉随机只是把问题藏起来）。根因与修法写进 PR。
 
-- [ ] **Step 2: `?slug=` 过滤（先红）**
+- [x] **Step 2: `?slug=` 过滤（先红）**
 
 ```python
 def test_slug_filter_returns_only_that_agent(client, seeded_agents):
@@ -1202,7 +1202,7 @@ def test_slug_filter_returns_only_that_agent(client, seeded_agents):
     assert [a["slug"] for a in r.json()["items"]] == ["script_ai"]
 ```
 
-- [ ] **Step 3: 实现 + 全量 + Commit**
+- [x] **Step 3: 实现 + 全量 + Commit**
 
 ```bash
 git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug 过滤生效（三期 3a Task 7）"
@@ -1212,24 +1212,100 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 
 ### Task 8: 真栈验收 + 完成账
 
-- [ ] **Step 1: 等两条部署链**
+- [x] **Step 1: 等两条部署链**
 
 每个 Task 合并后 `gh run list --workflow=deploy-gpu.yml --limit 2` 与 `deploy-pages.yml` 到 success；探 `readyz`（`dbos: enabled`）+ 容器内符号 `grep -c register_deliverable /app/app/services/library/generated_media_service.py`。
 
-- [ ] **Step 2: 按 spec §8 八项逐条真跑**
+- [x] **Step 2: 按 spec §8 八项逐条真跑**
 
 建真 issue、花真钱，prompt 要小。逐项记 done / 证据（id、SQL、截图）/ PASS·FAIL·UNVERIFIED 到 `.superpowers/sdd/<workspace>/task-8-evidence.md`。**负向对照必须做**：人手改同一对象后 `SELECT count(*) FROM run_deliverables WHERE kind=… AND ref_id=…` 不变。
 
-- [ ] **Step 3: 缺陷修复轮**
+- [x] **Step 3: 缺陷修复轮**
 
 真栈揪出的缺陷按 2b-2 的节奏走（7a/7b/7c 三轮的形状）：独立 PR、opus 评审、合并、再复验，直到一轮零新缺陷。
 
-- [ ] **Step 4: 完成账**
+- [x] **Step 4: 完成账**
 
 写进本 plan 末尾：八项验收表 + 真栈才暴露的缺陷清单 + 记小票；spec 的「实施记录」同步。
 
-- [ ] **Step 5: 收尾**
+- [x] **Step 5: 收尾**
 
 `npm run e2e:prod` 绿；记忆改 shipped；销毁 worktree；SDD 工作区保留证据文件。
 
 ---
+
+---
+
+**完成账（2026-09-11，Task 8 真栈验收）**
+
+全部在生产栈（gpupc `nous-worker` / `cn.nous.ink:88`，调试账号，team 331438215859255，agent `script_ai`）用 API、SQL 与 Playwright 真跑。验收 agent 的逐项证据文件（`task-8-backend-evidence.md`、`task-8-ui-evidence.md`）与截图 `~/Downloads/3a-ui-*.png` 留在 SDD 工作区未入库——它们建真 issue、花真钱，不适合当门禁。
+
+**PR 清单**：#2239 spec+plan、#2240 T1 mig 462、#2242 T2 登记口、#2243 T3 三端点、#2249 T3b 血缘补 issue_key/deep_link、#2244 T4 引用附件与框、#2245 T5 线程产出卡、#2248 T6 引用页签与来源块、#2250 T6b 来源块读 deep_link、#2246 T7 两张小票；master 045be0e3；前端 `version.json` 045be0e。
+
+| 项（spec §8） | 证据 | 结论 |
+|---|---|---|
+| 部署 | 每个 PR 合并后 deploy-gpu success + readyz `ready/dbos enabled` + 容器内符号 grep（`register_deliverable` / `fold_deliverable` / `not_registered` / `refuse_citations_without_issue` / `slug: Optional` / `issue_links.py`）；deploy-pages `version.json` 09f1139 → c7cca44 → 045be0e；生产库 462 五列三索引齐 | PASS |
+| ① agent 生成图登记 v1 | **UNVERIFIED**：GenerateImage 需 agent `capabilities.media.image`，生产 18 个 agent 全为 false；验收 agent 的权限门拒绝了「PATCH 共享预设」与「建私有 throwaway agent」两条路，控制器不代做（peer 权限不绕过）。需要人给一个私有 throwaway agent 开该能力后重跑 ①③⑥正向 | UNVERIFIED（待人授权） |
+| ② 同对象二改 → v2 | MH-94（348392006624870）分镜 337650953731886：v1/v2、`parent_version=1`、两个 run；`GET /outputs/script_shot/<id>` 版本倒序；`/diff?from=1&to=2` 两侧 `available:true` 文本不同；`deliverable` 事件 9 键；`view.outputs {total:1, revised:1}`；无产出的 run `outputs: null`；每版带 `issue_key="MH-94"`、`deep_link=/team/331438215859255/todolist/MH-94?step=1`（T3b） | PASS |
+| ③ 分镜出图（DBOS）带 run | 与 ① 同一阻塞；`run_id/turn/step` 接线在容器内可见但未真跑 | UNVERIFIED（待人授权） |
+| ④ 人手改同对象 → 零新行 | 人手 PATCH 分镜后 `count(*)` 不变 | PASS |
+| ⑤ @引用产出（空闲路径） | `output_ref` 落库 201、附件含 `title`；让 agent 原样回显框证明模型看到 `<output kind="script_shot" ref="337650953731886" version="1" title="MEDIUM"/>`（框在系统消息里，不在 transcript 事件）；四个负向全部类型化：`version:99` / 跨 issue → `output_ref_unresolvable`，9 条 → `output_ref_limit_exceeded`，chat 会话入口 → `output_ref_unresolvable` | PASS |
+| ⑥ Generated 来源行反查 | 负向半：3a 之前的老卡三字段全 null、label「Chat generation」；正向半与 ① 同一阻塞 | 半 PASS / 半 UNVERIFIED |
+| ⑦ 未登记 / 未知 kind | `GET /outputs/script_shot/999999999` 404 `details.code=not_registered`；未知 kind 400 `unknown_kind` | PASS |
+| ⑧ 健康 | readyz ready；一小时内 `application_logs` ERROR 含 deliverable 为 0；worker 日志无 `register_deliverable` ERROR | PASS |
+
+**真栈才暴露的缺陷**（T8a 修）：`GET /issues/{id}/messages` 读模型无 `attachments` 键，引用 chip 刷新即丢；`run_deliverables.seq` 无写方、wire 上恒 null。
+
+**验收方案两处更正**：chat 路由是 `POST /ai-library/sessions/{id}/chat`；`<referenced_outputs>` 在系统消息里，不能从 transcript 事件里找。
+
+**前端路（Playwright 真登录 `app.nous.ink` 045be0e，MH-94 同一分镜被推到 v5，截图 15 张）**
+
+| 检查（spec §5 两块稿） | 证据 | 结论 |
+|---|---|---|
+| 1 线程产出卡 | `output-card` ×2→5：`v1`（`data-state=new`，ok 色板）/ `v2 ← v1`（`revised`，warn 色板，仅修订卡有 Diff）；花费 `—`；卡挂在产出它的 STEP 1 下 | PASS |
+| 2 Cockpit 产出格 | 发帖触发一轮、页内每 1.2 s 轮询 240 s：`cockpit-steps=1` 全程、`cockpit-outputs=0` 全程；`/progress` 的 `current_run.view.outputs` 恒 null，而 `view-at?seq=999` 现折出 `{total:1,revised:1}`，生产库 `view` 的 17 个键里无 `outputs` → 独立 writer 镜像的 `outputs` 被活 recorder 的整值镜像覆盖（children 有 `refold_children`，outputs 没有）；负向对照 MH-93 四个 testid 全 0 | **FAIL（高，T8c 修）** |
+| 3 右栏产出块 / 悬停高亮 / 差异弹层 / Esc | rail 顺序 `Progress → Outputs → Deliverables → Budget → Schedules`；悬停 `outputs-row` → 恰 1 张卡 `data-highlighted=true`（最新版）；弹层两栏、`data-diff="add"` 三段 ok 色；版本 chips 单栏切换；`Revert To v1` disabled + `title="Arrives with 3b"`；Esc 关 | PASS |
+| 3b 弹层 «Open Run #» | 线程入口 enabled 且真开出 `detached-run-panel`；**右栏入口恒 disabled**（`contextBlocks` 在两个 `ChildRunContext.Provider` 之外，title 在这一页上说谎） | **FAIL（中，T8c 修）** |
+| 4 媒体卡缩略图 | team/个人 scope 零 `generated_media` 产出（同 ①③ 阻塞） | UNVERIFIED |
+| 5 @ 引用产出 | `resource-picker-tab-outputs` → 两行、最新在前、旧版折在 `OLDER` 下；选中 → `@MEDIUM v2` chip（三属性齐）；⌘↩ 201、chip 清空、**下一轮真触发并产出 v3**；agent 回显 `<referenced_outputs>…version="1"…` | PASS |
+| 5b 线程里人的消息显示 chip | 线程渲染为纯文本，只剩孤立 `@`；`GET /issues/{id}/messages` 无 `attachments` 键 | **FAIL（中，T8a 后端投影 + T8b 线程渲染）** |
+| 5c 下一轮第 1 步下「引用 N 件」行 | 未实现：`outputs.*` 45 个 key 无此文案、fold 无分支（`STEP 1 · 1 outputs` 是既有的助手输出计数，标签撞名） | **FAIL（中，T8c 补）** |
+| 5d >8 上限 | 对象只有 5 版，凑不出第 9 条 | NOT OBSERVED（单测覆盖） |
+| 6 对象页来源块 + «Open Issue» SPA | 画布分镜节点 `Made By An Agent · 2 versions · Step 1`，三按钮齐；`href` 逐字 `/team/331438215859255/todolist/MH-94?step=1`（= 后端 `deep_link`）；点击后 URL 变、issue 页挂载、`window` 标记存活（非整页重载）；人手分镜节点零来源块零错误 | PASS |
+| 7 Generated 卡来源行 | 零 `source.kind=agent_run` 样本 | UNVERIFIED |
+| 8 `npm run e2e:prod` | 第二轮零重试 3 passed | PASS |
+
+**偏差（对照 §5 两块稿，全部记小票不修）**：卡上无「新建 / 修订」字样（状态靠 `data-state`+色板+`v2 ← v1` 文字）；卡元信息无模型（null 条件渲染）与步号（由卡位表达）；来源块无花费；选中 outputs/assets 页签后编辑器里的 `@` 不删（资源页签走 `insertResourceRef` 会删，既有同病）。
+
+**真机才暴露的缺陷（前端路）**：Cockpit 产出格结构性永不渲染（镜像覆盖）；右栏 «Open Run #» 恒禁用（provider 范围）；「引用 N 件」行未实现。→ T8c。
+
+**缺陷修复轮（Task 8 Step 3，三个 PR，全部 opus 评审 + 突变 + 真 PG）**
+
+| PR | 修什么 | 评审轮次 | 状态 |
+|---|---|---|---|
+| #2251 T8a（后端） | `GET /issues/{id}/messages` 投影 `attachments`（全 Optional 读模型、老行 `null`、逐条校验畸形值只丢那一条并 WARNING、JSONB number → string 钉子、`data_url` 负向 + 白名单镜像守卫）；`run_deliverables.seq` 由 `_stamp_seq` 在事件落地后 best-effort 回写（`in_unit_of_work()` 下重抛，与 `_insert_next_version` 同策）；真 PG 集成 +2 | 1 轮 | 合并 25432518，deploy-gpu success |
+| #2252 T8b（前后端） | 终审三 Important + Minor：逐对象血缘对 `issue_id ≠` 门控议题的旧版置空 `issue_key`/`deep_link`（刻意比泄露面宽）；线程渲染只读引用 chip；深链 `?step=`（+`&turn=`）经 `focusTrajectoryStep` 锚到那一步——先摊开含目标的 run-group（每张只摊一次）、`(turn,step)` 对不上退回 step-only、只在定位成功后落 `deepLinked`；Generated 卡来源行 `· run #末六位 · step n` | 2 轮 | 合并 9413676b，两链 success |
+| #2253 T8c（前后端） | 真机三缺陷：活路径两条产出通道把自己的 recorder 交给登记口 + 镜像前重折 `view.outputs`；**顺带根治两 writer seq 相撞**（`RunEventWriter.append` 撞 sqlstate 23505 且约束名对得上时从 DB `max(seq)+1` 重播、有界重试 3 次，`SUBAGENT_EVENT_TYPES` 重放退居第二道网；真 PG 用例挂进 schema-drift 并在 CI 首跑 2 PASSED）；`ChildRunContext.Provider` 上提到共同祖先、非 timeline 页签点 Open Run 先切页签；`referenced_outputs` 随 `user` 事件 payload 落 transcript、第 1 步下渲染 `References N outputs · pinned to version`（`_one`/`_other`） | 2 轮 + 1 次 rebase 冲突（与 T8b 同文件尾追加的测试块） | 合并 7974e49b |
+
+**真栈才暴露、spec/plan 都没写的一条（写进 spec §2 实施记录）**：`run_deliverables` 之外还有一条隐性契约——同一个 run 的 transcript 由两个 writer 写（活 recorder 与 `for_run`），`UNIQUE(run_id, seq)` 让后者每登记一次都吃掉前者的下一条事件。3a 之前 workforce 的 `subagent_done` 也走这条路，靠 `SUBAGENT_EVENT_TYPES` 白名单重放兜住；现在两种 writer 都在 `append` 里按 23505 重播计数器，白名单不再承重。
+
+**真机复验（Task 8 Step 3 收口，生产 7974e49，花费 ¢0.531 / 4 轮）**
+
+| 项 | 证据 | 结论 |
+|---|---|---|
+| Cockpit 产出格 | 发帖触发一轮：`/progress` 的 `current_run.view.outputs` 在 9.1 s 变非空；页内 `cockpit-outputs` 8.1–13.2 s 可见，文字 `OUTPUTS 1 · 1 revised MEDIUM`；生产库 `view.outputs` 非空；transcript seq 1–12 无缝隙、`deliverable` 在 4 | PASS |
+| 线程引用 chip 刷新后仍在 | 7 条评论中 3 条带 `comment-citations`，chip `@MEDIUM v1`、`ref_id` 字符串、无 X；`GET /issues/{id}/messages` 返回 `attachments` | PASS |
+| 「引用 N 件」行 | 消费引用的那轮第 1 步下 `References 1 output · pinned to version` + `@MEDIUM v5`（本轮产出 v6，引用钉在 v5）；`user` 事件 payload 带 `referenced_outputs` | PASS |
+| `?step=` 深链 | href `/team/331438215859255/todolist/MH-94?step=1&turn=1`；SPA 标记存活；只展开链接指的那一步并滚入视野；直开 URL 同样 | PASS |
+| 弹层 «Open Run #» | 右栏入口 enabled → `detached-run-panel`；Related work 页签点击先切回 Timeline 再出面板 | PASS |
+| 跨议题旧版置空 | 新建 MH-95 让同一分镜产出 v7 后，逐对象血缘把 MH-94 的六版 `issue_key`/`deep_link` 全部置空、`issue_id` 保留（门控 = 最新版所在议题，即已裁定的「比泄露面宽」；精确化记小票） | PASS |
+| Generated 卡来源行 | 全库零 `generated_media` 产出（①③ 同一阻塞） | UNVERIFIED |
+| `npm run e2e:prod` | 3 passed 1 skipped，零重试 | PASS |
+
+**复验新发现（与本波无关；勘察定为既有——2026-05-05 `0a2caed4` 首次接线即如此、#1384 加了第二触发源；顺手修于 T8d PR #2254）**：issue 详情页加载约 1 s 后整棵子树被替换一次，正在输入的评论与打开的弹层被静默清空（复验因此浪费一轮 ¢0.12）。`<aside>`（`IssueDetailView.tsx:786`）本身被替换，病根在挂载点上游。
+
+**观察**：`staged-output-chip` testid 一名两用（作曲区暂存与线程历史 chip 共用组件），测试要靠 `comment-citations`/`staged-output-chip-remove` 区分；MH-93 无 project 绑定，screenwriting 工具一律 `scope_unbound`，不能再当跨议题样本；MH-95 为复验新建，分镜 337650953731886 的最新版 v7 现挂在它名下。
+
+**T8d（#2254，既有缺陷顺手修）**：`pages/TodolistPage.tsx` 单议题 effect 的依赖带着晚到的 `agentsById`/`projectsById`，解析时 effect 重跑 → `setSelectedLoading(true)` → 回到 Loading 占位 → `IssueDetailView` 整树卸载重挂。修：`mapsRef` 上提、依赖收成 `[identifier]`；单议题抓取收成唯一入口 `loadSelectedIssue`，`inPlace` 由 `shownIdentifierRef` 回答「屏幕上挂着谁的子树」，同议题重抓就地更新、请求序号丢弃过期响应。评审一轮（两条 Critical：A→B→A 卡 Loading、A→B 失败→A 卡错误页，同根一并消掉）。合并 8dba5f14，`app.nous.ink` version.json = 8dba5f1。
+
+**收尾**：`npm run e2e:prod` 绿（复验第二轮零重试）；记忆改 shipped；`feat-p4-3a-t{1..7,3b,6b,8a,8b,8c}`、`fix-todolist-remount` worktree 已销毁；SDD 工作区 `.superpowers/sdd/2026-09-10-harness-p4-phase3a-outputs-lineage/` 保留（ledger、briefs、reports、两份验收证据、复验证据、勘察报告、评审包）。
