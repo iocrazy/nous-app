@@ -158,10 +158,85 @@ export async function listIssueOutputs(issueId: number | string): Promise<Output
 
 const ref = (refId: string): string => encodeURIComponent(refId);
 
+/**
+ * One object's lineage, in flight or already answered.
+ *
+ * ⚠️ **Module-level, and deliberately so.** `OutputProvenance` mounts once per
+ * OBJECT — one per shot on a canvas, one per scene in a script sheet — and
+ * nothing above it knows about its siblings. Without sharing here, opening a
+ * 40-shot canvas fires 40 requests, nearly all of which come back 404
+ * `not_registered` because most objects were written by a person; and
+ * `EditorShell` keys the scene subtree on `rollbackNonce`, so a single
+ * rollback remounts every block and fires the whole set again.
+ *
+ * Holding the PROMISE rather than the value is what makes the concurrent case
+ * work: forty components mounting in one tick all await the same request
+ * instead of racing to start forty.
+ *
+ * **Lifetime is the page load.** There is no scope to invalidate against — the
+ * block hangs off canvas nodes and scene blocks, not off an issue or a route —
+ * so nothing clears this on navigation. That is sound because a registered
+ * lineage only grows when an AGENT writes, which cannot happen inside this
+ * tab; the two paths that can make it stale call `invalidateOutputLineage`.
+ */
+const lineageCache = new Map<string, Promise<OutputLineage>>();
+
+const lineageKey = (kind: string, refId: string): string => `${kind}:${refId}`;
+
+/**
+ * Forget one object, so the next read asks again.
+ *
+ * ONE object, never the whole map: a revert touches a single scene, and
+ * dropping everything would turn that into exactly the 60-request reload this
+ * cache exists to prevent.
+ *
+ * Call it wherever an object's registered chain can change under us — a
+ * successful revert (3b), a fresh registration this tab caused. A rollback in
+ * the script editor is NOT one of those: it writes new ops as the USER, and
+ * `run_deliverables` only records agent writes, so the chain is unchanged and
+ * the remount it triggers should cost nothing.
+ */
+export function invalidateOutputLineage(kind: string, refId: string): void {
+  lineageCache.delete(lineageKey(kind, refId));
+}
+
+/** Drop every cached lineage. For tests, which need each case to reach the
+ *  transport; production invalidates one object at a time. */
+export function clearOutputLineageCache(): void {
+  lineageCache.clear();
+}
+
 /** One object's whole chain, newest first. Throws `not_registered` when the
- *  object was never registered — an empty list would read as "no versions". */
-export async function getOutputLineage(kind: string, refId: string): Promise<OutputLineage> {
-  return get<OutputLineage>(`/api/v1/outputs/${encodeURIComponent(kind)}/${ref(refId)}`);
+ *  object was never registered — an empty list would read as "no versions".
+ *
+ *  Shared through {@link lineageCache}: concurrent callers get one request,
+ *  and a settled answer is reused for the life of the page.
+ *
+ *  **`not_registered` is cached like an answer**, because it IS one — "a
+ *  person made this" is a fact about the object and the common case, so
+ *  re-asking it on every remount is the storm the cache exists to stop.
+ *  Every OTHER failure is evicted on settle: a 502 is a fact about the last
+ *  few seconds, not about the object, and freezing it would leave "could not
+ *  read where this came from" on screen until the user navigated away. */
+export function getOutputLineage(kind: string, refId: string): Promise<OutputLineage> {
+  const key = lineageKey(kind, refId);
+  const cached = lineageCache.get(key);
+  if (cached) return cached;
+
+  const pending = get<OutputLineage>(
+    `/api/v1/outputs/${encodeURIComponent(kind)}/${ref(refId)}`,
+  ).catch((err: unknown) => {
+    // Evict everything except the registry's own "nothing produced this".
+    // Note this runs BEFORE the caller's own handler, so a later read sees an
+    // already-cleared slot and retries — which is the point.
+    if (!(err instanceof OutputsError) || err.code !== 'not_registered') {
+      lineageCache.delete(key);
+    }
+    throw err;
+  });
+
+  lineageCache.set(key, pending);
+  return pending;
 }
 
 /** Two versions as content. `from`/`to` are the wire's own query names. */

@@ -146,9 +146,15 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
   const hintTitle = (label: string, hint: string) => `${label} — ${hint}`;
 
   const deepLink = item.source.deep_link;
+  // Three destinations, three sentences. The canvas arm is keyed off
+  // `node_id`, which an `agent_run` row never has — so without its own arm a
+  // run link would inherit the vague fallback and tell the reader "opens where
+  // this was generated" about a link that opens an ISSUE.
   const sourceHint = item.source.node_id
     ? t('generated.card.openCanvasNodeHint', 'Opens the canvas at this node')
-    : t('generated.card.openSourceHint', 'Opens where this was generated');
+    : item.source.kind === 'agent_run'
+      ? t('generated.card.openIssueHint', 'Opens the issue whose run produced this')
+      : t('generated.card.openSourceHint', 'Opens where this was generated');
 
   // The P2 asset route. It is `resources/assets/item/:assetId`, NOT
   // `resources/assets/:assetId` — P2 gave the item page its own `item/`

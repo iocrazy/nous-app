@@ -116,6 +116,63 @@ def test_the_parser_does_not_accept_a_mention_in_prose(mirror_source):
         _ts_int_const(commented, "MAX_ASSET_REF_ATTACHMENTS")
 
 
+# ── the CITATION cap is a third pair (3a Task 6) ────────────────────────────
+#
+# Same file on the TS side, a different constant on the Python side:
+# ``output_ref_resolver.MAX_OUTPUT_REF_ATTACHMENTS``. The two caps hold the
+# same number today and are deliberately NOT the same constant — one bounds
+# five serial queries per asset, the other one ``lineage_for`` per cited
+# object — so they are pinned independently. A single assertion covering both
+# would pass forever by coincidence and stop meaning anything the day one of
+# them moves.
+#
+# This cap is enforced on BOTH sides for different reasons, which is why the
+# mirror matters more than the asset one: the picker refuses the ninth pick so
+# the writer sees the cap while choosing, and the server refuses the whole
+# comment. A picker that let 12 through would produce a comment that looks sent
+# and is not.
+
+
+@pytest.mark.unit
+def test_the_typescript_citation_cap_equals_the_python_one(mirror_source):
+    from app.services.ai.chat.output_ref_resolver import MAX_OUTPUT_REF_ATTACHMENTS
+
+    assert _ts_int_const(mirror_source, "MAX_OUTPUT_REF_ATTACHMENTS") == (
+        MAX_OUTPUT_REF_ATTACHMENTS
+    )
+
+
+@pytest.mark.unit
+def test_the_two_caps_are_read_from_their_own_declarations(mirror_source):
+    """Guard on the guard: both names must resolve SEPARATELY in the TS file.
+
+    The failure this rules out is a mirror that exports one constant and
+    re-exports it under the second name — which would make the test above pass
+    while the UI applied the asset cap to citations.
+    """
+    assert re.search(
+        r"^export const MAX_OUTPUT_REF_ATTACHMENTS\s*=\s*\d+\s*;", mirror_source, re.M
+    ), "MAX_OUTPUT_REF_ATTACHMENTS is not its own exported literal"
+    assert re.search(
+        r"^export const MAX_ASSET_REF_ATTACHMENTS\s*=\s*\d+\s*;", mirror_source, re.M
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("locale", sorted(LOCALES))
+def test_the_citation_limit_copy_interpolates_the_cap(locale):
+    """The refusal sentence must say ``{{n}}``, never the digit."""
+    from app.services.ai.chat.output_ref_resolver import MAX_OUTPUT_REF_ATTACHMENTS
+
+    if not LOCALES[locale].exists():
+        pytest.skip("frontend locales not checked out (backend-only tree)")
+    data = json.loads(LOCALES[locale].read_text(encoding="utf-8"))
+    copy = data["outputs"]["refError"]["limitExceeded"]
+    assert "{{n}}" in copy, f"{locale}: the cap must be interpolated, not written"
+    assert str(MAX_OUTPUT_REF_ATTACHMENTS) not in copy
+    assert "{{count}}" not in copy
+
+
 # ── the reason VOCABULARY is a second copy too ──────────────────────────────
 #
 # The cap above is one number in two files. The reason codes are a longer

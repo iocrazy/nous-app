@@ -99,6 +99,11 @@ const ITEM_A: GeneratedItem = {
     shot_id: null,
     conversation_id: null,
     deep_link: '/team/727145299382534200/canvas/325005725244722?node=n9',
+    // Null on every non-`agent_run` row (3a): `describe_source` reads the
+    // run_deliverables provenance in that one arm only.
+    issue_id: null,
+    run_id: null,
+    step: null,
   },
   title: 'Prompt 0',
 };

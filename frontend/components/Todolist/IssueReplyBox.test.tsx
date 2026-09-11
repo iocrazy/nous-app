@@ -1,7 +1,7 @@
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IssueReplyBox } from './IssueReplyBox';
-import { MAX_ASSET_REF_ATTACHMENTS } from '../chat/attachmentLimits';
+import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -141,6 +141,39 @@ const AVA = {
   scope_id: '727145299382534200',
 };
 
+/**
+ * `GET /api/v1/issues/{id}/outputs` — the REAL wire shape (3a Task 3): grouped
+ * by object, `versions` newest first, every id a STRING (`run_deliverables.id`
+ * / `run_id` / `ref_id` are Snowflake BIGINTs the router stringifies on
+ * purpose), and `title` nullable.
+ */
+const listIssueOutputs = vi.fn();
+vi.mock('../../services/outputsService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/outputsService')>();
+  return { ...actual, listIssueOutputs: (...args: unknown[]) => listIssueOutputs(...args) };
+});
+
+const outputVersion = (v: number, over: Record<string, unknown> = {}) => ({
+  id: `7271452993825349${10 + v}`,
+  version: v,
+  parent_version: v > 1 ? v - 1 : null,
+  run_id: '727145299382534100',
+  issue_id: '727145299382534000',
+  seq: null, turn: null, step: v,
+  title: 'S3 · Shot #1',
+  model: null, cost_cents: null,
+  created_at: '2026-09-10T00:00:00Z',
+  ...over,
+});
+
+const SHOT_OUTPUT = {
+  kind: 'script_shot',
+  ref_id: '727145299382534999',
+  title: 'S3 · Shot #1',
+  latest_version: 2,
+  versions: [outputVersion(2), outputVersion(1)],
+};
+
 const searchAssetsAccessible = vi.fn();
 vi.mock('../../services/assetsService', () => ({
   searchAssetsAccessible: (...args: unknown[]) => searchAssetsAccessible(...args),
@@ -157,6 +190,7 @@ describe('IssueReplyBox', () => {
     addToast.mockClear();
     editorText = '';
     editorRefNodes = [];
+    listIssueOutputs.mockResolvedValue([SHOT_OUTPUT]);
   });
 
   it('renders the attachment picker (paperclip button) when no chips', () => {
@@ -468,6 +502,14 @@ describe('IssueReplyBox — the Assets tab', () => {
   beforeEach(() => {
     searchAssetsAccessible.mockReset();
     searchAssetsAccessible.mockResolvedValue([AVA]);
+    listIssueOutputs.mockReset();
+    listIssueOutputs.mockResolvedValue([SHOT_OUTPUT]);
+    addToast.mockClear();
+    editorText = '';
+    // Leaks from the first describe otherwise: a resourceRef node left over
+    // from an earlier test rides along in the attachment payload and the
+    // citation assertion reads as a mapper bug.
+    editorRefNodes = [];
     editorOptions = {};
   });
 
@@ -657,6 +699,194 @@ describe('IssueReplyBox — the Assets tab', () => {
     });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  });
+
+  // ── Citations: the Outputs tab (harness 3a Task 6) ──────────────────────
+  //
+  // The tab exists only where there is an issue to be scoped to. That is not
+  // a UI preference: `output_ref_resolver` validates that the cited version
+  // was produced ON THIS ISSUE, so a composer with no issue behind it has
+  // nothing to check against and the chat panel refuses the kind outright.
+
+  const ISSUE = 727145299382534000;
+
+  async function openOutputsTab(): Promise<void> {
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-outputs'));
+  }
+
+  async function citeLatest(): Promise<void> {
+    await openOutputsTab();
+    fireEvent.click((await screen.findAllByTestId('output-picker-row'))[0]);
+  }
+
+  it('offers the Outputs tab only where an issue backs the composer', async () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await openMentionPicker();
+    expect(await screen.findByTestId('resource-picker-tab-outputs')).toBeInTheDocument();
+  });
+
+  it('hides the Outputs tab when there is no issue to cite against', async () => {
+    // Not cosmetic: with no issue every citation would come back
+    // `output_ref_unresolvable`, so offering the tab would be offering a
+    // control that cannot work.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    await openMentionPicker();
+    expect(await screen.findByTestId('resource-picker-tab-assets')).toBeInTheDocument();
+    expect(screen.queryByTestId('resource-picker-tab-outputs')).toBeNull();
+    expect(listIssueOutputs).not.toHaveBeenCalled();
+  });
+
+  it('reads this issue’s outputs, and only on demand', async () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await openMentionPicker();
+    expect(listIssueOutputs).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-outputs'));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledWith(ISSUE));
+  });
+
+  it('stages a citation chip naming the object AND the version', async () => {
+    // The version is the point. A chip reading "@S3 · Shot #1" alone would be
+    // the same chip whichever revision the reader picked, and revising the
+    // object later would silently re-point what the comment meant.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    const chip = await screen.findByTestId('staged-output-chip');
+    expect(chip.textContent).toContain('S3 · Shot #1');
+    expect(chip.textContent).toContain('v2');
+    expect(chip.getAttribute('data-version')).toBe('2');
+    expect(chip.getAttribute('data-ref')).toBe('727145299382534999');
+  });
+
+  it('lets one object be cited at two versions at once', async () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    await openOutputsTab();
+    fireEvent.click((await screen.findAllByTestId('output-picker-row'))[1]);
+    const chips = await screen.findAllByTestId('staged-output-chip');
+    expect(chips.map((c) => c.getAttribute('data-version'))).toEqual(['2', '1']);
+  });
+
+  it('drops one citation without taking the other with it', async () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    await openOutputsTab();
+    fireEvent.click((await screen.findAllByTestId('output-picker-row'))[1]);
+    await screen.findAllByTestId('staged-output-chip');
+    fireEvent.click(screen.getAllByTestId('staged-output-chip-remove')[0]);
+    const left = await screen.findAllByTestId('staged-output-chip');
+    expect(left).toHaveLength(1);
+    expect(left[0].getAttribute('data-version')).toBe('1');
+  });
+
+  it('sends the citation as an output_ref attachment, version intact', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={onSubmit} issueId={ISSUE} />);
+    await citeLatest();
+    await screen.findByTestId('staged-output-chip');
+    editorText = 'this one changed';
+    await act(async () => {
+      editorOptions.editorProps?.handleKeyDown?.(null, {
+        key: 'Enter', metaKey: true, ctrlKey: false, preventDefault: () => {},
+      } as unknown as KeyboardEvent);
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][2]).toEqual([
+      {
+        kind: 'output_ref',
+        ref_kind: 'script_shot',
+        ref_id: '727145299382534999',
+        version: 2,
+        title: 'S3 · Shot #1',
+      },
+    ]);
+  });
+
+  it('keeps the citations staged when the send is rejected', async () => {
+    // The refusal path for citations is all-or-nothing — the comment did not
+    // post. Clearing the chips would make the retry start from re-picking.
+    const onSubmit = vi.fn().mockRejectedValue(new Error('nope'));
+    render(<IssueReplyBox agents={_agents as never} onSubmit={onSubmit} issueId={ISSUE} />);
+    await citeLatest();
+    await screen.findByTestId('staged-output-chip');
+    editorText = 'x';
+    await act(async () => {
+      editorOptions.editorProps?.handleKeyDown?.(null, {
+        key: 'Enter', metaKey: true, ctrlKey: false, preventDefault: () => {},
+      } as unknown as KeyboardEvent);
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(screen.getAllByTestId('staged-output-chip')).toHaveLength(1);
+  });
+
+  it('leaves only one extra tab lit at a time', async () => {
+    // Assets and Outputs are two different populations sharing one set of
+    // arrow keys. Both lit would mean two bodies on screen and Enter picking
+    // from whichever the code reached first.
+    searchAssetsAccessible.mockResolvedValue([AVA]);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await openMentionPicker();
+    fireEvent.click(await screen.findByTestId('resource-picker-tab-assets'));
+    await waitFor(() =>
+      expect(screen.getByTestId('resource-picker-tab-assets').getAttribute('aria-pressed')).toBe('true'));
+
+    fireEvent.click(screen.getByTestId('resource-picker-tab-outputs'));
+    await waitFor(() =>
+      expect(screen.getByTestId('resource-picker-tab-outputs').getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByTestId('resource-picker-tab-assets').getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(screen.getByTestId('resource-picker-tab-assets'));
+    await waitFor(() =>
+      expect(screen.getByTestId('resource-picker-tab-outputs').getAttribute('aria-pressed')).toBe('false'));
+  });
+
+  it('refuses the ninth citation OUT LOUD, naming the cap', async () => {
+    // Past the cap the server refuses the WHOLE comment (`output_ref_limit_
+    // exceeded`), and an issue reply runs asynchronously in a DBOS workflow
+    // this composer never hears back from. A ninth chip that looked staged
+    // would produce a comment the writer believes was sent and that never
+    // posts.
+    listIssueOutputs.mockResolvedValue(
+      Array.from({ length: 9 }, (_, i) => ({
+        kind: 'script_shot',
+        ref_id: `72714529938253${4900 + i}`,
+        title: `Shot #${i}`,
+        latest_version: 1,
+        versions: [outputVersion(1, { title: `Shot #${i}` })],
+      })),
+    );
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+
+    for (let i = 0; i < MAX_OUTPUT_REF_ATTACHMENTS; i += 1) {
+      await openOutputsTab();
+      fireEvent.click((await screen.findAllByTestId('output-picker-row'))[i]);
+    }
+    expect(await screen.findAllByTestId('staged-output-chip')).toHaveLength(
+      MAX_OUTPUT_REF_ATTACHMENTS,
+    );
+
+    await openOutputsTab();
+    fireEvent.click((await screen.findAllByTestId('output-picker-row'))[8]);
+
+    expect(screen.getAllByTestId('staged-output-chip')).toHaveLength(
+      MAX_OUTPUT_REF_ATTACHMENTS,
+    );
+    // The SENTENCE, resolved from `en.json` with `{{n}}` filled in — not the
+    // key, which would stay green with the copy deleted.
+    expect(addToast).toHaveBeenCalledWith(
+      `A comment can reference at most ${MAX_OUTPUT_REF_ATTACHMENTS} outputs`,
+      'error',
+    );
+    expect(addToast.mock.calls[0][0]).not.toContain('{{');
+    expect(addToast.mock.calls[0][0]).not.toContain('outputs.citationLimit');
+  });
+
+  it('says the read failed rather than showing an empty shelf', async () => {
+    listIssueOutputs.mockRejectedValue(new Error('offline'));
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await openOutputsTab();
+    expect(await screen.findByTestId('output-picker-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('output-picker-empty')).toBeNull();
   });
 
   it('refuses the ninth asset OUT LOUD rather than letting the server drop it', async () => {

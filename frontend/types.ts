@@ -2490,6 +2490,41 @@ export type AssetRefAttachment = {
   url: '';
 };
 
+/** 3a Task 6 citation attachment: the user pointed at ONE VERSION of an object
+ *  an agent registered as an output (`run_deliverables`).
+ *
+ *  Unlike its two neighbours this delivers a REFERENCE, not a thing. There is
+ *  no `url`, no `mime` and no bytes — the frame the backend renders carries
+ *  coordinates and a title, and the model reads the content with the tools it
+ *  already has. Giving it the empty-string `mime`/`url` the asset ref carries
+ *  for shape parity would state "nothing to claim" about fields this kind does
+ *  not have at all.
+ *
+ *  `title` — NOT `name`, which is what every other reference kind calls its
+ *  snapshot. The field name is the backend's (`AttachmentRequest.title`), and
+ *  the value the client sends is IGNORED: `output_ref_resolver` overwrites it
+ *  with the registry row's title at post time, so the thread renders what was
+ *  actually registered rather than what a client claimed. It travels anyway so
+ *  an optimistic render has words before the round trip answers.
+ *
+ *  Version-locked by design. The chip carries kind + id + VERSION, so revising
+ *  the object later never re-points a comment that already meant v2. */
+export type OutputRefAttachment = {
+  kind: 'output_ref';
+  /** One of `generated_media | script_shot | script_scene | script_chapter`.
+   *  A free string rather than a union: the four live in
+   *  `app/services/deliverables/kinds.py` and an unknown one is refused as a
+   *  typed `output_ref_unresolvable`, which names the problem better than a
+   *  compile error in a file that never sees the registry. */
+  ref_kind: string;
+  /** BIGINT serialized as string (Snowflake). */
+  ref_id: string;
+  /** 1-based. Required — a citation names one specific version. */
+  version: number;
+  /** Registry title snapshot, or null when the row carries none. */
+  title: string | null;
+};
+
 /** AI processing state of a resource (`resources.transcript_status`
  *  etc.). `skipped` means the backend decided there is nothing to
  *  process — e.g. a video with no audio track. */

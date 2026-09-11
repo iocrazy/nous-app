@@ -2140,6 +2140,7 @@
       "confirmDelete": "Confirm Delete",
       "openCanvasNodeHint": "Opens the canvas at this node",
       "openSourceHint": "Opens where this was generated",
+      "openIssueHint": "Opens the issue whose run produced this",
       "open": "Preview {{title}}"
     },
     "batch": {
@@ -5842,6 +5843,29 @@
     }
   },
   "outputs": {
+    "refError": {
+      "unresolvable": "One of the referenced outputs could not be read — it may have been revised or removed. Nothing was posted.",
+      "limitExceeded": "A comment can reference at most {{n}} outputs. Nothing was posted.",
+      "unknown": "That reference was refused ({{code}}). Nothing was posted."
+    },
+    "mentionTab": "Outputs",
+    "mentionLoading": "Loading…",
+    "mentionEmpty": "This issue has produced nothing yet",
+    "mentionError": "Could not read this issue’s outputs",
+    "mentionOlder": "Older",
+    "mentionCount_one": "{{count}} output",
+    "mentionCount_other": "{{count}} outputs",
+    "citationRemove": "Remove This Reference",
+    "citationLimit": "A comment can reference at most {{n}} outputs",
+    "provenance": "Made By An Agent",
+    "provenanceOpenIssue": "Open Issue",
+    "provenanceOpenRun": "Open Run",
+    "provenanceDiff": "Diff",
+    "provenanceStep": "Step {{n}}",
+    "provenanceNoLink": "The issue that produced this is not linked",
+    "provenanceFailed": "Could not read where this came from.",
+    "provenanceVersions_one": "{{count}} version",
+    "provenanceVersions_other": "{{count}} versions",
     "openRun": "Open Run #{{run}}",
     "openRunHint": "The run panel is not open here",
     "version": "v{{n}}",

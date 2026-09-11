@@ -26,6 +26,8 @@ import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { ResourceChipBody } from './chat/ResourceChipBody';
 import { AssetChipBody } from './chat/AssetChipBody';
 import { StagedAssetLoadoutMenu } from './chat/StagedAssetLoadoutMenu';
+import { OutputChipBody } from './chat/OutputChipBody';
+import { removeStagedOutput, type StagedOutputRef } from './chat/stagedOutputs';
 import {
   removeStagedAsset,
   removeStagedResource,
@@ -59,6 +61,12 @@ interface ChatAttachmentPickerProps {
    *  path and carry a different snapshot. */
   assets?: StagedAssetRef[];
   onAssetsChange?: (next: StagedAssetRef[]) => void;
+  /** Output CITATIONS waiting to go with this comment (3a Task 6). A third
+   *  list rather than a third shape in one: a citation carries no bytes, no
+   *  mime and no thumbnail, and is resolved by a resolver that checks ISSUE
+   *  ownership — nothing else staged here answers to that. */
+  outputs?: StagedOutputRef[];
+  onOutputsChange?: (next: StagedOutputRef[]) => void;
 }
 
 function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
@@ -75,6 +83,8 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   onResourcesChange,
   assets = [],
   onAssetsChange,
+  outputs = [],
+  onOutputsChange,
 }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -121,6 +131,15 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     [assets, onAssetsChange],
   );
 
+  const removeOutput = useCallback(
+    (refKind: string, refId: string, version: number) => {
+      // Version-scoped: dropping the v2 chip must leave a separately staged
+      // v1 of the same object alone.
+      onOutputsChange?.(removeStagedOutput(outputs, refKind, refId, version));
+    },
+    [outputs, onOutputsChange],
+  );
+
   // The v2 loadout pick. The picker owns no staged state of its own — it
   // reports the whole next list upward, exactly as removal does, so the two
   // edits to one chip cannot end up with different owners.
@@ -142,6 +161,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     attachments.length === 0
     && resources.length === 0
     && assets.length === 0
+    && outputs.length === 0
     && !uploading
   ) {
     return (
@@ -201,6 +221,17 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
             />
           )}
           onRemove={() => removeAsset(a.asset_id)}
+        />
+      ))}
+
+      {outputs.map((o) => (
+        <OutputChipBody
+          key={`${o.ref_kind}:${o.ref_id}:${o.version}`}
+          refKind={o.ref_kind}
+          refId={o.ref_id}
+          version={o.version}
+          title={o.title}
+          onRemove={() => removeOutput(o.ref_kind, o.ref_id, o.version)}
         />
       ))}
 

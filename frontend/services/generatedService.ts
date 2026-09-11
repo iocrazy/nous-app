@@ -46,6 +46,22 @@ export interface GeneratedSource {
   shot_id: string | null;
   conversation_id: string | null;
   deep_link: string | null;
+  /**
+   * 3a run provenance. Filled only for `agent_run` rows that are actually in
+   * `run_deliverables`; null for everything else, historical rows included —
+   * a card with no provenance is normal history, not a fault.
+   *
+   * Ids are STRINGS: they are Snowflake BIGINTs, and a JS number above 2^53
+   * loses the low bits.
+   *
+   * ⚠️ `issue_id` is NOT a link. The issue route is keyed by the issue KEY and
+   * needs a team, so the only URL that goes anywhere is the `deep_link` the
+   * backend built; these three fields say WHICH run, for the reader and the
+   * log.
+   */
+  issue_id: string | null;
+  run_id: string | null;
+  step: number | null;
 }
 
 export interface GeneratedItem {

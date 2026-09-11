@@ -60,6 +60,7 @@ import { ScenePresenceBadge } from '../collab/ScenePresenceBadge';
 import type { PresenceUser } from '../collab/useScriptPresence';
 import { HeadingSelect } from './HeadingSelect';
 import { SceneContextMenu, type SceneContextMenuItem } from './SceneContextMenu';
+import { OutputProvenance } from '../../components/agentActivity/OutputProvenance';
 
 /** A scene's save status lifted to the shell for the aggregate SaveIndicator. */
 export interface SceneSyncStatus {
@@ -1552,6 +1553,14 @@ export function SceneBlock({
           items={contextMenuItems}
           onClose={closeContextMenu}
         />
+      )}
+
+      {/* Where this scene came from (3a Task 6). `scene.id` IS the registry's
+          `ref_id` for `script_scene` — `screenwriting_tools` registers with
+          exactly this value — so nothing is translated on the way in. A scene
+          a person wrote renders nothing at all, which is the common case. */}
+      {scene.id != null && String(scene.id) !== '' && (
+        <OutputProvenance kind="script_scene" refId={String(scene.id)} className="mt-2" />
       )}
     </div>
   );

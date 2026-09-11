@@ -96,6 +96,28 @@ export type IssueMessageAttachment =
       name: string;
       mime: string;
       url: string;
+    }
+  /**
+   * A CITATION of one registered output version (3a Task 6).
+   *
+   * Its own member for the same reason `asset_ref` is one, with a sharper
+   * edge: this kind carries no `url` AND no `name`. A mapper that reached for
+   * the familiar snapshot field would post `{kind:'output_ref', name:'…'}`
+   * with no coordinates at all — accepted by `AttachmentRequest` (every field
+   * Optional) and refused as `output_ref_unresolvable`, which reads to the
+   * user as "the thing you pointed at is gone" rather than "the client forgot
+   * to send which thing".
+   *
+   * `title` is the backend's field name and its value is overwritten server
+   * side with the registry row's title; it travels so an optimistic render has
+   * words before the round trip answers.
+   */
+  | {
+      kind: 'output_ref';
+      ref_kind: string;
+      ref_id: string;
+      version: number;
+      title: string | null;
     };
 
 export interface IssueMessagePostPayload {
@@ -179,10 +201,27 @@ async function _json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     try {
-      const parsed = JSON.parse(text) as { detail?: { code?: unknown; message?: unknown } };
-      const code = parsed?.detail?.code;
+      const parsed = JSON.parse(text) as {
+        detail?: { code?: unknown; message?: unknown } | string;
+        details?: { code?: unknown; message?: unknown } | string;
+      };
+      // `details` FIRST, and it is the one production sends. Every
+      // HTTPException is wrapped by `app/core/exceptions.py` into
+      // `{success, error, code:"http_<status>", request_id, details}`, where a
+      // dict `detail` is moved verbatim to `details` and the original key is
+      // gone. Reading only `detail` — as this did until 3a Task 6 — keeps every
+      // FastAPI-shaped unit fixture green while turning every real refusal into
+      // "400 Bad Request: {…}" (CLAUDE.md 2026-09-09). `detail` stays as the
+      // fallback for the direct-ASGI paths that never pass a handler.
+      //
+      // The envelope's own `code` is deliberately NOT read: it is `http_400` on
+      // every refusal, so treating it as typed would make every failure look
+      // classified while naming nothing.
+      const carrier = parsed?.details ?? parsed?.detail;
+      const code = typeof carrier === 'object' && carrier !== null ? carrier.code : undefined;
       if (typeof code === 'string' && code) {
-        const message = typeof parsed.detail?.message === 'string' ? parsed.detail.message : '';
+        const rawMessage = (carrier as { message?: unknown }).message;
+        const message = typeof rawMessage === 'string' ? rawMessage : '';
         throw new IssueAnswerRejectedError(res.status, code, message);
       }
     } catch (err) {

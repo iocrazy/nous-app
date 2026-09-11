@@ -49,6 +49,21 @@ export function toIssueAttachmentPayload(
         url: a.url,
       };
     }
+    if (a.kind === 'output_ref') {
+      // A CITATION, not a thing: coordinates only. The trailing branch below
+      // would have accepted this kind silently — it reads `url`, which a
+      // citation does not have — and posted an attachment whose every
+      // coordinate was missing. `version` travels because a citation names one
+      // specific version; dropping it would re-point the comment at whatever
+      // the object becomes later.
+      return {
+        kind: a.kind,
+        ref_kind: a.ref_kind,
+        ref_id: a.ref_id,
+        version: a.version,
+        title: a.title,
+      };
+    }
     return { kind: a.kind, url: a.url, mime: a.mime ?? undefined };
   });
 }
