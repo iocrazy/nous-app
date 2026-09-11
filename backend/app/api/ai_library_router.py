@@ -370,7 +370,18 @@ _enrich_skills_with_scope_names = _enrich_rows_with_scope_names
 
 
 @router.get("/agents", response_model=List[AgentOut], summary="List accessible agents")
-async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
+async def list_agents(
+    request: Request,
+    auth: AuthDep,
+    slug: Optional[str] = Query(
+        None,
+        description=(
+            "Return only the agent with this exact slug. This is a list "
+            "filter, not a lookup: a slug the caller cannot see yields an "
+            "empty list. 404 semantics live on GET /agents/{slug}."
+        ),
+    ),
+) -> List[Dict[str, Any]]:
     """Return all agents visible to the current user with their skill bindings.
 
     Visible set = union of:
@@ -380,6 +391,10 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         present and the user is a member of that team; otherwise all teams
         the user is a member of
       * agents on any project the user owns or is a member of
+
+    ``slug`` narrows that visible set to one exact match. It does not widen
+    it: an agent the caller cannot see stays invisible whether or not its slug
+    is named.
 
     Each row is enriched with ``skill_ids`` (ordered, enabled only) plus the
     denormalized ``team_name`` / ``project_name`` for UI scope badges.
@@ -398,6 +413,17 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         team_ids=team_ids,
         project_ids=project_ids,
     )
+
+    # Exact-match slug filter, applied to the visible set (never around it) and
+    # before the per-row enrichment below, so a single-agent request costs one
+    # get_skill_ids round-trip rather than one per visible agent.
+    #
+    # This parameter used not to be declared at all. FastAPI drops undeclared
+    # query params without a word, so `?slug=script_ai` returned the whole set
+    # and the 2b-2 acceptance script — which took `[0]` — spent its run driving
+    # `analyze`. A silently ignored filter is worse than a rejected one.
+    if slug is not None:
+        rows = [row for row in rows if row.get("slug") == slug]
 
     # Agent-overrides (mig 341): mark presets the caller (or their teams)
     # customized so the sidebar can badge them.
