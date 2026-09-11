@@ -79,6 +79,10 @@ class GenerateMediaTools:
                     provider=provider,
                     params={"aspect_ratio": args.get("aspect_ratio") or "16:9"},
                     derivation_kind="image_gen",
+                    # 3a: the step this came out of, so the deliverable card
+                    # hangs off the right one instead of the whole run.
+                    turn=run_context.get("turn"),
+                    step=run_context.get("step"),
                 ),
             )
             return {
@@ -128,6 +132,10 @@ class GenerateMediaTools:
                     provider=provider,
                     params={"source_image_url": src},
                     derivation_kind="video_gen",
+                    # 3a: the step this came out of, so the deliverable card
+                    # hangs off the right one instead of the whole run.
+                    turn=run_context.get("turn"),
+                    step=run_context.get("step"),
                 ),
             )
             return {

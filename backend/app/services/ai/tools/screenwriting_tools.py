@@ -303,7 +303,9 @@ class ScreenwritingTools:
             # the calling user; WITH CHECK on script_shots refuses a write that
             # would land outside the caller's tenant.
             async with caller_scope(scope.user_id):
-                shot = await gateway.create_shot(scope, scene, args)
+                shot = await gateway.create_shot(
+                    scope, scene, args, step=run_context.get("step")
+                )
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.exception("[screenwriting] CreateShot failed scene=%s", scene.id)
             return {
@@ -423,6 +425,12 @@ class ScreenwritingTools:
                     # of routing through resolve_shot first.
                     "shot_id": str(shot.id),
                     "user_id": scope.user_id,
+                    # 3a: this lane DOES have a run. It was already going into
+                    # task_tracking metadata; the workflow needs it too, or the
+                    # image it produces has no run to hang off.
+                    "run_id": gateway.ledger_run_id(scope),
+                    "turn": run_context.get("turn"),
+                    "step": run_context.get("step"),
                 },
                 workflow_id=wf_id,
             )
@@ -480,7 +488,9 @@ class ScreenwritingTools:
             # RLS 第三层 (PR-2b): the UPDATE (and its scene-number read) run as
             # the calling user.
             async with caller_scope(scope.user_id):
-                updated = await gateway.update_shot(scope, shot, args)
+                updated = await gateway.update_shot(
+                    scope, shot, args, step=run_context.get("step")
+                )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[screenwriting] UpdateShot failed shot=%s", shot.id)
             return {
@@ -685,6 +695,7 @@ class ScreenwritingTools:
                 edits,
                 quoted_base_version=base_version,
                 actor=_edit_actor(scope),
+                step=run_context.get("step"),
             )
             if isinstance(outcome, gateway.EditRefused):
                 return outcome.as_dict()

@@ -270,6 +270,11 @@ async def generate_shot(
             dbos_workflow_kwargs={
                 "shot_id": shot_id,
                 "user_id": auth.user_id,
+                # 3a: no agent run behind a human click. Explicit None so
+                # "this lane has no run" is written down, not forgotten.
+                "run_id": None,
+                "turn": None,
+                "step": None,
             },
             workflow_id=wf_id,
         )
@@ -330,6 +335,11 @@ async def generate_shot_video(
             dbos_workflow_kwargs={
                 "shot_id": shot_id,
                 "user_id": auth.user_id,
+                # 3a: no agent run behind a human click. Explicit None so
+                # "this lane has no run" is written down, not forgotten.
+                "run_id": None,
+                "turn": None,
+                "step": None,
             },
             workflow_id=wf_id,
         )

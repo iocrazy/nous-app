@@ -69,7 +69,14 @@ async def test_expand_chapter_persists_content():
 
     assert result["status"] == "success"
     expand.assert_awaited_once_with(title="Act I", summary="A summary", context="ctx")
-    update_chapter.assert_awaited_once_with(_CHAPTER, {"content": "<p>full prose</p>"})
+    # 3a: the attribution argument rides along; None = no run behind this call.
+    update_chapter.assert_awaited_once_with(
+        _CHAPTER,
+        {"content": "<p>full prose</p>"},
+        attributed_to_run_id=None,
+        turn=None,
+        step=None,
+    )
 
 
 async def test_expand_chapter_llm_failure_propagates():

@@ -134,20 +134,67 @@ class ScriptService:
     # ─── Chapter operations ───────────────────────────────────────────
 
     async def create_chapter(
-        self, script_id: str, data: Dict[str, Any]
+        self,
+        script_id: str,
+        data: Dict[str, Any],
+        *,
+        attributed_to_run_id: Optional[Any] = None,
+        turn: Optional[int] = None,
+        step: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Create one chapter. ``attributed_to_run_id`` is the署名 argument:
+        chapters have no run id anywhere in their own call chain (the editor
+        and the AI workflows share this method), so the dispatcher passes it
+        in. Default ``None`` means "a human did this" — the registry no-ops."""
         data_with_script = {**data, "script_id": script_id}
-        return await self.chapter_repo.create(data_with_script)
+        created = await self.chapter_repo.create(data_with_script)
+        await self._register_chapter(created, attributed_to_run_id, turn, step)
+        return created
 
     async def update_chapter(
-        self, chapter_id: str, data: Dict[str, Any]
+        self,
+        chapter_id: str,
+        data: Dict[str, Any],
+        *,
+        attributed_to_run_id: Optional[Any] = None,
+        turn: Optional[int] = None,
+        step: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Update one chapter. See ``create_chapter`` for the署名 argument."""
         update_data = {**data}
         if update_data.get("content_json"):
             update_data["content"] = _extract_text_from_content_json(
                 update_data["content_json"]
             )
-        return await self.chapter_repo.update(chapter_id, update_data)
+        updated = await self.chapter_repo.update(chapter_id, update_data)
+        await self._register_chapter(updated, attributed_to_run_id, turn, step)
+        return updated
+
+    @staticmethod
+    async def _register_chapter(
+        row: Optional[Dict[str, Any]],
+        run_id: Optional[Any],
+        turn: Optional[int],
+        step: Optional[int],
+    ) -> None:
+        """3a: register the chapter as a deliverable of the attributed run.
+
+        Imported lazily — ``script_service`` is imported by the editor's REST
+        path, and the registry drags the runner's event writer in with it."""
+        if not row or row.get("id") is None:
+            return
+        from app.services.deliverables.registry import (
+            register_deliverable_best_effort,
+        )
+
+        await register_deliverable_best_effort(
+            run_id=run_id,
+            kind="script_chapter",
+            ref_id=str(row["id"]),
+            title=row.get("title"),
+            turn=turn,
+            step=step,
+        )
 
     async def delete_chapter(self, chapter_id: str) -> None:
         await self.chapter_repo.delete(chapter_id)
