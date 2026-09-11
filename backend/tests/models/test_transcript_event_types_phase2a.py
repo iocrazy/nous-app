@@ -106,6 +106,19 @@ def test_migration_and_orm_event_type_sets_are_identical():
     )
 
 
+def test_462_does_not_touch_the_event_allowlist():
+    """LATEST_MIGRATION 只能指向**最近一次重写白名单**的迁移，现在仍是 461。
+    462 只补产出血缘列与三个索引，不碰事件类型；它若重写了白名单而
+    LATEST_MIGRATION 没跟上，上面那条 ORM 比对就会拿旧集合过关。
+    这里把「462 不碰」这个前提钉死，而不是让常量悄悄指错。裸子串（连注释里
+    提一嘴都不行）是刻意的：放宽成「不含 ARRAY[」就会在某天有人往 462 里补一
+    条 CHECK 时静默放行。"""
+    sql = (MIGRATION.parent / "462_harness_p4_phase3a_deliverables.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "agent_run_transcript_events" not in sql
+
+
 def test_migration_459_does_not_set_role():
     assert not any(
         re.match(r"(?i)^SET\s+ROLE\b", line) for line in _statements(_migration_body())

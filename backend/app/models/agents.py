@@ -630,6 +630,18 @@ class AgentRunInbox(Base):
             "created_at",
             postgresql_where=text("claimed_at IS NULL AND expired_at IS NULL"),
         ),
+        # 462: dedupe is idempotent by CONSTRAINT, not just by lookup. The
+        # predicate is load-bearing — an EXPIRED item was never consumed, so
+        # re-queueing it is legal and must not collide (same reading as
+        # dedupe_lookup_stmt).
+        Index(
+            "agent_run_inbox_dedupe_live_key",
+            "target_kind",
+            "target_id",
+            text("(content->>'dedupe_key')"),
+            unique=True,
+            postgresql_where=text("content ? 'dedupe_key' AND expired_at IS NULL"),
+        ),
         {"schema": "public"},
     )
 
@@ -669,6 +681,23 @@ class RunDeliverables(Base):
         PrimaryKeyConstraint("id", name="run_deliverables_pkey"),
         Index("idx_run_deliverables_run", "run_id"),
         Index("idx_run_deliverables_ref", "kind", "ref_id"),
+        # 462: the concurrency gate. Two runs registering the same object at
+        # the same time must not both believe they wrote v2 — one loses and
+        # recomputes its version.
+        Index(
+            "run_deliverables_kind_ref_version_key",
+            "kind",
+            "ref_id",
+            "version",
+            unique=True,
+        ),
+        # 462: newest version first, for "latest version" and chain reads.
+        Index(
+            "idx_run_deliverables_ref_latest",
+            "kind",
+            "ref_id",
+            text("version DESC"),
+        ),
         {"schema": "public"},
     )
 
@@ -683,6 +712,15 @@ class RunDeliverables(Base):
         Integer, nullable=False, server_default=text("1")
     )
     parent_version: Mapped[Optional[int]] = mapped_column(Integer)
+    # 462 lineage. All nullable: the table has never been written to, but a
+    # later backfill of historical outputs has no turn/step coordinates.
+    title: Mapped[Optional[str]] = mapped_column(Text)
+    model: Mapped[Optional[str]] = mapped_column(Text)
+    # This version's own spend. The run-level total stays on agent_runs
+    # .cost_cents — neither is derived from the other.
+    cost_cents: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(12, 4))
+    turn: Mapped[Optional[int]] = mapped_column(Integer)
+    step: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

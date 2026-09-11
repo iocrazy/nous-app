@@ -15,6 +15,7 @@ from typing import Any, Optional, Sequence
 
 from loguru import logger
 from sqlalchemy import and_, func, insert, not_, select, tuple_, update
+from sqlalchemy.exc import IntegrityError
 
 from app.db.session import read_scope, write_scope
 from app.models import AgentRunInbox, ConversationAiMeta, Conversations
@@ -141,10 +142,14 @@ def dedupe_lookup_stmt(target_kind: str, target_id: int, dedupe_key: str):
     nobody ever consumed (its run ended before the next step boundary), so it
     is deliberately NOT a match: the caller may queue again.
 
-    Best-effort by construction: without a unique index two SIMULTANEOUS
-    enqueues can both miss. It is aimed at the sequential case it is needed
-    for — a workflow body replayed after a crash — and says so rather than
-    claiming an airtight guarantee it cannot make without a migration.
+    Since mig 462 the guarantee is a CONSTRAINT, not this lookup:
+    ``agent_run_inbox_dedupe_live_key`` is unique over
+    ``(target_kind, target_id, content->>'dedupe_key')`` on live rows, with
+    the same predicate this statement uses. The query stays because the
+    sequential case it was written for — a workflow body replayed after a
+    crash — is the common one, and answering it with a SELECT is cheaper than
+    a failed INSERT plus a re-read. Two SIMULTANEOUS enqueues still both miss
+    here; the index catches the loser and ``enqueue`` re-reads the winner.
     """
     return (
         select(AgentRunInbox)
@@ -204,9 +209,11 @@ class AgentRunInboxRepository:
         key: a caller whose delivery may be REPLAYED (a DBOS workflow body
         resumed after a crash — its writes are not step-recorded) gets the
         existing item back instead of a second copy. The key rides inside
-        ``content`` so no column and no migration are needed."""
-        async with write_scope() as session:
-            if dedupe_key:
+        ``content``, so it still costs no column — mig 462 added the unique
+        index over the jsonb expression, which is what makes two SIMULTANEOUS
+        callers converge on one row instead of merely usually doing so."""
+        if dedupe_key:
+            async with write_scope() as session:
                 existing = (
                     await session.execute(
                         dedupe_lookup_stmt(target_kind, int(target_id), dedupe_key)
@@ -218,21 +225,56 @@ class AgentRunInboxRepository:
                         f"dedupe_key {dedupe_key} already queued — reusing item"
                     )
                     return _row(existing)
-                content = {**content, "dedupe_key": dedupe_key}
-            row = (
-                await session.execute(
-                    insert(AgentRunInbox)
-                    .values(
-                        target_kind=target_kind,
-                        target_id=int(target_id),
-                        user_id=user_id,
-                        kind=kind,
-                        content=content,
+            content = {**content, "dedupe_key": dedupe_key}
+        try:
+            async with write_scope() as session:
+                row = (
+                    await session.execute(
+                        insert(AgentRunInbox)
+                        .values(
+                            target_kind=target_kind,
+                            target_id=int(target_id),
+                            user_id=user_id,
+                            kind=kind,
+                            content=content,
+                        )
+                        .returning(AgentRunInbox)
                     )
-                    .returning(AgentRunInbox)
+                ).scalar_one()
+                return _row(row)
+        except IntegrityError:
+            # The other writer of a simultaneous pair: mig 462's unique index
+            # rejected this one. The INSERT ran in its own scope, so that
+            # transaction is already unwound here — re-read the winner in a
+            # fresh one.
+            if not dedupe_key:
+                # An insert carrying no dedupe_key cannot hit that index, so
+                # this conflict is some OTHER constraint (the kind CHECK, a
+                # dead claimed_run_id). Reinterpreting it as "somebody beat
+                # me to it" would hand the caller an unrelated row.
+                raise
+            winner = None
+            try:
+                async with read_scope() as retry:
+                    winner = (
+                        await retry.execute(
+                            dedupe_lookup_stmt(target_kind, int(target_id), dedupe_key)
+                        )
+                    ).scalar_one_or_none()
+            except Exception as err:  # noqa: BLE001
+                logger.error(
+                    f"[agent_run_inbox] {target_kind} {target_id}: dedupe_key "
+                    f"{dedupe_key} conflicted and the re-read failed too: {err}"
                 )
-            ).scalar_one()
-            return _row(row)
+            if winner is None:
+                # Nothing live carries this key, so the conflict was not the
+                # race. Raise the original rather than invent a result.
+                raise
+            logger.info(
+                f"[agent_run_inbox] {target_kind} {target_id}: dedupe_key "
+                f"{dedupe_key} lost the race — reusing the winner's item"
+            )
+            return _row(winner)
 
     async def claim(
         self, *, targets: Sequence[Target], run_id: int, turn: int, step: int
