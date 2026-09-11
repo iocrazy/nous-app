@@ -100,8 +100,52 @@ class OutputRefRefused(Exception):
         self.message = message
 
 
+#: 一条引用在附件表里用到的键。非 dict、又没有 ``model_dump`` 的对象按这几个
+#: 键逐个取属性。
+_CITATION_FIELDS = ("kind", "ref_kind", "ref_id", "version", "title")
+
+
+def _kind_of(att: Any) -> Optional[str]:
+    """一条附件的 ``kind``，**dict 与 pydantic 对象都认**。
+
+    ⚠️ 这个函数存在的理由是一次真实的空操作（修复轮 2）：
+    ``ChatRequest.attachments`` 是 ``list[AttachmentRequest]``，
+    ``ai_library_router`` 把那些**对象**原样转给 ``AILibraryChatService.chat``，
+    而这里原先第一句写的是 ``isinstance(att, dict)`` —— 于是聊天入口的引用守卫
+    在生产路径上**一条都拦不住**，而单测因为喂的是手写 dict 全绿。正是
+    CLAUDE.md 记的「边界 mock 必须用真实 JSON 形状」那一类。
+
+    ⚠️ **检测刻意不调 ``model_dump()``**：它会深拷贝整条附件，而 ``data_url``
+    单条可达 10MB（``chat_attachment_resolver.MAX_INLINE_IMAGE_BYTES``）。这个
+    判断跑在**每一次聊天轮次**上，为了认一个 ``kind`` 去复制几十 MB 图片字节
+    是不能接受的。真要读坐标时才归一（``_as_mapping``），而引用本身从不带
+    ``data_url``。
+    """
+    if isinstance(att, dict):
+        kind = att.get("kind")
+    else:
+        kind = getattr(att, "kind", None)
+    return kind if isinstance(kind, str) else None
+
+
+def _as_mapping(att: Any) -> dict:
+    """一条**已经确认是引用**的附件 → mapping。dict 原样，pydantic 走
+    ``model_dump()``，其余按 ``_CITATION_FIELDS`` 逐个取属性。
+
+    一个归一点服务所有调用方 —— 「同一个判断两处实现」的反面。
+    """
+    if isinstance(att, dict):
+        return att
+    dump = getattr(att, "model_dump", None)
+    if callable(dump):
+        dumped = dump()
+        if isinstance(dumped, dict):
+            return dumped
+    return {key: getattr(att, key, None) for key in _CITATION_FIELDS}
+
+
 def _is_citation(att: Any) -> bool:
-    return isinstance(att, dict) and att.get("kind") == ATTACHMENT_KIND
+    return _kind_of(att) == ATTACHMENT_KIND
 
 
 def _coordinates(att: dict) -> Tuple[str, str, int]:
@@ -193,7 +237,11 @@ async def resolve_output_refs(
     任何一条过不了就整体 ``OutputRefRefused``——见模块 docstring 的纪律一。
     """
     items = list(attachments or [])
-    cited = [(idx, att) for idx, att in enumerate(items) if _is_citation(att)]
+    # 归一只对**引用**做（见 ``_kind_of`` 的第二条警告）；其余条目原样留在
+    # ``items`` 里，调用方交进来什么就交回什么。
+    cited = [
+        (idx, _as_mapping(att)) for idx, att in enumerate(items) if _is_citation(att)
+    ]
     if not cited:
         # 一条引用都没有：原样交回去（``None`` 保持 ``None``——调用方用它区分
         # 「没有附件」和「有一份空表」）。
@@ -208,7 +256,7 @@ async def resolve_output_refs(
             f"{MAX_OUTPUT_REF_ATTACHMENTS} may be cited at a time",
         )
 
-    coords = [_coordinates(att) for _idx, att in cited]
+    coords = [_coordinates(mapping) for _idx, mapping in cited]
 
     repo = get_run_deliverables_repository()
     chains: dict[Tuple[str, str], List[dict]] = {}
@@ -224,7 +272,7 @@ async def resolve_output_refs(
     )
 
     stamped = list(items)
-    for (idx, _att), ref in zip(cited, refs):
+    for (idx, _mapping), ref in zip(cited, refs):
         stamped[idx] = _stamped(ref)
     return OutputRefResolution(refs=refs, attachments=stamped)
 
@@ -247,14 +295,15 @@ def output_refs_from_attachments(
     for att in attachments or []:
         if not _is_citation(att):
             continue
+        mapping = _as_mapping(att)
         try:
-            ref_kind, ref_id, version = _coordinates(att)
+            ref_kind, ref_id, version = _coordinates(mapping)
         except OutputRefRefused as exc:
             logger.warning(
                 f"[output_ref] dropping an unvalidated citation from a turn: {exc}"
             )
             continue
-        title = att.get("title")
+        title = mapping.get("title")
         out.append(
             ChatOutputRef(
                 ref_kind=ref_kind,

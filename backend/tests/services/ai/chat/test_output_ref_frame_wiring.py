@@ -207,11 +207,35 @@ async def test_no_output_ref_leaves_the_system_message_alone():
     assert captured["composed"].system_message == composed.system_message
 
 
-# ── 修复轮 1：聊天面板入口没有 issue 可作用域，引用一律类型化拒绝 ──────────
+# ── 修复轮 1/2：聊天面板入口没有 issue 可作用域，引用一律类型化拒绝 ────────
+
+
+def _as_request(att: dict):
+    """真实 wire 形状：``ChatRequest.attachments`` 是
+    ``list[AttachmentRequest]``，``ai_library_router`` 把那些 **pydantic 对象**
+    原样转给 ``chat()``（不是 dict）。"""
+    from app.schemas.ai_library_chat import AttachmentRequest
+
+    return AttachmentRequest(**att)
+
+
+def _as_dict(att: dict) -> dict:
+    """内部调用方（测试、workflow 重放）手里是普通 dict。"""
+    return dict(att)
+
+
+#: 两种形状都要钉住。只钉 dict 就是「mock 形状 ≠ wire 形状」——修复轮 1 的守卫
+#: 正是这样在生产路径上成了空操作：谓词第一句是 ``isinstance(att, dict)``，而
+#: 真实入参一个 dict 都没有（CLAUDE.md「边界 mock 必须用真实 JSON 形状」）。
+_SHAPES = [
+    pytest.param(_as_request, id="wire-shape-AttachmentRequest"),
+    pytest.param(_as_dict, id="internal-shape-dict"),
+]
 
 
 @pytest.mark.asyncio
-async def test_chat_entry_refuses_an_output_ref_with_a_typed_400():
+@pytest.mark.parametrize("shape", _SHAPES)
+async def test_chat_entry_refuses_an_output_ref_with_a_typed_400(shape):
     """聊天面板转发附件时不经过任何校验，所以一条 ``output_ref`` 会让框里
     的 kind/id/version/title 四个值**全部由客户端决定**。
 
@@ -237,7 +261,7 @@ async def test_chat_entry_refuses_an_output_ref_with_a_typed_400():
                 str(SESSION_ID),
                 user_id=USER_ID,
                 content="revise this",
-                attachments=[OUTPUT_ATT],
+                attachments=[shape(OUTPUT_ATT)],
             )
 
     assert exc.value.status_code == 400
@@ -250,13 +274,15 @@ async def test_chat_entry_refuses_an_output_ref_with_a_typed_400():
 
 
 @pytest.mark.asyncio
-async def test_chat_entry_still_accepts_other_attachment_kinds():
-    """守卫必须是窄的：它只拒引用，不拒别人的附件。"""
+@pytest.mark.parametrize("shape", _SHAPES)
+async def test_chat_entry_still_accepts_other_attachment_kinds(shape):
+    """守卫必须是窄的：它只拒引用，不拒别人的附件——两种形状都要验，否则
+    「只对 dict 生效」的谓词会在这一侧同样静默走样。"""
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
     svc = AILibraryChatService(store=_FakeStore())
     turn = AsyncMock(return_value={"content": "ok"})
-    other = {"kind": "resource_ref", "resource_id": "42", "name": "spec.md"}
+    other = shape({"kind": "resource_ref", "resource_id": "42", "name": "spec.md"})
 
     with (
         patch.object(
@@ -269,4 +295,5 @@ async def test_chat_entry_still_accepts_other_attachment_kinds():
         )
 
     turn.assert_awaited_once()
+    # 原样转发：守卫不许改写它放行的东西。
     assert turn.await_args.kwargs["attachments"] == [other]
