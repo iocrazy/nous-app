@@ -263,7 +263,20 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // re-reads instead of showing a list that is already out of date.
   const [schedulesRefresh, setSchedulesRefresh] = useState(0);
   const childRunState = useMemo<ChildRunState>(
-    () => ({ current: childRun, open: setChildRun, close: () => setChildRun(null) }),
+    () => ({
+      current: childRun,
+      // Opening a sub-run also SWITCHES TO THE TIMELINE (3a T8c 修复轮 1).
+      // `DetachedRunPanel` only mounts under the timeline tab, while the rail
+      // that can ask for it renders on both tabs — so asking from "Related
+      // work" used to set the state and mount nothing, a silent no-op. The
+      // panel belongs to the timeline, so the request takes the reader there
+      // rather than failing quietly or going back to a disabled button.
+      open: (origin: ChildRunOrigin) => {
+        setTab('timeline');
+        setChildRun(origin);
+      },
+      close: () => setChildRun(null),
+    }),
     [childRun],
   );
 
@@ -609,7 +622,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             is page state, so its context belongs at the page level, not once
             per consumer. */}
         <ChildRunContext.Provider value={childRunState}>
-        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 md:grid md:grid-cols-[1.5fr_1fr] md:gap-6 md:items-start">
+          <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 md:grid md:grid-cols-[1.5fr_1fr] md:gap-6 md:items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-3">
             <IssueStatusIcon status={issue.status} size={15} />
@@ -777,7 +790,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <b.component key={b.id} ctx={blockCtx} />
           ))}
         </aside>
-        </div>
+          </div>
         </ChildRunContext.Provider>
       </div>
 

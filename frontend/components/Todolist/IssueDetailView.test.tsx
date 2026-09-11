@@ -814,3 +814,40 @@ describe('IssueDetailView — 右栏产出块开出的弹层能打开 run 面板
     await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
   });
 });
+
+// ── 修复轮 1 / I1：从非 timeline 页签点 «Open Run» 不能是静默 no-op ─────────
+//
+// 右栏 contextBlocks 渲染在 tab 条件之外（两个页签上都在），而 DetachedRunPanel
+// 只挂在 `tab === 'timeline'` 分支里。缺陷 2 修好之后按钮在 Related work 上也
+// 变成可点的，点下去 setChildRun 生效却没有任何面板挂载 —— 从「诚实地禁用」退
+// 化成「可点但什么都不发生」，按本仓「触发路径必须类型化失败回显，silent
+// no-op 不可接受」，后者更糟。
+//
+// 裁决：面板属于 timeline，所以点击先切回 timeline 再开面板。
+describe('IssueDetailView — 从 Related work 页签点开 run 面板', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress();
+    stubOutputs();
+  });
+
+  it('switches back to the timeline and shows the panel', async () => {
+    renderDetail(mkIssue());
+
+    // 切到 Related work —— 右栏在这个页签上照样在。
+    fireEvent.click(screen.getByText('Related work'));
+    await waitFor(() => expect(screen.queryByTestId('detached-run-panel')).toBeNull());
+
+    fireEvent.click(await screen.findByTestId('outputs-row'));
+    await screen.findByTestId('output-diff');
+    const openRun = await screen.findByTestId('output-open-run');
+    expect((openRun as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(openRun);
+
+    await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
+    // 真的切回去了，而不是把面板塞进 Related work —— 这一行只在 timeline
+    // 分支里渲染（rollup 是 running）。
+    await waitFor(() => expect(screen.getByText('Agent is working…')).toBeTruthy());
+  });
+});
