@@ -198,6 +198,23 @@ def _last_user_text(user_messages: list[dict]) -> str:
     return ""
 
 
+def _user_event_payload(
+    composed: ComposedSystemPrompt, user_messages: list[dict]
+) -> dict:
+    """The turn-opening ``user`` event (三期 3a T8c 缺陷 4).
+
+    ``referenced_outputs`` is written ONLY when this turn cites something. A
+    turn without citations must produce byte-for-byte the payload it always
+    did: old runs and uncited new ones then render identically, and no reader
+    grows a branch for "the key is there but empty".
+    """
+    payload: dict = {"content": _last_user_text(user_messages)}
+    cited = getattr(composed, "referenced_outputs", None)
+    if cited:
+        payload["referenced_outputs"] = list(cited)
+    return payload
+
+
 def _is_mcp_tool_name(name: str, mcp_registry) -> bool:
     """Q5: check if a tool name maps to a registered MCP server.
 
@@ -620,7 +637,7 @@ class AgentRunner:
         # Streaming runs skip the final 'assistant' event — the chat layer
         # persists the full message itself; tool_call events below are the
         # part the Transcript adds over chat history.
-        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
+        await emit_event(recorder, "user", _user_event_payload(composed, user_messages))
 
         while iteration < MAX_STREAM_ITERATIONS:
             iteration += 1
@@ -1705,7 +1722,7 @@ class AgentRunner:
 
         # P3 transcript (mig 285): open the event stream with the user turn.
         # Best-effort — record_event never raises.
-        await emit_event(recorder, "user", {"content": _last_user_text(user_messages)})
+        await emit_event(recorder, "user", _user_event_payload(composed, user_messages))
 
         # Wave G (G3): per-run loop guard. Detects "same (tool, args)
         # called >= N times in last M calls" and warns the LLM mid-run

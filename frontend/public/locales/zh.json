@@ -5859,6 +5859,8 @@
     "mentionCount_other": "{{count}} 个产出",
     "citationRemove": "移除这条引用",
     "citationLimit": "一条评论最多引用 {{n}} 个产出",
+    "cited": "引用 {{count}} 件产出 · 按版本锁定，不随后续修订漂移",
+    "citedChip": "@{{title}} v{{n}}",
     "provenance": "由 Agent 生成",
     "provenanceOpenIssue": "打开议题",
     "provenanceOpenRun": "打开运行",

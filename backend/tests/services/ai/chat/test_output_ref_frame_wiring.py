@@ -130,6 +130,17 @@ async def test_output_ref_renders_the_frame_and_never_reaches_the_binary_path():
     ]
     assert frame in captured["composed"].system_message
     binary.assert_not_awaited()
+    # T8c 缺陷 4：同一批坐标也随轮次带下去，供 ``user`` 事件写进 transcript。
+    # 框给模型，这份给人——两者从同一个 ``ChatOutputRef`` 序列投影，所以不会
+    # 出现「模型看到 3 件、UI 说 2 件」。``ref_id`` 是字符串（Snowflake）。
+    assert captured["composed"].referenced_outputs == [
+        {
+            "kind": "script_shot",
+            "ref_id": "9",
+            "version": 2,
+            "title": "S3 · Shot #1",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -205,6 +216,8 @@ async def test_no_output_ref_leaves_the_system_message_alone():
 
     mock_renderer.assert_not_called()
     assert captured["composed"].system_message == composed.system_message
+    # 没有引用就没有坐标：runner 因此一个键都不写（旧 run 渲染分毫不动）。
+    assert captured["composed"].referenced_outputs == []
 
 
 # ── 修复轮 1/2：聊天面板入口没有 issue 可作用域，引用一律类型化拒绝 ────────

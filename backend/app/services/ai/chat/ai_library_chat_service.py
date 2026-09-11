@@ -46,6 +46,7 @@ from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.output_ref_resolver import ATTACHMENT_KIND as OUTPUT_REF_KIND
 from app.services.ai.chat.output_ref_resolver import (
     OutputRefRefused,
+    citations_for_transcript,
     output_ref_http_400,
     output_refs_from_attachments,
     refuse_citations_without_issue,
@@ -1090,7 +1091,14 @@ class AILibraryChatService:
                     update={
                         "system_message": (
                             composed.system_message + "\n\n" + outputs_block
-                        )
+                        ),
+                        # T8c 缺陷 4: the same coordinates, carried for the
+                        # run's own transcript. The frame above is what the
+                        # MODEL reads; this is what the PERSON reading the
+                        # thread reads ("References N outputs" under step 1).
+                        # One projection of one list, so the two can never
+                        # disagree about how many were cited.
+                        "referenced_outputs": citations_for_transcript(output_refs),
                     }
                 )
 

@@ -100,6 +100,25 @@ export interface StepNode {
   children: SubagentChild[];
   /** Outputs this step registered, in registration order (harness 3a §5). */
   outputs: OutputCard[];
+  /**
+   * The output versions the turn CITED on its way in (harness 3a T8c 缺陷 4).
+   * Only STEP 1 of a turn carries them, and only when the turn cited
+   * something — a run recorded before the backend wrote the field has no key
+   * at all and renders exactly as it always did.
+   *
+   * Note the direction: `outputs` is what this step PRODUCED, `citations` is
+   * what the person POINTED AT. Same coordinates, opposite arrows.
+   */
+  citations?: OutputCitation[];
+}
+
+/** One cited version. Pinned: the coordinates never follow later revisions. */
+export interface OutputCitation {
+  key: string;
+  kind: string;
+  refId: string;
+  version: number;
+  title: string | null;
 }
 
 export interface UserNode {
@@ -230,6 +249,27 @@ const arr = (v: unknown): unknown[] => {
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
 
 /**
+ * `user.referenced_outputs` → the citations one step shows (3a T8c 缺陷 4).
+ *
+ * An entry short a coordinate is dropped, not drawn: the chip names a version
+ * a reader can go look at, and one that cannot be identified says the wrong
+ * thing more confidently than saying nothing.
+ */
+const citationsFrom = (v: unknown): OutputCitation[] => {
+  const out: OutputCitation[] = [];
+  for (const raw of arr(v)) {
+    const item = obj(raw);
+    if (!item) continue;
+    const kind = str(item.kind);
+    const refId = str(item.ref_id);
+    const version = num(item.version);
+    if (!kind || !refId || version === null) continue;
+    out.push({ key: `${kind}:${refId}:${version}`, kind, refId, version, title: str(item.title) });
+  }
+  return out;
+};
+
+/**
  * Every identity a sub-agent event can be keyed by, in preference order.
  * A foreground spawn has a `child_run_id` from the start; a BACKGROUND spawn
  * has only the workforce `task_id` (no run exists yet) while its `done`
@@ -291,6 +331,25 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
   let current: StepNode | null = null;
   let stepCost = 0;
   let stepCount = 0;
+  /**
+   * Citations read off this turn's `user` event, waiting for the step that
+   * consumes them. They cannot be attached when the `user` event is folded:
+   * the step does not exist yet, and opening one there would leave a phantom
+   * that the real `step_start` then closes and duplicates. The FIRST step
+   * opened after the event takes them — that is "step 1 of this turn" — and
+   * a turn that never opens a step has no step to hang them under.
+   */
+  let pendingCitations: OutputCitation[] | null = null;
+
+  /** `newStep` plus the pending citations, so every opener gets them once. */
+  const openStep = (turn: number, step: number, model: string | null, at: string | null): StepNode => {
+    const node = newStep(turn, step, model, at);
+    if (pendingCitations) {
+      node.citations = pendingCitations;
+      pendingCitations = null;
+    }
+    return node;
+  };
 
   const closeCurrent = (): void => {
     if (current) current.live = false;
@@ -342,7 +401,7 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       if (earlier) return earlier;
     }
     closeCurrent();
-    current = newStep(num(ev.turn) ?? 1, coord ?? stepCount + 1, null, ev.created_at ?? null);
+    current = openStep(num(ev.turn) ?? 1, coord ?? stepCount + 1, null, ev.created_at ?? null);
     stepCount += 1;
     nodes.push(current);
     return current;
@@ -352,13 +411,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
     if (!ev || typeof ev.seq !== 'number') continue;
     const p = ev.payload ?? {};
     switch (ev.event_type) {
-      case 'user':
+      case 'user': {
         nodes.push({ kind: 'user', key: `seq:${ev.seq}`, text: str(p.content) ?? '', at: ev.created_at ?? null });
+        // Held for the step that consumes them — see `pendingCitations`. An
+        // absent key leaves the previous turn's leftovers alone only because
+        // there are none: each turn's step takes them the moment it opens.
+        const cited = citationsFrom(p.referenced_outputs);
+        pendingCitations = cited.length ? cited : null;
         break;
+      }
 
       case 'step_start': {
         closeCurrent();
-        current = newStep(num(ev.turn) ?? num(p.turn) ?? 1, num(ev.step) ?? num(p.step) ?? stepCount + 1, str(p.model), ev.created_at ?? null);
+        current = openStep(num(ev.turn) ?? num(p.turn) ?? 1, num(ev.step) ?? num(p.step) ?? stepCount + 1, str(p.model), ev.created_at ?? null);
         stepCount += 1;
         nodes.push(current);
         break;

@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, MessageSquare, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, MessageSquare, Quote, RotateCw, ShieldOff, Users, Wallet, Wrench, GitFork } from 'lucide-react';
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
@@ -297,6 +297,7 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
       {/* Outside the `open` block on purpose: a dispatched sub-agent and a
           registered output are the two things about a collapsed step you
           still need to see. */}
+      <OutputCitations node={node} />
       <SubagentCards node={node} />
       <OutputCards node={node} />
     </div>
@@ -350,6 +351,50 @@ const OutputThumb: React.FC<{ card: OutputCard }> = ({ card }) => {
       onError={() => setFailed(true)}
       className="h-[40px] w-[56px] shrink-0 rounded border border-ink-800 object-cover"
     />
+  );
+};
+
+/**
+ * What this turn POINTED AT on its way in (harness 3a T8c 缺陷 4).
+ *
+ * The sentence carries one fact the rest of the UI never states: a citation is
+ * pinned to the version the person picked and does not follow later revisions.
+ * Without it a reader seeing "@MEDIUM v2" beside an object now on v5 cannot
+ * tell whether the agent read v2 or v5.
+ *
+ * Sits above the step's own cards on purpose — what went in, then what came
+ * out — and outside the `open` block with them: a collapsed step still has to
+ * say what it was pointed at.
+ */
+export const OutputCitations: React.FC<{ node: StepNode }> = ({ node }) => {
+  const { t } = useTranslation();
+  const cited = node.citations ?? [];
+  if (cited.length === 0) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 px-2.5 pb-1.5 pl-7 text-[11px] text-ink-500"
+      data-testid="output-citations"
+    >
+      <Quote size={11} className="shrink-0" />
+      <span className="shrink-0">
+        {t('outputs.cited', 'References {{count}} outputs · pinned to version', { count: cited.length })}
+      </span>
+      {cited.map((c) => (
+        <span
+          key={c.key}
+          data-testid="output-citation-chip"
+          data-kind={c.kind}
+          data-ref={c.refId}
+          data-version={String(c.version)}
+          className="min-w-0 truncate rounded border border-ink-800 bg-ink-900/60 px-1.5 py-0.5 text-ink-400"
+        >
+          {t('outputs.citedChip', '@{{title}} v{{n}}', {
+            title: c.title ?? `${c.kind.replace(/_/g, ' ')} #${c.refId}`,
+            n: c.version,
+          })}
+        </span>
+      ))}
+    </div>
   );
 };
 
