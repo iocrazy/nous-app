@@ -1473,6 +1473,15 @@ class AgentRunner:
             # 就没有 run，那一路的产出不该假装属于某个 turn。
             "turn": 1 if recorder else None,
             "step": step,
+            # 3a T8c 缺陷 1：登记口没拿到 recorder 就退回
+            # ``RunEventWriter.for_run`` —— 同一个 run 上的**第二个** writer。
+            # 它把 ``view.outputs`` 折进 ``metadata_json``，活 recorder 的下
+            # 一次镜像（写的是整个 ``view`` 值）再原样抹掉，于是座舱那一格
+            # 唯一的数据源永远是空的；两个 writer 各记各的 seq，活 recorder
+            # 的下一条 insert 还会撞唯一索引被丢掉。把活 recorder 交出去，
+            # 这两半一起消失。⚠️ 只有**活着的**那条路有 recorder 可交；迟到
+            # 的登记（run 已结束）照旧走 ``for_run``，那时没有第二个 writer。
+            "recorder": recorder,
         }
 
     async def _preflight_compact_and_budget(

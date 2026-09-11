@@ -95,6 +95,10 @@ async def test_agent_generation_registers_one_deliverable(register_spy, insert_s
             cost_cents=0.12,
             turn=1,
             step=3,
+            # 这个调用点没有活 recorder（DBOS 侧回来的出图，父 run 多半已
+            # 收工），显式的 None 让登记口照旧走 ``for_run``。带 recorder 的
+            # 那条路见 ``test_live_recorder_wiring``。
+            recorder=None,
         )
     ]
 

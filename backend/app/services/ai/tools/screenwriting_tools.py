@@ -270,6 +270,10 @@ async def _register_write(
         title=title,
         turn=run_context.get("turn"),
         step=run_context.get("step"),
+        # 这一轮的活 recorder。少了它，登记口退回 ``for_run`` 另开一个
+        # writer，``view.outputs`` 会被活 recorder 的下一次整值镜像抹掉
+        # （3a T8c 缺陷 1 —— 座舱产出格在生产上从未渲染过）。
+        recorder=run_context.get("recorder"),
     )
 
 

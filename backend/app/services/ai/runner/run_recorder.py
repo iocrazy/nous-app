@@ -797,7 +797,7 @@ class RunRecorder:
         # finished mid-run put its ``subagent_done`` in the transcript, never
         # in these in-memory views, and this is the last chance to bill it.
         if self._event_writer is not None:
-            await self._event_writer.refold_children()
+            await self._event_writer.refold_external_slices()
         folded = self._event_writer.views["cost"] if self._event_writer else None
         own_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
@@ -988,6 +988,15 @@ async def event_writer_for_run(run_id: Any) -> "RunEventWriter":
 #: re-read from the transcript rather than trusted from memory.
 SUBAGENT_EVENT_TYPES = ("subagent_spawned", "subagent_done")
 
+#: Every event type a SECOND writer can put on a run's transcript, hence every
+#: view slice the mirror has to re-read instead of trusting memory.
+#: ``deliverable`` joins the two sub-agent types for the same reason: the
+#: deliverables registry falls back to ``RunEventWriter.for_run`` whenever no
+#: recorder is handed to it (三期 3a T8c 缺陷 1 — the folded ``view.outputs``
+#: was mirrored by that second writer and wiped by the live recorder's next
+#: whole-value mirror, so the cockpit's outputs cell could never render).
+EXTERNALLY_WRITTEN_EVENT_TYPES = (*SUBAGENT_EVENT_TYPES, "deliverable")
+
 
 class RunEventWriter:
     """The one write path onto a run's transcript + its folded views.
@@ -1011,9 +1020,9 @@ class RunEventWriter:
         self.views: dict[str, Any] = empty_views()
         self._pending_mirror = False
         # Sub-agent events this writer folded but could NOT persist (the
-        # insert-failure branch below). ``refold_children`` rebuilds those two
-        # slices from the transcript, so anything missing from it has to be
-        # replayed on top or it would be dropped on the next mirror.
+        # insert-failure branch below). ``refold_external_slices`` rebuilds
+        # those two slices from the transcript, so anything missing from it
+        # has to be replayed on top or it would be dropped on the next mirror.
         # Edge: an insert that raised may still have COMMITTED (an ambiguous
         # failure — the connection dropped after the write). The event is then
         # both in the transcript and here, so the counters inflate by one;
@@ -1132,9 +1141,10 @@ class RunEventWriter:
         if event_type == "subagent_done":
             await self._sync_cost_column()
 
-    async def refold_children(self) -> None:
-        """Rebuild ``view.children`` and ``cost.by_child`` from the persisted
-        transcript, then recompute ``cost.spent_cents``.
+    async def refold_external_slices(self) -> None:
+        """Rebuild the slices a SECOND writer can touch — ``view.children`` /
+        ``cost.by_child`` and ``view.outputs`` — from the persisted transcript,
+        then recompute ``cost.spent_cents``.
 
         TWO writers touch those two slices on one run: the parent's own
         recorder (these in-memory views, mirrored as WHOLE values) and the
@@ -1144,14 +1154,35 @@ class RunEventWriter:
         parent was still running left ``async_pending`` stuck at +1 and its
         cost out of the parent's total.
 
+        ``view.outputs`` is the same defect one slice over (三期 3a T8c 缺陷 1,
+        真栈 run 348401200407189): the deliverables registry writes its
+        ``deliverable`` event through ``RunEventWriter.for_run`` unless the
+        live recorder is handed to it, and the live mirror then erased the
+        outputs slice — ``metadata_json->'view'`` held 17 keys and ``outputs``
+        was never one of them, so the cockpit's outputs cell, whose ONLY
+        source is that slice, could not render on any run.
+
+        ONE query feeds both: the fold registry already owns the per-event
+        logic (``folds/deliverables.py``), so the scratch projection replays
+        every externally-written type and each slice is lifted off it.
+
         Race-free by construction: both writers only ever APPEND, and
         ``append`` inserts the row BEFORE folding, so every event in these
         in-memory views is already in the transcript. The one exception is an
         event whose insert failed — folded in memory, no row — which is why
         ``_unpersisted_subagent`` is replayed on top.
 
-        Skipped entirely when this run has no children, so the overwhelming
-        majority of runs never pay for the query.
+        Skipped entirely when this run has neither children nor outputs, so
+        the overwhelming majority of runs never pay for the query. ⚠️ That
+        pre-check reads MEMORY, so it opens only once this writer has folded
+        one such event itself — which is exactly why the live lanes hand their
+        own recorder to ``register_deliverable`` (the primary fix): the first
+        deliverable then folds in-process, and every later mirror re-reads the
+        log and picks up whatever a second writer added. A run whose outputs
+        are ALL written by another writer still mirrors none of them; closing
+        that would cost a transcript read on every append of every run, and
+        the lanes it covers (script chapters saved from the REST editor with
+        an attributed run id) have no live recorder to hand over anyway.
 
         The WHOLE body is under one guard, including the pre-check that reads
         the stored ``children.total`` and the final slice assignments. Both
@@ -1164,7 +1195,12 @@ class RunEventWriter:
         """
         try:
             children = self.views["view"].get("children") or {}
-            if not int(children.get("total") or 0) and not self._unpersisted_subagent:
+            outputs = self.views["view"].get("outputs") or {}
+            if (
+                not int(children.get("total") or 0)
+                and not int(outputs.get("total") or 0)
+                and not self._unpersisted_subagent
+            ):
                 return
 
             from sqlalchemy import select
@@ -1183,7 +1219,7 @@ class RunEventWriter:
                             .where(AgentRunTranscriptEvents.run_id == self.run_id)
                             .where(
                                 AgentRunTranscriptEvents.event_type.in_(
-                                    SUBAGENT_EVENT_TYPES
+                                    EXTERNALLY_WRITTEN_EVENT_TYPES
                                 )
                             )
                             .order_by(AgentRunTranscriptEvents.seq.asc())
@@ -1203,10 +1239,19 @@ class RunEventWriter:
 
             self.views["view"]["children"] = scratch["view"]["children"]
             self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            refolded_outputs = scratch["view"].get("outputs")
+            if refolded_outputs:
+                # ONLY when the log produced one. A ``deliverable`` whose
+                # insert failed folded in memory without a row, and the
+                # transcript cannot know about it — assigning an empty slice
+                # over it would delete a count nothing can rebuild, while
+                # leaving it is the same "degrade to what we have" the
+                # failed-read branch below takes.
+                self.views["view"]["outputs"] = refolded_outputs
             recompute_spent(self.views["cost"])
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(
-                f"[RunEventWriter] children re-fold skipped (run={self.run_id}): {err}"
+                f"[RunEventWriter] external re-fold skipped (run={self.run_id}): {err}"
             )
 
     async def _sync_cost_column(self) -> None:
@@ -1281,7 +1326,7 @@ class RunEventWriter:
     async def _mirror(self) -> None:
         # The mirror writes WHOLE ``view`` / ``cost`` values, so the two
         # externally-written slices are re-read from the event log first.
-        await self.refold_children()
+        await self.refold_external_slices()
         try:
             from app.db.session import write_scope
 

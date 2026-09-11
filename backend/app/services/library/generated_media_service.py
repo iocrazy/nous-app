@@ -293,6 +293,7 @@ async def register_generated_media(
     source_path: Optional[str] = None,
     mime: str,
     origin: GenerationOrigin,
+    recorder: Any = None,
 ) -> dict:
     """Ingest a generated media blob into Tier-1 and insert one row. Returns it.
 
@@ -308,6 +309,12 @@ async def register_generated_media(
     NOTE: this covers only AI *generations* (Tier-1 generated_media) — the
     media library's downloaded/uploaded videos live on their own path and
     stay on the filesystem+nginx.
+
+    ``recorder`` is the LIVE run's recorder when the caller has one (the agent
+    tool lane). It is forwarded to the deliverable registry so the event folds
+    into the run's own views instead of a second ``RunEventWriter.for_run`` —
+    whose ``view.outputs`` the live mirror then erased (3a T8c 缺陷 1). Every
+    other caller leaves it None and the registry keeps its late-append path.
     """
     if bool(source_url) == bool(source_path):
         raise ValueError(
@@ -381,6 +388,7 @@ async def register_generated_media(
             cost_cents=origin.cost_cents,
             turn=origin.turn,
             step=origin.step,
+            recorder=recorder,
         )
     return out
 

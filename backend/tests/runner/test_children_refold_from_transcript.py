@@ -208,7 +208,7 @@ async def test_an_event_that_failed_to_persist_is_still_counted(monkeypatch):
     assert await writer.append(*SPAWN_ASYNC) is None
     assert writer.views["view"]["children"]["async_pending"] == 1
 
-    await writer.refold_children()
+    await writer.refold_external_slices()
     assert writer.views["view"]["children"]["async_pending"] == 1
     assert writer.views["view"]["children"]["total"] == 1
 
@@ -235,14 +235,14 @@ async def test_a_failed_transcript_read_leaves_the_slices_alone(monkeypatch):
     }
     writer.views["cost"]["by_child"] = {"51": 3.0}
 
-    await writer.refold_children()
+    await writer.refold_external_slices()
 
     assert writer.views["view"]["children"]["total"] == 2
     assert writer.views["cost"]["by_child"] == {"51": 3.0}
 
 
 async def test_a_corrupt_stored_children_count_never_fails_the_run(monkeypatch):
-    """Re-review round 2. ``refold_children`` runs on the append and finish
+    """Re-review round 2. ``refold_external_slices`` runs on the append and finish
     paths, where the file's standing contract is that telemetry never fails a
     run. A ``children.total`` that is not a number — a hand-edited row, a
     partial write, a future shape — used to raise straight out of ``append``
@@ -298,4 +298,4 @@ async def test_a_corrupt_slice_from_the_transcript_never_fails_the_run(monkeypat
     writer.views["view"]["children"] = {"total": 1, "done": 0}
     writer.views["cost"] = None  # recompute_spent would blow up on this
 
-    await writer.refold_children()  # must not raise
+    await writer.refold_external_slices()  # must not raise
