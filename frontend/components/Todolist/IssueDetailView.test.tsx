@@ -783,6 +783,9 @@ describe('IssueDetailView — lineage deep link (?step)', () => {
     renderAt('/team/9/todolist/NOUS-1?run=501&seq=4&step=2');
     await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('501', 4));
 
+  });
+});
+
 // ── harness 3a T8c 缺陷 2：右栏与线程共用同一个子 run 上下文 ─────────────────
 //
 // 真机实测：同一个 issue 页、同一秒，线程入口点开的差异弹层里 «Open Run #»
