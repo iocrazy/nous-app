@@ -52,6 +52,7 @@ def describe_source(
     run_id = str(prov["run_id"]) if prov and prov.get("run_id") else None
     issue_key = (prov or {}).get("issue_key")
     step = (prov or {}).get("step")
+    turn = (prov or {}).get("turn")
 
     if kind in ("canvas_run", "canvas_upload"):
         name = canvas_names.get(canvas_id or "", _UNTITLED) if canvas_id else _UNTITLED
@@ -74,7 +75,9 @@ def describe_source(
             # The SAME builder the lineage endpoints use (3a Task 3b): this card
             # and the object's provenance block describe one row from two
             # directions and must print one URL.
-            deep_link = issue_deep_link(team_id=team_id, issue_key=issue_key, step=step)
+            deep_link = issue_deep_link(
+                team_id=team_id, issue_key=issue_key, step=step, turn=turn
+            )
         else:
             label = "Chat generation"
     elif kind == "chat_upload":

@@ -35,6 +35,39 @@ def test_step_zero_is_a_step_not_a_missing_one():
     )
 
 
+def test_the_turn_rides_along_with_the_step():
+    """Trajectory steps are keyed by (turn, step), not by step alone — a run
+    that took three turns has three step 2s. Without the turn the anchor lands
+    on whichever of them the page finds first (3a Task 8b fix round 1)."""
+    assert (
+        issue_deep_link(team_id="42", issue_key="MH-91", step=2, turn=3)
+        == "/team/42/todolist/MH-91?step=2&turn=3"
+    )
+
+
+def test_turn_zero_is_a_turn():
+    assert issue_deep_link(team_id="42", issue_key="MH-91", step=1, turn=0).endswith(
+        "?step=1&turn=0"
+    )
+
+
+def test_a_step_without_a_turn_keeps_the_old_one_key_url():
+    """Historical rows have no turn. The link stays exactly what it was."""
+    assert (
+        issue_deep_link(team_id="42", issue_key="MH-91", step=2)
+        == "/team/42/todolist/MH-91?step=2"
+    )
+
+
+def test_a_turn_without_a_step_anchors_nothing():
+    """The turn only disambiguates a step; alone it names no position, and a
+    query key the page would have to ignore is worse than no key."""
+    assert (
+        issue_deep_link(team_id="42", issue_key="MH-91", turn=3)
+        == "/team/42/todolist/MH-91"
+    )
+
+
 def test_no_step_is_the_bare_issue_url():
     assert issue_deep_link(team_id="42", issue_key="MH-91") == "/team/42/todolist/MH-91"
 

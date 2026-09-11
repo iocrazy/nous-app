@@ -5,7 +5,8 @@
  * 不断言栅格布局本身 —— 布局用 CSS 媒体查询表达，jsdom 里没有意义。
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UiIssue, AgentRef } from './types';
@@ -34,7 +35,12 @@ vi.mock('../../services/usageService', () => ({
   },
 }));
 
-vi.mock('../../services/issueMessageService', () => ({
+// Spread the real module first: the thread calls helpers this file never
+// stubs (`startedByWakeup`, read once per pair of rows), and a factory that
+// lists only the fetchers turns any multi-row fixture into a hard crash
+// inside <IssueChatThread> rather than a failed assertion.
+vi.mock('../../services/issueMessageService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/issueMessageService')>()),
   listIssueMessages: vi.fn(async () => ({ messages: [] })),
   postIssueMessage: vi.fn(async () => ({})),
   getCommentTriggerPreview: vi.fn(async () => null),
@@ -80,11 +86,39 @@ const RUN_EVENTS = [
   { seq: 2, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '' },
   { seq: 4, event_type: 'step_start', payload: { turn: 1, step: 2 }, created_at: '' },
 ];
+// An EARLIER exchange that ran longer: its step 4 exists nowhere else in the
+// thread, so a link to it can only be honoured by opening the folded group
+// those runs live in (3a Task 8b, fix round 1).
+const OLD_RUN_EVENTS = [
+  { seq: 1, event_type: 'user', payload: { content: 'go' }, created_at: '' },
+  { seq: 2, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '' },
+  { seq: 4, event_type: 'step_start', payload: { turn: 1, step: 2 }, created_at: '' },
+  { seq: 6, event_type: 'step_start', payload: { turn: 1, step: 3 }, created_at: '' },
+  { seq: 8, event_type: 'step_start', payload: { turn: 1, step: 4 }, created_at: '' },
+];
+const OLD_RUN_IDS = new Set(['401', '402']);
+// One run, two turns — the shape that makes a bare `?step=` ambiguous: the
+// trajectory keys its nodes by (turn, step), so this transcript draws TWO
+// "step 2" nodes.
+const TWO_TURN_EVENTS = [
+  { seq: 1, event_type: 'user', payload: { content: 'go' }, created_at: '' },
+  { seq: 2, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '' },
+  { seq: 4, event_type: 'step_start', payload: { turn: 1, step: 2 }, created_at: '' },
+  { seq: 6, event_type: 'step_start', payload: { turn: 2, step: 1 }, created_at: '' },
+  { seq: 8, event_type: 'step_start', payload: { turn: 2, step: 2 }, created_at: '' },
+];
 vi.mock('../../services/aiLibraryService', () => ({
   aiLibraryService: {
     cancelRun: vi.fn(async () => undefined),
     getRunViewAt: (...a: [string, number]) => getRunViewAt(...a),
-    getRunEvents: vi.fn(async () => ({ items: RUN_EVENTS, count: RUN_EVENTS.length, has_more: false })),
+    getRunEvents: vi.fn(async (runId: string) => {
+      const items = String(runId) === '601'
+        ? TWO_TURN_EVENTS
+        : OLD_RUN_IDS.has(String(runId))
+          ? OLD_RUN_EVENTS
+          : RUN_EVENTS;
+      return { items, count: items.length, has_more: false };
+    }),
     getRunForks: vi.fn(async () => ({ items: [] })),
     forkRun: (...a: [string, { at_seq: number; steer?: string }]) => forkRun(...a),
   },
@@ -533,5 +567,180 @@ describe('IssueDetailView — fork refusal', () => {
     // copy for the code (fallback echoed by this file's t mock), never the raw message
     expect(screen.getByTestId('fork-error').textContent).toContain('still going');
     expect(screen.getByTestId('fork-dialog')).toBeTruthy();
+  });
+});
+
+
+// ── harness 3a Task 8b: the `?step=` half of a lineage deep link ────────────
+//
+// `issue_links.issue_deep_link` has appended `?step=N` since Task 3b, and spec
+// §4 promises the link "锚到那一步". The page read `run`/`seq` and nothing
+// else, so every link built from an object's provenance landed at the top of
+// the issue — the anchor was written, sent, and silently dropped on arrival.
+describe('IssueDetailView — lineage deep link (?step)', () => {
+  function runMessage(over: Record<string, unknown> = {}) {
+    return {
+      id: 'm-run',
+      issue_id: 1,
+      kind: 'agent_run',
+      author_user_id: null,
+      author_agent_id: 'a1',
+      agent_run_id: '501',
+      content: null,
+      body: null,
+      created_at: '2026-08-03T00:00:00Z',
+      meta: { status: 'completed' },
+      ...over,
+    };
+  }
+
+  function renderAt(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route
+            path="/team/:teamId/todolist/:identifier"
+            element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const stepNode = (n: number) =>
+    document.querySelector(`[data-testid="traj-step"][data-step="${n}"]`) as HTMLElement | null;
+  const steps = (n: number) =>
+    [...document.querySelectorAll(`[data-testid="traj-step"][data-step="${n}"]`)] as HTMLElement[];
+
+  const isOpen = (node: HTMLElement) =>
+    node.querySelector('button')!.getAttribute('aria-expanded') === 'true';
+
+  /** Let real time pass in `act`-flushed slices until `done` holds. */
+  async function settleUntil(done: () => boolean, slices = 25) {
+    for (let i = 0; i < slices && !done(); i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+    }
+  }
+
+  it('opens the step the link named, and leaves the others folded', async () => {
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1?step=2');
+    await waitFor(() => expect(stepNode(2)).not.toBeNull());
+    await waitFor(() =>
+      expect(stepNode(2)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('true'),
+    );
+    // Exactly as wide as the promise: the anchor opens ONE step, it does not
+    // unfold the whole run.
+    expect(stepNode(1)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens a step that only exists inside a COLLAPSED run-group', async () => {
+    // The shape that breaks without this fix: an earlier exchange of two
+    // consecutive `agent_run` rows (one per turn of a bounded continuation)
+    // folded by `runGrouping` into a card that starts collapsed, then a
+    // comment, then today's run. The newest run is the one the scrubber
+    // attaches to, so IT is not folded — but the old group is, and a
+    // collapsed group renders no `run-group-body` at all, so the trajectory
+    // under it never mounts. Step 4 exists only in that old run: the anchor
+    // used to poll for ten seconds and give up, leaving the reader at the top
+    // of the issue, which is the symptom this feature exists to remove.
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [
+        runMessage({ id: 'm-401', agent_run_id: '401' }),
+        runMessage({ id: 'm-402', agent_run_id: '402' }),
+        { id: 'm-c', issue_id: 1, kind: 'comment', author_user_id: 'u1', author_agent_id: null, body: 'go on', meta: {}, created_at: '2026-08-03T01:00:00Z' },
+        runMessage({ id: 'm-501', agent_run_id: '501' }),
+      ],
+    });
+    renderAt('/team/9/todolist/NOUS-1?step=4');
+    await waitFor(() => expect(screen.getByTestId('run-group-card')).toBeTruthy());
+    // No "starts collapsed" assertion here: the search unfolds it within a
+    // frame of the card appearing, so pinning the initial state would be a
+    // race against the very fix under test. `RunGroupCard`'s own default
+    // (`useState(false)`) is what makes this case meaningful, and the mutation
+    // check — comment out the unfolding and step 4 never renders — is what
+    // proves the test can fail.
+    //
+    // The unfold is dispatched from a timer, not from this test, so its state
+    // update lands in React's act queue. Letting real time pass INSIDE `act`
+    // is what flushes it; a bare `waitFor` would spin until its own timeout on
+    // an update it is itself holding back.
+    await settleUntil(() => steps(4).some(isOpen));
+    expect(screen.getByTestId('run-group-toggle').getAttribute('aria-expanded')).toBe('true');
+    // Step 4 exists in no other run: its presence IS the unfolding.
+    expect(steps(4).length).toBeGreaterThan(0);
+    // SOME step 4: the folded group holds two runs and the link carries no run
+    // id, so which of them the anchor lands on is undetermined by design. What
+    // must hold is that the reader arrives at an open step.
+    expect(steps(4).some(isOpen)).toBe(true);
+  });
+
+  it('uses the turn to pick BETWEEN two nodes with the same step number', async () => {
+    // `foldEvents` keys a node by (turn, step), so a two-turn run draws two
+    // "step 2"s. Step alone lands on whichever the page finds last, which is
+    // turn 2 here — so a link to turn 1 is only honoured if the turn is read.
+    progressState.value = mkProgress({ current_run: { ...mkProgress().current_run, id: '601' } });
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [runMessage({ id: 'm-601', agent_run_id: '601' })],
+    });
+    renderAt('/team/9/todolist/NOUS-1?step=2&turn=1');
+    await settleUntil(() => steps(2).length >= 2 && steps(2).some(isOpen));
+    const byTurn = (n: number) =>
+      document.querySelector(`[data-testid="traj-step"][data-step="2"][data-turn="${n}"]`) as HTMLElement;
+    expect(isOpen(byTurn(1))).toBe(true);
+    expect(isOpen(byTurn(2))).toBe(false);
+  });
+
+  it('leaves every step folded when the URL names none', async () => {
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1');
+    await waitFor(() => expect(stepNode(2)).not.toBeNull());
+    expect(stepNode(2)!.querySelector('button')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('survives StrictMode: the doubled mount/cleanup/mount still opens the step', async () => {
+    // `index.tsx` wraps the app in <React.StrictMode>, so in development every
+    // effect runs mount → cleanup → mount. The search starts on the first
+    // pass, the cleanup cancels it, and a "we already did this" ref used to
+    // block the second pass — leaving `?step=` permanently dead on exactly the
+    // machine where a human verifies it by hand.
+    progressState.value = mkProgress();
+    // TWICE: StrictMode mounts the tree twice, so the thread fetches twice.
+    // A single `…Once` would leave the second mount — the one that survives —
+    // with an empty thread, and the test would fail for a reason that has
+    // nothing to do with the anchor.
+    const thread = { messages: [runMessage({ id: 'm-strict', agent_run_id: '501' })] };
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce(thread);
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1?step=2']}>
+          <Routes>
+            <Route
+              path="/team/:teamId/todolist/:identifier"
+              element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </React.StrictMode>,
+    );
+    await settleUntil(() => steps(2).some(isOpen));
+    expect(steps(2).some(isOpen)).toBe(true);
+  });
+
+  it('a replay link still wins: `run`+`seq` seeks and does not chase a step', async () => {
+    // Both keys on one URL is not a shape we build, but `run`/`seq` is the
+    // more specific instruction — it names WHICH run.
+    getRunViewAt.mockClear();
+    progressState.value = mkProgress();
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [runMessage()] });
+    renderAt('/team/9/todolist/NOUS-1?run=501&seq=4&step=2');
+    await waitFor(() => expect(getRunViewAt).toHaveBeenCalledWith('501', 4));
   });
 });

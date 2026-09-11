@@ -38,7 +38,10 @@ from app.repositories.run_deliverables_repository import (
 from app.schemas.outputs import OutputDiffResponse, OutputLineageResponse
 from app.services.deliverables.diff import build_diff
 from app.services.deliverables.kinds import ALL_KINDS
-from app.services.deliverables.lineage_view import version_of
+from app.services.deliverables.lineage_view import (
+    redact_foreign_issue_links,
+    version_of,
+)
 from app.services.issues.issue_visibility import assert_issue_visible
 from app.services.modules.gate import require_module
 
@@ -111,7 +114,14 @@ async def get_output_lineage(
     """Every version of one object, newest first, each with the run / issue /
     coordinates / model / spend that produced it."""
     rows = await _visible_chain(kind, ref_id, auth)
-    versions = [version_of(row) for row in rows]
+    # The gate above proved ONE issue visible — the newest version's. Any
+    # older version filed under a different issue keeps its coordinates but
+    # loses the link built from ITS team (3a Task 8b). The per-issue endpoint
+    # needs no equivalent: its rows were selected BY the issue it already
+    # checked, so every row there is on the gated issue by construction.
+    versions = redact_foreign_issue_links(
+        [version_of(row) for row in rows], gated_issue_id=rows[0].get("issue_id")
+    )
     return OutputLineageResponse(
         kind=kind,
         ref_id=str(ref_id),

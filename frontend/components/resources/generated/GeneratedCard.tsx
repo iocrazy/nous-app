@@ -146,6 +146,26 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
   const hintTitle = (label: string, hint: string) => `${label} — ${hint}`;
 
   const deepLink = item.source.deep_link;
+  // 3a §5: "谁 · issue · run #… · 第几步". `label` is the first half (the
+  // backend builds it); these two are the coordinates that tell two cards
+  // from two runs of the SAME issue apart — without them both read as four
+  // identical words and "which run made this one?" needs the issue opened.
+  //
+  // Last six digits only: the full Snowflake is 18 characters of noise on a
+  // 150px card, and the tail is what the rest of the UI prints for a run.
+  // `step` is compared against null, not truth-tested — steps are 0-based.
+  const runTail = item.source.run_id ? item.source.run_id.slice(-6) : null;
+  const sourceCoords = [
+    runTail ? t('generated.card.sourceRun', { run: runTail, defaultValue: 'run #{{run}}' }) : null,
+    item.source.step != null
+      ? t('generated.card.sourceStep', { n: item.source.step, defaultValue: 'step {{n}}' })
+      : null,
+  ].filter(Boolean);
+  // No provenance → the bare label. A trailing separator reads as a line that
+  // got cut off.
+  const sourceText = sourceCoords.length
+    ? `${item.source.label} · ${sourceCoords.join(' · ')}`
+    : item.source.label;
   // Three destinations, three sentences. The canvas arm is keyed off
   // `node_id`, which an `agent_run` row never has — so without its own arm a
   // run link would inherit the vague fallback and tell the reader "opens where
@@ -261,11 +281,11 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             className="flex w-full items-center gap-1 truncate text-left text-content-3 hover:text-content"
           >
             <ExternalLink size={11} aria-hidden="true" className="shrink-0" />
-            <span className="truncate">{item.source.label}</span>
+            <span className="truncate">{sourceText}</span>
           </button>
         ) : (
-          <div className="truncate" title={item.source.label}>
-            {item.source.label}
+          <div className="truncate" title={sourceText}>
+            {sourceText}
           </div>
         )}
         <div className="truncate tabular-nums text-content-4" title={metaLine}>

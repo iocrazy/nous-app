@@ -45,6 +45,19 @@ def test_agent_run_prints_the_agent_and_the_issue():
     assert s["step"] == 3
 
 
+def test_the_turn_rides_along_when_the_registry_row_has_one():
+    """``provenance_for`` selects ``turn`` beside ``step``; the card's link is
+    built by the SAME builder the lineage panel uses, so it must carry the same
+    pair or the two drift by a query key (3a Task 8b fix round 1)."""
+    s = describe_source(
+        {"origin_kind": "agent_run", "id": "500"},
+        canvas_names={},
+        team_id="42",
+        provenance={**PROV, "turn": 2},
+    )
+    assert s["deep_link"] == "/team/42/todolist/MH-91?step=3&turn=2"
+
+
 def test_a_run_without_a_step_links_to_the_issue_without_an_anchor():
     s = describe_source(
         {"origin_kind": "agent_run"},

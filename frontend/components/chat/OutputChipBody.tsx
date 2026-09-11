@@ -21,7 +21,13 @@ export interface OutputChipBodyProps {
   version: number;
   /** Registry title snapshot; null rows fall back to kind + id. */
   title: string | null;
-  onRemove: () => void;
+  /**
+   * Un-stage this draft citation. OMITTED in the thread (3a Task 8b): a
+   * posted comment is a record, so an X on it would either do nothing or
+   * edit history. Without the handler the button is not rendered at all —
+   * a disabled X still reads as "removable, just not now".
+   */
+  onRemove?: () => void;
 }
 
 const KIND_LABEL: Record<string, [string, string]> = {
@@ -55,16 +61,18 @@ export const OutputChipBody: React.FC<OutputChipBodyProps> = ({
       <span className="shrink-0 tabular-nums text-info">
         {t('outputs.version', 'v{{n}}', { n: version })}
       </span>
-      <button
-        type="button"
-        data-testid="staged-output-chip-remove"
-        onClick={onRemove}
-        aria-label={t('outputs.citationRemove', 'Remove This Reference')}
-        title={t('outputs.citationRemove', 'Remove This Reference')}
-        className="text-ink-500 hover:text-danger transition-colors"
-      >
-        <X className="w-3 h-3" />
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          data-testid="staged-output-chip-remove"
+          onClick={onRemove}
+          aria-label={t('outputs.citationRemove', 'Remove This Reference')}
+          title={t('outputs.citationRemove', 'Remove This Reference')}
+          className="text-ink-500 hover:text-danger transition-colors"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
     </span>
   );
 };

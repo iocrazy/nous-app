@@ -214,11 +214,16 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
   const { t } = useTranslation();
   const open = node.live || expanded;
   const tail = [fmtMs(node.summary.durationMs), fmtCents(node.summary.costCents)].filter(Boolean).join(' · ');
+  // `data-step` + `data-turn`: a node's identity is the PAIR (see foldEvents'
+  // `step:${turn}:${step}` key), so a reader addressing one step from outside
+  // — a lineage deep link — needs both halves in the DOM. The step alone is
+  // ambiguous on every run that took more than one turn.
   return (
     <div
       className={`rounded-md ${node.live ? 'border border-ok-line bg-ok-soft/40' : ''}`}
       data-testid={node.live ? 'traj-step-live' : 'traj-step'}
       data-step={node.step}
+      data-turn={node.turn}
     >
       <button
         type="button"

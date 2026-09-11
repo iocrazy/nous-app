@@ -30,7 +30,7 @@ class OutputVersion(BaseModel):
     ``issue_deep_link`` the Generated inbox card uses, so the two never drift::
 
         "issue_key": "MH-91",
-        "deep_link": "/team/424242424242/todolist/MH-91?step=3"
+        "deep_link": "/team/424242424242/todolist/MH-91?step=3&turn=2"
 
     ``deep_link`` is ``None`` when the run has no issue, when the issue has no
     identifier, or when it has no team — never a URL assembled from the

@@ -16,6 +16,7 @@ Two disciplines are pinned here on purpose:
 from __future__ import annotations
 
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -154,13 +155,22 @@ def test_lineage_carries_the_issue_key_and_a_deep_link(monkeypatch):
         _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()["versions"][0]
     )
     assert top["issue_key"] == ISSUE_KEY
-    assert top["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3"
+    assert top["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
 
 
 def test_the_step_anchor_is_part_of_the_link(monkeypatch):
     """A run of thirty steps opens on the step that produced THIS version, not
-    at the top of the issue."""
-    rows = [_row(1, step=7)]
+    at the top of the issue. The turn rides along: the trajectory keys its
+    nodes by ``(turn, step)``, so a multi-turn run has several step 7s."""
+    rows = [_row(1, step=7, turn=4)]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    assert body["versions"][0]["deep_link"].endswith("?step=7&turn=4")
+
+
+def test_a_version_with_no_turn_keeps_the_one_key_anchor(monkeypatch):
+    """Rows registered before ``turn`` was recorded. The link is exactly what
+    it was — never ``&turn=None``."""
+    rows = [_row(1, step=7, turn=None)]
     body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
     assert body["versions"][0]["deep_link"].endswith("?step=7")
 
@@ -239,6 +249,7 @@ def test_the_lineage_link_is_byte_identical_to_the_generated_inbox_one(monkeypat
             "issue_key": row["issue_key"],
             "agent_name": "Script Ai",
             "step": row["step"],
+            "turn": row["turn"],
         },
     )
     assert top["deep_link"] == card["deep_link"]
@@ -330,3 +341,63 @@ def test_diff_checks_visibility_before_reading_content(monkeypatch):
     c = _client(monkeypatch, visible=False)
     assert c.get("/api/v1/outputs/script_shot/9/diff?from=1&to=2").status_code == 404
     mod.build_diff.assert_not_awaited()
+
+
+# ── per-object gate: one issue's visibility is not every issue's ─────────
+
+
+OTHER_ISSUE_ID = "348087075560999"
+OTHER_ISSUE_KEY = "OPS-3"
+OTHER_TEAM_ID = "999999999999"
+
+
+def test_an_older_version_on_another_issue_loses_its_key_and_link(monkeypatch):
+    """The gate is the NEWEST version's issue (see the router's docstring), but
+    every row builds its OWN ``issue_key`` / ``deep_link`` out of its OWN team.
+    A caller allowed to read version 2 would otherwise receive a clickable,
+    team-scoped URL into an issue nobody checked they may see — the team
+    boundary leaking one row at a time (3a Task 8b)."""
+    rows = [
+        _row(2),
+        _row(
+            1,
+            issue_id=OTHER_ISSUE_ID,
+            issue_key=OTHER_ISSUE_KEY,
+            team_id=OTHER_TEAM_ID,
+        ),
+    ]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    newest, older = body["versions"]
+    assert newest["issue_key"] == ISSUE_KEY
+    assert newest["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
+    assert older["issue_key"] is None
+    assert older["deep_link"] is None
+    # The bare id stays, exactly as it did before this fix: Task 3b's ruling
+    # accepted it as a coordinate, and it is neither a route nor a team.
+    assert older["issue_id"] == OTHER_ISSUE_ID
+    wire = json.dumps(body)
+    assert OTHER_ISSUE_KEY not in wire
+    assert OTHER_TEAM_ID not in wire
+
+
+def test_every_version_of_the_gated_issue_keeps_its_link(monkeypatch):
+    """The redaction is exactly as wide as the leak: a chain that never leaves
+    the gated issue is untouched, so the panel still links every revision."""
+    body = _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()
+    assert [v["issue_key"] for v in body["versions"]] == [ISSUE_KEY] * 3
+    assert all(v["deep_link"] for v in body["versions"])
+
+
+def test_a_no_issue_chain_redacts_an_older_version_that_has_one(monkeypatch):
+    """The newest version answers to no issue, so the gate was the RUN's owner
+    — nobody asked whether that older issue is visible to this caller."""
+    rows = [
+        _row(2, issue_id=None, issue_key=None, team_id=None),
+        _row(1),
+    ]
+    body = (
+        _client(monkeypatch, rows, owner=ME).get("/api/v1/outputs/script_shot/9").json()
+    )
+    older = body["versions"][1]
+    assert older["issue_id"] == ISSUE_ID
+    assert older["issue_key"] is None and older["deep_link"] is None
