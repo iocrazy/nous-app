@@ -11,8 +11,8 @@
 | 第 3 期要新建 `run_deliverables` 表（总 spec §3） | **453 已建好**（`supabase/migrations/453_harness_p4_phase1_schema.sql:109-129`）：`id/run_id/seq/kind/ref_id/version/parent_version/created_at` + 两个索引 + service_role RLS；ORM `RunDeliverables`（`backend/app/models/agents.py:656`）。`deliverable` 也早在事件类型 CHECK 内（453 → 459 → 460 → 461） | 本期**不建表**；只加列与唯一索引（mig 462） |
 | `register_deliverable` 已有白名单实现（总 spec §1④「第 1 期一次放行」） | 只存在于散文：`models/agents.py:658` docstring 与 spec 本身。**零调用方、零 emitter、零 fold**；`lineage` 在前后端零命中 | 登记口本期从零写 |
 | 咽喉点覆盖「写资源 / 写画布 / 写分镜 / 发布」四臂 | **两臂没有调用方**：agent 工具集（`services/ai/runner/agent_runner.py:119` `SUPPORTED_TOOLS` = Skill / Delegate / ResourceFetch / FinishIssue / GenerateImage / GenerateVideo / AskUser + screenwriting）里**没有任何写画布的工具**（画布是前端保存路径在写），也**没有发布工具**。第三臂「写资源」也不成立：agent 不直接写 `resources`（该表只有 `prompt_origin`，无 run 引用），它写的是 `generated_media` | 本期只接**三类**：`generated_media`（图/视频）、`script_shot`（分镜）、`script_scene` / `script_chapter`（场景与章节）。画布与发布**明确不做**（§6） |
-| 「唯一入口」要新造 | `register_generated_media()`（`services/library/generated_media_service.py:281`）已经是 `generated_media` 的**唯一插入口**，其 `GenerationOrigin`（`:253-278`）已带 `run_id / agent_id / model / provider / cost_cents / parent_resource_id / derivation_kind / conversation_id` | 登记口**叠在它上面**（不是并列），五个调用点零改动——与 #2009 骑 `safe_popen_kwargs()` 同族 |
-| run 上下文一路都在 | **分镜两条 DBOS 路径丢 run**：`workflows/script_shot_generate.py:227`、`script_shot_video.py:164` 构造 `GenerationOrigin` 时不传 `run_id`/`agent_id`，上下文在派发时就没了 | 本期最具体的缺口：派发 payload 带 `run_id`/`turn`/`step`，workflow 内回填 origin |
+| 「唯一入口」要新造 | `register_generated_media()`（`services/library/generated_media_service.py:281`）已经是 `generated_media` 的**唯一插入口**，其 `GenerationOrigin`（`:253-278`）已带 `run_id / agent_id / model / provider / cost_cents / parent_resource_id / derivation_kind / conversation_id` 。⚠️ 它有 **11 个**生产调用点（不是 5 个），其中**只有 agent 的生图/生视频工具设 `run_id`**，两条分镜 workflow 与三条画布 workflow 都不设（有两处显式传 `run_id=None`）；**`cost_cents` 至今没有任何调用方填** | 登记口**叠在它上面**（不是并列），11 个调用点零改动——与 #2009 骑 `safe_popen_kwargs()` 同族。媒体类产出的 `cost_cents` 本期**留空**（不伪造），记小票 |
+| run 上下文一路都在 | **分镜两条 DBOS 路径丢 run**：`workflows/script_shot_generate.py:227`、`script_shot_video.py:164` 构造 `GenerationOrigin` 时不传 `run_id`/`agent_id`，上下文在派发时就没了。加宽处**不是两个而是四个**：出图三个 enqueue 站点、出视频一个；agent 工具侧的 enqueue 手里已有 `scope.run_id`，今天只拿去写 task_tracking 的 metadata | 本期最具体的缺口：四个 enqueue 站点的 payload 带 `run_id`/`turn`/`step`，workflow 内回填 origin |
 | 血缘字段（模型 / 花费 / 指纹）在表里 | `run_deliverables` 现有列**没有** `model` / `cost_cents` / `turn` / `step` / `title`；总 spec §2 的 `run.lineage` 却要这些 | mig 462 补列（见 §3）；**不写 `metadata_json.lineage`**（偏差，理由见 §2.4） |
 | UI 可以叫「交付物」 | 「交付物」已被占用两处，其一就在**同一个详情页**：`frontend/components/Todolist/blocks/DeliverablesBlock.tsx:29-35`（`zone:'context', order:30`，项目阶段文件夹拖放区），另一处是 `WorkspaceStageBoard` | 界面统一叫「产出 / Outputs」，两块并存；事件与表沿用 `deliverable` / `run_deliverables` |
 | `step.summary.outputs` 可以复用成产出计数 | 它今天数的是**assistant 文本消息条数**（`TrajectoryRenderer/foldEvents.ts:334-345`，detail 是 `{chars}`） | 产出计数另起字段，不碰它 |
@@ -56,8 +56,8 @@ async def register_deliverable(
 | 类 | 挂在哪 | 说明 |
 |---|---|---|
 | `generated_media` | `register_generated_media()` 插行成功之后（`generated_media_service.py:281`） | `origin.run_id` 为空即 no-op，所以画布 / 上传 / 前端生成路径零影响；`model` / `cost_cents` 直接取 `origin` |
-| `script_shot` | `services/ai/scope/scoped_script_gateway.py` 写 `script_shots` + `script_shot_ops` 的四处（`:845,865,911,929`） | 该网关已带 `created_by_agent_run_id` / ops 的 `run_id`，登记与 ops 账本同一事务边界 |
-| `script_scene` / `script_chapter` | `repositories/script_scene_repository.py:552,577`（场景 `content_json` + `script_ops`）、`workflows/script_ai_workflows.py:67,136`（章节改写 / 分支） | 场景侧今天只有 `actor='agent:<run_id>'` 字符串里藏着 run id；章节侧连这个都没有，需从调用方透传 |
+| `script_shot` | `services/ai/scope/scoped_script_gateway.py` 写 `script_shots` + `script_shot_ops` 的四处（`:845,865,911,929`） | 该网关已带 `created_by_agent_run_id` / ops 的 `run_id`，登记与 ops 账本同一事务边界。⚠️ 只有**改内容**的写才登记：`set_shot_status` 只改状态（今天连 ops 账本行都不写），状态不是新版本 |
+| `script_scene` / `script_chapter` | `repositories/script_scene_repository.py:552,577`（场景 `content_json` + `script_ops`）、`workflows/script_ai_workflows.py:67,136`（章节改写 / 分支） | 场景侧今天只有 `actor='agent:<run_id>'` 字符串里藏着 run id；**章节侧整条调用链都取不到 run id**，要给两个 workflow 加 keyword-only 参数、并给 `ScriptService.update_chapter` / `create_chapter` 加一个署名参数 |
 
 ### 1.3 丢 run 上下文的那条路（本期必修）
 
@@ -156,6 +156,8 @@ ORM 镜像 `backend/app/models/agents.py::RunDeliverables` 同 PR 改（schema-d
 1. **`tests/workflows` 与 `test_issue_reply_resume` 同跑的顺序依赖假红** —— 每个 PR 都在干扰判读，本期查清并钉住（隔离 fixture，不是加 `-p no:randomly`）。
 2. **`agent_run_inbox` dedupe 并发唯一索引** —— 与 mig 462 同批；3a 的引用投递会更依赖收件箱幂等。
 3. **`GET /ai-library/agents?slug=` 忽略过滤** —— 验收脚本已踩到（拿到的是 `analyze` 而不是 `script_ai`），是真缺陷，顺手修并补测试。
+
+**本轮勘察新记的两张（不在本期）**：`generated_media.cost_cents` 无任何调用方填，媒体类产出的花费一直为空（要么在生成工具里拿 provider 报价，要么承认拿不到并在 UI 显 `—`）；`set_shot_status` 不写 `script_shot_ops` 账本行，与同网关其余三处不一致。
 
 ## 8. 验收（真栈，照 2b-2 口径）
 
