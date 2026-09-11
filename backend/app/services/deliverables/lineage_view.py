@@ -85,6 +85,38 @@ def version_of(
     return out
 
 
+def redact_foreign_issue_links(
+    versions: List[Dict[str, Any]], *, gated_issue_id: Any
+) -> List[Dict[str, Any]]:
+    """Blank ``issue_key`` / ``deep_link`` on every version that answers to a
+    DIFFERENT issue than the one the caller was gated on (3a Task 8b).
+
+    The per-object reader proves visibility once, against the newest version's
+    issue — but each row builds its own link out of its own ``team_id``, so an
+    older version filed under another issue would hand the caller a clickable,
+    team-scoped URL nobody checked they may follow. The rule is the cheap one:
+    same issue as the gate, or no link. It is deliberately WIDER than the leak
+    (a sibling issue the caller can see loses its link too) — the alternative
+    is one visibility round trip per distinct issue in the chain, to re-earn a
+    link the panel does not need.
+
+    ``issue_id`` is left alone: Task 3b ruled the bare snowflake is a
+    coordinate, not a route, and it was already on the wire before this.
+
+    Returns new dicts; the inputs are not mutated.
+    """
+    gate = str(gated_issue_id) if gated_issue_id is not None else None
+    out: List[Dict[str, Any]] = []
+    for version in versions:
+        own = version.get("issue_id")
+        own = str(own) if own is not None else None
+        if own == gate:
+            out.append(version)
+        else:
+            out.append({**version, "issue_key": None, "deep_link": None})
+    return out
+
+
 def group_by_object(
     rows: List[Dict[str, Any]],
     *,
@@ -121,4 +153,4 @@ def group_by_object(
     return items
 
 
-__all__ = ["group_by_object", "version_of"]
+__all__ = ["group_by_object", "redact_foreign_issue_links", "version_of"]
