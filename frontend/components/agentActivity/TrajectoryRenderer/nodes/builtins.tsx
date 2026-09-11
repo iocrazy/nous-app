@@ -10,7 +10,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, Mes
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
-import { resolveMediaUrl } from '../../../../services/outputsService';
+import { generatedMediaCoverUrl } from '../../../../services/generatedMediaService';
 import { useChildRun } from '../../../Todolist/childRunContext';
 import { useHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputDiffDialog } from '../../../Todolist/OutputDiffDialog';
@@ -310,14 +310,16 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
  * row reads `—`, never `¢0.000`.
  */
 /**
- * A generated image's cover. `ref_id` IS the generated_media id, so this is
- * the very URL the diff endpoint returns for the same row — built in the wire's
- * relative shape and put through `resolveMediaUrl`, the one place that knows a
- * bare `/api/...` would hit the Pages origin instead of the API.
+ * A generated image's cover. `ref_id` IS the generated_media id, so the URL is
+ * already owned by `generatedMediaCoverUrl` — the same helper the Generated
+ * cards, the cleanup dialog and the generation-history panel use. Nothing is
+ * built by hand here: a fifth copy of the string is a fifth place to be wrong
+ * when the route moves. (`resolveMediaUrl` stays for the diff endpoint, whose
+ * media URLs arrive relative off the wire.)
  */
 function outputThumbUrl(card: OutputCard): string | null {
   if (card.kind !== 'generated_media') return null;
-  return resolveMediaUrl(`/api/v1/generated-media/${encodeURIComponent(card.refId)}/cover`);
+  return generatedMediaCoverUrl(card.refId);
 }
 
 /** 56×40 so a row of cards keeps the thread's rhythm; a cover that 404s or is

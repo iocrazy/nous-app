@@ -11,6 +11,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OutputCard, StepNode } from '../foldEvents';
+import { generatedMediaCoverUrl } from '../../../../services/generatedMediaService';
 import { setHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputCards } from './builtins';
 
@@ -24,6 +25,13 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 vi.mock('../../../../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
+// The cover URL is NOT hand-built here: `generatedMediaCoverUrl` already owns
+// that string (three other components use it). A mock that returns something
+// nothing else could produce is what proves the card really calls it.
+const coverUrl = vi.fn((id: string) => `https://cdn.test/gen/${id}/cover`);
+vi.mock('../../../../services/generatedMediaService', () => ({
+  generatedMediaCoverUrl: (id: string) => coverUrl(id),
+}));
 vi.mock('../../../Todolist/OutputDiffDialog', () => ({
   OutputDiffDialog: ({ kind, refId, initialTo, initialFrom }: { kind: string; refId: string; initialTo?: number; initialFrom?: number }) => (
     <div data-testid="output-diff" data-kind={kind} data-ref={refId} data-to={String(initialTo ?? '')} data-from={String(initialFrom ?? '')} />
@@ -109,13 +117,22 @@ describe('OutputCards', () => {
 });
 
 describe('OutputCards — thumbnails (修复轮 1, spec §5)', () => {
-  it('a generated image carries its cover, built against the API host', () => {
+  it('a generated image carries the cover the shared helper builds', () => {
     render(<OutputCards node={step([card()])} />);
     const img = screen.getByTestId('output-thumb') as HTMLImageElement;
-    // The same URL shape Task 3's diff endpoint returns, made absolute: a bare
-    // /api/... would hit the Pages origin, which serves index.html.
-    expect(img.getAttribute('src')).toBe('http://api.test/api/v1/generated-media/77/cover');
+    // `ref_id` IS the generated_media id, so the card asks the one helper that
+    // already knows this URL rather than writing a fifth copy of it.
+    expect(img.getAttribute('src')).toBe(generatedMediaCoverUrl('77'));
+    expect(coverUrl).toHaveBeenCalledWith('77');
     expect(img.getAttribute('alt')).toBe('S3 · Shot #1');
+  });
+
+  it('follows the helper wherever it points', () => {
+    // Move the helper and the card must move with it — a hand-built string
+    // that merely coincides today would stay put.
+    coverUrl.mockImplementationOnce((id: string) => `https://elsewhere.test/${id}.png`);
+    render(<OutputCards node={step([card()])} />);
+    expect(screen.getByTestId('output-thumb').getAttribute('src')).toBe('https://elsewhere.test/77.png');
   });
 
   it('a text output has no thumbnail at all', () => {
