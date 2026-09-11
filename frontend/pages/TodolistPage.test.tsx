@@ -211,7 +211,12 @@ describe('TodolistPage — agent / project map 晚到不得重挂载详情子树
     projectsDeferred = deferred<Array<typeof PROJECT>>();
     // The single-issue endpoint wins the race — one request against two.
     h.getIssueByIdentifier.mockImplementation(async (identifier: string) =>
-      mkIssue({ identifier, issue_number: identifier === 'MH-95' ? 95 : 94 }),
+      mkIssue({
+        identifier,
+        issue_number: identifier === 'MH-95' ? 95 : 94,
+        // The rendered <h1> is how the tests below tell A from B apart.
+        title: `Issue ${identifier}`,
+      }),
     );
     h.getIssue.mockImplementation(async () => mkIssue());
     h.listIssues.mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 });
@@ -244,6 +249,68 @@ describe('TodolistPage — agent / project map 晚到不得重挂载详情子树
     expect(screen.getByTestId('issue-context-rail').getAttribute('data-probe')).toBe('typed-comment');
     // The cause, not just the symptom: a late map must not re-run the fetch.
     expect(h.getIssueByIdentifier).toHaveBeenCalledTimes(1);
+  });
+
+  /** Shared opening: A is on screen and both maps have landed. */
+  async function openA() {
+    renderPage();
+    const rail = await screen.findByTestId('issue-context-rail');
+    await act(async () => {
+      agentsDeferred.resolve([AGENT]);
+      projectsDeferred.resolve([PROJECT]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(h.listIssues).toHaveBeenCalled());
+    return rail;
+  }
+
+  /**
+   * A → B → A while B is still in flight (click into B, hit Back immediately).
+   * The second load is for the issue the page LEFT, so "same identifier as
+   * `selectedIssue`" is not the same question as "that subtree is on screen":
+   * during B's placeholder frame nothing is mounted, and A must be loaded like
+   * any other cold load — placeholder, then settle.
+   */
+  it('lands back on A when B is still in flight, and drops B late response', async () => {
+    await openA();
+
+    const bFetch = deferred<Issue>();
+    h.getIssueByIdentifier.mockReturnValueOnce(bFetch.promise);
+    await act(async () => { navigateTo('/team/9/todolist/MH-95'); });
+    // B in flight: the placeholder replaced the whole subtree, as it should.
+    expect(screen.queryByTestId('issue-context-rail')).toBeNull();
+
+    await act(async () => { navigateTo('/team/9/todolist/MH-94'); });
+
+    await waitFor(() => expect(screen.getByTestId('issue-context-rail')).toBeTruthy());
+    expect(screen.getByRole('heading', { level: 1, name: 'Issue MH-94' })).toBeTruthy();
+    expect(screen.queryByText(/^Loading /)).toBeNull();
+
+    // B answers after the page has already gone back to A — drop it.
+    await act(async () => {
+      bFetch.resolve(mkIssue({ identifier: 'MH-95', issue_number: 95, title: 'Issue MH-95' }));
+    });
+    expect(screen.getByRole('heading', { level: 1, name: 'Issue MH-94' })).toBeTruthy();
+    expect(screen.queryAllByText('Issue MH-95')).toHaveLength(0);
+    expect(screen.queryByText(/^Loading /)).toBeNull();
+  });
+
+  /** A → B where B fails → back to A. B error page shows; A must recover. */
+  it('recovers to A after B failed, without carrying B error page over', async () => {
+    await openA();
+
+    h.getIssueByIdentifier.mockRejectedValueOnce(new Error('Issue MH-95 not found'));
+    await act(async () => { navigateTo('/team/9/todolist/MH-95'); });
+
+    // The failure really did surface while the page was on B.
+    await screen.findByText('Issue MH-95 not found');
+    expect(screen.queryByTestId('issue-context-rail')).toBeNull();
+
+    await act(async () => { navigateTo('/team/9/todolist/MH-94'); });
+
+    await screen.findByTestId('issue-context-rail');
+    expect(screen.getByRole('heading', { level: 1, name: 'Issue MH-94' })).toBeTruthy();
+    expect(screen.queryByText('Issue MH-95 not found')).toBeNull();
   });
 
   /**

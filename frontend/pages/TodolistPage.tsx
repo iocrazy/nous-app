@@ -231,10 +231,19 @@ export function TodolistPage() {
   // lands if nothing newer has been asked for since — the single fetch path is
   // shared by the URL effect and by the post-dispatch re-read.
   const selectedReqRef = useRef(0);
-  const selectedIssueRef = useRef<UiIssue | null>(selectedIssue);
-  useEffect(() => {
-    selectedIssueRef.current = selectedIssue;
-  }, [selectedIssue]);
+  /**
+   * Which issue's detail subtree is mounted RIGHT NOW, or null while the page
+   * is showing the placeholder / the error page / no issue at all.
+   *
+   * Deliberately not "the identifier `selectedIssue` happens to hold":
+   * `selectedIssue` keeps the issue the page has LEFT until the next one
+   * lands, so on an A→B→A flip it would claim A is on screen while B's
+   * placeholder is what the user is actually looking at — and a load that
+   * skips the placeholder from there never settles it again. Written
+   * synchronously at every transition below, so it is always the frame the
+   * user has, never one render behind.
+   */
+  const shownIdentifierRef = useRef<string | null>(null);
 
   /**
    * The one place the open issue is fetched. Every trigger goes through here.
@@ -251,8 +260,12 @@ export function TodolistPage() {
    */
   const loadSelectedIssue = useCallback(async (wanted: string) => {
     const seq = ++selectedReqRef.current;
-    const inPlace = selectedIssueRef.current?.identifier === wanted;
+    const inPlace = shownIdentifierRef.current === wanted;
     if (!inPlace) {
+      // Nothing of `wanted` is on screen, so this is a cold load: placeholder
+      // now, settled in `finally` — including when an earlier request for a
+      // different issue is still in flight and will be discarded below.
+      shownIdentifierRef.current = null;
       setSelectedLoading(true);
       setSelectedError(null);
     }
@@ -261,6 +274,7 @@ export function TodolistPage() {
       if (selectedReqRef.current !== seq) return;
       const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
       setSelectedIssue(toUiIssue(raw, agentMap, projectMap));
+      shownIdentifierRef.current = wanted;
     } catch (err) {
       if (selectedReqRef.current !== seq) return;
       if (inPlace) {
@@ -271,14 +285,22 @@ export function TodolistPage() {
       }
       setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
     } finally {
-      if (selectedReqRef.current === seq && !inPlace) setSelectedLoading(false);
+      // Settling is unconditional for the newest request: an in-place refetch
+      // never turned it on, and React bails out of a no-op setState, so this
+      // cannot cost the mounted subtree a render.
+      if (selectedReqRef.current === seq) setSelectedLoading(false);
     }
   }, []);
 
   // Fetch single issue when :identifier set
   useEffect(() => {
     if (!identifier) {
+      // Back to the list: reset every gate, so the next detail open starts
+      // from a clean frame instead of inheriting a stale error or placeholder.
+      shownIdentifierRef.current = null;
       setSelectedIssue(null);
+      setSelectedError(null);
+      setSelectedLoading(false);
       return undefined;
     }
     void loadSelectedIssue(identifier);
