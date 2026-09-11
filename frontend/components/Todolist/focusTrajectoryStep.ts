@@ -36,6 +36,27 @@ function stepNodes(step: number): HTMLElement[] {
   ];
 }
 
+/**
+ * Open every collapsed run-group card.
+ *
+ * A bounded-continuation dispatch writes one `agent_run` row per turn, and
+ * `runGrouping` folds two or more consecutive rows into a card that starts
+ * COLLAPSED — which renders no `run-group-body` at all, so the trajectory
+ * underneath never mounts and the step node this function is hunting for does
+ * not exist in the DOM. Polling alone would just time out: the answer is not
+ * "wait longer", it is "the thing is folded".
+ *
+ * Only currently-collapsed toggles are clicked, so calling it repeatedly is
+ * idempotent while the search runs; the search's own deadline is what stops
+ * it, and a group the reader folds back afterwards stays folded.
+ */
+function expandRunGroups(): void {
+  const folded = document.querySelectorAll<HTMLElement>(
+    '[data-testid="run-group-toggle"][aria-expanded="false"]',
+  );
+  folded.forEach((toggle) => toggle.click());
+}
+
 /** Expand + scroll, once the node is there. `false` means "not yet". */
 function openStep(step: number): boolean {
   // The LAST match: the thread runs oldest-first, and several runs of one
@@ -69,6 +90,11 @@ export function focusTrajectoryStep(step: number): () => void {
   const tick = () => {
     timer = null;
     if (cancelled || openStep(step)) return;
+    // Not there yet — it may be folded rather than unrendered. Unfold on
+    // EVERY failed pass, not once: the thread re-renders while its rows load,
+    // and a card that remounts comes back collapsed (its expanded flag is
+    // local `useState`), so a single early click is silently undone.
+    expandRunGroups();
     if (Date.now() >= deadline) return;
     timer = setTimeout(tick, POLL_MS);
   };
