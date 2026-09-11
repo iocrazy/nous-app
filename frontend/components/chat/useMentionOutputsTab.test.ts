@@ -32,8 +32,8 @@ const SHOT = {
   title: 'S3 · Shot #1',
   latest_version: 2,
   versions: [
-    { id: '1', version: 2, parent_version: 1, run_id: '727145299382534100', issue_id: '727145299382534000', seq: null, turn: null, step: 4, title: 'S3 · Shot #1', model: null, cost_cents: null, created_at: null },
-    { id: '2', version: 1, parent_version: null, run_id: '727145299382534100', issue_id: '727145299382534000', seq: null, turn: null, step: 2, title: 'S3 · Shot #1', model: null, cost_cents: null, created_at: null },
+    { id: '1', version: 2, parent_version: 1, run_id: '727145299382534100', issue_id: '727145299382534000', issue_key: 'MH-91', deep_link: '/team/424242424242/todolist/MH-91?step=4', seq: null, turn: null, step: 4, title: 'S3 · Shot #1', model: null, cost_cents: null, created_at: null },
+    { id: '2', version: 1, parent_version: null, run_id: '727145299382534100', issue_id: '727145299382534000', issue_key: 'MH-91', deep_link: '/team/424242424242/todolist/MH-91?step=2', seq: null, turn: null, step: 2, title: 'S3 · Shot #1', model: null, cost_cents: null, created_at: null },
   ],
 };
 

@@ -20,13 +20,28 @@
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
 
-/** One registered version of one object. */
+/**
+ * One registered version of one object.
+ *
+ * `issue_key` and `deep_link` are what makes the issue REACHABLE. `issue_id`
+ * alone cannot address it — the route is `/team/{team_id}/todolist/{key}`, so
+ * a URL built from the snowflake 404s or lands on an unrelated issue. The
+ * backend therefore hands over a finished link (`?step=` appended when the
+ * step is known) or `null`, and no frontend assembles one. Both are `null`
+ * for a run that answers to no issue, or an issue with no key or no team.
+ *
+ * Both are REQUIRED, not optional: 3a Task 3b puts them on every version of
+ * both list endpoints, `null` included, so a fixture that omits them is
+ * describing a response the backend does not send.
+ */
 export interface OutputVersion {
   id: string;
   version: number;
   parent_version: number | null;
   run_id: string;
   issue_id: string | null;
+  issue_key: string | null;
+  deep_link: string | null;
   seq: number | null;
   turn: number | null;
   step: number | null;

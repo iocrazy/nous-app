@@ -14,15 +14,17 @@
  * failure does render, for the mirror-image reason: silence would be
  * indistinguishable from "a person made this".
  *
- * ⚠️ **No link is invented.** The lineage response carries `issue_id` and
- * `run_id` and no key or deep link, while the issue route is keyed by the
- * issue KEY and needs a team — so a URL assembled from the snowflake would
- * 404, or land on an unrelated issue. The Open Issue link therefore appears
- * only when a host hands one over (`issueHref`). No host does today; see the
- * note on the prop.
+ * ⚠️ **No link is invented.** A URL assembled from `issue_id` would 404 or
+ * land on an unrelated issue — the issue route is keyed by the issue KEY and
+ * needs a team, neither of which can be derived from the snowflake. So the
+ * Open Issue link is only ever one somebody else finished: the `deep_link`
+ * the lineage itself carries (3a Task 3b), or an `issueHref` the host passes
+ * to override it. Both absent — a run with no issue, an issue with no key or
+ * no team — and the control stays disabled saying why.
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { ExternalLink, GitCompare, PlayCircle, Sparkles } from 'lucide-react';
 
 import {
@@ -40,13 +42,13 @@ export interface OutputProvenanceProps {
    *  about yet" — panels render before their row arrives. */
   refId: string;
   /**
-   * Where "Open Issue" goes, when the host can work it out.
+   * Where "Open Issue" goes — an OVERRIDE, not the only source.
    *
-   * Optional and usually absent: the lineage endpoint returns no issue key and
-   * no team, and this component refuses to build a URL from `issue_id` alone.
-   * A host that already knows the issue (a future issue-side mount) can pass
-   * one; the object pages this ships on cannot, so they get the fact without
-   * the link rather than a link that goes nowhere.
+   * Left out, the block follows the `deep_link` the latest version carries,
+   * which is the normal case on the object pages this ships on: they know
+   * nothing about issues, and the lineage does. Pass one when the host knows
+   * better — mounted on an issue page, it already knows which issue the
+   * reader arrived from, and that beats the producing run's own issue.
    */
   issueHref?: string;
   className?: string;
@@ -111,6 +113,9 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
 
   const latest = lineage.versions[0];
   const versions = lineage.versions.length;
+  // The host's answer wins; the lineage's own link is the fallback, and both
+  // may be absent. Neither is ever synthesised — see the note at the top.
+  const issueUrl = issueHref ?? latest.deep_link;
 
   return (
     <>
@@ -152,12 +157,18 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {/* A LINK, not a button: middle-click and copy-address are what a
               reader does with "open the issue that made this". Rendered only
-              when the host resolved one — see the prop's note. */}
-          {issueHref ? (
-            <a data-testid="output-provenance-issue" href={issueHref} className={BTN}>
+              when somebody handed one over — see the note at the top.
+
+              `Link`, not a bare `<a>`: this block mounts INSIDE the canvas
+              editor (ShotNodeView) and the script sheet, so a document reload
+              would throw away the graph the reader is standing in. It still
+              emits a real `href`, so middle-click and copy-address behave the
+              way the paragraph above promises. */}
+          {issueUrl ? (
+            <Link data-testid="output-provenance-issue" to={issueUrl} className={BTN}>
               <ExternalLink size={11} />
               {t('outputs.provenanceOpenIssue', 'Open Issue')}
-            </a>
+            </Link>
           ) : (
             <span
               data-testid="output-provenance-issue-unlinked"

@@ -36,14 +36,16 @@ vi.mock('../OutputDiffDialog', () => ({
 
 const ISSUE_ID = 347474243723822;
 
-const version = (version: number, parent: number | null) => ({
+const version = (version: number, parent: number | null, over: Record<string, unknown> = {}) => ({
   id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: String(ISSUE_ID),
+  issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
-  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z',
+  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z', ...over,
 });
 
 const shot: OutputObject = { kind: 'script_shot', ref_id: '9', title: 'Shot #1 v3', latest_version: 3, versions: [version(3, 2), version(2, 1), version(1, null)] };
-const image: OutputObject = { kind: 'generated_media', ref_id: '77', title: 'S3 · Shot #1', latest_version: 1, versions: [version(1, null)] };
+// No issue on this one's run (a canvas lane), so no key and no link.
+const image: OutputObject = { kind: 'generated_media', ref_id: '77', title: 'S3 · Shot #1', latest_version: 1, versions: [version(1, null, { issue_id: null, issue_key: null, deep_link: null })] };
 
 function ctx(): IssueBlockContext {
   return { issue: { id: ISSUE_ID }, rollup: { issue_id: String(ISSUE_ID) } as never, originKind: null, phase: 'running', env: {} };

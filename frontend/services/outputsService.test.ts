@@ -34,6 +34,8 @@ const version = {
   parent_version: 1,
   run_id: '347786145852700',
   issue_id: '5',
+  issue_key: 'MH-91',
+  deep_link: '/team/424242424242/todolist/MH-91?step=3',
   seq: 12,
   turn: 1,
   step: 3,
