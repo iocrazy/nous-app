@@ -1228,7 +1228,7 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 
 写进本 plan 末尾：八项验收表 + 真栈才暴露的缺陷清单 + 记小票；spec 的「实施记录」同步。
 
-- [ ] **Step 5: 收尾**
+- [x] **Step 5: 收尾**
 
 `npm run e2e:prod` 绿；记忆改 shipped；销毁 worktree；SDD 工作区保留证据文件。
 
@@ -1305,3 +1305,7 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 **复验新发现（与本波无关；勘察定为既有——2026-05-05 `0a2caed4` 首次接线即如此、#1384 加了第二触发源；顺手修于 T8d PR #2254）**：issue 详情页加载约 1 s 后整棵子树被替换一次，正在输入的评论与打开的弹层被静默清空（复验因此浪费一轮 ¢0.12）。`<aside>`（`IssueDetailView.tsx:786`）本身被替换，病根在挂载点上游。
 
 **观察**：`staged-output-chip` testid 一名两用（作曲区暂存与线程历史 chip 共用组件），测试要靠 `comment-citations`/`staged-output-chip-remove` 区分；MH-93 无 project 绑定，screenwriting 工具一律 `scope_unbound`，不能再当跨议题样本；MH-95 为复验新建，分镜 337650953731886 的最新版 v7 现挂在它名下。
+
+**T8d（#2254，既有缺陷顺手修）**：`pages/TodolistPage.tsx` 单议题 effect 的依赖带着晚到的 `agentsById`/`projectsById`，解析时 effect 重跑 → `setSelectedLoading(true)` → 回到 Loading 占位 → `IssueDetailView` 整树卸载重挂。修：`mapsRef` 上提、依赖收成 `[identifier]`；单议题抓取收成唯一入口 `loadSelectedIssue`，`inPlace` 由 `shownIdentifierRef` 回答「屏幕上挂着谁的子树」，同议题重抓就地更新、请求序号丢弃过期响应。评审一轮（两条 Critical：A→B→A 卡 Loading、A→B 失败→A 卡错误页，同根一并消掉）。合并 8dba5f14，`app.nous.ink` version.json = 8dba5f1。
+
+**收尾**：`npm run e2e:prod` 绿（复验第二轮零重试）；记忆改 shipped；`feat-p4-3a-t{1..7,3b,6b,8a,8b,8c}`、`fix-todolist-remount` worktree 已销毁；SDD 工作区 `.superpowers/sdd/2026-09-10-harness-p4-phase3a-outputs-lineage/` 保留（ledger、briefs、reports、两份验收证据、复验证据、勘察报告、评审包）。
