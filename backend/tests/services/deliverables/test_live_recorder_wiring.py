@@ -10,9 +10,15 @@
    ``(run_id, seq)`` 唯一索引被静默丢掉（真栈 transcript 里
    ``deliverable(4) tool_call(5)`` 正是这个形状）。
 
-能交出 recorder 的只有**活着的**两条路 —— 分镜/剧本工具与出图出片工具，两
-者的 ``run_context`` 都由 ``_media_run_context`` 组装。迟到的登记（run 已结
-束、DBOS 侧回来的）照旧走 ``for_run``，那时没有第二个 writer 可撞。
+能交出 recorder 的只有**同进程、同轮次**的那两条路 —— 分镜/剧本工具与出图出
+片工具，两者的 ``run_context`` 都由 ``_media_run_context`` 组装。其余登记照旧
+走 ``for_run``。
+
+⚠️ 别把 ``for_run`` 读成「那时父 run 一定已经结束」：`GenerateShotImage` 只确认
+dispatch 就返回，DBOS 侧那次 `register_generated_media` 可能落在父 run 仍然活着
+时。那条路够不着 recorder，兜住它的是 `RunEventWriter` 自己 —— `append` 撞唯一
+索引重新播种并重试，重折守卫也以那次撞车为信号打开
+（`tests/runner/test_seq_conflict_retry.py`）。
 """
 
 from __future__ import annotations
