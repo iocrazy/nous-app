@@ -14,7 +14,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { History, X } from 'lucide-react';
+import { History, PlayCircle, X } from 'lucide-react';
 
 import {
   getOutputDiff,
@@ -24,6 +24,7 @@ import {
   type OutputDiffSide,
   type OutputVersion,
 } from '../../services/outputsService';
+import { useChildRun } from './childRunContext';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
 
 export interface OutputDiffDialogProps {
@@ -133,6 +134,11 @@ const MediaSide: React.FC<{ side: OutputDiffSide; t: T }> = ({ side, t }) => {
 export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId, title, initialTo, initialFrom, onClose }) => {
   const { t } = useTranslation();
   const tr = t as unknown as T;
+  // The run that produced the newer side — the same affordance a sub-agent
+  // card offers, through the same context. Outside a provider (the dialog can
+  // be opened from the rail, where no run panel is mounted) it draws disabled
+  // rather than vanishing, so the reader knows the run is knowable.
+  const childRun = useChildRun();
   const [versions, setVersions] = useState<OutputVersion[]>([]);
   const [to, setTo] = useState<number | null>(initialTo ?? null);
   const [pinnedFrom, setPinnedFrom] = useState<number | null>(initialFrom ?? null);
@@ -318,6 +324,30 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
         )}
 
         <div className="mt-3 flex items-center gap-3">
+          {diff && (
+            <button
+              type="button"
+              data-testid="output-open-run"
+              disabled={!childRun}
+              title={childRun ? undefined : t('outputs.openRunHint', 'The run panel is not open here')}
+              onClick={() =>
+                childRun?.open({
+                  childRunId: diff.to.run_id,
+                  parentRunId: null,
+                  // The coordinate the registry kept for this version; 0 when
+                  // the chain does not carry one (the panel only labels it).
+                  step: versions.find((v) => v.version === diff.to.version)?.step ?? 0,
+                  mode: 'sync',
+                  subagentType: kind.replace(/_/g, ' '),
+                  description: diff.to.title ?? `${kind} #${refId}`,
+                })
+              }
+              className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-1 text-[12px] text-ink-300 hover:border-info-line hover:text-info disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PlayCircle size={12} />
+              {t('outputs.openRun', 'Open Run #{{run}}', { run: diff.to.run_id.slice(-6) })}
+            </button>
+          )}
           {text && !single && (
             <span className="text-[11px] text-ink-500 tabular-nums">
               {t('outputs.changeCount', '+{{added}} / −{{removed}} words', { added: text.added, removed: text.removed })}

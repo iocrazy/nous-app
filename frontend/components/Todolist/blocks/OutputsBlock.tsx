@@ -21,6 +21,7 @@ import { FileOutput } from 'lucide-react';
 import { listIssueOutputs, type OutputObject } from '../../../services/outputsService';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { OutputDiffDialog } from '../OutputDiffDialog';
+import { setHighlightedOutput } from '../outputHighlight';
 import { RailCard } from './StatusBlock';
 
 /** The four kinds, in the words a person uses for them. */
@@ -38,6 +39,9 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [items, setItems] = useState<OutputObject[]>([]);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<OutputObject | null>(null);
+
+  // A ring must not outlive the rail that set it (navigating away mid-hover).
+  useEffect(() => () => setHighlightedOutput(null), []);
 
   useEffect(() => {
     let live = true;
@@ -73,6 +77,13 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               data-kind={item.kind}
               data-ref={item.ref_id}
               onClick={() => setOpen(item)}
+              // Pointing at a row rings the matching card in the thread, which
+              // is how a person sees WHICH step produced this object. The key
+              // names the latest version — the card the thread ends on.
+              onMouseEnter={() => setHighlightedOutput(`${item.kind}:${item.ref_id}:${item.latest_version}`)}
+              onMouseLeave={() => setHighlightedOutput(null)}
+              onFocus={() => setHighlightedOutput(`${item.kind}:${item.ref_id}:${item.latest_version}`)}
+              onBlur={() => setHighlightedOutput(null)}
               className="flex w-full items-start gap-2 py-1 text-left text-[12px] hover:bg-ink-900/60"
             >
               <FileOutput size={11} className="mt-0.5 shrink-0 text-info" />

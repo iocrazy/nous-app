@@ -10,7 +10,9 @@ import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, Mes
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
+import { getApiUrl } from '../../../../utils/apiConfig';
 import { useChildRun } from '../../../Todolist/childRunContext';
+import { useHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputDiffDialog } from '../../../Todolist/OutputDiffDialog';
 import type {
   BudgetNode,
@@ -307,10 +309,51 @@ export const StepNodeView: React.FC<NodeProps<StepNode>> = ({ node, expanded, on
  * beside the version it replaced. Spend follows fmtChildCents: an unpriced
  * row reads `—`, never `¢0.000`.
  */
+/**
+ * A generated image's cover, absolute so it reaches the API host. A bare
+ * `/api/...` would resolve against the Pages origin, which answers every
+ * unknown path with index.html (CLAUDE.md「VITE_API_URL 不能留空」) — same
+ * rule `getResourceCoverUrl` follows. `ref_id` IS the generated_media id, so
+ * this is the URL shape the diff endpoint returns for the same row.
+ */
+function outputThumbUrl(card: OutputCard): string | null {
+  if (card.kind !== 'generated_media') return null;
+  return `${getApiUrl()}/api/v1/generated-media/${encodeURIComponent(card.refId)}/cover`;
+}
+
+/** 56×40 so a row of cards keeps the thread's rhythm; a cover that 404s or is
+ *  not readable falls back to a neutral box rather than a broken-image glyph. */
+const OutputThumb: React.FC<{ card: OutputCard }> = ({ card }) => {
+  const [failed, setFailed] = React.useState(false);
+  const url = outputThumbUrl(card);
+  if (!url || failed) {
+    return url ? (
+      <span
+        data-testid="output-thumb-missing"
+        className="h-[40px] w-[56px] shrink-0 rounded border border-ink-800 bg-ink-900"
+        aria-hidden="true"
+      />
+    ) : null;
+  }
+  return (
+    <img
+      data-testid="output-thumb"
+      src={url}
+      alt={card.title ?? `${card.kind} #${card.refId}`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-[40px] w-[56px] shrink-0 rounded border border-ink-800 object-cover"
+    />
+  );
+};
+
 export const OutputCards: React.FC<{ node: StepNode }> = ({ node }) => {
   const { t } = useTranslation();
   // Which card's dialog is open, and whether it was opened as a comparison.
   const [open, setOpen] = React.useState<{ card: OutputCard; compare: boolean } | null>(null);
+  // What the rail is pointing at (harness 3a §5): hovering a row there rings
+  // the card here, so a person can tell which step made which output.
+  const highlighted = useHighlightedOutput();
   if (node.outputs.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 px-2.5 pb-1.5 pl-7" data-testid="output-cards">
@@ -323,11 +366,13 @@ export const OutputCards: React.FC<{ node: StepNode }> = ({ node }) => {
             data-testid="output-card"
             data-state={revised ? 'revised' : 'new'}
             data-kind={o.kind}
+            data-highlighted={highlighted === o.key ? 'true' : 'false'}
             className={`rounded-md border px-2 py-1 text-[11px] ${
               revised ? 'border-warn-line bg-warn-soft/40 text-warn' : 'border-ok-line bg-ok-soft/40 text-ink-300'
-            }`}
+            } ${highlighted === o.key ? 'ring-2 ring-info' : ''}`}
           >
             <div className="flex min-w-0 items-center gap-1.5">
+              <OutputThumb card={o} />
               <FileOutput size={11} className="shrink-0" />
               <span className="shrink-0 font-medium tabular-nums">
                 {revised

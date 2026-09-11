@@ -7,10 +7,11 @@
  * `¢0.000` — no generated-media call site prices its rows, and a fabricated
  * zero says the work was free (the same rule fmtChildCents writes down).
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OutputCard, StepNode } from '../foldEvents';
+import { setHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputCards } from './builtins';
 
 vi.mock('react-i18next', () => ({
@@ -22,6 +23,7 @@ vi.mock('react-i18next', () => ({
     },
   }),
 }));
+vi.mock('../../../../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('../../../Todolist/OutputDiffDialog', () => ({
   OutputDiffDialog: ({ kind, refId, initialTo, initialFrom }: { kind: string; refId: string; initialTo?: number; initialFrom?: number }) => (
     <div data-testid="output-diff" data-kind={kind} data-ref={refId} data-to={String(initialTo ?? '')} data-from={String(initialFrom ?? '')} />
@@ -46,7 +48,10 @@ const step = (outputs: OutputCard[]): StepNode => ({
   children: [], outputs,
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  setHighlightedOutput(null);
+  cleanup();
+});
 
 describe('OutputCards', () => {
   it('draws nothing when the step registered nothing', () => {
@@ -100,5 +105,42 @@ describe('OutputCards', () => {
     expect(dialog.getAttribute('data-kind')).toBe('script_shot');
     expect(dialog.getAttribute('data-to')).toBe('2');
     expect(dialog.getAttribute('data-from')).toBe('');
+  });
+});
+
+describe('OutputCards — thumbnails (修复轮 1, spec §5)', () => {
+  it('a generated image carries its cover, built against the API host', () => {
+    render(<OutputCards node={step([card()])} />);
+    const img = screen.getByTestId('output-thumb') as HTMLImageElement;
+    // The same URL shape Task 3's diff endpoint returns, made absolute: a bare
+    // /api/... would hit the Pages origin, which serves index.html.
+    expect(img.getAttribute('src')).toBe('http://api.test/api/v1/generated-media/77/cover');
+    expect(img.getAttribute('alt')).toBe('S3 · Shot #1');
+  });
+
+  it('a text output has no thumbnail at all', () => {
+    render(<OutputCards node={step([card({ key: 'script_shot:9:1', kind: 'script_shot', refId: '9', title: 'Shot 4' })])} />);
+    expect(screen.queryByTestId('output-thumb')).toBeNull();
+  });
+
+  it('a cover that fails to load falls back to a neutral placeholder', () => {
+    render(<OutputCards node={step([card()])} />);
+    fireEvent.error(screen.getByTestId('output-thumb'));
+    expect(screen.queryByTestId('output-thumb')).toBeNull();
+    expect(screen.getByTestId('output-thumb-missing')).toBeTruthy();
+  });
+});
+
+describe('OutputCards — rail hover highlight (修复轮 1, spec §5)', () => {
+  it('marks only the card the rail is pointing at', () => {
+    render(<OutputCards node={step([card(), card({ key: 'script_shot:9:2', kind: 'script_shot', refId: '9', version: 2, parentVersion: 1 })])} />);
+    const [media, shot] = screen.getAllByTestId('output-card');
+    expect(media.getAttribute('data-highlighted')).toBe('false');
+    act(() => setHighlightedOutput('generated_media:77:1'));
+    expect(media.getAttribute('data-highlighted')).toBe('true');
+    expect(media.className).toContain('ring-info');
+    expect(shot.getAttribute('data-highlighted')).toBe('false');
+    act(() => setHighlightedOutput(null));
+    expect(media.getAttribute('data-highlighted')).toBe('false');
   });
 });

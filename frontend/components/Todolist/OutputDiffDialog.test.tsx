@@ -9,6 +9,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ChildRunContext, type ChildRunState } from './childRunContext';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
@@ -42,7 +43,7 @@ const v = (version: number, parent: number | null): OutputLineage['versions'][nu
 const lineage: OutputLineage = { kind: 'script_shot', ref_id: '9', latest_version: 2, versions: [v(2, 1), v(1, null)] };
 
 const side = (version: number, text: string | null, extra: Partial<OutputDiff['from']> = {}): OutputDiff['from'] => ({
-  version, run_id: '1', issue_id: '5', created_at: '2026-09-10T01:00:00Z', model: 'qwen-max',
+  version, run_id: '347786145852739', issue_id: '5', created_at: '2026-09-10T01:00:00Z', model: 'qwen-max',
   cost_cents: 0.42, title: `Shot #1 v${version}`, text, media: null, available: true, unavailable_reason: null, ...extra,
 });
 
@@ -150,5 +151,30 @@ describe('OutputDiffDialog — one version on its own', () => {
     // picking a version drops the pin and goes back to comparing
     fireEvent.click(screen.getByTestId('output-diff-version-2'));
     await waitFor(() => expect(getOutputDiff).toHaveBeenLastCalledWith('script_shot', '9', 1, 2));
+  });
+});
+
+describe('OutputDiffDialog — Open Run (修复轮 1, spec §5)', () => {
+  const childRun = (open: () => void): ChildRunState => ({ current: null, open, close: vi.fn() });
+
+  it('opens the run that produced the newer side, named by its last six digits', async () => {
+    const open = vi.fn();
+    render(
+      <ChildRunContext.Provider value={childRun(open)}>
+        <OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />
+      </ChildRunContext.Provider>,
+    );
+    const btn = await screen.findByTestId('output-open-run');
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    expect(btn.textContent).toContain('852739');
+    fireEvent.click(btn);
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ childRunId: '347786145852739', step: 2 }));
+  });
+
+  it('is disabled with a reason when no run panel is mounted', async () => {
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const btn = await screen.findByTestId('output-open-run');
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(btn.getAttribute('title')).toBeTruthy();
   });
 });

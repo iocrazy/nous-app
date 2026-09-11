@@ -48,6 +48,7 @@ describe('the outputs copy exists in both locales (harness 3a §5)', () => {
   // missing from both renders the raw dotted path.
   const OUTPUTS_KEYS = [
     'version', 'replaced', 'open', 'diff', 'revert', 'revertHint', 'changeCount', 'truncated',
+    'openRun', 'openRunHint',
     'noSnapshot', 'noLedger', 'notFound', 'unavailable', 'noPreview', 'loadFailed',
     'errorNotRegistered', 'errorVersionNotFound', 'errorCode', 'errorGeneric',
     'kindMedia', 'kindShot', 'kindScene', 'kindChapter', 'kindOther',

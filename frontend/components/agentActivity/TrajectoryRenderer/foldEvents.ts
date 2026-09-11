@@ -551,10 +551,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // A card that cannot be opened is worse than no card: all three or
         // nothing.
         if (!kind || !refId || version === null) break;
-        // Coordinates first — the registration may cross DBOS and arrive
-        // after the run walked on, and `ensureStep` takes it back to the step
-        // that actually produced it.
-        const node = ensureStep(ev, null);
+        // Its own step first (the registration may cross DBOS and arrive
+        // after the run walked on), then whatever step is open, then the last
+        // one. A deliverable NEVER opens a step: a coordinate naming a step
+        // that has no `step_start` would otherwise close the live step and
+        // strand the live marker on an empty phantom node. Only when the run
+        // has no step at all does one get made, because the alternative is
+        // dropping the card entirely (修复轮 1)。
+        const coord = num(ev.step);
+        const node =
+          (coord !== null ? stepAt(num(ev.turn) ?? 1, coord) : null) ??
+          current ??
+          lastStep() ??
+          ensureStep(ev, null);
         const key = `${kind}:${refId}:${version}`;
         if (node.outputs.some((o) => o.key === key)) break;
         node.outputs.push({

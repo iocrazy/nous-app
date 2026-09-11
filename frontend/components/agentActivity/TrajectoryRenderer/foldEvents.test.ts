@@ -371,6 +371,36 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     expect(step.outputs).toEqual([]);
   });
 
+  it('a coordinate naming a step that never started lands on the last step, never a phantom one', () => {
+    // 修复轮 1：`ensureStep` would close the live step and OPEN one at the
+    // unknown coordinate — the live marker then sits on an empty fake node.
+    // A deliverable may never open a step: it hangs on its own, else the last.
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1 }, 1),
+      at(3, 'step_start', { turn: 1, step: 2 }, 2),
+      at(4, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1 }, 9),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[1].outputs).toHaveLength(1);
+    expect(steps[0].outputs).toHaveLength(0);
+    // the live step is still the real one
+    expect(steps[1].live).toBe(true);
+  });
+
+  it('a deliverable with no coordinates at all still lands somewhere', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      { seq: 2, event_type: 'deliverable', payload: { kind: 'script_shot', ref_id: '9', version: 1 }, step: null, turn: null, created_at: '' } as AgentRunEvent,
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(1);
+    if (steps[0].kind !== 'step') throw new Error();
+    expect(steps[0].outputs).toHaveLength(1);
+  });
+
   it('does not draw the same version twice when the event is replayed', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 1 }, 1),

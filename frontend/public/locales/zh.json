@@ -5842,6 +5842,8 @@
     }
   },
   "outputs": {
+    "openRun": "打开运行 #{{run}}",
+    "openRunHint": "这里没有打开运行面板",
     "version": "v{{n}}",
     "replaced": "v{{n}} ← v{{prev}}",
     "revisions_one": "{{count}} 次修订",
