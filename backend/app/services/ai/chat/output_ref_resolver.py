@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 
+from fastapi import HTTPException
 from loguru import logger
 
 from app.repositories.run_deliverables_repository import (
@@ -265,6 +266,44 @@ def output_refs_from_attachments(
     return out
 
 
+def refuse_citations_without_issue(attachments: Optional[Sequence[Any]]) -> None:
+    """在**没有 issue 可作用域**的入口上，任何引用一律类型化拒绝。
+
+    3a 里一条引用按定义是 issue 作用域的：``_verified`` 校验的正是「这一版的
+    run 属于本 issue」，而聊天面板那条路根本没有 issue 可比。三种处理方式里：
+
+    - **静默丢掉**——本仓明令禁止（「触发路径必须类型化失败回显」）。
+    - **照单渲染**——那就是把 ``ref_kind`` / ``ref_id`` / ``version`` / ``title``
+      四个值原样交给客户端决定。转义仍然拦得住结构性攻击，但框会声称一条
+      从未被校验过的引用存在，而用户永远不会知道它没被校验。
+    - **拒绝**——这一个。理由说得出口，用户看得见，且不需要在这条路上编造一套
+      「拿 session 的 run 当 issue 用」的第二套归属语义。
+
+    用的是同一个 ``output_ref_unresolvable``：对客户端而言结论就是「这条引用
+    在这里用不了」，消息正文说得出为什么。**引用变成非 issue 作用域的那天，
+    改的是这一个函数，不是又添一条路。**
+    """
+    if any(_is_citation(att) for att in attachments or []):
+        raise OutputRefRefused(
+            UNRESOLVABLE,
+            "citations require an issue context — an output_ref names a version "
+            "produced on a specific issue, and this entry point has none",
+        )
+
+
+def output_ref_http_400(exc: OutputRefRefused) -> HTTPException:
+    """``OutputRefRefused`` → 400。**每个入口都用这一个**，不要各写各的。
+
+    ``detail`` 是 **dict**：生产把每个 ``HTTPException`` 包进 ``ErrorResponse``
+    外壳，只有 dict 的 detail 会原样落到 ``details``；字符串会塌成
+    ``http_400`` + "400 Bad Request"，前端读的 ``details.code`` 就没了
+    （CLAUDE.md 2026-09-09）。
+    """
+    return HTTPException(
+        status_code=400, detail={"code": exc.code, "message": exc.message}
+    )
+
+
 __all__ = [
     "ATTACHMENT_KIND",
     "LIMIT_EXCEEDED",
@@ -273,6 +312,8 @@ __all__ = [
     "ChatOutputRef",
     "OutputRefRefused",
     "OutputRefResolution",
+    "output_ref_http_400",
     "output_refs_from_attachments",
+    "refuse_citations_without_issue",
     "resolve_output_refs",
 ]

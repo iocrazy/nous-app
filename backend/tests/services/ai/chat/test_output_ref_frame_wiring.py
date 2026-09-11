@@ -205,3 +205,68 @@ async def test_no_output_ref_leaves_the_system_message_alone():
 
     mock_renderer.assert_not_called()
     assert captured["composed"].system_message == composed.system_message
+
+
+# ── 修复轮 1：聊天面板入口没有 issue 可作用域，引用一律类型化拒绝 ──────────
+
+
+@pytest.mark.asyncio
+async def test_chat_entry_refuses_an_output_ref_with_a_typed_400():
+    """聊天面板转发附件时不经过任何校验，所以一条 ``output_ref`` 会让框里
+    的 kind/id/version/title 四个值**全部由客户端决定**。
+
+    3a 里引用按定义是 issue 作用域的（解析器校验的正是「这一版的 run 属于
+    本 issue」），而这条路没有 issue 可比，所以拒绝——不是静默丢（本仓明令
+    禁止），也不是照单渲染。
+    """
+    from fastapi import HTTPException
+
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    svc = AILibraryChatService(store=_FakeStore())
+    turn = AsyncMock()
+
+    with (
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
+        patch.object(svc, "run_session_turn", new=turn),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await svc.chat(
+                str(SESSION_ID),
+                user_id=USER_ID,
+                content="revise this",
+                attachments=[OUTPUT_ATT],
+            )
+
+    assert exc.value.status_code == 400
+    assert isinstance(
+        exc.value.detail, dict
+    ), "detail 必须是 dict，否则 details.code 丢失"
+    assert exc.value.detail["code"] == "output_ref_unresolvable"
+    # 轮次一次都没开始：什么都没持久化，也没计费。
+    turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_entry_still_accepts_other_attachment_kinds():
+    """守卫必须是窄的：它只拒引用，不拒别人的附件。"""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    svc = AILibraryChatService(store=_FakeStore())
+    turn = AsyncMock(return_value={"content": "ok"})
+    other = {"kind": "resource_ref", "resource_id": "42", "name": "spec.md"}
+
+    with (
+        patch.object(
+            svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
+        ),
+        patch.object(svc, "run_session_turn", new=turn),
+    ):
+        await svc.chat(
+            str(SESSION_ID), user_id=USER_ID, content="read this", attachments=[other]
+        )
+
+    turn.assert_awaited_once()
+    assert turn.await_args.kwargs["attachments"] == [other]

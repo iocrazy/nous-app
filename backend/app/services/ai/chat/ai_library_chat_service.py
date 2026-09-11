@@ -45,7 +45,10 @@ from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.output_ref_resolver import ATTACHMENT_KIND as OUTPUT_REF_KIND
 from app.services.ai.chat.output_ref_resolver import (
+    OutputRefRefused,
+    output_ref_http_400,
     output_refs_from_attachments,
+    refuse_citations_without_issue,
 )
 from app.services.ai.chat.resource_ref_resolver import (
     fetch_resource_meta,
@@ -542,6 +545,16 @@ class AILibraryChatService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="session has no agent_slug bound — cannot chat",
             )
+        # 三期 3a Task 4 — a citation is issue-scoped by definition (the
+        # resolver checks that the cited version's run belongs to THIS issue),
+        # and the chat panel has no issue to scope to. Refuse with the same
+        # typed 400 the issue endpoint uses rather than rendering a frame built
+        # entirely from client-chosen coordinates. Refusing BEFORE the turn
+        # starts is the point: nothing is persisted, nothing is billed.
+        try:
+            refuse_citations_without_issue(attachments)
+        except OutputRefRefused as exc:
+            raise output_ref_http_400(exc) from exc
         return await self.run_session_turn(
             session_id,
             user_id=user_id,
