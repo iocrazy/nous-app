@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 from app.schemas.search import (
     HybridSearchRequest,
     SearchResponse,
@@ -13,7 +14,6 @@ from app.schemas.search import (
     SemanticSearchRequest,
     TextSearchRequest,
 )
-from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 from app.services.library.like_escape import escape_like
 from app.services.library.search_service import SearchService
 

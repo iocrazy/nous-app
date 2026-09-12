@@ -10,8 +10,8 @@ from sqlalchemy import text
 from app.db.session import read_scope
 from app.repositories.analysis_repository import get_analysis_repository
 from app.schemas.search import DEFAULT_SEARCH_FIELDS
-from app.services.library.like_escape import escape_like
 from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.library.like_escape import escape_like
 
 
 @dataclass
