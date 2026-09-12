@@ -101,7 +101,9 @@ def test_the_search_field_type_alias_matches_too(mirror_source):
     It is a third hand-written copy of the same vocabulary, so it can drift
     from ``ALL_SEARCH_FIELDS`` one file over as easily as from Python.
     """
-    assert set(_union_members(mirror_source, "SearchField")) == set(get_args(SearchField))
+    assert set(_union_members(mirror_source, "SearchField")) == set(
+        get_args(SearchField)
+    )
 
 
 def test_default_search_fields_match_the_backend_default(mirror_source):

@@ -13,6 +13,8 @@ from app.schemas.search import (
     SemanticSearchRequest,
     TextSearchRequest,
 )
+from app.repositories.analysis_repository import EmbeddingSearchUnavailable
+from app.services.library.like_escape import escape_like
 from app.services.library.search_service import SearchService
 
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -204,11 +206,18 @@ async def semantic_search(
             search_type=response.search_type,
         )
 
+    except EmbeddingSearchUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search is temporarily unavailable.",
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Semantic search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}",
+            detail="Search failed.",
         )
 
 
@@ -239,6 +248,7 @@ async def hybrid_search(
             limit=request.limit,
             threshold=request.threshold,
             user_id=auth.user_id,
+            fields=request.fields,
         )
 
         platform_ids = [r.platform_id for r in response.results]
@@ -274,7 +284,7 @@ async def hybrid_search(
         logger.error(f"Hybrid search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}",
+            detail="Search failed.",
         )
 
 
@@ -325,7 +335,9 @@ async def text_search(
             search_type="text",
         )
     # Ready ILIKE pattern for the RPC (SQL ILIKE uses ``%`` wildcards).
-    pattern = f"%{q_safe}%"
+    # ``%`` and ``_`` typed by the user are literals, not wildcards — without
+    # escaping, a one-character "%" query matches every row in every scope.
+    pattern = f"%{escape_like(q_safe)}%"
 
     # Empty fields list → no scope → empty result (caller probably means "no
     # scope checked", not "any scope").
@@ -357,7 +369,7 @@ async def text_search(
         logger.error(f"Text search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}",
+            detail="Search failed.",
         )
 
     # Project every row into a slim SearchResultItem (for analytics /
@@ -409,7 +421,10 @@ async def find_similar_media(
 
     try:
         response = await search_service.find_similar_media(
-            media_id=media_id, limit=limit, threshold=threshold
+            media_id=media_id,
+            user_id=auth.user_id,
+            limit=limit,
+            threshold=threshold,
         )
 
         if response.total == 0:
@@ -454,11 +469,16 @@ async def find_similar_media(
 
     except HTTPException:
         raise
+    except EmbeddingSearchUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search is temporarily unavailable.",
+        )
     except Exception as e:
         logger.error(f"Similar media search failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(e)}",
+            detail="Search failed.",
         )
 
 
@@ -483,6 +503,16 @@ async def quick_search(
             user_id=auth.user_id,
         )
 
+        # Ownership guardrail, same as /semantic. The RPC is user-scoped since
+        # migration 463, but this endpoint returns media_id / title / cover_url
+        # straight to the browser, so it does not rely on a single layer.
+        owned = await _hydrate_media_by_platform_ids(
+            [r.platform_id for r in response.results],
+            user_id=auth.user_id,
+        )
+        owned_pids = {v["platform_id"] for v in owned if v.get("platform_id")}
+        results = [r for r in response.results if r.platform_id in owned_pids]
+
         # Return simplified format for quick display
         return {
             "results": [
@@ -492,11 +522,25 @@ async def quick_search(
                     "cover_url": r.cover_url,
                     "similarity": round(r.similarity, 2),
                 }
-                for r in response.results
+                for r in results
             ],
-            "total": response.total,
+            "total": len(results),
         }
 
+    except EmbeddingSearchUnavailable:
+        # The engine cannot answer. Saying "0 results" here would be a wrong
+        # answer dressed as a right one — the caller cannot tell it apart from
+        # a genuine miss, and no probe would ever fire.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search is temporarily unavailable.",
+        )
+    except HTTPException:
+        raise
     except Exception as e:
+        # Still not a silent empty page: log with context and surface a 500.
         logger.error(f"Quick search failed: {e}")
-        return {"results": [], "total": 0}
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Search failed.",
+        )

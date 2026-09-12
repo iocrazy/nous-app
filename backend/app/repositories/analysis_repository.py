@@ -73,9 +73,31 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete, select, text
+from sqlalchemy.exc import ProgrammingError
 
 from app.db.session import read_scope, write_scope
 from app.models import ResourceAnalysis, Resources
+
+# PostgreSQL SQLSTATE for "function does not exist".
+_UNDEFINED_FUNCTION = "42883"
+
+
+class EmbeddingSearchUnavailable(RuntimeError):
+    """The embedding RPC is not callable in the shape this code expects.
+
+    Raised instead of returning ``[]`` so the caller can tell "the engine is
+    missing its schema" apart from "nothing matched". Those two are byte
+    identical downstream otherwise, which is the failure shape CLAUDE.md warns
+    about: an empty result is not a negative finding.
+    """
+
+
+def _is_undefined_function(exc: ProgrammingError) -> bool:
+    """True when the driver reported SQLSTATE 42883 (undefined function)."""
+    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+    if sqlstate is None:
+        sqlstate = getattr(getattr(exc, "orig", None), "pgcode", None)
+    return sqlstate == _UNDEFINED_FUNCTION
 
 
 class AnalysisRepository:
@@ -162,12 +184,23 @@ class AnalysisRepository:
         return items
 
     async def search_by_embedding(
-        self, embedding: List[float], limit: int = 10, threshold: float = 0.7
+        self,
+        embedding: List[float],
+        user_id: str,
+        limit: int = 10,
+        threshold: float = 0.7,
     ) -> List[dict]:
         """Search for similar resources via the match_videos_by_embedding RPC.
 
         Keeps using the RPC via raw SQL executed through the ORM session.
         The vector is passed as a formatted string with an explicit CAST.
+
+        ``user_id`` scopes the scan to rows the caller owns and is REQUIRED.
+        It is the only cross-user control on ``/search/similar`` and
+        ``/search/quick``, neither of which post-filters the RPC output, so a
+        default would let one forgotten keyword silently restore the global
+        scan. Before migration 463 the RPC ranked every user's analysis rows
+        and spent the whole ``limit`` budget before any ownership filter ran.
 
         Returned dict keys: media_id, platform_id, title, description,
         cover_urls, author, view_count, created_at, similarity.
@@ -175,15 +208,38 @@ class AnalysisRepository:
         ``SearchResult.created_at`` is ``Optional[str]``.
         """
         embedding_str = f"[{','.join(map(str, embedding))}]"
-        async with read_scope() as session:
-            result = await session.execute(
-                text(
-                    "SELECT * FROM match_videos_by_embedding("
-                    "CAST(:q AS vector), :t::double precision, :c::int)"
-                ),
-                {"q": embedding_str, "t": threshold, "c": limit},
-            )
-            rows = result.mappings().all()
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT * FROM match_videos_by_embedding("
+                        "CAST(:q AS vector), :t::double precision, :c::int, "
+                        "CAST(:u AS uuid))"
+                    ),
+                    {"q": embedding_str, "t": threshold, "c": limit, "u": user_id},
+                )
+                rows = result.mappings().all()
+        except ProgrammingError as exc:
+            # Deployment-order guard. Migrations and backend code ship on
+            # independent triggers (see CLAUDE.md "migration 与代码部署无顺序保证"),
+            # so this code can reach a database where 463 has not run yet and the
+            # 4-arg signature does not exist. Undefined-function (SQLSTATE 42883)
+            # raises a typed error rather than returning an empty list: "the
+            # engine has no schema" and "nothing matched" are byte identical
+            # downstream, and the router turns this one into a 503 so neither
+            # the user nor the post-release error funnel reads a transport
+            # failure as a confident answer. Every other ProgrammingError is a
+            # real defect and re-raises untouched.
+            if _is_undefined_function(exc):
+                logger.error(
+                    "match_videos_by_embedding is missing its p_user_id argument "
+                    "(SQLSTATE 42883) — migration 463 has not been applied to "
+                    "this database yet. Semantic search is unavailable."
+                )
+                raise EmbeddingSearchUnavailable(
+                    "match_videos_by_embedding/4 does not exist in this database"
+                ) from exc
+            raise
 
         output = []
         for row in rows:
