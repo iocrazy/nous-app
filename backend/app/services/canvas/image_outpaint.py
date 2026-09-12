@@ -101,6 +101,16 @@ def extend_canvas(
         with Image.open(BytesIO(image_bytes)) as source:
             source.load()
             out_format = _resolve_format(source, mime_type)
+            # NOTE — this encoder's alpha contract differs from its two
+            # siblings, deliberately. Everything is flattened to RGB right
+            # here, so outpaint DROPS a source's alpha (and, as a side effect,
+            # never meets "cannot write mode CMYK as PNG"), whereas crop and
+            # grid-split PRESERVE alpha and convert only modes the target
+            # format refuses (``image_encode.to_encodable``). The blur fill
+            # composites the whole frame, so a padded image has no meaningful
+            # transparency left to keep. Spelled out because "the three
+            # encoders treat alpha alike" is the assumption a reader of any
+            # one of them would otherwise make.
             src = source.convert("RGB") if source.mode != "RGB" else source.copy()
     except OutpaintError:
         raise

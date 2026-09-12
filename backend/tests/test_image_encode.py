@@ -43,7 +43,38 @@ def test_jpeg_keeps_cmyk(mode: str = "CMYK") -> None:
     assert to_encodable(img, "JPEG") is img
 
 
-@pytest.mark.parametrize("fmt", ["WEBP", "GIF"])
-def test_formats_that_convert_internally_are_left_alone(fmt: str) -> None:
+def test_webp_writes_cmyk_itself_so_it_is_left_alone() -> None:
+    # Measured, not assumed: on the pinned Pillow, WEBP's encoder accepts CMYK
+    # (it converts internally). Converting here would be a lossy no-op.
     img = Image.new("CMYK", (4, 4))
-    assert to_encodable(img, fmt) is img
+    assert to_encodable(img, "WEBP") is img
+
+
+def test_gif_does_not_write_cmyk_and_is_converted() -> None:
+    # The earlier comment claimed WEBP and GIF both swallow every mode. GIF
+    # does not: `Image.new("CMYK").save(fmt="GIF")` raises on Pillow 12.1.1.
+    # Unreachable today (a source that sniffs as GIF decodes to P/L/RGB), but
+    # a table that documents a false fact is worse than no table.
+    assert to_encodable(Image.new("CMYK", (4, 4)), "GIF").mode == "RGB"
+
+
+def test_premultiplied_alpha_takes_the_only_route_pillow_offers() -> None:
+    # `La` is PNG-unwritable AND cannot convert straight to RGB/RGBA —
+    # Pillow raises "conversion from La to L not supported". Going via `LA`
+    # (which it does support, and which PNG writes) is the only path that does
+    # not turn a rescue into a crash.
+    assert to_encodable(Image.new("La", (4, 4)), "PNG").mode in ("LA", "RGBA")
+    # JPEG carries no alpha, so the same source has to land on RGB there.
+    assert to_encodable(Image.new("La", (4, 4)), "JPEG").mode == "RGB"
+
+
+def test_premultiplied_rgba_keeps_its_alpha() -> None:
+    # RGBa is PNG-unwritable; it is still an alpha mode, so the target is RGBA.
+    assert to_encodable(Image.new("RGBa", (4, 4)), "PNG").mode == "RGBA"
+
+
+def test_mode_i_is_converted_rather_than_written_as_png() -> None:
+    # Pillow 12.1.1 already warns that saving mode I as PNG is removed in
+    # Pillow 13 (2026-10-15). Converting now keeps these images working across
+    # that bump instead of turning the deprecation into a 400 on upgrade day.
+    assert to_encodable(Image.new("I", (4, 4)), "PNG").mode == "RGB"
