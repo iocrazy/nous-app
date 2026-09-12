@@ -130,11 +130,19 @@ describe('OutputNodeView — upscale', () => {
     expect(addToast).not.toHaveBeenCalled();
   });
 
-  // Upscale is an edit like crop / expand / split, and every one of those keys
-  // on `editSourceUrl` — the picture the user is looking at. Keying on the
-  // primary instead upscaled a picture nobody asked about, and the result
-  // landed in the grid looking like the answer to the click.
-  it('upscales the grid image that was double-clicked, not the primary', async () => {
+  // CONSISTENCY PIN — deliberately NOT a reproduction of a live user-visible
+  // defect. Upscale now keys on `editSourceUrl` exactly like crop / expand /
+  // mask / split, so the five editing actions can never disagree about WHICH
+  // picture they act on.
+  //
+  // Why no user can reach this path today: `editingUrl` exists only while the
+  // unified editor is open, and that editor is a `fixed inset-0 z-[100]`
+  // portal covering the node's floating toolbar — the Upscale click below
+  // lands only because jsdom does no hit-testing. Deliberately no UI is added
+  // for it; the point is that if the toolbar ever outlives the editor (or the
+  // editor grows its own Upscale), the behaviour is already right instead of
+  // being a second bug to find later.
+  it('upscale keys on the edited image, like the other derives', async () => {
     upscaleGeneration.mockResolvedValue({
       id: '727145299382534999',
       url: '/api/v1/generated-media/727145299382534999/cover',
