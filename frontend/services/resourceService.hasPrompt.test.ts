@@ -111,19 +111,64 @@ describe('fetchResourcesPaginated — ai_has_prompt routing', () => {
       null,
       40,
     );
-    // Both the search .or() (referencedTable: resources, filename/notes ilike)
-    // and the has_prompt .or() must be present — neither silently dropped.
-    const orCalls = fromCalls.filter((c) => c.method === 'or');
-    const searchCall = orCalls.find(
-      (c) =>
-        typeof c.args[0] === 'string' &&
-        (c.args[0] as string).includes('filename.ilike'),
+    // What matters is that BOTH constraints reach the database, not which of
+    // the two code paths carries them. Since migration 464 a keyword routes to
+    // the RPC (only it can match a tag name), so this asserts the RPC received
+    // the term and the has_prompt flag together. Asserting the old PostgREST
+    // `.or()` here would have been pinning the route rather than the promise.
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    const args = rpcMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_search).toBe('my-file');
+    expect(args.p_has_prompt).toBe(true);
+  });
+
+  it('sends the search scope so a tag-name match is reachable', async () => {
+    await fetchResourcesPaginated(
+      {
+        isPersonal: true,
+        scopeId: 'user-1',
+        search: 'hanfu',
+        search_fields: ['tags'],
+      },
+      null,
+      40,
     );
-    const hasPromptCall = orCalls.find(
-      (c) => c.args[0] === HAS_PROMPT_OR_EXPRESSION,
+    // The Tags checkbox used to do nothing: matching a tag name needs
+    // resource_tags -> tags, which the PostgREST builder cannot express, and
+    // the RPC had no search parameter at all.
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    const args = rpcMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_search).toBe('hanfu');
+    expect(args.p_search_fields).toEqual(['tags']);
+  });
+
+  it('omits the scope when every field is ticked, letting the RPC default apply', async () => {
+    await fetchResourcesPaginated(
+      { isPersonal: true, scopeId: 'user-1', search: 'x', search_fields: [] },
+      null,
+      40,
     );
-    expect(searchCall).toBeDefined();
-    expect(hasPromptCall).toBeDefined();
+    const args = rpcMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_search_fields).toBeNull();
+  });
+
+  it('carries the flattened folder set into the RPC path', async () => {
+    // "Show child files" has to survive the switch to the RPC, or searching
+    // inside a folder would silently stop looking at descendants.
+    await fetchResourcesPaginated(
+      {
+        isPersonal: true,
+        scopeId: 'user-1',
+        search: 'x',
+        flatten: true,
+        flattenFolderIds: ['10', '11'],
+      },
+      null,
+      40,
+    );
+    const args = rpcMock.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_flatten).toBe(true);
+    expect(args.p_folder_ids).toEqual(['10', '11']);
   });
 
   it('routes through search_scope_resources when tag_ids is set (with p_has_prompt=null when absent)', async () => {

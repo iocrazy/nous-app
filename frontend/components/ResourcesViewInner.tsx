@@ -39,8 +39,6 @@ import {
 } from '../services/resourceService';
 import {
   RESOURCE_SCOPE_OPTIONS,
-  loadResourceSearchScope,
-  saveResourceSearchScope,
   type ResourceSearchField,
 } from './resourceSearchScope';
 
@@ -93,14 +91,15 @@ export const ResourcesViewInner: React.FC = () => {
   const [isAISearching, setIsAISearching] = useState(false);
 
   // ─── Resource search scope (Eagle-style) ─────────────
-  const [resourceSearchScope, setResourceSearchScope] = useState<ResourceSearchField[]>(
-    () => loadResourceSearchScope(),
+  // The scope lives in ResourcesContext, not here: since migration 464 the
+  // server-side query needs it too (matching a tag name is only possible in
+  // the RPC), and two copies would let the fetch and the local filter disagree
+  // about what the user ticked.
+  const resourceSearchScope = ctx.searchScope;
+  const handleResourceSearchScopeChange = useCallback(
+    (next: string[]) => ctx.setSearchScope(next as ResourceSearchField[]),
+    [ctx],
   );
-  const handleResourceSearchScopeChange = useCallback((next: string[]) => {
-    const typed = next as ResourceSearchField[];
-    setResourceSearchScope(typed);
-    saveResourceSearchScope(typed);
-  }, []);
 
   // ─── Context menu state ──────────────────────────────
   const [contextMenu, setContextMenu] = useState<{
