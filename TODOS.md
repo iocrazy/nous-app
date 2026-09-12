@@ -346,3 +346,64 @@
 
 **Status**: pending — MEDIUM (investigation, blocks SECURITY-001/002/003 scope confirmation)
 **Created**: 2026-05-18
+
+---
+
+## TODO-TEST-001: mimetypes 推断随宿主平台漂移，测试在 macOS 上必红
+
+**What**: `tests/test_storage_migration_web_resource_files.py::test_migrate_web_resource_files_row_migrates_qishui_audio` 断言 `.m4a` 推断为 `audio/mp4`。macOS 的 mimetypes 数据库给的是 `audio/mp4a-latm`，Linux（CI）给 `audio/mp4`。修法是在测试里 pin 期望值到被测代码自己的推断函数，或用 `mimetypes.add_type` 在 fixture 里固定映射，而不是断言一个随平台变的字面量。
+
+**Why**: 这是「测试进程必须与本机网络/环境隔离」（CLAUDE.md 2026-08-06 立约）的同族缺口 —— 一套结果取决于谁的机器在跑的测试不构成门禁。本机全量 pytest 因此多一个红点，掩盖真实回归。
+
+**Pros**: 消掉一个平台相关假红，本机与 CI 结果对齐。
+
+**Cons**: 纯测试改动，不影响生产行为。
+
+**Context**: 2026-09-11 跑全量 backend pytest 时发现（13 failed 里除去 12 个已知的 distribution 沙箱假红，剩这一个）。在干净 master 上复现，与搜索修复无关。
+
+**Depends on**: 无。
+
+**Status**: pending — LOW
+**Owner**: heygo
+**Created**: 2026-09-11
+
+
+---
+
+## TODO-SEARCH-001: rpc_user_media_text_search 的 OR 链让所有 trigram 索引失效
+
+**What**: `rpc_user_media_text_search` 的 WHERE 是一条横跨 parsed_media 列、resources 列和多个 EXISTS 子计划的 OR 链，每个分支还被运行时参数 `'x' = ANY(p_fields)` 门控。planner 无法做 BitmapOr，154 / 342 / 463 建的所有 trgm 索引对这个谓词形状全部用不上，计划恒为 resources⨝parsed_media 全扫 + 逐行 filter。改法是按 p_fields 拆成若干条 UNION ALL 的子查询，让每条各自命中自己的索引；tags 分支还要从相关 EXISTS 改成非相关预筛（先用 idx_tags_name_trgm 反查 resource_id 集合再 semi-join 回来）。
+
+**Why**: 默认搜索范围在 2026-09-11 从 4 个字段扩到 6 个，tags / notes 两条分支现在每次搜索都跑。1383 行的试点账号是几十毫秒量级可接受，但 `search_service.py` 的 Tier-1c 注释明说设计目标是 10 万+ 拥有资源，那一档会退化到秒级。且 `/search/text` 没有速率限制，300ms 防抖是唯一节流，改搜索范围也会重新触发。
+
+**Pros**: 把默认范围的成本从线性全扫降到索引驱动，让扩范围这件事可持续。
+
+**Cons**: 要重写 RPC 主体，是查询形状改动不是加索引，需要在最大的真实账号上用 `EXPLAIN (ANALYZE, BUFFERS)` 对 4 字段 vs 6 字段做前后对照才能确认收益。
+
+**Context**: 2026-09-11 搜索缺陷修复 PR 的两路专家审查独立指出同一点。当时的判断是先把正确性缺陷修掉，性能改造单独开。
+
+**Depends on**: 无。
+
+**Status**: pending — MEDIUM
+**Owner**: heygo
+**Created**: 2026-09-11
+
+---
+
+## TODO-SEARCH-002: resource_transcripts 的 RLS 策略列配对写错了
+
+**What**: `resource_transcripts` 启用了 RLS，策略里拿 `resources.media_id` 去比 `resource_transcripts.resource_id`（见 `supabase/schema_baseline.sql` 的策略定义）。这两列不是一个东西，配对是错的。
+
+**Why**: 今天不咬人，因为唯一的读方 `rpc_user_media_text_search` 是 SECURITY DEFINER 且属主是 postgres，直接绕过 RLS。一旦属主变更或有非 definer 的读方接进来，转录范围会静默返回零行而不是报错 —— 又一个「空输出被当成否定结论」。
+
+**Pros**: 消掉一个只在改动别处时才会引爆的地雷。
+
+**Cons**: 要先确认没有别的代码依赖当前（错误的）配对行为。
+
+**Context**: 2026-09-11 搜索修复的对抗审查发现。该策略早于本次改动存在，本次只是新增了一个经 definer 读该表的路径。
+
+**Depends on**: 无。
+
+**Status**: pending — LOW
+**Owner**: heygo
+**Created**: 2026-09-11

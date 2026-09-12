@@ -52,7 +52,11 @@ import {
   textSearch,
   type SearchField,
 } from '../services/searchService';
-import { SearchScopePicker, loadSearchScope } from './SearchScopePicker';
+import {
+  SearchScopePicker,
+  loadSearchScope,
+  saveSearchScope,
+} from './SearchScopePicker';
 import { useToast } from './Toast';
 import { trashResourceByPlatformId, updateResource } from '../services/resourceService';
 import { createTag, addResourceTag } from '../services/unifiedTagService';
@@ -60,6 +64,7 @@ import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { sendResourceToAgent } from '../utils/sendResourceToAgent';
 import { buildDownloadAgentPayload } from './DownloadsView/downloadAgentPayload';
+import { matchesLocalSearch } from './DownloadsView/localSearchMatch';
 import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -176,6 +181,10 @@ export const DownloadsView: React.FC = () => {
   // Eagle-style search-scope toggles (Title / Description / Author /
   // Hashtags). Persisted in localStorage so the choice survives reloads.
   const [searchScope, setSearchScope] = useState<SearchField[]>(() => loadSearchScope());
+  // Set when the backend search itself failed. Without it a failed fetch is
+  // indistinguishable from "no matches" — the grid renders the same empty
+  // state either way, asserting the library is empty when it is not.
+  const [searchError, setSearchError] = useState(false);
 
   // ─── Resource data ───────────────────────────────────
   // Need media_ids from the paginated library AND from the active search
@@ -343,23 +352,28 @@ export const DownloadsView: React.FC = () => {
         });
     }
     return library
-      .filter(item => {
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase().trim();
-          const title = (item.title || '').toLowerCase();
-          const author = ((item as any).author_nickname || '').toLowerCase();
-          const desc = (item.description || '').toLowerCase();
-          const extra = (tagSearchMap?.[item.id] || '').toLowerCase();
-          return title.includes(q) || author.includes(q) || desc.includes(q) || extra.includes(q);
-        }
-        return true;
-      })
+      .filter(item =>
+        matchesLocalSearch(
+          item as any,
+          searchQuery,
+          searchScope,
+          tagSearchMap?.[item.id] || '',
+        ),
+      )
       .sort((a, b) => {
         const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
         return bTime - aTime;
       });
-  }, [library, isSearchActive, searchResults, searchVideoMap, searchQuery, tagSearchMap]);
+  }, [
+    library,
+    isSearchActive,
+    searchResults,
+    searchVideoMap,
+    searchQuery,
+    searchScope,
+    tagSearchMap,
+  ]);
 
   // ─── Justified (adaptive) layout ───────────────────────
   // Reuses the resource grid's layout pass, aspect helpers and per-frame
@@ -408,7 +422,7 @@ export const DownloadsView: React.FC = () => {
         mode === 'semantic'
           ? await semanticSearch(query, 100)
           : mode === 'hybrid'
-            ? await hybridSearch(query, {}, 100, 0.5)
+            ? await hybridSearch(query, {}, 100, 0.5, searchScope)
             : await textSearch(query, 1000, searchScope);
       setSearchResults(response.results as any);
       // Backend now attaches full ParsedMedia rows in ``videos``. Index them
@@ -434,6 +448,7 @@ export const DownloadsView: React.FC = () => {
   }, [library, searchScope]);
 
   const handleSearchClear = useCallback(() => {
+    setSearchError(false);
     setSearchResults([]);
     setSearchVideoMap({});
     setIsSearchActive(false);
@@ -459,9 +474,15 @@ export const DownloadsView: React.FC = () => {
     skipQuickSearchRef.current = false;
     const trimmed = searchQuery.trim();
     if (trimmed.length < 2 || isRestorePass) return;
+    let cancelled = false;
     const timer = setTimeout(async () => {
+      // Without this the debounce plus a limit=1000 round trip renders as the
+      // "no downloaded content yet" empty state rather than a spinner, which
+      // reads as "your library is gone" on a slow link.
+      setIsAISearching(true);
       try {
         const response = await textSearch(trimmed, 1000, searchScope);
+        if (cancelled) return;
         setSearchResults(response.results as any);
         const hydrated: Record<string, Video> = {};
         for (const v of response.videos ?? []) {
@@ -473,9 +494,15 @@ export const DownloadsView: React.FC = () => {
         setSearchQueryText(trimmed);
       } catch (err) {
         console.error('quick-search backend fetch failed', err);
+        if (!cancelled) setSearchError(true);
+      } finally {
+        if (!cancelled) setIsAISearching(false);
       }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [searchQuery, searchScope]);
 
   const hasActiveQuery = isSearchActive || searchQuery.trim().length > 0;
@@ -1148,16 +1175,9 @@ export const DownloadsView: React.FC = () => {
               searchScope={searchScope}
               onSearchScopeChange={(next) => {
                 setSearchScope(next as SearchField[]);
-                // Persist Eagle-style — same key as the standalone picker
-                // so the choice carries across views.
-                try {
-                  window.localStorage.setItem(
-                    'mediahub_search_scope',
-                    JSON.stringify(next),
-                  );
-                } catch {
-                  /* ignore quota / private mode errors */
-                }
+                // Same writer as the standalone picker so the choice carries
+                // across views and stays on one storage key.
+                saveSearchScope(next as SearchField[]);
               }}
             />
 
@@ -1291,11 +1311,38 @@ export const DownloadsView: React.FC = () => {
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-ink-500">
             <Loading center label={t('common.loading', 'Loading...')} />
           </div>
+        ) : isAISearching && filteredLibrary.length === 0 ? (
+          /* A search in flight is not an empty library. Saying "no downloaded
+             content yet" here asserts the user's media is gone. */
+          <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-ink-500">
+            <Loading center label={t('common.searching', 'Searching...')} />
+          </div>
+        ) : searchError ? (
+          /* The search itself failed. Rendering the empty state here would
+             turn a transport failure into a confident wrong answer. */
+          <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+            <Search size={48} className="text-ink-600 mb-4" />
+            <p className="text-ink-400 text-sm">
+              {t('resources.searchFailed', 'Search failed')}
+            </p>
+            <p className="text-ink-500 text-xs mt-1">
+              {t('resources.searchFailedHint', 'Your library is unchanged. Try again in a moment.')}
+            </p>
+          </div>
         ) : filteredLibrary.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
             <Download size={48} className="text-ink-600 mb-4" />
-            <p className="text-ink-400 text-sm">{t('resources.noDownloads', 'No downloaded content yet')}</p>
-            <p className="text-ink-500 text-xs mt-1">{t('resources.noDownloadsHint', 'Use Parser to download media and they will appear here')}</p>
+            {hasActiveQuery ? (
+              <>
+                <p className="text-ink-400 text-sm">{t('resources.noSearchResults', 'No matching items')}</p>
+                <p className="text-ink-500 text-xs mt-1">{t('resources.noSearchResultsHint', 'Try a different keyword, or widen the search scope')}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-ink-400 text-sm">{t('resources.noDownloads', 'No downloaded content yet')}</p>
+                <p className="text-ink-500 text-xs mt-1">{t('resources.noDownloadsHint', 'Use Parser to download media and they will appear here')}</p>
+              </>
+            )}
           </div>
         ) : (
           <>

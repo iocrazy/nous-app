@@ -71,19 +71,25 @@ export const hybridSearch = async (
   filters: HybridSearchFilters = {},
   limit: number = 100,
   threshold: number = 0.3,
+  fields?: SearchField[],
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/hybrid', {
     query,
     limit,
     threshold,
+    // Smart Search used to drop the scope checkboxes on the floor: the
+    // backend hardcoded the four basic fields, so ticking Tags did nothing.
+    ...(fields && fields.length > 0 ? { fields } : {}),
     ...filters,
   });
 
 /** Eagle-style search-scope toggles. ``title``/``description``/``author``/
  *  ``hashtags`` are direct parsed_media columns. ``transcript`` searches
- *  ``parsed_media.ai_extract_text`` (heavyweight). ``tags`` joins through
- *  resource_tags → tags.name. ``notes`` searches resources.notes (per-user).
- *  Backend defaults to the four direct fields when ``fields`` is omitted. */
+ *  ``resource_transcripts.full_text`` plus the legacy
+ *  ``parsed_media.ai_extract_text`` column (heavyweight — transcript bodies
+ *  run to tens of KB). ``tags`` joins through resource_tags → tags.name.
+ *  ``notes`` searches resources.notes (per-user). When ``fields`` is omitted
+ *  the backend applies its own copy of ``DEFAULT_SEARCH_FIELDS``. */
 export type SearchField =
   | 'title'
   | 'description'
@@ -103,21 +109,31 @@ export const ALL_SEARCH_FIELDS: SearchField[] = [
   'notes',
 ];
 
-/** The four scopes selected by default on a fresh install. The three
- *  extras (transcript / tags / notes) are opt-in because they involve
- *  heavier columns or extra joins. */
+/** Scopes selected by default on a fresh install.
+ *
+ *  The search box promises "title, tags, notes", so those three ship on —
+ *  leaving ``tags``/``notes`` opt-in meant anyone who never opened the scope
+ *  picker could not find a thing by tag. ``transcript`` stays opt-in: it is
+ *  the one genuinely heavy scope (a join against multi-KB transcript bodies)
+ *  and the placeholder never promised it.
+ *
+ *  Keep in sync with ``DEFAULT_SEARCH_FIELDS`` in
+ *  ``backend/app/schemas/search.py`` — the backend applies its own copy when
+ *  a request omits ``fields``. */
 export const DEFAULT_SEARCH_FIELDS: SearchField[] = [
   'title',
   'description',
   'author',
   'hashtags',
+  'tags',
+  'notes',
 ];
 
 /**
  * Plain-text ILIKE search — returns every row whose selected fields contain
  * the substring. No semantic ranking, no top-N cutoff (up to ``limit``,
  * backend caps at 5000). ``fields`` lets users narrow the search scope
- * Eagle-style; default is all four.
+ * Eagle-style; omitting it applies the backend's DEFAULT_SEARCH_FIELDS.
  */
 export const textSearch = async (
   query: string,

@@ -174,6 +174,28 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 
 ⚠️ 与「catch 静默吞错」不冲突：这里要求的是 `except Exception as e: logger.error(...)`，**容纳并记录**，不是 `except: pass`。
 
+### SECURITY DEFINER 函数不能既收调用方给的身份、又对浏览器开放（2026-09-11 血泪）
+
+`SECURITY DEFINER` + 「目标用户 id 是一个普通参数」+ `GRANT EXECUTE TO anon/authenticated` 三者凑齐，等于把越权查询做成了公开 API。anon key 是烤进浏览器包的公开值，PostgREST 的 `/rest/v1/rpc/<name>` 直接可达，函数又以属主身份绕过 RLS —— 换个 uuid 就能读别人的全部数据。
+
+migration 274 的 `rpc_user_media_text_search` / `rpc_user_owned_platform_ids` 正是这个形状，从 2026-05 起一直对 anon 开放，直到 463 收口。**没有任何测试会发现它**：后端走直连 SQL session，功能测试全绿，泄露只存在于另一条没人走的路径上。
+
+三选一，按调用方决定：
+
+| 调用方 | 做法 |
+|---|---|
+| 只有后端（直连 SQL / service_role） | `REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated` —— 让浏览器根本到不了 |
+| 浏览器要直接调 | 函数体内加 `auth.uid() = p_user_id` 守卫，或干脆去掉参数改用 `auth.uid()` |
+| 两者都有 | 拆成两个函数，别用一个函数伺候两种信任级别 |
+
+⚠️ **`CREATE OR REPLACE FUNCTION` 保留原有 ACL**。改一个 definer 函数时它的授权不会跟着你的意图走，必须在同一个 migration 里显式处理，否则「我重写了这个函数」= 「我扩大了一个仍然敞开的洞」。
+
+⚠️ **加参数是新建重载，不是替换**。两个重载并存时，旧 arity 的调用会撞 `function is not unique` 而不是悄悄选一个。所以要先 `DROP FUNCTION` 旧签名。反过来，新签名的尾部参数带 DEFAULT 时旧调用方仍能工作 —— 这决定了安全的部署方向是**迁移先行**；代码先行那一侧必须自己容错（`SQLSTATE 42883` 抛类型化错误让上层转 503，而不是 `return []`）。
+
+### ILIKE 模式的转义责任要跟着模式走
+
+`rpc_user_media_text_search` 收的是拼好的模式（`%foo%`）而不是裸词，所以**谁拼模式谁负责转义**。长期没人负责：用户搜一个 `%` 就是一次全表匹配，`_` 同理。Postgres 的 LIKE 没有默认转义符，**光在 Python 侧转义是无效的**，SQL 侧每个 ILIKE 都得写 `ESCAPE '\\'` 才算数。两边配套见 `app/services/library/like_escape.py` 与 migration 463。
+
 ### 绝不把宿主环境和可预测路径交给不可信输出
 
 - **子进程环境要擦洗**：spawn 出去的命令不该看到 `*KEY*` / `*SECRET*` / `*TOKEN*` / `*PASSWORD*`，否则凭证会从子进程的输出、`env` 转储、崩溃日志里漏出去。

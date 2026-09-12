@@ -9,7 +9,9 @@ from sqlalchemy import text
 
 from app.db.session import read_scope
 from app.repositories.analysis_repository import get_analysis_repository
+from app.schemas.search import DEFAULT_SEARCH_FIELDS
 from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.library.like_escape import escape_like
 
 
 @dataclass
@@ -157,8 +159,18 @@ class SearchService:
             )
 
         # Search by embedding similarity
+        if not user_id:
+            # Every caller is authenticated; a missing id would mean scanning
+            # every user's analysis rows, so refuse rather than widen.
+            return SearchResponse(
+                results=[], total=0, query=query, search_type="semantic"
+            )
+
         raw_results = await self.analysis_repo.search_by_embedding(
-            embedding=query_embedding, limit=limit, threshold=threshold
+            embedding=query_embedding,
+            user_id=user_id,
+            limit=limit,
+            threshold=threshold,
         )
 
         # Transform results
@@ -192,6 +204,7 @@ class SearchService:
         limit: int = 20,
         threshold: float = 0.4,
         user_id: Optional[str] = None,
+        fields: Optional[List[str]] = None,
     ) -> SearchResponse:
         """
         Hybrid search combining semantic similarity with metadata filters.
@@ -215,10 +228,28 @@ class SearchService:
         query_clean = query.strip() if query else ""
         query_normalized = query_clean.replace(" ", "")  # "31 岁" -> "31岁"
 
+        # Honour the caller's scope checkboxes. This used to be hardcoded to
+        # the four basic fields, which silently discarded whatever the user had
+        # ticked in the search-scope picker — Smart Search looked like it was
+        # ignoring the UI because it was.
+        #
+        # An explicitly empty list means "no scope ticked" and returns nothing,
+        # the same reading /search/text applies. Only an omitted argument falls
+        # back to the default set; the two endpoints must not disagree about
+        # what `fields: []` means.
+        if fields is not None and len(fields) == 0:
+            return SearchResponse(
+                results=[], total=0, query=query or "", search_type="hybrid"
+            )
+        scope_fields = list(fields) if fields else list(DEFAULT_SEARCH_FIELDS)
+
         # If query is provided, do text search in database
         if query_clean:
             # Match anywhere in the text (ready ILIKE pattern for the RPC).
-            search_pattern = f"%{query_normalized}%"
+            # Metacharacters are escaped: a literal "%" typed by the user must
+            # match a percent sign, not every row. Unescaped, a one-character
+            # "%" query forces a full pass over every transcript body.
+            search_pattern = f"%{escape_like(query_normalized)}%"
 
             # Primary path: title / description / author / hashtags, scoped to
             # this user via the JOIN RPC. author / date / tag filters are
@@ -226,7 +257,7 @@ class SearchService:
             filtered_videos = await self.search_user_media_text(
                 user_id=user_id,
                 pattern=search_pattern,
-                fields=["title", "description", "author", "hashtags"],
+                fields=scope_fields,
                 author=author,
                 date_from=date_from,
                 date_to=date_to,
@@ -239,7 +270,7 @@ class SearchService:
                 f"{query_clean}"
             )
 
-            # Fallback: if no results from the basic fields, search the visual
+            # Fallback: if no results from the selected scope, search the visual
             # analysis text (resource_analysis.visual_description / detected_text)
             # — same user-scoped JOIN RPC, just a different field set.
             if not filtered_videos:
@@ -314,7 +345,11 @@ class SearchService:
         )
 
     async def find_similar_media(
-        self, media_id: int, limit: int = 10, threshold: float = 0.6
+        self,
+        media_id: int,
+        user_id: str,
+        limit: int = 10,
+        threshold: float = 0.6,
     ) -> SearchResponse:
         """
         Find media similar to a given media item.
@@ -347,6 +382,7 @@ class SearchService:
         # Search for similar media (excluding the source)
         raw_results = await self.analysis_repo.search_by_embedding(
             embedding=embedding,
+            user_id=user_id,
             limit=limit + 1,  # +1 to account for self-match
             threshold=threshold,
         )

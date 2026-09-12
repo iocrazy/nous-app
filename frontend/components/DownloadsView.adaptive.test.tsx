@@ -139,7 +139,18 @@ vi.mock('./DownloadsView/DownloadInfoPanel', () => ({ DownloadInfoPanel: () => n
 vi.mock('./DownloadsView/BackToTopButton', () => ({ BackToTopButton: () => null }));
 vi.mock('./SearchScopePicker', () => ({
   SearchScopePicker: () => null,
-  loadSearchScope: () => [],
+  // The real loader can never return an empty scope (sanitize rejects it), and
+  // an empty scope now means "the local pass cannot judge this", so the stub
+  // has to carry the shipped default or these suites stop exercising it.
+  loadSearchScope: () => [
+    'title',
+    'description',
+    'author',
+    'hashtags',
+    'tags',
+    'notes',
+  ],
+  saveSearchScope: () => {},
 }));
 vi.mock('./detail/DetailCardKit', () => ({
   loadPanelWidth: () => 360, savePanelWidth: vi.fn(),

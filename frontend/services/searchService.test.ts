@@ -13,6 +13,7 @@ import {
   localSearch,
   quickSearch,
   semanticSearch,
+  textSearch,
 } from './searchService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
@@ -102,6 +103,108 @@ describe('hybridSearch', () => {
     expect(body.tag_ids).toEqual([1, 2]);
     expect(body.author).toBe('Alice');
     expect(body.min_views).toBe(100);
+  });
+
+  it('forwards the search scope so Smart Search honours the checkboxes', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () =>
+        JSON.stringify({ results: [], total: 0, query: 'q', search_type: 'hybrid' }),
+      json: async () => ({ results: [], total: 0, query: 'q', search_type: 'hybrid' }),
+    } as unknown as Response);
+
+    await hybridSearch('q', {}, 100, 0.5, ['title', 'tags']);
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.fields).toEqual(['title', 'tags']);
+  });
+
+  it('omits fields entirely when no scope is given, letting the backend default apply', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () =>
+        JSON.stringify({ results: [], total: 0, query: 'q', search_type: 'hybrid' }),
+      json: async () => ({ results: [], total: 0, query: 'q', search_type: 'hybrid' }),
+    } as unknown as Response);
+
+    await hybridSearch('q');
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect('fields' in body).toBe(false);
+  });
+});
+
+describe('textSearch', () => {
+  // This is the DEFAULT search mode — both the Enter-key path and the
+  // 300ms quick-search debounce in DownloadsView go through here, so it is
+  // the request that actually carries the widened default scope (tags /
+  // notes) to the backend. It had no coverage at all.
+  //
+  // Response bodies below use the real wire shape: the endpoint returns
+  // ``videos`` (full parsed_media rows) alongside ``results``.
+  const stubTextResponse = () =>
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () =>
+        JSON.stringify({
+          results: [],
+          videos: [],
+          total: 0,
+          query: 'q',
+          search_type: 'text',
+        }),
+      json: async () => ({
+        results: [],
+        videos: [],
+        total: 0,
+        query: 'q',
+        search_type: 'text',
+      }),
+    } as unknown as Response);
+
+  it('forwards the scope so the picked checkboxes reach the RPC', async () => {
+    const spy = stubTextResponse();
+
+    await textSearch('krea', 1000, ['title', 'tags', 'notes']);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/search/text');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.fields).toEqual(['title', 'tags', 'notes']);
+    expect(body.limit).toBe(1000);
+  });
+
+  it('carries the transcript scope through untouched', async () => {
+    // The scope whose backend half moved to resource_transcripts in 463.
+    // If the client dropped it the migration would look broken from the UI.
+    const spy = stubTextResponse();
+
+    await textSearch('krea', 1000, ['transcript']);
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.fields).toEqual(['transcript']);
+  });
+
+  it('omits fields when the scope is absent or empty so the backend default applies', async () => {
+    const spy = stubTextResponse();
+    await textSearch('krea');
+    expect(
+      'fields' in JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string),
+    ).toBe(false);
+
+    const spy2 = stubTextResponse();
+    await textSearch('krea', 1000, []);
+    expect(
+      'fields' in JSON.parse((spy2.mock.calls[0][1] as RequestInit).body as string),
+    ).toBe(false);
   });
 });
 

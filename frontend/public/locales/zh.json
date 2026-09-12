@@ -223,7 +223,8 @@
       "hourOption": "{{value}} 时",
       "minuteOption": "{{value}} 分",
       "done": "完成"
-    }
+    },
+    "searching": "搜索中..."
   },
   "distribution": {
     "accountsTitle": "平台账号",
@@ -1699,7 +1700,11 @@
     "textTooLargeToEdit": "文件过大，无法内联预览或编辑。",
     "previewFailed": "预览加载失败",
     "saveAsAsset": "存为资产",
-    "saveAsAssetSource": "我的上传"
+    "saveAsAssetSource": "我的上传",
+    "searchFailed": "搜索失败",
+    "searchFailedHint": "资源库未受影响，请稍后重试。",
+    "noSearchResults": "没有匹配的内容",
+    "noSearchResultsHint": "换个关键词，或放宽搜索范围"
   },
   "assets": {
     "types": {
