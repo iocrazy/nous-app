@@ -19,6 +19,8 @@ from io import BytesIO
 
 from PIL import Image, UnidentifiedImageError
 
+from app.services.canvas.image_encode import to_encodable
+
 # Subset of Pillow formats we round-trip cleanly — kept in sync with
 # ``image_crop._FORMAT_BY_MIME``.
 _FORMAT_BY_MIME: dict[str, str] = {
@@ -76,6 +78,9 @@ def _encode_cell(cell: Image.Image, out_format: str) -> bytes:
     # JPEG can't carry alpha — flatten so the encode doesn't blow up.
     if out_format == "JPEG" and cell.mode in ("RGBA", "LA", "P"):
         cell = cell.convert("RGB")
+    # Same for a mode the target refuses outright (CMYK reaching the PNG path
+    # through ``transform_mime``): convert rather than let Pillow raise.
+    cell = to_encodable(cell, out_format)
     buffer = BytesIO()
     cell.save(buffer, format=out_format)
     return buffer.getvalue()

@@ -173,3 +173,46 @@ class TestPixelContent:
         decoded = _decode(out)
         assert decoded.getpixel((0, 0)) == (0, 0, 255)
         assert decoded.size == (100, 100)
+
+
+# ============================================================
+# Source modes Pillow cannot write in the target format
+# ============================================================
+
+
+def _cmyk_tiff_bytes(width: int, height: int) -> bytes:
+    """A CMYK TIFF — what a print-shop export or a scanner gives you.
+
+    ``transform_mime`` hands every decodable-but-unwritable format to the
+    transforms as ``image/png``, and Pillow refuses ``CMYK`` there
+    ("cannot write mode CMYK as PNG"), which surfaced as a 400 on the crop.
+    """
+    img = Image.new("CMYK", (width, height), (0, 40, 80, 10))
+    buf = BytesIO()
+    img.save(buf, format="TIFF")
+    return buf.getvalue()
+
+
+class TestUnwritableSourceModes:
+    def test_cmyk_source_encodes_as_png(self) -> None:
+        out = crop_normalized(
+            _cmyk_tiff_bytes(10, 8),
+            CropRegion(0.0, 0.0, 0.5, 1.0),
+            mime_type="image/png",
+        )
+        decoded = _decode(out)
+        assert decoded.format == "PNG"
+        assert decoded.mode in ("RGB", "RGBA")
+        assert decoded.size == (5, 8)
+
+    def test_rgba_png_keeps_its_alpha(self) -> None:
+        # Negative control for the conversion above: a mode PNG *can* write
+        # must not be touched, or every transparent crop would go opaque.
+        out = crop_normalized(
+            _png_rgba_bytes(80, 80),
+            CropRegion(0.0, 0.0, 0.5, 0.5),
+            mime_type="image/png",
+        )
+        decoded = _decode(out)
+        assert decoded.mode == "RGBA"
+        assert decoded.getpixel((0, 0))[3] == 128
