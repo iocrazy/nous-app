@@ -43,6 +43,11 @@ import { useToast } from '../components/Toast';
 import { getSupabaseClient } from '../supabaseClient';
 import { mergeAssignedTagsIntoAllTags } from '../utils/tagMerge';
 import type { Resource } from '../types';
+import {
+  loadResourceSearchScope,
+  saveResourceSearchScope,
+} from '../components/resourceSearchScope';
+import type { ResourceSearchField } from '../components/resourceSearchScope';
 
 // ─── Types ─────────────────────────────────────────────
 
@@ -194,6 +199,12 @@ export interface ResourcesContextType {
   setSortBy: React.Dispatch<React.SetStateAction<SortBy>>;
   searchQuery: string;
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  /** Which of name / notes / tags the keyword scans. Lives here rather than in
+   *  the view because the server-side query needs it: `tags` can only be
+   *  matched by the RPC, so the scope has to travel with the fetch, not just
+   *  with the local filter. */
+  searchScope: ResourceSearchField[];
+  setSearchScope: (next: ResourceSearchField[]) => void;
   debouncedSearch: string;
   setDebouncedSearch: React.Dispatch<React.SetStateAction<string>>;
   showInfoPanel: boolean;
@@ -385,6 +396,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }, [flattenFolders]);
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchScope, setSearchScopeState] = useState<ResourceSearchField[]>(
+    () => loadResourceSearchScope(),
+  );
+  const setSearchScope = useCallback((next: ResourceSearchField[]) => {
+    setSearchScopeState(next);
+    saveResourceSearchScope(next);
+  }, []);
+  const searchScopeKey = searchScope.slice().sort().join(',');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
@@ -487,6 +506,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           flatten: flattenActive,
           flattenFolderIds,
           search: debouncedSearch.trim() || undefined,
+          search_fields: searchScope,
           ...filterParamsRef.current,
         },
         cursor,
@@ -500,7 +520,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // flattenKey re-triggers when the flatten toggle / search recursion changes;
     // debouncedSearch re-triggers the server-side keyword search on text change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey, flattenKey, debouncedSearch],
+    [isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId, selectedSmartRulesKey, filterParamsKey, flattenKey, debouncedSearch, searchScopeKey],
   );
   const {
     items: resources,
@@ -1311,6 +1331,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setSortBy,
     searchQuery,
     setSearchQuery,
+    searchScope,
+    setSearchScope,
     debouncedSearch,
     setDebouncedSearch,
     showInfoPanel,
@@ -1350,7 +1372,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,
-    viewMode, flattenFolders, flattenActive, sortBy, searchQuery, debouncedSearch, showInfoPanel, infoPanelWidth,
+    viewMode, flattenFolders, flattenActive, sortBy, searchQuery, searchScope, setSearchScope, debouncedSearch, showInfoPanel, infoPanelWidth,
     filterParams, setFilterParams, reloadResources,
     loadMoreResources, hasMoreResources, isLoadingMoreResources,
     loadMoreTrashed, hasMoreTrashed, isLoadingMoreTrashed,

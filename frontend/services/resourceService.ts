@@ -449,6 +449,12 @@ export interface FetchResourcesParams {
    *  the already-loaded page — fixes "search returns nothing for items beyond
    *  the first page". */
   search?: string;
+  /** Which of name / notes / tags the keyword scans. Undefined or empty means
+   *  all three (the picker will not let the user untick everything). Only the
+   *  RPC path can honour `tags` — matching a tag name needs a join the
+   *  PostgREST builder cannot express — which is why any active search routes
+   *  through the RPC. */
+  search_fields?: string[];
   /** AND-semantic tag id filter. */
   tag_ids?: string[];
   /** Minimum rating (>= filter; 1..5). */
@@ -898,18 +904,27 @@ export async function fetchResourcesPaginated(
   // URL risked a Kong/nginx 502 at scale. The no-tag path below stays on the
   // PostgREST keyset query (already scale-safe).
   //
-  // ai_has_prompt does NOT force the RPC path on its own (fixed post-review —
-  // it used to, but that silently dropped `search`/`flatten`: the RPC has no
-  // p_search/p_flatten param, so typing a filename then checking "Has Prompt"
-  // returned every prompt-bearing resource, search term ignored). The 4-column
-  // OR + jsonb-literal predicate IS expressible via the PostgREST builder
-  // (see the `params.ai_has_prompt` branch in buildResourceItemsQuery below),
-  // verified against a live PostgREST v14.8 instance. Only tags still force
-  // the RPC (no resource_id-intersection alternative at scale); when both tags
-  // AND has_prompt are active, search_scope_resources (mig 401) still carries
-  // p_has_prompt so the combination stays correct — search/flatten were never
-  // available in the tag-filtered RPC path anyway (pre-existing, out of scope).
-  if (params.tag_ids && params.tag_ids.length > 0) {
+  // ai_has_prompt does NOT force the RPC path on its own: the 4-column OR +
+  // jsonb-literal predicate is expressible via the PostgREST builder (see the
+  // `params.ai_has_prompt` branch in buildResourceItemsQuery below), verified
+  // against a live PostgREST v14.8 instance, so it stays on the cheaper path
+  // when it is the only filter.
+  //
+  // The reason that used to matter — "the RPC has no p_search/p_flatten, so
+  // routing here would silently drop the keyword" — no longer holds: migration
+  // 464 gave the RPC both. That gap was real and user-visible (a tag filter
+  // plus a typed keyword returned every resource carrying the tag), which is
+  // why search now routes here deliberately rather than being kept away.
+  // A keyword also forces the RPC path as of migration 464. Two reasons:
+  //   * `tags` scope is unreachable from the PostgREST builder (matching a tag
+  //     name needs resource_tags -> tags, and or() cannot cross the junction),
+  //     so the ticked Tags checkbox used to do nothing at all;
+  //   * when a tag filter was ALSO active the query came here anyway, and this
+  //     function had no search parameter, so the typed keyword was dropped and
+  //     the user got every resource carrying the tag.
+  // One path now answers both, so the two cannot disagree.
+  const hasSearch = !!params.search && params.search.trim().length > 0;
+  if (hasSearch || (params.tag_ids && params.tag_ids.length > 0)) {
     return fetchResourcesViaRpc(params, cursor, pageSize, signal);
   }
 
@@ -991,6 +1006,22 @@ async function fetchResourcesViaRpc(
     p_min_favorites: params.min_favorites ?? null,
     p_min_shares: params.min_shares ?? null,
     p_social_combine: params.social_combine ?? 'and',
+    // Search (migration 464). The raw term goes over the wire; the RPC builds
+    // and escapes the ILIKE pattern so the escaping lives next to the ILIKEs
+    // rather than being duplicated here.
+    p_search: params.search?.trim() || null,
+    p_search_fields:
+      params.search_fields && params.search_fields.length > 0
+        ? params.search_fields
+        : null,
+    // Flatten: the caller resolved the descendant folder set, the RPC does not
+    // walk the tree. `p_flatten` with no ids means "scope root, no folder
+    // constraint", which is different from "not flattened" (root only).
+    p_flatten: params.flatten ?? false,
+    p_folder_ids:
+      params.flattenFolderIds && params.flattenFolderIds.length > 0
+        ? params.flattenFolderIds
+        : null,
     p_cursor_ts: cursor?.ts ?? null,
     p_cursor_id: cursor?.id ?? null,
     p_limit: pageSize + 1,
