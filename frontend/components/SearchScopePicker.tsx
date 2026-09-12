@@ -1,9 +1,9 @@
 // frontend/components/SearchScopePicker.tsx
 //
 // Eagle-style search scope picker — funnel icon next to the search box,
-// click opens a dropdown with field checkboxes (Title / Description /
-// Author / Hashtags). User toggles which fields the text search scans.
-// Persists in localStorage so the choice survives page reloads.
+// click opens a dropdown with one checkbox per searchable field. The user
+// toggles which fields the text search scans; the choice persists in
+// localStorage across reloads.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,26 +11,92 @@ import { Check, Filter } from 'lucide-react';
 import type { SearchField } from '../services/searchService';
 import { ALL_SEARCH_FIELDS, DEFAULT_SEARCH_FIELDS } from '../services/searchService';
 
-const STORAGE_KEY = 'mediahub_search_scope';
+const STORAGE_KEY = 'mediahub_search_scope_v2';
 
-/** Read selected scope from localStorage; default = the four
- *  parsed_media direct columns. The three Eagle extras (transcript /
- *  tags / notes) are opt-in because they're heavier — user must check
- *  them once and the choice persists. */
-export function loadSearchScope(): SearchField[] {
-  if (typeof window === 'undefined') return DEFAULT_SEARCH_FIELDS;
+/** The pre-v2 default. Anyone whose stored scope is exactly this never
+ *  touched the picker, so they get the widened default instead of being
+ *  stranded on a scope that cannot find their tags. A stored set that
+ *  differs in any way is a real choice and is preserved as-is. */
+const LEGACY_STORAGE_KEY = 'mediahub_search_scope';
+const LEGACY_DEFAULT: SearchField[] = [
+  'title',
+  'description',
+  'author',
+  'hashtags',
+];
+
+const sanitize = (parsed: unknown): SearchField[] | null => {
+  if (!Array.isArray(parsed)) return null;
+  const valid = parsed.filter((f): f is SearchField =>
+    ALL_SEARCH_FIELDS.includes(f as SearchField),
+  );
+  return valid.length > 0 ? valid : null;
+};
+
+/** Read one key. A corrupt value is removed rather than left to throw on every
+ *  load, and each key is read in its own try so a bad v2 value cannot skip the
+ *  legacy migration below. */
+const readScopeKey = (key: string): SearchField[] | null => {
+  if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SEARCH_FIELDS;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_SEARCH_FIELDS;
-    const valid = parsed.filter((f): f is SearchField =>
-      ALL_SEARCH_FIELDS.includes(f as SearchField),
-    );
-    return valid.length > 0 ? valid : DEFAULT_SEARCH_FIELDS;
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return sanitize(JSON.parse(raw));
   } catch {
-    return DEFAULT_SEARCH_FIELDS;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* private mode — nothing to clean up */
+    }
+    return null;
   }
+};
+
+const isLegacyDefault = (scope: SearchField[]): boolean =>
+  scope.length === LEGACY_DEFAULT.length &&
+  LEGACY_DEFAULT.every((f) => scope.includes(f));
+
+/** Persist the scope. Exported so every host writes the same key — an inline
+ *  ``setItem`` in one view was still writing the pre-v2 key, which meant the
+ *  choice made there was invisible to ``loadSearchScope``. */
+export function saveSearchScope(scope: SearchField[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(scope));
+  } catch {
+    /* ignore quota / private mode errors */
+  }
+}
+
+/** Read the selected scope, migrating the pre-v2 key exactly once.
+ *
+ *  The migration writes the resolved value to v2 and drops the old key, so the
+ *  two can never disagree afterwards. Leaving the legacy key in place meant a
+ *  stale tab (or a frontend rollback) still writing it would silently win over
+ *  every choice made since. */
+export function loadSearchScope(): SearchField[] {
+  if (typeof window === 'undefined') return [...DEFAULT_SEARCH_FIELDS];
+
+  const current = readScopeKey(STORAGE_KEY);
+  if (current) return current;
+
+  const legacy = readScopeKey(LEGACY_STORAGE_KEY);
+  // Exactly the pre-v2 default means the picker was never opened, so the user
+  // gets the widened default instead of being stranded on a scope that cannot
+  // reach their tags. Anything else is a real choice and is preserved.
+  const resolved =
+    legacy && !isLegacyDefault(legacy) ? legacy : [...DEFAULT_SEARCH_FIELDS];
+
+  if (legacy) {
+    saveSearchScope(resolved);
+    try {
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      /* ignore private mode */
+    }
+  }
+
+  return resolved;
 }
 
 interface SearchScopePickerProps {
@@ -70,11 +136,7 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
     // tried to remove if their action would empty the list.
     if (next.length === 0) return;
     onChange(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore quota / private mode errors */
-    }
+    saveSearchScope(next);
   };
 
   // Indigo tint when scope is "non-default" — helps user notice they have

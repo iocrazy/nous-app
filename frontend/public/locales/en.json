@@ -223,7 +223,8 @@
       "hourOption": "Hour {{value}}",
       "minuteOption": "Minute {{value}}",
       "done": "Done"
-    }
+    },
+    "searching": "Searching..."
   },
   "distribution": {
     "accountsTitle": "Platform Accounts",
@@ -1699,7 +1700,11 @@
     "textTooLargeToEdit": "File is too large to preview or edit inline.",
     "previewFailed": "Failed to load preview",
     "saveAsAsset": "As Asset",
-    "saveAsAssetSource": "My Uploads"
+    "saveAsAssetSource": "My Uploads",
+    "searchFailed": "Search failed",
+    "searchFailedHint": "Your library is unchanged. Try again in a moment.",
+    "noSearchResults": "No matching items",
+    "noSearchResultsHint": "Try a different keyword, or widen the search scope"
   },
   "assets": {
     "types": {
