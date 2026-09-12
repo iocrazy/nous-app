@@ -29,6 +29,7 @@ from app.db.session import read_scope, write_scope
 from app.models import (
     Canvases,
     GeneratedMedia,
+    ResourceItems,
     Resources,
     ResourceVersions,
     ScriptProjects,
@@ -316,23 +317,39 @@ def _inbox_filters(
     return crit
 
 
-def _promoted_resource_ids_stmt(gen_ids: Sequence[int]) -> Select:
+def _promoted_resource_ids_stmt(gen_ids: Sequence[int], scope_id: int) -> Select:
     """``(generation id, promoted resource id)`` for the archived ones whose
-    resource still exists.
+    resource still exists AND is filed in ``scope_id``.
 
     ``promoted_resource_id`` has no FK and is not cleared when a resource is
     purged, while ``canvas_resource_refs.resource_id`` REFERENCES resources:
     one dangling id would fail the refs INSERT after its DELETE committed and
     wipe every ref the canvas has. The INNER JOIN keeps only live targets
     (a trashed-but-not-purged row still exists, so it still counts).
+
+    The second join is the tenant check. The generation ids arrive from one
+    canvas's ``nodes_json``, which any member of that canvas can write — so
+    "this generation was archived" is not on its own a licence to file the
+    resulting resource id into THIS canvas's refs. ``resource_items`` is where
+    a resource's scope lives; requiring a row there for the canvas's own scope
+    is the same membership question the rest of the library asks.
+
+    ``DISTINCT`` because a resource filed into two folders of one scope has two
+    ``resource_items`` rows and would otherwise answer twice.
     """
     return (
         select(GeneratedMedia.id, GeneratedMedia.promoted_resource_id)
         .join(Resources, Resources.id == GeneratedMedia.promoted_resource_id)
+        .join(
+            ResourceItems,
+            (ResourceItems.resource_id == Resources.id)
+            & (ResourceItems.scope_id == int(scope_id)),
+        )
         .where(
             GeneratedMedia.id.in_(list(gen_ids)),
             GeneratedMedia.promoted_resource_id.is_not(None),
         )
+        .distinct()
     )
 
 
@@ -468,32 +485,42 @@ class GeneratedMediaRepository:
         return _normalize(dict(row)) if row else None
 
     async def promoted_resource_ids(
-        self, gen_ids: Iterable[int | str]
+        self, gen_ids: Iterable[int | str], *, scope_id: int
     ) -> dict[int, int]:
-        """``{generation id: promoted resource id}`` for the archived ones.
+        """``{generation id: promoted resource id}`` for the archived ones
+        whose resource is filed in ``scope_id``.
 
-        Unscoped like ``get_by_id``: the ids come from one canvas's own
-        nodes_json and the answer only feeds that canvas's refs mirror.
-        ``Resources`` is UserScoped and joined here, so under an ambient user
-        Scope the join would silently drop another contributor's archived
-        output — same rationale as
-        ``canvas_refs_repository.list_assets_for_canvas``.
+        ``scope_id`` is REQUIRED (keyword-only) on purpose: the ids come from a
+        canvas's ``nodes_json``, which its members write, so the answer must be
+        narrowed to resources that canvas may reference. An optional scope
+        would leave an unscoped call one forgotten argument away.
+
+        Read as the SYSTEM rather than the caller: ``Resources`` is UserScoped,
+        so under an ambient user Scope the join would silently drop another
+        contributor's archived output. Canvas membership plus the scope join
+        above is the authorization boundary here, not ``creator_id`` — same
+        rationale as ``canvas_refs_repository.list_assets_for_canvas``.
         """
         ids = sorted({int(g) for g in gen_ids})
         if not ids:
             return {}
         scope_cm = (
             system_request_scope(
-                reason="canvas refs archived-output lookup: canvas membership "
-                "is the authorization boundary, not creator_id — a canvas can "
-                "show generations archived by multiple contributors"
+                reason="canvas refs archived-output lookup: the canvas's SCOPE "
+                "(joined in SQL) is the authorization boundary, not creator_id "
+                "— a canvas can show generations archived by multiple "
+                "contributors, all of them inside that one scope"
             )
             if is_enforced("resources")
             else nullcontext()
         )
         async with scope_cm:
             async with read_scope() as session:
-                rows = (await session.execute(_promoted_resource_ids_stmt(ids))).all()
+                rows = (
+                    await session.execute(
+                        _promoted_resource_ids_stmt(ids, int(scope_id))
+                    )
+                ).all()
         return {int(gen_id): int(resource_id) for gen_id, resource_id in rows}
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:

@@ -27,6 +27,31 @@ from app.services.canvas.asset_refs import (
 )
 
 
+async def _canvas_scope_id(canvas_id: str) -> Optional[int]:
+    """The asset scope a canvas may reference: its project's team, or the
+    project owner's personal team. ``None`` when it cannot be resolved.
+
+    Delegates to the resolver the generation path already answers this with
+    (``canvas_generation._canvas_project_scope_id``, the same function behind
+    ``_registration_scope_id``) so a canvas's refs are checked against exactly
+    the scope its runs register products into — two answers to "what scope is
+    this canvas in" would eventually disagree.
+
+    Imported lazily: ``app.workflows.canvas_generation`` pulls in the DBOS
+    workflow module, which the canvas SERVICE has no other reason to load.
+
+    Never raises. Saving a canvas must not fail because a scope lookup did;
+    the caller treats ``None`` as "mirror the legacy refs only".
+    """
+    try:
+        from app.workflows.canvas_generation import _canvas_project_scope_id
+
+        return await _canvas_project_scope_id(int(canvas_id))
+    except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
+        logger.error(f"canvas {canvas_id} scope resolution failed (non-fatal): {e}")
+        return None
+
+
 class CanvasConflict(Exception):
     """Raised when an update's ``base_updated_at`` no longer matches the
     server row. The router catches this and returns 409 with the
@@ -223,15 +248,29 @@ class CanvasService:
     ) -> list[dict[str, str]]:
         """``refs`` plus the output refs whose generation has been archived.
 
+        Only archived resources in THIS canvas's scope are mirrored: the
+        generation ids come out of ``nodes_json``, which any member of the
+        canvas writes, so an id pasted from another tenant would otherwise
+        file that tenant's resource id into this canvas's refs.
+
         Its own try: a failed lookup degrades to the legacy refs and says so —
-        it must not stop them being written.
+        it must not stop them being written. A scope that cannot be resolved
+        degrades the SAME way rather than falling back to an unscoped lookup:
+        a check that could not run has not passed.
         """
         pairs = extract_output_generation_ids(nodes_json)
         if not pairs:
             return refs
+        scope_id = await _canvas_scope_id(canvas_id)
+        if scope_id is None:
+            logger.error(
+                f"canvas {canvas_id} archived-output refs skipped: its scope "
+                "could not be resolved (non-fatal, legacy refs only)"
+            )
+            return refs
         try:
             promoted = await self.gen_repo.promoted_resource_ids(
-                gen_id for _, gen_id in pairs
+                (gen_id for _, gen_id in pairs), scope_id=scope_id
             )
         except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
             logger.error(

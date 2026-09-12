@@ -11,7 +11,7 @@ from app.repositories import generated_media_repository as gmr
 
 def test_statement_reads_only_promoted_rows_for_the_ids() -> None:
     sql = str(
-        gmr._promoted_resource_ids_stmt([5, 6]).compile(
+        gmr._promoted_resource_ids_stmt([5, 6], 77).compile(
             dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
         )
     )
@@ -26,12 +26,29 @@ def test_statement_reads_only_promoted_rows_for_the_ids() -> None:
     )
 
 
+def test_statement_only_admits_resources_filed_in_the_canvas_scope() -> None:
+    # The gen ids come from nodes_json, which a canvas member writes. Without
+    # this join, pasting another tenant's generation id into a node would file
+    # THAT tenant's resource id into this canvas's refs mirror.
+    sql = str(
+        gmr._promoted_resource_ids_stmt([5], 77).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "resource_items" in sql
+    assert "public.resource_items.resource_id = public.resources.id" in sql
+    assert "public.resource_items.scope_id = 77" in sql
+
+
 async def test_no_ids_never_touch_the_database(monkeypatch) -> None:
     def refuse():
         raise AssertionError("queried with no ids")
 
     monkeypatch.setattr(gmr, "read_scope", refuse)
-    assert await gmr.GeneratedMediaRepository().promoted_resource_ids([]) == {}
+    assert (
+        await gmr.GeneratedMediaRepository().promoted_resource_ids([], scope_id=77)
+        == {}
+    )
 
 
 async def test_rows_become_an_int_map_over_deduped_ids(monkeypatch) -> None:
@@ -51,7 +68,9 @@ async def test_rows_become_an_int_map_over_deduped_ids(monkeypatch) -> None:
         yield _Session()
 
     monkeypatch.setattr(gmr, "read_scope", fake_read_scope)
-    got = await gmr.GeneratedMediaRepository().promoted_resource_ids(["5", 7, 5])
+    got = await gmr.GeneratedMediaRepository().promoted_resource_ids(
+        ["5", 7, 5], scope_id=77
+    )
     assert got == {5: 222, 7: 333}
     [stmt] = executed
     sql = str(
@@ -98,7 +117,7 @@ async def test_enforced_resources_read_runs_under_system_scope(monkeypatch) -> N
     monkeypatch.setattr(gmr, "is_enforced", lambda table: table == "resources")
     monkeypatch.setattr(gmr, "system_request_scope", fake_system_scope)
     monkeypatch.setattr(gmr, "read_scope", _fake_read_scope(entered, executed))
-    got = await gmr.GeneratedMediaRepository().promoted_resource_ids([5])
+    got = await gmr.GeneratedMediaRepository().promoted_resource_ids([5], scope_id=77)
     assert got == {5: 222}
     assert executed == [["system"]]
     assert len(reasons) == 1 and reasons[0]
@@ -114,5 +133,7 @@ async def test_unenforced_resources_read_skips_the_system_scope(monkeypatch) -> 
     monkeypatch.setattr(gmr, "is_enforced", lambda table: False)
     monkeypatch.setattr(gmr, "system_request_scope", refuse)
     monkeypatch.setattr(gmr, "read_scope", _fake_read_scope(entered, executed))
-    assert await gmr.GeneratedMediaRepository().promoted_resource_ids([5]) == {5: 222}
+    assert await gmr.GeneratedMediaRepository().promoted_resource_ids(
+        [5], scope_id=77
+    ) == {5: 222}
     assert executed == [[]]
