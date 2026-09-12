@@ -99,3 +99,34 @@ def test_grid_finer_than_pixels_raises() -> None:
     # A 2x2 image can't be split into a 3x3 grid.
     with pytest.raises(ValueError):
         split_grid(_png_bytes(2, 2), rows=3, cols=3, mime_type="image/png")
+
+
+def _cmyk_tiff_bytes(w: int, h: int) -> bytes:
+    img = Image.new("CMYK", (w, h), (0, 40, 80, 10))
+    buf = BytesIO()
+    img.save(buf, format="TIFF")
+    return buf.getvalue()
+
+
+def _png_rgba_bytes(w: int, h: int) -> bytes:
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 128))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_cmyk_source_splits_into_png_cells() -> None:
+    # `transform_mime` hands a TIFF to the transforms as image/png, and Pillow
+    # cannot write CMYK there — the split 400'd instead of re-encoding.
+    cells = split_grid(_cmyk_tiff_bytes(8, 8), rows=2, cols=2, mime_type="image/png")
+    assert len(cells) == 4
+    for cell in cells:
+        decoded = _decode(cell.bytes)
+        assert decoded.format == "PNG"
+        assert decoded.mode in ("RGB", "RGBA")
+
+
+def test_rgba_cells_keep_their_alpha() -> None:
+    # Negative control: a mode PNG can write is left alone.
+    cells = split_grid(_png_rgba_bytes(8, 8), rows=2, cols=2, mime_type="image/png")
+    assert {_decode(c.bytes).mode for c in cells} == {"RGBA"}

@@ -4,7 +4,7 @@
 // cannot read) must reach the user, not only the console.
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import en from '../../../../public/locales/en.json';
@@ -49,6 +49,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { OutputNodeView } from './OutputNodeView';
 
 const SOURCE = '/api/v1/generated-media/727145299382534145/cover';
+const ITEM2 = '/api/v1/generated-media/727145299382534222/cover';
 
 const baseProps = {
   selected: true,
@@ -62,13 +63,14 @@ const baseProps = {
   selectable: true,
 } as const;
 
-function renderOutput() {
+function renderOutput(overrides: Record<string, unknown> = {}) {
   const data = {
     kind: 'image',
     preview_text: '',
     preview_url: SOURCE,
     crop_region: null,
     images: [{ url: SOURCE, kind: 'image' }],
+    ...overrides,
   };
   useCanvasCoreStore.setState({
     nodes: [{ id: 'out1', type: 'output', data, position: { x: 0, y: 0 } }],
@@ -126,5 +128,52 @@ describe('OutputNodeView — upscale', () => {
       );
     });
     expect(addToast).not.toHaveBeenCalled();
+  });
+
+  // CONSISTENCY PIN — deliberately NOT a reproduction of a live user-visible
+  // defect. Upscale now keys on `editSourceUrl` exactly like crop / expand /
+  // mask / split, so the five editing actions can never disagree about WHICH
+  // picture they act on.
+  //
+  // Why no user can reach this path today: `editingUrl` exists only while the
+  // unified editor is open, and that editor is a `fixed inset-0 z-[100]`
+  // portal covering the node's floating toolbar — the Upscale click below
+  // lands only because jsdom does no hit-testing. Deliberately no UI is added
+  // for it; the point is that if the toolbar ever outlives the editor (or the
+  // editor grows its own Upscale), the behaviour is already right instead of
+  // being a second bug to find later.
+  it('upscale keys on the edited image, like the other derives', async () => {
+    upscaleGeneration.mockResolvedValue({
+      id: '727145299382534999',
+      url: '/api/v1/generated-media/727145299382534999/cover',
+    });
+    renderOutput({
+      images: [
+        { url: SOURCE, kind: 'image' },
+        { url: ITEM2, kind: 'image' },
+      ],
+    });
+    fireEvent.doubleClick(
+      within(screen.getByTestId('output-images-grid')).getAllByRole('img')[1],
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Upscale' }));
+
+    await waitFor(() => expect(upscaleGeneration).toHaveBeenCalledTimes(1));
+    expect(upscaleGeneration).toHaveBeenCalledWith('727145299382534222', '2k');
+  });
+
+  // A library import (`/api/v1/resources/{id}/cover`) has no generated-media
+  // row to upscale. The button used to render anyway and `return` on the
+  // missing id — a click with no outcome at all, which is the one result that
+  // teaches the user nothing.
+  it('offers no Upscale when the edited image has no generated-media id', () => {
+    renderOutput({
+      preview_url: '/api/v1/resources/9/cover',
+      images: [{ url: '/api/v1/resources/9/cover', kind: 'image' }],
+    });
+    expect(screen.queryByRole('button', { name: 'Upscale' })).toBeNull();
+    // Negative control: the toolbar itself is there, it is only Upscale that
+    // is withheld.
+    expect(screen.getByRole('button', { name: 'Brush' })).toBeTruthy();
   });
 });

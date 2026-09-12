@@ -21,6 +21,8 @@ from io import BytesIO
 
 from PIL import Image
 
+from app.services.canvas.image_encode import to_encodable
+
 # Subset of Pillow formats we round-trip cleanly. Pillow can encode many
 # more, but resource library MIME enforcement keeps the live set small.
 _FORMAT_BY_MIME: dict[str, str] = {
@@ -134,6 +136,10 @@ def crop_normalized(
         # transparency channel on encode.
         if out_format == "JPEG" and cropped.mode in ("RGBA", "LA", "P"):
             cropped = cropped.convert("RGB")
+        # And any other mode the target format refuses (a CMYK scan reaching
+        # the PNG path via ``transform_mime``) — otherwise Pillow raises and
+        # the user reads it as "400 crop failed".
+        cropped = to_encodable(cropped, out_format)
 
         buffer = BytesIO()
         cropped.save(buffer, format=out_format)

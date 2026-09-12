@@ -29,6 +29,7 @@ from app.db.session import read_scope, write_scope
 from app.models import (
     Canvases,
     GeneratedMedia,
+    ResourceItems,
     Resources,
     ResourceVersions,
     ScriptProjects,
@@ -316,23 +317,57 @@ def _inbox_filters(
     return crit
 
 
-def _promoted_resource_ids_stmt(gen_ids: Sequence[int]) -> Select:
-    """``(generation id, promoted resource id)`` for the archived ones whose
-    resource still exists.
+def _promoted_resource_ids_stmt(gen_ids: Sequence[int], scope_id: int) -> Select:
+    """``(generation id, promoted resource id, in_scope)`` for the archived
+    ones whose resource still exists.
 
     ``promoted_resource_id`` has no FK and is not cleared when a resource is
     purged, while ``canvas_resource_refs.resource_id`` REFERENCES resources:
     one dangling id would fail the refs INSERT after its DELETE committed and
-    wipe every ref the canvas has. The INNER JOIN keeps only live targets
-    (a trashed-but-not-purged row still exists, so it still counts).
+    wipe every ref the canvas has. The INNER JOIN on ``resources`` keeps only
+    live targets (a trashed-but-not-purged row still exists, so it counts).
+
+    The second join is the tenant check. The generation ids arrive from one
+    canvas's ``nodes_json``, which any member of that canvas can write — so
+    "this generation was archived" is not on its own a licence to file the
+    resulting resource id into THIS canvas's refs. ``resource_items`` is where
+    a resource's scope lives; requiring a row there for the canvas's own scope
+    is the same membership question the rest of the library asks.
+
+    It is a LEFT JOIN carrying a FLAG rather than an inner join, because
+    "filed in another scope" is a legitimate, pre-existing state that the
+    caller has to be able to REPORT. Promotes from before #2212 filed a canvas
+    output into the promoter's personal team; a chat upload can be filed
+    personally and then dropped on a team board. Those refs have been mirrored
+    for months and will now stop being mirrored — an inner join would make
+    that indistinguishable from "never promoted" and from "resource purged",
+    and the row would simply disappear from the canvas's mirror with nothing
+    anywhere saying so. The filtering still happens (in
+    ``promoted_resource_ids``); only the silence is removed.
+
+    ``DISTINCT`` because a resource filed into two folders of one scope has two
+    ``resource_items`` rows and would otherwise answer twice. With the ON
+    clause carrying the scope predicate, a generation yields exactly one row:
+    either the matched (flag true) rows collapsed by DISTINCT, or the single
+    unmatched NULL row.
     """
     return (
-        select(GeneratedMedia.id, GeneratedMedia.promoted_resource_id)
+        select(
+            GeneratedMedia.id,
+            GeneratedMedia.promoted_resource_id,
+            ResourceItems.id.is_not(None).label("in_scope"),
+        )
         .join(Resources, Resources.id == GeneratedMedia.promoted_resource_id)
+        .outerjoin(
+            ResourceItems,
+            (ResourceItems.resource_id == Resources.id)
+            & (ResourceItems.scope_id == int(scope_id)),
+        )
         .where(
             GeneratedMedia.id.in_(list(gen_ids)),
             GeneratedMedia.promoted_resource_id.is_not(None),
         )
+        .distinct()
     )
 
 
@@ -468,33 +503,69 @@ class GeneratedMediaRepository:
         return _normalize(dict(row)) if row else None
 
     async def promoted_resource_ids(
-        self, gen_ids: Iterable[int | str]
+        self, gen_ids: Iterable[int | str], *, scope_id: int
     ) -> dict[int, int]:
-        """``{generation id: promoted resource id}`` for the archived ones.
+        """``{generation id: promoted resource id}`` for the archived ones
+        whose resource is filed in ``scope_id``.
 
-        Unscoped like ``get_by_id``: the ids come from one canvas's own
-        nodes_json and the answer only feeds that canvas's refs mirror.
-        ``Resources`` is UserScoped and joined here, so under an ambient user
-        Scope the join would silently drop another contributor's archived
-        output — same rationale as
-        ``canvas_refs_repository.list_assets_for_canvas``.
+        ``scope_id`` is REQUIRED (keyword-only) on purpose: the ids come from a
+        canvas's ``nodes_json``, which its members write, so the answer must be
+        narrowed to resources that canvas may reference. An optional scope
+        would leave an unscoped call one forgotten argument away.
+
+        Read as the SYSTEM rather than the caller: ``Resources`` is UserScoped,
+        so under an ambient user Scope the join would silently drop another
+        contributor's archived output. Canvas membership plus the scope join
+        above is the authorization boundary here, not ``creator_id`` — same
+        rationale as ``canvas_refs_repository.list_assets_for_canvas``.
+
+        Out-of-scope generations are EXCLUDED from the result and ``warning``
+        -logged (count + ids + scope) rather than dropped in silence: some of
+        them are legitimate history — a promote from before #2212 filed the
+        resource in the promoter's personal team — and a ref that stops being
+        mirrored is a change somebody may have to explain later.
         """
         ids = sorted({int(g) for g in gen_ids})
         if not ids:
             return {}
         scope_cm = (
             system_request_scope(
-                reason="canvas refs archived-output lookup: canvas membership "
-                "is the authorization boundary, not creator_id — a canvas can "
-                "show generations archived by multiple contributors"
+                reason="canvas refs archived-output lookup: the canvas's SCOPE "
+                "(joined in SQL) is the authorization boundary, not creator_id "
+                "— a canvas can show generations archived by multiple "
+                "contributors, all of them inside that one scope"
             )
             if is_enforced("resources")
             else nullcontext()
         )
         async with scope_cm:
             async with read_scope() as session:
-                rows = (await session.execute(_promoted_resource_ids_stmt(ids))).all()
-        return {int(gen_id): int(resource_id) for gen_id, resource_id in rows}
+                rows = (
+                    await session.execute(
+                        _promoted_resource_ids_stmt(ids, int(scope_id))
+                    )
+                ).all()
+        in_scope: dict[int, int] = {}
+        dropped: list[int] = []
+        for gen_id, resource_id, is_in_scope in rows:
+            if is_in_scope:
+                in_scope[int(gen_id)] = int(resource_id)
+            else:
+                dropped.append(int(gen_id))
+        if dropped:
+            # One line per CALL, naming the count, the ids and the scope. These
+            # are generations whose archived resource is real but filed
+            # elsewhere (a pre-#2212 promote landed in the promoter's personal
+            # team; a personally-filed chat upload dropped on a team board).
+            # The canvas keeps showing the picture — only the refs mirror stops
+            # claiming the resource — but the change is visible in the data, so
+            # it has to be visible in the log too.
+            logger.warning(
+                f"canvas refs: {len(dropped)} archived output(s) not mirrored — "
+                f"their resource is not filed in scope {int(scope_id)} "
+                f"(generation ids: {sorted(dropped)})"
+            )
+        return in_scope
 
     async def delete(self, gen_id: int, scope_id: int) -> bool:
         # Capture the location BEFORE deleting so we can clean up an orphaned

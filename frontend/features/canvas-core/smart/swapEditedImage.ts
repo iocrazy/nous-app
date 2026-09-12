@@ -8,9 +8,12 @@ import type { GeneratedImageRef } from './types';
 
 export interface EditedImagePatch {
   preview_url?: string;
-  /** Cleared with the primary: both only ever described the old picture. */
+  /** Cleared with the primary: all three only ever described the old picture.
+   *  `gen_ratio` is the aspect the RUN asked for — keep it and the card boxes
+   *  the cropped image at the uncropped ratio, letterboxing it. */
   resource_id?: null;
   crop_region?: null;
+  gen_ratio?: null;
   images?: GeneratedImageRef[];
 }
 
@@ -24,6 +27,7 @@ export function swapEditedImage(
     patch.preview_url = to.url;
     patch.resource_id = null;
     patch.crop_region = null;
+    patch.gen_ratio = null;
   }
   const images = Array.isArray(slots.images) ? slots.images : [];
   if (images.some((img) => img?.url === from)) {

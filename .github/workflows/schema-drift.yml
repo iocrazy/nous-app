@@ -403,6 +403,22 @@ jobs:
           # asset is used nowhere".
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_canvas_asset_refs_integration.py -v
 
+      - name: Exercise the canvas refs archived-output scope filter (mig 445)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place promoted_resource_ids' scope join executes. Its unit
+          # tests compile the SQL and feed hand-made row tuples, which cannot
+          # settle: that resource_items really carries a resource's scope under
+          # those column names (a wrong one compiles fine and 42703s on the
+          # server), that the LEFT JOIN's in_scope flag arrives per generation
+          # so an out-of-scope ref can be REPORTED instead of silently
+          # vanishing, or that DISTINCT collapses a resource filed into two
+          # folders of one scope — without it that generation answers twice.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_promoted_resource_ids_scope_integration.py -v
+
       - name: Exercise the chat question stamp against the built schema (phase 2a)
         working-directory: backend
         env:

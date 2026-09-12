@@ -145,11 +145,21 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     store.setNodes([...store.nodes, node]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview_url, images, id]);
-  // IC 放大: upscale the primary image via jimeng image_upscale; the result
-  // appends beside the original (source stays).
+  // IC 放大: upscale the image being edited via jimeng image_upscale; the
+  // result appends beside the original (source stays).
+  //
+  // Keyed on `editSourceUrl` like crop / expand / split — the grid item that
+  // was double-clicked, else the primary. Keying on the primary upscaled a
+  // picture the user was not looking at, and the product landed in the grid
+  // looking like the answer to their click.
+  //
+  // Only a generated-media url carries a row to upscale; a library import
+  // (`/api/v1/resources/{id}/cover`) has none. That is why the id is resolved
+  // HERE and the toolbar is handed `onUpscale` only when it exists: an action
+  // whose one possible outcome is `return` must not be offered.
+  const upscaleGenId = editSourceUrl ? genIdFromDurableUrl(editSourceUrl) : null;
   const handleUpscale = useCallback(() => {
-    const url = primaryImageUrl;
-    const genId = url ? genIdFromDurableUrl(url) : null;
+    const genId = upscaleGenId;
     if (!genId) return;
     void (async () => {
       try {
@@ -180,8 +190,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         setUpscaling(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview_url, images, id, patchData, toast, t]);
+  }, [upscaleGenId, id, patchData, toast, t]);
   const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -625,7 +634,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onExpand={canDerive ? openOutpaintEditor : undefined}
           onMask={canCrop ? openMaskEditor : undefined}
           onBrush={() => setEditorMode('brush')}
-          onUpscale={canCrop ? handleUpscale : undefined}
+          onUpscale={canCrop && upscaleGenId ? handleUpscale : undefined}
           onDuplicate={canCrop ? handleDuplicate : undefined}
           upscaling={upscaling}
           onSplit={canDerive ? openGridEditor : undefined}

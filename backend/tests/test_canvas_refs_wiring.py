@@ -332,16 +332,28 @@ async def test_a_clean_save_does_not_warn_about_loadouts():
 
 
 class FakeGenRepo:
-    def __init__(self, promoted: Dict[int, int] | None = None, boom: bool = False):
+    def __init__(
+        self,
+        promoted: Dict[int, int] | None = None,
+        boom: bool = False,
+        in_scope: int | None = None,
+    ):
         self.promoted = promoted or {}
         self.boom = boom
+        # The scope the archived resources are actually filed in. A lookup for
+        # any OTHER scope comes back empty, like the scoped SQL does.
+        self.in_scope = in_scope
         self.calls: List[List[int]] = []
+        self.scopes: List[int] = []
 
-    async def promoted_resource_ids(self, gen_ids) -> Dict[int, int]:
+    async def promoted_resource_ids(self, gen_ids, *, scope_id: int) -> Dict[int, int]:
         ids = [int(g) for g in gen_ids]
         self.calls.append(ids)
+        self.scopes.append(scope_id)
         if self.boom:
             raise RuntimeError("db down")
+        if self.in_scope is not None and scope_id != self.in_scope:
+            return {}
         return {g: r for g, r in self.promoted.items() if g in ids}
 
 
@@ -367,8 +379,26 @@ def _archived_update() -> CanvasUpdate:
     )
 
 
+@pytest.fixture
+def canvas_scope(monkeypatch):
+    """Stub the canvas → project → team resolution (a DB read otherwise).
+
+    Returns the mutable holder so a test can make the resolution FAIL by
+    setting ``["scope"] = None``.
+    """
+    from app.services.canvas import canvas_service as cs
+
+    holder: Dict[str, Optional[int]] = {"scope": 77}
+
+    async def fake_scope(canvas_id: str) -> Optional[int]:
+        return holder["scope"]
+
+    monkeypatch.setattr(cs, "_canvas_scope_id", fake_scope)
+    return holder
+
+
 @pytest.mark.asyncio
-async def test_save_counts_archived_generations_shown_by_output_nodes():
+async def test_save_counts_archived_generations_shown_by_output_nodes(canvas_scope):
     refs_repo = FakeRefsRepo()
     gen_repo = FakeGenRepo({5: 333})
     svc = CanvasService(
@@ -378,11 +408,64 @@ async def test_save_counts_archived_generations_shown_by_output_nodes():
     )
     await svc.update_with_lock("5001", _archived_update())
     assert gen_repo.calls == [[5, 6]]
+    # The lookup is asked about THIS canvas's scope, not an unscoped one.
+    assert gen_repo.scopes == [77]
     _, refs = refs_repo.calls[0]
     assert {(r["node_id"], r["resource_id"], r["role"]) for r in refs} == {
         ("out-1", "333", "output"),
         ("out-2", "222", "output"),
     }
+
+
+@pytest.mark.asyncio
+async def test_an_archived_output_outside_the_canvas_scope_is_not_mirrored(
+    canvas_scope,
+):
+    """A canvas member can put ANY generation id in nodes_json.
+
+    If the archived resource behind it is filed in someone else's scope, it is
+    not this canvas's to reference — the mirror keeps only the legacy refs and
+    the foreign resource id never reaches canvas_resource_refs.
+    """
+    refs_repo = FakeRefsRepo()
+    gen_repo = FakeGenRepo({5: 333}, in_scope=9999)  # filed in another tenant
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs_repo,
+        generated_media_repository=gen_repo,
+    )
+    await svc.update_with_lock("5001", _archived_update())
+    assert gen_repo.scopes == [77]
+    _, refs = refs_repo.calls[0]
+    assert [(r["node_id"], r["resource_id"]) for r in refs] == [("out-2", "222")]
+
+
+@pytest.mark.asyncio
+async def test_an_unresolved_scope_degrades_to_the_legacy_refs(canvas_scope):
+    """Not resolvable is not "allow everything": without a scope there is
+    nothing to check the archived resource against, so the lookup is skipped
+    and the save carries on with the legacy refs (and says so)."""
+    from loguru import logger as loguru_logger
+
+    canvas_scope["scope"] = None
+    seen: List[str] = []
+    handler_id = loguru_logger.add(lambda m: seen.append(str(m)), level="ERROR")
+    refs_repo = FakeRefsRepo()
+    gen_repo = FakeGenRepo({5: 333})
+    try:
+        svc = CanvasService(
+            repository=FakeRepo(),
+            refs_repository=refs_repo,
+            generated_media_repository=gen_repo,
+        )
+        await svc.update_with_lock("5001", _archived_update())
+    finally:
+        loguru_logger.remove(handler_id)
+
+    assert gen_repo.calls == []
+    _, refs = refs_repo.calls[0]
+    assert [(r["node_id"], r["resource_id"]) for r in refs] == [("out-2", "222")]
+    assert any("scope" in line for line in seen), seen
 
 
 @pytest.mark.asyncio
@@ -404,7 +487,7 @@ async def test_save_without_generation_urls_skips_the_lookup():
 
 
 @pytest.mark.asyncio
-async def test_archived_lookup_failure_still_writes_the_legacy_refs():
+async def test_archived_lookup_failure_still_writes_the_legacy_refs(canvas_scope):
     refs_repo = FakeRefsRepo()
     svc = CanvasService(
         repository=FakeRepo(),
