@@ -144,9 +144,30 @@ export interface ResourcesContextType {
    *  rendered at all, so a failed fetch never shows six fake zeros. A type
    *  that really has none comes back as 0 from the server, which IS rendered
    *  as nothing — the distinction the null preserves is "we could not ask". */
-  /** Partial: a count we do not have is ABSENT, never zero. The unified
-   *  prompt count comes from a second request that can fail on its own. */
+  /** Partial: a count we do not have is ABSENT, never zero.
+   *
+   *  Every key here counts ASSET ROWS, `prompt` included — so the shelf's
+   *  "All" tab can sum them and land on a number its own grid can show. The
+   *  Prompts surface counts something else entirely; that lives in
+   *  {@link promptEntryCount}. */
   assetCounts: Partial<AssetCounts> | null;
+  /**
+   * How many rows the Prompts page holds: the unified catalog's `mine` plus
+   * its system presets.
+   *
+   * A SEPARATE number from `assetCounts.prompt`, and the separation is the
+   * point. This one counts prompt ENTRIES — prompted pictures, albums and
+   * templates, presets included — because that is what the sidebar's Prompts
+   * entry and the shelf's Prompts tab both open. `assetCounts.prompt` counts
+   * the team's own prompt ASSET rows, which is what belongs in an asset
+   * total. Folding the first into the second (as this context used to) put a
+   * picture count inside the shelf's "All N" badge, so a scope with no assets
+   * at all advertised fifteen of them over an empty grid.
+   *
+   * `null` while unknown or after a failed fetch — never 0, which would
+   * assert an empty catalog.
+   */
+  promptEntryCount: number | null;
   /** Re-fetch `assetCounts` (e.g. after creating or deleting an asset). */
   refreshAssetCounts: () => void;
   resourceTagNamesMap: Record<string, string>;
@@ -336,6 +357,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
   // ── Asset library counts (the six Assets sub-item badges) ──
   const [assetCounts, setAssetCounts] = useState<Partial<AssetCounts> | null>(null);
+  const [promptEntryCount, setPromptEntryCount] = useState<number | null>(null);
   const [assetCountsTick, setAssetCountsTick] = useState(0);
   const refreshAssetCounts = useCallback(() => {
     setAssetCountsTick((v) => v + 1);
@@ -775,6 +797,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // stale — the console.error is the signal) rather than the badges vanishing.
   useEffect(() => {
     setAssetCounts(null);
+    setPromptEntryCount(null);
   }, [scopeId]);
 
   useEffect(() => {
@@ -793,18 +816,21 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     ])
       .then(([counts, prompts]) => {
         if (cancelled) return;
-        // The Prompts tab lists the unified catalog (templates + prompted
-        // pictures), so its badge must count THAT — `/assets/counts` only
-        // knows the template rows. When the unified count fails we KEEP THE
-        // LAST KNOWN one: substituting the template-row number would show a
-        // different metric under the same label (0 while the page lists 13).
-        // With nothing known yet the key stays absent, which the sidebar
-        // already renders as no badge rather than as a zero.
-        setAssetCounts((prev) => {
-          const { prompt: _templatesOnly, ...rest } = counts;
-          const unified = prompts ? prompts.mine : prev?.prompt;
-          return unified === undefined ? rest : { ...rest, prompt: unified };
-        });
+        // `assetCounts` is left ALONE — every key stays an asset-row count,
+        // `prompt` included, so the shelf's "All" tab sums six numbers that
+        // its own grid can account for.
+        setAssetCounts(counts);
+        // The Prompts surface counts the unified catalog instead: the team's
+        // own entries PLUS the system presets, because the presets section is
+        // on that page and a badge that ignored it would undercount what the
+        // user is looking at. (The other five asset badges exclude presets —
+        // this one is a different metric already, and it names a page rather
+        // than a shelf of the team's own rows.)
+        //
+        // A failed unified fetch KEEPS THE LAST KNOWN number rather than
+        // falling back to the asset-row count: that would show a different
+        // metric under the same label (0 while the page lists fifteen).
+        if (prompts) setPromptEntryCount(prompts.mine + prompts.system);
       })
       .catch((err) => {
         console.error('[ResourcesContext] asset counts failed:', err);
@@ -1292,6 +1318,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     generatedUnreviewedCount,
     refreshGeneratedCounts,
     assetCounts,
+    promptEntryCount,
     refreshAssetCounts,
     resourceTagNamesMap,
     resourceTagIdsMap,
@@ -1368,7 +1395,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, isAssetsView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
-    generatedUnreviewedCount, refreshGeneratedCounts, assetCounts, refreshAssetCounts,
+    generatedUnreviewedCount, refreshGeneratedCounts, assetCounts, promptEntryCount, refreshAssetCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,

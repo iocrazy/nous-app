@@ -147,7 +147,7 @@ export interface AssetShelfProps {
 
 export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
   const { t } = useTranslation();
-  const { scopeId, teamId, resPath, assetCounts, refreshAssetCounts } = useResourcesContext();
+  const { scopeId, teamId, resPath, assetCounts, promptEntryCount, refreshAssetCounts } = useResourcesContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -358,7 +358,20 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
 
   const tagOptions = useMemo(() => tagOptionsFrom(rows, filters.tag), [rows, filters.tag]);
 
+  /**
+   * The number on a tab, in the currency of the surface that tab opens.
+   *
+   * Prompts is the odd one out and has to be: its tab does not open this
+   * shelf at all, it opens `PromptsShelf` over the unified catalog, so it
+   * counts prompt ENTRIES (pictures, albums, templates, presets included).
+   * Every other tab — and therefore the "All" sum, which stays over
+   * `assetCounts` alone — counts asset rows, which is what the grid below
+   * can actually show. Summing the entry count into "All" was how a scope
+   * holding no assets came to advertise fifteen of them above the words
+   * "No Assets Yet".
+   */
   const tabCount = (type: AssetType | null): number | null => {
+    if (type === 'prompt') return promptEntryCount;
     if (!assetCounts) return null;
     if (type === null) {
       return ASSET_TYPES.reduce((sum, one) => sum + (assetCounts[one] ?? 0), 0);

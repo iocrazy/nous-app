@@ -90,12 +90,18 @@ vi.mock('../../Toast', () => ({
 }));
 
 const refreshAssetCounts = vi.fn();
+// Mutable so the counts cases can set their own without a second mock factory.
+const ctxCounts = {
+  assetCounts: { character: 2, location: 1, prop: 0, costume: 0, prompt: 0, audio: 0 } as Record<string, number>,
+  promptEntryCount: null as number | null,
+};
 vi.mock('../../../contexts/ResourcesContext', () => ({
   useResourcesContext: () => ({
     scopeId: '727145299382534200',
     teamId: '42',
     resPath: (p: string) => `/team/42${p}`,
-    assetCounts: { character: 2, location: 1, prop: 0, costume: 0, prompt: 0, audio: 0 },
+    assetCounts: ctxCounts.assetCounts,
+    promptEntryCount: ctxCounts.promptEntryCount,
     refreshAssetCounts,
   }),
 }));
@@ -550,5 +556,45 @@ describe('AssetShelf — projects chip', () => {
     await waitFor(() => expect(screen.getByText('Projects unavailable')).toBeTruthy());
     // Clearing an active filter must keep working while the list is down.
     expect(screen.getByRole('menuitemradio', { name: 'Any Project' })).toBeTruthy();
+  });
+});
+
+/**
+ * Tab numbers, and the one that is not in the same currency as the rest.
+ *
+ * The Prompts tab does not open this shelf — `AssetsView` swaps in
+ * `PromptsShelf` for that type — so it counts prompt ENTRIES (prompted
+ * pictures, albums, templates, system presets). Every other tab counts asset
+ * rows, and so must "All", because "All" labels a grid of asset rows.
+ *
+ * The bug this pins: the entry count used to be written into
+ * `assetCounts.prompt`, which "All" sums. A scope holding no assets at all but
+ * fifteen prompted pictures rendered "All 15" directly above the words "No
+ * Assets Yet" — the exact disagreement this file's subject documents as its
+ * second invariant ("PRESETS ARE SEPARATED ... so the badge and the team's own
+ * grid agree").
+ */
+describe('AssetShelf — tab counts', () => {
+  beforeEach(() => {
+    ctxCounts.assetCounts = { character: 0, location: 0, prop: 0, costume: 0, prompt: 0, audio: 0 };
+    ctxCounts.promptEntryCount = 15;
+  });
+
+  it('does not sum prompt entries into All', async () => {
+    renderAt('/team/42/resources/assets');
+    await waitFor(() => expect(tab('All').textContent).toBe('All0'));
+  });
+
+  it('still shows the entry count on the Prompts tab itself', async () => {
+    renderAt('/team/42/resources/assets');
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: /Prompt/ }).textContent).toContain('15'),
+    );
+  });
+
+  it('All keeps counting the team\'s own prompt ASSET rows', async () => {
+    ctxCounts.assetCounts = { character: 2, location: 0, prop: 0, costume: 0, prompt: 3, audio: 0 };
+    renderAt('/team/42/resources/assets');
+    await waitFor(() => expect(tab('All').textContent).toBe('All5'));
   });
 });
