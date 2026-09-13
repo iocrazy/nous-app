@@ -49,6 +49,17 @@ interface VideoDetailPanelProps {
   mobileActions?: React.ReactNode;
   /** Current playback position (seconds) — drives synced lyrics highlight. */
   playerCurrentTime?: number;
+  /** Move the player to a point in the media, in seconds.
+   *
+   *  The transcript's timestamps advertise themselves as seek controls, so
+   *  without this they are a control that lies: the button rendered, the
+   *  tooltip said "Click to seek (coming soon)", and the click did nothing.
+   *  The sibling surface (`ResourceDetailPage`) has always done the seek
+   *  because it owns its own `<video>`; here the player lives in the parent
+   *  page, so the capability has to arrive as a prop. Absent means the host
+   *  has no player — the timestamps then render as plain text, not as dead
+   *  buttons. */
+  onSeek?: (seconds: number) => void;
   /** Track's own Soda palette — themes the lyrics tab for audio items. */
   sodaTheme?: SodaTheme;
   /**
@@ -125,6 +136,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   onNotesBlur,
   mobileActions,
   playerCurrentTime,
+  onSeek,
   sodaTheme,
   compact = false,
   island = false,
@@ -480,9 +492,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const getStatusIndicator = (status?: string) => {
     switch (status) {
       case 'processing':
-        return <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />;
+        return <span className="w-2 h-2 rounded-full bg-info animate-pulse" />;
       case 'completed':
-        return <span className="w-2 h-2 rounded-full bg-emerald-400" />;
+        return <span className="w-2 h-2 rounded-full bg-ok" />;
       case 'failed':
         return <span className="w-2 h-2 rounded-full bg-red-400" />;
       default:
@@ -507,7 +519,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === tab.key
-                  ? 'border-indigo-500 text-[var(--accent-text)]'
+                  ? 'border-accent text-[var(--accent-text)]'
                   : `border-transparent ${cText400} ${cHoverText200} ${cHoverBorder700}`
               }`}
             >
@@ -568,8 +580,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             {transcribeStatus === 'processing' && !transcript && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="relative mb-6">
-                  <div className="w-16 h-16 rounded-full border-2 border-indigo-500/20" />
-                  <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
+                  <div className="w-16 h-16 rounded-full border-2 border-accent/20" />
+                  <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-accent animate-spin" />
                   <div className="absolute inset-0 flex items-center justify-center">
                     <Brain size={24} className="text-[var(--accent-text)]" />
                   </div>
@@ -579,7 +591,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   AI is processing the audio. This may take a few minutes depending on the length.
                 </p>
                 <div className="mt-4 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-info animate-pulse" />
                   <span className="text-xs text-[var(--accent-text)]">Processing</span>
                 </div>
               </div>
@@ -605,7 +617,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 <button
                   onClick={handleTranscribe}
                   disabled={transcriptLoading}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="px-6 py-3 bg-accent hover:opacity-90 text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <Brain size={18} />
                   Transcribe
@@ -616,117 +628,180 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               </div>
             )}
 
-            {/* Transcript content */}
+            {/* Transcript content.
+                Three things this layout is answering, all visible in the
+                surface it replaces:
+
+                 * NO SECOND SCROLLER. The list used to sit in its own
+                   `max-h-[50vh] overflow-y-auto` box INSIDE the panel's own
+                   `flex-1 min-h-0 overflow-y-auto` body. Two nested scrollers
+                   fight the wheel, and capping at half the viewport left the
+                   controls stranded mid-page above a screen of dead space.
+                   One scroller now — the panel's — and the list is as long as
+                   the transcript is.
+                 * CONTROLS ABOVE THE TEXT, AND STICKY. Once the list is not
+                   capped, a toolbar below it is 114 segments away. Meta and
+                   controls describe the same object, so they share one row
+                   that stays put while you read.
+                 * THE SPEAKER CHIP MARKS A CHANGE, NOT A ROW. Stamping S02 on
+                   every one of 114 consecutive segments is the same as
+                   stamping none: the chip only earns its space where the
+                   speaker actually turns over. */}
             {transcript && (
-              <div className="space-y-4">
-                {/* Meta info */}
-                <div className={`flex flex-wrap items-center gap-3 text-xs ${cText500}`}>
-                  <span className="flex items-center gap-1">
-                    <Clock size={12} />
-                    {formatTimestamp(transcript.duration)} total
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Tag size={12} />
-                    {transcript.language.toUpperCase()}
-                  </span>
-                  <span>{transcript.segments.length} segments</span>
-                </div>
-
-                {/* Content area */}
-                <div className={`${cCardBg} border ${cBorder800} rounded-xl overflow-hidden`}>
-                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
-                    {transcriptView === 'segments' ? (
-                      <div className={`divide-y ${cDivide80050}`}>
-                        {transcript.segments.map((seg, i) => (
-                          <div
-                            key={i}
-                            className={`flex gap-3 px-4 py-3 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
-                          >
-                            <button
-                              className="text-xs font-mono text-[var(--accent-text)] group-hover:text-[var(--accent-text)] shrink-0 pt-0.5 transition-colors"
-                              title="Click to seek (coming soon)"
-                            >
-                              [{formatTimestamp(seg.start)}]
-                            </button>
-                            <SpeakerChip speaker={seg.speaker} />
-                            <p className={`text-sm ${cText300} leading-relaxed`}>{seg.text}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-4">
-                        <p className={`text-sm ${cText300} leading-relaxed whitespace-pre-wrap`}>
-                          {transcript.text}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Toolbar */}
-                <div className="flex items-center gap-2">
-                  {/* View toggle */}
-                  <div className={`flex ${cCtrlBg} border ${cBorder700} rounded-lg overflow-hidden`}>
-                    <button
-                      onClick={() => setTranscriptView('segments')}
-                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                        transcriptView === 'segments'
-                          ? 'bg-indigo-600 text-white'
-                          : `${cText400} ${cHoverText200}`
-                      }`}
-                    >
-                      <List size={12} />
-                      Segments
-                    </button>
-                    <button
-                      onClick={() => setTranscriptView('fulltext')}
-                      className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                        transcriptView === 'fulltext'
-                          ? 'bg-indigo-600 text-white'
-                          : `${cText400} ${cHoverText200}`
-                      }`}
-                    >
-                      <AlignLeft size={12} />
-                      Full Text
-                    </button>
+              <div className="space-y-2">
+                {/* One chrome row: what this transcript is, and what you can
+                    do to it. Sticky against the panel body's scroller. */}
+                <div className={`sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-x-3 gap-y-2 px-1 py-2 ${island ? 'bg-island-1' : 'bg-ink-900'}`}>
+                  <div className={`flex items-center gap-3 text-xs ${cText500}`}>
+                    <span className="flex items-center gap-1">
+                      <Clock size={12} />
+                      {formatTimestamp(transcript.duration)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Tag size={12} />
+                      {transcript.language.toUpperCase()}
+                    </span>
+                    <span className="tabular-nums">{transcript.segments.length} segments</span>
                   </div>
 
-                  {/* Copy */}
-                  <button
-                    onClick={handleCopyTranscript}
-                    className={`px-3 py-1.5 text-xs ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
-                  >
-                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
+                  <span className="flex-1" />
 
-                  {/* Export dropdown */}
-                  <div className="relative">
+                  <div className="flex items-center gap-2">
+                    <div className={`flex ${cCtrlBg} border ${cBorder700} rounded-lg overflow-hidden`}>
+                      <button
+                        onClick={() => setTranscriptView('segments')}
+                        aria-pressed={transcriptView === 'segments'}
+                        className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                          transcriptView === 'segments'
+                            ? 'bg-accent text-white'
+                            : `${cText400} ${cHoverText200}`
+                        }`}
+                      >
+                        <List size={12} />
+                        Segments
+                      </button>
+                      <button
+                        onClick={() => setTranscriptView('fulltext')}
+                        aria-pressed={transcriptView === 'fulltext'}
+                        className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                          transcriptView === 'fulltext'
+                            ? 'bg-accent text-white'
+                            : `${cText400} ${cHoverText200}`
+                        }`}
+                      >
+                        <AlignLeft size={12} />
+                        Full Text
+                      </button>
+                    </div>
+
                     <button
-                      onClick={() => setExportOpen(!exportOpen)}
+                      onClick={handleCopyTranscript}
                       className={`px-3 py-1.5 text-xs ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
                     >
-                      <Download size={12} />
-                      Export
-                      <ChevronDown size={10} />
+                      {copied ? <Check size={12} className="text-ok" /> : <Copy size={12} />}
+                      {copied ? 'Copied' : 'Copy'}
                     </button>
-                    {exportOpen && (
-                      <div className={`absolute bottom-full mb-1 left-0 ${cCtrlBg} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-10 min-w-[120px]`}>
-                        <button
-                          onClick={() => { handleExportSRT(); setExportOpen(false); }}
-                          className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
-                        >
-                          Export SRT
-                        </button>
-                        <button
-                          onClick={() => { handleExportTXT(); setExportOpen(false); }}
-                          className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
-                        >
-                          Export TXT
-                        </button>
-                      </div>
-                    )}
+
+                    <div className="relative">
+                      <button
+                        onClick={() => setExportOpen(!exportOpen)}
+                        aria-expanded={exportOpen}
+                        className={`px-3 py-1.5 text-xs ${cCtrlBg} ${cHoverSurf7} ${cText300} rounded-lg transition-colors flex items-center gap-1.5 border ${cBorder700}`}
+                      >
+                        <Download size={12} />
+                        Export
+                        <ChevronDown size={10} />
+                      </button>
+                      {exportOpen && (
+                        /* Opens DOWNWARD now that the toolbar sits at the top;
+                           `bottom-full` here would fly off the panel. */
+                        <div className={`absolute top-full mt-1 right-0 ${cCtrlBg} border ${cBorder700} rounded-lg shadow-xl overflow-hidden z-20 min-w-[120px]`}>
+                          <button
+                            onClick={() => { handleExportSRT(); setExportOpen(false); }}
+                            className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
+                          >
+                            Export SRT
+                          </button>
+                          <button
+                            onClick={() => { handleExportTXT(); setExportOpen(false); }}
+                            className={`w-full px-3 py-2 text-xs ${cText300} ${cHoverSurf7} text-left transition-colors`}
+                          >
+                            Export TXT
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
+                </div>
+
+                <div className={`${cCardBg} border ${cBorder800} rounded-xl overflow-hidden`}>
+                  {transcriptView === 'segments' ? (
+                    <div className={`divide-y ${cDivide80050}`}>
+                      {transcript.segments.map((seg, i) => {
+                        const prev = transcript.segments[i - 1];
+                        const speakerTurns = !!seg.speaker && seg.speaker !== prev?.speaker;
+                        const playing =
+                          playerCurrentTime !== undefined &&
+                          playerCurrentTime >= seg.start &&
+                          playerCurrentTime < seg.end;
+                        return (
+                          <div
+                            key={i}
+                            data-playing={playing || undefined}
+                            className={`flex gap-3 px-4 py-2.5 transition-colors ${
+                              playing
+                                ? 'bg-[var(--accent-soft)]'
+                                : island
+                                  ? 'hover:bg-island-2'
+                                  : 'hover:bg-ink-800/30'
+                            }`}
+                          >
+                            {/* A fixed mono gutter, so 114 timecodes line up as
+                                a column instead of ragging against the text.
+                                The brackets are gone — a right-aligned mono
+                                column already reads as a timecode, and they
+                                were two characters of chrome per row.
+
+                                Only a button when it can actually do
+                                something: with no player behind the panel this
+                                renders as plain text rather than as a control
+                                that does nothing when clicked. */}
+                            {onSeek ? (
+                              <button
+                                type="button"
+                                onClick={() => onSeek(seg.start)}
+                                title={`Play from ${formatTimestamp(seg.start)}`}
+                                className={`w-11 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums transition-colors ${
+                                  playing ? 'text-[var(--accent-text)]' : `${cText500} hover:text-[var(--accent-text)]`
+                                }`}
+                              >
+                                {formatTimestamp(seg.start)}
+                              </button>
+                            ) : (
+                              <span className={`w-11 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums ${cText500}`}>
+                                {formatTimestamp(seg.start)}
+                              </span>
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              {speakerTurns && (
+                                <div className="mb-1">
+                                  <SpeakerChip speaker={seg.speaker} />
+                                </div>
+                              )}
+                              <p className={`text-sm ${cText300} leading-relaxed`}>{seg.text}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-4">
+                      <p className={`text-sm ${cText300} leading-relaxed whitespace-pre-wrap`}>
+                        {transcript.text}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -763,7 +838,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <button
                     onClick={handleSummarize}
                     disabled={summaryLoading}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                    className="px-4 py-2 bg-accent hover:opacity-90 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
                   >
                     {summaryLoading ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -785,7 +860,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <button
                     onClick={handleSummarize}
                     disabled={summaryLoading}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                    className="px-4 py-2 bg-accent hover:opacity-90 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
                   >
                     {summaryLoading ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -838,8 +913,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                       <div className="flex flex-wrap gap-2">
                         {summary.topics.map((topic, i) => {
                           const colors = [
-                            'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
-                            'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                            'bg-info-soft text-info border-info-line',
+                            'bg-ok-soft text-ok border-ok-line',
                             'bg-purple-500/10 text-purple-400 border-purple-500/20',
                             'bg-amber-500/10 text-amber-400 border-amber-500/20',
                             'bg-rose-500/10 text-rose-400 border-rose-500/20',
