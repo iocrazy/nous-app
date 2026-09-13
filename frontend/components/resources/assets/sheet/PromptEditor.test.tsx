@@ -224,3 +224,56 @@ describe('prompt-type extras', () => {
     expect(screen.getByTestId('pin-lightbox-image')).toHaveAttribute('data-resource-id', 'ex1');
   });
 });
+
+/**
+ * Field height.
+ *
+ * The complaint this answers: a preset's positive prompt runs well past the
+ * three rows the box was fixed at, so the sheet showed a sliver of it behind
+ * an inner scrollbar. `resize-y` was already on the class list, but a handle
+ * nobody finds is not an answer — and having to drag it open on every visit
+ * is not one either.
+ *
+ * The contract is MIN-height, not height: the box is at least as tall as its
+ * own content up to a cap, and a manual drag can always make it taller. Using
+ * `height` would have fought the drag on the next keystroke.
+ *
+ * jsdom computes no layout, so `scrollHeight` is stubbed — these tests pin the
+ * ARITHMETIC (measure, cap, re-measure on change), which is the part that can
+ * be wrong. That the browser lays it out is not in question.
+ */
+describe('prompt field height', () => {
+  const stubScrollHeight = (px: number) =>
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => px,
+    });
+
+  it('grows to fit its content instead of clipping it', () => {
+    stubScrollHeight(300);
+    renderEditor();
+    expect((screen.getByTestId('prompt-positive') as HTMLTextAreaElement).style.minHeight).toBe('300px');
+  });
+
+  // Without a cap, one very long prompt pushes the platform params and the
+  // Examples row off the bottom of the page, and the sheet stops being a
+  // sheet.
+  it('stops growing at the cap and lets the rest scroll', () => {
+    stubScrollHeight(4000);
+    renderEditor();
+    expect((screen.getByTestId('prompt-positive') as HTMLTextAreaElement).style.minHeight).toBe('480px');
+  });
+
+  // The ratchet this guards: measuring without first releasing the min-height
+  // reads back the height we ourselves set, so a field could grow but never
+  // shrink again when its text was deleted.
+  it('shrinks again when the text is deleted', () => {
+    stubScrollHeight(300);
+    renderEditor();
+    const field = screen.getByTestId('prompt-positive') as HTMLTextAreaElement;
+    expect(field.style.minHeight).toBe('300px');
+    stubScrollHeight(60);
+    fireEvent.change(field, { target: { value: 'x' } });
+    expect(field.style.minHeight).toBe('60px');
+  });
+});

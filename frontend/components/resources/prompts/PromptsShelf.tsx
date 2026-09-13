@@ -57,6 +57,8 @@ export const PromptsShelf: React.FC = () => {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [page, setPage] = useState<PromptPage | null>(null);
+  /** System presets, fetched separately — see the section's own comment. */
+  const [presets, setPresets] = useState<PromptEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [tick, setTick] = useState(0);
@@ -102,6 +104,31 @@ export const PromptsShelf: React.FC = () => {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [scopeId, filters.projectId, filters.form, filters.origin, debouncedQ, tick]);
+
+  // System presets ride a SECOND request, because the catalog partitions by
+  // segment and this shelf's own segment is `mine` (or `project`). Skipping
+  // it was the whole bug: every preset prompt template was unreachable here
+  // while the Assets tab beside it advertised them.
+  //
+  // Filtered with the same `q` as the main list — a section that ignored the
+  // search box would answer a query with rows that do not match it — but NOT
+  // with `origin`: presets are seeded, and an origin chip is a question about
+  // where the user's own corpus came from.
+  //
+  // `wantsPresets` is both a correctness guard and the reason there is no
+  // request to waste: every preset is a template, so a shelf narrowed to
+  // Images or Albums must not answer with templates.
+  const wantsPresets = filters.form === null || filters.form === 'template';
+  useEffect(() => {
+    if (!scopeId || !wantsPresets) { setPresets([]); return; }
+    let cancelled = false;
+    fetchPrompts(scopeId, { segment: 'system', form: 'template', q: debouncedQ, limit: PAGE_LIMIT })
+      .then((p) => { if (!cancelled) setPresets(p.items); })
+      // A failed preset fetch must not blank the shelf the user came for; the
+      // section simply does not render (it is additive by construction).
+      .catch((err) => { console.error('[PromptsShelf] presets unavailable:', err); if (!cancelled) setPresets([]); });
+    return () => { cancelled = true; };
+  }, [scopeId, wantsPresets, debouncedQ, tick]);
 
   const items = useMemo(() => sortEntries(page?.items ?? [], filters.sort), [page, filters.sort]);
   // Ruling R6: `total` describes the WHOLE unfiltered segment, so it — not the
@@ -180,6 +207,30 @@ export const PromptsShelf: React.FC = () => {
             <p className="py-2 text-[11px] text-content-3">{t('prompts.shelf.capped', { limit: PAGE_LIMIT, defaultValue: 'Showing the first {{limit}} — narrow with search or filters' })}</p>
           )}
         </>
+      )}
+
+      {/* Presets are global and read-only, and the form counts above describe
+          the team's OWN corpus — `by_form` comes from the `mine`/`project`
+          page and never sees these rows. Their own labelled section is what
+          keeps the counts and the list above from disagreeing, exactly as
+          `AssetShelf` does it for the other five asset types.
+
+          Deliberately OUTSIDE the loading / empty / list conditional: a scope
+          with no prompts of its own still has presets, and rendering "No
+          prompts yet" over a shelf that does hold ten usable templates is the
+          same silence this section exists to end. */}
+      {presets.length > 0 && (
+        <section data-testid="prompt-preset-section" className="mt-2">
+          <div className="flex items-baseline gap-2 border-t border-line pt-4">
+            <h3 className="text-[13px] font-medium text-content-2">{t('assets.presets.title', 'System Presets')}</h3>
+            <p className="text-[11px] text-content-4">{t('assets.presets.hint', 'Read-only — duplicate one to edit it')}</p>
+          </div>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">
+            {presets.map((entry) => (
+              <PromptCard key={entry.key} entry={entry} lang={lang} onSend={(e) => setSend({ entry: e })} onSaveAsTemplate={(e) => setSave({ entry: e })} onOpen={onOpen} />
+            ))}
+          </div>
+        </section>
       )}
 
       {send && sendText && (
