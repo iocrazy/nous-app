@@ -23,7 +23,7 @@
 //    422 `nothing_to_translate`, `no_primary_file`, ...) surface through the
 //    shared reporter rather than being swallowed into "nothing happened".
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Languages, Loader2, Sparkles } from 'lucide-react';
 
@@ -64,6 +64,17 @@ const TEXTAREA =
   'w-full resize-y rounded-lg border border-line-strong bg-card px-2.5 py-2 text-[13px] ' +
   'leading-relaxed text-content placeholder:text-content-4 focus:border-accent focus:outline-none ' +
   'disabled:cursor-not-allowed disabled:opacity-70';
+
+/**
+ * How tall a prompt field may grow on its own, in px (~24 lines).
+ *
+ * A cap, not a preference: these fields sit above the platform-params table
+ * and the Examples row, and one very long preset with no ceiling would push
+ * both off the bottom of the page. Past the cap the field scrolls — and the
+ * `resize-y` handle still opens it further, because the auto-size writes
+ * `min-height`, which a drag can always exceed.
+ */
+const FIELD_MAX_AUTO_PX = 480;
 
 export const PromptEditor: React.FC<PromptEditorProps> = ({
   scopeId,
@@ -284,6 +295,31 @@ interface PromptFieldProps {
 
 const PromptField: React.FC<PromptFieldProps> = ({ testId, label, value, readOnly, onSave }) => {
   const [draft, setDraft] = useState(value ?? '');
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  /**
+   * Size the box to its own text, up to {@link FIELD_MAX_AUTO_PX}.
+   *
+   * `min-height` rather than `height` on purpose: the field keeps its
+   * `resize-y` handle, and writing `height` would snap a hand-dragged box
+   * back to content size on the very next keystroke.
+   *
+   * The reset to `0px` before measuring is the part that is easy to drop and
+   * hard to notice: `scrollHeight` is never smaller than the box itself, so
+   * measuring while our own min-height is still applied reads back what we
+   * last wrote. Without the reset a field would grow and then never shrink
+   * again when its text was deleted.
+   */
+  const autosize = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.minHeight = '0px';
+    el.style.minHeight = `${Math.min(el.scrollHeight, FIELD_MAX_AUTO_PX)}px`;
+  }, []);
+
+  // Layout effect, not effect: this runs before paint, so a long prompt is
+  // never shown at the wrong height first and then jumped to the right one.
+  useLayoutEffect(autosize, [draft, autosize]);
 
   // The server is the source of truth: a translate or regenerate that rewrote
   // this field must show its result, not the stale draft the user is not
@@ -305,7 +341,10 @@ const PromptField: React.FC<PromptFieldProps> = ({ testId, label, value, readOnl
         {label}
       </span>
       <textarea
+        ref={ref}
         data-testid={testId}
+        // `rows` is now only what an EMPTY field falls back to; every field
+        // with text in it is sized by `autosize` above.
         rows={3}
         disabled={readOnly}
         value={draft}

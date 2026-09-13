@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,6 +33,9 @@ const album = { ...image, key: 'album:7', form: 'album', title: 'Orange harvest'
   { name: '005.jpg', url: '/api/v1/media/9/slides/005.jpg', positive_en: null, positive_zh: null, negative_en: null, negative_zh: null },
 ] };
 const page = { items: [image, captioned, album], total: 3, by_form: { template: 0, image: 2, album: 1 }, by_origin: { typed: 0, extracted: 1, captioned: 2 } };
+const emptyPage = { items: [], total: 0, by_form: { template: 0, image: 0, album: 0 }, by_origin: { typed: 0, extracted: 0, captioned: 0 } };
+const preset = { ...image, key: 'template:900', form: 'template', origin: 'typed', title: '6 expressions bust', positive_en: 'six basic expressions', params: null, thumbs: [], source: { store: 'assets', id: '900' } };
+const presetPage = { items: [preset], total: 1, by_form: { template: 1, image: 0, album: 0 }, by_origin: { typed: 1, extracted: 0, captioned: 0 } };
 
 function mount() {
   return render(<MemoryRouter initialEntries={['/resources/assets/prompt']}><PromptsShelf /></MemoryRouter>);
@@ -40,7 +43,12 @@ function mount() {
 
 describe('PromptsShelf', () => {
   beforeEach(() => {
-    fetchPrompts.mockReset(); fetchPrompts.mockResolvedValue(page);
+    fetchPrompts.mockReset();
+    // Two fetches per render now: the shelf's own segment, and `system` for
+    // the presets section. Routing on the segment (rather than a call-order
+    // mock) keeps every assertion below reading about the segment it means.
+    fetchPrompts.mockImplementation((_scope: unknown, opts: { segment?: string }) =>
+      Promise.resolve(opts?.segment === 'system' ? emptyPage : page));
     fetchProjects.mockReset(); fetchProjects.mockResolvedValue([{ id: '77', name: 'Orchard Film', team_id: null }]);
   });
 
@@ -141,5 +149,85 @@ describe('PromptsShelf', () => {
     mount();
     await screen.findByText('cheerful woman, oranges');
     expect(screen.queryByText(/Showing the first 200/)).toBeNull();
+  });
+});
+
+// The presets gap this closes: the catalog partitions by SEGMENT, and the
+// shelf only ever asked for `mine` (or `project`). Every system preset prompt
+// template — 10 of them live on production — was structurally unreachable
+// here, so the Assets tab advertised prompt templates that the Prompts page
+// then reported as "Templates 0".
+//
+// The shape of the fix is `AssetShelf`'s, not the canvas panel's: this
+// component REPLACES `AssetShelf` for `assetType === 'prompt'`, and that
+// component's second invariant already settled where presets go — "PRESETS
+// ARE SEPARATED, NOT MIXED ... They get their own labelled section instead,
+// so the badge and the team's own grid agree." A segment chip would have made
+// the user click to discover content the sibling surface shows outright.
+describe('PromptsShelf — system presets', () => {
+  beforeEach(() => {
+    fetchPrompts.mockReset();
+    fetchPrompts.mockImplementation((_scope: unknown, opts: { segment?: string }) =>
+      Promise.resolve(opts?.segment === 'system' ? presetPage : page));
+    fetchProjects.mockReset(); fetchProjects.mockResolvedValue([]);
+  });
+
+  it('asks the catalog for the system segment as well as its own', async () => {
+    mount();
+    await screen.findByText('six basic expressions');
+    expect(fetchPrompts).toHaveBeenCalledWith('9000', expect.objectContaining({ segment: 'system' }));
+  });
+
+  it('renders presets in their own labelled read-only section', async () => {
+    mount();
+    const section = await screen.findByTestId('prompt-preset-section');
+    expect(within(section).getByText('System Presets')).toBeInTheDocument();
+    expect(within(section).getByText('Read-only — duplicate one to edit it')).toBeInTheDocument();
+    expect(within(section).getByText('six basic expressions')).toBeInTheDocument();
+  });
+
+  // The invariant AssetShelf spells out: presets are global and the counts
+  // describe the team's own corpus. A preset that bumped "Templates 1" would
+  // put a number on screen that the main list never accounts for.
+  it('does not let presets inflate the form counts', async () => {
+    mount();
+    await screen.findByText('six basic expressions');
+    expect(screen.getByRole('button', { name: 'Templates 0' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All 3' })).toBeInTheDocument();
+  });
+
+  it('renders no section at all when the scope has no presets', async () => {
+    fetchPrompts.mockImplementation((_scope: unknown, opts: { segment?: string }) =>
+      Promise.resolve(opts?.segment === 'system' ? emptyPage : page));
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    expect(screen.queryByTestId('prompt-preset-section')).toBeNull();
+  });
+
+  // Presets are all templates, so a shelf filtered to Images must not answer
+  // with a section full of templates — and must not spend the request either.
+  it('skips presets entirely when the form filter excludes templates', async () => {
+    render(<MemoryRouter initialEntries={['/resources/assets/prompt?form=image']}><PromptsShelf /></MemoryRouter>);
+    await screen.findByText('cheerful woman, oranges');
+    expect(screen.queryByTestId('prompt-preset-section')).toBeNull();
+    expect(fetchPrompts).not.toHaveBeenCalledWith('9000', expect.objectContaining({ segment: 'system' }));
+  });
+
+  // A preset section that ignored the search box would answer a query with
+  // rows that do not match it.
+  it('narrows presets with the same search the main list uses', async () => {
+    render(<MemoryRouter initialEntries={['/resources/assets/prompt?q=bust']}><PromptsShelf /></MemoryRouter>);
+    await screen.findByText('six basic expressions');
+    await waitFor(() => expect(fetchPrompts).toHaveBeenCalledWith('9000', expect.objectContaining({ segment: 'system', q: 'bust' })));
+  });
+
+  // The presets query is a separate request; its failure must not blank the
+  // shelf the user actually came for.
+  it('a preset fetch that fails leaves the main list standing', async () => {
+    fetchPrompts.mockImplementation((_scope: unknown, opts: { segment?: string }) =>
+      opts?.segment === 'system' ? Promise.reject(new Error('nope')) : Promise.resolve(page));
+    mount();
+    await screen.findByText('cheerful woman, oranges');
+    expect(screen.queryByTestId('prompt-preset-section')).toBeNull();
   });
 });
