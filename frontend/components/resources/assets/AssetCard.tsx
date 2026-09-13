@@ -320,13 +320,24 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const overflowProjects = projectIds.length - shownProjects.length;
 
   return (
-    // `h-full` on BOTH halves, and neither is decoration. The shelf grid
-    // stretches its items, and this wrapper — not the card button — is now the
-    // grid item; without `h-full` on the button the card shrinks to its own
-    // content and a row of cards with different name/chip heights stops
-    // lining up along the bottom, which is the whole reason the grid stretches
-    // them. The wrapper's own `h-full` covers the flex-row hosts where
-    // stretching is not the default.
+    // `h-full` on BOTH halves, and `w-full` on the button — none of it is
+    // decoration. The shelf grid stretches its items, and this wrapper — not
+    // the card button — is now the grid item, so everything the grid used to
+    // do for the button now has to be asked for explicitly:
+    //
+    //  * `h-full`: without it the card shrinks to its own content and a row of
+    //    cards with different name/chip heights stops lining up along the
+    //    bottom, which is the whole reason the grid stretches them. The
+    //    wrapper's own `h-full` covers the flex-row hosts where stretching is
+    //    not the default.
+    //  * `w-full`: a `<button>` sizes to FIT-CONTENT even at `display:flex` —
+    //    a block wrapper does not stretch it the way a grid item is stretched.
+    //    Leaving it off made each card exactly as wide as its own name (72 /
+    //    170 / 103px measured in one 170px column), and since the cover is
+    //    `aspect-[4/5]` of that width the covers came out 88 / 211 / 127px
+    //    tall, scattering the titles to three different heights. The action
+    //    menu, positioned against the full-width wrapper, then floated in the
+    //    empty gutter beside every card narrower than its cell.
     <div className="relative h-full">
       <button
         type="button"
@@ -339,7 +350,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           name: asset.name,
           defaultValue: 'Open {{name}}',
         })}
-        className="group flex h-full flex-col overflow-hidden rounded-xl border border-line bg-card text-left transition-colors hover:border-line-strong"
+        className="group flex h-full w-full flex-col overflow-hidden rounded-xl border border-line bg-card text-left transition-colors hover:border-line-strong"
       >
         <div className="relative aspect-[4/5] w-full bg-island-2">
           {asset.cover_file_id ? (
