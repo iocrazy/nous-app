@@ -109,6 +109,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     downloadsCount,
     generatedUnreviewedCount,
     assetCounts,
+    promptEntryCount,
   } = useResourcesContext();
 
   // Module Control Center display switch — My Downloads is the media-parser
@@ -398,7 +399,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
           <div className={`ml-3 border-l ${cBorderChild} pl-0.5`}>
             {ASSET_TYPES.map((type) => {
               const Icon = ASSET_TYPE_ICON[type];
-              const count = assetCounts?.[type];
+              // Prompts names a different page (the unified catalog, presets
+              // included), so it carries a different number. Every other type
+              // is an asset shelf and counts asset rows.
+              const count = type === 'prompt' ? (promptEntryCount ?? undefined) : assetCounts?.[type];
               return (
                 <button
                   key={type}

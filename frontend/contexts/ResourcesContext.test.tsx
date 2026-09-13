@@ -143,6 +143,7 @@ function Harness() {
       <span data-testid="selected">{[...ctx.selectedIds].join(',')}</span>
       <span data-testid="view">{ctx.sidebarView}</span>
       <span data-testid="assetCounts">{JSON.stringify(ctx.assetCounts)}</span>
+      <span data-testid="promptEntryCount">{String(ctx.promptEntryCount)}</span>
       <span data-testid="assetType">{String(ctx.selectedAssetType)}</span>
       <span data-testid="assetTypeParam">{String(ctx.assetTypeParam)}</span>
       <span data-testid="assetId">{String(ctx.selectedAssetId)}</span>
@@ -398,27 +399,44 @@ describe('ResourcesContext — asset counts', () => {
     spy.mockRestore();
   });
 
-  // The Prompts badge counts the UNIFIED catalog (templates + prompted
-  // pictures), which is a different number from the `prompt` asset rows
-  // `/assets/counts` knows about. The sidebar badge and the shelf tab both
-  // read `assetCounts`, so the override is what keeps them saying the same
-  // thing (ruling R15).
-  it('shows the unified prompt count, not the asset-row count', async () => {
+  // The Prompts badge counts the UNIFIED catalog — prompted pictures, albums
+  // and templates, PLUS the system presets, because the presets section is on
+  // that page and a badge that ignored it would undercount what the user is
+  // looking at. That is a different number from the `prompt` asset rows
+  // `/assets/counts` knows about, and it now lives in its own field.
+  //
+  // Ruling R15 (sidebar badge and shelf tab must say the same thing) still
+  // holds — both read `promptEntryCount`. What changed is that the unified
+  // number no longer rides INSIDE `assetCounts`: the shelf's "All" tab sums
+  // that record, so a picture count in there made a scope with no assets
+  // advertise fifteen of them over the words "No Assets Yet".
+  it('counts the unified catalog, presets included, in its own field', async () => {
+    promptCounts.mockResolvedValueOnce({ mine: 12, project: null, system: 3 });
+
+    renderAssetsAt('/team/42/resources/assets');
+
+    await waitFor(() => expect(screen.getByTestId('promptEntryCount').textContent).toBe('15'));
+    expect(promptCounts).toHaveBeenCalledWith('team-1');
+  });
+
+  // The other half of the same rule: `assetCounts` stays asset rows all the
+  // way across, so whoever sums it gets a number the asset grid can show.
+  it('leaves every assetCounts key an asset-row count', async () => {
+    assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, location: 2, prompt: 7 });
     promptCounts.mockResolvedValueOnce({ mine: 12, project: null, system: 3 });
 
     renderAssetsAt('/team/42/resources/assets');
 
     await waitFor(() =>
-      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12'),
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4'),
     );
-    expect(promptCounts).toHaveBeenCalledWith('team-1');
-    // Only `prompt` is overridden — the other five keep the asset numbers.
-    expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4');
+    // 7 — the team's own prompt ASSETS — not the 15 entries on the Prompts page.
+    expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":7');
     expect(screen.getByTestId('assetCounts').textContent).toContain('"location":2');
   });
 
   // M8: the fallback used to be `/assets/counts`'s `prompt`, which counts
-  // TEMPLATE ROWS ONLY — a different metric under the same label, reading 0
+  // ASSET ROWS ONLY — a different metric under the same label, reading 0
   // while the page lists 13. The last known unified number is the honest
   // thing to keep; a failed refresh must not rewrite the badge.
   it('keeps the LAST KNOWN unified count when a refresh of it fails', async () => {
@@ -426,9 +444,7 @@ describe('ResourcesContext — asset counts', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     renderAssetsAt('/team/42/resources/assets');
-    await waitFor(() =>
-      expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12'),
-    );
+    await waitFor(() => expect(screen.getByTestId('promptEntryCount').textContent).toBe('15'));
 
     assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, prompt: 7 });
     promptCounts.mockRejectedValueOnce(new Error('boom'));
@@ -442,15 +458,15 @@ describe('ResourcesContext — asset counts', () => {
         expect.any(Error),
       ),
     );
-    // 12, not the 7 template rows `/assets/counts` just reported.
-    expect(screen.getByTestId('assetCounts').textContent).toContain('"prompt":12');
+    // 15, not the 7 asset rows `/assets/counts` just reported.
+    expect(screen.getByTestId('promptEntryCount').textContent).toBe('15');
     spy.mockRestore();
   });
 
   it('omits the prompt count entirely when the FIRST unified fetch fails', async () => {
     // Nothing known yet, so there is no last value to keep. The badge is then
-    // absent (the sidebar renders no number for `undefined`) rather than
-    // showing the template-row count under the unified label.
+    // absent (the sidebar renders no number for a null count) rather than
+    // showing the asset-row count under the unified label.
     assetCounts.mockResolvedValueOnce({ ...ZERO_COUNTS, character: 4, prompt: 7 });
     promptCounts.mockRejectedValueOnce(new Error('boom'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -460,7 +476,7 @@ describe('ResourcesContext — asset counts', () => {
     await waitFor(() =>
       expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4'),
     );
-    expect(screen.getByTestId('assetCounts').textContent).not.toContain('"prompt"');
+    expect(screen.getByTestId('promptEntryCount').textContent).toBe('null');
     spy.mockRestore();
   });
 
