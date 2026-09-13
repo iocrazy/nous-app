@@ -568,6 +568,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       resourceId={resourceId || undefined}
       slide={currentSlide ?? undefined}
       playerCurrentTime={currentTime}
+      // The transcript's timestamps are seek controls; the player they drive
+      // lives out here, so the capability goes down as a prop. Guarded on the
+      // element rather than assumed: the audio and album players do not mount
+      // a <video>, and the panel renders plain timecodes when no seek arrives.
+      onSeek={(seconds) => {
+        if (playerRef.current) playerRef.current.currentTime = seconds;
+      }}
       sodaTheme={sodaTheme}
       compact={isMobile && isAudio}
       onClose={handleBack}
