@@ -235,12 +235,22 @@ describe('AssetCard — the menu keyboard model', () => {
   });
 });
 
-describe('AssetCard — grid row height', () => {
+describe('AssetCard — grid cell fill', () => {
   // The shelf lays cards out in a stretching grid, and the wrapper div added
   // for the action menu is now the grid ITEM. Without `h-full` on the button
   // inside it, each card shrinks to its own content and a row of cards with
   // different name / chip heights stops lining up along the bottom — the one
   // thing the stretching grid was doing for free.
+  //
+  // BOTH axes, and the width one is not symmetry for its own sake: a `<button>`
+  // sizes to fit-content even at `display:flex`, so a block wrapper does NOT
+  // stretch it the way the grid used to. Measured in Chrome on the real class
+  // list, three cards in one 170px column came out 72 / 170 / 103 wide — each
+  // card as wide as its own name — and because the cover is `aspect-[4/5]` of
+  // that width, the covers came out 88 / 211 / 127 tall, so the titles landed
+  // at three different heights inside a row of equal-height cells. The action
+  // menu, absolutely positioned against the full-width WRAPPER, floated in the
+  // empty gutter beside every card narrower than its cell.
   it('the wrapper fills its grid cell and the card button fills the wrapper', () => {
     render(<AssetCard asset={CHARACTER} onOpen={() => {}} />);
     const card = screen.getByTestId('asset-card');
@@ -249,6 +259,7 @@ describe('AssetCard — grid row height', () => {
     expect(wrapper.className).toContain('relative');
     expect(wrapper.className).toContain('h-full');
     expect(card.className).toContain('h-full');
+    expect(card.className).toContain('w-full');
   });
 
   it('the menu is a sibling of the card, so it rides that same cell', () => {
