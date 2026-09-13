@@ -196,6 +196,15 @@ describe('PromptsShelf — system presets', () => {
     expect(screen.getByRole('button', { name: 'All 3' })).toBeInTheDocument();
   });
 
+  // Without this the page cannot explain its own sidebar badge: that badge
+  // counts own entries PLUS presets, the form chips count only own entries,
+  // and a scope with none of its own showed "10" beside an "All 0".
+  it('puts a count on the preset section so the sidebar badge reconciles', async () => {
+    mount();
+    const section = await screen.findByTestId('prompt-preset-section');
+    expect(within(section).getByTestId('prompt-preset-count').textContent).toBe('1');
+  });
+
   it('renders no section at all when the scope has no presets', async () => {
     fetchPrompts.mockImplementation((_scope: unknown, opts: { segment?: string }) =>
       Promise.resolve(opts?.segment === 'system' ? emptyPage : page));

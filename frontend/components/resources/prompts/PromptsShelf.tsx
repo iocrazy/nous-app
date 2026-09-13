@@ -223,6 +223,14 @@ export const PromptsShelf: React.FC = () => {
         <section data-testid="prompt-preset-section" className="mt-2">
           <div className="flex items-baseline gap-2 border-t border-line pt-4">
             <h3 className="text-[13px] font-medium text-content-2">{t('assets.presets.title', 'System Presets')}</h3>
+            {/* The section carries its OWN count, and it has to: the sidebar
+                badge counts this page in full (own entries + presets), while
+                the form chips above describe only the team's own corpus. With
+                no number here, a scope holding "0 of my own, 10 presets"
+                showed a badge of 10 over an "All 0" chip and ten visible
+                cards, with nothing on screen reconciling the two. Now the
+                page's own arithmetic reads back: 0 + 10. */}
+            <span data-testid="prompt-preset-count" className="text-[11px] tabular-nums text-content-3">{presets.length}</span>
             <p className="text-[11px] text-content-4">{t('assets.presets.hint', 'Read-only — duplicate one to edit it')}</p>
           </div>
           <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">
