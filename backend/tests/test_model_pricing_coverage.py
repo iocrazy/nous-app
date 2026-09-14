@@ -144,6 +144,22 @@ def test_select_stmt_is_single_column_distinct():
     assert "cents" not in sql
 
 
+def test_the_old_flat_set_shape_is_refused_loudly():
+    """3b 把第二个参数从一个扁平 set 换成了 ``{"token", "per_call"}`` 两面。
+
+    旧形状**必须炸**：``set`` 上的 ``.get(face)`` 不存在，若改成宽容取值就会
+    静默退化成「每一行都 missing」——一个会教管理员忽略这个红标签的答案
+    （2026-08-14 红灯教训）。陈旧调用方应当当场失败，不是安静地错。
+    """
+    with pytest.raises(TypeError):
+        price_coverage_for(_row(), {"doubao-seed-2-0-lite-260428"})
+    # 空 set 同样是旧形状，不能因为「反正是空的」就放过。
+    with pytest.raises(TypeError):
+        price_coverage_for(_row(), set())
+    # 但 not_applicable 的行根本不看价目表，先返回、不校验形状。
+    assert price_coverage_for(_row(type="tts"), {"x"}) == "not_applicable"
+
+
 def test_the_per_call_stmt_is_single_column_distinct_and_filtered():
     sql = str(
         _per_call_priced_models_select_stmt().compile(dialect=postgresql.dialect())

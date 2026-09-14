@@ -23,13 +23,24 @@ from app.db.session import read_scope
 
 
 def _price_stmt(model: str, provider: str):
-    """列级 select（row-shape 纪律），不取整行。"""
+    """列级 select（row-shape 纪律），不取整行。
+
+    ``per_call_cents IS NOT NULL`` 与 ``ORDER BY effective_at DESC LIMIT 1``
+    合起来才是契约：**最新的、真的带每次调用价的那一行**。价目表同时伺候两个
+    面，一行可以只调每千 token 价（``per_call_cents`` 留空）；只按时间取最新，
+    一次纯 token 的调价就会让这个模型的每次调用价凭空消失，而生成的图在血缘里
+    静静退回 '—'。这条谓词与 admin 覆盖率查询
+    （``model_pricing_coverage._per_call_priced_models_select_stmt``）是同一条
+    ——「有价」在两处必须是同一件事。真库复现见
+    ``tests/db/test_step_costs_and_media_price_integration.py``。
+    """
     from app.models import AiModelPrices
 
     return (
         select(AiModelPrices.per_call_cents)
         .where(AiModelPrices.model == model)
         .where(AiModelPrices.provider == provider)
+        .where(AiModelPrices.per_call_cents.isnot(None))
         .order_by(AiModelPrices.effective_at.desc())
         .limit(1)
     )

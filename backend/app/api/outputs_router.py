@@ -187,14 +187,18 @@ async def get_output_lineage(
         ),
         visible_issue_ids=visible,
     )
-    # 水位取最新那一行的 seq —— 人手版不落 transcript 事件、没有 seq，退回它的
-    # 行 id。两者都单调，前端只拿它比大小丢过期的刷新信号（3b §4）。
-    newest = rows[0]
+    # 水位用**一把尺子**：这条链上最大的登记行 id。Snowflake 跨 run、跨人手版
+    # 都单调，而 transcript ``seq`` 是每个 run 内部的小整数、人手版压根没有——
+    # 两者混在一个字段里，回退场景（agent → 人手 → agent）会给出一个会**变小**
+    # 的水位，客户端据此丢帧就会把最新的响应当过期扔掉（3b §4，fix 轮 0）。
+    # 出口是字符串、客户端用 BigInt 比——Snowflake 超过 2^53。
     return OutputLineageResponse(
         kind=kind,
         ref_id=str(ref_id),
         latest_version=versions[0]["version"],
-        as_of_seq=int(newest.get("seq") or newest["id"]),
+        # 字符串出口（Snowflake 精度纪律）；比较在 int 上做完再转，免得按
+        # 字典序比出「9 > 10」。
+        as_of_seq=str(max(int(row["id"]) for row in rows)),
         versions=versions,
     )
 

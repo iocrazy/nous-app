@@ -348,16 +348,51 @@ def test_a_media_versions_registered_cost_stays_exact(monkeypatch):
 
 
 def test_lineage_reports_the_chain_watermark(monkeypatch):
-    """``as_of_seq`` = 最新登记行的 seq——前端按它丢过期的刷新信号。"""
+    """``as_of_seq`` = 这条链上**最大的登记行 id**（Snowflake，单调）。
+
+    刻意**不是** transcript ``seq``：seq 是每个 run 内部的小整数，人手版根本
+    没有，两把尺子混在一个字段里会给出一个会变小的水位（见下一条）。"""
     client = _client(monkeypatch)
-    assert client.get("/api/v1/outputs/script_shot/9").json()["as_of_seq"] == 3
+    mark = client.get("/api/v1/outputs/script_shot/9").json()["as_of_seq"]
+    # Snowflake 超过 2^53，JSON number 一进浏览器就掉精度（CLAUDE.md BIGINT
+    # 陷阱），所以它以**字符串**出口，前端用 BigInt 比大小。
+    assert mark == "700000000000003" and isinstance(mark, str)
 
 
-def test_a_version_with_no_seq_falls_back_to_its_row_id(monkeypatch):
-    """人手登记的版本不落 transcript 事件、没有 seq——用行 id 当水位。"""
-    client = _client(monkeypatch, rows=[_row(3, seq=None), _row(2), _row(1)])
-    body = client.get("/api/v1/outputs/script_shot/9").json()
-    assert body["as_of_seq"] == 700000000000003
+def test_the_watermark_only_grows_across_a_revert(monkeypatch):
+    """回退是唯一会让两种版本交替出现在链首的场景：v3(agent) → v4(人手) →
+    v5(agent)。水位必须严格递增——客户端只拿它拒绝「用更旧的响应盖掉更新的」。
+
+    这一条钉的正是「按 seq 取水位」会错的地方：那样 v5 的水位是它的 seq(=5)，
+    比 v4 的行 id（Snowflake，7e14 量级）小，于是最新的一次响应会被当过期丢掉。
+    """
+    human = _row(4, run_id=None, issue_id=None, issue_key=None, team_id=None, seq=None)
+    states = [
+        [_row(3), _row(2), _row(1)],
+        [human, _row(3), _row(2), _row(1)],
+        [_row(5, seq=5), human, _row(3), _row(2), _row(1)],
+    ]
+    marks = [
+        _client(monkeypatch, rows=rows)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()["as_of_seq"]
+        for rows in states
+    ]
+    assert marks == ["700000000000003", "700000000000004", "700000000000005"]
+    assert all(isinstance(m, str) for m in marks)
+    # 严格递增。用 int 比，而不是靠等长字符串的字典序碰巧成立——客户端那边是
+    # BigInt，这里就按数值比。
+    numbers = [int(m) for m in marks]
+    assert numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
+
+
+def test_the_watermark_is_the_max_not_the_first_row(monkeypatch):
+    """仓库按 version DESC 排，但「版本号最大」与「行 id 最大」不是同一件事：
+    一条落后的链上重新登记一个旧版本号，行 id 仍然更大。取 max 而不是取首行。"""
+    client = _client(monkeypatch, rows=[_row(2), _row(9)])
+    assert client.get("/api/v1/outputs/script_shot/9").json()["as_of_seq"] == (
+        "700000000000009"
+    )
 
 
 def test_a_version_with_no_run_asks_for_no_share(monkeypatch):

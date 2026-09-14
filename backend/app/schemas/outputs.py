@@ -93,9 +93,18 @@ class OutputLineageResponse(BaseModel):
     kind: str
     ref_id: str
     latest_version: int
-    # 这条链的水位：最新登记行的 transcript seq。人手登记的版本不落事件、没有
-    # seq，退回它的行 id——两者都单调，前端只拿它比大小丢过期信号（3b §4）。
-    as_of_seq: int
+    #: newest registration row id of the chain, as a string; monotonic; the
+    #: client compares with BigInt and only uses it to refuse overwriting a
+    #: newer response with an older one.
+    #:
+    #: 一把尺子到底：``max(run_deliverables.id)``。刻意**不是** transcript
+    #: ``seq`` —— 那是每个 run 内部的小整数，人手登记的版本根本没有，混用会让
+    #: 「agent → 人手回退 → agent」这条链上的水位变小（3b §4，fix 轮 0）。
+    #: 字段名保留 ``as_of_seq``：它对客户端的含义（这份响应有多新）没有变。
+    #:
+    #: **字符串出口**，同这个模型里每一个 id：Snowflake 超过 2^53，JSON number
+    #: 一进浏览器就掉精度，而掉了精度的水位会把相邻两版判成同一版。
+    as_of_seq: str
     versions: List[OutputVersion]
 
 

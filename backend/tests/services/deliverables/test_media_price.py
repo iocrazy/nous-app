@@ -112,3 +112,22 @@ async def test_an_empty_key_never_queries(monkeypatch):
     monkeypatch.setattr(mp, "read_scope", _boom)
     assert await mp.media_price_cents("", "ark") is None
     assert await mp.media_price_cents("m", "") is None
+
+
+def test_the_statement_only_considers_rows_that_carry_a_per_call_price():
+    """价目表同时伺候两个面：一行可以只有每千 token 价（``per_call_cents``
+    NULL）。只按 ``effective_at`` 取最新，一次纯 token 的调价就会让这个模型的
+    每次调用价**凭空消失**（真库上已复现，见
+    ``tests/db/test_step_costs_and_media_price_integration.py``）。
+
+    这条谓词与 admin 覆盖率查询用的是同一条——「有价」在两处必须是同一件事。
+    """
+    from sqlalchemy.dialects import postgresql
+
+    import app.services.deliverables.media_price as mp
+
+    sql = str(mp._price_stmt("m", "p").compile(dialect=postgresql.dialect()))
+    assert "per_call_cents IS NOT NULL" in sql
+    assert "ORDER BY public.ai_model_prices.effective_at DESC" in sql
+    # provider 是键的一半，不许被优化掉。
+    assert "public.ai_model_prices.provider" in sql

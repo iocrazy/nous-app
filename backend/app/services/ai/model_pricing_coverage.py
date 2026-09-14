@@ -68,6 +68,13 @@ def price_coverage_for(
         return "not_applicable"
     if priced_models is None:
         return "unknown"
+    if not isinstance(priced_models, Mapping):
+        # 3b 前这个参数是一个扁平 set。宽容接受它会让陈旧调用方**静默**退化成
+        # 「每一行都 missing」——一个会教管理员忽略红标签的答案。当场炸。
+        raise TypeError(
+            "price_coverage_for expects {'token': set, 'per_call': set}; "
+            f"got {type(priced_models).__name__} (pre-3b flat set?)"
+        )
     priced = set(priced_models.get(face) or ())
     keys = {row.get("actual_model") or "", row.get("name") or ""} - {""}
     return "priced" if keys & priced else "missing"
