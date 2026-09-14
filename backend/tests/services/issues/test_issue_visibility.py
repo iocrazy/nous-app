@@ -22,6 +22,7 @@ pytestmark = pytest.mark.unit
 
 ME = "11111111-1111-1111-1111-111111111111"
 SOMEONE_ELSE = "22222222-2222-2222-2222-222222222222"
+A_THIRD_PARTY = "33333333-3333-3333-3333-333333333333"
 
 MY_TEAM = 424242424242
 OTHER_TEAM = 999999999999
@@ -38,11 +39,18 @@ class _Auth:
 
 class _Repo:
     """Records every read so the "one IN query, one membership check per team"
-    claim is an assertion rather than a reading of the implementation."""
+    claim is an assertion rather than a reading of the implementation.
 
-    def __init__(self, rows, member_of=(MY_TEAM,)):
+    ``is_team_member`` answers for ``member_user`` ONLY. Membership is a
+    per-user fact in the real repository (``team_members`` is keyed by both
+    columns), and a stub that answered by team alone would let a user-blind
+    implementation pass — the exact bug the memo key has to avoid.
+    """
+
+    def __init__(self, rows, member_of=(MY_TEAM,), member_user=ME):
         self.rows = rows
         self.member_of = set(member_of)
+        self.member_user = member_user
         self.batches: list[list] = []
         self.membership_calls: list[tuple] = []
 
@@ -53,7 +61,7 @@ class _Repo:
 
     async def is_team_member(self, user_id, team_id):
         self.membership_calls.append((user_id, int(team_id)))
-        return int(team_id) in self.member_of
+        return user_id == self.member_user and int(team_id) in self.member_of
 
 
 def _issue(issue_id, *, creator=SOMEONE_ELSE, assignee=None, team_id=MY_TEAM):
@@ -139,6 +147,35 @@ async def test_the_assignee_sees_an_issue_from_a_team_they_are_not_in(repo):
     repo.rows = [_issue(A, assignee=ME, team_id=OTHER_TEAM)]
     assert await mod.visible_issue_ids([A], _Auth()) == {str(A)}
     assert repo.membership_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_memo_reused_across_users_answers_each_user_for_themselves(repo):
+    """The memo key is ``(user_id, team_id)``, not ``team_id``.
+
+    ``visible_issue_ids`` holds ``user_id`` fixed, but ``team_memo`` is a
+    PUBLIC keyword on the sole app-layer enforcement of "team 是铁边界". A memo
+    keyed by team alone would hand the second caller the first caller's
+    membership answer — silently, with no read to notice — which on this one
+    path is a cross-tenant read. So: ME is in MY_TEAM, SOMEONE_ELSE is not, and
+    one shared memo must still answer each of them for themselves.
+    """
+    repo.member_of = {MY_TEAM}
+    # Created by neither of them, so both have to reach the membership branch.
+    row = _issue(B, creator=A_THIRD_PARTY, team_id=MY_TEAM)
+    memo: dict = {}
+
+    assert await mod.is_issue_visible(row, ME, team_memo=memo) is True
+    assert await mod.is_issue_visible(row, SOMEONE_ELSE, team_memo=memo) is False
+
+    # The second user's membership was actually queried, not read off the
+    # first user's cached answer.
+    assert repo.membership_calls == [(ME, MY_TEAM), (SOMEONE_ELSE, MY_TEAM)]
+    assert set(memo) == {(ME, MY_TEAM), (SOMEONE_ELSE, MY_TEAM)}
+
+    # And within ONE user the memo still saves the read it exists to save.
+    assert await mod.is_issue_visible(row, ME, team_memo=memo) is True
+    assert len(repo.membership_calls) == 2
 
 
 @pytest.mark.asyncio

@@ -20,15 +20,21 @@ async def is_issue_visible(
     row: dict[str, Any],
     user_id: str,
     *,
-    team_memo: dict[int, bool] | None = None,
+    team_memo: dict[tuple[str, int], bool] | None = None,
 ) -> bool:
     """The D6.1 rule for ONE already-loaded issue row.
 
     ``team_memo`` is an optional caller-owned cache of ``is_team_member``
-    answers, keyed by ``team_id``. It exists for ``visible_issue_ids``, which
-    judges many rows in a row and must not pay one membership read per issue.
-    Its lifetime is the caller's: a long-lived memo would outlive a membership
-    change, so nobody should hold one across requests.
+    answers. It exists for ``visible_issue_ids``, which judges many rows in a
+    row and must not pay one membership read per issue.
+
+    **The key is ``(user_id, team_id)``, never ``team_id`` alone.** Membership
+    is a per-user fact, and this function is the sole app-layer enforcement of
+    "team 是铁边界" — a memo keyed by team would hand the second caller the
+    first caller's answer, silently, on the one code path where that is a
+    cross-tenant read. Its lifetime is still the caller's: a long-lived memo
+    would outlive a membership change, so nobody should hold one across
+    requests.
     """
     if (
         row.get("created_by_user_id") == user_id
@@ -38,12 +44,12 @@ async def is_issue_visible(
     team_id = row.get("team_id")
     if team_id is None:
         return False
-    team_id = int(team_id)
-    if team_memo is not None and team_id in team_memo:
-        return team_memo[team_id]
-    member = await issue_repository.is_team_member(user_id, team_id)
+    key = (user_id, int(team_id))
+    if team_memo is not None and key in team_memo:
+        return team_memo[key]
+    member = await issue_repository.is_team_member(user_id, key[1])
     if team_memo is not None:
-        team_memo[team_id] = member
+        team_memo[key] = member
     return member
 
 
@@ -57,15 +63,16 @@ async def visible_issue_ids(issue_ids: Iterable[Any], auth: Any) -> set[str]:
 
     **Cost model**: one ``get_by_ids`` ``IN`` query for the whole deduplicated
     set, plus at most one ``is_team_member`` read per distinct ``team_id`` in
-    it (memoized for this call only). An empty set costs nothing at all. So a
-    thirty-version lineage chain spanning two issues in one team is two reads,
-    not sixty.
+    it (memoized for this call only — the memo is created here, keyed by
+    ``(user_id, team_id)``, and dropped on return). An empty set costs nothing
+    at all. So a thirty-version lineage chain spanning two issues in one team
+    is two reads, not sixty.
     """
     wanted = {str(i) for i in issue_ids if i is not None}
     if not wanted:
         return set()
     user_id = str(auth.user_id)
-    team_memo: dict[int, bool] = {}
+    team_memo: dict[tuple[str, int], bool] = {}
     visible: set[str] = set()
     for row in await issue_repository.get_by_ids(wanted):
         row_id = str(row.get("id"))

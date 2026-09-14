@@ -85,17 +85,20 @@ class _IssueGate:
     """Stub for ``visible_issue_ids`` — the per-issue batch check.
 
     ``allowed=None`` means "every issue in the batch is visible", which is what
-    the tests that are not about redaction want. Every call is recorded so the
-    "one round trip, deduplicated" claim can be pinned rather than assumed.
+    the tests that are not about redaction want. Every call is recorded — the
+    id set AND the auth it was asked on behalf of — so the "one round trip,
+    deduplicated, for THIS caller" claim can be pinned rather than assumed.
     """
 
     def __init__(self, allowed=None):
         self.allowed = allowed
         self.calls: list[set] = []
+        self.auths: list = []
 
     async def __call__(self, issue_ids, auth):
         asked = {str(i) for i in issue_ids if i is not None}
         self.calls.append(asked)
+        self.auths.append(auth)
         if self.allowed is None:
             return asked
         return {i for i in asked if i in self.allowed}
@@ -298,7 +301,9 @@ def test_lineage_of_an_invisible_issue_is_404(monkeypatch):
 
 
 def test_a_run_with_no_issue_is_visible_only_to_its_own_user(monkeypatch):
-    rows = [_row(1, issue_id=None)]
+    # No issue means no JOIN, so the key and the team are absent too — the
+    # three arrive together or not at all (边界 mock 必须用真实 JSON 形状).
+    rows = [_row(1, issue_id=None, issue_key=None, team_id=None)]
     assert (
         _client(monkeypatch, rows, owner=ME)
         .get("/api/v1/outputs/script_shot/9")
@@ -488,6 +493,9 @@ def test_visibility_is_checked_once_per_distinct_issue(monkeypatch):
     gate = _IssueGate()
     _client(monkeypatch, rows, gate=gate).get("/api/v1/outputs/script_shot/9")
     assert gate.calls == [{ISSUE_ID, OTHER_ISSUE_ID}]
+    # Asked on behalf of THIS caller. Visibility is a per-user fact, so a
+    # router that dropped the auth (or passed None) must not pass here.
+    assert [a.user_id for a in gate.auths] == [ME]
 
 
 def test_diff_does_not_pay_for_the_batch_visibility_check(monkeypatch):
