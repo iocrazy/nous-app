@@ -502,6 +502,32 @@ class GeneratedMediaRepository:
             )
         return _normalize(dict(row)) if row else None
 
+    async def find_by_promoted_resource(self, resource_id: int) -> Optional[dict]:
+        """一个 promoted 资源背后的那一行收件箱记录，没有则 None（3b spec §2.4）。
+
+        语句直接复用 ``insert_registered_resource`` 的幂等 SELECT
+        （``_registered_resource_lookup_stmt``）：同一个问题「哪一行为这个
+        资源负责」只许有一个答案，两处各写一遍迟早会分叉。
+
+        ``promoted_resource_id`` **没有外键**（mig 307:30），资源删除时不清；
+        本方法因此从不断言资源存在。这条路上不可达（调用方拿着活资源进来），
+        但那正是它不该假设的原因。
+
+        不做 scope 过滤：可见性由 ``resources_router`` 的资源 ACL 承担，
+        这里再加一层 scope 只会让「能看资源却读不到来源」这种半可见状态出现。
+        """
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        _registered_resource_lookup_stmt(int(resource_id))
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _normalize(dict(row)) if row else None
+
     async def promoted_resource_ids(
         self, gen_ids: Iterable[int | str], *, scope_id: int
     ) -> dict[int, int]:

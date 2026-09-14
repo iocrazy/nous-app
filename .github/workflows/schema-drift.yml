@@ -69,6 +69,7 @@ on:
       - 'backend/tests/db/test_conversations_store_question_integration.py'
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
       - 'backend/tests/db/test_run_deliverables_repository_integration.py'
+      - 'backend/tests/db/test_generated_media_promoted_lookup_integration.py'
       - 'backend/tests/db/test_migration_466_revert_cost_integration.py'
       - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
       # The writer whose seq-conflict retry that file is the only real-driver
@@ -90,6 +91,10 @@ on:
       # below is the only place Postgres ever sees them (3a Task 2).
       - 'backend/app/repositories/run_deliverables_repository.py'
       - 'backend/app/services/deliverables/registry.py'
+      # 同上一条：promoted-resource 反查的 ORM 语句只在下面那一步真正执行，
+      # 它的单测 session 是桩的。只改这个模块的 PR 如果不触发本 job，那条
+      # 真 PG 用例就跑不到 —— 等于悄悄失去它唯一的门禁。
+      - 'backend/app/repositories/generated_media_repository.py'
       # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
       # project-entity migration workflow imported `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module, and the step that
@@ -134,7 +139,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all sixteen, so it has to re-run
+      # to it changes what "green" means for all seventeen, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -369,6 +374,17 @@ jobs:
           # (kind, ref_id, version) — the registry's whole race story — or that
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
+
+      - name: Exercise the promoted-resource reverse lookup (mig 307/456)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 资源信息面板「谁做的我」唯一的解析口。单测的 session 是桩的，
+          # 所以 NULL 指针不匹配、BIGINT id 出闸变 string、以及 456 的
+          # partial unique 还在，只有这里会被 Postgres 真正回答。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_generated_media_promoted_lookup_integration.py -v
 
       - name: Exercise the transcript seq-conflict retry against the built schema (mig 397)
         working-directory: backend
