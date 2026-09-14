@@ -213,10 +213,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   return (
     <div
-      // `@container`: the stats row below decides how many numbers it can
-      // print from THIS card's width, not the viewport's — a portrait card in
-      // the adaptive rows is far narrower than its landscape neighbours.
-      className={`group @container relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
+      className={`group relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
         isChecked || isSelected
           ? 'border-[var(--accent-border)] ring-1 ring-inset ring-indigo-500/30'
           : 'border-ink-800 hover:border-ink-600'
@@ -447,55 +444,19 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           })()}
         </div>
 
-        {/* Engagement stats — ONE LINE at every card width, showing as many
-            numbers as actually fit.
-
-            Two earlier shapes failed, each teaching one of the constraints:
-
-             * FOUR COLOURED BOXES. Each needed ~34px to hold `1.6K`, so on a
-               portrait card in the adaptive rows the numbers overflowed their
-               boxes and the four read as one smear of digits.
-             * THE SAME FOUR, WRAPPED 2×2. The digits became legible and the
-               layout broke instead: a card in a justified row must match its
-               neighbours' height, and only the narrow cards wrapped, so they
-               hung below the row's baseline.
-
-            So: the height may never depend on the width, and the numbers may
-            never be truncated. Measured, one pair costs 38 / 34 / 28 / 34px
-            and all four with gaps want ~158px — more than the ~102px a 120px
-            card has inside its padding. Nothing makes four fit there, so the
-            row prints what it can and drops from the least-carrying end
-            (saves, then shares). The `title` still names all four, so the
-            numbers are hidden, not lost.
-
-            Thresholds come from the WORST case, not the common one. A first
-            pass measured `1.6K`-sized numbers and set 128 / 164px — and the
-            extremes then overflowed at 130 and 180px, because `formatNumber`
-            can emit six characters (`999.9K`, `999.9M`) and that pair costs
-            50px, not 34. Measured against six characters: four pairs plus
-            gaps and the block's padding need 230px of card, three need 176,
-            two need 122 — each carrying 4px of slack, because a threshold set
-            exactly at the measured need flips back and forth on the border
-            (230px overflowed by a pixel before the slack went in).
-            A threshold that only holds for typical data is not a threshold. */}
-        <div
-          className="flex items-center justify-between gap-1 text-[10px] tabular-nums text-ink-400"
-          title={`♥ ${formatNumber(data.like_count)} · 💬 ${formatNumber(data.comment_count)} · ↗ ${formatNumber(data.share_count)} · 🔖 ${formatNumber(data.favorite_count)}`}
-        >
-           <span className="flex shrink-0 items-center gap-1">
-              <Heart size={11} className="shrink-0 text-rose-500" />
-              {formatNumber(data.like_count)}
-           </span>
-           {/* Even two six-character numbers want 122px of card; below that
-               only the headline metric fits. Likes is the one that survives
-               every width — it is the number these platforms lead with. */}
-           <span className="hidden shrink-0 items-center gap-1 @[126px]:flex">
-              <MessageCircle size={11} className="shrink-0 text-sky-500" />
-              {formatNumber(data.comment_count)}
-           </span>
-           {/* The one interactive stat — copies the source link. Still a real
-               button now that it has no box to look like one, so it stays
-               keyboard-reachable. */}
+        {/* Stats Grid */}
+        <div className="grid grid-cols-4 gap-1.5">
+           {/* Like */}
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#2A1818] rounded-md border border-red-900/30">
+              <Heart size={12} className="text-rose-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.like_count)}</span>
+           </div>
+           {/* Comment */}
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#10243E] rounded-md border border-sky-900/30">
+              <MessageCircle size={12} className="text-sky-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.comment_count)}</span>
+           </div>
+           {/* Share - Click to copy link */}
            <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -505,20 +466,21 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                   setTimeout(() => setCopiedShare(false), 2000);
                 }
               }}
-              className="hidden shrink-0 items-center gap-1 rounded transition-colors hover:text-ink-200 @[178px]:flex"
+              className="flex flex-col items-center justify-center py-1.5 bg-[#0F291E] rounded-md border border-emerald-900/30 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all cursor-pointer group"
               title="Click to copy link"
            >
               {copiedShare ? (
-                <Check size={11} className="shrink-0 text-emerald-400" />
+                <Check size={12} className="text-emerald-400 mb-0.5" />
               ) : (
-                <Share2 size={11} className="shrink-0 text-emerald-500" />
+                <Share2 size={12} className="text-emerald-500 mb-0.5 group-hover:scale-110 transition-transform" />
               )}
-              {copiedShare ? 'Copied' : formatNumber(data.share_count)}
+              <span className="text-[9px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
            </button>
-           <span className="hidden shrink-0 items-center gap-1 @[232px]:flex">
-              <Bookmark size={11} className="shrink-0 text-amber-500" />
-              {formatNumber(data.favorite_count)}
-           </span>
+           {/* Collect */}
+           <div className="flex flex-col items-center justify-center py-1.5 bg-[#2E2005] rounded-md border border-amber-900/30">
+              <Bookmark size={12} className="text-amber-500 mb-0.5" />
+              <span className="text-[9px] text-white font-bold">{formatNumber(data.favorite_count)}</span>
+           </div>
         </div>
 
         {/* Author Footer with Date - Inline Layout */}
