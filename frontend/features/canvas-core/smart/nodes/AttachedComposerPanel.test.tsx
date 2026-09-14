@@ -14,7 +14,7 @@ vi.mock('../regenerate', () => ({
 }));
 vi.mock('./useGenerationModels', () => ({
   useGenerationModels: () => [
-    { name: 'codex-image', display_name: 'GPT Image 2 (Codex)' },
+    { name: 'codex-image', display_name: 'GPT Image (Codex)' },
   ],
 }));
 

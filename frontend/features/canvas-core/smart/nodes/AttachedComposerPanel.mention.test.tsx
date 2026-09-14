@@ -27,7 +27,7 @@ vi.mock('../recreate', () => ({
     createPromptFromNode(nodeId, seed),
 }));
 vi.mock('./useGenerationModels', () => ({
-  useGenerationModels: () => [{ name: 'codex-image', display_name: 'GPT Image 2' }],
+  useGenerationModels: () => [{ name: 'codex-image', display_name: 'GPT Image (Codex)' }],
 }));
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';

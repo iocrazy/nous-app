@@ -84,7 +84,7 @@ const OPENAI_25: ModelCapabilities = {
 
 const MODELS = [
   { name: 'doubao-seedream', display_name: 'Seedream' },
-  { name: 'codex-local-image', display_name: 'GPT Image 2 (local)' },
+  { name: 'codex-local-image', display_name: 'GPT Image (Codex, local)' },
   { name: 'openai-image-flare', display_name: 'GPT Image 2.5 Flare (OpenAI API)' },
 ];
 
