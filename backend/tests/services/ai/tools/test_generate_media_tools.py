@@ -213,3 +213,55 @@ async def test_scratch_dir_is_reaped_even_when_registration_fails(
     assert out["ok"] is False
     assert out["error_code"] == "generation_failed"
     assert not os.path.exists(os.path.dirname(local))
+
+
+@pytest.mark.asyncio
+async def test_generate_image_registers_the_resolved_provider_and_model(
+    monkeypatch, tmp_path
+):
+    """目录行名 + 空模型不是归因；查价靠的是 adapter 解析出的真值。"""
+    local = _scratch(tmp_path, "codeximg_res", "out.png")
+
+    async def _gen(**kwargs):
+        return {
+            "image_url": "",
+            "image_path": local,
+            "provider": "ark",
+            "model": "doubao-seedream-4-0",
+        }
+
+    captured: dict = {}
+    tools = _tools(monkeypatch, captured, 556, generate_image=_gen)
+    monkeypatch.setenv("GENMEDIA_DEFAULT_IMAGE_PROVIDER", "nous-image")
+    monkeypatch.setenv("GENMEDIA_DEFAULT_IMAGE_MODEL", "")
+
+    assert (await tools.generate_image({"prompt": "a cat"}, dict(_CTX)))["ok"] is True
+    origin = captured["origin"]
+    assert (origin.provider, origin.model) == ("ark", "doubao-seedream-4-0")
+
+
+@pytest.mark.asyncio
+async def test_generate_video_registers_the_resolved_provider_and_model(
+    monkeypatch, tmp_path
+):
+    local = _scratch(tmp_path, "jimengvid_res", "out.mp4")
+
+    async def _gen(**kwargs):
+        return {
+            "video_url": "",
+            "video_path": local,
+            "provider": "jimeng-cli",
+            "model": "jimeng-video-3.0",
+        }
+
+    captured: dict = {}
+    tools = _tools(monkeypatch, captured, 557, generate_video=_gen)
+    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "nous-video")
+    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_MODEL", "")
+
+    out = await tools.generate_video(
+        {"prompt": "pan", "source_image_url": "https://cdn/in.png"}, dict(_CTX)
+    )
+    assert out["ok"] is True, out
+    origin = captured["origin"]
+    assert (origin.provider, origin.model) == ("jimeng-cli", "jimeng-video-3.0")

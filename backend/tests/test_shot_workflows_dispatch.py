@@ -445,9 +445,10 @@ async def test_generate_step_composes_prompt_and_returns_url():
             MagicMock(return_value=svc),
         ),
     ):
-        url = await m.generate_shot_image_step(_SHOT, "dall-e-3", "openai")
+        out = await m.generate_shot_image_step(_SHOT, "dall-e-3", "openai")
 
-    assert url == "http://cdn/x.png"
+    # step 现在回 {url, provider, model}——归因跟着产出一起走（3b T0）。
+    assert out["url"] == "http://cdn/x.png"
     # generate_image called with the shot id as node_id + provider_name kwarg.
     kwargs = svc.generate_image.call_args.kwargs
     assert kwargs["provider_name"] == "openai"
@@ -498,9 +499,10 @@ async def test_generate_step_threads_none_provider_to_service():
             MagicMock(return_value=svc),
         ),
     ):
-        url = await m.generate_shot_image_step(_SHOT, m._DEFAULT_MODEL, None)
+        out = await m.generate_shot_image_step(_SHOT, m._DEFAULT_MODEL, None)
 
-    assert url == "http://cdn/x.png"
+    # step 现在回 {url, provider, model}——归因跟着产出一起走（3b T0）。
+    assert out["url"] == "http://cdn/x.png"
     assert svc.generate_image.call_args.kwargs["provider_name"] is None
 
 
