@@ -184,6 +184,22 @@ describe('OutputsBlockView — live refresh', () => {
     }
   });
 
+  it('re-reads ONCE when the poll edge and the done frame describe the same run', async () => {
+    // 真栈上一个回合结束会被说两遍（Task 9 报告第 9 行，5 次重现 4 次）：
+    // `useIssueProgress` 的轮询边沿报的是上一次读到的 `last_seq`（3），87–144ms 后
+    // WS 的 `status{phase:'done'}` 带着这个 run 真正的终局 seq（42）再来一遍。
+    // 按 seq 比大小会让后到的那条越过水位 —— 于是每个回合重拉两遍产出。
+    render(<OutputsBlockView ctx={ctx()} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: '727145299382534100', seq: 3 }));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: '727145299382534100', seq: 42 }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).toHaveBeenCalledTimes(2);
+  });
+
   it('ignores another issue’s turn', async () => {
     render(<OutputsBlockView ctx={ctx()} />);
     await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
