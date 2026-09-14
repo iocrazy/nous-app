@@ -19,13 +19,19 @@ import { useTranslation } from 'react-i18next';
 import { FileOutput } from 'lucide-react';
 
 import { listIssueOutputs, type OutputObject } from '../../../services/outputsService';
+import type { DeliverableKind } from '../../chat/deliverableKinds';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { OutputDiffDialog } from '../OutputDiffDialog';
 import { setHighlightedOutput } from '../outputHighlight';
 import { RailCard } from './StatusBlock';
 
-/** The four kinds, in the words a person uses for them. */
-const KIND_LABEL: Record<string, [string, string]> = {
+/** The four kinds, in the words a person uses for them.
+ *
+ *  Keyed by `DeliverableKind` so a kind added to `deliverableKinds.ts` fails
+ *  to compile until it is labelled here too. Exported for
+ *  `components/chat/deliverableKinds.test.ts`, which re-checks the coverage at
+ *  runtime — the type alone can be widened back in one keystroke. */
+export const KIND_LABEL: Record<DeliverableKind, [string, string]> = {
   generated_media: ['outputs.kindMedia', 'Image'],
   script_shot: ['outputs.kindShot', 'Shot'],
   script_scene: ['outputs.kindScene', 'Scene'],
@@ -67,7 +73,9 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     <>
       <RailCard title={t('issueDetail.outputs', 'Outputs')} testId="outputs-block">
         {items.map((item) => {
-          const [key, fallback] = KIND_LABEL[item.kind] ?? ['outputs.kindOther', item.kind.replace(/_/g, ' ')];
+          // The cast asserts nothing about the value — it only permits the
+          // lookup; `??` still answers for a kind this build has not heard of.
+          const [key, fallback] = KIND_LABEL[item.kind as DeliverableKind] ?? ['outputs.kindOther', item.kind.replace(/_/g, ' ')];
           const revisions = Math.max(0, item.latest_version - 1);
           return (
             <button

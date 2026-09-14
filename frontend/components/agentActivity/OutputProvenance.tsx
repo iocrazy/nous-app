@@ -34,10 +34,14 @@ import {
 } from '../../services/outputsService';
 import { OutputDiffDialog } from '../Todolist/OutputDiffDialog';
 import { useChildRun } from '../Todolist/childRunContext';
+import type { DeliverableKind } from '../chat/deliverableKinds';
 
 export interface OutputProvenanceProps {
-  /** One of `generated_media | script_shot | script_scene | script_chapter`. */
-  kind: string;
+  /** Which registry to ask. A union, not prose: every mount site names the
+   *  kind as a LITERAL (`kind="script_shot"` on the shot node, `script_scene`
+   *  in the scene block), so a typo is caught here rather than answered with a
+   *  404 `not_registered` — the one failure this block renders as silence. */
+  kind: DeliverableKind;
   /** The object's id as a STRING (Snowflake). Empty means "nothing to ask
    *  about yet" — panels render before their row arrives. */
   refId: string;

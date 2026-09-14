@@ -19,6 +19,7 @@
  */
 
 import type { OutputObject } from '../../services/outputsService';
+import type { DeliverableKind } from './deliverableKinds';
 
 /** One citable version — the unit the picker offers and the chip carries. */
 export interface OutputMentionRow {
@@ -37,8 +38,14 @@ export interface OutputMentionRow {
   startsOlderGroup: boolean;
 }
 
-/** The kind words a query can match, so an untitled row stays findable. */
-const KIND_WORDS: Record<string, string> = {
+/** The kind words a query can match, so an untitled row stays findable.
+ *
+ *  Keyed by `DeliverableKind` for completeness: a fifth kind added in
+ *  `deliverableKinds.ts` fails to compile here until it gets search words,
+ *  rather than shipping a row findable only by its raw id. Exported for
+ *  `deliverableKinds.test.ts`, which re-checks the coverage at runtime so the
+ *  type cannot be widened back to `Record<string, …>` unnoticed. */
+export const KIND_WORDS: Record<DeliverableKind, string> = {
   generated_media: 'image media generated',
   script_shot: 'shot',
   script_scene: 'scene',
@@ -47,9 +54,11 @@ const KIND_WORDS: Record<string, string> = {
 
 /** Everything about one object a query is allowed to match. */
 function haystack(obj: OutputObject): string {
-  return [obj.title ?? '', obj.ref_id, obj.kind, KIND_WORDS[obj.kind] ?? '']
-    .join(' ')
-    .toLowerCase();
+  // `obj.kind` is whatever the endpoint sent — the cast asserts nothing, it
+  // just lets the lookup happen; `?? ''` still answers for a kind this build
+  // has never heard of. An unknown kind stays findable by title and id.
+  const words = KIND_WORDS[obj.kind as DeliverableKind] ?? '';
+  return [obj.title ?? '', obj.ref_id, obj.kind, words].join(' ').toLowerCase();
 }
 
 /**

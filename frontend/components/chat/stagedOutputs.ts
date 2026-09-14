@@ -90,11 +90,21 @@ export function removeStagedOutput(
   return list.filter((s) => !same(s, refKind, refId, version));
 }
 
-/** The wire form — the five keys `output_ref_resolver._stamped` stores. */
+/** The wire form — the five keys `output_ref_resolver._stamped` stores.
+ *
+ * The one place `StagedOutputRef.ref_kind` (a string, because every value in
+ * it came FROM `GET /issues/{id}/outputs`) meets `OutputRefAttachment.ref_kind`
+ * (a `DeliverableKind`, so a client-assembled citation cannot be misspelt into
+ * a post-time refusal). The cast states that boundary rather than hiding it:
+ * an unknown kind still travels, and the server still answers
+ * `output_ref_unresolvable` — narrowing the staged type instead would push a
+ * cast up to the endpoint and lose nothing but the honesty about where the
+ * unchecked value enters.
+ */
 export function toOutputAttachment(staged: StagedOutputRef): OutputRefAttachment {
   return {
     kind: 'output_ref',
-    ref_kind: staged.ref_kind,
+    ref_kind: staged.ref_kind as OutputRefAttachment['ref_kind'],
     ref_id: staged.ref_id,
     version: staged.version,
     title: staged.title,
