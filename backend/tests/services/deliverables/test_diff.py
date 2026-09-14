@@ -69,14 +69,43 @@ def test_render_elements_tolerates_an_empty_scene():
 # ── script_shot ──────────────────────────────────────────────────────────
 
 
-#: ``(after_json, created_at, ops_row_id)`` — the shape ``_shot_ledger``
-#: returns since 3b. The third slot is the ops row's own id, which is what
-#: ``run_deliverables.ledger_ref`` points at; the rows here carry no
-#: ``ledger_ref``, so these cases still exercise the timestamp fallback.
+#: ``({"after": …, "before": …}, created_at, ops_row_id)`` — the shape
+#: ``_shot_ledger`` returns since the 3b fix round. The third slot is the ops
+#: row's own id, which is what ``run_deliverables.ledger_ref`` points at; the
+#: rows here carry no ``ledger_ref``, so these cases still exercise the
+#: timestamp fallback. ``before`` is the op's pre-image — the value the field
+#: had at every version BEFORE that op (tier 2 below).
 SHOT_LEDGER = [
-    ({"shot_type": "WS", "description": "a wide shot"}, _at(11), 1001),
-    ({"description": "a close-up"}, _at(12), 1002),
+    ({"after": {"shot_type": "WS", "description": "a wide shot"}}, _at(11), 1001),
+    (
+        {
+            "after": {"description": "a close-up"},
+            "before": {"description": "a wide shot"},
+        },
+        _at(12),
+        1002,
+    ),
 ]
+
+#: 分镜行**当下**的六个字段。默认全 None，所以既有用例读到的就是「账本说了算」；
+#: 关心第三档的用例往这个 dict 里填值（fixture 每次调用都现读，改它即生效）。
+CURRENT: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def current_row(monkeypatch):
+    """``script_shots`` 的当前行 —— 三档解析的最后一档。
+
+    autouse：没有它，每个折叠分镜的用例都会真的去读库（那正是 3b fix A 之前
+    不存在、现在存在的一个外部面）。"""
+    CURRENT.clear()
+    CURRENT.update({field: None for field in mod._SHOT_FIELDS})
+
+    async def _current(ref_id):
+        return dict(CURRENT)
+
+    monkeypatch.setattr(mod, "_current_shot_fields", _current)
+    return CURRENT
 
 
 @pytest.mark.asyncio
@@ -125,6 +154,139 @@ async def test_each_side_carries_its_own_metadata(monkeypatch):
     assert body["to"]["run_id"] == RUN_ID
     assert body["to"]["issue_id"] == "348087075560200"
     assert body["to"]["cost_cents"] == 1.25
+
+
+# ── 三档解析：账本 → 后继 op 的前像 → 当前行（fix A） ─────────────────────
+#
+# agent 的 ``UpdateShot`` 只把**改过的**那个字段写进 ``after_json``，而分镜创建
+# （REST / 拆分工作流）根本不写账本行。所以「创建时设好、之后没人碰过」的字段在
+# 账本里一次都不出现 —— 只折叠 ``after_json`` 的话它任何一版都重建不出来，回退
+# 就会把它写成 NULL（2026-09-14 生产实测：`script_shots.shot_type` 被清空）。
+
+
+#: 生产那个形状：创建没写账本行，只有一条改 description 的 update。
+UNTOUCHED_LEDGER = [
+    (
+        {"after": {"description": "Alpha rain on glass"}, "before": {}},
+        _at(11),
+        2001,
+    ),
+    (
+        {
+            "after": {"description": "Beta rain on glass"},
+            "before": {"description": "Alpha rain on glass"},
+        },
+        _at(12),
+        2002,
+    ),
+]
+
+
+def _pinned(version: int, ledger_ref: int) -> dict:
+    """一行登记记录，水位钉在某一条账本行上（``ledger_ref`` 是外键，不是时间）。"""
+    return {**_row(version, 11), "ledger_ref": str(ledger_ref)}
+
+
+@pytest.mark.asyncio
+async def test_a_field_touched_after_the_watermark_comes_from_the_next_ops_pre_image(
+    monkeypatch, current_row
+):
+    """第二档：v1 之后那条 op 的 ``before_json`` 记着它改之前的值 —— 那正是 v1
+    看到的值。拿当前行去填会把 v1 画成 v2。"""
+
+    async def _ledger(ref_id):
+        return UNTOUCHED_LEDGER
+
+    current_row["description"] = "Beta rain on glass"
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    content, reason = await mod.rebuild_content("script_shot", "9", _pinned(1, 2001))
+    assert reason is None
+    assert content["description"] == "Alpha rain on glass"
+
+
+@pytest.mark.asyncio
+async def test_a_field_no_op_ever_touched_comes_from_the_current_row(
+    monkeypatch, current_row
+):
+    """第三档：账本里从没出现过 ⇒ 创建那一刻设好、此后没变过 ⇒ 当前行的值就是
+    **每一版**的值。重建成 None 等于声称这一版那五个字段是空的。"""
+
+    async def _ledger(ref_id):
+        return UNTOUCHED_LEDGER
+
+    current_row.update(
+        {
+            "shot_type": "MEDIUM",
+            "camera_angle": "EYE_LEVEL",
+            "camera_movement": "STATIC",
+            "focal_length": "35mm",
+            "lighting": "practical",
+            "description": "Beta rain on glass",
+        }
+    )
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    content, reason = await mod.rebuild_content("script_shot", "9", _pinned(1, 2001))
+    assert reason is None
+    assert content == {
+        "shot_type": "MEDIUM",
+        "camera_angle": "EYE_LEVEL",
+        "camera_movement": "STATIC",
+        "focal_length": "35mm",
+        "lighting": "practical",
+        # 第一档仍然赢过第三档：description 被 op 碰过。
+        "description": "Alpha rain on glass",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_watermark_still_wins_over_the_current_row(monkeypatch, current_row):
+    """负向对照：被账本碰过的字段永远由账本说了算，哪怕当前行有别的值 —— 否则
+    每一版都会退化成「当前状态」，diff 两侧一模一样。"""
+
+    async def _ledger(ref_id):
+        return UNTOUCHED_LEDGER
+
+    current_row["description"] = "Beta rain on glass"
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    body = await mod.build_diff(
+        kind="script_shot",
+        ref_id="9",
+        from_row=_pinned(1, 2001),
+        to_row=_pinned(2, 2002),
+    )
+    assert body["from"]["text"] == "description: Alpha rain on glass"
+    assert body["to"]["text"] == "description: Beta rain on glass"
+
+
+@pytest.mark.asyncio
+async def test_a_shot_row_that_is_gone_is_unavailable_rather_than_five_nulls(
+    monkeypatch,
+):
+    """当前行读不回来（行没了 / 读失败）⇒ 第三档答不出来 ⇒ 说不知道。
+
+    fail-closed 是刻意的：这条路的下游是回退的 UPDATE，而「当作 None」就是那次
+    生产事故本身。"""
+
+    async def _ledger(ref_id):
+        return UNTOUCHED_LEDGER
+
+    async def _gone(ref_id):
+        return None
+
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    monkeypatch.setattr(mod, "_current_shot_fields", _gone)
+    assert await mod.rebuild_content("script_shot", "9", _pinned(1, 2001)) == (
+        None,
+        mod.NOT_FOUND,
+    )
+    body = await mod.build_diff(
+        kind="script_shot",
+        ref_id="9",
+        from_row=_pinned(1, 2001),
+        to_row=_pinned(2, 2002),
+    )
+    assert body["from"]["available"] is False
+    assert body["from"]["unavailable_reason"] == mod.NOT_FOUND
 
 
 # ── script_scene ─────────────────────────────────────────────────────────

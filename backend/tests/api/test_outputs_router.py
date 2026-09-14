@@ -576,6 +576,28 @@ def test_diff_returns_two_sides_keyed_from_and_to(monkeypatch):
     assert body["to"]["issue_id"] == ISSUE_ID
 
 
+def test_diff_lends_the_chains_issue_to_a_human_version(monkeypatch):
+    """回退写的人手版 ``run_id IS NULL`` ⇒ 它自己的 ``issue_id`` 也是 NULL。
+
+    回退响应与血缘端点都用 ``newest_with_a_run`` 把这条链的归属补给它（3b fix
+    轮 1）；diff 是第三个读者，不补的话同一版在面板上一会儿有归属一会儿没有
+    （Task 9 旁证 C）。"""
+    human = _row(4, run_id=None, issue_id=None, issue_key=None, turn=None, step=None)
+    rows = [human, _row(3), _row(2), _row(1)]
+    diff = _diff_body()
+    r = _client(monkeypatch, rows=rows, diff=diff).get(
+        "/api/v1/outputs/script_shot/9/diff?from=3&to=4"
+    )
+    assert r.status_code == 200, r.text
+    passed = mod.build_diff.await_args.kwargs
+    assert passed["to_row"]["issue_id"] == ISSUE_ID
+    assert passed["to_row"]["issue_key"] == ISSUE_KEY
+    # agent 版原样传递：它自己答得出归属，补给它等于把别的 issue 的版本说成
+    # 这条链的（3b fix 轮 1 的那条纪律）。
+    assert passed["from_row"]["issue_id"] == ISSUE_ID
+    assert passed["from_row"]["run_id"] == RUN_ID
+
+
 def test_diff_checks_visibility_before_reading_content(monkeypatch):
     c = _client(monkeypatch, visible=False)
     assert c.get("/api/v1/outputs/script_shot/9/diff?from=1&to=2").status_code == 404

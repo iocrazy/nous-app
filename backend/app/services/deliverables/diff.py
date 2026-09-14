@@ -4,10 +4,23 @@
 version's bytes. So each kind is reconstructed from the ledger that already
 exists for it:
 
-* ``script_shot`` — fold ``script_shot_ops.after_json`` (create carries every
-  writable field, update carries only the ones it changed) up to the ops row
-  the deliverable's ``ledger_ref`` names, or, for rows registered before 3b,
-  the newest one at or before its ``created_at`` (see ``_prefix_for``).
+* ``script_shot`` — resolve each of the six writable fields against the
+  ``script_shot_ops`` ledger up to the ops row the deliverable's ``ledger_ref``
+  names (or, for rows registered before 3b, the newest one at or before its
+  ``created_at`` — see ``_split_for``). **Three tiers, per field**, because an
+  ``UpdateShot`` op only carries the fields it touched and a shot created
+  through REST / the breakdown workflow writes no ledger row at all:
+
+  1. the last ``after_json[field]`` at or before the watermark;
+  2. else the ``before_json[field]`` of the FIRST op after the watermark that
+     carries it — an op's pre-image IS the value at every earlier version;
+  3. else the CURRENT ``script_shots`` value: no op ever touched the field, so
+     it has not changed since the row was created.
+
+  Tier 3 is not a nicety. Without it those fields reconstruct as ``None`` for
+  EVERY version, and since ``rebuild_content`` is what a revert writes back,
+  一次回退就会把它们清空 (2026-09-14 生产实测：``shot_type`` 变成空) 并让
+  「保留未登记编辑」那条臂每次都白多写一版。
 * ``script_scene`` — replay ``script_ops`` through the pure
   ``version_service.replay_to`` to the same watermark.
 * ``generated_media`` — there is nothing to fold: a regeneration writes a NEW
@@ -32,6 +45,7 @@ from sqlalchemy import select
 
 from app.db.session import read_scope
 from app.models import GeneratedMedia, ScriptOps, ScriptShotOps
+from app.repositories.script_shot_repository import get_script_shot_repository
 from app.services.script.version_service import replay_to
 
 #: The shot fields a diff prints, in a stable order (mirrors the gateway's
@@ -95,10 +109,10 @@ def _as_datetime(value: Any) -> Optional[_dt.datetime]:
     return stamp
 
 
-def _prefix_for(
+def _seen_by(
     ledger: List[Tuple[Any, Optional[_dt.datetime], int]], row: Dict[str, Any]
-) -> List[Any]:
-    """这一版能看见的账本前缀。
+) -> List[bool]:
+    """每条账本行：这一版看得见它吗。
 
     优先 ``ledger_ref``（登记时记下的账本位置：shot 是 script_shot_ops.id，scene 是
     script_ops.op_seq 水位）——那是**外键**；``created_at`` 只是巧合上单调的时间戳，
@@ -112,15 +126,33 @@ def _prefix_for(
         except (TypeError, ValueError):
             cut = None
         if cut is not None:
-            return [payload for payload, _created, key in ledger if key <= cut]
+            return [key <= cut for _payload, _created, key in ledger]
     stamp = _as_datetime(row.get("created_at"))
     if stamp is None:
-        return [payload for payload, _created, _key in ledger]
+        return [True for _entry in ledger]
     return [
-        payload
-        for payload, created, _key in ledger
-        if created is not None and created <= stamp
+        created is not None and created <= stamp for _payload, created, _key in ledger
     ]
+
+
+def _split_for(
+    ledger: List[Tuple[Any, Optional[_dt.datetime], int]], row: Dict[str, Any]
+) -> Tuple[List[Any], List[Any]]:
+    """``(前缀, 后缀)`` —— 这一版看得见的账本，和它之后发生的账本。
+
+    后缀不是摆设：一条 op 的 ``before_json`` 就是**这一版看到的值**，而它是账本
+    里唯一记着「某个字段在被改之前是什么」的地方（见模块 docstring 的第二档）。"""
+    seen = _seen_by(ledger, row)
+    prefix = [entry[0] for entry, ok in zip(ledger, seen) if ok]
+    suffix = [entry[0] for entry, ok in zip(ledger, seen) if not ok]
+    return prefix, suffix
+
+
+def _prefix_for(
+    ledger: List[Tuple[Any, Optional[_dt.datetime], int]], row: Dict[str, Any]
+) -> List[Any]:
+    """这一版能看见的账本前缀（场次臂只需要这一半）。"""
+    return _split_for(ledger, row)[0]
 
 
 # ── per-kind reconstruction ──────────────────────────────────────────────
@@ -129,7 +161,10 @@ def _prefix_for(
 async def _shot_ledger(
     ref_id: str,
 ) -> List[Tuple[Dict[str, Any], Optional[_dt.datetime], int]]:
-    """``(after_json, created_at, id)`` per ops row, oldest first.
+    """``({"after": …, "before": …}, created_at, id)`` per ops row, oldest first.
+
+    ``before_json`` rides along because it is the ONLY record of what a field
+    held before an op changed it — the second tier of the resolution above.
 
     Ordered by ``id`` (snowflake, monotonic) rather than ``created_at``: the id
     IS ``ledger_ref``'s domain, so the ordering and the cut key are the same
@@ -146,6 +181,7 @@ async def _shot_ledger(
             await session.execute(
                 select(
                     ScriptShotOps.after_json,
+                    ScriptShotOps.before_json,
                     ScriptShotOps.created_at,
                     ScriptShotOps.id,
                 )
@@ -153,7 +189,28 @@ async def _shot_ledger(
                 .order_by(ScriptShotOps.id.asc())
             )
         ).all()
-    return [(row[0] or {}, _as_datetime(row[1]), int(row[2])) for row in rows]
+    return [
+        (
+            {"after": row[0] or {}, "before": row[1] or {}},
+            _as_datetime(row[2]),
+            int(row[3]),
+        )
+        for row in rows
+    ]
+
+
+async def _current_shot_fields(ref_id: str) -> Optional[Dict[str, Any]]:
+    """分镜行**当下**的六个字段，行没了（或读不回来）就是 ``None``。
+
+    走 ``ScriptShotRepository``，不自己开 ORM：``script_shots`` 的直接访问由
+    ``tests/test_scope_resolver_single_choke_point.py`` 的门禁管着，而这条路的
+    ``ref_id`` 与回退那条一样，是登记表里的 ref、进门前已经过了 ``visible_chain``。
+    仓库的读失败会 log 并返回 ``None`` —— 调用方一律按「答不出来」处理（fail-closed），
+    绝不当成「六个字段都是空的」。"""
+    row = await get_script_shot_repository().get_by_id(str(ref_id))
+    if row is None:
+        return None
+    return {field: row.get(field) for field in _SHOT_FIELDS}
 
 
 async def _scene_ledger(
@@ -207,6 +264,7 @@ def _side(row: Dict[str, Any], **content: Any) -> Dict[str, Any]:
         "version": row.get("version"),
         "run_id": row.get("run_id"),
         "issue_id": row.get("issue_id"),
+        "issue_key": row.get("issue_key"),
         "created_at": row.get("created_at"),
         "model": row.get("model"),
         "cost_cents": row.get("cost_cents"),
@@ -263,8 +321,12 @@ async def _sides(
 
     if kind == "script_shot":
         ledger = await _shot_ledger(ref_id)
+        # 两侧共用一次当前行的读：它是第三档的唯一来源，而两侧问的是同一行。
+        current = await _current_shot_fields(ref_id)
+        if current is None:
+            return _unavailable(from_row, NOT_FOUND), _unavailable(to_row, NOT_FOUND)
         return tuple(  # type: ignore[return-value]
-            _shot_side(row, ledger) for row in (from_row, to_row)
+            _shot_side(row, ledger, current) for row in (from_row, to_row)
         )
 
     if kind == "script_scene":
@@ -278,15 +340,43 @@ async def _sides(
     return _unavailable(from_row, NO_LEDGER), _unavailable(to_row, NO_LEDGER)
 
 
-def _fold_shot(prefix: List[Any]) -> Dict[str, Any]:
-    """一段分镜账本前缀 → 那一刻的六字段快照。
+#: 「这一档没有答案」——``None`` 是**合法的字段值**（列可空），拿它当哨兵会让
+#: 「账本说这里是 NULL」和「账本没提过这个字段」变成同一件事，而这两者的区别正是
+#: 本轮修的那个缺陷。
+_UNKNOWN = object()
 
-    ``create`` 带齐每个可写字段，``update`` 只带它改过的，所以折叠就是按序
-    ``update``。缺席的字段读成 ``None`` —— 那正是列的实际状态。"""
+
+def _pre_image(suffix: List[Any], field: str) -> Any:
+    """水位之后**第一条**提到这个字段的 op 改它之前的值，没有就是 ``_UNKNOWN``。
+
+    第一条而不是任意一条：后面的 op 的前像是更晚的状态，拿它会把这一版画成后来
+    的样子。"""
+    for payload in suffix:
+        before = (payload or {}).get("before") or {}
+        if field in before:
+            return before[field]
+    return _UNKNOWN
+
+
+def _fold_shot(
+    prefix: List[Any], suffix: List[Any], current: Dict[str, Any]
+) -> Dict[str, Any]:
+    """一段分镜账本 + 当前行 → 那一刻的六字段快照（三档，见模块 docstring）。
+
+    ``create`` 带齐每个可写字段、``update`` 只带它改过的，所以第一档就是按序
+    ``update``；账本里压根没出现过的字段不是「空的」，而是**没人动过**——它在每一版
+    上的值就是它此刻的值。"""
     snapshot: Dict[str, Any] = {}
-    for after in prefix:
-        snapshot.update(after or {})
-    return {field: snapshot.get(field) for field in _SHOT_FIELDS}
+    for payload in prefix:
+        snapshot.update((payload or {}).get("after") or {})
+    resolved: Dict[str, Any] = {}
+    for field in _SHOT_FIELDS:
+        if field in snapshot:
+            resolved[field] = snapshot[field]
+            continue
+        pre = _pre_image(suffix, field)
+        resolved[field] = current.get(field) if pre is _UNKNOWN else pre
+    return resolved
 
 
 def _replay_scene(prefix: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -299,12 +389,14 @@ def _replay_scene(prefix: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _shot_side(
-    row: Dict[str, Any], ledger: List[Tuple[Any, Any, int]]
+    row: Dict[str, Any], ledger: List[Tuple[Any, Any, int]], current: Dict[str, Any]
 ) -> Dict[str, Any]:
-    prefix = _prefix_for(ledger, row)
+    prefix, suffix = _split_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
-    return _side(row, text=render_shot(_fold_shot(prefix)), available=True)
+    return _side(
+        row, text=render_shot(_fold_shot(prefix, suffix, current)), available=True
+    )
 
 
 def _scene_side(
@@ -331,10 +423,15 @@ async def rebuild_content(
     """
     try:
         if kind == "script_shot":
-            prefix = _prefix_for(await _shot_ledger(ref_id), row)
+            prefix, suffix = _split_for(await _shot_ledger(ref_id), row)
             if not prefix:
                 return None, NO_SNAPSHOT
-            return _fold_shot(prefix), None
+            current = await _current_shot_fields(ref_id)
+            if current is None:
+                # 行没了、或者读失败。fail-closed：回退拿这个 dict 直接 UPDATE，
+                # 「当作六个空字段」正是本轮在修的那次生产事故。
+                return None, NOT_FOUND
+            return _fold_shot(prefix, suffix, current), None
         if kind == "script_scene":
             prefix = _prefix_for(await _scene_ledger(ref_id), row)
             if not prefix:

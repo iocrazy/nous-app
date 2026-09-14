@@ -101,6 +101,12 @@ export interface OutputDiffSide {
   version: number;
   run_id: string;
   issue_id: string | null;
+  /**
+   * Lent by the chain for a human (revert-written) version, which has no run
+   * of its own — the same projection the lineage endpoint and the revert
+   * response use, so all three readers describe one version identically.
+   */
+  issue_key: string | null;
   created_at: string | null;
   model: string | null;
   cost_cents: number | null;

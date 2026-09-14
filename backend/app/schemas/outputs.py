@@ -132,6 +132,10 @@ class OutputDiffSide(BaseModel):
     #: 回退版没有 run（作者是人）。两侧都要能画，所以这里也是可空的。
     run_id: Optional[str] = None
     issue_id: Optional[str] = None
+    #: 人手版自己答不出归属，由**这条链**补上（``newest_with_a_run``）——回退响应
+    #: 与血缘端点早就这么做，diff 是第三个读者，不补的话同一版在面板上一会儿有
+    #: 归属一会儿没有（3b fix A / Task 9 旁证 C）。
+    issue_key: Optional[str] = None
     created_at: Optional[str] = None
     model: Optional[str] = None
     cost_cents: Optional[float] = None
