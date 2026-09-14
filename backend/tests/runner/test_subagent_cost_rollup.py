@@ -317,7 +317,6 @@ async def test_the_refold_lifts_the_media_account_with_the_outputs_slice(monkeyp
     transcript 捞回来的，**钱必须跟着同一次捞回来**：只捞计数不捞账，就会出现
     「面板上有 1 件产出、账上一分钱没有」。"""
     import contextlib
-
     from unittest.mock import AsyncMock
 
     from app.db import session as dbs
