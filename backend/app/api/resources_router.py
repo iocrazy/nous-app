@@ -10,6 +10,7 @@ Sub-modules:
 - resources_versions_router — version management, HLS, transcode
 - resources_folders_router  — folders + smart folders
 - resources_assets_router   — save a resource as an asset (P6 ruling E)
+- resources_provenance_router — GET /resources/{id}/provenance: 这个资源是谁做的 (3b Task 7)
 """
 
 from fastapi import APIRouter
@@ -19,6 +20,7 @@ from app.api.resources_assets_router import router as assets_router
 from app.api.resources_crud_router import router as crud_router
 from app.api.resources_folders_router import router as folders_router
 from app.api.resources_gallery_router import router as gallery_router
+from app.api.resources_provenance_router import router as provenance_router
 from app.api.resources_search_router import router as search_router
 from app.api.resources_upload_router import router as upload_router
 from app.api.resources_versions_router import router as versions_router
@@ -45,4 +47,7 @@ router.include_router(gallery_router)
 # id segment crud_router owns, so it registers first for the same reason the
 # routers above do.
 router.include_router(assets_router)
+# GET /resources/{id}/provenance —— 与 assets_router 同理：它是 crud_router
+# 那个 catch-all id 段下的静态子路径，必须先注册。
+router.include_router(provenance_router)
 router.include_router(crud_router)
