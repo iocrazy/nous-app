@@ -680,6 +680,10 @@ class RunDeliverables(Base):
         ),
         PrimaryKeyConstraint("id", name="run_deliverables_pkey"),
         Index("idx_run_deliverables_run", "run_id"),
+        CheckConstraint(
+            "run_id IS NOT NULL OR actor_user_id IS NOT NULL",
+            name="run_deliverables_run_or_actor",
+        ),
         Index("idx_run_deliverables_ref", "kind", "ref_id"),
         # 462: the concurrency gate. Two runs registering the same object at
         # the same time must not both believe they wrote v2 — one loses and
@@ -704,7 +708,13 @@ class RunDeliverables(Base):
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
-    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 466: 回退是人手占号 —— run 为空时 actor_user_id 必须有值（CHECK 兜住）。
+    run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    actor_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    reverted_from_version: Mapped[Optional[int]] = mapped_column(Integer)
+    #: 账本位置：script_shot → script_shot_ops.id，script_scene → op_seq 水位。
+    #: 存量行 NULL，diff 退回 created_at。
+    ledger_ref: Mapped[Optional[str]] = mapped_column(Text)
     seq: Mapped[Optional[int]] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     ref_id: Mapped[str] = mapped_column(Text, nullable=False)
