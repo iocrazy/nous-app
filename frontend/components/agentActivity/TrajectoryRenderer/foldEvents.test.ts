@@ -328,6 +328,9 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
         title: 'S3 · Shot #1',
         model: null,
         costCents: null,
+        // No price on the registration and no step_end to share out: unknown,
+        // which is a different fact from free.
+        costKind: null,
       },
     ]);
   });
@@ -410,6 +413,68 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     const step = nodes[0];
     if (step.kind !== 'step') throw new Error();
     expect(step.outputs).toHaveLength(1);
+  });
+
+  // ---- 3b §3.1: the step cost is shared out over what the step registered ---
+  //
+  // Same formula as the backend's `lineage_view.allocate_step_costs`
+  // (`stepCost / cards.length`), so the thread card and the lineage endpoint
+  // cannot disagree about what a text version cost.
+  it('splits a step cost across the deliverables that step registered', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 2, model: 'doubao-seed-2-0-lite' }, 2),
+      at(2, 'deliverable', { kind: 'script_shot', ref_id: '9', version: 1 }, 2),
+      at(3, 'deliverable', { kind: 'script_shot', ref_id: '10', version: 1 }, 2),
+      at(4, 'step_end', { turn: 1, step: 2, cost_cents: 0.18 }, 2),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.outputs.map((o) => o.costCents)).toEqual([0.09, 0.09]);
+    expect(step.outputs.map((o) => o.costKind)).toEqual(['allocated', 'allocated']);
+  });
+
+  it('a deliverable that lands after step_end still gets its share', () => {
+    // DBOS 登记会晚于本步结束到达（`stepAt` 注释里的既有事实）。均摊写进
+    // step_end 的分支就只覆盖先到的卡，而份额取决于卡的总数 —— 顺序依赖即错误依赖。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 2 }, 2),
+      at(2, 'step_end', { turn: 1, step: 2, cost_cents: 0.18 }, 2),
+      at(3, 'deliverable', { kind: 'script_shot', ref_id: '9', version: 1 }, 2),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.outputs[0].costCents).toBe(0.18);
+  });
+
+  it('divides by every card the step registered, priced ones included', () => {
+    // 与后端 `load_step_shares` 同一分母：它按 (run_id, turn, step) 下**所有**
+    // deliverable 事件数除，媒体那张也算进去。按「没有价的卡数」除会让同一个
+    // 文本版本在线程卡上是 ¢0.18、在血缘端点上是 ¢0.09 —— 两个面对同一笔钱
+    // 给两个答案，是这份共用写法存在的意义的反面。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 4 }, 4),
+      at(2, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1, cost_cents: 12 }, 4),
+      at(3, 'deliverable', { kind: 'script_shot', ref_id: '9', version: 1 }, 4),
+      at(4, 'step_end', { turn: 1, step: 4, cost_cents: 0.18 }, 4),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.outputs.map((o) => [o.costCents, o.costKind])).toEqual([
+      [12, 'exact'],        // 目录价原样保留
+      [0.09, 'allocated'],  // 0.18 / 2，不是 0.18 / 1
+    ]);
+  });
+
+  it('an exact media price is never overwritten by the allocation', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 3 }, 3),
+      at(2, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1, cost_cents: 12 }, 3),
+      at(3, 'step_end', { turn: 1, step: 3, cost_cents: 0.2 }, 3),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    const o = step.outputs[0];
+    expect([o.costCents, o.costKind]).toEqual([12, 'exact']);
   });
 });
 

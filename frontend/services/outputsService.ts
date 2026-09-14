@@ -38,7 +38,16 @@ export interface OutputVersion {
   id: string;
   version: number;
   parent_version: number | null;
-  run_id: string;
+  /** The run that wrote it — `null` for a version a PERSON registered (3b: a
+   *  revert, and the edits it kept). `run_id` and `actor_user_id` are the two
+   *  possible authors and the T1 CHECK keeps at least one of them non-null. */
+  run_id: string | null;
+  /** 谁写的，当它不是 run。人手登记（回退）才有值 —— run_id 与它至少有一个非空（T1 CHECK）。 */
+  actor_user_id: string | null;
+  /** 这一版回退自哪一版；非回退为 null。 */
+  reverted_from_version: number | null;
+  /** 花费怎么来的：allocated = 从 step 花费均摊（文本类，参考值），exact = 登记时的目录价。 */
+  cost_kind: 'allocated' | 'exact' | null;
   issue_id: string | null;
   issue_key: string | null;
   deep_link: string | null;
@@ -66,6 +75,13 @@ export interface OutputLineage {
   ref_id: string;
   latest_version: number;
   versions: OutputVersion[];
+  /**
+   * The registry sequence this answer was read at — a Snowflake id, and so a
+   * STRING. Never parse it into a number: past 2^53 that silently rounds
+   * (CLAUDE.md「Snowflake BIGINT 精度丢失」). Compare two of them with
+   * `BigInt(a) < BigInt(b)` if you ever need to order them.
+   */
+  as_of_seq: string;
 }
 
 export interface OutputDiffMedia {
@@ -128,22 +144,36 @@ export function resolveMediaUrl(url: string | null | undefined): string | null {
 export class OutputsError extends Error {
   readonly code: string;
   readonly status: number;
-  constructor(code: string, status: number, message: string) {
+  /**
+   * The whole typed payload the server sent under `details`, not just its
+   * `code`. A refusal often carries the fact the copy has to name — the
+   * version that appeared (`latest_version`), why a snapshot is gone
+   * (`reason`) — and dropping it leaves the caller able to say only "there
+   * was a conflict", which does not tell the reader who wrote what.
+   */
+  readonly details: Record<string, unknown> | null;
+  constructor(code: string, status: number, message: string, details: Record<string, unknown> | null = null) {
     super(message);
     this.name = 'OutputsError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
 async function reject(res: Response): Promise<never> {
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
+  let details: Record<string, unknown> | null = null;
   try {
     const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
     const detail = body?.details ?? body?.detail;
     if (detail && typeof detail === 'object') {
       const d = detail as { code?: unknown; message?: unknown };
+      // The WHOLE object, not the two keys we happen to read here: a refusal's
+      // extra facts (`latest_version`, `reason`) are what the caller's copy
+      // names, and this parser must not decide which of them matter.
+      details = detail as Record<string, unknown>;
       if (typeof d.code === 'string' && d.code) code = d.code;
       if (typeof d.message === 'string' && d.message) message = d.message;
     } else if (typeof detail === 'string' && detail) {
@@ -155,7 +185,7 @@ async function reject(res: Response): Promise<never> {
     // Not JSON at all (a gateway's HTML) — keep the status line.
     console.error('[outputsService] error body was not JSON', err);
   }
-  throw new OutputsError(code, res.status, message);
+  throw new OutputsError(code, res.status, message, details);
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -257,4 +287,37 @@ export function getOutputLineage(kind: string, refId: string): Promise<OutputLin
 /** Two versions as content. `from`/`to` are the wire's own query names. */
 export async function getOutputDiff(kind: string, refId: string, from: number, to: number): Promise<OutputDiff> {
   return get<OutputDiff>(`/api/v1/outputs/${encodeURIComponent(kind)}/${ref(refId)}/diff?from=${from}&to=${to}`);
+}
+
+/** What a revert wrote: the new version, and the one the backend had to
+ *  register first if this tab's object held unregistered human edits. */
+export interface RevertResult {
+  version: OutputVersion;
+  /** 回退前把未登记的人手编辑登记成的那一版；没有就是 null。
+   *  弹层调用前无从得知它会不会出现，所以确认文案不提它，成功后才说。 */
+  kept_version: OutputVersion | null;
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${getApiUrl()}${path}`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return reject(res);
+  return (await res.json()) as T;
+}
+
+/** 把对象回退到 `toVersion`，写出新的一版。`expectedLatest` 是乐观锁：与服务端当前
+ *  最新版不等就 409 `version_conflict`（detail 带 `latest_version`），绝不覆盖别人刚登记的版本。 */
+export async function revertOutput(
+  kind: string,
+  refId: string,
+  opts: { toVersion: number; expectedLatest: number },
+): Promise<RevertResult> {
+  return post<RevertResult>(
+    `/api/v1/outputs/${encodeURIComponent(kind)}/${ref(refId)}/revert`,
+    { to_version: opts.toVersion, expected_latest: opts.expectedLatest },
+  );
 }

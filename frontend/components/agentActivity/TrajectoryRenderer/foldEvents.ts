@@ -14,6 +14,7 @@
  */
 
 import type { AgentRunEvent } from '../../../types';
+import type { CostKind } from '../outputCost';
 
 export type StepLineType = 'tool' | 'retry' | 'compaction' | 'todo' | 'output' | 'model';
 
@@ -83,6 +84,10 @@ export interface OutputCard {
   title: string | null;
   model: string | null;
   costCents: number | null;
+  /** Where `costCents` came from: `exact` is the catalogue price the
+   *  registration carried (media), `allocated` is this step's spend shared out
+   *  (text), `null` is no price at all. */
+  costKind: CostKind;
 }
 
 export interface StepNode {
@@ -640,6 +645,9 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           title: str(p.title),
           model: str(p.model),
           costCents: num(p.cost_cents),
+          // A price ON the registration is the catalogue one (media). Text
+          // rows carry none and get their share in `allocateStepCosts`.
+          costKind: num(p.cost_cents) === null ? null : 'exact',
         });
         break;
       }
@@ -706,7 +714,36 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
 
   if (current && opts.isRunning === false) closeCurrent();
   stampResultSummaries(nodes);
+  allocateStepCosts(nodes);
   return nodes;
+}
+
+/**
+ * 把每一步的 step 花费均摊到这一步登记的产出卡上（3b §3.1）。
+ *
+ * **分母是这一步登记的全部卡，不是「没有价的卡」** —— 后端
+ * `load_step_shares` 按 `(run_id, turn, step)` 下所有 `deliverable` 事件数除，
+ * 带目录价的媒体那张也算进去。按没有价的卡数除，会让同一个文本版本在线程卡上
+ * 是 `¢0.18`、在血缘端点上是 `¢0.09`：两个面对同一笔钱给两个答案，正是这份
+ * 共用写法要消灭的东西。
+ *
+ * 写进去的只有没有自己价的卡 —— 媒体类登记时就带目录价，拿参考值盖掉精确价
+ * 是把账做坏。分母与写入范围是两件事，别把它们合成一个 filter。
+ *
+ * 第二遍而不是 `step_end` 的分支：登记会晚于本步结束到达（见 `stepAt` 的注释），
+ * 在分支里算就只覆盖先到的那几张卡，而份额本身又取决于卡的总数。
+ */
+function allocateStepCosts(nodes: TrajectoryNode[]): void {
+  for (const n of nodes) {
+    if (n.kind !== 'step' || n.summary.costCents === null) continue;
+    if (n.outputs.length === 0) continue;
+    const each = n.summary.costCents / n.outputs.length;
+    for (const o of n.outputs) {
+      if (o.costCents !== null) continue;
+      o.costCents = each;
+      o.costKind = 'allocated';
+    }
+  }
 }
 
 /**

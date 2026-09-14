@@ -47,6 +47,9 @@ const version = (v: number, over: Record<string, unknown> = {}) => ({
   run_id: '727145299382534100',
   issue_id: '727145299382534000',
   issue_key: 'MH-91',
+  actor_user_id: null,
+  reverted_from_version: null,
+  cost_kind: 'exact' as const,
   deep_link: '/team/424242424242/todolist/MH-91?step=4',
   seq: null,
   turn: null,
@@ -63,6 +66,8 @@ const lineage = (versions: ReturnType<typeof version>[]) => ({
   ref_id: '727145299382534999',
   latest_version: versions[0].version,
   versions,
+  // A Snowflake id, so a STRING on the wire — never a number.
+  as_of_seq: '727145299382534770',
 });
 
 const OBJECT_ROUTE = '/team/424242424242/canvas/5';

@@ -14,17 +14,21 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { History, PlayCircle, X } from 'lucide-react';
+import { History, PlayCircle, RotateCcw, X } from 'lucide-react';
 
 import {
   getOutputDiff,
   getOutputLineage,
+  invalidateOutputLineage,
   OutputsError,
   resolveMediaUrl,
+  revertOutput,
   type OutputDiff,
   type OutputDiffSide,
   type OutputVersion,
 } from '../../services/outputsService';
+import { formatOutputCost, outputCostTitle, type CostKind } from '../agentActivity/outputCost';
+import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
 
@@ -71,6 +75,35 @@ function errorText(err: unknown, t: T): string {
   return t('outputs.errorGeneric', 'Could not read this output.');
 }
 
+// 只有文本类有账本 / 逆操作批可以重放；媒体回退与媒体版本链是另立的一期（3b §6）。
+const REVERTIBLE = new Set(['script_shot', 'script_scene']);
+
+/** 回退失败的话术：每个码说清「发生了什么」和「接下来做什么」。
+ *
+ *  The facts come from `err.details`, not from `err.message`: the server's
+ *  prose is for a log, and the one thing the reader needs — WHICH version
+ *  appeared — only exists in the typed payload. */
+function revertErrorText(err: unknown, from: number | null, t: T): string {
+  if (!(err instanceof OutputsError)) return t('outputs.revertFailed', 'Revert failed.');
+  const d = err.details ?? {};
+  switch (err.code) {
+    case 'version_conflict':
+      return t('outputs.revertConflict', 'Someone registered v{{n}} meanwhile — reopen to see it', {
+        n: String(d.latest_version ?? '?'),
+      });
+    case 'content_unavailable':
+      return t('outputs.revertNoLedger', "v{{n}} can't be rebuilt (no ledger)", { n: from ?? '?' });
+    case 'kind_not_revertible':
+      return t('outputs.revertKindRefused', "This kind can't be reverted");
+    case 'version_not_found':
+      return t('outputs.errorVersionNotFound', 'That version is not in this object’s chain.');
+    case 'not_permitted':
+      return t('outputs.revertNotPermitted', 'You do not have permission to revert this object.');
+    default:
+      return t('outputs.revertFailedCode', 'Revert failed ({{code}})', { code: err.code });
+  }
+}
+
 const TONE: Record<DiffSegment['type'], string> = {
   same: '',
   add: 'bg-ok-soft text-ok rounded-sm',
@@ -96,10 +129,21 @@ const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string }
   );
 };
 
-const SideHead: React.FC<{ side: OutputDiffSide; label: string }> = ({ side, label }) => (
+const SideHead: React.FC<{ side: OutputDiffSide; label: string; cost: string; costTitle?: string; testId: string }> = ({
+  side,
+  label,
+  cost,
+  costTitle,
+  testId,
+}) => (
   <div className="flex items-baseline gap-2 text-[11px] text-ink-500">
     <span className="font-mono tracking-wider text-ink-400">{label}</span>
     {side.model && <span className="truncate">{side.model}</span>}
+    {/* The chain's price, not the diff side's: the registry row is where
+        `cost_kind` lives, and the two must not disagree on screen. */}
+    <span data-testid={testId} title={costTitle} className="shrink-0 tabular-nums">
+      {cost}
+    </span>
     {side.created_at && <span className="ml-auto shrink-0 tabular-nums">{side.created_at.slice(0, 16).replace('T', ' ')}</span>}
   </div>
 );
@@ -150,6 +194,22 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const [loading, setLoading] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
 
+  // ---- revert (3b §3.4) --------------------------------------------------
+  // `useOptionalToast`, because this dialog also mounts from the canvas, where
+  // no ToastProvider is above it — a required one would throw there.
+  const toast = useOptionalToast();
+  const [confirming, setConfirming] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [kept, setKept] = useState<OutputVersion | null>(null);
+  const confirmBtn = useRef<HTMLButtonElement>(null);
+
+  // A question just appeared where the button was; focus its answer so Enter
+  // resolves the thing the reader is looking at rather than re-firing the
+  // button that asked.
+  useEffect(() => {
+    if (confirming) confirmBtn.current?.focus();
+  }, [confirming]);
+
   // Focus the panel, hand focus back to the opener when it goes.
   useEffect(() => {
     const opener = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
@@ -198,6 +258,42 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
     if (parent !== null && versions.some((v) => v.version === parent)) return parent;
     return versions.some((v) => v.version === to - 1) ? to - 1 : to;
   }, [versions, to, pinnedFrom]);
+
+  const latestVersion = versions.length ? Math.max(...versions.map((x) => x.version)) : 0;
+  const canRevert = REVERTIBLE.has(kind) && from !== null && from < latestVersion && !reverting;
+  const row = (n: number | null): OutputVersion | null => (n === null ? null : versions.find((x) => x.version === n) ?? null);
+  const costOf = (n: number): string => formatOutputCost(row(n)?.cost_cents ?? null, (row(n)?.cost_kind ?? null) as CostKind);
+  /** Why that number reads the way it does — `≈` says "approximate", this says
+   *  what it was approximated FROM; on an unpriced media row it names the model
+   *  whose catalogue price is missing. `undefined` when there is nothing to add. */
+  const costTitleOf = (n: number): string | undefined =>
+    outputCostTitle(row(n)?.cost_cents ?? null, (row(n)?.cost_kind ?? null) as CostKind, {
+      deliverableKind: kind,
+      model: row(n)?.model ?? null,
+    });
+
+  const doRevert = async (): Promise<void> => {
+    if (from === null) return;
+    setReverting(true);
+    try {
+      const res = await revertOutput(kind, refId, { toVersion: from, expectedLatest: latestVersion });
+      // 用响应里的新版就地更新，不等重拉（3b §4）；同时让缓存的链作废，
+      // 别处（来源块、右栏）下一次读才拿到真答案。
+      setVersions((prev) => [res.version, ...(res.kept_version ? [res.kept_version] : []), ...prev]);
+      setKept(res.kept_version);
+      setPinnedFrom(null);
+      setTo(res.version.version);
+      setConfirming(false);
+      invalidateOutputLineage(kind, refId);
+      toast?.addToast(tr('outputs.revertDone', 'Reverted to v{{from}} as v{{n}}', { from, n: res.version.version }), 'success');
+    } catch (err) {
+      console.error('[OutputDiffDialog] revert failed', err);
+      toast?.addToast(revertErrorText(err, from, tr), 'error');
+      setConfirming(false);
+    } finally {
+      setReverting(false);
+    }
+  };
 
   useEffect(() => {
     if (to === null || from === null) return;
@@ -272,6 +368,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 onClick={() => {
                   setPinnedFrom(null);
                   setTo(v.version);
+                  // "your edits were kept as v3" answers a question about the
+                  // revert just performed; carried onto another version it
+                  // becomes a claim about the wrong object. Cleared here
+                  // rather than in the diff effect, because `doRevert` moves
+                  // `to` itself and would wipe the note it just earned.
+                  setKept(null);
+                  setConfirming(false);
                 }}
                 className={`rounded border px-1.5 py-0.5 text-[11px] ${
                   v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
@@ -297,7 +400,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
           <div className={`mt-3 grid gap-3 ${single ? 'grid-cols-1' : 'sm:grid-cols-2'}`}>
             {!single && (
               <div className="min-w-0 space-y-1">
-                <SideHead side={diff.from} label={t('outputs.version', 'v{{n}}', { n: diff.from.version })} />
+                <SideHead
+                  side={diff.from}
+                  label={t('outputs.version', 'v{{n}}', { n: diff.from.version })}
+                  cost={costOf(diff.from.version)}
+                  costTitle={costTitleOf(diff.from.version)}
+                  testId="output-diff-cost-from"
+                />
                 {!diff.from.available ? (
                   <Unavailable side={diff.from} t={tr} />
                 ) : diff.content_type === 'media' ? (
@@ -308,7 +417,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               </div>
             )}
             <div className="min-w-0 space-y-1" data-testid={single ? 'output-diff-only' : undefined}>
-              <SideHead side={diff.to} label={t('outputs.version', 'v{{n}}', { n: diff.to.version })} />
+              <SideHead
+                side={diff.to}
+                label={t('outputs.version', 'v{{n}}', { n: diff.to.version })}
+                cost={costOf(diff.to.version)}
+                costTitle={costTitleOf(diff.to.version)}
+                testId="output-diff-cost-to"
+              />
               {!diff.to.available ? (
                 <Unavailable side={diff.to} t={tr} />
               ) : diff.content_type === 'media' ? (
@@ -326,7 +441,9 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
           </p>
         )}
 
-        <div className="mt-3 flex items-center gap-3">
+        {/* `flex-wrap`, so the "edits were kept" line below can take its own
+            row (`w-full`) instead of being squeezed into the button row. */}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           {diff && (
             <button
               type="button"
@@ -356,15 +473,57 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               {t('outputs.changeCount', '+{{added}} / −{{removed}} words', { added: text.added, removed: text.removed })}
             </span>
           )}
-          <button
-            type="button"
-            data-testid="output-diff-revert"
-            disabled
-            title={t('outputs.revertHint', 'Arrives with 3b')}
-            className="ml-auto cursor-not-allowed rounded border border-ink-700 px-3 py-1.5 text-[13px] text-ink-500 opacity-50"
-          >
-            {t('outputs.revert', 'Revert To v{{n}}', { n: diff?.from.version ?? 1 })}
-          </button>
+          {/* 回退版的身份：v4 ↩ v1 · Reverted · You。info 色（不是 ok/warn）——
+              回退是一次导航，既不是成功也不是告警。 */}
+          {row(to)?.reverted_from_version != null && (
+            <span
+              data-testid="output-reverted-chip"
+              className="rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[11px] text-info tabular-nums"
+            >
+              {t('outputs.revertedChip', 'v{{n}} ↩ v{{from}}', { n: to, from: row(to)?.reverted_from_version })}
+              <span className="ml-1.5">{t('outputs.revertedBy', 'Reverted · You')}</span>
+            </span>
+          )}
+          {confirming ? (
+            <span data-testid="output-revert-confirm" className="ml-auto flex items-center gap-2 text-[12px] text-ink-300">
+              {t('outputs.revertConfirm', 'Revert to v{{from}}? This creates v{{next}}.', { from, next: latestVersion + 1 })}
+              <button
+                type="button"
+                data-testid="output-revert-go"
+                ref={confirmBtn}
+                disabled={reverting}
+                onClick={() => void doRevert()}
+                className="rounded border border-info-line px-2 py-1 text-info disabled:opacity-50"
+              >
+                {t('outputs.revertGo', 'Revert')}
+              </button>
+              <button
+                type="button"
+                data-testid="output-revert-cancel"
+                onClick={() => setConfirming(false)}
+                className="rounded border border-ink-700 px-2 py-1 text-ink-400"
+              >
+                {t('common.cancel', 'Cancel')}
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid="output-diff-revert"
+              disabled={!canRevert}
+              title={canRevert ? undefined : t('outputs.revertHint', 'Only an older script version can be reverted')}
+              onClick={() => setConfirming(true)}
+              className="ml-auto inline-flex items-center gap-1 rounded border border-ink-700 px-3 py-1.5 text-[13px] text-ink-300 hover:border-info-line hover:text-info disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RotateCcw size={12} />
+              {t('outputs.revert', 'Revert To v{{n}}', { n: from ?? 1 })}
+            </button>
+          )}
+          {kept && (
+            <p data-testid="output-revert-kept" className="mt-2 w-full text-[11px] text-info">
+              {t('outputs.revertKept', 'Your edits before the revert were kept as v{{n}}.', { n: kept.version })}
+            </p>
+          )}
         </div>
       </div>
     </div>

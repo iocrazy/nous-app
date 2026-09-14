@@ -36,6 +36,7 @@ const { OutputCards } = await import('../agentActivity/TrajectoryRenderer/nodes/
 
 const version = (v: number, parent: number | null) => ({
   id: `d${v}`, version: v, parent_version: parent, run_id: '347786145852700', issue_id: '5',
+  actor_user_id: null, reverted_from_version: null, cost_kind: null,
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${v}`,
   seq: v, turn: 1, step: v, title: `S3 · Shot #1`, model: 'qwen-image', cost_cents: null,
   created_at: '2026-09-10T01:00:00Z',
@@ -48,8 +49,8 @@ const step: StepNode = {
   summary: { tools: 0, retries: 0, compactions: 0, outputs: 0, todo: null, durationMs: null, costCents: null, finishReason: null },
   children: [],
   outputs: [
-    { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, parentVersion: null, title: 'S3 · Shot #1', model: 'qwen-image', costCents: null },
-    { key: 'script_shot:9:2', kind: 'script_shot', refId: '9', version: 2, parentVersion: 1, title: 'Shot 4', model: 'qwen-max', costCents: 0.42 },
+    { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, parentVersion: null, title: 'S3 · Shot #1', model: 'qwen-image', costCents: null, costKind: null },
+    { key: 'script_shot:9:2', kind: 'script_shot', refId: '9', version: 2, parentVersion: 1, title: 'Shot 4', model: 'qwen-max', costCents: 0.42, costKind: 'exact' },
   ],
 };
 

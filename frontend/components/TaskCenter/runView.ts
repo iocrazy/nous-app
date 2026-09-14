@@ -113,6 +113,11 @@ export interface RunCostStep {
 
 export interface RunCost {
   spent_cents: number;
+  /** The image/audio share of this run's bill (3b, written by the backend
+   *  fold). OPTIONAL because rows written before 3b genuinely do not have the
+   *  key — a required `number` would let a reader write `cost.media_cents * 2`
+   *  and get NaN with tsc's blessing. Every read does `?? 0`. */
+  media_cents?: number;
   by_step: RunCostStep[];
   by_model: Record<string, number>;
   budget_cents: number | null;

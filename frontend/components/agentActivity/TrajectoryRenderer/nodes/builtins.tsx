@@ -28,6 +28,7 @@ import type {
 } from '../foldEvents';
 import { registerTrajectoryNode, type NodeProps } from './registry';
 import { useTrajectoryRunId } from '../trajectoryRunContext';
+import { formatOutputCost, outputCostTitle } from '../../outputCost';
 
 function fmtMs(ms: number | null): string {
   if (ms === null) return '';
@@ -431,8 +432,21 @@ export const OutputCards: React.FC<{ node: StepNode }> = ({ node }) => {
                   : t('outputs.version', 'v{{n}}', { n: o.version })}
               </span>
               <span className="truncate text-ink-400">{o.title ?? `${o.kind.replace(/_/g, ' ')} #${o.refId}`}</span>
-              {o.model && <span className="shrink-0 truncate text-ink-500">{o.model}</span>}
-              <span className="ml-auto shrink-0 tabular-nums text-ink-500">{fmtChildCents(o.costCents)}</span>
+              {o.model && <span data-testid="output-card-model" className="shrink-0 truncate text-ink-500">{o.model}</span>}
+              {/* One spelling of a price for all four faces (`outputCost.ts`):
+                  `≈` when the number is this step's spend shared out, `—` when
+                  there is none, and a reason in the title when a media row
+                  should have had one. */}
+              <span
+                data-testid="output-card-cost"
+                title={outputCostTitle(o.costCents, o.costKind, { deliverableKind: o.kind, model: o.model })}
+                className="ml-auto shrink-0 tabular-nums text-ink-500"
+              >
+                {formatOutputCost(o.costCents, o.costKind)}
+              </span>
+              <span data-testid="output-card-step" className="shrink-0 tabular-nums text-ink-600">
+                {t('outputs.cardStep', 'step {{n}}', { n: node.step })}
+              </span>
               <button
                 type="button"
                 data-testid="output-open"

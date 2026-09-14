@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import { FileOutput } from 'lucide-react';
 
 import { listIssueOutputs, type OutputObject } from '../../../services/outputsService';
+import { formatOutputCost, outputCostTitle } from '../../agentActivity/outputCost';
 import type { DeliverableKind } from '../../chat/deliverableKinds';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { OutputDiffDialog } from '../OutputDiffDialog';
@@ -101,6 +102,11 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
                   {t(key, fallback)}
                   {revisions > 0 && ` · ${t('outputs.revisions', '{{count}} revisions', { count: revisions })}`}
                 </span>
+              </span>
+              {/* The latest version's price — the row IS that version. */}
+              <span data-testid="outputs-row-cost" className="shrink-0 text-[11px] text-ink-500 tabular-nums"
+                    title={outputCostTitle(item.versions[0]?.cost_cents ?? null, item.versions[0]?.cost_kind ?? null, { deliverableKind: item.kind, model: item.versions[0]?.model ?? null })}>
+                {formatOutputCost(item.versions[0]?.cost_cents ?? null, item.versions[0]?.cost_kind ?? null)}
               </span>
               <span className="shrink-0 rounded border border-info-line px-1 text-[11px] text-info tabular-nums">
                 {t('outputs.version', 'v{{n}}', { n: item.latest_version })}

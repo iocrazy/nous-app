@@ -47,6 +47,7 @@ const card = (over: Partial<OutputCard> = {}): OutputCard => ({
   title: 'S3 · Shot #1',
   model: 'qwen-image',
   costCents: null,
+  costKind: null,
   ...over,
 });
 
@@ -82,7 +83,7 @@ describe('OutputCards', () => {
     expect(el.getAttribute('data-state')).toBe('revised');
     expect(el.className).toContain('border-warn-line');
     expect(el.textContent).toContain('v3 ← v2');
-    expect(el.textContent).toContain('¢0.420');
+    expect(el.textContent).toContain('¢0.42');
   });
 
   it('unpriced work reads — rather than a fabricated zero', () => {
@@ -91,6 +92,27 @@ describe('OutputCards', () => {
     expect(cards[0].textContent).toContain('—');
     expect(cards[0].textContent).not.toContain('¢0');
     expect(cards[1].textContent).toContain('—');
+  });
+
+  // ---- 3b §3.4: the meta line is model · cost · step -----------------------
+  it('shows the model, the allocated cost and the step', () => {
+    const node = { ...step([card({ costCents: 0.09, costKind: 'allocated', model: 'doubao-seed-2-0-lite' })]), step: 2 };
+    render(<OutputCards node={node} />);
+    expect(screen.getByTestId('output-card-model').textContent).toBe('doubao-seed-2-0-lite');
+    const c = screen.getByTestId('output-card-cost');
+    // ≈, because a text version's price is this step's spend shared out — not
+    // a catalogue price, and not something to reconcile an invoice against.
+    expect(c.textContent).toBe('≈¢0.09');
+    expect(c.getAttribute('title')).toBe('Allocated from step cost');
+    expect(screen.getByTestId('output-card-step').textContent).toBe('step 2');
+  });
+
+  it('an unpriced media card says why', () => {
+    render(<OutputCards node={step([card({ kind: 'generated_media', model: 'gpt-6-astra', costCents: null, costKind: null })])} />);
+    const c = screen.getByTestId('output-card-cost');
+    // Only media can assert "this SHOULD have had a price": it comes from a
+    // catalogue row, so a missing one is a missing configuration.
+    expect([c.textContent, c.getAttribute('title')]).toEqual(['—', 'No price configured for gpt-6-astra']);
   });
 
   it('Open shows that version on its own; only a revision offers Diff', () => {

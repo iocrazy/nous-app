@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('./parserService', () => ({ getAuthHeaders: async () => ({ Authorization: 'Bearer t' }) }));
 
-const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl, invalidateOutputLineage, clearOutputLineageCache } = await import('./outputsService');
+const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl, invalidateOutputLineage, clearOutputLineageCache, revertOutput } = await import('./outputsService');
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -265,5 +265,58 @@ describe('outputsService — the lineage request cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(a).toBe(b);
     expect(a).toBeInstanceOf(OutputsError);
+  });
+});
+
+/**
+ * 3b Task 5 — revert.
+ *
+ * A revert writes a NEW version whose author is a PERSON: `run_id` is null and
+ * `actor_user_id` carries the identity. The refusal shapes are the production
+ * `ErrorResponse` envelope, and the typed payload under `details` is load
+ * bearing — the conflict copy names the version that appeared.
+ */
+describe('outputsService — revertOutput', () => {
+  // ---- 3b Task 5: revert -------------------------------------------------
+  //
+  // A revert writes a NEW version whose author is a PERSON, so `run_id` is
+  // null and `actor_user_id` carries the identity — the pair the T1 CHECK
+  // keeps mutually exclusive-ish (at least one non-null). Shapes照
+  // `backend/app/schemas/outputs.py` —— every id is a string on the wire.
+  const reverted = {
+    ...version, id: '347786145852739099', version: 5, parent_version: 4,
+    run_id: null, actor_user_id: '6f1c1b64-2b3f-4a5e-9a10-1f2c3d4e5f60',
+    reverted_from_version: 1, cost_kind: null, cost_cents: null,
+  };
+
+  it('reverts to a version and returns both rows', async () => {
+    fetchMock.mockResolvedValueOnce(json(201, { version: reverted, kept_version: null }));
+    const out = await revertOutput('script_shot', '9', { toVersion: 1, expectedLatest: 4 });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://api.test/api/v1/outputs/script_shot/9/revert');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({ to_version: 1, expected_latest: 4 });
+    expect(out.version.version).toBe(5);
+    expect(out.version.run_id).toBeNull();               // 人手版没有 run
+    expect(out.version.reverted_from_version).toBe(1);
+    expect(out.kept_version).toBeNull();
+  });
+
+  it('a conflict arrives as a typed code WITH its payload', async () => {
+    // latest_version 在 details 里，文案要拿它拼 —— 所以 details 必须穿过来，
+    // 只留 code 就只能说「冲突了」，读者无从知道是谁写的。
+    fetchMock.mockResolvedValueOnce(json(409, {
+      success: false, error: 'Conflict', code: 'http_409',
+      request_id: 'r1', details: { code: 'version_conflict', latest_version: 4 },
+    }));
+    await expect(revertOutput('script_shot', '9', { toVersion: 1, expectedLatest: 3 }))
+      .rejects.toMatchObject({ code: 'version_conflict', status: 409, details: { latest_version: 4 } });
+  });
+
+  it('keeps the kept version when the backend registered one', async () => {
+    fetchMock.mockResolvedValueOnce(json(201, {
+      version: reverted,
+      kept_version: { ...reverted, id: '347786145852739098', version: 4, parent_version: 3, reverted_from_version: null },
+    }));
+    expect((await revertOutput('script_shot', '9', { toVersion: 1, expectedLatest: 3 })).kept_version?.version).toBe(4);
   });
 });

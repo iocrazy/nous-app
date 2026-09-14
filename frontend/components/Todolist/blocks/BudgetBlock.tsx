@@ -7,6 +7,8 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { updateIssue } from '../../../services/issuesService';
+import { selectRunCost } from '../../TaskCenter/runView';
+import { formatOutputCost } from '../../agentActivity/outputCost';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
 import { RailCard } from './StatusBlock';
 
@@ -21,7 +23,7 @@ const TONE: Record<string, string> = {
   over: 'bg-danger',
 };
 
-const BudgetBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
+export const BudgetBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const { t } = useTranslation();
   const rollup = ctx.rollup;
   const budget = rollup?.budget ?? {
@@ -51,6 +53,9 @@ const BudgetBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   };
 
   const pct = budget.pct ?? 0;
+  // `?? 0` twice over: no current run, or a run view written before media was
+  // tracked. Either way the answer is "no media spend", not NaN.
+  const media = selectRunCost(rollup?.current_run ? { cost: rollup.current_run.cost } : null)?.media_cents ?? 0;
   return (
     <RailCard
       title={t('issueDetail.budget', 'Budget')}
@@ -80,6 +85,13 @@ const BudgetBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
       {budget.budget_cents != null && (
         <div className="h-1 rounded-full bg-ink-800 overflow-hidden">
           <div className={`h-full ${TONE[budget.state] ?? 'bg-ok'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+        </div>
+      )}
+      {/* Only when there IS media spend: a standing `Media ¢0.00` would say
+          images were free, the same fabricated zero `formatOutputCost` refuses. */}
+      {media > 0 && (
+        <div data-testid="budget-media" className="text-[11px] text-ink-500">
+          {t('issueDetail.mediaSpend', 'Media {{c}}', { c: formatOutputCost(media, 'exact') })}
         </div>
       )}
       <div className="text-[11px] text-ink-600">{t('issueDetail.budgetRule', 'Warns at 80%, records at 100%')}</div>

@@ -41,9 +41,21 @@ describe('outputRefErrorText', () => {
     );
   });
 
+  it('says an unassigned issue needs an agent before it can take attachments', () => {
+    // The server refuses the WHOLE comment here too (nobody would run the
+    // turn), so the copy has to say the comment did not go — and it has to
+    // name the fix, which is assigning an agent, not editing the reference.
+    const text = outputRefErrorText(reject('citations_need_agent'), t);
+    expect(text).toBe('Attachments need an assigned agent — the comment was not posted');
+  });
+
   it('isOutputRefRejection claims only the citation codes', () => {
     expect(isOutputRefRejection(reject('output_ref_unresolvable'))).toBe(true);
     expect(isOutputRefRejection(reject('output_ref_limit_exceeded'))).toBe(true);
+    // Refused for the same reason and on the same channel: an attachment the
+    // server will not accept. Falling through to `err.message` would show the
+    // server's internal sentence instead.
+    expect(isOutputRefRejection(reject('citations_need_agent'))).toBe(true);
     // Another kind's refusal must fall through to its own handler — claiming
     // it here would answer a budget question with a sentence about citations.
     expect(isOutputRefRejection(reject('budget_still_exhausted'))).toBe(false);
