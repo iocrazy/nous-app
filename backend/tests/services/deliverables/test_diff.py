@@ -243,3 +243,128 @@ async def test_a_broken_ledger_read_yields_two_unavailable_sides(monkeypatch):
     assert body["from"]["available"] is False
     assert body["from"]["unavailable_reason"] == mod.NOT_FOUND
     assert body["to"]["version"] == 2
+
+
+# ── rebuild_content（3b 回退写回的就是它） ────────────────────────────────
+
+
+SCENE_LEDGER = [
+    (
+        {
+            "op_seq": 1,
+            "op_json": {
+                "ops": [
+                    {
+                        "op": "insert",
+                        "element_id": "el_1",
+                        "payload": {"type": "action", "text": "He enters."},
+                    }
+                ]
+            },
+        },
+        _at(11),
+        1,
+    ),
+    (
+        {
+            "op_seq": 2,
+            "op_json": {
+                "ops": [
+                    {
+                        "op": "insert",
+                        "element_id": "el_2",
+                        "after_id": "el_1",
+                        "payload": {"type": "dialogue", "text": "Hello."},
+                    }
+                ]
+            },
+        },
+        _at(12),
+        2,
+    ),
+]
+
+
+@pytest.mark.asyncio
+async def test_a_rebuilt_shot_is_every_writable_field_not_just_the_filled_ones(
+    monkeypatch,
+):
+    """回退把这个 dict 直接 UPDATE 进 ``script_shots``，所以它必须是**完整的**六
+    个字段——只带折叠时出现过的键，会让一次回退把没被提到的列原地留在新版上。"""
+
+    async def _ledger(ref_id):
+        return SHOT_LEDGER
+
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    content, reason = await mod.rebuild_content("script_shot", "9", _row(2, 12))
+    assert reason is None
+    assert content == {
+        "shot_type": "WS",
+        "camera_angle": None,
+        "camera_movement": None,
+        "focal_length": None,
+        "lighting": None,
+        "description": "a close-up",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_rebuilt_shot_and_its_diff_side_are_the_same_fold(monkeypatch):
+    """两套重建 = 两种「v1 是什么」的说法，而回退会把其中一种当真写进库。"""
+
+    async def _ledger(ref_id):
+        return SHOT_LEDGER
+
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    row = _row(1, 11)
+    content, _ = await mod.rebuild_content("script_shot", "9", row)
+    body = await mod.build_diff(
+        kind="script_shot", ref_id="9", from_row=row, to_row=row
+    )
+    assert mod.render_shot(content) == body["from"]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_rebuilt_scene_is_the_element_array_at_that_watermark(monkeypatch):
+    async def _ledger(ref_id):
+        return SCENE_LEDGER
+
+    monkeypatch.setattr(mod, "_scene_ledger", _ledger)
+    content, reason = await mod.rebuild_content("script_scene", "7", _row(1, 11))
+    assert reason is None
+    assert [e["text"] for e in content] == ["He enters."]
+
+
+@pytest.mark.asyncio
+async def test_a_version_older_than_every_ledger_row_rebuilds_to_nothing(monkeypatch):
+    async def _ledger(ref_id):
+        return SHOT_LEDGER
+
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    assert await mod.rebuild_content("script_shot", "9", _row(1, 1)) == (
+        None,
+        mod.NO_SNAPSHOT,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_kind_with_no_ledger_says_so_rather_than_returning_a_blank():
+    """媒体重生成是新对象的 v1、章节没有账本。``(None, reason)`` 让调用方 409，
+    而 ``({}, None)`` 会让一次回退把六个字段全清空。"""
+    for kind in ("generated_media", "script_chapter"):
+        assert await mod.rebuild_content(kind, "5", _row(1, 11)) == (
+            None,
+            mod.NO_LEDGER,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_broken_ledger_read_rebuilds_to_nothing_not_an_exception(monkeypatch):
+    async def _boom(ref_id):
+        raise RuntimeError("ledger unreadable")
+
+    monkeypatch.setattr(mod, "_shot_ledger", _boom)
+    assert await mod.rebuild_content("script_shot", "9", _row(2, 12)) == (
+        None,
+        mod.NOT_FOUND,
+    )

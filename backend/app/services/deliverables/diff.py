@@ -278,16 +278,33 @@ async def _sides(
     return _unavailable(from_row, NO_LEDGER), _unavailable(to_row, NO_LEDGER)
 
 
+def _fold_shot(prefix: List[Any]) -> Dict[str, Any]:
+    """一段分镜账本前缀 → 那一刻的六字段快照。
+
+    ``create`` 带齐每个可写字段，``update`` 只带它改过的，所以折叠就是按序
+    ``update``。缺席的字段读成 ``None`` —— 那正是列的实际状态。"""
+    snapshot: Dict[str, Any] = {}
+    for after in prefix:
+        snapshot.update(after or {})
+    return {field: snapshot.get(field) for field in _SHOT_FIELDS}
+
+
+def _replay_scene(prefix: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """一段场次账本前缀 → 那一刻的元素数组。
+
+    水位就是前缀的末尾。``ledger_ref`` 已经在 ``_prefix_for`` 里切过一刀，
+    这里再按它算一次是同一个界的第二份算法：两处冗余意味着拆掉任何一处都
+    没有测试会红（3b fix 轮 1 实测）。一个口径，一个可证伪点。"""
+    return replay_to(prefix, max(int(op["op_seq"]) for op in prefix))
+
+
 def _shot_side(
     row: Dict[str, Any], ledger: List[Tuple[Any, Any, int]]
 ) -> Dict[str, Any]:
     prefix = _prefix_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
-    snapshot: Dict[str, Any] = {}
-    for after in prefix:
-        snapshot.update(after or {})
-    return _side(row, text=render_shot(snapshot), available=True)
+    return _side(row, text=render_shot(_fold_shot(prefix)), available=True)
 
 
 def _scene_side(
@@ -296,13 +313,40 @@ def _scene_side(
     prefix = _prefix_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
-    # 水位就是前缀的末尾。``ledger_ref`` 已经在 ``_prefix_for`` 里切过一刀，
-    # 这里再按它算一次是同一个界的第二份算法：两处冗余意味着拆掉任何一处都
-    # 没有测试会红（3b fix 轮 1 实测）。一个口径，一个可证伪点。
-    watermark = max(int(op["op_seq"]) for op in prefix)
-    return _side(
-        row, text=render_elements(replay_to(prefix, watermark)), available=True
-    )
+    return _side(row, text=render_elements(_replay_scene(prefix)), available=True)
+
+
+async def rebuild_content(
+    kind: str, ref_id: str, row: Dict[str, Any]
+) -> Tuple[Any, Optional[str]]:
+    """一版的**内容**（不是渲染后的文本）：shot 是六字段 dict，scene 是元素数组。
+
+    回退写回的就是它，所以这里和 ``_shot_side`` / ``_scene_side`` 走的是同一条
+    折叠路径（``_fold_shot`` / ``_replay_scene``）——两套重建等于两种「v1 是什么」
+    的说法，而回退会把其中一种当真写进库。``(None, reason)`` 表示重建不出来，
+    调用方据此 409 而不是把一个空内容写回去。
+
+    ``generated_media`` / ``script_chapter`` 落到最后一行的 ``NO_LEDGER``：媒体
+    重生成是**新对象**的 v1（没有可回的旧版），章节根本没有账本。
+    """
+    try:
+        if kind == "script_shot":
+            prefix = _prefix_for(await _shot_ledger(ref_id), row)
+            if not prefix:
+                return None, NO_SNAPSHOT
+            return _fold_shot(prefix), None
+        if kind == "script_scene":
+            prefix = _prefix_for(await _scene_ledger(ref_id), row)
+            if not prefix:
+                return None, NO_SNAPSHOT
+            return _replay_scene(prefix), None
+    except Exception as exc:  # noqa: BLE001 — 同 build_diff：说不出来也要说出来
+        logger.opt(exception=True).error(
+            f"[deliverables] rebuild {kind}/{ref_id} v{row.get('version')} "
+            f"failed: {exc!r}"
+        )
+        return None, NOT_FOUND
+    return None, NO_LEDGER
 
 
 __all__ = [
@@ -310,6 +354,7 @@ __all__ = [
     "NO_SNAPSHOT",
     "NOT_FOUND",
     "build_diff",
+    "rebuild_content",
     "render_elements",
     "render_shot",
 ]

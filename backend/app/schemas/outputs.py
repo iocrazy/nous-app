@@ -135,6 +135,25 @@ class OutputDiffResponse(BaseModel):
     to: OutputDiffSide
 
 
+# ── 回退（3b spec §2.3） ──────────────────────────────────────────────────
+
+
+class RevertRequest(BaseModel):
+    """``expected_latest`` 是乐观锁，不是可选的礼貌：两人同时回退同一个对象时，
+    没有它后者会静默覆盖前者刚登记的那一版。"""
+
+    to_version: int = Field(ge=1)
+    expected_latest: int = Field(ge=1)
+
+
+class RevertResponse(BaseModel):
+    """``kept_version`` = 回退前把未登记的人手编辑登记成的那一版（spec §2.3）。
+    多数回退是 None——只在当前内容与最新登记版不同时才出现。"""
+
+    version: OutputVersion
+    kept_version: Optional[OutputVersion] = None
+
+
 __all__ = [
     "IssueOutputsResponse",
     "OutputDiffMedia",
@@ -143,4 +162,6 @@ __all__ = [
     "OutputLineageResponse",
     "OutputObject",
     "OutputVersion",
+    "RevertRequest",
+    "RevertResponse",
 ]

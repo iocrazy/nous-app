@@ -71,6 +71,7 @@ on:
       - 'backend/tests/db/test_run_deliverables_repository_integration.py'
       - 'backend/tests/db/test_generated_media_promoted_lookup_integration.py'
       - 'backend/tests/db/test_migration_466_revert_cost_integration.py'
+      - 'backend/tests/db/test_revert_output_integration.py'
       - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
       # The writer whose seq-conflict retry that file is the only real-driver
       # proof of: a stub can raise IntegrityError on command, but only Postgres
@@ -95,6 +96,14 @@ on:
       # 它的单测 session 是桩的。只改这个模块的 PR 如果不触发本 job，那条
       # 真 PG 用例就跑不到 —— 等于悄悄失去它唯一的门禁。
       - 'backend/app/repositories/generated_media_repository.py'
+      # 3b Task 3 的回退服务：本仓第一个会改**用户内容**的产出写入方。它的单测把
+      # 六个外部面全桩掉了，所以在下面那一步之前，它的 `SELECT … FOR UPDATE`、
+      # 人手账本行（`run_id NULL` + `actor`，靠 mig 466 的
+      # `script_shot_ops_run_or_actor` 放行）、以及「登记失败要把内容一起回滚」
+      # 这条事务承诺，Postgres 一次都没看见过。`diff.py` 同批：``rebuild_content``
+      # 的返回值会被回退**直接 UPDATE 进 script_shots**，形状错了没有单测会红。
+      - 'backend/app/services/deliverables/revert.py'
+      - 'backend/app/services/deliverables/diff.py'
       # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
       # project-entity migration workflow imported `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module, and the step that
@@ -139,7 +148,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all seventeen, so it has to re-run
+      # to it changes what "green" means for all eighteen, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -550,3 +559,20 @@ jobs:
           # uq_genmedia_promoted_resource 一个，不是两个：456 把 307 的
           # idx_genmedia_promoted DROP 掉了，替换而非并存。）
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_466_revert_cost_integration.py -v
+
+      - name: Exercise the revert service against the built schema (3b Task 3)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步问「466 的 CHECK 拦不拦得住坏行」；这一步问「回退真的写出来的那些
+          # 行过不过得了」——同一批约束的另一面，而且是唯一一个会改**用户内容**的
+          # 产出写入方。单测把 session / 账本 / 登记口全桩掉了，所以只有这里能回答：
+          # 带 `FOR UPDATE` 的列表 SELECT、`run_id NULL + actor` 的账本行过不过
+          # `script_shot_ops_run_or_actor`、`action='update'` 在不在
+          # `script_shot_ops_action_check` 的白名单里、以及登记失败时内容有没有
+          # **真的**跟着回滚（桩 session 回滚不了任何东西，而「内容回了、版本没记」
+          # 正是血缘要回答的那个问题）。顺带钉住并发回退：SQLSTATE 23505 必须以
+          # `IntegrityError.orig.sqlstate` 的形状到达，否则那个 409 退化成 500。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_revert_output_integration.py -v

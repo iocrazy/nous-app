@@ -203,6 +203,30 @@ class RunDeliverablesRepository:
                 for row, issue_id, identifier, team_id in rows
             ]
 
+    async def get_by_id(
+        self, *, row_id: Any, session: Any = None
+    ) -> Optional[Dict[str, Any]]:
+        """One registered version, by its own id — ``None`` when it is gone.
+
+        Exists for the revert service (3b Task 3), which has to describe the row
+        it just inserted **the way the lineage endpoint will**. The insert's
+        ``RETURNING`` is narrowed to ``DeliverableRow`` (no ``created_at``, no
+        ``seq``), so building the response from it hands the panel a version with
+        ``created_at: null`` — a different-looking row for the same version
+        depending on which endpoint you asked. Reading back through ``_row``
+        gives the one shape both readers share.
+
+        ``session`` joins the caller's transaction, so the read sees the
+        not-yet-committed insert it is describing.
+        """
+        async with _scope(session, write=False) as session:
+            row = (
+                await session.execute(
+                    select(RunDeliverables).where(RunDeliverables.id == int(row_id))
+                )
+            ).scalar_one_or_none()
+        return _row(row) if row is not None else None
+
     async def provenance_for(
         self, *, kind: str, ref_ids: List[Any]
     ) -> Dict[str, Dict[str, Any]]:
