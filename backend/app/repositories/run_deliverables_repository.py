@@ -226,6 +226,7 @@ class RunDeliverablesRepository:
                 )
             ).scalar_one_or_none()
         return _row(row) if row is not None else None
+
     async def output_keys_for_run(self, run_id: Any) -> List[Dict[str, Any]]:
         """这条 run 登记过的 distinct ``(kind, ref_id)``，按首次登记 seq 升序。
 
