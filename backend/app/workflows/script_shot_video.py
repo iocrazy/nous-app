@@ -46,8 +46,13 @@ from typing import Any, AsyncIterator, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.services.ai.media.gen_attribution import resolved_attribution
 from app.services.library.scratch_reaper import reap_scratch_dir
-from app.workflows.script_shot_generate import _compose_prompt, _resolve_scope_id
+from app.workflows.script_shot_generate import (
+    _compose_prompt,
+    _resolve_scope_id,
+    _step_output,
+)
 
 # Default video aspect — shots carry no aspect field; 16:9 is the cinematic
 # default (the provider maps it to the CLI --ratio).
@@ -83,12 +88,17 @@ async def generate_shot_video_step(
     model: Optional[str],
     provider: Optional[str],
     user_id: Optional[str] = None,
-) -> str:
+) -> dict[str, str]:
     """Read the shot + scene, compose the prompt, and run the video provider.
 
-    Returns the produced clip's LOCAL file path (jimeng writes to disk, no URL).
-    Uses image2video when the shot already has a filesystem-backed image, else
-    text2video. Raises if the shot is missing or the provider yields no file."""
+    Returns ``{"path", "provider", "model"}`` — the produced clip's LOCAL file
+    path (jimeng writes to disk, no URL) plus the attribution the catalog
+    actually resolved. The request's ``model`` / ``provider`` are only the
+    catalog LOOKUP NAME (they are what gets handed to ``resolve_video_provider``
+    below), so they are not an answer to "which model ran" — the resolved row's
+    ``actual_model`` and the stamped ``provider_key`` are. Uses image2video when
+    the shot already has a filesystem-backed image, else text2video. Raises if
+    the shot is missing or the provider yields no file."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
     from app.services.media.parsers.video_providers.db_registry import (
@@ -115,13 +125,27 @@ async def generate_shot_video_step(
     local_path = getattr(result, "local_path", None)
     if not local_path:
         raise RuntimeError(f"Video provider returned no file for shot {shot_id}")
+    # jimeng 的 ``GenResult`` 不带归因（只有 local_path / mime / raw），所以真值
+    # 取自解析结果本身：``_stamp_provider_key`` 盖的 provider_key + actual_model。
+    gen_provider, gen_model = resolved_attribution(
+        {
+            "provider": getattr(provider_obj, "provider_key", None),
+            "model": actual_model,
+        },
+        requested_provider=provider,
+        requested_model=model,
+    )
     logger.info(
         "[script_shot_video][step] shot {} → {} ({})",
         shot_id,
         local_path,
         "image2video" if image_path else "text2video",
     )
-    return local_path
+    return {
+        "path": local_path,
+        "provider": gen_provider or "",
+        "model": gen_model or "",
+    }
 
 
 @DBOS.step()
@@ -134,6 +158,11 @@ async def persist_video_generation(
     run_id: Optional[int] = None,
     turn: Optional[int] = None,
     step: Optional[int] = None,
+    # 归因：目录真正解析出的那一行。keyword-only + 默认 None = DBOS 冻结输入
+    # 兼容（部署前排队的 workflow 恢复时没有这两个）。
+    *,
+    resolved_provider: Optional[str] = None,
+    resolved_model: Optional[str] = None,
 ) -> str:
     """Persist the local clip through the generated-media store → durable URL.
 
@@ -170,8 +199,10 @@ async def persist_video_generation(
                 kind="shot_video",
                 node_id=str(shot_id),
                 prompt=prompt,
-                model=model,
-                provider=provider,
+                # 请求侧的 model/provider 是目录**行名**（step 拿它查表），
+                # 按 (model, provider) 查价要的是真正跑了的那一行。
+                model=resolved_model or model,
+                provider=resolved_provider or provider,
                 derivation_kind="shot_video",
                 # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
                 # 产出的视频永远没有 run 可挂（真栈缺口，spec §1.3）。
@@ -231,9 +262,19 @@ async def script_shot_video_workflow(
     task_tracking mirrors it); the shot row is left untouched so a video failure
     never corrupts the image lane. ``user_id`` is optional (frozen DBOS input
     compat) but a real value is required to persist."""
-    local_path = await generate_shot_video_step(shot_id, model, provider, user_id)
+    step_out = await generate_shot_video_step(shot_id, model, provider, user_id)
+    local_path, gen_provider, gen_model = _step_output(step_out, key="path")
     video_url = await persist_video_generation(
-        shot_id, local_path, model, provider, user_id, run_id, turn, step
+        shot_id,
+        local_path,
+        model,
+        provider,
+        user_id,
+        run_id,
+        turn,
+        step,
+        resolved_provider=gen_provider,
+        resolved_model=gen_model,
     )
     await mark_shot_video_done(shot_id, video_url)
     return {"status": "success", "shot_id": shot_id, "video_url": video_url}

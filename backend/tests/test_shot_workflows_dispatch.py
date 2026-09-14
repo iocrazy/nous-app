@@ -883,6 +883,9 @@ class _FakeVideoProvider:
     def __init__(self, local_path: str):
         self._local_path = local_path
         self.calls: list = []
+        # db_registry._stamp_provider_key 在真实解析路径上盖的就是这个属性，
+        # 归因读的也是它——桩上不带就等于没测到真形状。
+        self.provider_key = "jimeng-cli"
 
     async def generate_video(self, **kwargs):
         self.calls.append(kwargs)
@@ -924,9 +927,11 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
     ):
         out = await m.generate_shot_video_step(_SHOT, None, None)
 
-    assert out == "/tmp/jimeng_x/clip.mp4"
+    assert out["path"] == "/tmp/jimeng_x/clip.mp4"
     assert provider.calls[0]["image_path"] is None
     assert provider.calls[0]["model_version"] == "seedance2.0fast"
+    # 归因跟着产出一起出 step：跑的是目录解析出的那一行，不是请求里的 None。
+    assert (out["provider"], out["model"]) == ("jimeng-cli", "seedance2.0fast")
 
 
 async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
@@ -970,7 +975,7 @@ async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
     ):
         out = await m.generate_shot_video_step(_SHOT, None, None)
 
-    assert out == "/tmp/jimeng_y/clip.mp4"
+    assert out["path"] == "/tmp/jimeng_y/clip.mp4"
     assert provider.calls[0]["image_path"] == "/data/img/first.png"
 
 

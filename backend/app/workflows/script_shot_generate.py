@@ -97,15 +97,18 @@ def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> st
     return ". ".join(segments) or "storyboard shot"
 
 
-def _step_output(out: Any) -> tuple[str, Optional[str], Optional[str]]:
-    """``generate_shot_image_step`` 的返回值 → ``(url, provider, model)``。
+def _step_output(
+    out: Any, *, key: str = "url"
+) -> tuple[str, Optional[str], Optional[str]]:
+    """出图/出视频 step 的返回值 → ``(载荷, provider, model)``。
 
     DBOS 把 step 返回值冻进 checkpoint，所以部署前排队的 workflow 恢复时
     拿回来的仍是旧的裸 ``str``。两种形状都要接：归因是增益，不是继续跑完
-    的前提。"""
+    的前提。``key`` 是载荷在字典里的键——出图是 ``url``，出视频是 ``path``
+    （``script_shot_video`` 复用本函数，它的产物永远是本地文件）。"""
     if isinstance(out, dict):
         return (
-            str(out.get("url") or ""),
+            str(out.get(key) or ""),
             out.get("provider") or None,
             out.get("model") or None,
         )

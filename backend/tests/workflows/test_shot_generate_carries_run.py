@@ -203,6 +203,56 @@ async def test_a_legacy_replay_without_attribution_still_drops_the_sentinel(
     assert (origin.provider, origin.model) == ("ark", None)
 
 
+async def test_video_persist_registers_the_resolved_provider_and_model(monkeypatch):
+    """出视频同族：请求侧的 model/provider 是**目录行名**（step 拿它当
+    ``resolve_video_provider`` 的 name），不是跑出来的那一行。"""
+    import app.workflows.script_shot_video as wf
+
+    seen: dict = {}
+
+    async def _fake_register(**kwargs):
+        seen["origin"] = kwargs["origin"]
+        return {"id": 67}
+
+    monkeypatch.setattr(
+        "app.services.library.generated_media_service.register_generated_media",
+        _fake_register,
+    )
+    _stub_repos(monkeypatch)
+    monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
+    monkeypatch.setattr(wf, "reap_scratch_dir", lambda _p: None)
+
+    await _call_step(
+        wf.persist_video_generation,
+        shot_id="1",
+        local_path="/tmp/jimeng_x/out.mp4",
+        model="nous-video",
+        provider=None,
+        user_id="u",
+        run_id=777,
+        turn=1,
+        step=9,
+        resolved_provider="jimeng-cli",
+        resolved_model="seedance2.0fast",
+    )
+    origin = seen["origin"]
+    assert (origin.provider, origin.model) == ("jimeng-cli", "seedance2.0fast")
+
+
+def test_a_legacy_video_string_checkpoint_still_persists():
+    """出视频 step 的旧 checkpoint 同样是裸 ``str``（那边的载荷是本地路径）。"""
+    import app.workflows.script_shot_generate as wf
+
+    assert wf._step_output("/tmp/jimeng_x/out.mp4", key="path") == (
+        "/tmp/jimeng_x/out.mp4",
+        None,
+        None,
+    )
+    assert wf._step_output(
+        {"path": "/p", "provider": "jimeng-cli", "model": "m"}, key="path"
+    ) == ("/p", "jimeng-cli", "m")
+
+
 def test_a_legacy_string_checkpoint_still_persists():
     """DBOS 冻结的旧 step 返回值是裸 str——回放时必须照旧能走完。"""
     import app.workflows.script_shot_generate as wf
