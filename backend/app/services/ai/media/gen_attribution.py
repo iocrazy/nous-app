@@ -9,19 +9,17 @@ actual_model」（``image_generation_service.py:120-127``），写进登记行�
 
 from __future__ import annotations
 
-from typing import Optional
-
 #: ``image_generation_service._DEFAULT_IMAGE_MODEL`` 的同一个值。此处复制而不
 #: import，是为了不让登记侧反向依赖生成服务；同源守卫在测试里。
 DEFAULT_MODEL_SENTINEL = "dall-e-3"
 
 
 def resolved_attribution(
-    raw: dict,
+    raw: dict | None,
     *,
-    requested_provider: Optional[str],
-    requested_model: Optional[str],
-) -> tuple[Optional[str], Optional[str]]:
+    requested_provider: str | None,
+    requested_model: str | None,
+) -> tuple[str | None, str | None]:
     """``(provider, model)``：adapter 报的优先，请求值兜底，哨兵作废。"""
     provider = ((raw or {}).get("provider") or "").strip() or (
         requested_provider or ""

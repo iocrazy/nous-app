@@ -429,7 +429,15 @@ async def test_generate_step_composes_prompt_and_returns_url():
         return_value={"heading_int_ext": "INT", "location_text": "Hall"}
     )
     svc = MagicMock()
-    svc.generate_image = AsyncMock(return_value={"image_url": "http://cdn/x.png"})
+    # 真形状：服务层回的是 asdict(ImageGenResult)，provider/model 永远在
+    # （video_providers/base.py:6-14）——桩少了它们就等于没测到归因。
+    svc.generate_image = AsyncMock(
+        return_value={
+            "image_url": "http://cdn/x.png",
+            "provider": "ark",
+            "model": "doubao-seedream-4-0",
+        }
+    )
 
     with (
         patch(
@@ -449,6 +457,8 @@ async def test_generate_step_composes_prompt_and_returns_url():
 
     # step 现在回 {url, provider, model}——归因跟着产出一起走（3b T0）。
     assert out["url"] == "http://cdn/x.png"
+    # 写进登记行的是 adapter 报的真值，不是请求里的目录行名 / 哨兵。
+    assert (out["provider"], out["model"]) == ("ark", "doubao-seedream-4-0")
     # generate_image called with the shot id as node_id + provider_name kwarg.
     kwargs = svc.generate_image.call_args.kwargs
     assert kwargs["provider_name"] == "openai"
@@ -483,7 +493,15 @@ async def test_generate_step_threads_none_provider_to_service():
     scene_repo = MagicMock()
     scene_repo.get_by_id = AsyncMock(return_value={})
     svc = MagicMock()
-    svc.generate_image = AsyncMock(return_value={"image_url": "http://cdn/x.png"})
+    # 真形状：服务层回的是 asdict(ImageGenResult)，provider/model 永远在
+    # （video_providers/base.py:6-14）——桩少了它们就等于没测到归因。
+    svc.generate_image = AsyncMock(
+        return_value={
+            "image_url": "http://cdn/x.png",
+            "provider": "ark",
+            "model": "doubao-seedream-4-0",
+        }
+    )
 
     with (
         patch(
@@ -503,6 +521,8 @@ async def test_generate_step_threads_none_provider_to_service():
 
     # step 现在回 {url, provider, model}——归因跟着产出一起走（3b T0）。
     assert out["url"] == "http://cdn/x.png"
+    # 写进登记行的是 adapter 报的真值，不是请求里的目录行名 / 哨兵。
+    assert (out["provider"], out["model"]) == ("ark", "doubao-seedream-4-0")
     assert svc.generate_image.call_args.kwargs["provider_name"] is None
 
 
@@ -932,6 +952,52 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
     assert provider.calls[0]["model_version"] == "seedance2.0fast"
     # 归因跟着产出一起出 step：跑的是目录解析出的那一行，不是请求里的 None。
     assert (out["provider"], out["model"]) == ("jimeng-cli", "seedance2.0fast")
+
+
+async def test_video_step_normalizes_an_alias_provider_key_to_the_family(
+    monkeypatch,
+):
+    """目录行的 ``actual_provider`` 可以是别名（``ark.py:16`` doubao、
+    ``jimeng.py:65`` jimeng），而出图链的 adapter 写的永远是协议的规范 key
+    （``ark`` / ``jimeng-cli`` / ``codex``，见 ``ark_image.py:119-126`` 等）。
+    同一个 provider 在两条链上拼法不同，Task 4 按 (model, provider) 查价就会
+    有一半落空——所以这里也要归一到规范 key。"""
+    from app.workflows import script_shot_video as m
+
+    shot_repo = MagicMock()
+    shot_repo.get_by_id = AsyncMock(
+        return_value={"id": int(_SHOT), "scene_id": int(_SCENE), "description": "d"}
+    )
+    scene_repo = MagicMock()
+    scene_repo.get_by_id = AsyncMock(return_value={"heading": "INT"})
+    provider = _FakeVideoProvider("/tmp/jimeng_z/clip.mp4")
+    # _stamp_provider_key 盖的是目录行的 actual_provider 原文——别名照样进来。
+    provider.provider_key = "jimeng"
+
+    async def _resolve(name, *, user_id=None):
+        return provider, "seedance2.0fast"
+
+    with (
+        patch(
+            "app.repositories.script_shot_repository.get_script_shot_repository",
+            MagicMock(return_value=shot_repo),
+        ),
+        patch(
+            "app.repositories.script_scene_repository.get_script_scene_repository",
+            MagicMock(return_value=scene_repo),
+        ),
+        patch(
+            "app.services.media.parsers.video_providers.db_registry."
+            "resolve_video_provider",
+            _resolve,
+        ),
+        patch.object(
+            m, "_resolve_local_image_for_i2v", _fake_resolve_local_image_cm(None)
+        ),
+    ):
+        out = await m.generate_shot_video_step(_SHOT, None, None)
+
+    assert out["provider"] == "jimeng-cli"
 
 
 async def test_video_step_image2video_when_local_image_resolves(monkeypatch):

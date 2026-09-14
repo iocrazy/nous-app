@@ -82,6 +82,27 @@ async def _resolve_local_image_for_i2v(
         yield path
 
 
+def _canonical_provider(provider_key: Optional[str]) -> Optional[str]:
+    """目录行的 ``actual_provider`` → 协议的**规范 key**（别名归一）。
+
+    出图链的三个 adapter 写进 ``ImageGenResult.provider`` 的都是协议自己的
+    ``key``（``ark_image.py`` 写死 ``"ark"``、``jimeng.py`` 写死
+    ``"jimeng-cli"``、``codex.py`` 用构造时传进来的 ``self.key``——
+    ``codex`` 或 ``openai-images``），从来不是别名。而出视频链手上的
+    ``provider_key`` 是目录行的 ``actual_provider`` 原文，可能是别名
+    （``ark.py:16`` ``doubao``、``jimeng.py:65`` ``jimeng``）。同一个 provider
+    在两条链上拼法不同，按 ``(model, provider)`` 查价就会有一半落空。
+
+    认不出来的值原样留着——瞎猜一个规范名比诚实地记下原文更糟。
+    """
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    if not provider_key:
+        return None
+    protocol = resolve_generation_protocol(provider_key)
+    return protocol.key if protocol is not None else provider_key
+
+
 @DBOS.step(retries_allowed=True, max_attempts=3)
 async def generate_shot_video_step(
     shot_id: str,
@@ -129,7 +150,9 @@ async def generate_shot_video_step(
     # 取自解析结果本身：``_stamp_provider_key`` 盖的 provider_key + actual_model。
     gen_provider, gen_model = resolved_attribution(
         {
-            "provider": getattr(provider_obj, "provider_key", None),
+            "provider": _canonical_provider(
+                getattr(provider_obj, "provider_key", None)
+            ),
             "model": actual_model,
         },
         requested_provider=provider,
@@ -201,6 +224,11 @@ async def persist_video_generation(
                 prompt=prompt,
                 # 请求侧的 model/provider 是目录**行名**（step 拿它查表），
                 # 按 (model, provider) 查价要的是真正跑了的那一行。
+                # 回退到 ``model`` 不是将就：``actual_model`` 为空时 step 给 CLI
+                # 的就是它（``generate_video(model_version=actual_model or model
+                # or None)``），所以这个值确实是跑了的那个。出图链那边回退到
+                # None，是因为它的 ``model`` 默认是 ``dall-e-3`` 哨兵——一个
+                # 假模型名，两边的规则都是「只写真跑过的东西」。
                 model=resolved_model or model,
                 provider=resolved_provider or provider,
                 derivation_kind="shot_video",
