@@ -7,8 +7,11 @@ JSON numbers above 2^53 lose precision the moment the browser parses them
 them; these models make that part of the contract instead of an accident of
 one query.
 
-``cost_cents`` is a float and may be ``None`` — no generated-media call site
-fills it today, and the UI shows ``—`` rather than a fabricated 0.
+``cost_cents`` is a float and may be ``None``, and ``cost_kind`` says where it
+came from (3b §3.1): media rows carry the catalog per-call price they were
+registered with (``exact``), text rows carry a read-time share of the step that
+produced them (``allocated``), and a version with neither reports ``None`` on
+both — the UI shows ``—`` rather than a fabricated 0.
 """
 
 from __future__ import annotations
@@ -63,6 +66,11 @@ class OutputVersion(BaseModel):
     title: Optional[str] = None
     model: Optional[str] = None
     cost_cents: Optional[float] = None
+    # 这个花费怎么来的（3b §3.1）。``exact`` 是登记时就知道的真价（媒体类的
+    # 目录每次调用价）；``allocated`` 是产出它那一步的 LLM 花费按该步产出件数
+    # 均摊出来的参考值，UI 显示 ``≈¢0.09``，**不是计费输入**；``None`` 与
+    # ``cost_cents=None`` 同时出现，意思是没有花费可报。
+    cost_kind: Optional[Literal["allocated", "exact"]] = None
     created_at: Optional[str] = None
 
 
@@ -85,6 +93,18 @@ class OutputLineageResponse(BaseModel):
     kind: str
     ref_id: str
     latest_version: int
+    #: newest registration row id of the chain, as a string; monotonic; the
+    #: client compares with BigInt and only uses it to refuse overwriting a
+    #: newer response with an older one.
+    #:
+    #: 一把尺子到底：``max(run_deliverables.id)``。刻意**不是** transcript
+    #: ``seq`` —— 那是每个 run 内部的小整数，人手登记的版本根本没有，混用会让
+    #: 「agent → 人手回退 → agent」这条链上的水位变小（3b §4，fix 轮 0）。
+    #: 字段名保留 ``as_of_seq``：它对客户端的含义（这份响应有多新）没有变。
+    #:
+    #: **字符串出口**，同这个模型里每一个 id：Snowflake 超过 2^53，JSON number
+    #: 一进浏览器就掉精度，而掉了精度的水位会把相邻两版判成同一版。
+    as_of_seq: str
     versions: List[OutputVersion]
 
 

@@ -45,10 +45,12 @@ from app.schemas.outputs import (
 from app.services.deliverables.diff import build_diff
 from app.services.deliverables.kinds import ALL_KINDS
 from app.services.deliverables.lineage_view import (
+    allocate_step_costs,
     redact_foreign_issue_links,
     version_of,
 )
 from app.services.deliverables.revert import revert_output
+from app.services.deliverables.step_costs import load_step_shares
 from app.services.issues.issue_visibility import (
     assert_issue_visible,
     visible_issue_ids,
@@ -161,21 +163,42 @@ async def get_output_lineage(
     # 也说成属于这个 issue（3b fix 轮 1）。``version_of`` 会把它的 turn / step /
     # deep_link 一并清成 None。
     chain = newest_with_a_run(rows) or {}
+    # 文本类的花费不在登记行里（3b §3.1：不回写）。它是产出那一版的**那一步**的
+    # LLM 花费，按那一步产出了几件均摊 —— 一次查询装载整条链涉及的 run，装不出
+    # 来的步就没有份额（缺席 = 不知道，不是免费）。人手版没有 run，不进清单。
+    shares = await load_step_shares(
+        [int(r["run_id"]) for r in rows if r.get("run_id") is not None]
+    )
     versions = redact_foreign_issue_links(
-        [
-            version_of(
-                row,
-                issue_id=chain.get("issue_id") if row.get("run_id") is None else None,
-                issue_key=chain.get("issue_key") if row.get("run_id") is None else None,
-            )
-            for row in rows
-        ],
+        allocate_step_costs(
+            [
+                version_of(
+                    row,
+                    issue_id=(
+                        chain.get("issue_id") if row.get("run_id") is None else None
+                    ),
+                    issue_key=(
+                        chain.get("issue_key") if row.get("run_id") is None else None
+                    ),
+                )
+                for row in rows
+            ],
+            shares,
+        ),
         visible_issue_ids=visible,
     )
+    # 水位用**一把尺子**：这条链上最大的登记行 id。Snowflake 跨 run、跨人手版
+    # 都单调，而 transcript ``seq`` 是每个 run 内部的小整数、人手版压根没有——
+    # 两者混在一个字段里，回退场景（agent → 人手 → agent）会给出一个会**变小**
+    # 的水位，客户端据此丢帧就会把最新的响应当过期扔掉（3b §4，fix 轮 0）。
+    # 出口是字符串、客户端用 BigInt 比——Snowflake 超过 2^53。
     return OutputLineageResponse(
         kind=kind,
         ref_id=str(ref_id),
         latest_version=versions[0]["version"],
+        # 字符串出口（Snowflake 精度纪律）；比较在 int 上做完再转，免得按
+        # 字典序比出「9 > 10」。
+        as_of_seq=str(max(int(row["id"]) for row in rows)),
         versions=versions,
     )
 
