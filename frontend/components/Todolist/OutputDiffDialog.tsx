@@ -83,22 +83,24 @@ const REVERTIBLE = new Set(['script_shot', 'script_scene']);
  *  The facts come from `err.details`, not from `err.message`: the server's
  *  prose is for a log, and the one thing the reader needs — WHICH version
  *  appeared — only exists in the typed payload. */
-function revertErrorText(err: unknown, from: number | null): string {
-  if (!(err instanceof OutputsError)) return 'Revert failed.';
+function revertErrorText(err: unknown, from: number | null, t: T): string {
+  if (!(err instanceof OutputsError)) return t('outputs.revertFailed', 'Revert failed.');
   const d = err.details ?? {};
   switch (err.code) {
     case 'version_conflict':
-      return `Someone registered v${String(d.latest_version ?? '?')} meanwhile — reopen to see it`;
+      return t('outputs.revertConflict', 'Someone registered v{{n}} meanwhile — reopen to see it', {
+        n: String(d.latest_version ?? '?'),
+      });
     case 'content_unavailable':
-      return `v${from ?? '?'} can't be rebuilt (no ledger)`;
+      return t('outputs.revertNoLedger', "v{{n}} can't be rebuilt (no ledger)", { n: from ?? '?' });
     case 'kind_not_revertible':
-      return "This kind can't be reverted";
+      return t('outputs.revertKindRefused', "This kind can't be reverted");
     case 'version_not_found':
-      return 'That version is not in this object’s chain.';
+      return t('outputs.errorVersionNotFound', 'That version is not in this object’s chain.');
     case 'not_permitted':
-      return 'You do not have permission to revert this object.';
+      return t('outputs.revertNotPermitted', 'You do not have permission to revert this object.');
     default:
-      return `Revert failed (${err.code})`;
+      return t('outputs.revertFailedCode', 'Revert failed ({{code}})', { code: err.code });
   }
 }
 
@@ -267,10 +269,10 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
       setTo(res.version.version);
       setConfirming(false);
       invalidateOutputLineage(kind, refId);
-      toast?.addToast(`Reverted to v${from} as v${res.version.version}`, 'success');
+      toast?.addToast(tr('outputs.revertDone', 'Reverted to v{{from}} as v{{n}}', { from, n: res.version.version }), 'success');
     } catch (err) {
       console.error('[OutputDiffDialog] revert failed', err);
-      toast?.addToast(revertErrorText(err, from), 'error');
+      toast?.addToast(revertErrorText(err, from, tr), 'error');
       setConfirming(false);
     } finally {
       setReverting(false);
