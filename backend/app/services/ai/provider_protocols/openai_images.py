@@ -5,6 +5,15 @@ path the API honours --size and the quality tiers `xhigh` / `max`, and the
 image model is chosen by us (`actual_model` → `--model`). Billing is per token
 on the operator's OpenAI account (the catalog row's api_key), which is why the
 seeded display names carry "(OpenAI API)".
+
+★ Provenance of the "honours exact sizes and xhigh/max" claim: OpenAI docs read
+2026-09-13 (the gpt-image-2.5-flare / -sunburst model pages) plus the
+gpt-image-2-skill 0.7.4 `--quality` enum. NOT yet measured against the live API
+— that is Task 7 acceptance. Contrast `codex.py`, whose counterpart claim IS
+measured (2026-09-09: that path rewrites `xhigh` to `medium` and says nothing),
+and the difference between the two is the entire reason these are separate
+protocols. Until the real-stack probe runs, treat this paragraph as a
+documented expectation rather than an observation.
 """
 
 from __future__ import annotations
@@ -27,7 +36,8 @@ class OpenAIImagesProtocol(ProviderProtocol):
     description = (
         "gpt-image-2-skill CLI over the OpenAI Images API with the row's api_key "
         "(pay-as-you-go). actual_model is the image model: gpt-image-2.5-flare "
-        "or gpt-image-2.5-sunburst. Honours exact sizes and xhigh/max quality."
+        "or gpt-image-2.5-sunburst. Honours exact sizes and xhigh/max quality "
+        "(per docs 2026-09-13; not yet measured on the live API)."
     )
     model_types = ("image",)
     aliases = ()
