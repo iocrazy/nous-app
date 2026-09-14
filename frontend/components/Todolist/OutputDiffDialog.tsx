@@ -32,7 +32,7 @@ import {
 import { formatOutputCost, outputCostTitle, type CostKind } from '../agentActivity/outputCost';
 import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
-import { notifyTurn } from './issueTurnSignal';
+import { nextLocalSeq, notifyTurn } from './issueTurnSignal';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
 
 export interface OutputDiffDialogProps {
@@ -297,12 +297,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
       // and when nothing on the chain answers to an issue (the canvas), say
       // nothing — there is no issue page to refresh.
       //
-      // ⚠️ `runId: null` is load-bearing: `seq` here is the new version's
-      // SNOWFLAKE id, ten orders of magnitude above any transcript seq. The
-      // local lane keeps it from pinning the issue's watermark to the sky and
-      // silently killing every later real turn signal.
+      // ⚠️ The seq is a LOCAL counter, never the new version's id. That id is a
+      // Snowflake: `Number()` rounds it past 2^53, so two reverts minted in the
+      // same millisecond collapse to one value and the watermark drops the
+      // second as a replay. `runId: null` puts it in its own lane, where a
+      // counter that only has to beat its own last value is all that is needed.
       const signalIssue = res.version.issue_id ?? versions[0]?.issue_id ?? null;
-      if (signalIssue) notifyTurn(String(signalIssue), { runId: null, seq: Number(res.version.id) });
+      if (signalIssue) notifyTurn(String(signalIssue), { runId: null, seq: nextLocalSeq() });
       toast?.addToast(tr('outputs.revertDone', 'Reverted to v{{from}} as v{{n}}', { from, n: res.version.version }), 'success');
     } catch (err) {
       console.error('[OutputDiffDialog] revert failed', err);

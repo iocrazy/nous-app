@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OutputObject, OutputVersion } from '../../../services/outputsService';
 import type { IssueBlockContext } from '../issueBlocks';
-import { __resetTurnSignals, notifyTurn } from '../issueTurnSignal';
-import { OutputsBlockView, outputsBlock } from './OutputsBlock';
+import { __listenerCount, __resetTurnSignals, notifyTurn } from '../issueTurnSignal';
+import { OutputsBlockView, outputsBlock, UPDATED_BADGE_MS } from './OutputsBlock';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -49,8 +49,8 @@ const shot: OutputObject = { kind: 'script_shot', ref_id: '9', title: 'Shot #1 v
 // No issue on this one's run (a canvas lane), so no key and no link.
 const image: OutputObject = { kind: 'generated_media', ref_id: '77', title: 'S3 · Shot #1', latest_version: 1, versions: [version(1, null, { issue_id: null, issue_key: null, deep_link: null })] };
 
-function ctx(): IssueBlockContext {
-  return { issue: { id: ISSUE_ID }, rollup: { issue_id: String(ISSUE_ID) } as never, originKind: null, phase: 'running', env: {} };
+function ctx(env: Record<string, unknown> = {}): IssueBlockContext {
+  return { issue: { id: ISSUE_ID }, rollup: { issue_id: String(ISSUE_ID) } as never, originKind: null, phase: 'running', env } as IssueBlockContext;
 }
 
 afterEach(cleanup);
@@ -135,7 +135,11 @@ describe('outputsBlock registration', () => {
  * appears — the one moment it most needs to be on screen.
  */
 describe('OutputsBlockView — live refresh', () => {
-  beforeEach(() => __resetTurnSignals());
+  beforeEach(() => {
+    __resetTurnSignals();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => vi.useRealTimers());
 
   it('re-reads when the issue signals a finished turn', async () => {
     render(<OutputsBlockView ctx={ctx()} />);
@@ -147,6 +151,37 @@ describe('OutputsBlockView — live refresh', () => {
     // The reader is looking at a list that changed under them; saying so is
     // what separates "this is current" from "this is whatever loaded earlier".
     expect(screen.getByTestId('outputs-updated')).toBeTruthy();
+  });
+
+  it('does not claim «Updated» when only the refresh key moved', async () => {
+    // The badge means "this changed under you". Once a signal has been seen,
+    // keying it off `signal !== null` makes every LATER re-run of the fetch
+    // effect — a rail refreshKey bump, for instance — claim an update that
+    // never happened, and a badge that cries wolf is worse than no badge.
+    const { rerender } = render(<OutputsBlockView ctx={ctx()} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: 'r1', seq: 7 }));
+    await waitFor(() => expect(screen.getByTestId('outputs-updated')).toBeTruthy());
+    act(() => vi.advanceTimersByTime(UPDATED_BADGE_MS + 1));
+    await waitFor(() => expect(screen.queryByTestId('outputs-updated')).toBeNull());
+
+    rerender(<OutputsBlockView ctx={ctx({ refreshKey: 1 })} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(3));
+    expect(screen.queryByTestId('outputs-updated')).toBeNull();
+  });
+
+  it('leaves no subscription behind when it unmounts', async () => {
+    // A leaked subscriber is invisible until it is not: every finished turn
+    // would fire one more re-read than the last, and only a long session shows
+    // it. Mount/unmount twice and the count has to come back to where it was.
+    expect(__listenerCount(String(ISSUE_ID))).toBe(0);
+    for (let i = 0; i < 2; i += 1) {
+      const { unmount } = render(<OutputsBlockView ctx={ctx()} />);
+      await waitFor(() => expect(__listenerCount(String(ISSUE_ID))).toBe(1));
+      unmount();
+      expect(__listenerCount(String(ISSUE_ID))).toBe(0);
+    }
   });
 
   it('ignores another issue’s turn', async () => {

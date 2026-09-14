@@ -14,7 +14,7 @@
  * ⚠️ Block id is `outputs`, not `deliverables` — that id belongs to the
  * project-stage folder block and `registerIssueBlock` throws on a duplicate.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileOutput } from 'lucide-react';
 
@@ -22,7 +22,7 @@ import { listIssueOutputs, type OutputObject } from '../../../services/outputsSe
 import { formatOutputCost, outputCostTitle } from '../../agentActivity/outputCost';
 import type { DeliverableKind } from '../../chat/deliverableKinds';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
-import { useTurnSignal } from '../issueTurnSignal';
+import { useTurnSignal, type TurnSignal } from '../issueTurnSignal';
 import { OutputDiffDialog } from '../OutputDiffDialog';
 import { setHighlightedOutput } from '../outputHighlight';
 import { RailCard } from './StatusBlock';
@@ -30,7 +30,7 @@ import { RailCard } from './StatusBlock';
 /** How long «Updated» stays up after a re-read. Long enough to catch the eye of
  *  someone already looking at the card, short enough that it never becomes a
  *  label the reader stops seeing. */
-const UPDATED_BADGE_MS = 1_000;
+export const UPDATED_BADGE_MS = 1_000;
 
 /** The four kinds, in the words a person uses for them.
  *
@@ -56,20 +56,30 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // «A turn on this issue ended» — one broadcast, deduped by watermark, so the
   // WS `done` frame and the polling edge for one turn cost one re-read.
   const signal = useTurnSignal(String(issueId));
+  /** The signal the badge has already spoken for. The effect re-runs for other
+   *  reasons too (a rail `refreshKey` bump), and `signal !== null` stays true
+   *  forever once the first turn lands — so without this the badge would claim
+   *  an update on every later re-read. A badge that cries wolf is worse than
+   *  no badge. */
+  const badgedSignal = useRef<TurnSignal | null>(null);
 
   // A ring must not outlive the rail that set it (navigating away mid-hover).
   useEffect(() => () => setHighlightedOutput(null), []);
 
   useEffect(() => {
     let live = true;
+    // Claimed at the START of the run this signal caused, so a re-run for any
+    // other reason cannot claim it a second time.
+    const isNewSignal = signal !== null && signal !== badgedSignal.current;
+    badgedSignal.current = signal;
     listIssueOutputs(issueId)
       .then((rows) => {
         if (!live) return;
         setItems(rows);
         setFailed(false);
-        // Only after a signal: the first load of a page is not "this changed",
-        // and a badge on arrival would say the opposite of what it means.
-        if (signal) setJustUpdated(true);
+        // Only for the signal's own re-read: the first load of a page is not
+        // "this changed", and a badge on arrival would say the opposite.
+        if (isNewSignal) setJustUpdated(true);
       })
       .catch((err) => {
         if (!live) return;

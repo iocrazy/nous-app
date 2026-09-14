@@ -387,14 +387,31 @@ describe('OutputDiffDialog — a revert announces itself (3b Task 6)', () => {
   };
 
   it('signals the issue the chain belongs to, on the local lane', async () => {
-    // `runId: null` matters: the seq is the new version's Snowflake id, ten
-    // orders of magnitude above any transcript seq. On a shared watermark it
-    // would pin the issue's lane to the sky and every later real turn would be
-    // dropped as stale — the local lane is what keeps that harmless.
+    // `runId: null` matters: a transcript seq and a local one are different
+    // counters, and sharing a watermark would let either silence the other.
     await revertOnce();
-    await waitFor(() =>
-      expect(notifyTurn).toHaveBeenCalledWith('5', { runId: null, seq: 347786145852739099 }),
-    );
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(1));
+    const [issue, signal] = notifyTurn.mock.calls[0] as [string, { runId: null; seq: number }];
+    expect(issue).toBe('5');
+    expect(signal.runId).toBeNull();
+    expect(signal.seq).toBeGreaterThan(0);
+  });
+
+  it('two reverts in the same millisecond both get through', async () => {
+    // The seq must NOT be the new version's id: that is a Snowflake, and
+    // `Number()` rounds it past 2^53, so two reverts minted in one millisecond
+    // collapse to the same value and the watermark drops the second as a
+    // replay — the page would sit on the first revert's result.
+    const { unmount } = render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    unmount();
+    await revertOnce();
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(1));
+    cleanup();
+    await revertOnce();
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(2));
+
+    const seqs = notifyTurn.mock.calls.map((c) => (c[1] as { seq: number }).seq);
+    expect(seqs[1]).toBeGreaterThan(seqs[0]);
   });
 
   it('says nothing when no version on the chain answers to an issue', async () => {

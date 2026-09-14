@@ -360,12 +360,18 @@ export function getOutputLineage(kind: string, refId: string): Promise<OutputLin
     .then((chain) => {
       const seq = chain.as_of_seq ?? '0';
       const current = lineageCache.get(key);
-      // A LATE answer must never displace a fresher one. The race is real: a
-      // read is in flight when a revert invalidates the object, a re-read
-      // starts and answers first — and this answer describes the world before
-      // the revert. Writing it back would hand the next reader the version the
-      // user just reverted away from.
-      if (current && current !== entry && !isNewerSeq(seq, current.asOfSeq)) return;
+      // A LATE answer must never install itself. Two shapes of the same race,
+      // both produced by the `done` frame's own order (invalidate, THEN
+      // signal), and both starting from a read that was already in flight:
+      //
+      //   no `current`  — the slot was invalidated and nothing has re-read yet.
+      //     This answer describes the world BEFORE whatever the run wrote, and
+      //     installing it would pin that stale chain for a full TTL, with its
+      //     original `fetchedAt`. The invalidate would have achieved nothing.
+      //   a DIFFERENT entry — a re-read already answered. Ours only wins if its
+      //     `as_of_seq` is genuinely newer; otherwise the next reader would get
+      //     back the version the user just reverted away from.
+      if (!current || (current !== entry && !isNewerSeq(seq, current.asOfSeq))) return;
       entry.asOfSeq = seq;
       lineageCache.set(key, entry);
     })

@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { notifyTurn, subscribeTurn, __resetTurnSignals } from './issueTurnSignal';
+import { nextLocalSeq, notifyTurn, subscribeTurn, __listenerCount, __resetTurnSignals } from './issueTurnSignal';
 
 beforeEach(() => __resetTurnSignals());
 
@@ -73,11 +73,32 @@ describe('issueTurnSignal', () => {
     expect(good).toHaveBeenCalledTimes(1);
   });
 
+  it('gives the local lane a strictly increasing seq', () => {
+    // Two reverts inside the same millisecond must both be heard. The version's
+    // Snowflake id cannot carry that: past 2^53 a JS number rounds, so two ids
+    // minted in one millisecond collapse to the same value and the second one
+    // is dropped as a replay.
+    const cb = vi.fn();
+    subscribeTurn('5', cb);
+    notifyTurn('5', { runId: null, seq: nextLocalSeq() });
+    notifyTurn('5', { runId: null, seq: nextLocalSeq() });
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it('a local seq never collides with itself across issues', () => {
+    const a = vi.fn();
+    subscribeTurn('5', a);
+    const first = nextLocalSeq();
+    const second = nextLocalSeq();
+    expect(second).toBeGreaterThan(first);
+  });
+
   it('stops delivering after unsubscribe', () => {
     const cb = vi.fn();
     const off = subscribeTurn('5', cb);
     off();
     notifyTurn('5', { runId: 'r1', seq: 1 });
     expect(cb).not.toHaveBeenCalled();
+    expect(__listenerCount('5')).toBe(0);
   });
 });

@@ -256,6 +256,30 @@ describe('OutputProvenance — live refresh', () => {
     await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(2));
   });
 
+  it('re-reads ONCE when a done frame invalidates three objects', async () => {
+    // A run registers three objects, so the `done` frame drops three keys —
+    // three generation bumps inside one dispatch. React coalesces them into a
+    // single render, so a consumer re-reads once. Were they to arrive as three
+    // separate renders, every consumer on the page would multiply each run's
+    // output count by its own re-read.
+    getOutputLineage.mockResolvedValue(lineage([version(2), version(1)]));
+    render(
+      <MemoryRouter>
+        <OutputProvenance kind="script_shot" refId="9" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      for (const [kind, id] of [['script_shot', '9'], ['script_scene', '3'], ['generated_media', '77']]) {
+        invalidateOutputLineage(kind, id);
+      }
+    });
+    await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getOutputLineage).toHaveBeenCalledTimes(2);
+  });
+
   it('does not close an open version dialog when some OTHER object changes', async () => {
     // The generation is global: every invalidate anywhere moves it. A re-read
     // is cheap (this object's own entry is still cached), but tearing the

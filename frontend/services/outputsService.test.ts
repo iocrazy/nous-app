@@ -351,6 +351,26 @@ describe('outputsService — the lineage request cache', () => {
     }
   });
 
+  it('a read invalidated mid-flight never installs its answer', async () => {
+    // The ordering the `done` frame produces: invalidate, THEN signal. A
+    // provenance block's read is often already in flight when that lands, and
+    // its answer describes the world before whatever the run just wrote.
+    // Installing it would pin the pre-invalidation chain in the cache with its
+    // ORIGINAL fetchedAt — stale, and stale for a full TTL, so the invalidate
+    // that was supposed to force a re-read achieves nothing.
+    let settle: ((r: Response) => void) | null = null;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { settle = r; }));
+    const inflight = getOutputLineage('script_shot', '9');
+
+    invalidateOutputLineage('script_shot', '9');
+    settle!(json(200, chain(2)));
+    await inflight;
+
+    fetchMock.mockResolvedValueOnce(json(200, chain(3)));
+    expect((await getOutputLineage('script_shot', '9')).latest_version).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('a late answer never displaces a fresher chain already cached', async () => {
     // A read is in flight when a revert invalidates the object; the re-read
     // answers FIRST. The first request's answer describes the world before the

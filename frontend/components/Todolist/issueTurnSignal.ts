@@ -65,6 +65,29 @@ export function useTurnSignal(issueId: string): TurnSignal | null {
   return useSyncExternalStore(subscribe, snapshot, () => null);
 }
 
+let localSeq = 0;
+
+/**
+ * 本地车道（`runId: null`）的下一个计数。
+ *
+ * ⚠️ **不要拿被写对象的 id 当这个 seq。** 那是 Snowflake，`Number()` 之后超过 2^53
+ * 会静默取整 —— 同一毫秒内的两次回退会折成同一个值，第二次被水位当成重放丢掉，
+ * 页面就停在第一次回退的结果上。一个进程内单调的计数器没有这个问题，而本地车道
+ * 本来也不需要和任何服务端序号对齐：它只需要「比上一次大」。
+ *
+ * 刻意**不**被 `__resetTurnSignals` 清零 —— 它只需单调，跨用例继续增长是对的。
+ */
+export function nextLocalSeq(): number {
+  localSeq += 1;
+  return localSeq;
+}
+
+/** 测试专用：某个议题当前挂着几个订阅者。用来钉住「挂载/卸载来回几次不会漏订阅」——
+ *  泄漏的订阅者会让每个回合信号触发越来越多次重拉，而那是只有长会话才看得见的退化。 */
+export function __listenerCount(issueId: string): number {
+  return listeners.get(issueId)?.size ?? 0;
+}
+
 /** 测试专用：模块级状态活得比一个用例长。 */
 export function __resetTurnSignals(): void {
   listeners.clear();

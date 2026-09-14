@@ -915,6 +915,32 @@ describe('IssueDetailView — WS done frame (3b Task 6)', () => {
     expect(invalidateOutputLineage).toHaveBeenCalledWith('script_shot', '9');
   });
 
+  it('a run that registered three objects drops exactly those three keys', () => {
+    // Keyed, one per registered object — never a blanket clear, which would
+    // turn a 40-shot canvas into 40 requests, and never one bulk call, which
+    // would have to guess the keys.
+    act(() =>
+      onEvent({
+        type: 'status',
+        phase: 'done',
+        run_id: '777',
+        seq: 44,
+        outputs: [
+          { kind: 'script_shot', ref_id: '9' },
+          { kind: 'script_scene', ref_id: '3' },
+          { kind: 'generated_media', ref_id: '77' },
+        ],
+      }),
+    );
+    expect(invalidateOutputLineage.mock.calls).toEqual([
+      ['script_shot', '9'],
+      ['script_scene', '3'],
+      ['generated_media', '77'],
+    ]);
+    // ...and ONE signal for the turn, not one per object.
+    expect(notifyTurn).toHaveBeenCalledTimes(1);
+  });
+
   it('a legacy done frame without seq/outputs still signals', () => {
     // An old backend omits all three keys. Missing `seq` is 0 and missing
     // `outputs` is [] — the turn is still over, and saying nothing would
