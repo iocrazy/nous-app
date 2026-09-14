@@ -134,7 +134,7 @@ def test_the_refusal_detail_is_what_the_outcome_would_record():
 
     _message, patch = describe_generation_failure(ei.value)
     assert patch["failure"]["detail"] == (
-        "openai-images row has no api_key — set it in Admin → AI Models"
+        "openai-images row has no api_key; set it in Admin > AI Models"
     )
 
 

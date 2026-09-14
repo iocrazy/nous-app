@@ -74,7 +74,7 @@ class OpenAIImagesProtocol(ProviderProtocol):
             raise ProviderNotConfiguredError(
                 self.key,
                 actual_model,
-                detail=(f"{self.key} row has no api_key — set it in Admin → AI Models"),
+                detail=(f"{self.key} row has no api_key; set it in Admin > AI Models"),
             )
         return (
             _CodexImageAdapter(
