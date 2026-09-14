@@ -40,6 +40,8 @@ import { DownloadsBatchToolbar } from './DownloadsView/DownloadsBatchToolbar';
 import { BatchTagSheet } from './DownloadsView/BatchTagSheet';
 import Loading from './common/Loading';
 import { CompactMediaCard } from './CompactMediaCard';
+import { ViewModeMenu } from './ViewModeMenu';
+import type { LibraryViewMode } from '../hooks/useLibrary';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
 import { ToolbarSearch } from './ToolbarSearch';
@@ -1206,35 +1208,22 @@ export const DownloadsView: React.FC = () => {
               <Filter size={14} />
             </button>
 
+            {/* One control, not four glyphs in a row. It also names the
+                mode you are in — the old row had no pressed state and three
+                of its four buttons were always the wrong answer. Desktop-only
+                gate kept as it was; the modes here include `feed`, which this
+                page can render and the uploads toolbar cannot. */}
             <div className="hidden md:flex items-center">
-              <button
-                onClick={() => setLibraryViewMode('list')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
-                title="List View"
-              >
-                <LayoutList size={14} />
-              </button>
-              <button
-                onClick={() => setLibraryViewMode('grid')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
-                title="Grid View"
-              >
-                <LayoutGrid size={14} />
-              </button>
-              <button
-                onClick={() => setLibraryViewMode('justified')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'justified' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
-                title={t('resources.justifiedView')}
-              >
-                <LayoutTemplate size={14} />
-              </button>
-              <button
-                onClick={() => setLibraryViewMode('feed')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
-                title="Feed View"
-              >
-                <Smartphone size={14} />
-              </button>
+              <ViewModeMenu<LibraryViewMode>
+                modes={[
+                  { value: 'justified', icon: LayoutTemplate, label: t('resources.justifiedView', 'Justified View') },
+                  { value: 'grid', icon: LayoutGrid, label: t('resources.gridView', 'Grid View') },
+                  { value: 'list', icon: LayoutList, label: t('resources.listView', 'List View') },
+                  { value: 'feed', icon: Smartphone, label: t('resources.feedView', 'Feed View') },
+                ]}
+                value={libraryViewMode}
+                onChange={setLibraryViewMode}
+              />
             </div>
           </div>
         </div>

@@ -1704,7 +1704,9 @@
     "searchFailed": "搜索失败",
     "searchFailedHint": "资源库未受影响，请稍后重试。",
     "noSearchResults": "没有匹配的内容",
-    "noSearchResultsHint": "换个关键词，或放宽搜索范围"
+    "noSearchResultsHint": "换个关键词，或放宽搜索范围",
+    "feedView": "信息流视图",
+    "viewMode": "视图：{{mode}}"
   },
   "assets": {
     "types": {

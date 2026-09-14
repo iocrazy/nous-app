@@ -1704,7 +1704,9 @@
     "searchFailed": "Search failed",
     "searchFailedHint": "Your library is unchanged. Try again in a moment.",
     "noSearchResults": "No matching items",
-    "noSearchResultsHint": "Try a different keyword, or widen the search scope"
+    "noSearchResultsHint": "Try a different keyword, or widen the search scope",
+    "feedView": "Feed View",
+    "viewMode": "View: {{mode}}"
   },
   "assets": {
     "types": {

@@ -213,7 +213,11 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
 
   return (
     <div
-      className={`group relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
+      // `@container`: in the adaptive rows a portrait card gets a much narrower
+      // column than a landscape one, and the stats grid below has to answer to
+      // THAT width rather than the viewport's. Same device `MediaCard` already
+      // uses for its own info column.
+      className={`group @container relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
         isChecked || isSelected
           ? 'border-[var(--accent-border)] ring-1 ring-inset ring-indigo-500/30'
           : 'border-ink-800 hover:border-ink-600'
@@ -444,17 +448,22 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           })()}
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-1.5">
+        {/* Stats grid — 2×2 until the card is wide enough for one row of four.
+            Four columns on a narrow portrait card left each cell about 15px
+            wide, so `1.6K` overflowed its box and the four boxes read as one
+            smear of digits. Wrapping to 2×2 keeps every number legible and
+            drops nothing; the threshold is where four cells plus their gaps
+            stop fitting a 9px `1.6K` (4×34 + 3×6 ≈ 154px of content). */}
+        <div className="grid grid-cols-2 @[10.5rem]:grid-cols-4 gap-1.5">
            {/* Like */}
            <div className="flex flex-col items-center justify-center py-1.5 bg-[#2A1818] rounded-md border border-red-900/30">
               <Heart size={12} className="text-rose-500 mb-0.5" />
-              <span className="text-[9px] text-white font-bold">{formatNumber(data.like_count)}</span>
+              <span className="text-[9px] text-white font-bold tabular-nums whitespace-nowrap">{formatNumber(data.like_count)}</span>
            </div>
            {/* Comment */}
            <div className="flex flex-col items-center justify-center py-1.5 bg-[#10243E] rounded-md border border-sky-900/30">
               <MessageCircle size={12} className="text-sky-500 mb-0.5" />
-              <span className="text-[9px] text-white font-bold">{formatNumber(data.comment_count)}</span>
+              <span className="text-[9px] text-white font-bold tabular-nums whitespace-nowrap">{formatNumber(data.comment_count)}</span>
            </div>
            {/* Share - Click to copy link */}
            <button
@@ -474,12 +483,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
               ) : (
                 <Share2 size={12} className="text-emerald-500 mb-0.5 group-hover:scale-110 transition-transform" />
               )}
-              <span className="text-[9px] text-white font-bold">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
+              <span className="text-[9px] text-white font-bold tabular-nums whitespace-nowrap">{copiedShare ? 'Copied!' : formatNumber(data.share_count)}</span>
            </button>
            {/* Collect */}
            <div className="flex flex-col items-center justify-center py-1.5 bg-[#2E2005] rounded-md border border-amber-900/30">
               <Bookmark size={12} className="text-amber-500 mb-0.5" />
-              <span className="text-[9px] text-white font-bold">{formatNumber(data.favorite_count)}</span>
+              <span className="text-[9px] text-white font-bold tabular-nums whitespace-nowrap">{formatNumber(data.favorite_count)}</span>
            </div>
         </div>
 
