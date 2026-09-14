@@ -545,6 +545,7 @@ async def start_workflow_routed(
     dbos_workflow_callable: Callable[..., Any],
     dbos_workflow_kwargs: Optional[dict[str, Any]] = None,
     workflow_id: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Dispatch a task as a DBOS workflow, gated by `dbos_workflow_routing`.
 
@@ -563,9 +564,15 @@ async def start_workflow_routed(
         dbos_workflow_callable: the @DBOS.workflow function to invoke
         dbos_workflow_kwargs: kwargs passed to the workflow
         workflow_id: optional explicit DBOS workflow id (default: server-generated)
+        task_id: the caller's ``task_tracking`` row, recorded ONLY on the
+            deferred path so a drain that cannot dispatch can fail that row
+            instead of orphaning it. Never passed to the workflow.
 
     Returns:
-        dict with keys: mode, task_type, dbos_workflow_id.
+        dict with keys: mode, task_type, dbos_workflow_id — plus
+        ``deferred: True`` when a deferred-dispatch collector is active (see
+        ``app.services.infra.deferred_dispatch``), meaning the workflow has NOT
+        started yet and the enclosing workflow body will start it.
     """
     decision = await get_routing(task_type)
     if decision.mode != "dbos":
@@ -605,6 +612,38 @@ async def start_workflow_routed(
                 from app.agent_framework._metrics_helper import inc_metric
 
                 inc_metric("dispatch_gate_passed")
+
+    # Deferred dispatch (harness 3a Task 2): inside a @DBOS.step, DBOS refuses
+    # start_workflow/enqueue outright (`assert cur_ctx.is_workflow()`). When a
+    # collector is installed the dispatch is RECORDED here and performed by the
+    # enclosing workflow body — see app.services.infra.deferred_dispatch.
+    #
+    # Placed AFTER the three gates on purpose: a dispatch the routing table,
+    # the enabled check or the bounds registry would have refused is still
+    # refused at the same place, rather than queueing work the body would then
+    # discover it cannot start.
+    from app.services.infra.deferred_dispatch import (
+        deferral_active,
+        record_deferred_dispatch,
+    )
+
+    if deferral_active():
+        import uuid as _uuid
+
+        deferred_id = workflow_id or str(_uuid.uuid4())
+        record_deferred_dispatch(
+            task_type=task_type,
+            dbos_workflow_callable=dbos_workflow_callable,
+            dbos_workflow_kwargs=dbos_workflow_kwargs,
+            workflow_id=deferred_id,
+            task_id=task_id,
+        )
+        return {
+            "mode": "dbos",
+            "task_type": task_type,
+            "dbos_workflow_id": deferred_id,
+            "deferred": True,
+        }
 
     from contextlib import nullcontext
 

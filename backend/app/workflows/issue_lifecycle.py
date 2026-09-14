@@ -37,6 +37,10 @@ from app.services.ai.tools.finish_issue_tool import (
     extract_issue_options,
     extract_issue_outcome,
 )
+from app.services.infra.deferred_dispatch import (
+    collect_deferred_dispatches,
+    drain_deferred_dispatches,
+)
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
     publish_message,
@@ -48,6 +52,20 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 # steady stream of steers must not keep ONE dispatch alive indefinitely; past
 # this bound the minute-ly sweeper's idle-drain picks the issue up instead.
 MAX_INBOX_DRAIN_TURNS = 3
+
+
+def _pending_dispatches(res: Any) -> list[dict[str, Any]]:
+    """The workflows a turn recorded instead of starting (harness 3a Task 2).
+
+    Reads defensively because both consumers take their turn callable
+    INJECTED: production always hands over a step returning the full dict, but
+    a caller (or a test fake) may return anything. A turn result that has no
+    dispatch list simply has no dispatches — reading it must never be the thing
+    that breaks a turn that otherwise worked.
+    """
+    if not isinstance(res, dict):
+        return []
+    return list(res.get("pending_dispatches") or [])
 
 
 def _execution_state_without_dispatching():
@@ -388,6 +406,12 @@ async def run_issue_reply_step(
     — mirrors ``run_issue_agent``'s FinishIssue extraction (Spec-4) so a reply
     that resumes a needs_input issue can be routed by ``route_finish_outcome``
     the same way the dispatch loop is.
+
+    ``pending_dispatches`` (harness 3a Task 2) carries the workflows this turn's
+    tools/hooks decided to start. They are NOT started here: this is a
+    ``@DBOS.step``, and DBOS refuses ``start_workflow`` inside one. The caller
+    — always a workflow body — drains them. Same route-C split as
+    ``deliver_or_dispatch``; see ``app.services.infra.deferred_dispatch``.
     """
     from uuid import UUID
 
@@ -400,26 +424,29 @@ async def run_issue_reply_step(
         [AttachmentRequest(**a) for a in attachments] if attachments else None
     )
 
-    result = await AILibraryChatService().run_session_turn(
-        # session_id is ai_sessions.id = BIGINT Snowflake (mig 231), a numeric
-        # string. Pass it through as-is; UUID() would raise ValueError.
-        session_id,
-        user_id=UUID(user_id),
-        content=reply_text,
-        trigger="issue_reply",
-        chunk_callback=_cb,
-        attachments=attachment_objects,
-        # phase 2b-2 §4.2: a reply turn is an issue run too. Without this the
-        # row is created with issue_id NULL and only route_finish_outcome's
-        # post-hoc backfill fills it — which never runs when the turn does not
-        # return (crash, cancel, empty output). Same hole as the dispatch path,
-        # different trigger.
-        issue_id=issue_id,
-        # Task 7a defect 6: provenance for the user message this turn opens
-        # with. The turn is the ONLY writer of that message (defect 7), so if
-        # it does not carry the source, nothing downstream can.
-        message_source=source,
-    )
+    async with collect_deferred_dispatches() as pending:
+        result = await AILibraryChatService().run_session_turn(
+            # session_id is ai_sessions.id = BIGINT Snowflake (mig 231), a
+            # numeric string. Pass it through as-is; UUID() would raise
+            # ValueError.
+            session_id,
+            user_id=UUID(user_id),
+            content=reply_text,
+            trigger="issue_reply",
+            chunk_callback=_cb,
+            attachments=attachment_objects,
+            # phase 2b-2 §4.2: a reply turn is an issue run too. Without this
+            # the row is created with issue_id NULL and only
+            # route_finish_outcome's post-hoc backfill fills it — which never
+            # runs when the turn does not return (crash, cancel, empty output).
+            # Same hole as the dispatch path, different trigger.
+            issue_id=issue_id,
+            # Task 7a defect 6: provenance for the user message this turn opens
+            # with. The turn is the ONLY writer of that message (defect 7), so
+            # if it does not carry the source, nothing downstream can.
+            message_source=source,
+        )
+        pending_dispatches = list(pending)
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
     content = assistant.get("content") or ""
@@ -437,6 +464,7 @@ async def run_issue_reply_step(
         "question": question,
         "options": extract_issue_options(result.get("tool_calls")),
         "stop_reason": result.get("stop_reason"),
+        "pending_dispatches": pending_dispatches,
     }
 
 
@@ -554,6 +582,19 @@ async def _run_reply_turns(
                     error_message=str(exc)[:500],
                 )
             raise
+
+        # Harness 3a Task 2: the turn ran inside a @DBOS.step, so anything it
+        # wanted to dispatch was recorded instead of started. Start it HERE —
+        # this function is never a step (see the docstring of
+        # ``_maybe_fire_subissue_barrier`` for the same constraint).
+        #
+        # BEFORE routing, and unconditionally. Dispatch and status routing are
+        # two independent results of one turn: a routing failure must not eat
+        # the dispatch (the shot would stay 'generating' with nothing coming),
+        # and a plain non-resuming reply — which never routes at all — can
+        # still have dispatched. The drain itself never raises, so the reverse
+        # direction holds too.
+        await drain_deferred_dispatches(_pending_dispatches(result))
 
         if resuming:
             outcome = (result or {}).get("outcome")
@@ -739,16 +780,24 @@ async def run_issue_agent_step(
 
     ``auto`` (M4 Autopilot, task O2) forwards straight through to
     ``run_issue_agent`` — see that function's docstring for what it changes
-    (the quota-counted ``agent_runs.trigger`` value)."""
+    (the quota-counted ``agent_runs.trigger`` value).
+
+    ``pending_dispatches`` (harness 3a Task 2) is added to the turn's own
+    result: the workflows this turn's tools/hooks decided to start, recorded
+    rather than started because this is a ``@DBOS.step``. The dispatch loop
+    drains them from the workflow body — see
+    ``app.services.infra.deferred_dispatch``."""
     from app.services.issues.issue_agent_executor import run_issue_agent
 
-    return await run_issue_agent(
-        issue=issue,
-        agent_id=agent_id,
-        user_id=user_id,
-        is_continuation=is_continuation,
-        auto=auto,
-    )
+    async with collect_deferred_dispatches() as pending:
+        result = await run_issue_agent(
+            issue=issue,
+            agent_id=agent_id,
+            user_id=user_id,
+            is_continuation=is_continuation,
+            auto=auto,
+        )
+        return {**(result or {}), "pending_dispatches": list(pending)}
 
 
 # Issue statuses that mean "stop working this issue". If an external actor
@@ -1158,6 +1207,8 @@ async def _run_dispatch_with_continuation(
             turn_no += 1
             await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_reply(issue_id, payload)
+            # Harness 3a Task 2 — see the twin call after ``run_turn`` below.
+            await drain_deferred_dispatches(_pending_dispatches(res))
         else:
             if (fresh or {}).get("paused_at"):
                 # Target-level pause (phase 2a): no FRESH turn starts while
@@ -1182,6 +1233,16 @@ async def _run_dispatch_with_continuation(
                 user_id,
                 is_continuation=(attempt > 0 or wait_rounds > 0 or drains > 0),
             )
+            # Harness 3a Task 2: the turn ran inside a @DBOS.step, which may
+            # not start workflows — it recorded them instead. This function is
+            # the workflow body, so start them here.
+            #
+            # Per TURN, not once at the end of the loop: a three-turn dispatch
+            # would otherwise sit on turn one's image until the loop finished.
+            # And BEFORE ``route_finish_outcome`` — including the needs_input
+            # park branch at the loop top, which routes the PREVIOUS turn's
+            # result — so a routing failure never swallows a dispatch.
+            await drain_deferred_dispatches(_pending_dispatches(res))
         if (res or {}).get("stop_reason") == "paused":
             # PauseHook stopped the run at a step boundary. Not an outcome:
             # nothing is routed, no status is written, the lock is released by
