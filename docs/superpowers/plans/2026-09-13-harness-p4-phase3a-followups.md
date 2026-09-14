@@ -182,3 +182,37 @@
 **裁定**（全文在 ledger）：四 Task 并发派发；T4 突变替换（读模型放宽）；T1 门控 issue 双判定接受；A6 作废（前提过时）；终审 Minor「撞名」不改、「fixture 值」进桶 B。
 
 **本轮新记的票**：B9、B10、C17 补充（见上表）；T4 的 `display_attachments` docstring、router 896 行；T2「先删后插」无机器守卫；T1 `get_by_ids` 无真 PG 覆盖、双判定正解；T3 sibling 镜像测试缺锚点、`ref_kind` 收窄注释、`deliverableKinds.ts` 位置。
+
+---
+
+**补验账 ①③⑦（2026-09-14）**
+
+探针环境：私有 throwaway agent `probe-3a-media`（`capabilities.media.image=true`，18 个共享预设一个没碰）；新建探针议题 MH-96（349426708244346，fresh session——改既有议题的 `assignee_agent_id` 不会重绑既有 session，第一次在 MH-94 上跑成了 script_ai）；调试账号的私有 Codex 图片目录行 `codex-image-3a-probe`（349425977042658，`actual_provider=codex` / `gpt-6-astra`，由用户手工 INSERT——admin 的 `MediahubModelCreate.type` 不含 image，生产 INSERT 被分类器拒绝、按规则未绕过）。三样用完即删：agent `DELETE /ai-library/agents/probe-3a-media` 204；目录行 `DELETE /admin/mediahub-models/349425977042658` 200（owner token）；MH-94 assignee 仍为 script_ai。MH-96 留作证据（agent 删除后 assignee 置空）。
+
+| 项 | 结果 | 证据（生产真栈） |
+|---|---|---|
+| ① agent 生图登记 v1 | **PASS** | run 349435553143766：`GenerateImage` ok → `generated_media` 349435673566217（`origin_kind=agent_run`，`origin_run_id`/`agent_id` 非空）；`run_deliverables` 恰一行 generated_media v1（run/turn 1/step 1，seq 4）；transcript `deliverable` 事件 seq 4 带 turn/step；`view.outputs` total 1；工具回 `/api/v1/generated-media/{id}/cover`；worker `/tmp/codeximg_*` 已回收 |
+| ③ DBOS 分镜出图链带 run_id/turn/step | **PASS** | run 349452628709930：`GenerateShotImage` 回 `deferred:true + task_id`；task_tracking `d999c50d-…` shot_generate completed（metadata `run_id/trigger=agent_tool`）；`generated_media` 349452830741069（`origin_kind=shot_generate`，`origin_run_id='349452628709930'` 字符串）；`script_shots.image_url` 从悬空的 `/tmp/codeximg_y5nblpq4/gen.png` 换成 `/api/v1/generated-media/349452830741069/cover`；`run_deliverables` v1 run/turn 1/step 1 seq 12；`deliverable` 事件 seq 12 带 turn/step；血缘端点 `issue_key=MH-96`、`deep_link=…/MH-96?step=1&turn=1` |
+| ⑦ Generated 卡来源行 + 点回议题锚到 step | **PASS** | app.nous.ink（c2f535c）Playwright 真登录（临时 spec 已删）：卡片来源行「3a Media Probe (throwaway) · MH-96 · run #143766 · step 1」；API `source={kind:agent_run, issue_id, run_id, step:1, deep_link}`；点击 SPA 落到该 URL，`traj-step[data-step=1]` 可见，线程内 output-card「v1 … — Open」。截图 `~/Downloads/3a-7-generated-source.png` |
+
+补验过程中撞出三个**生产真缺陷**，各自独立 PR（worktree from origin/master + TDD + opus 对抗评审 + 突变 + 合并盯 deploy-gpu 容器符号 + readyz）。SDD 工作区 `.superpowers/sdd/2026-09-14-harness-3a-genmedia-fixes/`。
+
+| 缺陷 | PR | 合并 SHA | 修法 |
+|---|---|---|---|
+| A：`GenerateImage`/`GenerateShotImage` 工具只读 `image_url`，CLI 系 provider（codex / jimeng-cli）回 `image_path` → 「provider returned no image url」零登记 | #2274 | 0e324fc8 | `produced = image_url or image_path`（url→source_url、path→source_path），返回 `/cover`（视频 `/stream`），类型化 `error_code`；公用 `scratch_reaper`（`jimeng_`/`codeximg_` 前缀）在 finally 回收，四条 workflow 同步切换 |
+| B：议题回合在 `@DBOS.step` 内 `start_workflow` → `AssertionError: cur_ctx.is_workflow()`，任务行永远 queued（857490f7），`memory_harvester` side_effect 每轮报错同根 | #2276 | 72da376e | 新 `services/infra/deferred_dispatch.py`（contextvar 收集器；记录为 `module:name` 可序列化；白名单 = `_dispatch_bundle` 命名空间 + `app.workflows` 下 `__module__`）；`start_workflow_routed` 三道门之后在收集器激活时只记录并预铸 workflow_id、返回 `{deferred:true}`；两个 issue step 返回 `pending_dispatches`，workflow body 在 `route_finish_outcome` 前 drain（drain 永不抛，失败走 `_fail_task`）。把 2b-2「step 只回报、body 派发」推广成通用机制 |
+| C：分镜链把 int `run_id` 写进 TEXT `origin_run_id`（asyncpg DataError），`persist_generation` 回退把本地路径写进 `script_shots.image_url` 且 reaper 之后必悬空 | #2277 | c9a35380 | `register_generated_media` 咽喉点 `_as_text` 归一化 TEXT 列（`agent_id` 是 Uuid 不动）；persist 回退：本地路径 → raise（workflow 标 failed），http(s) 仍保留；真 PG 集成用例 `tests/db/test_generated_media_int_run_id_integration.py` 接进 `schema-drift.yml` |
+
+孤儿任务行 857490f7（缺陷 B 留下的）未手工 PATCH（路线 C 第 2 条），已由 `liveness_reconcile` 自动标成 `lost`——关闭。
+
+**裁定**（全文在两份 ledger）：目录行 INSERT 被拒不绕过、交用户执行；改 assignee 不重绑 session → 换新议题而不是修当场；A/B 两缺陷分两个 PR（文件集不相交），B 做成通用机制而非给 `GenerateShotImage` 单独开洞；孤儿行不手工 PATCH；A 的视频用 `/stream`、reaper 放 finally（brief 两处笔误改正）；C 的归一化放咽喉点、不改 `gateway.ledger_run_id` 的 int 语义，本地路径回退改 raise；`agent_id` 不做 `str()`（brief 写错）；T4 突变替换、A6 作废见上一节。
+
+**本轮新记的票**（进桶 B/C）：
+- **C14 前置（3b 花费必须先修）**：图片登记的归因不对——agent 工具路径 `model=""`、`provider` 记的是目录行名（`codex-image-3a-probe`）而非服务层解析出的 `ImageGenResult.provider/model`；分镜链 `provider=""`、`model` 记的是 `script_shot_generate._DEFAULT_MODEL` 的 `dall-e-3` 哨兵。3b 按 `(model, provider)` 查每次调用价之前得先把两条路径都改成写真实归因。
+- 改议题 `assignee_agent_id` 不重绑既有 issue session（是缺陷还是设计待定；至少 UI 该提示）。
+- `token_billing` 每轮 WARNING `PointsService.check_and_consume() got an unexpected keyword argument 'points'`。
+- `qwen3-embedding-8b` 未加载 → embedding 503（每轮）。
+- `canvas_timeline_workflow` 不在 `_dispatch_bundle`（只走 REST，不受 B 影响，但白名单口径要有人记得）。
+- `codex_daemon_router` 有与缺陷 C 反向的类型坑（T3 实施者观察）。
+- `schema-drift.yml` 里的集成用例清单注释要随新用例更新（本轮加了一条）。
+- 关闭：`memory_harvester` side_effect dispatch failed（B 根治）；孤儿行 857490f7（自动 lost）。
