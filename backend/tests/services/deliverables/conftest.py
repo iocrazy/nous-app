@@ -29,26 +29,40 @@ class RepoSpy:
         #: happen after the event exists (the row is inserted first).
         self.seq_calls: list[tuple[str, int]] = []
         self.raise_on_set_seq = False
+        #: 每次读/写调用收到的 ``session``（3b）。回退把「改内容 / 写账本 /
+        #: 登记版本」放进调用方的一个事务里，所以「登记口有没有把 session
+        #: 传下去」是可断言的事实，不是实现细节。
+        self.sessions: list[Any] = []
+        self.set_seq_sessions: list[Any] = []
         self._ids = itertools.count(1000)
 
-    async def latest_version(self, *, kind: str, ref_id: str) -> Optional[int]:
+    async def latest_version(
+        self, *, kind: str, ref_id: str, session: Any = None
+    ) -> Optional[int]:
         self.latest_calls.append((kind, ref_id))
+        self.sessions.append(session)
         returns = self.latest_version_returns
         if isinstance(returns, list):
             idx = len(self.latest_calls) - 1
             return returns[idx] if idx < len(returns) else returns[-1]
         return returns
 
-    async def insert_version(self, **values: Any) -> dict[str, Any]:
+    async def insert_version(
+        self, *, session: Any = None, **values: Any
+    ) -> dict[str, Any]:
         from sqlalchemy.exc import IntegrityError
 
         self.inserts.append(dict(values))
+        self.sessions.append(session)
         if len(self.inserts) in self.raise_integrity_on:
             raise IntegrityError("INSERT", {}, Exception("duplicate key"))
         return {"id": next(self._ids), **values}
 
-    async def set_seq(self, *, row_id: Any, seq: int) -> None:
+    async def set_seq(self, *, row_id: Any, seq: int, session: Any = None) -> None:
         self.seq_calls.append((str(row_id), seq))
+        #: seq 回写是 agent 那条路的**第三次**写。它单独记一格：调用方的事务
+        #: 要罩住的是三次写，不是前两次（3b）。
+        self.set_seq_sessions.append(session)
         if self.raise_on_set_seq:
             raise RuntimeError("update failed")
 

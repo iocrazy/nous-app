@@ -69,9 +69,13 @@ def test_render_elements_tolerates_an_empty_scene():
 # ── script_shot ──────────────────────────────────────────────────────────
 
 
+#: ``(after_json, created_at, ops_row_id)`` — the shape ``_shot_ledger``
+#: returns since 3b. The third slot is the ops row's own id, which is what
+#: ``run_deliverables.ledger_ref`` points at; the rows here carry no
+#: ``ledger_ref``, so these cases still exercise the timestamp fallback.
 SHOT_LEDGER = [
-    ({"shot_type": "WS", "description": "a wide shot"}, _at(11)),
-    ({"description": "a close-up"}, _at(12)),
+    ({"shot_type": "WS", "description": "a wide shot"}, _at(11), 1001),
+    ({"description": "a close-up"}, _at(12), 1002),
 ]
 
 
@@ -143,6 +147,7 @@ async def test_a_scene_version_is_replayed_to_its_own_watermark(monkeypatch):
                 },
             },
             _at(11),
+            1,
         ),
         (
             {
@@ -159,6 +164,7 @@ async def test_a_scene_version_is_replayed_to_its_own_watermark(monkeypatch):
                 },
             },
             _at(12),
+            2,
         ),
     ]
 

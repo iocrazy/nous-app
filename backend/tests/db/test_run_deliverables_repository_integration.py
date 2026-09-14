@@ -549,3 +549,136 @@ async def test_the_reads_are_empty_not_an_error_when_nothing_was_registered(
     repo = _repo()
     assert await repo.list_for_issue(fx["issue_a"]) == []
     assert await repo.lineage_for(kind="script_shot", ref_id=_uniq("nope")) == []
+
+
+# ---------------------------------------------------------------------------
+# cases 7, 8 — 人手登记的版本（3b：run_id NULL + actor_user_id）
+#
+# 这两条是 mig 466 之后**唯一**会在真库上现形的一类：单测里的 session 是桩的，
+# 一个内连接把 run_id IS NULL 的行悄悄丢掉，桩永远不会说出来。
+# ---------------------------------------------------------------------------
+
+
+async def _human_version(repo, *, kind, ref_id, version, actor, **over):
+    """一条回退写下的行：没有 run，由人署名（CHECK run_deliverables_run_or_actor）。"""
+    values = dict(
+        run_id=None,
+        actor_user_id=actor,
+        kind=kind,
+        ref_id=ref_id,
+        version=version,
+        parent_version=version - 1 or None,
+        title=f"v{version}",
+        model=None,
+        cost_cents=None,
+        turn=None,
+        step=None,
+        reverted_from_version=None,
+        ledger_ref=None,
+    )
+    values.update(over)
+    return await repo.insert_version(**values)
+
+
+@_skip
+async def test_lineage_for_keeps_a_human_version_that_has_no_run(orm_dsn, fx, pg):
+    """回退版的 ``run_id`` 是 NULL。run 侧内连接会让它——也就是链上**最新**的
+    那一版——当场消失，而端点照样 200，只是少一行。"""
+    repo = _repo()
+    ref = _uniq("shot")
+    actor = str(uuid.uuid4())
+    try:
+        await repo.insert_version(
+            run_id=fx["run_a"],
+            kind="script_shot",
+            ref_id=ref,
+            version=1,
+            parent_version=None,
+            title="v1",
+            model=None,
+            cost_cents=None,
+            turn=1,
+            step=1,
+            ledger_ref="5001",
+        )
+        await _human_version(
+            repo,
+            kind="script_shot",
+            ref_id=ref,
+            version=2,
+            actor=actor,
+            reverted_from_version=1,
+            ledger_ref="5002",
+        )
+
+        chain = await repo.lineage_for(kind="script_shot", ref_id=ref)
+
+        assert [r["version"] for r in chain] == [2, 1]
+        human = chain[0]
+        assert human["run_id"] is None
+        # UUID 列必须以字符串出口，否则这一行 JSON 编不了。
+        assert human["actor_user_id"] == actor
+        assert human["reverted_from_version"] == 1
+        assert human["ledger_ref"] == "5002"
+        # 没有 run 就没有 issue —— outer join 给的是 NULL，不是丢行。
+        assert human["issue_id"] is None and human["issue_key"] is None
+        assert chain[1]["issue_id"] == str(fx["issue_a"])
+    finally:
+        await pg.execute("DELETE FROM public.run_deliverables WHERE ref_id = $1", ref)
+
+
+@_skip
+async def test_list_for_issue_shows_human_versions_of_its_own_objects_only(
+    orm_dsn, fx, pg
+):
+    """两件事一起钉住：
+
+    * 一个对象只要有**一版**出自这个 issue 的 run，它的每一版都要列出来，
+      包括回退写下的人手版（spec §5 稿二右栏的 ``v5 ↩ v1``）；
+    * 归属判定仍然 run-based —— 一个只有人手版的对象不属于任何 issue，
+      不该因为「反正它没有 run」就出现在别人的产出面板上。
+    """
+    repo = _repo()
+    ref = _uniq("shot")
+    ref_human_only = _uniq("shot")
+    actor = str(uuid.uuid4())
+    try:
+        await repo.insert_version(
+            run_id=fx["run_a"],
+            kind="script_shot",
+            ref_id=ref,
+            version=1,
+            parent_version=None,
+            title="v1",
+            model=None,
+            cost_cents=None,
+            turn=1,
+            step=1,
+        )
+        await _human_version(
+            repo,
+            kind="script_shot",
+            ref_id=ref,
+            version=2,
+            actor=actor,
+            reverted_from_version=1,
+        )
+        await _human_version(
+            repo, kind="script_shot", ref_id=ref_human_only, version=1, actor=actor
+        )
+
+        rows = await repo.list_for_issue(fx["issue_a"])
+
+        mine = [r for r in rows if r["ref_id"] == ref]
+        assert [r["version"] for r in mine] == [2, 1]
+        assert mine[0]["run_id"] is None and mine[0]["actor_user_id"] == actor
+        assert mine[0]["reverted_from_version"] == 1
+        # 没有 run 把它带进这个 issue 的对象一行都不该出现。
+        assert [r["ref_id"] for r in rows].count(ref_human_only) == 0
+        # 而且一个对象的一版不会因为 JOIN 而重复出现。
+        assert len(mine) == len({r["id"] for r in mine})
+    finally:
+        await pg.execute(
+            "DELETE FROM public.run_deliverables WHERE ref_id = ANY($1::text[])",
+            [ref, ref_human_only],
+        )

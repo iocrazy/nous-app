@@ -6,7 +6,8 @@ exists for it:
 
 * ``script_shot`` — fold ``script_shot_ops.after_json`` (create carries every
   writable field, update carries only the ones it changed) up to the ops row
-  that is the newest at or before the deliverable's ``created_at``.
+  the deliverable's ``ledger_ref`` names, or, for rows registered before 3b,
+  the newest one at or before its ``created_at`` (see ``_prefix_for``).
 * ``script_scene`` — replay ``script_ops`` through the pure
   ``version_service.replay_to`` to the same watermark.
 * ``generated_media`` — there is nothing to fold: a regeneration writes a NEW
@@ -94,37 +95,72 @@ def _as_datetime(value: Any) -> Optional[_dt.datetime]:
     return stamp
 
 
-def _at_or_before(ledger: List[Tuple[Any, _dt.datetime]], when: Any) -> List[Any]:
-    """The ledger prefix a version could have seen.
+def _prefix_for(
+    ledger: List[Tuple[Any, Optional[_dt.datetime], int]], row: Dict[str, Any]
+) -> List[Any]:
+    """这一版能看见的账本前缀。
 
-    ``when`` is the deliverable's ``created_at``; the registration happens right
-    after the write commits, so every ledger row at or before it belongs to that
-    version. A version with no usable timestamp takes the WHOLE ledger rather
-    than none: showing the latest known content is a smaller error than claiming
-    the version had no content.
-    """
-    stamp = _as_datetime(when)
+    优先 ``ledger_ref``（登记时记下的账本位置：shot 是 script_shot_ops.id，scene 是
+    script_ops.op_seq 水位）——那是**外键**；``created_at`` 只是巧合上单调的时间戳，
+    一个事务里的两次写共享事务开始时间，按它切会把 v1 画成 v2。存量行没有
+    ledger_ref 且永远不会有，所以时间戳这条退路是常设的，不是过渡期妥协。解析不出
+    数字的脏值同样退回时间戳：一条血缘不该因为一个字段而 500。"""
+    ref = row.get("ledger_ref")
+    if ref not in (None, ""):
+        try:
+            cut = int(str(ref))
+        except (TypeError, ValueError):
+            cut = None
+        if cut is not None:
+            return [payload for payload, _created, key in ledger if key <= cut]
+    stamp = _as_datetime(row.get("created_at"))
     if stamp is None:
-        return [payload for payload, _ in ledger]
-    return [payload for payload, created in ledger if created <= stamp]
+        return [payload for payload, _created, _key in ledger]
+    return [
+        payload
+        for payload, created, _key in ledger
+        if created is not None and created <= stamp
+    ]
 
 
 # ── per-kind reconstruction ──────────────────────────────────────────────
 
 
-async def _shot_ledger(ref_id: str) -> List[Tuple[Dict[str, Any], _dt.datetime]]:
+async def _shot_ledger(
+    ref_id: str,
+) -> List[Tuple[Dict[str, Any], Optional[_dt.datetime], int]]:
+    """``(after_json, created_at, id)`` per ops row, oldest first.
+
+    Ordered by ``id`` (snowflake, monotonic) rather than ``created_at``: the id
+    IS ``ledger_ref``'s domain, so the ordering and the cut key are the same
+    thing.
+
+    A ``created_at`` of NULL no longer drops the row HERE — it used to vanish
+    from every reconstruction without a word. It still cannot be seen by the
+    timestamp FALLBACK in ``_prefix_for`` (that branch has nothing to compare
+    against), so a version registered before 3b still reconstructs without it;
+    a version carrying a ``ledger_ref`` sees it.
+    """
     async with read_scope() as session:
         rows = (
             await session.execute(
-                select(ScriptShotOps.after_json, ScriptShotOps.created_at)
+                select(
+                    ScriptShotOps.after_json,
+                    ScriptShotOps.created_at,
+                    ScriptShotOps.id,
+                )
                 .where(ScriptShotOps.shot_id == int(ref_id))
-                .order_by(ScriptShotOps.created_at.asc(), ScriptShotOps.id.asc())
+                .order_by(ScriptShotOps.id.asc())
             )
         ).all()
-    return [(row[0] or {}, _as_datetime(row[1])) for row in rows if row[1] is not None]
+    return [(row[0] or {}, _as_datetime(row[1]), int(row[2])) for row in rows]
 
 
-async def _scene_ledger(ref_id: str) -> List[Tuple[Dict[str, Any], _dt.datetime]]:
+async def _scene_ledger(
+    ref_id: str,
+) -> List[Tuple[Dict[str, Any], Optional[_dt.datetime], int]]:
+    """``({op_seq, op_json}, created_at, op_seq)`` per ops row, oldest first.
+    ``op_seq`` is both the replay watermark and this kind's ``ledger_ref``."""
     async with read_scope() as session:
         rows = (
             await session.execute(
@@ -134,9 +170,12 @@ async def _scene_ledger(ref_id: str) -> List[Tuple[Dict[str, Any], _dt.datetime]
             )
         ).all()
     return [
-        ({"op_seq": row[0], "op_json": row[1] or {}}, _as_datetime(row[2]))
+        (
+            {"op_seq": row[0], "op_json": row[1] or {}},
+            _as_datetime(row[2]),
+            int(row[0]),
+        )
         for row in rows
-        if row[2] is not None
     ]
 
 
@@ -239,8 +278,10 @@ async def _sides(
     return _unavailable(from_row, NO_LEDGER), _unavailable(to_row, NO_LEDGER)
 
 
-def _shot_side(row: Dict[str, Any], ledger: List[Tuple[Any, Any]]) -> Dict[str, Any]:
-    prefix = _at_or_before(ledger, row.get("created_at"))
+def _shot_side(
+    row: Dict[str, Any], ledger: List[Tuple[Any, Any, int]]
+) -> Dict[str, Any]:
+    prefix = _prefix_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
     snapshot: Dict[str, Any] = {}
@@ -249,10 +290,15 @@ def _shot_side(row: Dict[str, Any], ledger: List[Tuple[Any, Any]]) -> Dict[str, 
     return _side(row, text=render_shot(snapshot), available=True)
 
 
-def _scene_side(row: Dict[str, Any], ledger: List[Tuple[Any, Any]]) -> Dict[str, Any]:
-    prefix = _at_or_before(ledger, row.get("created_at"))
+def _scene_side(
+    row: Dict[str, Any], ledger: List[Tuple[Any, Any, int]]
+) -> Dict[str, Any]:
+    prefix = _prefix_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
+    # 水位就是前缀的末尾。``ledger_ref`` 已经在 ``_prefix_for`` 里切过一刀，
+    # 这里再按它算一次是同一个界的第二份算法：两处冗余意味着拆掉任何一处都
+    # 没有测试会红（3b fix 轮 1 实测）。一个口径，一个可证伪点。
     watermark = max(int(op["op_seq"]) for op in prefix)
     return _side(
         row, text=render_elements(replay_to(prefix, watermark)), available=True
