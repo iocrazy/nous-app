@@ -1,4 +1,4 @@
-"""Codex (GPT Image 2) CLI provider — subprocess-driven image generation.
+"""Codex (GPT Image) CLI provider — subprocess-driven image generation.
 
 Drives the ``gpt-image-2-skill`` CLI (baked into the backend image, see
 ``docs/runbook/codex-image.md``) as a subprocess with ``--provider codex``: the

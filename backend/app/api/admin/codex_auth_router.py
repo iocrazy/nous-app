@@ -1,4 +1,4 @@
-"""Admin status probe for the Codex (GPT Image 2) CLI provider.
+"""Admin status probe for the Codex (GPT Image) CLI provider.
 
 Status ONLY — unlike jimeng there is no in-panel login: the Codex OAuth
 session is created on the HOST (`codex login`, browser flow) and
