@@ -99,3 +99,80 @@ describe('CompactMediaCard — adaptive tile', () => {
     expect(() => fireEvent.load(img)).not.toThrow()
   })
 })
+
+/**
+ * The engagement-stats row.
+ *
+ * Two earlier shapes each broke one of the two constraints, which is why both
+ * are pinned here:
+ *
+ *  * FOUR COLOURED BOXES needed ~34px each, so on a portrait card in the
+ *    adaptive rows the numbers overflowed their boxes and read as one smear.
+ *  * THE SAME FOUR WRAPPED 2×2 fixed the digits and broke the layout: only the
+ *    narrow cards wrapped, so they hung below their row's baseline. A card in
+ *    a justified row must end where its neighbours end.
+ *
+ * So the row must be ONE LINE at every width, and it must never print a number
+ * it cannot fit. jsdom resolves no container queries, so what these can pin is
+ * the contract that produces that: a single flex row (no grid, no wrap), likes
+ * always present, the rest gated on measured thresholds, and every number
+ * still reachable through the row's title.
+ */
+describe('CompactMediaCard — engagement stats', () => {
+  const withCounts = {
+    ...item,
+    like_count: 1634,
+    comment_count: 160,
+    share_count: 41,
+    favorite_count: 427,
+    original_url: 'https://example.com/x',
+  } as unknown as Video
+
+  /** The stats row: the flex row holding the four metrics. */
+  function statsRow(container: HTMLElement): HTMLElement {
+    const el = container.querySelector('[title*="♥"]')
+    if (!el) throw new Error('stats row not found')
+    return el as HTMLElement
+  }
+
+  it('is one flex row, never a grid — its height must not follow its width', () => {
+    const { container } = render(<CompactMediaCard data={withCounts} onClick={() => {}} />)
+    const row = statsRow(container)
+    expect(row.className).toContain('flex')
+    expect(row.className).not.toContain('grid')
+    expect(row.className).not.toContain('flex-wrap')
+  })
+
+  it('always shows likes — the one metric that survives every width', () => {
+    const { container } = render(<CompactMediaCard data={withCounts} onClick={() => {}} />)
+    const first = statsRow(container).children[0] as HTMLElement
+    expect(first.className).not.toContain('hidden')
+    expect(first.textContent).toContain('1.6K')
+  })
+
+  // Thresholds measured against the WIDEST number `formatNumber` can emit
+  // (`999.9K`), not a typical one — a first pass used `1.6K` and the extremes
+  // then overflowed.
+  it('gates the other three on ascending measured thresholds', () => {
+    const { container } = render(<CompactMediaCard data={withCounts} onClick={() => {}} />)
+    const [, comments, shares, saves] = [...statsRow(container).children] as HTMLElement[]
+    expect(comments.className).toContain('@[126px]:flex')
+    expect(shares.className).toContain('@[178px]:flex')
+    expect(saves.className).toContain('@[232px]:flex')
+    for (const el of [comments, shares, saves]) expect(el.className).toContain('hidden')
+  })
+
+  // Hidden, not lost.
+  it('keeps every number reachable in the row title', () => {
+    const { container } = render(<CompactMediaCard data={withCounts} onClick={() => {}} />)
+    const title = statsRow(container).getAttribute('title') ?? ''
+    for (const n of ['1.6K', '160', '41', '427']) expect(title).toContain(n)
+  })
+
+  // It lost its box; it must not lose its role.
+  it('leaves the share stat a real button', () => {
+    const { container } = render(<CompactMediaCard data={withCounts} onClick={() => {}} />)
+    const shares = statsRow(container).children[2] as HTMLElement
+    expect(shares.tagName).toBe('BUTTON')
+  })
+})
