@@ -94,15 +94,29 @@ async def get_resource_provenance(
         ],
         visible_issue_ids=visible,
     )
-    newest = rows[0]
     return OutputLineageResponse(
         kind="generated_media",
         ref_id=str(gen["id"]),
         latest_version=versions[0]["version"],
         versions=versions,
-        # T4 的字段；T4 未合并时 pydantic 的 extra="ignore" 默认把它丢掉，
-        # 所以两个 Task 的合并顺序不构成依赖。
-        as_of_seq=int(newest.get("seq") or newest.get("id")),
+        # 这条链的登记水位：**最新那一行 ``run_deliverables`` 的 id**，字符串。
+        #
+        # 不是 ``seq``：``seq`` 是某次 run 的 transcript 坐标，可空（没有 live
+        # writer 或事件没落盘时就是 NULL），跨 run 也不单调——拿它当水位，一条
+        # 人手版收尾的链会报出 NULL，而两条 run 的链会报出互相倒退的数。
+        #
+        # 是 ``str`` 而不是 ``int``：Snowflake 过 2^53 在浏览器里掉精度
+        # （CLAUDE.md「Snowflake BIGINT 精度丢失」），血缘响应里每个 id 都是
+        # string，这个水位也是个 id，没有理由例外。
+        #
+        # ``max`` 而不是 ``rows[0]``：仓库确实按版本倒序返回，但水位的定义是
+        # 「最大的那个」，写成依赖排序就等于把一个别处的承诺悄悄变成本行的前提。
+        #
+        # T4 的字段（``OutputLineageResponse.as_of_seq: str``）。T4 未合并时
+        # pydantic 的 extra="ignore" 默认把它丢掉，所以两个 Task 的合并顺序不
+        # 构成依赖——正因为如此，下面那条单测断言的是**路由算出来的值**，而不是
+        # 响应体里的键。
+        as_of_seq=str(max(int(row["id"]) for row in rows)),
     )
 
 

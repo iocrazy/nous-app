@@ -214,8 +214,55 @@ def test_a_missing_resource_is_404_not_found(monkeypatch):
 
 
 def test_ids_stay_strings_on_the_wire(monkeypatch):
-    """Snowflake BIGINT 过 2^53 在浏览器里会掉精度（CLAUDE.md 已知陷阱）。"""
+    """Snowflake BIGINT 过 2^53 在浏览器里会掉精度（CLAUDE.md 已知陷阱）。
+
+    喂 string id 然后断言 string 是同义反复——它对「schema 上那些 ``str``
+    标注是不是真的在干活」一个字都没说。所以这里喂 **int** id：``OutputVersion``
+    必须拒绝它，而不是把一个 JSON number 发给浏览器。pydantic v2 的宽松模式
+    **不**做 int→str 强转，这正是我们要钉住的那件事——把 ``id: str`` 放宽成
+    ``Any`` 或 ``int``，这条就会转绿（而线上会开始掉精度）。
+    """
+    from pydantic import ValidationError
+
+    client, _repo, _find = _client(
+        monkeypatch,
+        rows=[_row(1, id=700000000000001, run_id=913402881190401)],
+    )
+    with pytest.raises(ValidationError) as caught:
+        _get(client)
+    bad = {err["loc"][-1] for err in caught.value.errors()}
+    assert {"id", "run_id"} <= bad, caught.value.errors()
+
+    # 正向对照：仓库真实返回的形状（id 已是 string）照常过关并保持 string。
     client, _repo, _find = _client(monkeypatch)
     version = _get(client).json()["versions"][0]
     assert isinstance(version["run_id"], str)
     assert isinstance(version["id"], str)
+
+
+def test_as_of_seq_is_the_newest_registration_id_as_a_string(monkeypatch):
+    """水位 = 链上最大的 ``run_deliverables.id``，**字符串**。
+
+    断言的是路由**算出来的 kwargs**，不是响应体里的键：``as_of_seq`` 是 T4 的
+    字段，T4 未合并时 pydantic 的 ``extra="ignore"`` 会把它丢掉，去读 JSON 的
+    测试在今天必然看不到它——那样这一行就完全无人把守，直到 T4 合并才第一次
+    被检验。
+
+    三件事各自可证伪：
+    * 不是 ``seq``（这里 seq 是 1/2/3，id 是 7000000000000 0x，值不同）；
+    * 不是 ``rows[0]``（行按 2/3/1 乱序喂进去，答案仍是 v3 那行）；
+    * 不是 ``int``（Snowflake 过 2^53 掉精度）。
+    """
+    real = mod.OutputLineageResponse
+    seen: dict = {}
+
+    def _spy(**kwargs):
+        seen.update(kwargs)
+        return real(**kwargs)
+
+    client, _repo, _find = _client(monkeypatch, rows=[_row(2), _row(3), _row(1)])
+    monkeypatch.setattr(mod, "OutputLineageResponse", _spy)
+    assert _get(client).status_code == 200
+
+    assert seen["as_of_seq"] == "700000000000003"
+    assert isinstance(seen["as_of_seq"], str)
