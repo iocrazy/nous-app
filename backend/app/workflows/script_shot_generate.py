@@ -97,19 +97,41 @@ def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> st
     return ". ".join(segments) or "storyboard shot"
 
 
+def _step_output(
+    out: Any, *, key: str = "url"
+) -> tuple[str, Optional[str], Optional[str]]:
+    """出图/出视频 step 的返回值 → ``(载荷, provider, model)``。
+
+    DBOS 把 step 返回值冻进 checkpoint，所以部署前排队的 workflow 恢复时
+    拿回来的仍是旧的裸 ``str``。两种形状都要接：归因是增益，不是继续跑完
+    的前提。``key`` 是载荷在字典里的键——出图是 ``url``，出视频是 ``path``
+    （``script_shot_video`` 复用本函数，它的产物永远是本地文件）。"""
+    if isinstance(out, dict):
+        return (
+            str(out.get(key) or ""),
+            out.get("provider") or None,
+            out.get("model") or None,
+        )
+    return (str(out), None, None)
+
+
 @DBOS.step(retries_allowed=True, max_attempts=3)
 async def generate_shot_image_step(
     shot_id: str,
     model: str,
     provider: Optional[str],
     user_id: Optional[str] = None,
-) -> str:
+) -> dict[str, str]:
     """Read the shot + its scene, compose the prompt, and run the image provider.
 
-    Returns the produced ``image_url``. Raises if the shot is missing or the
-    provider yields no url (so the workflow marks the shot failed)."""
+    Returns ``{"url", "provider", "model"}`` — the produced url/path plus the
+    attribution the adapter resolved (the request's ``model`` is the
+    ``dall-e-3`` sentinel by default, which is not a model name). Raises if the
+    shot is missing or the provider yields no image (so the workflow marks the
+    shot failed)."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
+    from app.services.ai.media.gen_attribution import resolved_attribution
     from app.services.ai.media.image_generation_service import ImageGenerationService
 
     shot = await get_script_shot_repository().get_by_id(shot_id)
@@ -136,8 +158,11 @@ async def generate_shot_image_step(
     produced = (result or {}).get("image_url") or (result or {}).get("image_path")
     if not produced:
         raise RuntimeError(f"Image provider returned no image for shot {shot_id}")
+    gen_provider, gen_model = resolved_attribution(
+        result or {}, requested_provider=provider, requested_model=model
+    )
     logger.info(f"[script_shot_generate][step] shot {shot_id} → {produced}")
-    return produced
+    return {"url": produced, "provider": gen_provider or "", "model": gen_model or ""}
 
 
 async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
@@ -170,6 +195,11 @@ async def persist_generation(
     run_id: Optional[int] = None,
     turn: Optional[int] = None,
     step: Optional[int] = None,
+    # 归因：adapter 解析出的真值。keyword-only + 默认 None = DBOS 冻结输入
+    # 兼容（部署前排队的 workflow 恢复时没有这两个）。
+    *,
+    resolved_provider: Optional[str] = None,
+    resolved_model: Optional[str] = None,
 ) -> dict[str, str]:
     """Persist the provider's ephemeral image through the generated-media store.
 
@@ -247,8 +277,11 @@ async def persist_generation(
                     kind="shot_generate",
                     node_id=str(shot_id),
                     prompt=prompt,
-                    model=model,
-                    provider=provider,
+                    # 哨兵 ``dall-e-3`` 的含义是「用目录行的 actual_model」，
+                    # 不是模型名——写进登记行会让按 (model, provider) 查价落空。
+                    model=resolved_model
+                    or (None if model == _DEFAULT_MODEL else model),
+                    provider=resolved_provider or provider,
                     derivation_kind="shot_generate",
                     # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
                     # 产出的图永远没有 run 可挂（真栈缺口，spec §1.3）。
@@ -336,9 +369,19 @@ async def script_shot_generate_workflow(
     re-raised (route-C: DBOS records FAILED; shot.status is a business column).
     ``user_id`` is optional (frozen DBOS input compat)."""
     try:
-        provider_url = await generate_shot_image_step(shot_id, model, provider, user_id)
+        step_out = await generate_shot_image_step(shot_id, model, provider, user_id)
+        provider_url, gen_provider, gen_model = _step_output(step_out)
         urls = await persist_generation(
-            shot_id, provider_url, model, provider, user_id, run_id, turn, step
+            shot_id,
+            provider_url,
+            model,
+            provider,
+            user_id,
+            run_id,
+            turn,
+            step,
+            resolved_provider=gen_provider,
+            resolved_model=gen_model,
         )
         await mark_shot_done(shot_id, urls["image_url"], urls["thumbnail_url"])
         return {

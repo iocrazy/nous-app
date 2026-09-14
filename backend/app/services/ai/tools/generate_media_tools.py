@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.services.ai.media.gen_attribution import resolved_attribution
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
@@ -106,6 +107,11 @@ class GenerateMediaTools:
                     "error": "provider returned no image url",
                     "error_code": "no_image",
                 }
+            # 归因写 adapter 解析出的真值：请求侧的 provider 是目录行名、
+            # model 常为空，按 (model, provider) 查价一定落空。
+            gen_provider, gen_model = resolved_attribution(
+                raw or {}, requested_provider=provider, requested_model=model
+            )
             is_url = _is_url(produced)
             try:
                 row = await register_generated_media(
@@ -119,8 +125,8 @@ class GenerateMediaTools:
                         run_id=run_context.get("run_id"),
                         agent_id=run_context.get("agent_id"),
                         prompt=prompt,
-                        model=model,
-                        provider=provider,
+                        model=gen_model,
+                        provider=gen_provider,
                         params={"aspect_ratio": args.get("aspect_ratio") or "16:9"},
                         derivation_kind="image_gen",
                         # 3a: the step this came out of, so the deliverable card
@@ -192,6 +198,10 @@ class GenerateMediaTools:
                     "error": "provider returned no video url",
                     "error_code": "no_video",
                 }
+            # 同 generate_image：登记的归因来自 adapter，不是请求值。
+            gen_provider, gen_model = resolved_attribution(
+                raw or {}, requested_provider=provider, requested_model=model
+            )
             is_url = _is_url(produced)
             try:
                 row = await register_generated_media(
@@ -205,8 +215,8 @@ class GenerateMediaTools:
                         run_id=run_context.get("run_id"),
                         agent_id=run_context.get("agent_id"),
                         prompt=prompt,
-                        model=model,
-                        provider=provider,
+                        model=gen_model,
+                        provider=gen_provider,
                         params={"source_image_url": src},
                         derivation_kind="video_gen",
                         # 3a: the step this came out of, so the deliverable card
