@@ -13,15 +13,13 @@ turns a missing kind into a COMPILE error over there. That only helps if the
 list itself agrees with Python — which is what this file reads both sides to
 say.
 
-The citation cap is pinned here for the same reason, one directory away from
-where the number is decided:
-``app.services.ai.chat.output_ref_resolver.MAX_OUTPUT_REF_ATTACHMENTS`` vs the
-picker's own refusal at ``attachmentLimits.ts``. ⚠️ It is ALSO pinned by
-``tests/services/ai/chat/test_attachment_limit_frontend_mirror.py``, which is
-that constant's natural home (it sits beside the resolver and additionally
-pins the two locale sentences). The copy here is deliberate redundancy for the
-A6 ticket and is the weaker of the two — if one of the pair is ever removed,
-remove THIS one.
+⚠️ The citation cap is NOT pinned here. ``MAX_OUTPUT_REF_ATTACHMENTS`` is
+already read from both sides by
+``tests/services/ai/chat/test_attachment_limit_frontend_mirror.py``, which sits
+beside the resolver that decides it and additionally pins the two locale
+sentences that interpolate it. A second assertion over the same constant would
+fail alongside that one saying the same thing, and a pin that only ever
+duplicates another's diff stops being read.
 
 Same posture as ``tests/services/assets/test_slots_frontend_mirror.py``: a TEXT
 PARSE of what a reader of the TS file sees, not an execution, so it needs no
@@ -43,19 +41,32 @@ from app.services.deliverables.kinds import ALL_KINDS
 _ROOT = Path(__file__).resolve().parents[4]
 _CHAT_DIR = _ROOT / "frontend" / "components" / "chat"
 MIRROR = _CHAT_DIR / "deliverableKinds.ts"
-LIMITS = _CHAT_DIR / "attachmentLimits.ts"
 
 
 def _require(path: Path) -> str:
     """Read ``path``, skipping ONLY on a backend-only checkout.
 
-    The distinction is the whole point. A tree with no ``frontend/`` cannot
-    answer the question and says so by skipping; a tree that HAS the frontend
-    but is missing this particular file is drift of exactly the kind this file
-    exists to catch — somebody deleted or renamed the mirror — and must fail.
-    Skipping on "file absent" is how a guard reports agreement it never
-    checked (the sibling attachment-limit mirror has that scar in its header).
+    Three states, and keeping them apart is the whole point:
+
+    * ``_ROOT`` did not resolve to the repo root — the ``parents[N]`` is
+      wrong. That is a BROKEN GUARD, and it must fail loudly: a miscounted
+      index makes every path below miss, every case skip, and the green run
+      say nothing at all. The sibling attachment-limit mirror carries exactly
+      that scar in its header (`parents[4]` where five were needed).
+    * ``_ROOT`` is right but there is no ``frontend/`` — a backend-only tree
+      genuinely cannot answer, so it skips.
+    * The frontend IS checked out and this file is missing — somebody deleted
+      or renamed the mirror, which is the drift this test exists to catch.
+      Fails.
+
+    The anchor is asserted BEFORE the skip decision, because otherwise state
+    one is indistinguishable from state two and reports as agreement.
     """
+    assert (_ROOT / "backend" / "app").is_dir(), (
+        f"_ROOT misresolved to {_ROOT} — the parents[N] index is wrong, so "
+        "every path below would miss and every case would skip into a green "
+        "run that checked nothing"
+    )
     if not _CHAT_DIR.is_dir():
         pytest.skip(f"frontend not checked out: {_CHAT_DIR} (backend-only tree)")
     assert path.exists(), (
@@ -85,21 +96,9 @@ def _ts_string_array(source: str, name: str) -> list[str]:
     ]
 
 
-def _ts_int_const(source: str, name: str) -> int:
-    """The value of ``export const <name> = <int>;``. Same anchoring rule."""
-    m = re.search(rf"^export const {name}\s*=\s*(\d+)\s*;", source, re.M)
-    assert m, f"{name} not found as an exported int — renamed?"
-    return int(m.group(1))
-
-
 @pytest.fixture(scope="module")
 def mirror_source() -> str:
     return _require(MIRROR)
-
-
-@pytest.fixture(scope="module")
-def limits_source() -> str:
-    return _require(LIMITS)
 
 
 @pytest.mark.unit
@@ -125,19 +124,6 @@ def test_the_mirror_declares_the_union_type_from_the_array(mirror_source):
         r"export type DeliverableKind\s*=\s*\(typeof DELIVERABLE_KINDS\)\[number\];",
         mirror_source,
     ), "DeliverableKind must be `(typeof DELIVERABLE_KINDS)[number]`"
-
-
-@pytest.mark.unit
-def test_the_typescript_citation_cap_equals_the_python_one(limits_source):
-    from app.services.ai.chat.output_ref_resolver import MAX_OUTPUT_REF_ATTACHMENTS
-
-    assert (
-        _ts_int_const(limits_source, "MAX_OUTPUT_REF_ATTACHMENTS")
-        == MAX_OUTPUT_REF_ATTACHMENTS
-    ), (
-        "the picker would refuse a different pick than the server refuses — "
-        "a comment that looks sent and is not, or a cap the writer never sees"
-    )
 
 
 @pytest.mark.unit
@@ -167,15 +153,9 @@ def test_the_parser_would_notice_a_dropped_entry():
 
 @pytest.mark.unit
 def test_the_parser_does_not_accept_a_mention_in_prose():
-    """A comment naming either constant must not satisfy the declaration
-    search — otherwise deleting the export while leaving the doc comment reads
-    as fine.
+    """A comment naming the constant must not satisfy the declaration search —
+    otherwise deleting the export while leaving the doc comment reads as fine.
     """
     commented = " * DELIVERABLE_KINDS = ['nope'] as const; — see the header\n"
     with pytest.raises(AssertionError):
         _ts_string_array(commented, "DELIVERABLE_KINDS")
-    with pytest.raises(AssertionError):
-        _ts_int_const(
-            " * MAX_OUTPUT_REF_ATTACHMENTS = 99 elsewhere\n",
-            "MAX_OUTPUT_REF_ATTACHMENTS",
-        )

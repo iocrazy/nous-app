@@ -7,6 +7,11 @@
  * disagree, so adding a kind is a two-file edit; there is no way to ship half
  * of it.
  *
+ * Adding a kind is EXPECTED to fail in three places until it is finished: the
+ * backend mirror test, `tsc` on the four `Record<DeliverableKind, …>` tables,
+ * and `deliverableKinds.test.ts`'s inline list of the four words. All three
+ * red at once is the guard working, not three separate problems.
+ *
  * Why it exists at all: four separate tables key labels and search words by
  * these words (`outputMentionRows`, `OutputMentionList`, `OutputChipBody`,
  * `Todolist/blocks/OutputsBlock`). Typed `Record<string, …>` they each accept
