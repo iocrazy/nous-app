@@ -30,6 +30,7 @@ import { useComposerDropzone } from '../../hooks/useComposerDropzone';
 import { useComposerPaste } from '../../hooks/useComposerPaste';
 import { useResourceSearch } from '../../hooks/useResourceSearch';
 import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
+import { useDropMentionTrigger } from '../chat/useDropMentionTrigger';
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
 import type { AssetGridRow } from '../assets/AssetGridPicker';
 import { useMentionAssetsTab } from '../chat/useMentionAssetsTab';
@@ -447,6 +448,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     mentionOutputsReset.current();
   }, []);
 
+  /** Delete the "@query" that opened the picker. Shared with `AIChatPanel`:
+   *  both composers stage assets and outputs above the box instead of
+   *  inserting a node, so both have to take the now-meaningless text back out
+   *  (see the hook for what it cost when they did not). */
+  const dropMentionTrigger = useDropMentionTrigger(editorRef);
+
   // Close the picker on Escape or click-outside (mirrors AIChatPanel).
   useEffect(() => {
     if (!mentionOpen) return;
@@ -470,6 +477,14 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   const handleMentionSelect = useCallback((item: ResourceSearchResult) => {
     const ed = editorRef.current;
     if (ed) {
+      // BEFORE the insert, not after. `insertResourceRef` is a bare
+      // `insertContent` at the caret — it replaces nothing — so the typed
+      // "@query" would otherwise survive next to the chip ("hello
+      // @me@story.md"). Dropping it afterwards is worse than not dropping it:
+      // the scan starts at a caret sitting behind the fresh chip, finds the
+      // chip's own "@" span first and deletes what was just inserted
+      // (measured: body came back "hello " with no chip).
+      dropMentionTrigger();
       (ed.commands as unknown as {
         insertResourceRef: (item: ResourceSearchResult) => boolean;
       }).insertResourceRef(item);
@@ -477,7 +492,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     closeMentionPicker();
     setMentionQuery('');
     ed?.commands.focus();
-  }, [closeMentionPicker]);
+  }, [dropMentionTrigger, closeMentionPicker]);
 
   /**
    * Picking an asset STAGES it — it does not insert a tiptap node.
@@ -512,11 +527,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         return;
       }
       setStagedAssets(next);
+      dropMentionTrigger();
       closeMentionPicker();
       setMentionQuery('');
       editorRef.current?.commands.focus();
     },
-    [stagedAssets, addToast, t, closeMentionPicker],
+    [stagedAssets, addToast, t, dropMentionTrigger, closeMentionPicker],
   );
 
   /**
@@ -543,11 +559,12 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         return;
       }
       setStagedOutputs(next);
+      dropMentionTrigger();
       closeMentionPicker();
       setMentionQuery('');
       editorRef.current?.commands.focus();
     },
-    [stagedOutputs, addToast, t, closeMentionPicker],
+    [stagedOutputs, addToast, t, dropMentionTrigger, closeMentionPicker],
   );
 
   // The Assets tab itself — state, transport and key routing shared with

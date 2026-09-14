@@ -76,6 +76,7 @@ import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
 import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useMentionAssetsTab } from './chat/useMentionAssetsTab';
+import { useDropMentionTrigger } from './chat/useDropMentionTrigger';
 import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
@@ -514,12 +515,9 @@ export function AIChatPanel({
 
   /** Delete the "@query" the user typed to open the picker. Once the pick is
    *  staged above the composer that text is a placeholder for nothing, and
-   *  leaving it behind sends "@clip.mp4" as message body. */
-  const dropMentionTrigger = useCallback(() => {
-    (chatEditorRef.current?.commands as unknown as {
-      removeMentionTrigger?: () => boolean;
-    } | undefined)?.removeMentionTrigger?.();
-  }, []);
+   *  leaving it behind sends "@clip.mp4" as message body. Shared with
+   *  `Todolist/IssueReplyBox`, which grew the same staging tabs. */
+  const dropMentionTrigger = useDropMentionTrigger(chatEditorRef);
 
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {
