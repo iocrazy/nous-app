@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
+import { ViewModeMenu } from './ViewModeMenu';
 import { createPortal } from 'react-dom';
 import {
   Clock,
@@ -628,30 +629,20 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               )}
             </div>
 
-            {/* View toggle — cycles grid → justified → list → grid */}
-            <button
-              onClick={() =>
-                setViewMode(
-                  viewMode === 'grid' ? 'justified' : viewMode === 'justified' ? 'list' : 'grid',
-                )
-              }
-              className="p-1.5 rounded-lg text-ink-400 hover:text-ink-200 hover:bg-ink-800 transition-colors"
-              title={
-                viewMode === 'grid'
-                  ? t('resources.gridView')
-                  : viewMode === 'justified'
-                  ? t('resources.justifiedView')
-                  : t('resources.listView')
-              }
-            >
-              {viewMode === 'grid' ? (
-                <LayoutGrid size={14} />
-              ) : viewMode === 'justified' ? (
-                <LayoutTemplate size={14} />
-              ) : (
-                <LayoutList size={14} />
-              )}
-            </button>
+            {/* View picker. This used to CYCLE grid → justified → list on
+                click — deliberate, but a cycle never says which mode you are
+                in or how many there are, so finding a view meant clicking
+                past it. Same control as My Downloads now, minus `feed`: this
+                toolbar's grid has no feed renderer. */}
+            <ViewModeMenu<'grid' | 'list' | 'justified'>
+              modes={[
+                { value: 'justified', icon: LayoutTemplate, label: t('resources.justifiedView', 'Justified View') },
+                { value: 'grid', icon: LayoutGrid, label: t('resources.gridView', 'Grid View') },
+                { value: 'list', icon: LayoutList, label: t('resources.listView', 'List View') },
+              ]}
+              value={viewMode}
+              onChange={setViewMode}
+            />
 
             {/* Flatten toggle — "show child files": list every file from the
                 current folder + all descendants, hiding folder cards. */}
