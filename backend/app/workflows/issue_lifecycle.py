@@ -68,6 +68,16 @@ def _pending_dispatches(res: Any) -> list[dict[str, Any]]:
     return list(res.get("pending_dispatches") or [])
 
 
+def _turn_run_id(res: Any) -> Any:
+    """这一轮跑出来的 run id（3b §4），读不出就是 None。
+
+    与 ``_pending_dispatches`` 同一条纪律、同一个理由：回合可调用对象是**注入**
+    的，生产给的是完整 dict，测试替身（或别的调用方）可能给任何东西。``done``
+    帧上的水位只是装饰——读它绝不能成为压垮一次本来成功的回合的那件事。
+    """
+    return res.get("run_id") if isinstance(res, dict) else None
+
+
 def _execution_state_without_dispatching():
     """``execution_state - 'dispatching'`` as an UPDATE value.
 
@@ -545,6 +555,9 @@ async def _run_reply_turns(
         )
         return {"issue_id": issue_id, "deferred": True}
 
+    # 3b §4：这条回合跑出来的 run —— 调用方的 ``done`` 帧要靠它报水位。
+    # 在 try 之外初始化，于是任何提前返回/异常路径下它都有定义。
+    last_run_id: Any = None
     try:
         resuming = False
         if load_issue is not None and set_status is not None:
@@ -583,6 +596,8 @@ async def _run_reply_turns(
                 )
             raise
 
+        last_run_id = _turn_run_id(result) or last_run_id
+
         # Harness 3a Task 2: the turn ran inside a @DBOS.step, so anything it
         # wanted to dispatch was recorded instead of started. Start it HERE —
         # this function is never a step (see the docstring of
@@ -619,7 +634,7 @@ async def _run_reply_turns(
             # explains. Non-resuming replies never change status, so there
             # is nothing for the barrier to react to — left untouched.
             await _maybe_fire_subissue_barrier(issue_id)
-        return {"issue_id": issue_id, "executed": True}
+        return {"issue_id": issue_id, "executed": True, "run_id": last_run_id}
     finally:
         await release(issue_id)
 
@@ -664,8 +679,9 @@ async def respond_to_issue_reply(
         session_id = await ensure_issue_session_step(issue_id)
         auto_close = await load_auto_close_flag()
         await publish_status(issue_id, "running")
+        turns_out: Optional[dict[str, Any]] = None
         try:
-            return await _run_reply_turns(
+            turns_out = await _run_reply_turns(
                 issue_id,
                 user_id,
                 reply_text,
@@ -683,10 +699,12 @@ async def respond_to_issue_reply(
                 auto_close=auto_close,
                 attachments=attachments,
             )
+            return turns_out
         finally:
             # Paired with the "running" above: only a turn that was announced
-            # gets announced as done.
-            await publish_status(issue_id, "done")
+            # gets announced as done. 3b §4: it names the run it announced, so
+            # the frame can carry that run's transcript watermark.
+            await publish_status(issue_id, "done", run_id=_turn_run_id(turns_out))
     finally:
         await clear_dispatch_marker_step(issue_id)
 
@@ -716,16 +734,19 @@ async def run_issue_reply_for_wait(
     """
     session_id = await ensure_issue_session_step(issue_id)
     await publish_status(issue_id, "running")
+    turn_out: Optional[dict[str, Any]] = None
     try:
-        return await run_issue_reply_step(
+        turn_out = await run_issue_reply_step(
             issue_id=issue_id,
             session_id=session_id,
             user_id=user_id,
             reply_text=reply_text,
             attachments=attachments,
         )
+        return turn_out
     finally:
-        await publish_status(issue_id, "done")
+        # 3b §4: same as respond_to_issue_reply — the frame names the run.
+        await publish_status(issue_id, "done", run_id=_turn_run_id(turn_out))
 
 
 @DBOS.step()

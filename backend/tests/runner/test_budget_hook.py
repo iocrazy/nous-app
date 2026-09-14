@@ -447,3 +447,34 @@ def test_chain_puts_the_budget_gate_before_the_inbox_claim():
 
     src = Path("app/services/ai/chat/ai_library_chat_wiring.py").read_text()
     assert re.search(r"BudgetGateHook\(\),\s*InboxClaimHook\(\)", src)
+
+
+@pytest.mark.asyncio
+async def test_a_media_deliverable_pushes_the_gate_over_budget():
+    """生图的钱必须进 spent_cents，否则预算拦不住一条只生图的 run。"""
+    views = rp.replay(
+        [
+            (
+                "step_end",
+                {"turn": 1, "step": 1, "cost_cents": 10.0, "model": "qwen-max"},
+            ),
+            (
+                "deliverable",
+                {
+                    "kind": "generated_media",
+                    "ref_id": "1",
+                    "version": 1,
+                    "cost_cents": 95.0,
+                },
+            ),
+        ]
+    )
+    assert views["cost"]["spent_cents"] == 105.0
+
+    rec = _Rec()
+    rec.views = views
+    rec.views["view"]["question"] = None
+    ctx = StepContext(turn=1, step=2, recorder=rec)
+    assert await _hook(budget=100).before_llm_call(ctx) is StepDecision.STOP
+    assert [e[0] for e in rec.events] == ["budget_check", "question_asked"]
+    assert rec.events[0][1]["action"] == "halt"

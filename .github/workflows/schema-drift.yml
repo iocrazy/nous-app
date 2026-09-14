@@ -82,6 +82,10 @@ on:
       # `ORDER BY effective_at DESC` + `per_call_cents IS NOT NULL` picks.
       - 'backend/app/services/deliverables/step_costs.py'
       - 'backend/app/services/deliverables/media_price.py'
+      - 'backend/tests/db/test_run_seq_and_output_keys_integration.py'
+      # 3b Task 4b 的两个聚合读。两边的单测都把这两个方法整个打桩，所以
+      # 除了下面那一步，没有任何地方让 Postgres 见过它们。
+      - 'backend/app/repositories/agent_runs_repository.py'
       - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
       # The writer whose seq-conflict retry that file is the only real-driver
       # proof of: a stub can raise IntegrityError on command, but only Postgres
@@ -158,7 +162,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all nineteen, so it has to re-run
+      # to it changes what "green" means for all twenty, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -588,6 +592,7 @@ jobs:
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_466_revert_cost_integration.py -v
 
       - name: Exercise the revert service against the built schema (3b Task 3)
+      - name: Exercise the turn-done watermark reads against the built schema (3b Task 4b)
         working-directory: backend
         env:
           INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
@@ -603,3 +608,13 @@ jobs:
           # 正是血缘要回答的那个问题）。顺带钉住并发回退：SQLSTATE 23505 必须以
           # `IntegrityError.orig.sqlstate` 的形状到达，否则那个 409 退化成 500。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_revert_output_integration.py -v
+          # The ONLY place last_transcript_seq / output_keys_for_run execute.
+          # Both are aggregates, which is the shape a stubbed session cannot
+          # vouch for: whether MAX(seq) over an empty run comes back as None
+          # rather than raising or reading 0 ("no events" and "seq 0" are
+          # different answers — 0 makes the browser drop the NEWEST frame as
+          # the oldest), whether GROUP BY kind, ref_id really collapses two
+          # versions of one object into one cache key, and whether
+          # ORDER BY MIN(seq) puts a not-yet-stamped registration (seq is
+          # NULLABLE — the registry back-fills it) last instead of dropping it.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_seq_and_output_keys_integration.py -v

@@ -202,6 +202,9 @@ async def run_issue_agent(
 
     attribution = attribution_from_origin_kind(issue.get("origin_kind"))
 
+    # 3b §4：``done`` 帧要带这一轮的 run 才说得出水位。声明在 try 之外，
+    # 于是异常路径下它仍是 None —— 帧照发，run_id 是 null（「不知道」不伪装）。
+    result: Optional[dict[str, Any]] = None
     await publish_status(iid, "running")
     try:
         result = await AILibraryChatService().run_session_turn(
@@ -285,4 +288,4 @@ async def run_issue_agent(
             "stop_reason": result.get("stop_reason"),
         }
     finally:
-        await publish_status(iid, "done")
+        await publish_status(iid, "done", run_id=(result or {}).get("run_id"))

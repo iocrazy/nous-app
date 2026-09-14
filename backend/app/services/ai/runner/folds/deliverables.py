@@ -10,9 +10,15 @@
 跟着 views 一起被镜像进 ``agent_runs.metadata_json`` —— 迟到的事件走
 ``RunEventWriter.for_run``，折的是**存下来的** views，簿记不跟着存就等于
 每次迟到都从零开始去重。读方只取前三个键。
+
+3b §3.3：媒体类登记行带精确价，同一个 ``seen`` 去重键同时护住计数和账——
+重复到达既不多计一件，也不多计一次钱。价钱进 ``cost.media_cents``（与
+``own_cents`` / ``by_child`` 并列的第三个分量），因此预算钩子读的
+``spent_cents`` 里从此有生图的钱。文本类登记行没有 ``cost_cents``（读时
+才分摊），这里一分不加——「不知道」不能当 0 计进账，也不能当钱。
 """
 
-from app.services.ai.runner.run_projection import register
+from app.services.ai.runner.run_projection import recompute_spent, register
 
 _SEEN_MAX = 50
 _EMPTY = {"total": 0, "revised": 0, "last": None, "seen": []}
@@ -41,5 +47,12 @@ def fold_deliverable(views, payload):
         "version": version,
         "title": payload.get("title"),
     }
+    cents = payload.get("cost_cents")
+    if isinstance(cents, (int, float)) and not isinstance(cents, bool):
+        cost = views["cost"]
+        cost["media_cents"] = round(
+            float(cost.get("media_cents") or 0.0) + float(cents), 4
+        )
+        recompute_spent(cost)
     views["view"]["outputs"] = outputs
     return views

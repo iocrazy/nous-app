@@ -75,6 +75,7 @@ def compute_rollup(
     origin: dict[str, Any],
     *,
     now: Optional[dt.datetime] = None,
+    last_seq: Optional[int] = None,
 ) -> dict[str, Any]:
     """``runs`` newest first, root runs only."""
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -109,6 +110,9 @@ def compute_rollup(
                 "model": current.get("model"),
                 "view": _view(current),
                 "cost": _cost(current),
+                # 该 run 的 transcript 水位，轮询边沿用它跟 WS 的 done 帧去重
+                # （3b §4）；读不到就是 None——0 会把最新的一帧当最旧的丢掉。
+                "last_seq": last_seq,
             }
             if current
             else None
@@ -177,7 +181,13 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
-    return compute_rollup(issue, runs, children, pending, origin)
+    current = next((r for r in runs if r.get("status") == "running"), None)
+    last_seq = (
+        await get_agent_runs_repository().last_transcript_seq(int(current["id"]))
+        if current
+        else None
+    )
+    return compute_rollup(issue, runs, children, pending, origin, last_seq=last_seq)
 
 
 __all__ = ["compute_rollup", "derive_phase", "load_rollup"]

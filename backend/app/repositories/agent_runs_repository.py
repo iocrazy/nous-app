@@ -783,6 +783,20 @@ class AgentRunsRepository(AsyncpgRepository):
             for r in rows
         ]
 
+    async def last_transcript_seq(self, run_id: int) -> Optional[int]:
+        """这条 run 的 transcript 水位（``MAX(seq)``），没有事件就是 None。
+
+        前端按它丢重复与乱序的回合结束信号（3b §4）。「没有事件」与「seq 0」
+        是两件事，所以空表回 None。"""
+        from app.models import AgentRunTranscriptEvents as TE
+
+        async with read_scope() as session:
+            return (
+                await session.execute(
+                    select(func.max(TE.seq)).where(TE.run_id == int(run_id))
+                )
+            ).scalar_one_or_none()
+
     async def list_forks(self, run_id: int) -> List[Dict[str, Any]]:
         """Runs whose ``fork_of_run_id`` is this run (mig 453), oldest first.
         Phase 2b-1 ``GET /runs/{id}/forks``."""
