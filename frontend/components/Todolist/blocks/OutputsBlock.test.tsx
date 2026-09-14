@@ -163,8 +163,16 @@ describe('OutputsBlockView — live refresh', () => {
 
     act(() => notifyTurn(String(ISSUE_ID), { runId: 'r1', seq: 7 }));
     await waitFor(() => expect(screen.getByTestId('outputs-updated')).toBeTruthy());
+    // ⚠️ 必须先 flush 再推时钟。徽章是 commit 阶段进 DOM 的，而给它定时下架的
+    // passive effect 晚一个 flush 才挂表；`waitFor` 一看见徽章就返回了，此刻那个
+    // 1000ms 的定时器还不存在。直接 `advanceTimersByTime` 等于对着空表推时间 ——
+    // effect 随后才挂表，从推完的那一刻重新数满 UPDATED_BADGE_MS。机器一慢（CI 的
+    // 真实负载，本机把 fetch 拖慢 400ms 即必现）就卡在这里：徽章永远不下去。
+    await act(async () => {});
+    // flush 过之后定时器必定已挂上，推时间就是同步触发 —— 不再拿 `waitFor`
+    // 等（它的默认超时 1000ms 恰好等于 UPDATED_BADGE_MS，是另一个会骗人的边界）。
     act(() => vi.advanceTimersByTime(UPDATED_BADGE_MS + 1));
-    await waitFor(() => expect(screen.queryByTestId('outputs-updated')).toBeNull());
+    expect(screen.queryByTestId('outputs-updated')).toBeNull();
 
     rerender(<OutputsBlockView ctx={ctx({ refreshKey: 1 })} />);
     await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(3));
@@ -182,6 +190,22 @@ describe('OutputsBlockView — live refresh', () => {
       unmount();
       expect(__listenerCount(String(ISSUE_ID))).toBe(0);
     }
+  });
+
+  it('re-reads ONCE when the poll edge and the done frame describe the same run', async () => {
+    // 真栈上一个回合结束会被说两遍（Task 9 报告第 9 行，5 次重现 4 次）：
+    // `useIssueProgress` 的轮询边沿报的是上一次读到的 `last_seq`（3），87–144ms 后
+    // WS 的 `status{phase:'done'}` 带着这个 run 真正的终局 seq（42）再来一遍。
+    // 按 seq 比大小会让后到的那条越过水位 —— 于是每个回合重拉两遍产出。
+    render(<OutputsBlockView ctx={ctx()} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: '727145299382534100', seq: 3 }));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: '727145299382534100', seq: 42 }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).toHaveBeenCalledTimes(2);
   });
 
   it('ignores another issue’s turn', async () => {

@@ -2,8 +2,10 @@
  * 「这个议题的一个回合结束了」——跨 React 树的一次广播（harness 3b §4）。
  *
  * 同一个回合结束会被说两遍：WS 的 `status{phase:'done'}` 帧一遍，`useIssueProgress`
- * 的轮询边沿一遍。去重的水位按 `(issueId, runId)` 记 —— transcript 的 `seq` 本来就是
- * 每个 run 自己的计数器，全 issue 共用一条水位会把「新 run 的 seq 3」误判成陈旧帧。
+ * 的轮询边沿一遍。**一个 run 只结束一次**，所以 `(issueId, runId)` 车道由第一条信号
+ * 封口，之后同车道的一律丢掉 —— 两个说话人报的 seq 本来就不是同一个东西（轮询边沿
+ * 报的是上一次读到的 `last_seq`，WS 报的是这个 run 真正的终局 seq），拿 seq 比大小
+ * 会让后到的那条越过水位再放一次。seq 只在本地车道（`runId: null`）有序号意义。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +16,7 @@ beforeEach(() => __resetTurnSignals());
 const RUN = '727145299382534100';
 
 describe('issueTurnSignal', () => {
-  it('fires once for a seq, and drops the replay of the same seq', () => {
+  it('fires once for a run, and drops the replay of the same seq', () => {
     // 轮询边沿与 WS done 描述的是同一个回合结束，先后到达两次。
     const cb = vi.fn();
     subscribeTurn('5', cb);
@@ -29,6 +31,38 @@ describe('issueTurnSignal', () => {
     notifyTurn('5', { runId: RUN, seq: 5 });
     notifyTurn('5', { runId: RUN, seq: 4 });
     expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('seals the run lane on the poll edge, so the WS done frame adds nothing', () => {
+    // 真栈上的原样顺序（Task 9 报告第 9 行）：`useIssueProgress` 的轮询边沿先落，它报
+    // 的 seq 是**上一次读到的** `current_run.last_seq`(3)；87–144ms 后 WS 的
+    // `status{phase:'done'}` 才到，带着这个 run 真正的终局 seq(42)。两个数字描述的
+    // 不是同一件事，拿它们比大小 = 后到的那条越过水位再放一次 = 每回合重拉两遍产出。
+    const cb = vi.fn();
+    subscribeTurn('5', cb);
+    notifyTurn('5', { runId: RUN, seq: 3 });
+    notifyTurn('5', { runId: RUN, seq: 42 });
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('seals the same way when the WS frame lands first', () => {
+    // 两个说话人谁先到不确定（轮询 tick 与 WS 帧没有顺序保证），封口必须两向都成立。
+    const cb = vi.fn();
+    subscribeTurn('5', cb);
+    notifyTurn('5', { runId: RUN, seq: 42 });
+    notifyTurn('5', { runId: RUN, seq: 3 });
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives each of two runs its own single signal', () => {
+    // 封口是按 run 的，不是按 issue 的 —— 下一个 run 结束照样要说一次。
+    const cb = vi.fn();
+    subscribeTurn('5', cb);
+    notifyTurn('5', { runId: 'run-a', seq: 3 });
+    notifyTurn('5', { runId: 'run-a', seq: 42 });
+    notifyTurn('5', { runId: 'run-b', seq: 3 });
+    notifyTurn('5', { runId: 'run-b', seq: 42 });
+    expect(cb).toHaveBeenCalledTimes(2);
   });
 
   it('keeps two issues independent', () => {
@@ -91,6 +125,20 @@ describe('issueTurnSignal', () => {
     const first = nextLocalSeq();
     const second = nextLocalSeq();
     expect(second).toBeGreaterThan(first);
+  });
+
+  it('forgets its seals on reset', () => {
+    // 模块级状态活得比一个用例长；不清封口表会让后面的用例静默丢掉自己的信号。
+    const first = vi.fn();
+    subscribeTurn('5', first);
+    notifyTurn('5', { runId: RUN, seq: 3 });
+    expect(first).toHaveBeenCalledTimes(1);
+
+    __resetTurnSignals();
+    const second = vi.fn();
+    subscribeTurn('5', second);
+    notifyTurn('5', { runId: RUN, seq: 3 });
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it('stops delivering after unsubscribe', () => {
