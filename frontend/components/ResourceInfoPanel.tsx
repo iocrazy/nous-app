@@ -2,8 +2,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain, Sparkles, Eye, Loader2, Check, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
-import { getResourceCoverUrl } from '../services/resourceService';
+import { getResourceCoverUrl, getResourceProvenance } from '../services/resourceService';
+import type { OutputLineage } from '../services/outputsService';
 import { EagleTagPicker } from './EagleTagPicker';
+import { OutputProvenance } from './agentActivity/OutputProvenance';
 import { ResourcePromptSection } from './resources/ResourcePromptSection';
 
 interface ResourceInfoPanelProps {
@@ -152,6 +154,26 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   const { icon: IconComponent, color, bg } = getFileIcon(resource.mime_type);
 
   const isMedia = resource.mime_type?.startsWith('video/') || resource.mime_type?.startsWith('audio/');
+
+  // ─── Provenance (harness 三期 3b §5 稿四) ────────────
+  //
+  // 这个资源的来源链。面板手上只有 `resource.id` —— 链接在 generated_media
+  // 一侧，`resources` 没有反向列，所以反查在后端；拿回来的链直接喂给画布上用的
+  // **同一个** OutputProvenance，而不是在这里复制一块长得像的 UI。
+  const [provenance, setProvenance] = useState<OutputLineage | null>(null);
+  useEffect(() => {
+    let live = true;
+    // 换资源先清空：上一张图的来源留在屏幕上，比没有来源更糟。
+    setProvenance(null);
+    getResourceProvenance(String(resource.id))
+      .then((chain) => { if (live) setProvenance(chain); })
+      .catch((err) => {
+        // 读不到来源不该让整个信息面板残缺；说出来（日志），但不画错误块 ——
+        // 这一块在库里的常态就是不存在。
+        console.error('[ResourceInfoPanel] provenance read failed', err);
+      });
+    return () => { live = false; };
+  }, [resource.id]);
 
   // Island redesign: neutral text/border aligned to the mock --content/--line ladder.
   const cPrimary = 'text-content';
@@ -512,6 +534,19 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
           <InfoRow label={t('resources.infoPanel.modified')} value={formatDate(resource.updated_at)} />
         </div>
       </div>
+
+      {/* Source —— 人传的资源这里什么都不画（3b §5 稿四）。 */}
+      {provenance && (
+        <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
+          <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
+            {t('resources.infoPanel.provenance', 'Source')}
+          </h4>
+          {/* 画布分镜节点挂的是同一个组件 —— 一块 UI，两个宿主。
+              allowDiff={false}：媒体没有版本链可比（3b §6）。 */}
+          <OutputProvenance kind="generated_media" refId={provenance.ref_id}
+                            lineage={provenance} allowDiff={false} />
+        </div>
+      )}
 
       {/* Bottom spacing */}
       <div className="h-6" />

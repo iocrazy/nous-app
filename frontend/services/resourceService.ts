@@ -8,7 +8,8 @@ import {
   type KeysetListPage,
 } from './pagination';
 import { getAuthHeaders } from './parserService';
-import { apiClient } from './apiClient';
+import { apiClient, ApiError } from './apiClient';
+import type { OutputLineage } from './outputsService';
 import { getApiUrl } from '../utils/apiConfig';
 import { buildMediaUrl } from '../utils/mediaUrl';
 import { chunked, PG_IN_CHUNK } from '../utils/chunk';
@@ -2479,4 +2480,31 @@ export async function fetchResourceCanvasRefs(resourceId: string): Promise<Canva
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   return json.data as CanvasBackRef[];
+}
+
+// ─── Provenance (harness 三期 3b §5 稿四) ────────────────
+
+/**
+ * 这个资源是谁做出来的 —— `null` 表示没有 run 登记过它，也就是人传的。
+ *
+ * 404 收成 null 而不是抛：库里绝大多数行都是人传的，把常态渲染成错误等于在每一页
+ * 挂一个永久假警报（`OutputProvenance` 顶部写的同一条规则）。其它失败一律外抛 ——
+ * 静默成 null 会让「读不到」与「人传的」不可区分。
+ *
+ * 判据是 **状态码**而不是 `details.code`：这条路只有两种 404（`not_found` 资源
+ * 不存在、`not_registered` 没有产出登记），两者对这块 UI 是同一个答案「没有来源
+ * 可画」；而生产把每个 HTTPException 包进 ErrorResponse 外壳，`err.code` 拿到的
+ * 是外壳的 `http_404` 而非类型码（CLAUDE.md 2026-09-09），照着 `err.code ===
+ * 'not_registered'` 写会在真栈上每次都判错，单测却因为用了理想形状而全绿。
+ *
+ * 反查在后端：链接在 `generated_media.promoted_resource_id` 一侧，`resources` 没有
+ * 反向列，前端拿着资源 id 无从自己走到 generated_media。
+ */
+export async function getResourceProvenance(resourceId: string): Promise<OutputLineage | null> {
+  try {
+    return await apiClient.get<OutputLineage>(`/api/v1/resources/${resourceId}/provenance`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
