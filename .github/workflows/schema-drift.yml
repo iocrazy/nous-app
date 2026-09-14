@@ -592,7 +592,6 @@ jobs:
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_466_revert_cost_integration.py -v
 
       - name: Exercise the revert service against the built schema (3b Task 3)
-      - name: Exercise the turn-done watermark reads against the built schema (3b Task 4b)
         working-directory: backend
         env:
           INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
@@ -608,6 +607,13 @@ jobs:
           # 正是血缘要回答的那个问题）。顺带钉住并发回退：SQLSTATE 23505 必须以
           # `IntegrityError.orig.sqlstate` 的形状到达，否则那个 409 退化成 500。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_revert_output_integration.py -v
+
+      - name: Exercise the turn-done watermark reads against the built schema (3b Task 4b)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
           # The ONLY place last_transcript_seq / output_keys_for_run execute.
           # Both are aggregates, which is the shape a stubbed session cannot
           # vouch for: whether MAX(seq) over an empty run comes back as None
