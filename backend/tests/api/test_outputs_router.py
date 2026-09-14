@@ -81,7 +81,27 @@ class _Repo:
         ]
 
 
-def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None):
+class _IssueGate:
+    """Stub for ``visible_issue_ids`` — the per-issue batch check.
+
+    ``allowed=None`` means "every issue in the batch is visible", which is what
+    the tests that are not about redaction want. Every call is recorded so the
+    "one round trip, deduplicated" claim can be pinned rather than assumed.
+    """
+
+    def __init__(self, allowed=None):
+        self.allowed = allowed
+        self.calls: list[set] = []
+
+    async def __call__(self, issue_ids, auth):
+        asked = {str(i) for i in issue_ids if i is not None}
+        self.calls.append(asked)
+        if self.allowed is None:
+            return asked
+        return {i for i in asked if i in self.allowed}
+
+
+def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None, gate=None):
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(mod.router, prefix="/api/v1")
@@ -107,6 +127,9 @@ def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None):
         ),
     )
     monkeypatch.setattr(mod, "run_owner_user_id", AsyncMock(return_value=owner))
+    monkeypatch.setattr(
+        mod, "visible_issue_ids", gate if gate is not None else _IssueGate()
+    )
     monkeypatch.setattr(
         mod, "build_diff", AsyncMock(return_value=diff if diff is not None else {})
     )
@@ -305,7 +328,8 @@ def test_diff_of_an_unregistered_object_is_not_registered(monkeypatch):
     assert r.json()["details"]["code"] == "not_registered"
 
 
-def test_diff_returns_two_sides_keyed_from_and_to(monkeypatch):
+def _diff_body() -> dict:
+    """What ``build_diff`` returns, in the shape ``OutputDiffResponse`` validates."""
     side = {
         "version": 1,
         "run_id": RUN_ID,
@@ -319,13 +343,17 @@ def test_diff_returns_two_sides_keyed_from_and_to(monkeypatch):
         "available": True,
         "unavailable_reason": None,
     }
-    diff = {
+    return {
         "kind": "script_shot",
         "ref_id": "9",
         "content_type": "text",
         "from": side,
         "to": {**side, "version": 2, "text": "description: a close-up"},
     }
+
+
+def test_diff_returns_two_sides_keyed_from_and_to(monkeypatch):
+    diff = _diff_body()
     r = _client(monkeypatch, diff=diff).get(
         "/api/v1/outputs/script_shot/9/diff?from=1&to=2"
     )
@@ -351,13 +379,10 @@ OTHER_ISSUE_KEY = "OPS-3"
 OTHER_TEAM_ID = "999999999999"
 
 
-def test_an_older_version_on_another_issue_loses_its_key_and_link(monkeypatch):
-    """The gate is the NEWEST version's issue (see the router's docstring), but
-    every row builds its OWN ``issue_key`` / ``deep_link`` out of its OWN team.
-    A caller allowed to read version 2 would otherwise receive a clickable,
-    team-scoped URL into an issue nobody checked they may see — the team
-    boundary leaking one row at a time (3a Task 8b)."""
-    rows = [
+def _cross_issue_rows():
+    """A two-version chain whose older version was filed under another issue,
+    in another team — the shape the redaction exists for."""
+    return [
         _row(2),
         _row(
             1,
@@ -366,38 +391,111 @@ def test_an_older_version_on_another_issue_loses_its_key_and_link(monkeypatch):
             team_id=OTHER_TEAM_ID,
         ),
     ]
-    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+
+
+def test_an_older_version_on_another_issue_loses_its_key_and_link(monkeypatch):
+    """The router's gate proves the NEWEST version's issue, but every row
+    builds its OWN ``issue_key`` / ``deep_link`` out of its OWN team. When the
+    batch check says that other issue is invisible, nothing about it may reach
+    the wire — not the key, not the team inside the URL (3a Task 8b / A1)."""
+    gate = _IssueGate(allowed={ISSUE_ID})
+    body = (
+        _client(monkeypatch, _cross_issue_rows(), gate=gate)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()
+    )
     newest, older = body["versions"]
     assert newest["issue_key"] == ISSUE_KEY
     assert newest["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
     assert older["issue_key"] is None
     assert older["deep_link"] is None
-    # The bare id stays, exactly as it did before this fix: Task 3b's ruling
-    # accepted it as a coordinate, and it is neither a route nor a team.
-    assert older["issue_id"] == OTHER_ISSUE_ID
     wire = json.dumps(body)
     assert OTHER_ISSUE_KEY not in wire
     assert OTHER_TEAM_ID not in wire
 
 
+def test_a_visible_sibling_issue_keeps_its_link(monkeypatch):
+    """A1: the old rule blanked EVERY foreign issue, so a sibling issue in the
+    caller's own team lost its link too — a correct link, thrown away because
+    nobody had asked. Asked and answered "yes", the link stays."""
+    gate = _IssueGate(allowed={ISSUE_ID, OTHER_ISSUE_ID})
+    body = (
+        _client(monkeypatch, _cross_issue_rows(), gate=gate)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()
+    )
+    newest, older = body["versions"]
+    assert newest["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=3&turn=2"
+    assert older["issue_key"] == OTHER_ISSUE_KEY
+    assert (
+        older["deep_link"]
+        == f"/team/{OTHER_TEAM_ID}/todolist/{OTHER_ISSUE_KEY}?step=3&turn=2"
+    )
+
+
+def test_an_invisible_older_issue_loses_its_link(monkeypatch):
+    """Answered "no": the link goes, the coordinate stays. Task 3b ruled the
+    bare snowflake is a coordinate and not a route, so ``issue_id`` survives on
+    both versions — blanking it would be a different (and wider) decision."""
+    gate = _IssueGate(allowed={ISSUE_ID})
+    body = (
+        _client(monkeypatch, _cross_issue_rows(), gate=gate)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()
+    )
+    newest, older = body["versions"]
+    assert older["issue_key"] is None and older["deep_link"] is None
+    assert newest["issue_key"] == ISSUE_KEY and newest["deep_link"]
+    assert [v["issue_id"] for v in body["versions"]] == [ISSUE_ID, OTHER_ISSUE_ID]
+
+
 def test_every_version_of_the_gated_issue_keeps_its_link(monkeypatch):
-    """The redaction is exactly as wide as the leak: a chain that never leaves
-    the gated issue is untouched, so the panel still links every revision."""
-    body = _client(monkeypatch).get("/api/v1/outputs/script_shot/9").json()
+    """A chain that never leaves one visible issue is untouched, so the panel
+    still links every revision."""
+    gate = _IssueGate(allowed={ISSUE_ID})
+    body = _client(monkeypatch, gate=gate).get("/api/v1/outputs/script_shot/9").json()
     assert [v["issue_key"] for v in body["versions"]] == [ISSUE_KEY] * 3
     assert all(v["deep_link"] for v in body["versions"])
 
 
 def test_a_no_issue_chain_redacts_an_older_version_that_has_one(monkeypatch):
-    """The newest version answers to no issue, so the gate was the RUN's owner
-    — nobody asked whether that older issue is visible to this caller."""
+    """The newest version answers to no issue, so the entry gate was the RUN's
+    owner. The older version's issue is still put to the batch check — and when
+    that says no, its link goes."""
     rows = [
         _row(2, issue_id=None, issue_key=None, team_id=None),
         _row(1),
     ]
+    gate = _IssueGate(allowed=set())
     body = (
-        _client(monkeypatch, rows, owner=ME).get("/api/v1/outputs/script_shot/9").json()
+        _client(monkeypatch, rows, owner=ME, gate=gate)
+        .get("/api/v1/outputs/script_shot/9")
+        .json()
     )
     older = body["versions"][1]
     assert older["issue_id"] == ISSUE_ID
     assert older["issue_key"] is None and older["deep_link"] is None
+    assert gate.calls == [{ISSUE_ID}]
+
+
+def test_visibility_is_checked_once_per_distinct_issue(monkeypatch):
+    """The cost model this replaces the blanket rule with: ONE batch call for
+    the whole chain, asked about the DEDUPLICATED set of issues — not one round
+    trip per version, which a long chain would turn into a fan-out."""
+    rows = [_row(v) for v in (6, 5, 4)] + [
+        _row(v, issue_id=OTHER_ISSUE_ID, issue_key=OTHER_ISSUE_KEY) for v in (3, 2, 1)
+    ]
+    gate = _IssueGate()
+    _client(monkeypatch, rows, gate=gate).get("/api/v1/outputs/script_shot/9")
+    assert gate.calls == [{ISSUE_ID, OTHER_ISSUE_ID}]
+
+
+def test_diff_does_not_pay_for_the_batch_visibility_check(monkeypatch):
+    """``/diff`` rides the same entry gate but returns no ``versions``, so it
+    has no links to redact — and must not buy a query it cannot spend."""
+    gate = _IssueGate()
+    r = _client(monkeypatch, gate=gate, diff=_diff_body()).get(
+        "/api/v1/outputs/script_shot/9/diff?from=1&to=2"
+    )
+    assert r.status_code == 200, r.text
+    assert gate.calls == []
