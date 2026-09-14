@@ -3,9 +3,15 @@
 **回退不是回滚**：以目标版的内容新建 v(latest+1)，血缘记下 ``reverted_from_version``
 与 ``actor_user_id``。历史只增不减，所以一次回退本身还能再被回退。
 
-**永不销毁内容**：写回之前先比对当前内容与最新登记版重建出来的内容；不同就说明有
-未登记的人手编辑（``PATCH /shots/{id}`` 不写 ops 行），先把当前内容登记成一版并给它
-补一行账本（否则那一版以后重建不出来），回退版再占下一个号。一次回退最多两行。
+**永不销毁内容**：写回之前先比对当前内容与最新登记版重建出来的内容；不同就说明这个
+对象上有**没被登记成一版**的编辑，先把当前内容登记成一版，回退版再占下一个号。一次
+回退最多两行。**两条臂都有这个分支**，区别只在账本：
+
+* 分镜的人手编辑（``PATCH /shots/{id}``）根本不写 ops 行，所以保留版要**补一行账本**
+  才重建得出来；
+* 场次的每一次编辑都经 ``apply_element_ops`` 写了 ``script_ops``，账本是全的——缺的
+  只是「哪一版看到哪个水位」，所以保留版**不写新账本**，只把当前 ``max(op_seq)``
+  记成它的 ``ledger_ref``。
 
 **三步一个事务**：改内容 / 写账本 / 登记版本同事务。登记在事务外意味着先提交内容再
 登记，中间失败就留下「内容回了、版本没记」——而那正是血缘要回答的问题。登记口的
@@ -24,6 +30,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException, status
 from loguru import logger
 from sqlalchemy import insert, select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.core.scope_guards import verify_scene_access, verify_shot_access
 from app.db.session import unit_of_work
@@ -34,7 +41,13 @@ from app.repositories.run_deliverables_repository import (
 from app.services.deliverables.diff import _SHOT_FIELDS, rebuild_content
 from app.services.deliverables.lineage_view import version_of
 from app.services.deliverables.registry import register_deliverable
-from app.services.script.version_service import inverse_between
+from app.services.script.version_service import inverse_between, replay_to
+
+#: Postgres 的唯一性冲突。``run_deliverables_kind_ref_version_key`` 是两次并发回退
+#: 的**唯一**仲裁者（登记口按 SELECT max → INSERT 取号，两个请求可以读到同一个
+#: max），所以这个码要能被单独认出来：别的 ``IntegrityError``（CHECK、外键）是真
+#: 缺陷，把它们也说成「你慢了一步」等于用一个安抚性的 409 盖掉一个 bug。
+_UNIQUE_VIOLATION = "23505"
 
 #: 有账本、因而回得去的两类。其余两类不是「还没做」，是**没有旧版这回事**。
 REVERTIBLE_KINDS = ("script_shot", "script_scene")
@@ -96,6 +109,17 @@ async def _latest_version(*, kind: str, ref_id: str, session) -> Optional[int]:
     )
 
 
+def _is_unique_violation(exc: IntegrityError) -> bool:
+    """这次 ``IntegrityError`` 是不是唯一索引冲突（SQLSTATE 23505）。
+
+    驱动之间键名不同：asyncpg 的异常带 ``sqlstate``，psycopg 带 ``pgcode``。两个都
+    读，都没有就当**不是**——宁可让一个认不出来的完整性错误以 500 + 栈暴露出来，
+    也不要把它伪装成一次可重试的竞态。"""
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return str(code) == _UNIQUE_VIOLATION
+
+
 async def revert_output(
     *, kind: str, ref_id: str, to_version: int, expected_latest: int, auth
 ) -> RevertResult:
@@ -150,34 +174,59 @@ async def revert_output(
 
     chain = _chain_identity(rows)
     uid = str(auth.user_id)
-    async with unit_of_work() as session:
-        fresh = await _latest_version(kind=kind, ref_id=str(ref_id), session=session)
-        if int(fresh or 0) != latest:
-            # 两人同时回退同一个对象：后者在事务里才看见对方，仍然 409。
-            raise _reject(
-                status.HTTP_409_CONFLICT,
-                "version_conflict",
-                "someone registered a newer version while you were looking",
-                latest_version=int(fresh or 0),
+    try:
+        async with unit_of_work() as session:
+            fresh = await _latest_version(
+                kind=kind, ref_id=str(ref_id), session=session
             )
-        if kind == "script_shot":
-            return await _revert_shot(
+            if int(fresh or 0) != latest:
+                # 两人同时回退同一个对象：后者在事务里才看见对方，仍然 409。
+                raise _reject(
+                    status.HTTP_409_CONFLICT,
+                    "version_conflict",
+                    "someone registered a newer version while you were looking",
+                    latest_version=int(fresh or 0),
+                )
+            if kind == "script_shot":
+                return await _revert_shot(
+                    ref_id=str(ref_id),
+                    target=target,
+                    head=head,
+                    chain=chain,
+                    to_version=to_version,
+                    uid=uid,
+                    session=session,
+                )
+            return await _revert_scene(
                 ref_id=str(ref_id),
-                target=target,
+                to_row=by_version[to_version],
                 head=head,
                 chain=chain,
                 to_version=to_version,
                 uid=uid,
                 session=session,
             )
-        return await _revert_scene(
-            ref_id=str(ref_id),
-            to_row=by_version[to_version],
-            chain=chain,
-            to_version=to_version,
-            uid=uid,
-            session=session,
+    except IntegrityError as conflict:
+        # 上面那次 `_latest_version` 复查不加锁，所以两个并发回退可以双双通过它，
+        # 由唯一索引最后仲裁。**这个 except 必须在 `async with` 外面**：事务要先
+        # 因为异常穿出而回滚（`session.begin()` 的 `__aexit__` 干这件事），内容才
+        # 真的退了回去；在里面接住的话 session 已经 abort，随后每一条语句都会变成
+        # `PendingRollbackError`，而我们还需要再读一次库。
+        if not _is_unique_violation(conflict):
+            # CHECK / 外键违例是真缺陷，不是竞态。原样交出去变成 500 并带栈——
+            # 把它说成 409「你慢了一步」等于用一句安抚盖掉一个 bug。
+            raise
+        latest_now = await _latest_version(kind=kind, ref_id=str(ref_id), session=None)
+        logger.info(
+            f"[revert] {kind}/{ref_id}: lost the version race at v{latest + 1} "
+            f"— latest is now v{latest_now}; the content was rolled back"
         )
+        raise _reject(
+            status.HTTP_409_CONFLICT,
+            "version_conflict",
+            "someone registered a newer version while you were looking",
+            latest_version=int(latest_now or 0),
+        ) from conflict
 
 
 async def _read_shot_fields(ref_id: str, session) -> Optional[Dict[str, Any]]:
@@ -271,12 +320,19 @@ async def _revert_shot(
 
 
 async def _revert_scene(
-    *, ref_id, to_row, chain, to_version, uid, session
+    *, ref_id, to_row, head, chain, to_version, uid, session
 ) -> RevertResult:
     """逆操作批，与 undo 服务同机制（``run_undo_service.py:190``）——不造 replace-all op。
 
-    场次账本是完整的（每次元素编辑都写一行 ``script_ops``），所以「未登记的人手编辑」
-    在这条臂上不会发生，``kept_version`` 恒为 None。"""
+    结构与 ``_revert_shot`` 一致：先读当前内容、与最新登记版比、不同就保留一版，
+    再改内容、再登记。**差别只在保留版怎么变得可重建**：分镜要补一行账本（人手 PATCH
+    不写 ops），场次的账本本来就是全的（每次编辑都过 ``apply_element_ops``），缺的只是
+    「这一版看到哪个水位」，所以它的 ``ledger_ref`` 就是当前的 ``max(op_seq)``，一行
+    新账本都不用写。
+
+    场次**确实**会出现「未登记的人手编辑」：编辑器里改一句台词写了 ``script_ops``，
+    但不占版本号（登记只开给 agent 产出与回退）。不保留它，一次回退就会把用户刚写的
+    那段悄悄冲掉且再也指认不出来。"""
     from app.repositories.script_scene_repository import (
         VersionConflict,
         get_script_scene_repository,
@@ -293,6 +349,21 @@ async def _revert_scene(
         ).all()
     ]
     current_seq = max((int(r["op_seq"]) for r in ledger), default=0)
+
+    kept = None
+    # 当前内容 = 整本账本重放到末位；``head`` = 最新登记版重建出来的内容（按它自己的
+    # ``ledger_ref`` 水位切）。两者不同 ⇒ 水位之后有没被登记的编辑。
+    if replay_to(ledger, current_seq) != head:
+        kept = await _register(
+            kind="script_scene",
+            ref_id=ref_id,
+            chain=chain,
+            uid=uid,
+            ledger_ref=str(current_seq),
+            reverted_from=None,
+            session=session,
+        )
+
     ref = to_row.get("ledger_ref")
     # 存量行没有 ledger_ref：退回「整本账本的末位」，逆操作批为空，回退退化成「把当前
     # 内容登记成新的一版」。宁可少改，也不要按猜出来的水位改写场次。
@@ -321,7 +392,7 @@ async def _revert_scene(
             reverted_from=to_version,
             session=session,
         ),
-        kept_version=None,
+        kept_version=kept,
     )
 
 
