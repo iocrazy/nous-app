@@ -726,12 +726,42 @@ def test_visibility_is_checked_once_per_distinct_issue(monkeypatch):
     assert [a.user_id for a in gate.auths] == [ME]
 
 
-def test_diff_does_not_pay_for_the_batch_visibility_check(monkeypatch):
-    """``/diff`` rides the same entry gate but returns no ``versions``, so it
-    has no links to redact — and must not buy a query it cannot spend."""
+def test_diff_asks_about_its_two_sides_and_nothing_else(monkeypatch):
+    """``/diff`` 也要买那次批量可见性问答 —— 但只问它真正要画的两侧。
+
+    （这条替换了「diff 不该付这笔查询」的旧断言：3b fix A 给两侧加上
+    ``issue_key`` 之后，「没有链接要裁」的前提就不成立了。）"""
     gate = _IssueGate()
-    r = _client(monkeypatch, gate=gate, diff=_diff_body()).get(
-        "/api/v1/outputs/script_shot/9/diff?from=1&to=2"
+    rows = [_row(3), _row(2), _row(1, issue_id=OTHER_ISSUE_ID)]
+    r = _client(monkeypatch, rows=rows, gate=gate, diff=_diff_body()).get(
+        "/api/v1/outputs/script_shot/9/diff?from=2&to=3"
     )
     assert r.status_code == 200, r.text
-    assert gate.calls == []
+    # 一次调用，只含这两侧的 issue（v1 那件外来 issue 不在问答里 —— 它不被画）。
+    assert gate.calls == [{ISSUE_ID}]
+    assert [a.user_id for a in gate.auths] == [ME]
+
+
+def test_diff_redacts_a_side_whose_issue_the_caller_cannot_see(monkeypatch):
+    """进门那道闸只证明了「最新的有 run 的那一版」的 issue 可见。另一侧可以是
+    **另一件** issue 下的旧版本，而 ``issue_key`` 是可路由的 —— 不裁就是跨团队
+    边界一行一行地漏（3a Task 8b / 小票 A1 的 diff 版）。
+
+    借来的那一侧（人手版，带的是刚被判过的那件 issue）必须活下来，否则这次裁剪
+    就把 Task 9 旁证 C 刚修好的东西又拿走了。"""
+    human = _row(4, run_id=None, issue_id=None, issue_key=None, turn=None, step=None)
+    foreign = _row(1, issue_id=OTHER_ISSUE_ID, issue_key=OTHER_ISSUE_KEY)
+    rows = [human, _row(3), _row(2), foreign]
+    gate = _IssueGate(allowed={ISSUE_ID})  # 外来那件不可见
+    r = _client(monkeypatch, rows=rows, gate=gate, diff=_diff_body()).get(
+        "/api/v1/outputs/script_shot/9/diff?from=1&to=4"
+    )
+    assert r.status_code == 200, r.text
+    passed = mod.build_diff.await_args.kwargs
+    # 外来那一侧：坐标（issue_id）留着，可路由的两个字段清掉。
+    assert passed["from_row"]["issue_id"] == OTHER_ISSUE_ID
+    assert passed["from_row"]["issue_key"] is None
+    assert passed["from_row"]["deep_link"] is None
+    # 人手那一侧：借到的正是被判过的那件 issue，照常活下来。
+    assert passed["to_row"]["issue_id"] == ISSUE_ID
+    assert passed["to_row"]["issue_key"] == ISSUE_KEY

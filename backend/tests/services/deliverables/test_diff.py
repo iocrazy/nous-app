@@ -259,6 +259,40 @@ async def test_the_watermark_still_wins_over_the_current_row(monkeypatch, curren
 
 
 @pytest.mark.asyncio
+async def test_an_unplaceable_ledger_row_witnesses_neither_side(
+    monkeypatch, current_row
+):
+    """``created_at IS NULL`` + 没有 ``ledger_ref`` ⇒ 这条账本行**定位不了**。
+
+    它进不了前缀（没法比时间），也**不该**进后缀：后缀是第二档前像的来源，而一条
+    其实位于水位之下的行，它的前像是更早的状态 —— 拿它作证会把这一版画成它之前的
+    样子。说不出来就不作证，退到第三档。"""
+    ledger = [
+        (
+            {"after": {"description": "placed"}, "before": {"shot_type": "OLD"}},
+            None,
+            3001,
+        ),
+        (
+            {"after": {"description": "later"}, "before": {"description": "placed"}},
+            _at(12),
+            3002,
+        ),
+    ]
+
+    async def _ledger(ref_id):
+        return ledger
+
+    current_row["shot_type"] = "MEDIUM"
+    monkeypatch.setattr(mod, "_shot_ledger", _ledger)
+    content, reason = await mod.rebuild_content("script_shot", "9", _row(2, 12))
+    assert reason is None
+    # 无从定位的那行带着 ``before.shot_type``，但它没有资格作证 —— 第三档说了算。
+    assert content["shot_type"] == "MEDIUM"
+    assert content["description"] == "later"
+
+
+@pytest.mark.asyncio
 async def test_a_shot_row_that_is_gone_is_unavailable_rather_than_five_nulls(
     monkeypatch,
 ):

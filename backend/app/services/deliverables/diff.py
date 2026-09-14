@@ -14,8 +14,15 @@ exists for it:
   1. the last ``after_json[field]`` at or before the watermark;
   2. else the ``before_json[field]`` of the FIRST op after the watermark that
      carries it — an op's pre-image IS the value at every earlier version;
-  3. else the CURRENT ``script_shots`` value: no op ever touched the field, so
-     it has not changed since the row was created.
+  3. else the CURRENT ``script_shots`` value — the value at every version
+     **that the ledger can attest to**.
+
+  ⚠️ Tier 3 是**账本视角下**的最好答案，不是绝对真相：``PATCH /shots/{id}``
+  （``script_shots_router.py:133``）改内容而**不写** ``script_shot_ops`` 行，所以
+  人手编辑对账本是隐形的。一个字段先被人手改过、账本里又从没出现过，那么它在每一
+  版上都只会读出**今天这个值** —— 账本里没有任何东西能说出它当初是什么。回退的
+  「保留未登记编辑」那条臂同样只保得住账本看得见的编辑（见 ``revert.py``）。
+  根治要让 ``PATCH /shots`` 也写一行账本（actor 记人），那是单独一票。
 
   Tier 3 is not a nicety. Without it those fields reconstruct as ``None`` for
   EVERY version, and since ``rebuild_content`` is what a revert writes back,
@@ -111,8 +118,9 @@ def _as_datetime(value: Any) -> Optional[_dt.datetime]:
 
 def _seen_by(
     ledger: List[Tuple[Any, Optional[_dt.datetime], int]], row: Dict[str, Any]
-) -> List[bool]:
-    """每条账本行：这一版看得见它吗。
+) -> List[Optional[bool]]:
+    """每条账本行：这一版看得见它吗。``True`` 看得见 / ``False`` 在它之后 /
+    ``None`` **说不出来**（只会出现在时间戳退路上，见下）。
 
     优先 ``ledger_ref``（登记时记下的账本位置：shot 是 script_shot_ops.id，scene 是
     script_ops.op_seq 水位）——那是**外键**；``created_at`` 只是巧合上单调的时间戳，
@@ -130,8 +138,13 @@ def _seen_by(
     stamp = _as_datetime(row.get("created_at"))
     if stamp is None:
         return [True for _entry in ledger]
+    # ``created_at IS NULL`` 的账本行在这条退路上是**无法定位**的，所以它既不进前缀
+    # 也不进后缀。把它扔进后缀会更糟：后缀是第二档前像的来源，而一条其实位于水位
+    # **之下**的行，它的前像是更早的状态 —— 那会把这一版画成它之前的样子。说不出来
+    # 就不要拿它作证。
     return [
-        created is not None and created <= stamp for _payload, created, _key in ledger
+        None if created is None else created <= stamp
+        for _payload, created, _key in ledger
     ]
 
 
@@ -143,8 +156,8 @@ def _split_for(
     后缀不是摆设：一条 op 的 ``before_json`` 就是**这一版看到的值**，而它是账本
     里唯一记着「某个字段在被改之前是什么」的地方（见模块 docstring 的第二档）。"""
     seen = _seen_by(ledger, row)
-    prefix = [entry[0] for entry, ok in zip(ledger, seen) if ok]
-    suffix = [entry[0] for entry, ok in zip(ledger, seen) if not ok]
+    prefix = [entry[0] for entry, ok in zip(ledger, seen) if ok is True]
+    suffix = [entry[0] for entry, ok in zip(ledger, seen) if ok is False]
     return prefix, suffix
 
 
@@ -171,10 +184,10 @@ async def _shot_ledger(
     thing.
 
     A ``created_at`` of NULL no longer drops the row HERE — it used to vanish
-    from every reconstruction without a word. It still cannot be seen by the
-    timestamp FALLBACK in ``_prefix_for`` (that branch has nothing to compare
-    against), so a version registered before 3b still reconstructs without it;
-    a version carrying a ``ledger_ref`` sees it.
+    from every reconstruction without a word. A version carrying a
+    ``ledger_ref`` sees it (the cut key is the id). On the timestamp FALLBACK
+    it stays unplaceable, and ``_seen_by`` therefore puts it in **neither** the
+    prefix nor the suffix — 不作证，也不拿它当后继 op 的前像。
     """
     async with read_scope() as session:
         rows = (
@@ -324,6 +337,12 @@ async def _sides(
         # 两侧共用一次当前行的读：它是第三档的唯一来源，而两侧问的是同一行。
         current = await _current_shot_fields(ref_id)
         if current is None:
+            logger.warning(
+                f"[deliverables] diff script_shot/{ref_id}: the shot row came "
+                "back empty — deleted, or the repository read failed (it logs "
+                "its own error). Both sides are unavailable rather than "
+                "missing every never-touched field."
+            )
             return _unavailable(from_row, NOT_FOUND), _unavailable(to_row, NOT_FOUND)
         return tuple(  # type: ignore[return-value]
             _shot_side(row, ledger, current) for row in (from_row, to_row)
@@ -364,8 +383,8 @@ def _fold_shot(
     """一段分镜账本 + 当前行 → 那一刻的六字段快照（三档，见模块 docstring）。
 
     ``create`` 带齐每个可写字段、``update`` 只带它改过的，所以第一档就是按序
-    ``update``；账本里压根没出现过的字段不是「空的」，而是**没人动过**——它在每一版
-    上的值就是它此刻的值。"""
+    ``update``；账本里压根没出现过的字段不是「空的」——账本对它没有任何说法，于是
+    取当前行：那是**账本能作证的**每一版的值（局限见模块 docstring 第三档的告警）。"""
     snapshot: Dict[str, Any] = {}
     for payload in prefix:
         snapshot.update((payload or {}).get("after") or {})
@@ -430,6 +449,12 @@ async def rebuild_content(
             if current is None:
                 # 行没了、或者读失败。fail-closed：回退拿这个 dict 直接 UPDATE，
                 # 「当作六个空字段」正是本轮在修的那次生产事故。
+                logger.warning(
+                    f"[deliverables] rebuild script_shot/{ref_id} "
+                    f"v{row.get('version')}: the shot row came back empty — "
+                    "deleted, or the repository read failed (it logs its own "
+                    "error). Refusing to rebuild rather than writing NULLs."
+                )
                 return None, NOT_FOUND
             return _fold_shot(prefix, suffix, current), None
         if kind == "script_scene":
