@@ -395,7 +395,6 @@ jobs:
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
 
       - name: Exercise the promoted-resource reverse lookup (mig 307/456)
-      - name: Exercise the read-time step-cost fold & per-call price lookup (3b Task 4)
         working-directory: backend
         env:
           INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
@@ -405,6 +404,13 @@ jobs:
           # 所以 NULL 指针不匹配、BIGINT id 出闸变 string、以及 456 的
           # partial unique 还在，只有这里会被 Postgres 真正回答。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_generated_media_promoted_lookup_integration.py -v
+
+      - name: Exercise the read-time step-cost fold & per-call price lookup (3b Task 4)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
           # The ONLY place step_costs.load_step_shares and
           # media_price.media_price_cents execute. Their unit tests stub the
           # session, so nothing else proves that a JSONB payload's cost_cents
