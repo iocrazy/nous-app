@@ -81,12 +81,23 @@ def version_of(
     team — never out of ``issue_id``, which no route accepts. It is ``None``
     whenever either is missing, which is the normal state of a run that answers
     to no issue at all.
+
+    **人手版（3b 回退，``run_id IS NULL``）另有一条规则**：它仍然报出所在链的
+    ``issue_id`` / ``issue_key``（读者要知道这一版属于哪件工作），但
+    ``turn`` / ``step`` / ``deep_link`` 一律 ``None``。轨迹坐标是 run 的东西，
+    人手版没有；而 ``deep_link`` 的锚点正是 ``(turn, step)`` —— 给它一条指向
+    某次运行某一步的 URL，等于声称这一版是那一步产生的，而它不是。
     """
     out = {key: row.get(key) for key in _VERSION_KEYS}
     if out.get("issue_id") is None and issue_id is not None:
         out["issue_id"] = str(issue_id)
     if out.get("issue_key") is None and issue_key is not None:
         out["issue_key"] = issue_key
+    if row.get("run_id") is None:
+        out["turn"] = None
+        out["step"] = None
+        out["deep_link"] = None
+        return out
     row_team = row.get("team_id")
     out["deep_link"] = issue_deep_link(
         team_id=row_team if row_team is not None else team_id,

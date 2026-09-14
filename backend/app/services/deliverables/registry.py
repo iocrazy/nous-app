@@ -88,6 +88,13 @@ async def register_deliverable(
             "reverted_from_version needs an actor_user_id — a revert "
             "is a human act and must say whose"
         )
+    # kind 先于 no-op 判定（3b fix 轮 1）。合并 no-op 分支之前，非 bigint 的
+    # run id（画布道历史上传过 "r1"）会先走到这里并抛——把 kind 排在 no-op
+    # 后面会让「run_id='r1' + kind 写错」从 ValueError 退化成 None + WARNING，
+    # 即一条真的接线 bug 被降级成一行日志。kind 写错在**每条**路上都是接线
+    # bug，与这次登记占不占号无关。
+    if kind not in ALL_KINDS:
+        raise ValueError(f"unknown deliverable kind {kind!r}")
     rid = None if run_id in _EMPTY_RUN_IDS else _bigint_run_id(run_id)
     if rid is None and actor_user_id is None:
         # 3a 不变量：普通人手改动 / 画布保存 / 前端直传不占号。非 bigint 的 run id
@@ -98,8 +105,6 @@ async def register_deliverable(
                 "not a bigint and no actor was given — registered nothing"
             )
         return None
-    if kind not in ALL_KINDS:
-        raise ValueError(f"unknown deliverable kind {kind!r}")
 
     repo = RunDeliverablesRepository()
     clipped = clip_claimed_text(title or "", TITLE_MAX) or None

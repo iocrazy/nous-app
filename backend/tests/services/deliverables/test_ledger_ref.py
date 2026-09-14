@@ -64,10 +64,9 @@ def test_a_scene_replays_to_the_ledger_ref_watermark():
     那样这个用例就只是在测桩数据，不是在测水位（「边界 mock 必须用真实
     形状」）。
 
-    ⚠️ 场次侧 ledger_ref 走两处且**互为冗余**：``_prefix_for`` 按它切前缀、
-    ``_scene_side`` 按它取水位，两者算出同一个界。所以只拆掉其中一处这个用例
-    照样绿（实测），两处都拆才转红——它钉的是「场次到底认不认 ledger_ref」，
-    不是某一行代码。要单独钉某一处，得先让两者的界不再相等。"""
+    场次侧的 ledger_ref 只有 ``_prefix_for`` 一个入口：``_scene_side`` 的水位
+    就取前缀的末尾，不再按 ledger_ref 自己算第二遍（fix 轮 1 删掉了那份冗余
+    —— 两处算同一个界时，拆掉任何一处都不会有测试转红）。"""
     ledger = [
         (
             {

@@ -41,8 +41,10 @@ class OutputVersion(BaseModel):
     version: int
     parent_version: Optional[int] = None
     run_id: Optional[str] = None
-    #: 3b：人手登记的作者（回退是唯一的人手占号路径）。run_id 为空时它必非空，反之
-    #: 亦然——CHECK run_deliverables_run_or_actor 兜住。
+    #: 3b：人手登记的作者（回退是唯一的人手占号路径）。CHECK
+    #: ``run_deliverables_run_or_actor`` 是 **OR 不是 XOR**：它只保证
+    #: 「run_id 与 actor_user_id 不同时为空」，两个都非空是允许的（今天没有
+    #: 写入方这么做，但契约上别当互斥读）。run_id 为空 ⇒ 这一列必非空。
     actor_user_id: Optional[str] = None
     #: 这一版是从哪一版回退来的。None = 正常前进的一版。
     reverted_from_version: Optional[int] = None

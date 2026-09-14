@@ -80,6 +80,20 @@ async def run_owner_user_id(run_id: Any) -> Optional[str]:
     return str(owner) if owner is not None else None
 
 
+def newest_with_a_run(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """链上最新的**有 run 的**那一版，没有就是 ``None``。
+
+    两个消费方共用（3b）。回退写的是 ``run_id IS NULL`` 的人手版，它的
+    ``issue_id`` 也必然是 NULL：
+
+    * 门禁拿它当判据既证明不了归属，又会把 ``run_owner_user_id`` 喂成 None
+      （``int(None)`` 当场 500）；
+    * 投影要靠它说出「这一版属于哪件工作」—— 人手版自己答不出来。
+
+    人手版写在一条已经存在的链上，不引入新的可见性，所以两处问的是同一个行。"""
+    return next((row for row in rows if row.get("run_id") is not None), None)
+
+
 async def _visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
     """The version chain, newest first, once the caller has proved they may
     read it. Every refusal on this path is a 404 — an object the caller cannot
@@ -97,11 +111,7 @@ async def _visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
             "not_registered",
             f"{kind}/{ref_id} is not in the deliverable registry",
         )
-    # 门禁按 **run** 判定（3b）。回退写的是 ``run_id IS NULL`` 的人手版，它的
-    # ``issue_id`` 也必然是 NULL —— 拿它当判据，既证明不了归属，又会把
-    # ``run_owner_user_id`` 喂成 None（``int(None)`` 当场 500）。所以取最新的
-    # **有 run 的**那一版：人手版写在一条已经存在的链上，不引入新的可见性。
-    newest = next((row for row in rows if row.get("run_id") is not None), None)
+    newest = newest_with_a_run(rows)
     if newest is None:
         # 整条链都没有 run 的话没人能证明调用方看得见它。跟「不存在」同一个
         # 回答——这条路上每一次拒绝都是 404。
@@ -125,8 +135,8 @@ async def get_output_lineage(
     """Every version of one object, newest first, each with the run / issue /
     coordinates / model / spend that produced it."""
     rows = await _visible_chain(kind, ref_id, auth)
-    # The gate above proved ONE issue visible — the newest version's. Every
-    # OTHER issue in the chain is decided here, in one batch: the link a
+    # The gate above proved ONE issue visible — the newest version that has a
+    # run. Every OTHER issue in the chain is decided here, in one batch: the link a
     # version carries is built from ITS team, so handing it over without
     # asking would leak across the team boundary one row at a time (3a Task
     # 8b), while blanking every foreign issue throws away links the caller may
@@ -135,8 +145,21 @@ async def get_output_lineage(
     # equivalent: its rows were selected BY the issue it already checked, so
     # every row there is on the gated issue by construction.
     visible = await visible_issue_ids({row.get("issue_id") for row in rows}, auth)
+    # 人手版（回退）自己没有 issue —— 它的归属是**这条链的**归属，也就是门禁
+    # 刚刚判过的那一版的。只补给人手版：补给所有行会把一条画布道 run 的旧版本
+    # 也说成属于这个 issue（3b fix 轮 1）。``version_of`` 会把它的 turn / step /
+    # deep_link 一并清成 None。
+    chain = newest_with_a_run(rows) or {}
     versions = redact_foreign_issue_links(
-        [version_of(row) for row in rows], visible_issue_ids=visible
+        [
+            version_of(
+                row,
+                issue_id=chain.get("issue_id") if row.get("run_id") is None else None,
+                issue_key=chain.get("issue_key") if row.get("run_id") is None else None,
+            )
+            for row in rows
+        ],
+        visible_issue_ids=visible,
     )
     return OutputLineageResponse(
         kind=kind,

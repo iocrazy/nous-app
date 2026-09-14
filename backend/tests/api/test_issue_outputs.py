@@ -197,3 +197,53 @@ async def test_a_personal_issue_keeps_its_key_but_has_no_link(monkeypatch):
         "versions"
     ][0]
     assert top["issue_key"] == ISSUE_KEY and top["deep_link"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_human_row_keeps_the_issue_key_but_gets_no_deep_link(monkeypatch):
+    """3b 回退：``run_id IS NULL`` 的人手版。
+
+    ``issue_key`` 要留着——这一版确实长在这件工作的链上，读者要知道是哪件。
+    ``deep_link`` 必须是 None：链接的锚点是 ``(turn, step)``，也就是某次运行的
+    某一步；人手版没有那一步，给它一条 URL 等于声称这一版是那一步产生的。
+    ``turn`` / ``step`` 同理清空——轨迹坐标是 run 的东西。
+    """
+    rows = [
+        _row(
+            "script_shot",
+            "9",
+            3,
+            run_id=None,
+            actor_user_id=ME,
+            reverted_from_version=1,
+            seq=None,
+            turn=None,
+            step=None,
+        ),
+        _row("script_shot", "9", 2),
+    ]
+    _patch(monkeypatch, repo=_Repo(rows))
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+
+    human, agent = body["items"][0]["versions"]
+    assert human["version"] == 3 and human["run_id"] is None
+    assert human["actor_user_id"] == ME
+    assert human["reverted_from_version"] == 1
+    assert human["issue_id"] == str(ISSUE_ID)
+    assert human["issue_key"] == ISSUE_KEY
+    assert human["deep_link"] is None
+    assert human["turn"] is None and human["step"] is None
+    # 正向对照：同一批里有 run 的那一版照常拿到链接。
+    assert agent["deep_link"] == f"/team/{TEAM_ID}/todolist/{ISSUE_KEY}?step=2&turn=1"
+
+
+@pytest.mark.asyncio
+async def test_a_human_row_with_stray_coordinates_still_gets_no_link(monkeypatch):
+    """就算行上带着 turn / step（不该有，但别靠「不该有」兜底），投影也要清掉
+    它们——否则 ``issue_deep_link`` 会照样拼出一条锚到别人那一步的 URL。"""
+    rows = [_row("script_shot", "9", 3, run_id=None, actor_user_id=ME)]
+    _patch(monkeypatch, repo=_Repo(rows))
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+    human = body["items"][0]["versions"][0]
+    assert human["turn"] is None and human["step"] is None
+    assert human["deep_link"] is None

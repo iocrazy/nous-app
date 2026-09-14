@@ -133,8 +133,13 @@ async def _shot_ledger(
 
     Ordered by ``id`` (snowflake, monotonic) rather than ``created_at``: the id
     IS ``ledger_ref``'s domain, so the ordering and the cut key are the same
-    thing. It also stops dropping rows whose ``created_at`` is NULL — those
-    used to vanish from every reconstruction without a word.
+    thing.
+
+    A ``created_at`` of NULL no longer drops the row HERE — it used to vanish
+    from every reconstruction without a word. It still cannot be seen by the
+    timestamp FALLBACK in ``_prefix_for`` (that branch has nothing to compare
+    against), so a version registered before 3b still reconstructs without it;
+    a version carrying a ``ledger_ref`` sees it.
     """
     async with read_scope() as session:
         rows = (
@@ -291,12 +296,10 @@ def _scene_side(
     prefix = _prefix_for(ledger, row)
     if not prefix:
         return _unavailable(row, NO_SNAPSHOT)
-    ref = row.get("ledger_ref")
-    watermark = (
-        int(str(ref))
-        if str(ref or "").isdigit()
-        else max(int(op["op_seq"]) for op in prefix)
-    )
+    # 水位就是前缀的末尾。``ledger_ref`` 已经在 ``_prefix_for`` 里切过一刀，
+    # 这里再按它算一次是同一个界的第二份算法：两处冗余意味着拆掉任何一处都
+    # 没有测试会红（3b fix 轮 1 实测）。一个口径，一个可证伪点。
+    watermark = max(int(op["op_seq"]) for op in prefix)
     return _side(
         row, text=render_elements(replay_to(prefix, watermark)), available=True
     )

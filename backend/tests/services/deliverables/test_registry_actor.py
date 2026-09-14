@@ -62,3 +62,28 @@ async def test_a_caller_session_is_handed_to_every_repo_call(repo_spy, emit_spy)
         session=sentinel,
     )
     assert repo_spy.sessions == [sentinel, sentinel]  # latest_version + insert
+
+
+@pytest.mark.parametrize("run_id", ["r1", None, 777])
+async def test_a_wrong_kind_is_a_typed_failure_on_every_path(repo_spy, run_id):
+    """kind 写错在**每条**路上都是接线 bug，与这次登记占不占号无关。
+
+    ``"r1"`` 是画布道真实传过的非 bigint run id。3b 合并 no-op 分支时它一度排在
+    kind 校验之前，于是「run 传错 + kind 写错」从 ValueError 退化成 None + 一行
+    WARNING —— 一个真缺陷被降级成日志。
+    """
+    with pytest.raises(ValueError, match="unknown deliverable kind"):
+        await register_deliverable(run_id=run_id, kind="script_beat", ref_id="9")
+    assert repo_spy.inserts == []
+
+
+async def test_a_caller_session_reaches_the_seq_back_fill_too(repo_spy, emit_spy):
+    """agent 那条路多一次写：事件落下之后把 seq 补回行上。它也必须待在调用方的
+    事务里——三次写分属两个事务就等于「行记了、指针没记」可以各自成功。"""
+    sentinel = object()
+    await register_deliverable(
+        run_id=777, kind="script_shot", ref_id="9", session=sentinel
+    )
+    assert repo_spy.seq_calls  # 事件确实落了，否则下面这条断言是空的
+    assert repo_spy.set_seq_sessions == [sentinel]
+    assert repo_spy.sessions == [sentinel, sentinel]  # latest_version + insert

@@ -214,6 +214,14 @@ class RunDeliverablesRepository:
 
         同一对象有多版时取**最新版**的坐标：卡描述的是那张图现在的来历。
         查不到的 ref_id 不出现在返回里；调用方据此退回平文本标签。
+
+        ⚠️ run 侧**刻意仍是内连接**（与 3b 改成 outer 的 ``lineage_for`` 相反）：
+        这个方法回答的是「哪次 run 产出了这一件」，没有 run 的行在这个问题下
+        无可作答；唯一调用方是 Generated 收件箱，而 ``generated_media`` 今天不
+        存在人手版（回退的目标是 script_shot / script_scene）。
+        一旦哪天有了，失效方式是**静默给出过期的最新坐标**——最新版是人手版时
+        它会被跳过，卡上印的是上一版 agent 版的 run / issue / step，看起来完全
+        正常。那时要改的是这里，不是调用方。
         """
         wanted = [str(r) for r in ref_ids if r is not None]
         if not wanted:

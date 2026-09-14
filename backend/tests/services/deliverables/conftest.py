@@ -33,6 +33,7 @@ class RepoSpy:
         #: 登记版本」放进调用方的一个事务里，所以「登记口有没有把 session
         #: 传下去」是可断言的事实，不是实现细节。
         self.sessions: list[Any] = []
+        self.set_seq_sessions: list[Any] = []
         self._ids = itertools.count(1000)
 
     async def latest_version(
@@ -59,6 +60,9 @@ class RepoSpy:
 
     async def set_seq(self, *, row_id: Any, seq: int, session: Any = None) -> None:
         self.seq_calls.append((str(row_id), seq))
+        #: seq 回写是 agent 那条路的**第三次**写。它单独记一格：调用方的事务
+        #: 要罩住的是三次写，不是前两次（3b）。
+        self.set_seq_sessions.append(session)
         if self.raise_on_set_seq:
             raise RuntimeError("update failed")
 
