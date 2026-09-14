@@ -35,17 +35,12 @@ is a BUSINESS column this workflow may write):
 
 from __future__ import annotations
 
-import os
-import shutil
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
 
-# Prefix of the scratch dir the jimeng-cli provider writes its product into
-# (``tempfile.mkdtemp(prefix="jimeng_")``). Only a dir with this prefix is ever
-# reaped after ingest, so cleanup can never nuke an arbitrary path.
-_JIMENG_SCRATCH_PREFIX = "jimeng_"
+from app.services.library.scratch_reaper import reap_scratch_dir
 
 # Default image provider/model. ``provider=None`` means "resolve from the DB
 # mediahub_models catalog" — the image ``provider_registry`` ships EMPTY, so a
@@ -139,17 +134,6 @@ async def generate_shot_image_step(
         raise RuntimeError(f"Image provider returned no image for shot {shot_id}")
     logger.info(f"[script_shot_generate][step] shot {shot_id} → {produced}")
     return produced
-
-
-def _reap_scratch_dir(local_path: str) -> None:
-    """Remove the jimeng-cli scratch dir holding ``local_path`` (H1).
-
-    Best-effort and defensive: only a dir whose basename starts with the
-    ``jimeng_`` prefix is ever removed, so a stray non-scratch path can never
-    trigger deletion of an arbitrary directory."""
-    parent = os.path.dirname(local_path)
-    if os.path.basename(parent).startswith(_JIMENG_SCRATCH_PREFIX):
-        shutil.rmtree(parent, ignore_errors=True)
 
 
 async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
@@ -268,7 +252,7 @@ async def persist_generation(
             return {"image_url": provider_url, "thumbnail_url": provider_url}
     finally:
         if not is_url:
-            _reap_scratch_dir(provider_url)
+            reap_scratch_dir(provider_url)
 
 
 @DBOS.step()

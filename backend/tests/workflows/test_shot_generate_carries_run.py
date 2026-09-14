@@ -107,7 +107,7 @@ async def test_video_workflow_backfills_the_run_coordinates(monkeypatch):
         lambda: _SceneRepo(),
     )
     monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
-    monkeypatch.setattr(wf, "_reap_scratch_dir", lambda _p: None)
+    monkeypatch.setattr(wf, "reap_scratch_dir", lambda _p: None)
 
     url = await _call_step(
         wf.persist_video_generation,

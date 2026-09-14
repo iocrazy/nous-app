@@ -35,7 +35,7 @@ from app.services.library.generated_media_service import (
     register_generated_media,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
-from app.workflows.script_shot_generate import _reap_scratch_dir
+from app.services.library.scratch_reaper import reap_scratch_dir
 
 _MAX_SEGMENTS = 12
 _MAX_SEGMENT_SECONDS = 10
@@ -238,7 +238,7 @@ async def persist_timeline_film_step(
             "media_kind": "video",
         }
     finally:
-        _reap_scratch_dir(film_path)
+        reap_scratch_dir(film_path)
 
 
 @DBOS.step()

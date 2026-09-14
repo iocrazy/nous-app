@@ -89,7 +89,8 @@ async def test_the_image_tool_hands_the_recorder_down_to_the_registry(monkeypatc
 
     class _Svc:
         async def generate_image(self, **_k):
-            return {"url": "http://cdn/x.png"}
+            # 真实 wire 形状：asdict(ImageGenResult)
+            return {"image_url": "http://cdn/x.png", "image_path": None}
 
     monkeypatch.setattr(gmt.GenerateMediaTools, "_svc", lambda _self: _Svc())
     recorder = SimpleNamespace(run_id=777)

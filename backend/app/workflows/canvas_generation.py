@@ -35,7 +35,7 @@ from app.services.library.generated_media_service import (
     register_generated_media,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
-from app.workflows.script_shot_generate import _reap_scratch_dir
+from app.services.library.scratch_reaper import reap_scratch_dir
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.services.ai.provider_protocols.base import ProviderCapabilities
@@ -1023,7 +1023,7 @@ async def persist_canvas_generation_step(
         }
     finally:
         if local_path:
-            _reap_scratch_dir(str(local_path))
+            reap_scratch_dir(str(local_path))
 
 
 @DBOS.step()

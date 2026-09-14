@@ -7,7 +7,8 @@ async def test_generate_image_registers_and_returns_ref(monkeypatch):
 
     async def _fake_generate_image(**kwargs):
         assert kwargs["prompt"] == "a cat"
-        return {"url": "http://x/cat.png"}
+        # 真实 wire 形状是 asdict(ImageGenResult)：image_url / image_path
+        return {"image_url": "http://x/cat.png", "image_path": None}
 
     captured = {}
 
@@ -77,7 +78,8 @@ async def test_generate_video_registers_and_returns_ref(monkeypatch):
     async def _fake_generate_video(**kwargs):
         assert kwargs["prompt"] == "pan"
         assert kwargs["source_image_url"] == "http://x/in.png"
-        return {"url": "http://x/clip.mp4"}
+        # 真实 wire 形状是 asdict(VideoGenResult)：video_url / video_path
+        return {"video_url": "http://x/clip.mp4", "video_path": None}
 
     captured = {}
 
