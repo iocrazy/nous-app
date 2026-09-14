@@ -481,7 +481,7 @@ class ScreenwritingTools:
                 dbos_workflow_id=wf_id,
                 metadata={"trigger": "agent_tool", "run_id": scope.run_id},
             )
-            await start_workflow_routed(
+            dispatch = await start_workflow_routed(
                 "script_shot_generate",
                 dbos_workflow_callable=script_shot_generate_workflow,
                 dbos_workflow_kwargs={
@@ -497,6 +497,10 @@ class ScreenwritingTools:
                     "step": run_context.get("step"),
                 },
                 workflow_id=wf_id,
+                # Recorded only when the dispatch is deferred (issue turns run
+                # inside a @DBOS.step) so the workflow body can FAIL this row
+                # if it cannot start the workflow. Never reaches the workflow.
+                task_id=task_id,
             )
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.exception(
@@ -521,23 +525,39 @@ class ScreenwritingTools:
                 "error_code": "dispatch_failed",
             }
 
+        # An issue turn runs inside a @DBOS.step, where DBOS refuses
+        # start_workflow. There the dispatch is RECORDED and the enclosing
+        # workflow body starts it at the end of the step (harness 3a Task 2).
+        # Reported rather than smoothed over: "queued" and "running" are not
+        # the same fact, and the model is told which one it got.
+        deferred = bool((dispatch or {}).get("deferred"))
         logger.info(
-            "[screenwriting] GenerateShotImage run=%s shot=%s task=%s",
+            "[screenwriting] GenerateShotImage run=%s shot=%s task=%s deferred=%s",
             scope.run_id,
             shot.id,
             task_id,
+            deferred,
         )
-        return {
+        note = (
+            "Generation is queued at the end of this step — it is not done "
+            "yet, and it has not started yet either. The shot's image will "
+            "update once it completes; this call does not wait and does not "
+            "know the outcome."
+            if deferred
+            else "Generation dispatched asynchronously — it is not done yet. "
+            "The shot's image will update once it completes; this call "
+            "does not wait and does not know the outcome."
+        )
+        result: dict[str, Any] = {
             "ok": True,
             "dispatched": True,
             "shot_id": str(shot.id),
             "task_id": task_id,
-            "note": (
-                "Generation dispatched asynchronously — it is not done yet. "
-                "The shot's image will update once it completes; this call "
-                "does not wait and does not know the outcome."
-            ),
+            "note": note,
         }
+        if deferred:
+            result["deferred"] = True
+        return result
 
     async def update_shot(self, args: dict, run_context: dict) -> dict:
         scope = await _bound_scope(run_context)
