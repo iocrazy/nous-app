@@ -84,7 +84,11 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
 }) => {
   const { t } = useTranslation();
   const childRun = useChildRun();
-  const [lineage, setLineage] = useState<OutputLineage | null>(null);
+  /** 自取回来的链。宿主喂了 `lineage` 时它保持不用 —— 屏幕上那条是下面派生的。 */
+  const [fetched, setFetched] = useState<OutputLineage | null>(null);
+  // 派生而不是把 prop 镜像进 state：镜像要靠一个 effect 回写，宿主内联一个对象
+  // 字面量就会让那个 effect 每次渲染都跑一遍（外加一次多余的 setState）。
+  const lineage = lineageProp !== undefined ? lineageProp : fetched;
   /** `null` = nothing wrong (including "not registered", which clears state
    *  entirely). A string is a code we have to SAY something about. */
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -100,7 +104,7 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
   // finishing would otherwise blank this block and shut an open version dialog
   // under the reader's hands.
   useEffect(() => {
-    setLineage(null);
+    setFetched(null);
     setErrorCode(null);
     setDiffOpen(false);
   }, [kind, refId]);
@@ -109,16 +113,12 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
     // 宿主给了答案就不再自问。`null` 也是答案（人手上传），所以判的是
     // `undefined` 而不是真值 —— 真值判定会把「查过、没有」退回成「自己去取」，
     // 对着一个本块根本不该问的端点。
-    if (lineageProp !== undefined) {
-      setLineage(lineageProp);
-      setErrorCode(null);
-      return;
-    }
+    if (lineageProp !== undefined) return;
     if (!refId) return;
     let live = true;
     getOutputLineage(kind, refId)
       .then((chain) => {
-        if (live) setLineage(chain);
+        if (live) setFetched(chain);
       })
       .catch((err) => {
         if (!live) return;
@@ -134,7 +134,9 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
     };
   }, [kind, refId, gen, lineageProp]);
 
-  if (errorCode !== null) {
+  // 自取失败才说「读不到」。宿主喂着链的时候屏幕上那条不是自取来的，一个陈旧的
+  // 自取错误盖在它上面等于报了一件此刻不成立的事。
+  if (errorCode !== null && lineageProp === undefined) {
     return (
       <p
         data-testid="output-provenance-error"

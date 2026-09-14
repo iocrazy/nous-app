@@ -146,7 +146,7 @@ describe('ResourceInfoPanel', () => {
 describe('ResourceInfoPanel — provenance', () => {
   it('shows where an agent-made resource came from', async () => {
     vi.mocked(getResourceProvenance).mockResolvedValue(chain);
-    render(<ResourceInfoPanel {...props} resource={{ ...resource, id: '347786145852739000', source_type: 'generated' } as unknown as Resource} />);
+    render(<ResourceInfoPanel {...props} resource={{ ...resource, id: '347786145852739000' } as unknown as Resource} />);
     const block = await screen.findByTestId('provenance');
     // ref 是 generated_media 的 id（链上的 ref_id），不是资源 id。
     expect([block.getAttribute('data-ref'), block.getAttribute('data-diff')]).toEqual(['347786145852739', 'false']);

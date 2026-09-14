@@ -13,15 +13,21 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 真实 `ApiError` 的形状：生产的 ErrorResponse 外壳让 `code` 是 `http_404`，
+// 类型码落在 `details` 里（`apiClient.ts` 的 `code: body?.code ?? …` /
+// `details: body?.details ?? …`）。桩少一个 `details`，被测代码就只能去读
+// `code`，而那正是真栈上判错的那条路。
 vi.mock('./apiClient', () => ({
   apiClient: { get: vi.fn() },
   ApiError: class ApiError extends Error {
     status: number;
     code?: string;
-    constructor(m: string, s: number, o: { code?: string } = {}) {
+    details?: unknown;
+    constructor(m: string, s: number, o: { code?: string; details?: unknown } = {}) {
       super(m);
       this.status = s;
       this.code = o.code;
+      this.details = o.details;
     }
   },
 }));
@@ -70,8 +76,32 @@ describe('getResourceProvenance', () => {
 
   it('a human upload is null, not an error', async () => {
     // 404 not_registered 是答案不是故障：库里大多数资源都是人传的。
-    vi.mocked(apiClient.get).mockRejectedValueOnce(new ApiError('nope', 404, { code: 'not_registered' }));
+    // 原样的生产错误体：外壳的 code 是 http_404，类型码在 details 里。
+    vi.mocked(apiClient.get).mockRejectedValueOnce(
+      new ApiError('no generation was promoted into this resource', 404, {
+        code: 'http_404',
+        details: { code: 'not_registered', message: 'no generation was promoted into this resource' },
+      }),
+    );
     await expect(getResourceProvenance('1')).resolves.toBeNull();
+  });
+
+  it('a resource that is not there is also null', async () => {
+    // 这条路的另一个 404（`not_found`）对这块 UI 是同一个答案：没有来源可画。
+    vi.mocked(apiClient.get).mockRejectedValueOnce(
+      new ApiError('resource not found', 404, {
+        code: 'http_404',
+        details: { code: 'not_found', message: 'resource not found' },
+      }),
+    );
+    await expect(getResourceProvenance('1')).resolves.toBeNull();
+  });
+
+  it('a 404 that is not one of ours propagates', async () => {
+    // 路由还没部署时 FastAPI 答的是裸 `{"detail":"Not Found"}` —— 没有类型码。
+    // 把它收成 null 会让整块来源在全站静默消失，而没有一处会说出来。
+    vi.mocked(apiClient.get).mockRejectedValueOnce(new ApiError('Not Found', 404, {}));
+    await expect(getResourceProvenance('1')).rejects.toThrow('Not Found');
   });
 
   it('any other failure propagates', async () => {
