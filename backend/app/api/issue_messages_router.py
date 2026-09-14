@@ -624,7 +624,11 @@ async def post_issue_message(
       — the agent reads it on its next wake (history loads every message in the
       conversation, unfiltered by role). The body is stored verbatim, /note
       prefix and all (multica parity — the literal text is the record).
-    - Legacy: no assigned agent → plain issue_messages insert.
+    - Legacy: no assigned agent → plain issue_messages insert, which stores
+      the body and NOTHING else (meta={}). So a typed answer (409
+      no_open_question) and any attachment at all (409 citations_need_agent)
+      are refused here rather than silently dropped — both are addressed to
+      an agent this issue does not have.
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
     # Pass the body so a /note prefix short-circuits the wake, exactly as the
@@ -643,6 +647,23 @@ async def post_issue_message(
                 detail={
                     "code": "no_open_question",
                     "message": "this issue has no agent to answer",
+                },
+            )
+        # 3a 小票 C17：附件是写给 agent 看的。`_insert_legacy_comment` 只落
+        # body + meta={}，所以**每一种**附件都会被原样丢掉——引用、资源、
+        # 图片一视同仁，不只是 `output_ref`。而「发帖成功、附件消失」是本仓
+        # 明令禁止的静默 no-op（「触发路径必须类型化失败回显」）。与上面的
+        # no_open_question 同形：有东西要交给 agent，而这个 issue 没有 agent。
+        # 按 kind 分拣是没有意义的——这条路一个 kind 都存不下。
+        if payload.attachments:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "citations_need_agent",
+                    "message": (
+                        "Attachments need an assigned agent — "
+                        "the comment was not posted"
+                    ),
                 },
             )
         return await _insert_legacy_comment(issue_id, payload, auth)

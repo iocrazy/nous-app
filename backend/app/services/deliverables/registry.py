@@ -22,6 +22,9 @@ dispatch 就返回，所以两个 writer 同时在一个 run 上是真实情形�
 **kind 错是接线 bug，不是数据问题**：四类之外一律 ``ValueError``。静默跳过
 会让那条路的产出永远不存在而没有任何地方说得出来（「触发路径必须类型化
 失败回显」）。
+
+版本语义（undo 不占号 / revert 占、``generated_media`` 恒 v1）见
+``services/deliverables/README.md``。
 """
 
 from __future__ import annotations

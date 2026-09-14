@@ -87,6 +87,29 @@ def _wire(monkeypatch, lineage: list[dict]):
     return r, dispatch, repo
 
 
+def _wire_no_agent(monkeypatch):
+    """同一个路由，但 issue 没有 assignee agent —— legacy 评论分支。
+
+    只桩两处：可见性检查和 legacy 插入。**刻意不桩** session / dispatch 那几个，
+    因为这条路径根本不该走到它们；万一将来走到了，缺桩会当场炸而不是静静地绿。
+    """
+    importlib.import_module("app.api.issue_messages_router")
+    r = sys.modules["app.api.issue_messages_router"]
+
+    issue_row = {
+        "id": ISSUE_ID,
+        "assignee_agent_id": None,
+        "created_by_user_id": ME,
+        "assignee_user_id": None,
+        "paused_at": None,
+        "execution_state": {},
+    }
+    monkeypatch.setattr(r, "_assert_issue_visible", AsyncMock(return_value=issue_row))
+    legacy = AsyncMock(return_value=None)
+    monkeypatch.setattr(r, "_insert_legacy_comment", legacy)
+    return r, legacy
+
+
 async def _post(r, attachments):
     return await r.post_issue_message(
         ISSUE_ID,
@@ -212,3 +235,53 @@ async def test_over_cap_output_refs_are_a_typed_400(monkeypatch):
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "output_ref_limit_exceeded"
     repo.lineage_for.assert_not_awaited()
+
+
+# ── 无 agent 的 issue：附件无人可读 → 类型化 409 ─────────────────────────
+
+
+# `resource_ref` 的形状照抄前端真正发出去的那份（`IssueReplyBox.tsx::collectRefs`），
+# 不是按后端读起来顺眼的样子写的——「边界 mock 必须用真实 JSON 形状」。
+_RESOURCE_REF = {
+    "kind": "resource_ref",
+    "resource_id": "42",
+    "name": "spec.md",
+    "mime": "text/markdown",
+    "scope": {"type": "personal", "id": ""},
+}
+
+
+@pytest.mark.parametrize(
+    "attachment",
+    [
+        pytest.param(_att(), id="output_ref"),
+        pytest.param(_RESOURCE_REF, id="resource_ref"),
+        pytest.param({"kind": "image", "url": "https://x/y.png"}, id="image"),
+    ],
+)
+async def test_an_attachment_on_an_agentless_issue_is_a_typed_409(
+    monkeypatch, attachment
+):
+    """C17：legacy 评论路径在 3a 之后成了唯一静默吃附件的分支——而它吃的不止
+    引用：`_insert_legacy_comment` 只落 body + meta={}，**每一种** kind 都消失。
+    附件只有 agent 读得懂，没有 agent 就该当面拒绝，而不是发帖成功、附件消失。"""
+    r, legacy = _wire_no_agent(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        await _post(r, [attachment])
+    assert exc.value.status_code == 409
+    assert isinstance(
+        exc.value.detail, dict
+    ), "detail 必须是 dict，否则 details.code 丢失"
+    assert exc.value.detail["code"] == "citations_need_agent"
+    legacy.assert_not_awaited()  # 一行都不许落库
+
+
+async def test_an_ordinary_comment_on_an_agentless_issue_still_posts(monkeypatch):
+    """守卫只认附件：没有附件的普通评论照旧走 legacy 插入，一个字都没变。"""
+    r, legacy = _wire_no_agent(monkeypatch)
+    await r.post_issue_message(ISSUE_ID, IssueMessagePost(body="hi"), AUTH)
+    legacy.assert_awaited_once()
+    await r.post_issue_message(
+        ISSUE_ID, IssueMessagePost(body="still here", attachments=[]), AUTH
+    )
+    assert legacy.await_count == 2  # 空列表不是「有东西要交给 agent」

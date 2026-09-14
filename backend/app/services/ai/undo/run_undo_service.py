@@ -9,6 +9,8 @@ Every id this module touches comes off the server's own ledgers
 model- or user-supplied scene/shot id, which is why it is exempt from the
 scope_resolver choke point (see the two allowlist entries this task adds to
 ``tests/test_scope_resolver_single_choke_point.py``).
+
+版本语义见 ``services/deliverables/README.md``（undo 不占号，revert 占）。
 """
 
 from __future__ import annotations
