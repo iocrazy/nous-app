@@ -477,6 +477,14 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   const handleMentionSelect = useCallback((item: ResourceSearchResult) => {
     const ed = editorRef.current;
     if (ed) {
+      // BEFORE the insert, not after. `insertResourceRef` is a bare
+      // `insertContent` at the caret — it replaces nothing — so the typed
+      // "@query" would otherwise survive next to the chip ("hello
+      // @me@story.md"). Dropping it afterwards is worse than not dropping it:
+      // the scan starts at a caret sitting behind the fresh chip, finds the
+      // chip's own "@" span first and deletes what was just inserted
+      // (measured: body came back "hello " with no chip).
+      dropMentionTrigger();
       (ed.commands as unknown as {
         insertResourceRef: (item: ResourceSearchResult) => boolean;
       }).insertResourceRef(item);
@@ -484,7 +492,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     closeMentionPicker();
     setMentionQuery('');
     ed?.commands.focus();
-  }, [closeMentionPicker]);
+  }, [dropMentionTrigger, closeMentionPicker]);
 
   /**
    * Picking an asset STAGES it — it does not insert a tiptap node.

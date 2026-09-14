@@ -5,12 +5,18 @@ import type { Editor } from '@tiptap/core';
 /**
  * Delete the "@query" the writer typed to open the mention picker.
  *
- * Mandatory on every picker tab that STAGES its pick above the composer
- * (assets, outputs) instead of inserting a chip where the caret is: the typed
- * text then stands for nothing, and what is left behind is POSTED as message
- * body — an issue reply whose body was just "@" (真机验收 run
- * 348429859900467). The resource tab is exempt because `insertResourceRef`
- * replaces the query with a node.
+ * Mandatory on EVERY tab of the picker, whatever it does with the pick:
+ *
+ * - assets / outputs STAGE above the composer, so the typed text stands for
+ *   nothing and is POSTED as message body — an issue reply whose body was just
+ *   "@" (真机验收 run 348429859900467);
+ * - the resource tab inserts a chip, but `insertResourceRef` is a bare
+ *   `insertContent` AT THE CARET that replaces nothing, so the query survives
+ *   next to the chip ("hello @me@story.md").
+ *
+ * ⚠️ Callers that also insert must call this FIRST and insert second. Run
+ * afterwards, the scan starts from a caret behind the fresh chip, reads the
+ * chip's own "@name" as the query and deletes what was just inserted.
  *
  * Shared by the two composers that both grew the same staging tabs
  * (`AIChatPanel` and `Todolist/IssueReplyBox`) so they cannot disagree about
