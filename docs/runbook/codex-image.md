@@ -1,4 +1,8 @@
-# Codex (GPT Image 2) 生图 provider — 运维手册
+# Codex / OpenAI 出图链（`gpt-image-2-skill`）— 运维手册
+
+同一个 CLI 二进制的两条路径：**Codex 订阅会话**（`--provider codex`，下文
+「架构事实」起）与 **OpenAI API key**（`--provider openai`，见「API-key 路径」）。
+两者的凭证、计费和能力都不一样，别把一条路径的结论搬到另一条上。
 
 CodexCliProvider（`backend/app/services/media/parsers/video_providers/codex_cli.py`）
 以 subprocess 调 `gpt-image-2-skill` CLI 生图。凭证是 **gpupc 宿主机 heygo 用户的
@@ -77,6 +81,11 @@ Codex 会话互不相干。协议实现在
 `GPT Image (Codex, local)`）：订阅路径上工具内的出图模型是 OpenAI 的灰度决定，
 不是我们能选的，写死版本号只会过期。
 
+⚠️ **那个"计费信号"只是给人看的，系统不替你算钱**：目录行上的 `pricing_type` /
+`pricing_value` 今天是信息字段，唯一真正消费它们的是转录（ASR）扣点，且只对
+`nous-` 前缀的模型生效（`api/ai_router.py`，按时长折算）。图片的按 token 成本
+**没有任何地方在追踪**，真实花费只能去 OpenAI 平台的用量页看。
+
 **key 怎么进去**：Admin → AI Models，**逐行**粘贴后保存（那里会加密存储），再把
 `is_enabled` 打开。migration 只种 `api_key = ''`（该列 NOT NULL）——迁移文件里写明文
 key 等于把凭证提交进 git，还会绕过 Admin 的加密。key 为空时协议在 build 期就抛类型化
@@ -105,11 +114,21 @@ docker exec nous-worker sh -c \
 ⚠️ API-key 那一列的依据是 OpenAI 文档（2026-09-13 读）+ 0.7.4 的 `--quality` 枚举，
 **尚未在真 API 上实测**——按「文档化的预期」读它，别当观测结果。真实测在生图验收里。
 
-升级二进制后先把枚举打出来再改代码里的 tier 表，别假设它没变（`high` 与 `xhigh` 在
-二进制里是重叠存储的，`strings` 看不出 `high` 还在不在）：
+0.7.4 的 `--quality` 枚举已实测（在 `linux/amd64` 容器里真跑二进制，2026-09-13）：
+
+```
+[possible values: auto, low, medium, high, xhigh, max]
+```
+
+⚠️ 不要用 `strings` 去看这个：`high` 与 `xhigh` 在二进制里是重叠存储的（`high` 只是
+`xhigh` 的尾巴），光看字符串会误判 `high` 已被删。**Dockerfile 的安装层现在把这条
+断言钉死了** —— 除了校验版本号，还要 `--help` 的输出里同时出现 `xhigh` 和独立的
+`high`，任何一个消失就是 build 失败，而不是等到用户每次出图都撞参数解析错误
+（codex 路径每次都发 `--quality high`）。升级二进制时如果这层红了，先把下面的枚举
+打出来，再决定怎么改代码里的 tier 表（`IMAGE_25_QUALITY_TIERS` / `LEGACY_QUALITY_TIERS`）：
 
 ```bash
-docker exec nous-worker gpt-image-2-skill images generate --help | grep -A3 'possible values'
+docker exec nous-worker gpt-image-2-skill images generate --help 2>&1 | grep -o '\[possible values[^]]*\]'
 ```
 
 ## 一次性安装 / 登录（宿主机）

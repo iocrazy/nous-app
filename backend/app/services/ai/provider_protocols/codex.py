@@ -90,7 +90,7 @@ class _CodexImageAdapter(BaseImageProvider):
 
 class CodexProtocol(ProviderProtocol):
     key = "codex"
-    label = "Codex CLI (GPT Image 2)"
+    label = "Codex CLI (GPT Image)"
     description = (
         "Subprocess gpt-image-2-skill CLI over the local Codex OAuth session "
         "(no api_key; ChatGPT subscription quota). Image generation only."
