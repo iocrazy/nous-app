@@ -60,6 +60,7 @@ class _CodexImageAdapter(BaseImageProvider):
             model_version=model or None,
             quality=kwargs.get("quality") or None,
             ref_image_paths=paths or None,
+            resolution=kwargs.get("resolution") or None,
         )
         return ImageGenResult(
             image_url="",

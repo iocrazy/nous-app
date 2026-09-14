@@ -26,7 +26,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 from loguru import logger
 
@@ -36,6 +36,7 @@ from app.services.generation.aspect import ASPECT_TOLERANCE as _ASPECT_TOLERANCE
 from app.services.generation.aspect import CODEX_DEFAULT_SIZE as _DEFAULT_SIZE
 from app.services.generation.aspect import CODEX_SIZES as _ASPECT_TO_SIZE
 from app.services.generation.aspect import aspect_instruction as _aspect_instruction
+from app.services.generation.aspect import image_size_for
 
 
 @dataclass
@@ -206,6 +207,8 @@ class CodexCliProvider:
         bin_path: Optional[str] = None,
         auth_file: Optional[str] = None,
         timeout: Optional[float] = None,
+        provider_kind: Literal["codex", "openai"] = "codex",
+        api_key: Optional[str] = None,
     ) -> None:
         # GPT_IMAGE_2_SKILL_BIN lets tests / non-standard installs point at a
         # specific binary; CODEX_AUTH_FILE points at the mounted session file
@@ -218,6 +221,14 @@ class CodexCliProvider:
             if auth_file is not None
             else os.environ.get("CODEX_AUTH_FILE", "")
         )
+        # Which credential — and therefore which upstream — this instance
+        # drives. "codex" is the ChatGPT subscription session (auth.json, no
+        # key); "openai" is the public Images API (a key, and it HONOURS
+        # --size). The two differ in more than the flag: see generate_image.
+        self._provider_kind = provider_kind
+        self._api_key = (api_key or "").strip()
+        if provider_kind == "openai" and not self._api_key:
+            raise ValueError("openai kind needs an api_key")
         self._timeout = timeout if timeout is not None else _default_timeout()
         # Set by `_run_cli` on every run: the model's own words from the last
         # invocation's event stream, or "" when it said nothing.
@@ -233,16 +244,25 @@ class CodexCliProvider:
         # only channel carrying the model's own words when it declines a
         # prompt. `_run_cli` splits that stream back apart before anything
         # else sees it.
-        cmd = [self._bin, "--json", "--json-events", "--provider", "codex"]
-        if self._auth_file:
+        cmd = [self._bin, "--json", "--json-events", "--provider", self._provider_kind]
+        if self._provider_kind == "codex" and self._auth_file:
             cmd += ["--auth-file", self._auth_file]
         cmd += args
+        # The key rides in the child's environment, never on argv: the process
+        # table is world-readable, so a flag would publish it to every user on
+        # the box and into any crash dump of the command line. The CLI reads
+        # OPENAI_API_KEY (doctor reports auth_source=env, verified 0.7.4).
+        popen = (
+            safe_popen_kwargs(env_extra={"OPENAI_API_KEY": self._api_key})
+            if self._provider_kind == "openai"
+            else safe_popen_kwargs()
+        )
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
+                **popen,
             )
         except FileNotFoundError as exc:
             raise CodexCliError(
@@ -371,18 +391,28 @@ class CodexCliProvider:
         quality: Optional[str] = None,
         ref_image_path: Optional[str] = None,
         ref_image_paths: Optional[List[str]] = None,
+        resolution: Optional[str] = None,
     ) -> GenResult:
         """``images generate`` (or ``edit`` with local ref images) → local PNG.
 
         ``ref_image_paths`` supersedes the single ``ref_image_path`` (kept for
         callers not yet migrated); the CLI takes multiple ``--ref-image``
-        flags (IC caps references at 9)."""
+        flags (IC caps references at 9).
+
+        ``resolution`` (``1k`` / ``2k`` / ``4k``) only means something on the
+        openai kind, which honours ``--size``; the codex kind ignores it."""
         out_dir = tempfile.mkdtemp(prefix="codeximg_")
         out_path = os.path.join(out_dir, "gen.png")
-        size = _ASPECT_TO_SIZE.get(aspect or "", _DEFAULT_SIZE)
-        # The shape actually comes from here, not from --size. See the block
-        # above _ASPECT_TO_PHRASE for the measurements.
-        effective_prompt = prompt + _aspect_instruction(aspect)
+        if self._provider_kind == "openai":
+            # This upstream honours --size, so the pixels are the request and
+            # the prose sentence would only be noise competing with them.
+            size = image_size_for(aspect or None, resolution)
+            effective_prompt = prompt
+        else:
+            size = _ASPECT_TO_SIZE.get(aspect or "", _DEFAULT_SIZE)
+            # The shape actually comes from here, not from --size. See the
+            # block above _ASPECT_TO_PHRASE for the measurements.
+            effective_prompt = prompt + _aspect_instruction(aspect)
         refs = [
             r
             for r in (ref_image_paths or ([ref_image_path] if ref_image_path else []))
@@ -483,7 +513,16 @@ class CodexCliProvider:
             payload = {}
         if not isinstance(payload, dict) or rc != 0:
             return {"ok": False, "error": "health_failed"}
-        auth = ((payload.get("providers") or {}).get("codex") or {}).get("auth") or {}
+        providers = payload.get("providers") or {}
+        if self._provider_kind == "openai":
+            # A different credential, so a different field and a different
+            # verdict: "not_logged_in" would send the user to a login flow
+            # that has nothing to do with a missing key.
+            auth = (providers.get("openai") or {}).get("auth") or {}
+            if auth.get("api_key_present") is not True:
+                return {"ok": False, "error": "api_key_missing"}
+            return {"ok": True}
+        auth = (providers.get("codex") or {}).get("auth") or {}
         if auth.get("access_token_present") is not True:
             return {"ok": False, "error": "not_logged_in"}
         return {"ok": True}
