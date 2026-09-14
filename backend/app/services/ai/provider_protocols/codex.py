@@ -29,10 +29,19 @@ class _CodexImageAdapter(BaseImageProvider):
     ``generate`` returns an ``ImageGenResult`` whose ``image_path`` is the local
     PNG the CLI produced (``image_url`` stays empty — there is no URL). The
     downstream persist step ingests the local file via ``source_path``.
+
+    ``provider_name`` is what the result CALLS itself. Two protocols drive the
+    same binary (``codex`` on the subscription session, ``openai-images`` on
+    the API key), so a hardcoded "codex" would mislabel half the generations —
+    ``_stamp_provider_key`` overwrites ``provider_key`` downstream, but the
+    result's own ``provider`` string is read on its way there.
     """
 
-    def __init__(self, provider: "CodexCliProvider") -> None:
+    def __init__(
+        self, provider: "CodexCliProvider", provider_name: str = "codex"
+    ) -> None:
         self._provider = provider
+        self._provider_name = provider_name
 
     async def generate(self, prompt: str, model: str, **kwargs) -> ImageGenResult:
         # Preferred channel: LOCAL reference paths the workflow already
@@ -65,7 +74,7 @@ class _CodexImageAdapter(BaseImageProvider):
         return ImageGenResult(
             image_url="",
             image_path=result.local_path,
-            provider="codex",
+            provider=self._provider_name,
             model=model or "",
             metadata={"mime": result.mime, **(result.raw or {})},
         )

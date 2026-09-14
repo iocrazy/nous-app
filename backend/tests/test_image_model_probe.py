@@ -409,6 +409,9 @@ def test_every_generation_protocol_declares_whether_it_is_http_probeable() -> No
         # here as well keeps the axis total rather than relying on that guard.
         "codex-local": False,
         "jimeng-local": False,
+        # Same binary as ``codex``, a different upstream behind it — still a
+        # subprocess, so still nothing this process could dial.
+        "openai-images": False,
     }
     actual = {
         p.key: p.supports_http_image_probe

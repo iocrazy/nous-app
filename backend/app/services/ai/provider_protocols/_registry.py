@@ -16,6 +16,9 @@ from app.services.ai.provider_protocols.jimeng import JimengProtocol
 from app.services.ai.provider_protocols.jimeng_local import JimengLocalProtocol
 from app.services.ai.provider_protocols.modelscope import ModelScopeProtocol
 from app.services.ai.provider_protocols.openai import OpenAIProtocol
+from app.services.ai.provider_protocols.openai_images import (
+    OpenAIImagesProtocol,
+)
 from app.services.ai.provider_protocols.qwen import QwenProtocol
 
 PROTOCOLS: tuple[ProviderProtocol, ...] = (
@@ -30,6 +33,7 @@ PROTOCOLS: tuple[ProviderProtocol, ...] = (
     JimengLocalProtocol(),
     CodexProtocol(),
     CodexLocalProtocol(),
+    OpenAIImagesProtocol(),
 )
 
 
