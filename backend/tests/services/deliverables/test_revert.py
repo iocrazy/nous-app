@@ -53,18 +53,21 @@ def wired(monkeypatch):
         },
         applied=[],
         registered=[],
+        calls=[],
     )
 
     async def _chain_of(kind, ref_id, auth):
         return st.chain
 
     async def _ok(*a, **k):
+        st.calls.append("guard")
         return None
 
     async def _rebuild(kind, ref_id, row):
         return st.rebuilt.get(row["version"]), None
 
     async def _read(ref_id, session):
+        st.calls.append("read_for_update")
         return st.current
 
     async def _write(ref_id, fields, *, actor, session, before):
@@ -88,7 +91,22 @@ def wired(monkeypatch):
     async def _latest(*, kind, ref_id, session):
         return 3
 
+    async def _stored(*, row_id, session):
+        """仓库回读：登记口的 RETURNING 给不出 created_at / seq，血缘端点给得出。"""
+        reg = st.registered[-1]
+        return {
+            "id": str(row_id),
+            "version": 3 + len(st.registered),
+            "parent_version": 2 + len(st.registered),
+            "title": reg.get("title"),
+            "actor_user_id": reg.get("actor_user_id"),
+            "reverted_from_version": reg.get("reverted_from_version"),
+            "seq": None,
+            "created_at": "2026-09-14T00:00:00+00:00",
+        }
+
     monkeypatch.setattr(mod, "visible_chain", _chain_of)
+    monkeypatch.setattr(mod, "_stored_version_row", _stored)
     monkeypatch.setattr(mod, "verify_shot_access", _ok)
     monkeypatch.setattr(mod, "rebuild_content", _rebuild)
     monkeypatch.setattr(mod, "_read_shot_fields", _read)
@@ -294,6 +312,7 @@ def wired_scene(monkeypatch):
         watermarks={1: "1", 2: "2"},
         applied=[],
         registered=[],
+        calls=[],
     )
 
     def _chain():
@@ -316,6 +335,7 @@ def wired_scene(monkeypatch):
         return _chain()
 
     async def _ok(*a, **k):
+        st.calls.append("guard")
         return None
 
     async def _rebuild(kind, ref_id, row):
@@ -339,6 +359,19 @@ def wired_scene(monkeypatch):
     async def _latest(*, kind, ref_id, session):
         return 2
 
+    async def _stored(*, row_id, session):
+        reg = st.registered[-1]
+        return {
+            "id": str(row_id),
+            "version": 2 + len(st.registered),
+            "parent_version": 1 + len(st.registered),
+            "title": reg.get("title"),
+            "actor_user_id": reg.get("actor_user_id"),
+            "reverted_from_version": reg.get("reverted_from_version"),
+            "seq": None,
+            "created_at": "2026-09-14T00:00:00+00:00",
+        }
+
     class _FakeUowWithSession:
         async def __aenter__(self):
             return _FakeSession(st.ledger)
@@ -352,6 +385,7 @@ def wired_scene(monkeypatch):
             return {"content_version": expected_version + 1}
 
     monkeypatch.setattr(mod, "visible_chain", _chain_of)
+    monkeypatch.setattr(mod, "_stored_version_row", _stored)
     monkeypatch.setattr(mod, "verify_scene_access", _ok)
     monkeypatch.setattr(mod, "rebuild_content", _rebuild)
     monkeypatch.setattr(mod, "register_deliverable", _register)
@@ -394,3 +428,124 @@ async def test_a_scene_with_nothing_newer_than_its_latest_version_keeps_nothing(
 
     assert out.kept_version is None and len(wired_scene.registered) == 1
     assert wired_scene.registered[0]["reverted_from_version"] == 1
+
+
+# ── 写权限守卫必须真的挡住（fix 轮 2） ────────────────────────────────────
+#
+# 在此之前 `verify_shot_access` / `verify_scene_access` 在**每一个**套件里都被桩成
+# no-op，路由测试又整体 mock 掉 `revert_output` —— 把 revert.py 里那两行 await 删掉，
+# 253 个测试全绿。「能看见 ≠ 能改」这条纪律当时没有任何可证伪的落点。
+#
+# 两条断言缺一不可：拒绝要穿出去（且是**类型化**的），以及它必须发生在任何写之前
+# —— 守卫排在 `FOR UPDATE` / 账本重放后面的话，一次越权请求仍然会锁行、甚至改完
+# 内容才被拒，那是「先做了再问」。
+
+
+def _denied(status_code: int, detail: str):
+    """守卫真实的抛法：**裸字符串** detail（`scope_guards.py:254/336/371`），
+    不是 dict —— 这正是需要翻译的原因。"""
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+async def test_a_shot_you_may_see_but_not_write_is_refused_before_anything_is_touched(
+    wired, monkeypatch
+):
+    async def _deny(*a, **k):
+        wired.calls.append("guard")
+        raise _denied(403, "Access denied")
+
+    monkeypatch.setattr(mod, "verify_shot_access", _deny)
+    with pytest.raises(HTTPException) as err:
+        await mod.revert_output(
+            kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+        )
+
+    assert err.value.status_code == 403
+    # 类型化：生产的 ErrorResponse 外壳只让 dict detail 活到 details.code。
+    assert err.value.detail["code"] == "not_permitted"
+    assert err.value.detail["message"] == "Access denied"
+    # 什么都没动 —— 没锁行、没改内容、没登记。
+    assert wired.applied == [] and wired.registered == []
+    assert wired.calls == ["guard"]  # 守卫跑了，FOR UPDATE 没跑
+
+
+async def test_a_missing_shot_is_refused_as_typed_not_found(wired, monkeypatch):
+    """守卫对「找不到」也抛裸字符串（"Shot not found"）。同样要带上码，否则这个
+    端点上唯一没有类型化码的拒绝就是权限那一类。"""
+
+    async def _deny(*a, **k):
+        wired.calls.append("guard")
+        raise _denied(404, "Shot not found")
+
+    monkeypatch.setattr(mod, "verify_shot_access", _deny)
+    with pytest.raises(HTTPException) as err:
+        await mod.revert_output(
+            kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+        )
+
+    assert err.value.status_code == 404
+    assert err.value.detail["code"] == "not_found"
+    assert err.value.detail["message"] == "Shot not found"
+    assert wired.applied == [] and wired.registered == []
+
+
+async def test_a_scene_you_may_see_but_not_write_is_refused_before_any_replay(
+    wired_scene, monkeypatch
+):
+    async def _deny(*a, **k):
+        wired_scene.calls.append("guard")
+        raise _denied(403, "Access denied")
+
+    monkeypatch.setattr(mod, "verify_scene_access", _deny)
+    with pytest.raises(HTTPException) as err:
+        await mod.revert_output(
+            kind="script_scene", ref_id="7", to_version=1, expected_latest=2, auth=AUTH
+        )
+
+    assert err.value.status_code == 403
+    assert err.value.detail["code"] == "not_permitted"
+    assert err.value.detail["message"] == "Access denied"
+    # 逆操作批一条都没派发，一版都没登记。
+    assert wired_scene.applied == [] and wired_scene.registered == []
+    assert wired_scene.calls == ["guard"]
+
+
+async def test_a_guard_that_already_speaks_in_codes_is_not_wrapped_twice(
+    wired, monkeypatch
+):
+    """负向对照：守卫将来自己改成类型化 detail 时，别再包一层把它的码埋掉。"""
+
+    async def _deny(*a, **k):
+        raise HTTPException(403, detail={"code": "seat_expired", "message": "x"})
+
+    monkeypatch.setattr(mod, "verify_shot_access", _deny)
+    with pytest.raises(HTTPException) as err:
+        await mod.revert_output(
+            kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+        )
+    assert err.value.detail["code"] == "seat_expired"
+
+
+async def test_the_returned_version_carries_what_the_lineage_endpoint_will_show(wired):
+    """登记口的 RETURNING 没有 created_at；回读补上，两个读者才在说同一版。"""
+    out = await mod.revert_output(
+        kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+    )
+    assert out.version["created_at"] == "2026-09-14T00:00:00+00:00"
+
+
+async def test_a_readback_that_comes_back_empty_still_returns_a_usable_version(
+    wired, monkeypatch
+):
+    """装饰字段读不回来不该把一次成功的回退判成失败——内容与登记都已经成立。"""
+
+    async def _gone(*, row_id, session):
+        return None
+
+    monkeypatch.setattr(mod, "_stored_version_row", _gone)
+    out = await mod.revert_output(
+        kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+    )
+    assert out.version["reverted_from_version"] == 1
+    assert out.version["created_at"] is None
+    assert len(wired.registered) == 1

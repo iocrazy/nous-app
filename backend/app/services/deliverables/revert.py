@@ -109,6 +109,51 @@ async def _latest_version(*, kind: str, ref_id: str, session) -> Optional[int]:
     )
 
 
+async def _stored_version_row(*, row_id, session) -> Optional[Dict[str, Any]]:
+    """刚登记的那一行，按血缘端点读它的样子读回来（同一个事务，看得见未提交的插入）。
+
+    登记口的 ``RETURNING`` 窄化成 ``DeliverableRow``，没有 ``created_at`` / ``seq``；
+    照它组装响应等于对**同一版**给出两种描述——回退接口说 ``created_at: null``，
+    刷新后血缘接口说一个时间戳。多读一行换两个读者说同一句话。"""
+    return await get_run_deliverables_repository().get_by_id(
+        row_id=row_id, session=session
+    )
+
+
+async def _assert_may_write(kind: str, ref_id: str, auth) -> None:
+    """写权限：**能看见 ≠ 能改**。
+
+    走的就是分镜 PATCH（``script_shots_router.py:134``）与场次 ops
+    （``script_scenes_router.py:236``）用的那一对守卫——同一个对象上两条写路径用
+    两套权限判断，迟早会分叉，而回退这条是后来的那一条。
+
+    **但要把它们的拒绝翻译成类型化的。** 两个守卫抛的是裸字符串 detail（"Access
+    denied" / "Shot not found"，``scope_guards.py:254/336/371``），而生产的
+    ``ErrorResponse`` 外壳只让 **dict** detail 活到 ``details``（CLAUDE.md
+    2026-09-09）。不翻译的话，这个端点上**唯一**一个没有类型化码的拒绝恰好就是
+    「不许你改」——前端只拿得到 ``code: http_403`` 与 "403 Forbidden"，而它旁边每一种
+    拒绝都带着码。状态码原样保留，守卫自己的文案原样转述进 ``message``。
+    """
+    guard = verify_shot_access if kind == "script_shot" else verify_scene_access
+    try:
+        await guard(str(ref_id), auth)
+    except HTTPException as denied:
+        if isinstance(denied.detail, dict):
+            # 已经是类型化的（将来守卫自己改好了）——别再包一层把码埋进去。
+            raise
+        raise _reject(
+            denied.status_code,
+            # 今天这两个守卫只产 403 / 404 两种；再出现别的状态码时按「不是 403
+            # 就是找不到」归类会说错话，所以这里的映射要跟着守卫一起 review。
+            (
+                "not_permitted"
+                if denied.status_code == status.HTTP_403_FORBIDDEN
+                else "not_found"
+            ),
+            str(denied.detail),
+        ) from denied
+
+
 def _is_unique_violation(exc: IntegrityError) -> bool:
     """这次 ``IntegrityError`` 是不是唯一索引冲突（SQLSTATE 23505）。
 
@@ -132,11 +177,7 @@ async def revert_output(
             "creates a new object; chapters have no ledger)",
         )
     rows = await visible_chain(kind, str(ref_id), auth)  # 404 在里面
-    # 写权限走与分镜 PATCH / 场次 ops 完全相同的守卫：能看见 ≠ 能改。
-    if kind == "script_shot":
-        await verify_shot_access(str(ref_id), auth)
-    else:
-        await verify_scene_access(str(ref_id), auth)
+    await _assert_may_write(kind, str(ref_id), auth)
 
     latest_row = rows[0]
     latest = int(latest_row["version"])
@@ -353,6 +394,13 @@ async def _revert_scene(
     kept = None
     # 当前内容 = 整本账本重放到末位；``head`` = 最新登记版重建出来的内容（按它自己的
     # ``ledger_ref`` 水位切）。两者不同 ⇒ 水位之后有没被登记的编辑。
+    #
+    # ⚠️ 存量的最新登记行没有 ``ledger_ref``（3b 之前登记的都没有），那时
+    # ``diff._prefix_for``（``diff.py:116-124``）退回按 ``created_at`` 切账本——
+    # 那个时间戳只是**巧合**单调的：同一个事务里的两次写共享事务开始时间。切偏一行
+    # 就会让 ``head`` 少一笔，于是这里判定「有未登记的编辑」并**多登记一版**。
+    # 后果是良性的（多留一版历史，没有内容被销毁，方向与「永不销毁内容」一致），
+    # 但那一版是假的。这类链会随着每次回退自己补上 ``ledger_ref`` 而消失。
     if replay_to(ledger, current_seq) != head:
         kept = await _register(
             kind="script_scene",
@@ -418,26 +466,31 @@ async def _register(
             "revert_failed",
             "the content was not changed: the new version could not be registered",
         )
-    # ``run_id=None`` 走 ``version_of`` 的人手分支：turn / step / deep_link 一律
-    # 清空（轨迹坐标是 run 的东西），issue 身份则由这条链补上——与血缘端点同一口径。
-    return version_of(
-        {
+    # 回读刚插的那一行（同一个事务），拿服务器才有的 ``created_at``。登记口的
+    # ``RETURNING`` 窄化成 ``DeliverableRow``，照它组装等于对**同一版**给出两种
+    # 描述：回退接口说 ``created_at: null``，刷新后血缘接口说一个时间戳。
+    stored = await _stored_version_row(row_id=row.id, session=session)
+    if stored is None:
+        # 行刚插进去、读不回来：不该发生，但它只影响这次响应的装饰字段，
+        # 内容与登记都已经成立。为此把一次成功的回退判成失败是更坏的交易。
+        logger.warning(
+            f"[revert] {kind}/{ref_id} v{row.version}: could not read the row "
+            "back — the response loses created_at / seq, nothing else"
+        )
+        stored = {
             "id": row.id,
             "version": row.version,
             "parent_version": row.parent_version,
-            "run_id": None,
-            "issue_id": None,
-            "issue_key": None,
-            "seq": None,
-            "turn": None,
-            "step": None,
             "title": row.title,
-            "model": None,
-            "cost_cents": None,
-            "created_at": None,
             "actor_user_id": row.actor_user_id,
             "reverted_from_version": row.reverted_from_version,
-        },
+        }
+    # ``run_id=None`` 走 ``version_of`` 的人手分支：turn / step / deep_link 一律
+    # 清空（轨迹坐标是 run 的东西），issue 身份则由这条链补上——与血缘端点同一口径。
+    # ``stored`` 是仓库 ``_row`` 出来的，键与 ``lineage_for`` 的行完全一致，所以
+    # ``version_of`` 的投影对两个读者做的是同一件事。
+    return version_of(
+        {**stored, "run_id": None, "issue_id": None, "issue_key": None},
         issue_id=chain.issue_id,
         issue_key=chain.issue_key,
     )

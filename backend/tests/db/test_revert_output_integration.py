@@ -220,6 +220,9 @@ def unguarded(monkeypatch):
         return rows
 
     async def _allow(*a, **k):
+        """守卫放行。它们**拒绝**时的行为（类型化 403 / 404、且发生在任何写之前）
+        由 `tests/services/deliverables/test_revert.py` 的四个用例钉住 —— 那里不需要
+        真库，而在这里搭一套越权的团队成员关系只会把本文件的问题换成另一个。"""
         return None
 
     monkeypatch.setattr(mod, "visible_chain", _chain)
@@ -343,6 +346,9 @@ async def test_a_shot_revert_writes_content_ledger_and_version_in_one_go(
     assert version["version"] == 3 and version["reverted_from_version"] == 1
     assert version["run_id"] is None
     assert version["actor_user_id"] == fx["user_id"]
+    # 服务器才有的字段：登记口的 RETURNING 给不出，回读补上。没有它，回退接口与
+    # 血缘接口会对**同一版**给出两种描述（一个 null，一个时间戳）。
+    assert version["created_at"] is not None
 
     stored = await pg.fetchrow(
         "SELECT run_id, actor_user_id, reverted_from_version, ledger_ref "
@@ -476,7 +482,7 @@ async def test_a_failed_registration_rolls_the_content_back(
 
 @_skip
 async def test_losing_the_version_race_is_a_typed_409_on_a_real_index(
-    orm_dsn, fx, pg, unguarded
+    orm_dsn, fx, pg, unguarded, monkeypatch
 ):
     """并发回退的仲裁者是 ``run_deliverables_kind_ref_version_key``。单测伪造了
     ``IntegrityError.orig.sqlstate``；只有 asyncpg + 真索引能证明 23505 确实以那个
@@ -504,18 +510,17 @@ async def test_losing_the_version_race_is_a_typed_409_on_a_real_index(
             return 2
         return await original(kind=kind, ref_id=ref_id, session=session)
 
-    unguarded._latest_version = _stale_inside_the_transaction
-    try:
-        with pytest.raises(HTTPException) as err:
-            await unguarded.revert_output(
-                kind="script_shot",
-                ref_id=str(shot_id),
-                to_version=1,
-                expected_latest=2,
-                auth=_auth(fx),
-            )
-    finally:
-        unguarded._latest_version = original
+    # monkeypatch 而不是手工赋值 + try/finally：还原由 pytest 负责，测试中途抛异常
+    # 也不会把补丁泄漏给后面的用例（本文件其余的桩都走它）。
+    monkeypatch.setattr(unguarded, "_latest_version", _stale_inside_the_transaction)
+    with pytest.raises(HTTPException) as err:
+        await unguarded.revert_output(
+            kind="script_shot",
+            ref_id=str(shot_id),
+            to_version=1,
+            expected_latest=2,
+            auth=_auth(fx),
+        )
 
     assert err.value.status_code == 409
     assert err.value.detail["code"] == "version_conflict"
