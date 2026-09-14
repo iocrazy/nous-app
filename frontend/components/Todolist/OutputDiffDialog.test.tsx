@@ -299,4 +299,54 @@ describe('OutputDiffDialog — revert (3b §3.4)', () => {
     await waitFor(() => expect(screen.getByTestId('output-diff-cost-to').textContent).toBe('≈¢0.42'));
     expect(screen.getByTestId('output-diff-cost-from').textContent).toBe('≈¢0.42');
   });
+
+  it('says where an allocated price came from', async () => {
+    // The `≈` says "approximate"; the title says WHY, which is the half a
+    // reader needs before deciding whether to reconcile anything against it.
+    openTextDiff();
+    await waitFor(() => expect(screen.getByTestId('output-diff-cost-to').getAttribute('title'))
+      .toBe('Allocated from step cost'));
+    expect(screen.getByTestId('output-diff-cost-from').getAttribute('title')).toBe('Allocated from step cost');
+  });
+
+  it('an unpriced media side says which model has no price row', async () => {
+    const unpriced = (n: number, parent: number | null) => ({
+      ...v(n, parent), model: 'gpt-6-astra', cost_cents: null, cost_kind: null,
+    });
+    getOutputLineage.mockResolvedValueOnce({
+      kind: 'generated_media', ref_id: '77', latest_version: 2,
+      versions: [unpriced(2, 1), unpriced(1, null)], as_of_seq: '347786145852741',
+    });
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'generated_media', ref_id: '77', content_type: 'media',
+      from: { ...side(1, null), media: { id: '77', media_kind: 'image', mime: 'image/png', cover_url: 'https://cdn.example.com/a.png', stream_url: null } },
+      to: { ...side(2, null), media: { id: '78', media_kind: 'image', mime: 'image/png', cover_url: 'https://cdn.example.com/b.png', stream_url: null } },
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="generated_media" refId="77" onClose={vi.fn()} />);
+    const cost = await screen.findByTestId('output-diff-cost-to');
+    expect([cost.textContent, cost.getAttribute('title')])
+      .toEqual(['—', 'No price configured for gpt-6-astra']);
+  });
+
+  it('hands focus to the confirm button, so Enter answers the question just asked', async () => {
+    openTextDiff();
+    fireEvent.click(await screen.findByTestId('output-diff-revert'));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('output-revert-go')));
+  });
+
+  it('drops the kept note when the reader moves to another version', async () => {
+    // It answers "what happened to my edits during THAT revert" — carrying it
+    // onto a version the revert never touched makes it a claim about the wrong
+    // object.
+    openTextDiff();
+    revertOutput.mockResolvedValue({
+      version: { ...v(4, 3), reverted_from_version: 1, run_id: null, actor_user_id: ACTOR },
+      kept_version: { ...v(3, 2), run_id: null, actor_user_id: ACTOR },
+    });
+    fireEvent.click(await screen.findByTestId('output-diff-revert'));
+    fireEvent.click(screen.getByTestId('output-revert-go'));
+    await screen.findByTestId('output-revert-kept');
+    fireEvent.click(screen.getByTestId('output-diff-version-1'));
+    await waitFor(() => expect(screen.queryByTestId('output-revert-kept')).toBeNull());
+  });
 });

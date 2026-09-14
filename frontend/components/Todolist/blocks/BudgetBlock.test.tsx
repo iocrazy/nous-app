@@ -47,14 +47,19 @@ describe('BudgetBlockView — media spend', () => {
     expect(screen.queryByTestId('budget-media')).toBeNull();
   });
 
-  it('a run view written before media was tracked reads as no media, not NaN', () => {
+  it('a run view written before media was tracked still renders, without a Media row', () => {
     // `media_cents` is a 3b addition; every row older than it lacks the key.
+    // The claim worth making is that the block KEEPS WORKING — the absent row
+    // alone would also be what a crash-free NaN produces, so it proves nothing
+    // on its own.
     const older = {
       rollup: { budget: { budget_cents: null, spent_cents: 30, pct: null, state: 'ok' }, current_run: { cost: { spent_cents: 30 } } },
       issue: { raw: {} },
       env: {},
     } as unknown as IssueBlockContext;
-    render(<BudgetBlockView ctx={older} />);
+    const { container } = render(<BudgetBlockView ctx={older} />);
+    expect(screen.getByTestId('budget-spent').textContent).toContain('¢30');
     expect(screen.queryByTestId('budget-media')).toBeNull();
+    expect(container.textContent).not.toContain('NaN');
   });
 });

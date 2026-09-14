@@ -446,6 +446,25 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     expect(step.outputs[0].costCents).toBe(0.18);
   });
 
+  it('divides by every card the step registered, priced ones included', () => {
+    // 与后端 `load_step_shares` 同一分母：它按 (run_id, turn, step) 下**所有**
+    // deliverable 事件数除，媒体那张也算进去。按「没有价的卡数」除会让同一个
+    // 文本版本在线程卡上是 ¢0.18、在血缘端点上是 ¢0.09 —— 两个面对同一笔钱
+    // 给两个答案，是这份共用写法存在的意义的反面。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 4 }, 4),
+      at(2, 'deliverable', { kind: 'generated_media', ref_id: '77', version: 1, cost_cents: 12 }, 4),
+      at(3, 'deliverable', { kind: 'script_shot', ref_id: '9', version: 1 }, 4),
+      at(4, 'step_end', { turn: 1, step: 4, cost_cents: 0.18 }, 4),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.outputs.map((o) => [o.costCents, o.costKind])).toEqual([
+      [12, 'exact'],        // 目录价原样保留
+      [0.09, 'allocated'],  // 0.18 / 2，不是 0.18 / 1
+    ]);
+  });
+
   it('an exact media price is never overwritten by the allocation', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 3 }, 3),

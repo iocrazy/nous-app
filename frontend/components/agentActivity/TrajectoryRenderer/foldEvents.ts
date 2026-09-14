@@ -719,20 +719,27 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
 }
 
 /**
- * 把每一步的 step 花费均摊到这一步登记的产出卡上（3b §3.1，与后端
- * `lineage_view.allocate_step_costs` 同一公式 `stepCost / cards.length`）。
+ * 把每一步的 step 花费均摊到这一步登记的产出卡上（3b §3.1）。
+ *
+ * **分母是这一步登记的全部卡，不是「没有价的卡」** —— 后端
+ * `load_step_shares` 按 `(run_id, turn, step)` 下所有 `deliverable` 事件数除，
+ * 带目录价的媒体那张也算进去。按没有价的卡数除，会让同一个文本版本在线程卡上
+ * 是 `¢0.18`、在血缘端点上是 `¢0.09`：两个面对同一笔钱给两个答案，正是这份
+ * 共用写法要消灭的东西。
+ *
+ * 写进去的只有没有自己价的卡 —— 媒体类登记时就带目录价，拿参考值盖掉精确价
+ * 是把账做坏。分母与写入范围是两件事，别把它们合成一个 filter。
  *
  * 第二遍而不是 `step_end` 的分支：登记会晚于本步结束到达（见 `stepAt` 的注释），
- * 在分支里算就只覆盖先到的那几张卡。只填没有自己价的卡 —— 媒体类登记时就带目录价，
- * 拿参考值盖掉精确价是把账做坏。
+ * 在分支里算就只覆盖先到的那几张卡，而份额本身又取决于卡的总数。
  */
 function allocateStepCosts(nodes: TrajectoryNode[]): void {
   for (const n of nodes) {
     if (n.kind !== 'step' || n.summary.costCents === null) continue;
-    const share = n.outputs.filter((o) => o.costCents === null);
-    if (share.length === 0) continue;
-    const each = n.summary.costCents / share.length;
-    for (const o of share) {
+    if (n.outputs.length === 0) continue;
+    const each = n.summary.costCents / n.outputs.length;
+    for (const o of n.outputs) {
+      if (o.costCents !== null) continue;
       o.costCents = each;
       o.costKind = 'allocated';
     }

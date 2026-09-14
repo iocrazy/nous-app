@@ -10,8 +10,14 @@ export type CostKind = 'allocated' | 'exact' | null;
 
 const cents = (c: number): string => `¢${c < 0.01 ? c.toFixed(3) : c.toFixed(2)}`;
 
+/** The smallest price three decimals can show without rounding to zero. */
+const FLOOR = 0.0005;
+
 export function formatOutputCost(c: number | null, kind: CostKind): string {
   if (c === null || c === 0) return '—';
+  // `¢0.000` states the work was free — the one thing we know is false here.
+  // `<` already carries the imprecision, so no `≈` is stacked on top of it.
+  if (c < FLOOR) return '<¢0.001';
   return kind === 'allocated' ? `≈${cents(c)}` : cents(c);
 }
 

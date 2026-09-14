@@ -27,7 +27,7 @@ import {
   type OutputDiffSide,
   type OutputVersion,
 } from '../../services/outputsService';
-import { formatOutputCost, type CostKind } from '../agentActivity/outputCost';
+import { formatOutputCost, outputCostTitle, type CostKind } from '../agentActivity/outputCost';
 import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
@@ -201,6 +201,14 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const [confirming, setConfirming] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [kept, setKept] = useState<OutputVersion | null>(null);
+  const confirmBtn = useRef<HTMLButtonElement>(null);
+
+  // A question just appeared where the button was; focus its answer so Enter
+  // resolves the thing the reader is looking at rather than re-firing the
+  // button that asked.
+  useEffect(() => {
+    if (confirming) confirmBtn.current?.focus();
+  }, [confirming]);
 
   // Focus the panel, hand focus back to the opener when it goes.
   useEffect(() => {
@@ -255,6 +263,14 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const canRevert = REVERTIBLE.has(kind) && from !== null && from < latestVersion && !reverting;
   const row = (n: number | null): OutputVersion | null => (n === null ? null : versions.find((x) => x.version === n) ?? null);
   const costOf = (n: number): string => formatOutputCost(row(n)?.cost_cents ?? null, (row(n)?.cost_kind ?? null) as CostKind);
+  /** Why that number reads the way it does — `≈` says "approximate", this says
+   *  what it was approximated FROM; on an unpriced media row it names the model
+   *  whose catalogue price is missing. `undefined` when there is nothing to add. */
+  const costTitleOf = (n: number): string | undefined =>
+    outputCostTitle(row(n)?.cost_cents ?? null, (row(n)?.cost_kind ?? null) as CostKind, {
+      deliverableKind: kind,
+      model: row(n)?.model ?? null,
+    });
 
   const doRevert = async (): Promise<void> => {
     if (from === null) return;
@@ -352,6 +368,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 onClick={() => {
                   setPinnedFrom(null);
                   setTo(v.version);
+                  // "your edits were kept as v3" answers a question about the
+                  // revert just performed; carried onto another version it
+                  // becomes a claim about the wrong object. Cleared here
+                  // rather than in the diff effect, because `doRevert` moves
+                  // `to` itself and would wipe the note it just earned.
+                  setKept(null);
+                  setConfirming(false);
                 }}
                 className={`rounded border px-1.5 py-0.5 text-[11px] ${
                   v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
@@ -381,6 +404,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                   side={diff.from}
                   label={t('outputs.version', 'v{{n}}', { n: diff.from.version })}
                   cost={costOf(diff.from.version)}
+                  costTitle={costTitleOf(diff.from.version)}
                   testId="output-diff-cost-from"
                 />
                 {!diff.from.available ? (
@@ -397,6 +421,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 side={diff.to}
                 label={t('outputs.version', 'v{{n}}', { n: diff.to.version })}
                 cost={costOf(diff.to.version)}
+                costTitle={costTitleOf(diff.to.version)}
                 testId="output-diff-cost-to"
               />
               {!diff.to.available ? (
@@ -465,6 +490,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               <button
                 type="button"
                 data-testid="output-revert-go"
+                ref={confirmBtn}
                 disabled={reverting}
                 onClick={() => void doRevert()}
                 className="rounded border border-info-line px-2 py-1 text-info disabled:opacity-50"

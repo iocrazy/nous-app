@@ -32,4 +32,15 @@ describe('outputCost', () => {
   });
 
   it('keeps sub-cent costs readable', () => expect(formatOutputCost(0.004, 'allocated')).toBe('≈¢0.004'));
+
+  it('a price too small to print never rounds down to a fabricated zero', () => {
+    // `¢0.000` states the work was free, which is the one thing we know is
+    // false — it has a price, it is just below what three decimals can show.
+    // `<` already carries the imprecision, so no `≈` is added on top of it.
+    expect(formatOutputCost(0.0004, 'allocated')).toBe('<¢0.001');
+    expect(formatOutputCost(0.0004, 'exact')).toBe('<¢0.001');
+    expect(formatOutputCost(0.0004, null)).toBe('<¢0.001');
+    // the boundary still prints, because it rounds to something non-zero
+    expect(formatOutputCost(0.0005, 'exact')).toBe('¢0.001');
+  });
 });
