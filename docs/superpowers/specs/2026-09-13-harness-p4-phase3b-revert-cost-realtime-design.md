@@ -42,7 +42,7 @@
 | `script_shot_ops` | `run_id` → NULLable；加 `actor TEXT NULL`（同 `script_ops.actor` 形状，`revert:<user_uuid>`）；`CHECK (run_id IS NOT NULL OR actor IS NOT NULL)` | 分镜回退要有账本行，diff 才能继续重建；undo 按 `run_id` 读，NULL 行天然不入 undo |
 | `ai_model_prices` | 加 `per_call_cents NUMERIC(12,4) NULL` | 图片/视频模型按次计价；沿用同一张「按 effective_at 版本化、admin 只追加不改」的表，不造第二张价格表 |
 
-ORM 三处同 PR 镜像（`models/agents.py::RunDeliverables`、`models/script.py::ScriptShotOps`、`models/ai.py::AiModelPrices`）；`LATEST_MIGRATION` → 466。
+ORM 三处同 PR 镜像（`models/agents.py::RunDeliverables`、`models/script.py::ScriptShotOps`、`models/ai.py::AiModelPrices`）；`tests/models/test_transcript_event_types_phase2a.py::LATEST_MIGRATION` 不动（它只指向最近一次重写事件白名单的迁移 461，466 不改白名单）。
 
 **登记口签名**（`services/deliverables/registry.py`）：
 
@@ -161,4 +161,4 @@ C17（legacy 无 agent 的评论路径在 A7 之后成了唯一静默吃附件�
 ## 10. Hand-off
 
 1. 画板四块稿已由用户放行（Version 15，2026-09-14「继续」）。
-2. `superpowers:writing-plans`，Task 粗切：T1 mig 466 + 三处 ORM → T2 登记口扩参 + `ledger_ref` 填写 + diff 优先 `ledger_ref` → T3 回退端点（shot/scene 两臂 + 同事务登记）→ T0 图片登记归因修复（两条路径写 `ImageGenResult.provider/model`）→ T4 花费（血缘端点读时分摊 + `cost_kind` + `media_price_cents` 咽喉 + fold `media_cents` + `recompute_spent`）→ T5 前端回退（弹层确认态 / 结果态 / 错误码）+ 花费显示三处 + Budget 行 → T6 实时信号（seq 水位）+ deliverable 事件按键失效 + 缓存 TTL（无 WS 页面）+ 三个消费方接线 → T7 资源来源端点 + 面板块 → T8 真栈验收 + 完成账。
+2. 实施计划：`docs/superpowers/plans/2026-09-14-harness-p4-phase3b-revert-cost-realtime.md`（Task 0–9，含 7b/4b）。原粗切：T1 mig 466 + 三处 ORM → T2 登记口扩参 + `ledger_ref` 填写 + diff 优先 `ledger_ref` → T3 回退端点（shot/scene 两臂 + 同事务登记）→ T0 图片登记归因修复（两条路径写 `ImageGenResult.provider/model`）→ T4 花费（血缘端点读时分摊 + `cost_kind` + `media_price_cents` 咽喉 + fold `media_cents` + `recompute_spent`）→ T5 前端回退（弹层确认态 / 结果态 / 错误码）+ 花费显示三处 + Budget 行 → T6 实时信号（seq 水位）+ deliverable 事件按键失效 + 缓存 TTL（无 WS 页面）+ 三个消费方接线 → T7 资源来源端点 + 面板块 → T8 真栈验收 + 完成账。
