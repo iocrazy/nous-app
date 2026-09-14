@@ -412,6 +412,13 @@ export interface IssueProgress {
     status: string;
     started_at: string | null;
     model: string | null;
+    /**
+     * The transcript sequence this run has reached — the watermark the turn
+     * signal dedupes on, so the polling edge and the WS `done` frame for one
+     * turn count as one event. A NUMBER (a per-run counter, not a Snowflake),
+     * and absent on a backend older than 3b Task 4b.
+     */
+    last_seq?: number | null;
     /** `agent_runs.metadata_json.view` — read through runView.ts selectors. */
     view: Record<string, unknown>;
     cost: Record<string, unknown>;

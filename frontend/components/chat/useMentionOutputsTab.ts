@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listIssueOutputs, OutputsError, type OutputObject } from '../../services/outputsService';
+import { useTurnSignal } from '../Todolist/issueTurnSignal';
 import { toMentionRows, type OutputMentionRow } from './outputMentionRows';
 import type { OutputMentionListHandle } from './OutputMentionList';
 import type { OutputsTabProps } from './ResourcePickerSuggestion';
@@ -83,6 +84,25 @@ export function useMentionOutputsTab({
   // (a click, then the strip re-rendering) must not double the round trip.
   const requested = useRef(false);
 
+  /**
+   * Reading once per mention session is right (§2 above) — but an issue keeps
+   * producing WHILE its composer sits open, and a guard that never forgets
+   * makes the thing the agent just made permanently un-citable. A finished turn
+   * is the event that says the population changed.
+   *
+   * Declared BEFORE the fetch effect on purpose: effects run in declaration
+   * order, so the guard is already down when the fetch effect re-runs on the
+   * same signal. An open tab therefore re-reads rather than sitting on the
+   * emptied list, which would say "this issue produced nothing" and never ask
+   * again until the reader closed and reopened the mention.
+   */
+  const signal = useTurnSignal(issueId == null ? '' : String(issueId));
+  useEffect(() => {
+    if (!signal) return;
+    requested.current = false;
+    setObjects(null);
+  }, [signal]);
+
   useEffect(() => {
     if (!active || issueId == null || requested.current) return;
     requested.current = true;
@@ -112,7 +132,7 @@ export function useMentionOutputsTab({
     return () => {
       live = false;
     };
-  }, [active, issueId]);
+  }, [active, issueId, signal]);
 
   const error = useMemo(() => {
     if (errorCode === null) return null;

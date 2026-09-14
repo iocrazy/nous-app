@@ -6,11 +6,12 @@
  * drawing an empty card — "produced nothing" and "I could not find out" are
  * answers a person acts on differently (same rule as the Schedules block).
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OutputObject, OutputVersion } from '../../../services/outputsService';
 import type { IssueBlockContext } from '../issueBlocks';
+import { __resetTurnSignals, notifyTurn } from '../issueTurnSignal';
 import { OutputsBlockView, outputsBlock } from './OutputsBlock';
 
 vi.mock('react-i18next', () => ({
@@ -122,5 +123,37 @@ describe('outputsBlock registration', () => {
     expect(ids).toContain('outputs');
     expect(ids).toContain('deliverables');
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+/**
+ * harness 3b Task 6 — the block re-reads when the issue's turn ends.
+ *
+ * The matcher stays `() => true` (spec §7 C12): this block still pulls once per
+ * page and the signal only makes it pull AGAIN. Guessing `has_outputs` off the
+ * rollup instead would hide the whole card at the moment an output first
+ * appears — the one moment it most needs to be on screen.
+ */
+describe('OutputsBlockView — live refresh', () => {
+  beforeEach(() => __resetTurnSignals());
+
+  it('re-reads when the issue signals a finished turn', async () => {
+    render(<OutputsBlockView ctx={ctx()} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('outputs-updated')).toBeNull();
+
+    act(() => notifyTurn(String(ISSUE_ID), { runId: '727145299382534100', seq: 7 }));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+    // The reader is looking at a list that changed under them; saying so is
+    // what separates "this is current" from "this is whatever loaded earlier".
+    expect(screen.getByTestId('outputs-updated')).toBeTruthy();
+  });
+
+  it('ignores another issue’s turn', async () => {
+    render(<OutputsBlockView ctx={ctx()} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+    act(() => notifyTurn('999999', { runId: 'r1', seq: 7 }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).toHaveBeenCalledTimes(1);
   });
 });

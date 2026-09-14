@@ -22,14 +22,16 @@
  * to override it. Both absent — a run with no issue, an issue with no key or
  * no team — and the control stays disabled saying why.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { ExternalLink, GitCompare, PlayCircle, Sparkles } from 'lucide-react';
 
 import {
   getOutputLineage,
+  lineageGeneration,
   OutputsError,
+  subscribeLineageChange,
   type OutputLineage,
 } from '../../services/outputsService';
 import { formatOutputCost, outputCostTitle } from './outputCost';
@@ -75,11 +77,23 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
    *  entirely). A string is a code we have to SAY something about. */
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
+  // This block mounts where there is no WebSocket and no polling (a canvas
+  // node, a library panel), so the cache's generation is the ONLY thing that
+  // can tell it the chain moved. The service has already dropped the entry by
+  // the time this fires, so re-reading reaches the transport.
+  const gen = useSyncExternalStore(subscribeLineageChange, lineageGeneration, () => 0);
 
+  // Pointing at a DIFFERENT object resets what is on screen. A refresh of the
+  // SAME object must not: the generation is global, so an unrelated agent run
+  // finishing would otherwise blank this block and shut an open version dialog
+  // under the reader's hands.
   useEffect(() => {
     setLineage(null);
     setErrorCode(null);
     setDiffOpen(false);
+  }, [kind, refId]);
+
+  useEffect(() => {
     if (!refId) return;
     let live = true;
     getOutputLineage(kind, refId)
@@ -98,7 +112,7 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
     return () => {
       live = false;
     };
-  }, [kind, refId]);
+  }, [kind, refId, gen]);
 
   if (errorCode !== null) {
     return (

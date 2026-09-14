@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { getOutputLineage } = vi.hoisted(() => ({ getOutputLineage: vi.fn() }));
@@ -36,7 +36,7 @@ vi.mock('../Todolist/OutputDiffDialog', () => ({
 }));
 
 import { OutputProvenance } from './OutputProvenance';
-import { OutputsError } from '../../services/outputsService';
+import { invalidateOutputLineage, OutputsError } from '../../services/outputsService';
 
 afterEach(cleanup);
 
@@ -233,5 +233,45 @@ describe('OutputProvenance', () => {
     // be a 400 per empty panel open.
     renderBlock({ refId: '' });
     expect(getOutputLineage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * harness 3b Task 6 — the block re-reads when its chain is invalidated.
+ *
+ * This block mounts on pages with no WebSocket and no polling (a canvas node,
+ * a library panel), so the ONLY thing that can tell it the chain moved is the
+ * cache generation the service bumps.
+ */
+describe('OutputProvenance — live refresh', () => {
+  it('re-reads after the lineage is invalidated', async () => {
+    getOutputLineage.mockResolvedValue(lineage([version(2), version(1)]));
+    render(
+      <MemoryRouter>
+        <OutputProvenance kind="script_shot" refId="9" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(1));
+    act(() => invalidateOutputLineage('script_shot', '9'));
+    await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not close an open version dialog when some OTHER object changes', async () => {
+    // The generation is global: every invalidate anywhere moves it. A re-read
+    // is cheap (this object's own entry is still cached), but tearing the
+    // component's view state down with it would shut the dialog under the
+    // reader's hands the moment an unrelated agent run finished.
+    getOutputLineage.mockResolvedValue(lineage([version(2), version(1)]));
+    render(
+      <MemoryRouter>
+        <OutputProvenance kind="script_shot" refId="9" />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByTestId('output-provenance-diff'));
+    expect(await screen.findByTestId('output-diff-dialog')).toBeTruthy();
+
+    act(() => invalidateOutputLineage('generated_media', '77'));
+    await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('output-diff-dialog')).not.toBeNull();
   });
 });

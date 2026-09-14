@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 vi.mock('./parserService', () => ({ getAuthHeaders: async () => ({ Authorization: 'Bearer t' }) }));
 
-const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl, invalidateOutputLineage, clearOutputLineageCache, revertOutput } = await import('./outputsService');
+const { listIssueOutputs, getOutputLineage, getOutputDiff, OutputsError, resolveMediaUrl, invalidateOutputLineage, subscribeLineageChange, LINEAGE_TTL_MS, revertOutput } = await import('./outputsService');
 
 const fetchMock = vi.fn();
 beforeEach(() => {
@@ -20,8 +20,9 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   // The lineage cache outlives a test the way it outlives a component. Without
   // this every case after the first would assert against a cached answer and
-  // stop exercising the transport at all.
-  clearOutputLineageCache();
+  // stop exercising the transport at all. No arguments = the whole table,
+  // which is what a test harness wants and production never asks for.
+  invalidateOutputLineage();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -157,11 +158,13 @@ describe('resolveMediaUrl', () => {
  * inspecting a response.
  */
 describe('outputsService — the lineage request cache', () => {
-  const chain = (v = 2) => ({
+  const chain = (v = 2, asOfSeq = '347786145852739') => ({
     kind: 'script_shot',
     ref_id: '9',
     latest_version: v,
     versions: [{ ...version, version: v }],
+    // A Snowflake, and so a STRING on the wire — never a number.
+    as_of_seq: asOfSeq,
   });
 
   const notRegistered = () =>
@@ -265,6 +268,108 @@ describe('outputsService — the lineage request cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(a).toBe(b);
     expect(a).toBeInstanceOf(OutputsError);
+  });
+
+  // ── 3b Task 6: keyed invalidation, a generation to subscribe to, and a TTL
+  //    for the pages that get no events at all ──────────────────────────────
+
+  it('drops the whole table when asked with no arguments', async () => {
+    // The test harness's own reset, and nothing else: a blanket invalidate
+    // turns a canvas of 40 shots into 40 requests, which is what this cache
+    // exists to prevent.
+    fetchMock.mockResolvedValueOnce(json(200, chain()));
+    fetchMock.mockResolvedValueOnce(json(200, { ...chain(), ref_id: '10' }));
+    await getOutputLineage('script_shot', '9');
+    await getOutputLineage('script_shot', '10');
+    fetchMock.mockClear();
+
+    invalidateOutputLineage();
+    fetchMock.mockImplementation(async () => json(200, chain()));
+    await getOutputLineage('script_shot', '9');
+    await getOutputLineage('script_shot', '10');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('bumps a generation every consumer can subscribe to', () => {
+    // The mounted blocks hold no reference to this map — they learn the answer
+    // changed by the generation moving, not by being told which key it was.
+    const seen = vi.fn();
+    const off = subscribeLineageChange(seen);
+    invalidateOutputLineage('script_shot', '9');
+    expect(seen).toHaveBeenCalledTimes(1);
+    off();
+    invalidateOutputLineage('script_shot', '9');
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('one bad generation subscriber never starves the next', () => {
+    const bad = vi.fn(() => { throw new Error('boom'); });
+    const good = vi.fn();
+    const offA = subscribeLineageChange(bad);
+    const offB = subscribeLineageChange(good);
+    invalidateOutputLineage('script_shot', '9');
+    expect(good).toHaveBeenCalledTimes(1);
+    offA(); offB();
+  });
+
+  it('re-reads an entry older than the TTL when the tab comes back', async () => {
+    // A canvas node has no WebSocket and no polling — nothing will ever tell it
+    // its chain moved. Coming back to the tab after a minute is the cheapest
+    // honest moment to re-ask.
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(async () => json(200, chain(1)));
+      await getOutputLineage('script_shot', '9');
+      const bumped = vi.fn();
+      const off = subscribeLineageChange(bumped);
+      vi.advanceTimersByTime(LINEAGE_TTL_MS + 1);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(bumped).toHaveBeenCalledTimes(1);
+      off();
+      await getOutputLineage('script_shot', '9');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a fresh entry survives the same visibilitychange', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(async () => json(200, chain(1)));
+      await getOutputLineage('script_shot', '9');
+      const bumped = vi.fn();
+      const off = subscribeLineageChange(bumped);
+      vi.advanceTimersByTime(1_000);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(bumped).not.toHaveBeenCalled();
+      off();
+      await getOutputLineage('script_shot', '9');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a late answer never displaces a fresher chain already cached', async () => {
+    // A read is in flight when a revert invalidates the object; the re-read
+    // answers FIRST. The first request's answer describes the world before the
+    // revert, so writing it back into the slot would hand the next reader the
+    // version the user just reverted away from.
+    let settleFirst: ((r: Response) => void) | null = null;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { settleFirst = r; }));
+    const first = getOutputLineage('script_shot', '9');
+
+    invalidateOutputLineage('script_shot', '9');
+    fetchMock.mockResolvedValueOnce(json(200, chain(3, '347786145852999')));
+    expect((await getOutputLineage('script_shot', '9')).latest_version).toBe(3);
+
+    settleFirst!(json(200, chain(2, '347786145852700')));
+    await first;
+
+    fetchMock.mockClear();
+    expect((await getOutputLineage('script_shot', '9')).latest_version).toBe(3);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

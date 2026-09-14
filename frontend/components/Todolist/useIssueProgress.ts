@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getIssueProgress, type IssueProgress } from '../../services/issuesService';
 import { getSupabaseClient } from '../../supabaseClient';
+import { notifyTurn } from './issueTurnSignal';
 
 export const LIVE_POLL_MS = 4_000;
 export const IDLE_POLL_MS = 30_000;
@@ -31,12 +32,32 @@ export function useIssueProgress(
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  /** The answer this one is compared against. `IssueProgress` has no "a turn
+   *  ended" field — that fact only exists as an EDGE between two reads, and the
+   *  derivation belongs here rather than in each consumer: polling fires
+   *  several times per turn, so every consumer would need its own copy of the
+   *  last answer to tell a repeat from a change. */
+  const prev = useRef<IssueProgress | null>(null);
 
   const refresh = useCallback(async () => {
     if (!issueId) return;
     try {
       const next = await getIssueProgress(issueId);
       if (!alive.current) return;
+
+      const before = prev.current;
+      prev.current = next;
+      const endedRun = before?.current_run?.id ?? null;
+      // Only "the previous read had a run, and this one has a different one or
+      // none" is an ending. Without `endedRun &&` the very first load fires,
+      // and every consumer re-fetches the thing it just fetched.
+      if (endedRun && next.current_run?.id !== endedRun) {
+        notifyTurn(String(issueId), {
+          runId: String(endedRun),
+          seq: before?.current_run?.last_seq ?? 0,
+        });
+      }
+
       setProgress(next);
       setError(null);
     } catch (err) {
@@ -50,6 +71,9 @@ export function useIssueProgress(
 
   useEffect(() => {
     alive.current = true;
+    // A different issue's last answer is not this one's previous read — leaving
+    // it would make the first load of the new issue look like an ending.
+    prev.current = null;
     setProgress(null);
     setLoaded(false);
     void refresh();
