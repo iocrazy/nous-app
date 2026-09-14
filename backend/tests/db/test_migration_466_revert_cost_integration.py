@@ -21,7 +21,8 @@ import pytest
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
-pytest.importorskip("asyncpg")
+# 没有 importorskip：asyncpg 是硬依赖，上面的顶层 import 已经决定了一切——
+# 缺它就是 collection error，而那正是想要的（悄悄跳过等于假绿）。
 _skip = pytest.mark.skipif(
     not _TEST_DSN, reason="INTEGRATION_DATABASE_URL not set — mig 466 needs a DB."
 )

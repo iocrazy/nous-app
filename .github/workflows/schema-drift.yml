@@ -136,7 +136,7 @@ on:
       # The full-skip guard every integration step below runs through. A change
       # to it changes what "green" means for all sixteen, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
-      # ⚠️ That count has been wrong three times (it said "eight" when there
+      # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment:

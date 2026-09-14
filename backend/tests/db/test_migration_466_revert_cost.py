@@ -52,8 +52,12 @@ def test_both_checks_are_named_and_say_run_or_actor():
 
 
 def test_no_third_index_no_set_role_single_transaction():
-    """307 与 456 已各建一个索引；再建一个只是多一份写放大。"""
-    assert "idx_generated_media_promoted_resource" not in BODY
+    """466 一个索引都不建。generated_media(promoted_resource_id) 的反查已由 456 的
+    partial UNIQUE `uq_genmedia_promoted_resource` 覆盖 —— 那是 307 的
+    `idx_genmedia_promoted` 的**替换**而非并存（456 第 13 行把后者 DROP 了，注释
+    原话 "is subsumed and dropped"），所以活着的只有一个，再建一个只是多一份写放大。
+    真库上索引仍在由集成测试那边钉住；这里只管本迁移别偷偷加索引。"""
+    assert "CREATE INDEX" not in BODY
     assert not any(
         re.match(r"(?i)^SET\s+ROLE\b", line.strip()) for line in BODY.splitlines()
     ), "migrations must not SET ROLE"
@@ -73,7 +77,12 @@ def test_the_orm_mirrors_the_nullable_run_ids_and_new_columns():
 
 
 def test_the_orm_mirrors_both_check_constraints():
-    """CHECK 漏在 ORM 侧，drift 门禁比的是名字——少一个就是两个 schema。"""
+    """ORM 侧的 CheckConstraint 是这两个约束**可读的权威记录** —— 看模型就知道
+    「run 为空时必须有人」这条规则存在，不必去翻迁移。
+
+    ⚠️ 别指望 drift 门禁替你查：`test_schema_drift.py` 的六道关只比表、列名、
+    可空性、列类型、未映射表和 FK，**CHECK 不在其中**。所以漏写一个不会有任何
+    自动化说话 —— 这个测试就是那个说话的人。"""
 
     def names(model):
         return {
