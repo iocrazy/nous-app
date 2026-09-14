@@ -35,13 +35,20 @@ from app.db.session import read_scope
 from app.repositories.run_deliverables_repository import (
     get_run_deliverables_repository,
 )
-from app.schemas.outputs import OutputDiffResponse, OutputLineageResponse
+from app.schemas.outputs import (
+    OutputDiffResponse,
+    OutputLineageResponse,
+    OutputVersion,
+    RevertRequest,
+    RevertResponse,
+)
 from app.services.deliverables.diff import build_diff
 from app.services.deliverables.kinds import ALL_KINDS
 from app.services.deliverables.lineage_view import (
     redact_foreign_issue_links,
     version_of,
 )
+from app.services.deliverables.revert import revert_output
 from app.services.issues.issue_visibility import (
     assert_issue_visible,
     visible_issue_ids,
@@ -94,10 +101,14 @@ def newest_with_a_run(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return next((row for row in rows if row.get("run_id") is not None), None)
 
 
-async def _visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
+async def visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
     """The version chain, newest first, once the caller has proved they may
     read it. Every refusal on this path is a 404 — an object the caller cannot
-    see must not be distinguishable from one that was never registered."""
+    see must not be distinguishable from one that was never registered.
+
+    3b 的回退端点也走它——同一个对象，同一把可见性尺子。它从服务层延迟 import
+    这个名字（``services/deliverables/revert.py::visible_chain``），所以这里不再
+    带前导下划线：它是跨模块契约的一部分，不是本文件的私有实现。"""
     if kind not in ALL_KINDS:
         raise _reject(
             status.HTTP_400_BAD_REQUEST,
@@ -134,7 +145,7 @@ async def get_output_lineage(
 ) -> OutputLineageResponse:
     """Every version of one object, newest first, each with the run / issue /
     coordinates / model / spend that produced it."""
-    rows = await _visible_chain(kind, ref_id, auth)
+    rows = await visible_chain(kind, ref_id, auth)
     # The gate above proved ONE issue visible — the newest version that has a
     # run. Every OTHER issue in the chain is decided here, in one batch: the link a
     # version carries is built from ITS team, so handing it over without
@@ -181,7 +192,7 @@ async def get_output_diff(
 
     A version number that is not in the chain is a 404 ``version_not_found``,
     not an empty pane: the pane would read as "this version was blank"."""
-    rows = await _visible_chain(kind, ref_id, auth)
+    rows = await visible_chain(kind, ref_id, auth)
     by_version = {row.get("version"): row for row in rows}
     missing = [v for v in (from_version, to_version) if v not in by_version]
     if missing:
@@ -197,6 +208,35 @@ async def get_output_diff(
         to_row=by_version[to_version],
     )
     return OutputDiffResponse.model_validate(body)
+
+
+@router.post(
+    "/{kind}/{ref_id}/revert",
+    response_model=RevertResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def revert_output_version(
+    kind: str, ref_id: str, body: RevertRequest, auth: AuthDep
+) -> RevertResponse:
+    """把一个对象回到它的某一旧版（3b spec §2.3）。
+
+    201 而不是 200：这次调用**新建**了一版（可能两版），没有任何东西被就地改写。
+    可见性与写权限在服务层里，与分镜 PATCH / 场次 ops 用的是同一对守卫。"""
+    result = await revert_output(
+        kind=kind,
+        ref_id=str(ref_id),
+        to_version=body.to_version,
+        expected_latest=body.expected_latest,
+        auth=auth,
+    )
+    return RevertResponse(
+        version=OutputVersion.model_validate(result.version),
+        kept_version=(
+            OutputVersion.model_validate(result.kept_version)
+            if result.kept_version
+            else None
+        ),
+    )
 
 
 __all__ = ["router"]
