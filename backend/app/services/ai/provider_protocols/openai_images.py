@@ -23,8 +23,8 @@ from typing import Any
 from app.services.ai.provider_protocols.base import (
     ALL_RATIOS,
     IMAGE_25_QUALITY_TIERS,
-    ProtocolCapabilityError,
     ProviderCapabilities,
+    ProviderNotConfiguredError,
     ProviderProtocol,
 )
 from app.services.ai.provider_protocols.codex import _CodexImageAdapter
@@ -60,11 +60,22 @@ class OpenAIImagesProtocol(ProviderProtocol):
         )
 
         key = (row.get("api_key") or "").strip()
+        actual_model = row.get("actual_model") or ""
         if not key:
             # A typed refusal at build time beats the CLI's `not_logged_in`
             # (which would read as a codex session problem, not a missing key).
-            raise ProtocolCapabilityError(self.key, "image (api_key missing)")
-        actual_model = row.get("actual_model") or ""
+            #
+            # `ProviderNotConfiguredError`, NOT `ProtocolCapabilityError`: the
+            # latter says "this protocol cannot do images", which is both
+            # false and unactionable. The row is fine and the fix is one paste
+            # by the person who just enabled it, so the refusal names the row
+            # and the place — and carries it as `detail`, the field the
+            # failure record shows the operator.
+            raise ProviderNotConfiguredError(
+                self.key,
+                actual_model,
+                detail=(f"{self.key} row has no api_key — set it in Admin → AI Models"),
+            )
         return (
             _CodexImageAdapter(
                 CodexCliProvider(provider_kind="openai", api_key=key),

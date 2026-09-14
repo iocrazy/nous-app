@@ -109,6 +109,51 @@ async def test_openai_kind_uses_openai_provider_and_env_key(cli_stub):
 
 
 @pytest.mark.unit
+async def test_openai_kind_omits_quality_when_no_tier_was_chosen(cli_stub):
+    """The pill on Auto must not spend the metered path's money at ``high``.
+
+    ``quality or "high"`` is the codex path's historical default and costs
+    nothing extra on a subscription. On the API path it is a per-token billing
+    decision taken for a user who chose nothing, on the one knob whose cost
+    spread the spec calls out — while ``effective_params.quality`` truthfully
+    says ``null``. Sending no flag lets the CLI apply its own ``auto``, so the
+    record and the wire agree.
+    """
+    p = CodexCliProvider(provider_kind="openai", api_key="k", bin_path="gis")
+
+    await p.generate_image(prompt="a fox", aspect="1:1", quality=None)
+
+    cmd, _ = cli_stub.last
+    assert "--quality" not in cmd
+
+
+@pytest.mark.unit
+async def test_openai_kind_sends_the_tier_the_user_did_choose(cli_stub):
+    """Omitting the flag is only for the unchosen case — a real pick still ships."""
+    p = CodexCliProvider(provider_kind="openai", api_key="k", bin_path="gis")
+
+    await p.generate_image(prompt="a fox", aspect="1:1", quality="max")
+
+    cmd, _ = cli_stub.last
+    assert cmd[cmd.index("--quality") + 1] == "max"
+
+
+@pytest.mark.unit
+async def test_codex_kind_still_defaults_quality_to_high(cli_stub):
+    """The subscription path keeps its default byte-for-byte.
+
+    It bills nothing per tier, so there is no reason to change what every
+    existing codex run has been sending.
+    """
+    p = CodexCliProvider(bin_path="gis")
+
+    await p.generate_image(prompt="a fox", aspect="1:1", quality=None)
+
+    cmd, _ = cli_stub.last
+    assert cmd[cmd.index("--quality") + 1] == "high"
+
+
+@pytest.mark.unit
 async def test_openai_kind_ignores_auth_file_even_when_set(cli_stub):
     """``--auth-file`` is the codex session; on the API path it means nothing."""
     p = CodexCliProvider(

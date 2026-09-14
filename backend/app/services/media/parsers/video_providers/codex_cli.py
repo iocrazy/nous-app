@@ -438,8 +438,20 @@ class CodexCliProvider:
             size,
             "--format",
             "png",
-            "--quality",
-            quality or "high",
+        ]
+        # The codex kind keeps its historical default byte-for-byte: a
+        # subscription bills the same whatever tier it renders at. The API
+        # path does NOT — quality is the knob whose cost spread the spec
+        # calls out, so a user who chose nothing must not be billed at
+        # ``high`` behind their back. Sending no flag lets the CLI apply its
+        # own ``auto``, which is also what ``effective_params.quality: null``
+        # already claims happened.
+        chosen_quality = quality or (
+            None if self._provider_kind == "openai" else "high"
+        )
+        if chosen_quality:
+            args += ["--quality", chosen_quality]
+        args += [
             # --background defaults to "auto", which lets the codex chain
             # pick transparent — and the codex transparent path renders on a
             # pure-green #00ff00 matte whose spill leaks into the output

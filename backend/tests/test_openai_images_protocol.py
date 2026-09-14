@@ -90,13 +90,52 @@ async def test_generated_images_are_attributed_to_this_protocol(monkeypatch):
 
 @pytest.mark.unit
 def test_build_image_provider_refuses_empty_key():
-    from app.services.ai.provider_protocols.base import ProtocolCapabilityError
+    """An unpasted key is a CONFIGURATION refusal, not a protocol defect.
+
+    ``ProtocolCapabilityError`` renders as "protocol 'openai-images' does not
+    support image (api_key missing)" — which reads as "this protocol is
+    broken" to the one person who can fix it in ten seconds. The rows ship
+    disabled, so this fires exactly when an operator enables one before
+    pasting the key: foreseeable, and the message is the whole remedy.
+    """
+    from app.services.ai.provider_protocols.base import ProviderNotConfiguredError
 
     proto = resolve_generation_protocol("openai-images")
-    with pytest.raises(ProtocolCapabilityError):
+    with pytest.raises(ProviderNotConfiguredError) as ei:
         proto.build_image_provider(
             {"api_key": "", "actual_model": "gpt-image-2.5-flare"}
         )
+    assert ei.value.provider == "openai-images"
+    assert ei.value.model == "gpt-image-2.5-flare"
+    assert "api_key" in ei.value.detail and "Admin" in ei.value.detail
+
+
+@pytest.mark.unit
+def test_the_refusal_detail_is_what_the_outcome_would_record():
+    """The detail is not decoration — it is the field the failure record reads.
+
+    ``describe_generation_failure`` is duck-typed on ``code`` / ``detail``
+    (that is how the daemon and in-container codex paths share one
+    description), and ``_record_failure_detail`` puts ``detail`` into the
+    task's ``metadata.failure`` for the details pane. An exception without one
+    lands there as an empty string and the pane has nothing to show.
+
+    ⚠️ Today ``resolve_image_provider`` is called OUTSIDE the ``try`` in
+    ``canvas_generation._generate_image``, so this refusal still propagates as
+    a raise rather than reaching ``_record_failure_detail``. Widening that
+    ``try`` was ruled a larger change than the fix wave; this test pins the
+    contract so the detail is already right when it does.
+    """
+    from app.services.generation.failure import describe_generation_failure
+
+    proto = resolve_generation_protocol("openai-images")
+    with pytest.raises(Exception) as ei:
+        proto.build_image_provider({"api_key": "   ", "actual_model": "x"})
+
+    _message, patch = describe_generation_failure(ei.value)
+    assert patch["failure"]["detail"] == (
+        "openai-images row has no api_key — set it in Admin → AI Models"
+    )
 
 
 @pytest.mark.unit

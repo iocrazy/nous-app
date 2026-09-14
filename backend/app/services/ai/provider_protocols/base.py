@@ -48,13 +48,23 @@ class ProviderNotConfiguredError(ValueError):
     configure their own keys in Settings → AI Providers; platform models are
     managed by the admin in Admin → AI Models."""
 
-    def __init__(self, provider: str, model: str):
+    def __init__(self, provider: str, model: str, detail: str = ""):
         self.provider = provider
         self.model = model
+        # ``detail`` is read by ``describe_generation_failure`` (duck-typed on
+        # ``code`` / ``detail``), which puts it in the task's
+        # ``metadata.failure`` for the details pane. Optional because most
+        # raise sites have nothing to add beyond the sentence below; a
+        # provider whose remedy is more specific than "add a key somewhere"
+        # says so here and that exact wording is what the record keeps.
+        self.detail = detail
         super().__init__(
-            f"AI provider '{provider}' is not configured for model {model!r}. "
-            "Add your API key in Settings → AI Providers, or ask the admin "
-            "to enable a platform model (Admin → AI Models)."
+            detail
+            or (
+                f"AI provider '{provider}' is not configured for model {model!r}. "
+                "Add your API key in Settings → AI Providers, or ask the admin "
+                "to enable a platform model (Admin → AI Models)."
+            )
         )
 
 
