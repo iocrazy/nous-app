@@ -69,7 +69,10 @@ from app.services.issues.comment_trigger import (
     apply_suppression,
     compute_comment_trigger,
 )
-from app.services.issues.issue_message_mapper import map_ai_message_to_issue_message
+from app.services.issues.issue_message_mapper import (
+    map_ai_message_to_issue_message,
+    to_display_attachments,
+)
 from app.services.issues.issue_reply_dispatch import dispatch_respond_to_issue_reply
 from app.services.issues.issue_session import get_or_create_issue_session
 from app.services.issues.issue_visibility import assert_issue_visible
@@ -494,16 +497,45 @@ async def _insert_legacy_comment(
     )
 
 
-def _optimistic_comment(issue_id: int, body: str, auth: AuthDep) -> IssueMessage:
-    """Synthesised row for immediate render; GET (the session) is canonical."""
+def _optimistic_comment(
+    issue_id: int,
+    body: str,
+    auth: AuthDep,
+    *,
+    attachments: Optional[list[dict]] = None,
+) -> IssueMessage:
+    """Synthesised row for immediate render; GET (the session) is canonical.
+
+    三期 3a 小票 A7: ``attachments`` is the already-resolved request payload
+    (每条 ``output_ref`` 已经盖上登记表的 title). It goes through the SAME two
+    reductions the stored row does before it reaches the response:
+
+    1. ``ConversationsAiStore.display_attachments`` — the store's whitelist,
+       the reason ``data_url`` bytes never leave the request. The note path
+       writes the row with this very call, so the response can only describe
+       what was (or would be) persisted.
+    2. ``to_display_attachments`` — the read model's per-entry projection, the
+       one ``GET /messages`` uses.
+
+    Running both, in this order, is what makes the response chip field-for-field
+    the chip GET hands back for the same message; a hand-rolled third projection
+    here is exactly how the two would drift. ``None`` — never ``[]`` — when there
+    are no attachments, matching the read path.
+    """
+    message_id = uuid.uuid4()
     return IssueMessage(
-        id=uuid.uuid4(),
+        id=message_id,
         issue_id=issue_id,
         kind=IssueMessageKind.COMMENT,
         author_user_id=auth.user_id,
         body=body,
         meta={"optimistic": True},
         created_at=datetime.now(timezone.utc),
+        attachments=to_display_attachments(
+            ConversationsAiStore.display_attachments(attachments),
+            message_id=message_id,
+            issue_id=issue_id,
+        ),
     )
 
 
@@ -660,7 +692,9 @@ async def post_issue_message(
         # nothing — a reply turn on a cancelled issue is a pointless run.
         await _commit_typed_answer(answer)
         return IssueMessagePostResponse(
-            comment=_optimistic_comment(issue_id, payload.body, auth),
+            comment=_optimistic_comment(
+                issue_id, payload.body, auth, attachments=attachments_payload
+            ),
             agent_run=None,
             agent_dispatched=False,
         )
@@ -685,7 +719,10 @@ async def post_issue_message(
             )
             raise HTTPException(500, "failed to save note")
         return IssueMessagePostResponse(
-            comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+            comment=_optimistic_comment(
+                issue_id, payload.body, auth, attachments=attachments_payload
+            ),
+            agent_run=None,
         )
 
     # ── Inbox diversion (harness p4 §1-③, phase 2a pause) ────────────────
@@ -710,7 +747,9 @@ async def post_issue_message(
     )
     if inbox_id is not None:
         return IssueMessagePostResponse(
-            comment=_optimistic_comment(issue_id, payload.body, auth),
+            comment=_optimistic_comment(
+                issue_id, payload.body, auth, attachments=attachments_payload
+            ),
             agent_run=None,
             agent_dispatched=False,
             diverted_to_inbox=True,
@@ -728,7 +767,9 @@ async def post_issue_message(
         if answer is not None:
             await _commit_typed_answer(answer)
         return IssueMessagePostResponse(
-            comment=_optimistic_comment(issue_id, payload.body, auth),
+            comment=_optimistic_comment(
+                issue_id, payload.body, auth, attachments=attachments_payload
+            ),
             agent_run=None,
             agent_dispatched=True,
         )
@@ -750,7 +791,9 @@ async def post_issue_message(
         await _commit_typed_answer(answer)
 
     return IssueMessagePostResponse(
-        comment=_optimistic_comment(issue_id, payload.body, auth),
+        comment=_optimistic_comment(
+            issue_id, payload.body, auth, attachments=attachments_payload
+        ),
         agent_run=None,
         agent_dispatched=True,
     )

@@ -25,10 +25,15 @@ from app.schemas.issue_message import (
 )
 
 
-def _display_attachments(
+def to_display_attachments(
     raw: Any, *, message_id: Any, issue_id: Any
 ) -> Optional[list[IssueMessageAttachment]]:
     """The row's stored display attachments, or ``None``.
+
+    Public because the POST endpoint needs the SAME projection: the comment it
+    synthesises for the response has to be field-for-field what GET hands back
+    for that message, and a second hand-rolled projection is exactly how the
+    two drift.
 
     ``ConversationsAiStore`` already hands back ``body['attachments'] or None``,
     so the common cases are a list of small dicts or nothing at all. Anything
@@ -143,7 +148,7 @@ def map_ai_message_to_issue_message(
         # 三期 3a Task 8a: the citation chip (and every other stored chip) has
         # to survive a reload. The store persists these on user-role messages;
         # before this they were written and never read back.
-        attachments=_display_attachments(
+        attachments=to_display_attachments(
             row.get("attachments"), message_id=row.get("id"), issue_id=issue_id
         ),
     )
