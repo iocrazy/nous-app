@@ -180,8 +180,8 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
 # NB: the CLI's -V/--help exit non-zero by design, so the sanity check greps
 # the version string instead of trusting the exit code.
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG GPT_IMAGE_2_SKILL_VERSION=0.7.3
-ARG GPT_IMAGE_2_SKILL_SHA256=9ff833f643736cd317e91c31ef976ff74356340c59ec95c343b112d98de92cc9
+ARG GPT_IMAGE_2_SKILL_VERSION=0.7.4
+ARG GPT_IMAGE_2_SKILL_SHA256=0488a72fa009cf69a1c0e57f9997de288da13f52673242826cae5420daffb575
 RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-static/-/gpt-image-2-skill-linux-x64-static-${GPT_IMAGE_2_SKILL_VERSION}.tgz" \
     && echo "${GPT_IMAGE_2_SKILL_SHA256}  /tmp/gis.tgz" | sha256sum -c - \
     && tar xzf /tmp/gis.tgz -C /tmp package/bin/gpt-image-2-skill \

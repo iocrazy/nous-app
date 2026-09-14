@@ -57,6 +57,61 @@ gpt-image-2-skill --json --provider codex request create --request-operation res
 `~/.codex/gpt-image-2-skill/config.json` 是 0600 —— 容器以 uid 1031 挂载读不了，服务端路径立刻
 `config_read_failed`。探针前那个文件本来不存在。
 
+## API-key 路径（`openai-images`，2026-09-13）
+
+同一个二进制的第二条路径：`--provider openai`，凭证是**目录行自己的 api_key**
+（OpenAI 平台 key，按 token 计费到组织账单），跟上面那条烧 ChatGPT 订阅额度的
+Codex 会话互不相干。协议实现在
+`backend/app/services/ai/provider_protocols/openai_images.py`。
+
+目录行（migration 465，两行都**默认 disabled**，`owner_user_id` 为 NULL 即平台级，
+不像 codex 行绑定 owner）：
+
+| `name` | `actual_model` | 画布里显示 |
+|---|---|---|
+| `openai-image-flare` | `gpt-image-2.5-flare` | GPT Image 2.5 Flare (OpenAI API) |
+| `openai-image-sunburst` | `gpt-image-2.5-sunburst` | GPT Image 2.5 Sunburst (OpenAI API) |
+
+显示名里的 "(OpenAI API)" 是给用户的**计费信号**——选它花的是组织的钱，不是订阅额度。
+同一个 migration 把 codex 两行的显示名去掉了版本号（`GPT Image (Codex)` /
+`GPT Image (Codex, local)`）：订阅路径上工具内的出图模型是 OpenAI 的灰度决定，
+不是我们能选的，写死版本号只会过期。
+
+**key 怎么进去**：Admin → AI Models，**逐行**粘贴后保存（那里会加密存储），再把
+`is_enabled` 打开。migration 只种 `api_key = ''`（该列 NOT NULL）——迁移文件里写明文
+key 等于把凭证提交进 git，还会绕过 Admin 的加密。key 为空时协议在 build 期就抛类型化
+拒绝（`ProtocolCapabilityError`），不会退化成 CLI 的 `not_logged_in`——后者读起来像
+Codex 会话坏了，会把人支去重新登录。
+
+**探针**（`auth_source` 应为 `env`，证明 key 真的走到了 CLI）：
+
+```bash
+docker exec nous-worker sh -c \
+  'OPENAI_API_KEY=sk-... gpt-image-2-skill --json --provider openai doctor' | head -40
+```
+
+服务端路径不依赖这个环境变量：`codex_cli.py` 用 `safe_popen_kwargs(env_extra=
+{"OPENAI_API_KEY": …})` 把目录行的 key 显式注进子进程（默认擦洗会丢掉一切 `*KEY*`，
+见 CLAUDE.md「子进程环境要擦洗」）。⚠️ 同「读正常 ≠ 服务正常」：`doctor` 只证明 key
+存在且形状可用，不证明它有额度——真验收要在 UI 里用这两行真出一张图。
+
+**两条路径的能力不一样，结论不许互相搬运**：
+
+| | API-key（`openai-images`） | Codex 订阅（`codex` / `codex-local`） |
+|---|---|---|
+| 尺寸 | `--size` 按写的来 | 只有三档，catalog aspect 就近映射 |
+| quality | 多 `xhigh` / `max` 两档 | 仅 low/medium/high；`xhigh` 被**静默降级成 medium**（2026-09-09 实测） |
+
+⚠️ API-key 那一列的依据是 OpenAI 文档（2026-09-13 读）+ 0.7.4 的 `--quality` 枚举，
+**尚未在真 API 上实测**——按「文档化的预期」读它，别当观测结果。真实测在生图验收里。
+
+升级二进制后先把枚举打出来再改代码里的 tier 表，别假设它没变（`high` 与 `xhigh` 在
+二进制里是重叠存储的，`strings` 看不出 `high` 还在不在）：
+
+```bash
+docker exec nous-worker gpt-image-2-skill images generate --help | grep -A3 'possible values'
+```
+
 ## 一次性安装 / 登录（宿主机）
 
 宿主机已有 codex CLI（linuxbrew）。若重装：
