@@ -134,6 +134,7 @@ def test_the_primary_pick_agrees_with_build_bundle_on_the_same_slot_map():
     caps = ProviderCapabilities(
         ratios=frozenset({"1:1"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=False,
         max_refs=1,
         negative=False,

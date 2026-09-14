@@ -286,7 +286,10 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
     strategy, not something the UI can act on.
     """
     from app.services.ai.provider_protocols import resolve_generation_protocol
-    from app.services.ai.provider_protocols.base import ProviderCapabilities
+    from app.services.ai.provider_protocols.base import (
+        QUALITY_TIER_ORDER,
+        ProviderCapabilities,
+    )
     from app.services.generation.aspect import ASPECT_RATIOS
 
     order = list(ASPECT_RATIOS)  # stable declaration order for the UI grid
@@ -300,6 +303,10 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
         data[str(r.get("name"))] = {
             "ratios": [x for x in order if x in caps.ratios],
             "quality": caps.quality,
+            # Ordered low→max from the one ordering constant, never re-listed
+            # here: the pill renders a ramp, and ``sorted`` would put "high"
+            # first. Empty whenever the provider honours no tiers.
+            "quality_tiers": [t for t in QUALITY_TIER_ORDER if t in caps.quality_tiers],
             "resolution": caps.resolution,
             "max_refs": caps.max_refs,
             "negative": caps.negative,

@@ -234,7 +234,10 @@ async def test_dispatch_forwards_attribution_to_the_ticket():
 async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
     """Without this wiring every test above can pass while production still
     files daemon products as anonymous uploads."""
-    from app.services.ai.provider_protocols.base import ProviderCapabilities
+    from app.services.ai.provider_protocols.base import (
+        LEGACY_QUALITY_TIERS,
+        ProviderCapabilities,
+    )
     from app.workflows.canvas_generation import generate_canvas_media_step
 
     captured: dict = {}
@@ -261,6 +264,7 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),
                     quality=True,
+                    quality_tiers=LEGACY_QUALITY_TIERS,
                     resolution=False,
                     max_refs=9,
                     negative=False,
@@ -394,7 +398,10 @@ async def test_the_daemon_ticket_carries_a_verified_source_asset_id():
     from the client: the column is an FK, and an id that resolves to nothing
     would take the whole upload down.
     """
-    from app.services.ai.provider_protocols.base import ProviderCapabilities
+    from app.services.ai.provider_protocols.base import (
+        LEGACY_QUALITY_TIERS,
+        ProviderCapabilities,
+    )
     from app.workflows.canvas_generation import generate_canvas_media_step
 
     captured: dict = {}
@@ -430,6 +437,7 @@ async def test_the_daemon_ticket_carries_a_verified_source_asset_id():
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),
                     quality=True,
+                    quality_tiers=LEGACY_QUALITY_TIERS,
                     resolution=False,
                     max_refs=9,
                     negative=False,
