@@ -159,6 +159,44 @@ def test_an_invisible_issue_keeps_the_coordinates_and_loses_the_link(monkeypatch
     assert version["deep_link"] is None
 
 
+def test_a_human_version_borrows_the_chains_issue(monkeypatch):
+    """回退写的人手版（``run_id IS NULL``）自己答不出「这一版属于哪件工作」——
+    它的归属是**这条链的**归属。口径与 ``/outputs/{kind}/{ref_id}`` 必须一致，
+    否则同一版在议题页有 issue、在资源面板没有（3b Task 2 fix 轮 1）。
+
+    借来的只有身份：``deep_link`` 仍是 ``None``——链接的锚点是 ``(turn, step)``，
+    给人手版一条指向某次运行某一步的 URL 等于声称它是那一步产生的。"""
+    human = _row(
+        2,
+        run_id=None,
+        issue_id=None,
+        issue_key=None,
+        seq=None,
+        turn=None,
+        step=None,
+        actor_user_id=ME,
+        reverted_from_version=1,
+    )
+    client, _repo, _find = _client(monkeypatch, rows=[human, _row(1)])
+    res = _get(client)
+    assert res.status_code == 200, res.text
+    latest = res.json()["versions"][0]
+    assert latest["run_id"] is None
+    assert latest["issue_id"] == ISSUE_ID
+    assert latest["issue_key"] == ISSUE_KEY
+    assert latest["deep_link"] is None
+
+
+def test_a_human_version_with_an_invisible_issue_loses_the_key_too(monkeypatch):
+    """借来的身份不绕过可见性：坐标留下，链接置空。"""
+    human = _row(2, run_id=None, issue_id=None, issue_key=None, seq=None)
+    client, _repo, _find = _client(monkeypatch, rows=[human, _row(1)], visible=set())
+    latest = _get(client).json()["versions"][0]
+    assert latest["issue_id"] == ISSUE_ID
+    assert latest["issue_key"] is None
+    assert latest["deep_link"] is None
+
+
 def test_a_resource_the_caller_cannot_access_is_403(monkeypatch):
     client, _repo, find = _client(monkeypatch, access=False)
     res = _get(client)

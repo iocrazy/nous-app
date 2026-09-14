@@ -9,6 +9,14 @@ todolist。门控与可见性都跟着**资源**走，路由就该长在资源�
 再用议题规则 404 一次，就是把用户有权看的文件说成不存在。所以链**给**，链里
 每一版的议题链接仍按 ``visible_issue_ids`` 逐条置空——坐标留下，按钮禁用
 （spec §5 稿四）。置空逻辑是 ``redact_foreign_issue_links`` 原物，不另写一份。
+
+**人手版（``run_id IS NULL``，3b 回退）的归属与 ``/outputs`` 逐字一致**：它自己
+答不出「这一版属于哪件工作」，归属是**这条链的**归属，所以从链上最新的有 run
+的那一版借 ``issue_id`` / ``issue_key`` 过来（``newest_with_a_run``，与
+``outputs_router`` 同一个 helper —— 两个读者必须用同一条规则，否则同一版在议题
+页有 issue、在资源面板没有）。借来的只有身份：``version_of`` 仍把它的
+``turn`` / ``step`` / ``deep_link`` 清成 ``None``，而借来的 ``issue_key`` 照样
+过一遍上面的可见性置空——借身份不是绕过门禁。
 """
 
 from __future__ import annotations
@@ -16,6 +24,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.media_permissions import check_media_access
+from app.api.outputs_router import newest_with_a_run
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.repositories.generated_media_repository import GeneratedMediaRepository
@@ -71,8 +80,19 @@ async def get_resource_provenance(
             f"generated_media/{gen['id']} is not in the deliverable registry",
         )
     visible = await visible_issue_ids({row.get("issue_id") for row in rows}, auth)
+    # 只补给人手版：补给所有行会把一条画布道 run 的旧版本也说成属于这个 issue
+    # （``outputs_router`` 的 3b fix 轮 1，同一段逻辑、同一个 helper）。
+    chain = newest_with_a_run(rows) or {}
     versions = redact_foreign_issue_links(
-        [version_of(row) for row in rows], visible_issue_ids=visible
+        [
+            version_of(
+                row,
+                issue_id=chain.get("issue_id") if row.get("run_id") is None else None,
+                issue_key=chain.get("issue_key") if row.get("run_id") is None else None,
+            )
+            for row in rows
+        ],
+        visible_issue_ids=visible,
     )
     newest = rows[0]
     return OutputLineageResponse(

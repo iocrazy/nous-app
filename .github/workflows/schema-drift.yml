@@ -70,6 +70,10 @@ on:
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
       - 'backend/tests/db/test_run_deliverables_repository_integration.py'
       - 'backend/tests/db/test_generated_media_promoted_lookup_integration.py'
+      # 与上面的成对登记同理：那个测试执行的是 find_by_promoted_resource 的
+      # ORM 语句，而它的单测 session 是桩的。只改这个模块的 PR 如果不触发
+      # 本 job，那条真 PG 用例就跑不到 —— 等于悄悄失去它唯一的门禁。
+      - 'backend/app/repositories/generated_media_repository.py'
       - 'backend/tests/db/test_migration_466_revert_cost_integration.py'
       - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
       # The writer whose seq-conflict retry that file is the only real-driver
