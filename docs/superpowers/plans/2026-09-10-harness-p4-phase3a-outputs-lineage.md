@@ -1309,3 +1309,13 @@ git commit -m "fix(test,api): 工作流测试顺序隔离 + agents 列表 slug �
 **T8d（#2254，既有缺陷顺手修）**：`pages/TodolistPage.tsx` 单议题 effect 的依赖带着晚到的 `agentsById`/`projectsById`，解析时 effect 重跑 → `setSelectedLoading(true)` → 回到 Loading 占位 → `IssueDetailView` 整树卸载重挂。修：`mapsRef` 上提、依赖收成 `[identifier]`；单议题抓取收成唯一入口 `loadSelectedIssue`，`inPlace` 由 `shownIdentifierRef` 回答「屏幕上挂着谁的子树」，同议题重抓就地更新、请求序号丢弃过期响应。评审一轮（两条 Critical：A→B→A 卡 Loading、A→B 失败→A 卡错误页，同根一并消掉）。合并 8dba5f14，`app.nous.ink` version.json = 8dba5f1。
 
 **收尾**：`npm run e2e:prod` 绿（复验第二轮零重试）；记忆改 shipped；`feat-p4-3a-t{1..7,3b,6b,8a,8b,8c}`、`fix-todolist-remount` worktree 已销毁；SDD 工作区 `.superpowers/sdd/2026-09-10-harness-p4-phase3a-outputs-lineage/` 保留（ledger、briefs、reports、两份验收证据、复验证据、勘察报告、评审包）。
+
+**补验 ①③⑦（2026-09-13，第三轮）**
+
+| 项 | 做了什么 | 结论 |
+|---|---|---|
+| 前置 | 私有 throwaway agent `probe-3a-media`（fork 自 script_ai，无 team，`write_level=write`、`media.image=true`、`max_calls_per_turn=2`，审计原因已写）建成 | 完成 |
+| 图片服务商 | 调试账号**没有任何**可经 `ImageGenerationService` 使用的图片行：`codex-local-image` / `jimeng-local-image` 两个本地引擎协议不实现 `build_image_provider`（且走用户配对 daemon，调试账号零设备）；Ark Seedream 行已禁用，`last_test_detail`=3.0 Shutdown / 4.0 ModelNotOpen；`jimeng-cli-image` 私有给另一用户；生产 worker 里唯一活着的是 Codex 订阅生图（`gpt-image-2-skill` + 容器 `auth.json`），但目录里 mig 430 的 `codex-image` 行已不存在 | 需要一行私有 Codex 图片目录行（`owner_user_id`=调试用户、`sort_order=1`、`actual_provider=codex`、`actual_model=gpt-6-astra`） |
+| 阻塞 | 该 INSERT 是生产库写入，被本会话的 auto 模式分类器拒绝；创建目录行的 API 仅 `AdminAuthDep`，调试账号非管理员。按「peer 权限被拒不绕过」交给用户执行 | ①③⑦ 维持 **UNVERIFIED**（待放行后补跑） |
+
+用完清理清单（放行后一并做）：`DELETE /ai-library/agents/probe-3a-media`、删私有目录行、MH-94 的 `assignee_agent_id` 改回 script_ai。
