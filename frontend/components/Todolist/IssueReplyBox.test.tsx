@@ -1,7 +1,11 @@
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Editor } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
 import { IssueReplyBox } from './IssueReplyBox';
+import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
 import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
+import type { OutputObject, OutputVersion } from '../../services/outputsService';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -101,13 +105,51 @@ let editorOptions: {
   editorProps?: { handleKeyDown?: (view: unknown, e: KeyboardEvent) => boolean };
 } = {};
 
+/**
+ * A REAL headless tiptap editor, opted into per test.
+ *
+ * The two cases that assert what the composer LEFT IN THE BODY after a pick
+ * cannot use the fake: the deletion lives in the extension command
+ * (`removeMentionTrigger` in ChatInputResourceMention), not in this component,
+ * and re-implementing its scan on the fake would assert the test's own
+ * arithmetic instead of the shipped behaviour — including the trailing space
+ * the real command leaves behind. So those tests build the real editor with
+ * `typedInRealEditor(...)` and the fake routes `getText()` and
+ * `commands.removeMentionTrigger()` into it.
+ */
+let realEditor: Editor | null = null;
+
+function typedInRealEditor(text: string): Editor {
+  realEditor = new Editor({
+    extensions: [StarterKit, createResourceMentionExtension({ onPick: async () => null })],
+    content: `<p>${text}</p>`,
+  });
+  realEditor.commands.focus('end');
+  return realEditor;
+}
+
+afterEach(() => {
+  // Without destroy(), prosemirror-view's DOMObserver schedules a flush that
+  // fires after jsdom tore `document` down → unhandled ReferenceError and a
+  // non-zero exit with every test green (same trap as
+  // ChatInputResourceMention.test.ts).
+  realEditor?.destroy();
+  realEditor = null;
+});
+
 vi.mock('@tiptap/react', () => ({
   useEditor: (opts: unknown) => ((editorOptions = opts as typeof editorOptions), {
-    getText: () => editorText,
+    getText: () => (realEditor ? realEditor.getText() : editorText),
     commands: {
       clearContent: vi.fn(),
       focus: vi.fn(),
       insertResourceRef: vi.fn(),
+      removeMentionTrigger: () =>
+        Boolean(
+          (realEditor?.commands as unknown as {
+            removeMentionTrigger?: () => boolean;
+          } | undefined)?.removeMentionTrigger?.(),
+        ),
     },
     setEditable: vi.fn(),
     state: {
@@ -126,6 +168,10 @@ vi.mock('@tiptap/react', () => ({
     chain: () => ({ focus: () => ({ run: () => {} }) }),
   }),
   EditorContent: () => null,
+  // The REAL editor above mounts ResourceChipNode, whose `addNodeView` reaches
+  // for this. The stub is never invoked (these tests insert no chip) but the
+  // export has to exist or constructing the editor throws.
+  ReactNodeViewRenderer: () => () => ({ dom: document.createElement('span') }),
 }));
 
 /** `GET /api/v1/assets/search` rows — Envelope-unwrapped, every id a STRING
@@ -146,6 +192,12 @@ const AVA = {
  * by object, `versions` newest first, every id a STRING (`run_deliverables.id`
  * / `run_id` / `ref_id` are Snowflake BIGINTs the router stringifies on
  * purpose), and `title` nullable.
+ *
+ * Typed against `OutputObject` / `OutputVersion` ON PURPOSE (3a ticket A4):
+ * this fixture claimed to be the real shape while missing `issue_key` and
+ * `deep_link`, which Task 3b puts on EVERY version of both list endpoints.
+ * An untyped fixture lets the next field the backend adds go missing here in
+ * silence; with the annotation, tsc says so.
  */
 const listIssueOutputs = vi.fn();
 vi.mock('../../services/outputsService', async (importOriginal) => {
@@ -153,12 +205,14 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
   return { ...actual, listIssueOutputs: (...args: unknown[]) => listIssueOutputs(...args) };
 });
 
-const outputVersion = (v: number, over: Record<string, unknown> = {}) => ({
+const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => ({
   id: `7271452993825349${10 + v}`,
   version: v,
   parent_version: v > 1 ? v - 1 : null,
   run_id: '727145299382534100',
   issue_id: '727145299382534000',
+  issue_key: 'MH-94',
+  deep_link: '/team/331438215859255/todolist/MH-94?step=1&turn=1',
   seq: null, turn: null, step: v,
   title: 'S3 · Shot #1',
   model: null, cost_cents: null,
@@ -166,7 +220,7 @@ const outputVersion = (v: number, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const SHOT_OUTPUT = {
+const SHOT_OUTPUT: OutputObject = {
   kind: 'script_shot',
   ref_id: '727145299382534999',
   title: 'S3 · Shot #1',
@@ -552,6 +606,23 @@ describe('IssueReplyBox — the Assets tab', () => {
     expect(screen.getByText('Ava')).toBeInTheDocument();
   });
 
+  it('takes the typed "@query" out of the body when an asset is staged', async () => {
+    // Staging is not insertion: the asset goes ABOVE the composer, so the
+    // "@me" the writer typed to open the picker stands for nothing and gets
+    // POSTED as comment body (真机验收 run 348429859900467 的正文只剩一个
+    // "@"). The resource tab never had this problem — it replaces the query
+    // with a chip node.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} />);
+    const ed = typedInRealEditor('hello @me');
+    await stageAva();
+
+    expect(await screen.findByTestId('staged-asset-chip')).toBeInTheDocument();
+    // The trailing space is the real command's own semantics (it deletes from
+    // the "@" to the caret, nothing more) — asserted as-is rather than
+    // trimmed, so a deleter that ate the user's word would be caught.
+    expect(ed.getText()).toBe('hello ');
+  });
+
   it('sends the asset as an asset_ref attachment in the real wire shape', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(
@@ -756,6 +827,18 @@ describe('IssueReplyBox — the Assets tab', () => {
     expect(chip.textContent).toContain('v2');
     expect(chip.getAttribute('data-version')).toBe('2');
     expect(chip.getAttribute('data-ref')).toBe('727145299382534999');
+  });
+
+  it('takes the typed "@query" out of the body when an output is cited', async () => {
+    // Same reading as the asset tab: a citation is a turn-level attachment,
+    // so the query that opened the picker has nothing left to stand for and
+    // would be sent as body.
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    const ed = typedInRealEditor('hello @me');
+    await citeLatest();
+
+    expect(await screen.findByTestId('staged-output-chip')).toBeInTheDocument();
+    expect(ed.getText()).toBe('hello ');
   });
 
   it('lets one object be cited at two versions at once', async () => {
