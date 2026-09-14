@@ -12,7 +12,7 @@
  * different fact from "this version was empty" and the reader must be able to
  * tell them apart.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { History, PlayCircle, RotateCcw, X } from 'lucide-react';
 
@@ -20,6 +20,8 @@ import {
   getOutputDiff,
   getOutputLineage,
   invalidateOutputLineage,
+  lineageGeneration,
+  subscribeLineageChange,
   OutputsError,
   resolveMediaUrl,
   revertOutput,
@@ -30,6 +32,7 @@ import {
 import { formatOutputCost, outputCostTitle, type CostKind } from '../agentActivity/outputCost';
 import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
+import { nextLocalSeq, notifyTurn } from './issueTurnSignal';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
 
 export interface OutputDiffDialogProps {
@@ -193,6 +196,10 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
+  // Someone ELSE can move this chain while the dialog is open (an agent run
+  // finishing, a revert in another pane). The generation is how that reaches a
+  // component that holds no reference to the cache.
+  const gen = useSyncExternalStore(subscribeLineageChange, lineageGeneration, () => 0);
 
   // ---- revert (3b §3.4) --------------------------------------------------
   // `useOptionalToast`, because this dialog also mounts from the canvas, where
@@ -245,7 +252,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
     };
     // `tr` is a fresh function each render; the copy is picked at throw time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, refId]);
+  }, [kind, refId, gen]);
 
   // The older side of the pair: the version this one actually replaced. A
   // first version has no predecessor, so it is compared with itself and drawn
@@ -285,6 +292,18 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
       setTo(res.version.version);
       setConfirming(false);
       invalidateOutputLineage(kind, refId);
+      // The issue page has to re-read too. The reverted version carries its own
+      // issue when it has one; otherwise borrow the one already on the chain,
+      // and when nothing on the chain answers to an issue (the canvas), say
+      // nothing — there is no issue page to refresh.
+      //
+      // ⚠️ The seq is a LOCAL counter, never the new version's id. That id is a
+      // Snowflake: `Number()` rounds it past 2^53, so two reverts minted in the
+      // same millisecond collapse to one value and the watermark drops the
+      // second as a replay. `runId: null` puts it in its own lane, where a
+      // counter that only has to beat its own last value is all that is needed.
+      const signalIssue = res.version.issue_id ?? versions[0]?.issue_id ?? null;
+      if (signalIssue) notifyTurn(String(signalIssue), { runId: null, seq: nextLocalSeq() });
       toast?.addToast(tr('outputs.revertDone', 'Reverted to v{{from}} as v{{n}}', { from, n: res.version.version }), 'success');
     } catch (err) {
       console.error('[OutputDiffDialog] revert failed', err);

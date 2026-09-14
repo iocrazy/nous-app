@@ -44,6 +44,15 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({ useOptionalToast: () => ({ addToast }) }));
 
+// Spied, not stubbed: the real store dedupes by watermark, and asserting
+// through it would be re-asserting the store's own rules.
+const notifyTurn = vi.fn();
+vi.mock('./issueTurnSignal', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./issueTurnSignal')>();
+  return { ...mod, notifyTurn: (...a: unknown[]) => notifyTurn(...(a as [string, never])) };
+});
+const { __resetTurnSignals } = await import('./issueTurnSignal');
+
 const v = (version: number, parent: number | null): OutputLineage['versions'][number] => ({
   id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: '5',
   actor_user_id: null, reverted_from_version: null, cost_kind: 'allocated',
@@ -348,5 +357,70 @@ describe('OutputDiffDialog — revert (3b §3.4)', () => {
     await screen.findByTestId('output-revert-kept');
     fireEvent.click(screen.getByTestId('output-diff-version-1'));
     await waitFor(() => expect(screen.queryByTestId('output-revert-kept')).toBeNull());
+  });
+});
+
+/**
+ * harness 3b Task 6 — a revert is a turn as far as the page is concerned.
+ *
+ * The chain it belongs to names the issue; the dialog is also opened from the
+ * canvas, where there is no issue at all and nothing to refresh.
+ */
+describe('OutputDiffDialog — a revert announces itself (3b Task 6)', () => {
+  const ACTOR = '6f1c1b64-2b3f-4a5e-9a10-1f2c3d4e5f60';
+  const openTextDiff = () => render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+
+  beforeEach(() => {
+    __resetTurnSignals();
+    notifyTurn.mockReset();
+  });
+
+  const revertOnce = async (over: Partial<OutputLineage['versions'][number]> = {}) => {
+    openTextDiff();
+    revertOutput.mockResolvedValue({
+      version: { ...v(4, 3), id: '347786145852739099', reverted_from_version: 1, run_id: null, actor_user_id: ACTOR, ...over },
+      kept_version: null,
+    });
+    fireEvent.click(await screen.findByTestId('output-diff-revert'));
+    fireEvent.click(screen.getByTestId('output-revert-go'));
+    await waitFor(() => expect(revertOutput).toHaveBeenCalled());
+  };
+
+  it('signals the issue the chain belongs to, on the local lane', async () => {
+    // `runId: null` matters: a transcript seq and a local one are different
+    // counters, and sharing a watermark would let either silence the other.
+    await revertOnce();
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(1));
+    const [issue, signal] = notifyTurn.mock.calls[0] as [string, { runId: null; seq: number }];
+    expect(issue).toBe('5');
+    expect(signal.runId).toBeNull();
+    expect(signal.seq).toBeGreaterThan(0);
+  });
+
+  it('two reverts in the same millisecond both get through', async () => {
+    // The seq must NOT be the new version's id: that is a Snowflake, and
+    // `Number()` rounds it past 2^53, so two reverts minted in one millisecond
+    // collapse to the same value and the watermark drops the second as a
+    // replay — the page would sit on the first revert's result.
+    const { unmount } = render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    unmount();
+    await revertOnce();
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(1));
+    cleanup();
+    await revertOnce();
+    await waitFor(() => expect(notifyTurn).toHaveBeenCalledTimes(2));
+
+    const seqs = notifyTurn.mock.calls.map((c) => (c[1] as { seq: number }).seq);
+    expect(seqs[1]).toBeGreaterThan(seqs[0]);
+  });
+
+  it('says nothing when no version on the chain answers to an issue', async () => {
+    // Opened from the canvas: nothing to refresh, so nothing is announced.
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [{ ...v(2, 1), issue_id: null }, { ...v(1, null), issue_id: null }],
+    });
+    await revertOnce({ issue_id: null });
+    expect(notifyTurn).not.toHaveBeenCalled();
   });
 });

@@ -5892,6 +5892,7 @@
     "revertHint": "只有比最新版旧的剧本版本才能回退",
     "revertConfirm": "回退到 v{{from}}？这会写出 v{{next}}。",
     "revertGo": "回退",
+    "updated": "已更新",
     "revertKept": "回退前的人手编辑已登记为 v{{n}}。",
     "revertedChip": "v{{n}} ↩ v{{from}}",
     "revertedBy": "已回退 · 你",

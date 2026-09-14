@@ -218,22 +218,79 @@ const ref = (refId: string): string => encodeURIComponent(refId);
  * work: forty components mounting in one tick all await the same request
  * instead of racing to start forty.
  *
- * **Lifetime is the page load.** There is no scope to invalidate against — the
- * block hangs off canvas nodes and scene blocks, not off an issue or a route —
- * so nothing clears this on navigation. That is sound because a registered
- * lineage only grows when an AGENT writes, which cannot happen inside this
- * tab; the two paths that can make it stale call `invalidateOutputLineage`.
+ * **Lifetime is the page load, bounded by a TTL.** There is no scope to
+ * invalidate against — the block hangs off canvas nodes and scene blocks, not
+ * off an issue or a route — so nothing clears this on navigation. An issue page
+ * does not need the TTL (it gets precise events: a WS `done` frame names the
+ * objects a run wrote), but a canvas node gets no events at all, and an answer
+ * held for an hour is an answer that can be wrong for an hour.
  */
-const lineageCache = new Map<string, Promise<OutputLineage>>();
+export const LINEAGE_TTL_MS = 60_000;
+
+interface LineageEntry {
+  data: Promise<OutputLineage>;
+  fetchedAt: number;
+  /**
+   * The registry sequence this answer was read at (`as_of_seq`) — a Snowflake,
+   * so a STRING, compared with `BigInt` and never parsed into a number.
+   * `'0'` until the request settles.
+   */
+  asOfSeq: string;
+}
+
+const lineageCache = new Map<string, LineageEntry>();
 
 const lineageKey = (kind: string, refId: string): string => `${kind}:${refId}`;
+
+/** Strictly newer, as Snowflakes. A malformed value loses rather than throwing:
+ *  ordering two chains must never be able to break a read. */
+function isNewerSeq(a: string, b: string): boolean {
+  try {
+    return BigInt(a) > BigInt(b);
+  } catch (err) {
+    console.error('[outputsService] as_of_seq was not a number', err);
+    return false;
+  }
+}
+
+let generation = 0;
+const genListeners = new Set<() => void>();
+
+/** A counter every consumer can render off. The blocks hold no reference to the
+ *  map — they learn an answer changed by this moving, not by being told which
+ *  key it was. Pair it with `subscribeLineageChange` in `useSyncExternalStore`. */
+export function lineageGeneration(): number {
+  return generation;
+}
+
+export function subscribeLineageChange(cb: () => void): () => void {
+  genListeners.add(cb);
+  return () => {
+    genListeners.delete(cb);
+  };
+}
+
+function bump(): void {
+  generation += 1;
+  for (const fn of genListeners) {
+    try {
+      fn();
+    } catch (err) {
+      // One bad subscriber never starves the next (CLAUDE.md 分发器要容纳回调异常).
+      console.error('[outputsService] lineage listener failed', err);
+    }
+  }
+}
 
 /**
  * Forget one object, so the next read asks again.
  *
- * ONE object, never the whole map: a revert touches a single scene, and
- * dropping everything would turn that into exactly the 60-request reload this
- * cache exists to prevent.
+ * **Keyed is the normal call; only the no-argument form drops the whole map.**
+ * A blanket invalidate turns a canvas of 40 shots into 40 requests, which is
+ * exactly what this cache exists to prevent — and the callers always know the
+ * key: a revert touches one object, and a `done` frame names the objects the
+ * run registered. The whole-table form is for a test harness that needs each
+ * case to reach the transport.
  *
  * Call it wherever an object's registered chain can change under us — a
  * successful revert (3b), a fresh registration this tab caused. A rollback in
@@ -241,14 +298,28 @@ const lineageKey = (kind: string, refId: string): string => `${kind}:${refId}`;
  * `run_deliverables` only records agent writes, so the chain is unchanged and
  * the remount it triggers should cost nothing.
  */
-export function invalidateOutputLineage(kind: string, refId: string): void {
-  lineageCache.delete(lineageKey(kind, refId));
+export function invalidateOutputLineage(kind?: string, refId?: string): void {
+  if (kind !== undefined && refId !== undefined) lineageCache.delete(lineageKey(kind, refId));
+  else lineageCache.clear();
+  bump();
 }
 
-/** Drop every cached lineage. For tests, which need each case to reach the
- *  transport; production invalidates one object at a time. */
-export function clearOutputLineageCache(): void {
-  lineageCache.clear();
+if (typeof document !== 'undefined') {
+  // Coming back to the tab is when stale entries get dropped. A timer cannot do
+  // this job: background tabs have theirs throttled, and "I was away for ten
+  // minutes" is precisely the moment the answer most deserves re-asking.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const now = Date.now();
+    let dropped = false;
+    for (const [k, e] of lineageCache) {
+      if (now - e.fetchedAt > LINEAGE_TTL_MS) {
+        lineageCache.delete(k);
+        dropped = true;
+      }
+    }
+    if (dropped) bump();
+  });
 }
 
 /** One object's whole chain, newest first. Throws `not_registered` when the
@@ -266,7 +337,9 @@ export function clearOutputLineageCache(): void {
 export function getOutputLineage(kind: string, refId: string): Promise<OutputLineage> {
   const key = lineageKey(kind, refId);
   const cached = lineageCache.get(key);
-  if (cached) return cached;
+  // An entry past its TTL is a miss, not a hit: `visibilitychange` sweeps the
+  // common case, but a tab that never left still holds an hour-old answer.
+  if (cached && Date.now() - cached.fetchedAt <= LINEAGE_TTL_MS) return cached.data;
 
   const pending = get<OutputLineage>(
     `/api/v1/outputs/${encodeURIComponent(kind)}/${ref(refId)}`,
@@ -275,12 +348,38 @@ export function getOutputLineage(kind: string, refId: string): Promise<OutputLin
     // Note this runs BEFORE the caller's own handler, so a later read sees an
     // already-cleared slot and retries — which is the point.
     if (!(err instanceof OutputsError) || err.code !== 'not_registered') {
-      lineageCache.delete(key);
+      if (lineageCache.get(key) === entry) lineageCache.delete(key);
     }
     throw err;
   });
 
-  lineageCache.set(key, pending);
+  const entry: LineageEntry = { data: pending, fetchedAt: Date.now(), asOfSeq: '0' };
+  lineageCache.set(key, entry);
+
+  void pending
+    .then((chain) => {
+      const seq = chain.as_of_seq ?? '0';
+      const current = lineageCache.get(key);
+      // A LATE answer must never install itself. Two shapes of the same race,
+      // both produced by the `done` frame's own order (invalidate, THEN
+      // signal), and both starting from a read that was already in flight:
+      //
+      //   no `current`  — the slot was invalidated and nothing has re-read yet.
+      //     This answer describes the world BEFORE whatever the run wrote, and
+      //     installing it would pin that stale chain for a full TTL, with its
+      //     original `fetchedAt`. The invalidate would have achieved nothing.
+      //   a DIFFERENT entry — a re-read already answered. Ours only wins if its
+      //     `as_of_seq` is genuinely newer; otherwise the next reader would get
+      //     back the version the user just reverted away from.
+      if (!current || (current !== entry && !isNewerSeq(seq, current.asOfSeq))) return;
+      entry.asOfSeq = seq;
+      lineageCache.set(key, entry);
+    })
+    .catch(() => {
+      // The rejection is the caller's to handle (and already evicted above);
+      // this arm only exists so the bookkeeping promise is never unhandled.
+    });
+
   return pending;
 }
 

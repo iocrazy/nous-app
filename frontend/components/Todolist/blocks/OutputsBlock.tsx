@@ -14,7 +14,7 @@
  * ⚠️ Block id is `outputs`, not `deliverables` — that id belongs to the
  * project-stage folder block and `registerIssueBlock` throws on a duplicate.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileOutput } from 'lucide-react';
 
@@ -22,9 +22,15 @@ import { listIssueOutputs, type OutputObject } from '../../../services/outputsSe
 import { formatOutputCost, outputCostTitle } from '../../agentActivity/outputCost';
 import type { DeliverableKind } from '../../chat/deliverableKinds';
 import type { IssueBlock, IssueBlockProps } from '../issueBlocks';
+import { useTurnSignal, type TurnSignal } from '../issueTurnSignal';
 import { OutputDiffDialog } from '../OutputDiffDialog';
 import { setHighlightedOutput } from '../outputHighlight';
 import { RailCard } from './StatusBlock';
+
+/** How long «Updated» stays up after a re-read. Long enough to catch the eye of
+ *  someone already looking at the card, short enough that it never becomes a
+ *  label the reader stops seeing. */
+export const UPDATED_BADGE_MS = 1_000;
 
 /** The four kinds, in the words a person uses for them.
  *
@@ -46,17 +52,34 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [items, setItems] = useState<OutputObject[]>([]);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<OutputObject | null>(null);
+  const [justUpdated, setJustUpdated] = useState(false);
+  // «A turn on this issue ended» — one broadcast, deduped by watermark, so the
+  // WS `done` frame and the polling edge for one turn cost one re-read.
+  const signal = useTurnSignal(String(issueId));
+  /** The signal the badge has already spoken for. The effect re-runs for other
+   *  reasons too (a rail `refreshKey` bump), and `signal !== null` stays true
+   *  forever once the first turn lands — so without this the badge would claim
+   *  an update on every later re-read. A badge that cries wolf is worse than
+   *  no badge. */
+  const badgedSignal = useRef<TurnSignal | null>(null);
 
   // A ring must not outlive the rail that set it (navigating away mid-hover).
   useEffect(() => () => setHighlightedOutput(null), []);
 
   useEffect(() => {
     let live = true;
+    // Claimed at the START of the run this signal caused, so a re-run for any
+    // other reason cannot claim it a second time.
+    const isNewSignal = signal !== null && signal !== badgedSignal.current;
+    badgedSignal.current = signal;
     listIssueOutputs(issueId)
       .then((rows) => {
         if (!live) return;
         setItems(rows);
         setFailed(false);
+        // Only for the signal's own re-read: the first load of a page is not
+        // "this changed", and a badge on arrival would say the opposite.
+        if (isNewSignal) setJustUpdated(true);
       })
       .catch((err) => {
         if (!live) return;
@@ -66,13 +89,27 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     return () => {
       live = false;
     };
-  }, [issueId, refreshKey]);
+  }, [issueId, refreshKey, signal]);
+
+  useEffect(() => {
+    if (!justUpdated) return;
+    const timer = window.setTimeout(() => setJustUpdated(false), UPDATED_BADGE_MS);
+    return () => window.clearTimeout(timer);
+  }, [justUpdated]);
 
   if (items.length === 0 && !failed) return null;
 
   return (
     <>
       <RailCard title={t('issueDetail.outputs', 'Outputs')} testId="outputs-block">
+        {justUpdated && (
+          <span
+            data-testid="outputs-updated"
+            className="animate-in fade-in mb-1 block text-[11px] text-info"
+          >
+            {t('outputs.updated', 'Updated')}
+          </span>
+        )}
         {items.map((item) => {
           // The cast asserts nothing about the value — it only permits the
           // lookup; `??` still answers for a kind this build has not heard of.

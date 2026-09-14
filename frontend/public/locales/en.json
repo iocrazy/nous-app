@@ -5892,6 +5892,7 @@
     "revertHint": "Only an older script version can be reverted",
     "revertConfirm": "Revert to v{{from}}? This creates v{{next}}.",
     "revertGo": "Revert",
+    "updated": "Updated",
     "revertKept": "Your edits before the revert were kept as v{{n}}.",
     "revertedChip": "v{{n}} ↩ v{{from}}",
     "revertedBy": "Reverted · You",

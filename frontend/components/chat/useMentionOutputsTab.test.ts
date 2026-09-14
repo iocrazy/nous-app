@@ -22,6 +22,7 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
   return { ...actual, listIssueOutputs };
 });
 
+import { __resetTurnSignals, notifyTurn } from '../Todolist/issueTurnSignal';
 import { useMentionOutputsTab } from './useMentionOutputsTab';
 import { OutputsError } from '../../services/outputsService';
 import type { OutputMentionListHandle } from './OutputMentionList';
@@ -189,5 +190,52 @@ describe('useMentionOutputsTab', () => {
     await waitFor(() => expect(result.current.outputs.rows.length).toBe(2));
     act(() => result.current.outputs.onSelect(result.current.outputs.rows[1]));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ version: 1, ref_kind: 'script_shot' }));
+  });
+});
+
+/**
+ * harness 3b Task 6 — the one-shot guard has to forget when a turn ends.
+ *
+ * Reading once per mention session is right (§2 of the hook's note), but an
+ * issue keeps producing WHILE its composer sits open. Without this the tab
+ * caches the list from the first `@` of the session and the thing the agent
+ * just made can never be cited.
+ */
+describe('useMentionOutputsTab — a finished turn', () => {
+  beforeEach(() => __resetTurnSignals());
+
+  it('forgets its one-shot guard when a turn ends', async () => {
+    const { result } = setup({ issueId: 42 });
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.deactivate());
+    act(() => notifyTurn('42', { runId: '727145299382534100', seq: 7 }));
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+  });
+
+  it('re-reads under an OPEN tab rather than leaving it empty', async () => {
+    // Clearing the rows without re-reading them is worse than staleness: the
+    // picker would sit there saying this issue produced nothing, and nothing
+    // would ever ask again until the reader closed and reopened the mention.
+    const { result } = setup({ issueId: 42 });
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    act(() => notifyTurn('42', { runId: '727145299382534100', seq: 7 }));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.outputs.rows.length).toBeGreaterThan(0));
+  });
+
+  it('a turn on another issue changes nothing', async () => {
+    const { result } = setup({ issueId: 42 });
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+    act(() => result.current.deactivate());
+    act(() => notifyTurn('999999', { runId: 'r1', seq: 7 }));
+    act(() => result.current.outputs.onActivate());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).toHaveBeenCalledTimes(1);
   });
 });

@@ -22,7 +22,22 @@ function getWsBaseUrl(): string {
 export type IssueChatEvent =
   | { type: 'chunk'; delta: string }
   | { type: 'message'; message: IssueMessage }
-  | { type: 'status'; phase: 'running' | 'done' | string };
+  // `run_id` / `seq` / `outputs` ride the `done` frame (3b Task 4b): always
+  // present on that backend, null / `[]` when unknown. There is no separate
+  // `deliverable` frame — this socket relays chunk / message / status only, and
+  // what a run registered arrives here.
+  //
+  // All three are OPTIONAL because an older backend omits them entirely: a
+  // missing `seq` reads as 0 and missing `outputs` as `[]`. That is safe
+  // because the signal's watermark is per `(issue, run)` — a frame with no
+  // `run_id` lands in the local lane and cannot mask a real run's frames.
+  | {
+      type: 'status';
+      phase: 'running' | 'done' | string;
+      run_id?: string | null;
+      seq?: number | null;
+      outputs?: Array<{ kind: string; ref_id: string }>;
+    };
 
 /**
  * Mint a one-shot ticket, open a WebSocket to `/ws/issue/{issueId}`,

@@ -48,8 +48,11 @@ vi.mock('../../services/issueMessageService', async (importOriginal) => ({
   AgentNotDispatchedError: class extends Error {},
 }));
 
+const openIssueChatSocket = vi.fn(
+  (..._a: unknown[]): Promise<WebSocket> => Promise.reject(new Error('no ws in tests')),
+);
 vi.mock('../../services/issueChatSocket', () => ({
-  openIssueChatSocket: vi.fn(() => Promise.reject(new Error('no ws in tests'))),
+  openIssueChatSocket: (...a: unknown[]) => openIssueChatSocket(...a),
 }));
 
 vi.mock('../../supabaseClient', () => ({ getSupabaseClient: () => null }));
@@ -140,6 +143,7 @@ vi.mock('../../services/aiLibraryService', () => ({
 const listIssueOutputs = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
 const getOutputLineage = vi.fn();
 const getOutputDiff = vi.fn();
+const invalidateOutputLineage = vi.fn();
 vi.mock('../../services/outputsService', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../services/outputsService')>();
   return {
@@ -147,7 +151,17 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
     listIssueOutputs: (...a: unknown[]) => listIssueOutputs(...a),
     getOutputLineage: (...a: unknown[]) => getOutputLineage(...a),
     getOutputDiff: (...a: unknown[]) => getOutputDiff(...a),
+    invalidateOutputLineage: (...a: unknown[]) => invalidateOutputLineage(...a),
   };
+});
+
+// The turn signal the `done` frame raises. Spied rather than stubbed out: the
+// real store dedupes by watermark, and a test that asserted through it would
+// be asserting the store's rules a second time.
+const notifyTurn = vi.fn();
+vi.mock('./issueTurnSignal', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./issueTurnSignal')>();
+  return { ...mod, notifyTurn: (...a: unknown[]) => notifyTurn(...(a as [string, never])) };
 });
 
 const outputVersion = (version: number, parent: number | null) => ({
@@ -857,5 +871,88 @@ describe('IssueDetailView — 从 Related work 页签点开 run 面板', () => {
     // 真的切回去了，而不是把面板塞进 Related work —— 这一行只在 timeline
     // 分支里渲染（rollup 是 running）。
     await waitFor(() => expect(screen.getByText('Agent is working…')).toBeTruthy());
+  });
+});
+
+/**
+ * harness 3b Task 6 — what a finished turn does to the page.
+ *
+ * The frames are the REAL wire shape Task 4b produces: `run_id` / `seq` /
+ * `outputs` are always present on a `status` frame, null / `[]` when unknown,
+ * and ids are STRINGS. There is no separate `deliverable` frame — the `done`
+ * frame carries what the run registered.
+ */
+describe('IssueDetailView — WS done frame (3b Task 6)', () => {
+  let onEvent: (e: Record<string, unknown>) => void;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    progressState.value = mkProgress();
+    openIssueChatSocket.mockImplementation((_id: unknown, cb: unknown) => {
+      onEvent = cb as (e: Record<string, unknown>) => void;
+      return Promise.resolve({ close: vi.fn(), readyState: 1 } as unknown as WebSocket);
+    });
+    renderDetail(mkIssue());
+    await waitFor(() => expect(onEvent).toBeTypeOf('function'));
+  });
+
+  it('a done frame signals the turn with its run and seq', () => {
+    act(() => onEvent({ type: 'status', phase: 'done', run_id: '777', seq: 42, outputs: [] }));
+    expect(notifyTurn).toHaveBeenCalledWith('1', { runId: '777', seq: 42 });
+  });
+
+  it('a done frame invalidates exactly the objects it registered', () => {
+    act(() =>
+      onEvent({
+        type: 'status',
+        phase: 'done',
+        run_id: '777',
+        seq: 43,
+        outputs: [{ kind: 'script_shot', ref_id: '9' }],
+      }),
+    );
+    expect(invalidateOutputLineage).toHaveBeenCalledTimes(1);
+    expect(invalidateOutputLineage).toHaveBeenCalledWith('script_shot', '9');
+  });
+
+  it('a run that registered three objects drops exactly those three keys', () => {
+    // Keyed, one per registered object — never a blanket clear, which would
+    // turn a 40-shot canvas into 40 requests, and never one bulk call, which
+    // would have to guess the keys.
+    act(() =>
+      onEvent({
+        type: 'status',
+        phase: 'done',
+        run_id: '777',
+        seq: 44,
+        outputs: [
+          { kind: 'script_shot', ref_id: '9' },
+          { kind: 'script_scene', ref_id: '3' },
+          { kind: 'generated_media', ref_id: '77' },
+        ],
+      }),
+    );
+    expect(invalidateOutputLineage.mock.calls).toEqual([
+      ['script_shot', '9'],
+      ['script_scene', '3'],
+      ['generated_media', '77'],
+    ]);
+    // ...and ONE signal for the turn, not one per object.
+    expect(notifyTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a legacy done frame without seq/outputs still signals', () => {
+    // An old backend omits all three keys. Missing `seq` is 0 and missing
+    // `outputs` is [] — the turn is still over, and saying nothing would
+    // leave the page frozen on whatever it drew before.
+    act(() => onEvent({ type: 'status', phase: 'done' }));
+    expect(notifyTurn).toHaveBeenCalledWith('1', { runId: null, seq: 0 });
+    expect(invalidateOutputLineage).not.toHaveBeenCalled();
+  });
+
+  it('a running frame signals nothing', () => {
+    act(() => onEvent({ type: 'status', phase: 'running', run_id: '777', seq: 1, outputs: [] }));
+    expect(notifyTurn).not.toHaveBeenCalled();
+    expect(invalidateOutputLineage).not.toHaveBeenCalled();
   });
 });

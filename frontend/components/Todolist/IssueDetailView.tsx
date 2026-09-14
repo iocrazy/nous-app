@@ -37,6 +37,8 @@ import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import type { SubtaskCount } from './issueFlow';
 import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
+import { invalidateOutputLineage } from '../../services/outputsService';
+import { notifyTurn } from './issueTurnSignal';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
@@ -401,6 +403,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         } else if (event.phase === 'done') {
           setIsAgentWorking(false);
           setStreamingText('');
+          // Invalidate BEFORE signalling: a subscriber re-reads synchronously
+          // on the signal, and the order decides whether it gets the new chain
+          // or the cached one it already had.
+          //
+          // `outputs` names exactly what this run registered, so the blast
+          // radius is those objects — never the whole map, which would turn a
+          // 40-shot canvas into 40 requests. An older backend sends neither
+          // key: no objects to forget, seq 0, and the turn is still announced.
+          for (const o of event.outputs ?? []) invalidateOutputLineage(o.kind, o.ref_id);
+          notifyTurn(String(issue.id), { runId: event.run_id ?? null, seq: event.seq ?? 0 });
         }
       }
     })
