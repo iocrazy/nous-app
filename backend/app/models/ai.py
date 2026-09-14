@@ -229,6 +229,8 @@ class AiModelPrices(Base):
     cached_input_cents_per_1k: Mapped[Optional[decimal.Decimal]] = mapped_column(
         Numeric
     )
+    #: 466: 图片/视频模型按**次**计价（每千 token 的两列对它们无意义）。
+    per_call_cents: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(12, 4))
 
 
 class AiUsageLogs(Base):

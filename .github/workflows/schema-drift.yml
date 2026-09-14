@@ -69,6 +69,7 @@ on:
       - 'backend/tests/db/test_conversations_store_question_integration.py'
       - 'backend/tests/db/test_inbox_expire_skips_paused_integration.py'
       - 'backend/tests/db/test_run_deliverables_repository_integration.py'
+      - 'backend/tests/db/test_migration_466_revert_cost_integration.py'
       - 'backend/tests/db/test_transcript_seq_conflict_integration.py'
       # The writer whose seq-conflict retry that file is the only real-driver
       # proof of: a stub can raise IntegrityError on command, but only Postgres
@@ -133,11 +134,12 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirteen, so it has to re-run
+      # to it changes what "green" means for all sixteen, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
-      # ⚠️ That count has been wrong twice (it said "eight" when there were
-      # seven, "nine" when there were eight, then "eleven" when there were thirteen — each edit trusted the
-      # previous number instead of counting). Recount, do not increment:
+      # ⚠️ That count has been wrong four times (it said "eight" when there
+      # were seven, "nine" when there were eight, "eleven" when there were
+      # thirteen, then "thirteen" when there were fifteen — each edit trusted
+      # the previous number instead of counting). Recount, do not increment:
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -518,3 +520,17 @@ jobs:
           # in this file is what keeps the positive case a claim about
           # Postgres rather than about SQLAlchemy's compiler.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_generated_media_int_run_id_integration.py -v
+
+      - name: Assert mig 466's nullable run ids, both CHECKs & the per-call price
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 466 放宽两个 NOT NULL，用两个 CHECK 换回约束。文本测试读迁移写了什么；
+          # 只有服务器能回答 CHECK 是否真的拒绝「既无 run 也无人」的行，以及
+          # NUMERIC(12,4) 是否真的留住第四位小数。同一步顺带钉住 generated_media
+          # 上那个反查索引仍在 —— 3b 正因为它才没有再建一个。（钉的是 456 的
+          # uq_genmedia_promoted_resource 一个，不是两个：456 把 307 的
+          # idx_genmedia_promoted DROP 掉了，替换而非并存。）
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_466_revert_cost_integration.py -v

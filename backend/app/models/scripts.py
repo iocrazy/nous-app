@@ -733,13 +733,21 @@ class ScriptShotOps(Base):
         ),
         PrimaryKeyConstraint("id", name="script_shot_ops_pkey"),
         Index("idx_script_shot_ops_run", "run_id"),
+        CheckConstraint(
+            "run_id IS NOT NULL OR actor IS NOT NULL",
+            name="script_shot_ops_run_or_actor",
+        ),
         {"schema": "public"},
     )
 
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
-    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 466: 人手回退不经过 agent_run —— run 为空时 actor 必须有值（CHECK 兜住）。
+    run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    #: 同 script_ops.actor 的形状：'revert:<uid>' / 'keep:<uid>'。NULL = agent 写的。
+    #: undo 按 run_id 读（run_undo_service.py:62），人手行天然不入 undo。
+    actor: Mapped[Optional[str]] = mapped_column(Text)
     shot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     scene_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
