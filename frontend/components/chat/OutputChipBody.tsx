@@ -15,6 +15,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileOutput, X } from 'lucide-react';
 
+import type { DeliverableKind } from './deliverableKinds';
+
 export interface OutputChipBodyProps {
   refKind: string;
   refId: string;
@@ -30,7 +32,11 @@ export interface OutputChipBodyProps {
   onRemove?: () => void;
 }
 
-const KIND_LABEL: Record<string, [string, string]> = {
+/** Keyed by `DeliverableKind` so a kind added to `deliverableKinds.ts` fails
+ *  to compile until it is labelled. Exported for `deliverableKinds.test.ts`,
+ *  which re-checks the coverage at runtime so the type cannot be widened back
+ *  to `Record<string, …>` unnoticed. */
+export const KIND_LABEL: Record<DeliverableKind, [string, string]> = {
   generated_media: ['outputs.kindMedia', 'Image'],
   script_shot: ['outputs.kindShot', 'Shot'],
   script_scene: ['outputs.kindScene', 'Scene'],
@@ -45,7 +51,9 @@ export const OutputChipBody: React.FC<OutputChipBodyProps> = ({
   onRemove,
 }) => {
   const { t } = useTranslation();
-  const [key, fallback] = KIND_LABEL[refKind] ?? ['outputs.kindOther', refKind.replace(/_/g, ' ')];
+  // The cast asserts nothing about the value — it only permits the lookup;
+  // `??` still answers for a kind this build has not heard of.
+  const [key, fallback] = KIND_LABEL[refKind as DeliverableKind] ?? ['outputs.kindOther', refKind.replace(/_/g, ' ')];
   const name = title ?? `${t(key, fallback)} #${refId}`;
   return (
     <span

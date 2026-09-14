@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { FileOutput } from 'lucide-react';
 
 import type { OutputMentionRow } from './outputMentionRows';
+import type { DeliverableKind } from './deliverableKinds';
 
 export interface OutputMentionListHandle {
   /** Move the highlight, wrapping. Driven by the host's arrow keys. */
@@ -46,8 +47,13 @@ export interface OutputMentionListProps {
 
 /** The four kinds in the words a person uses — shared wording with the
  *  Outputs block's `KIND_LABEL`, kept as its own map because this list needs
- *  the singular noun alone (the block pairs it with a count). */
-const KIND_LABEL: Record<string, [string, string]> = {
+ *  the singular noun alone (the block pairs it with a count).
+ *
+ *  Keyed by `DeliverableKind` so a kind added to `deliverableKinds.ts` fails
+ *  to compile until it is labelled here. Exported for `deliverableKinds.test.ts`
+ *  only, which re-checks the coverage at runtime — the type alone can be
+ *  widened back to `Record<string, …>` in one keystroke. */
+export const KIND_LABEL: Record<DeliverableKind, [string, string]> = {
   generated_media: ['outputs.kindMedia', 'Image'],
   script_shot: ['outputs.kindShot', 'Shot'],
   script_scene: ['outputs.kindScene', 'Scene'],
@@ -126,7 +132,9 @@ export const OutputMentionList = forwardRef<OutputMentionListHandle, OutputMenti
         className="py-1 max-h-[288px] overflow-y-auto"
       >
         {rows.map((row, idx) => {
-          const [key, fallback] = KIND_LABEL[row.ref_kind] ?? ['outputs.kindOther', row.ref_kind.replace(/_/g, ' ')];
+          // The cast asserts nothing about the value — it only permits the
+          // lookup. `??` still answers for a kind this build has not heard of.
+          const [key, fallback] = KIND_LABEL[row.ref_kind as DeliverableKind] ?? ['outputs.kindOther', row.ref_kind.replace(/_/g, ' ')];
           const kindWord = t(key, fallback);
           return (
             <React.Fragment key={row.key}>

@@ -1,4 +1,12 @@
 
+// The only import in this file, and deliberately `import type`: it is erased
+// at compile time (`isolatedModules`), so the app's leaf declaration file
+// still pulls in nothing at runtime. `DeliverableKind` lives beside the
+// backend mirror it is pinned against rather than here, and copying the four
+// words into this file would be the fifth hand-copy the mirror test exists to
+// prevent.
+import type { DeliverableKind } from './components/chat/deliverableKinds';
+
 export enum DownloadStatus {
   PENDING = 'PENDING',
   PROCESSING = 'PROCESSING',
@@ -2511,12 +2519,21 @@ export type AssetRefAttachment = {
  *  the object later never re-points a comment that already meant v2. */
 export type OutputRefAttachment = {
   kind: 'output_ref';
-  /** One of `generated_media | script_shot | script_scene | script_chapter`.
-   *  A free string rather than a union: the four live in
-   *  `app/services/deliverables/kinds.py` and an unknown one is refused as a
-   *  typed `output_ref_unresolvable`, which names the problem better than a
-   *  compile error in a file that never sees the registry. */
-  ref_kind: string;
+  /** Which registry the citation points into.
+   *
+   *  `DeliverableKind`, mirrored from `app/services/deliverables/kinds.py` and
+   *  pinned by `tests/services/deliverables/test_kinds_frontend_mirror.py`.
+   *  It was a free string, on the argument that an unknown kind already comes
+   *  back as a typed `output_ref_unresolvable` and that names the problem
+   *  better than a compile error. That still holds for kinds arriving FROM the
+   *  server — and is why `StagedOutputRef.ref_kind` stays a string, with the
+   *  narrowing done once where the wire form is built. What it does not cover
+   *  is the other direction: a value assembled in the client (a hand-written
+   *  attachment, a test fixture, a future "cite this" button on an object
+   *  page) reaching the server with a misspelt kind, where the typed refusal
+   *  arrives after the comment failed to post. That is the case the union
+   *  catches, and it costs nothing on the read path. */
+  ref_kind: DeliverableKind;
   /** BIGINT serialized as string (Snowflake). */
   ref_id: string;
   /** 1-based. Required — a citation names one specific version. */
