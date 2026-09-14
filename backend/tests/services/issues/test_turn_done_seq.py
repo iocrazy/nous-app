@@ -157,3 +157,31 @@ async def test_load_rollup_asks_nobody_when_no_run_is_running(monkeypatch):
 
     assert asked == []
     assert out["current_run"] is None
+
+
+async def test_an_unusable_run_id_still_gets_a_frame_out(monkeypatch):
+    """帧上那个 run id 是调用方给什么就是什么——转不成 int 的话两次读没法做，
+    但状态帧本身必须照发。裸 ``int("abc")`` 会抛，而这是发布器：这里抛出去
+    就等于一个坏 id 让整个回合的 done 信号消失。"""
+    import app.services.issues.issue_chat_stream as st
+
+    published: list[dict] = []
+    monkeypatch.setattr(st, "_publish", _sink(published))
+
+    async def _boom(_run_id):  # 真被调到就说明守卫没拦住
+        raise AssertionError("must not reach the repository with an unusable id")
+
+    monkeypatch.setattr(st, "_last_transcript_seq", _boom)
+    monkeypatch.setattr(st, "_run_output_keys", _boom)
+
+    await st.publish_status(1, "done", run_id="abc")
+
+    assert published == [
+        {
+            "type": "status",
+            "phase": "done",
+            "run_id": "abc",
+            "seq": None,
+            "outputs": [],
+        }
+    ]

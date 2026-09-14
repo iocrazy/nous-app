@@ -495,3 +495,39 @@ async def test_run_issue_agent_passes_fork_of_from_execution_state(monkeypatch):
     kw = chat_svc.run_session_turn.await_args.kwargs
     assert kw["fork_of"] is None and kw["fork_steer"] is False
     clear.assert_not_awaited()
+
+
+async def test_the_done_frame_never_masks_the_turns_real_exception(monkeypatch):
+    """``done`` 帧的 run id 是装饰，而读它的那一行在 ``finally`` 里。
+
+    回合体拿到一个不是 dict 的结果时会先炸在 ``result.get("assistant_message")``
+    上——那是真异常。如果 ``finally`` 里再裸读一次 ``.get``，抛出的 AttributeError
+    会**顶替**它成为调用方看到的那个，排障从此指向错误的地方。
+    """
+    from app.services.issues import issue_agent_executor as m
+
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(return_value="not a dict")
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-1")
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    status = AsyncMock()
+    monkeypatch.setattr(m, "publish_status", status)
+
+    with pytest.raises(AttributeError) as excinfo:
+        await m.run_issue_agent(
+            issue={"id": 42, "title": "t", "description": "d"},
+            agent_id="a",
+            user_id="u",
+        )
+
+    # 真异常是「str 没有 get」，不是 finally 自己制造的那一个。
+    assert "assistant_message" in str(excinfo.value) or "'str' object" in str(
+        excinfo.value
+    )
+    # 而帧照样发出去了，run 未知即 None。
+    assert status.await_args_list[-1].args[1] == "done"
+    assert status.await_args_list[-1].kwargs == {"run_id": None}

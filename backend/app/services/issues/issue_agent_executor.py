@@ -288,4 +288,9 @@ async def run_issue_agent(
             "stop_reason": result.get("stop_reason"),
         }
     finally:
-        await publish_status(iid, "done", run_id=(result or {}).get("run_id"))
+        # 这一行在 ``finally`` 里：这里抛出的任何东西都会盖掉正在传播的真异常。
+        # ``result`` 在生产里永远是 dict 或 None，但一个替身（或将来某个调用方）
+        # 可以给任何东西，而读一个装饰字段绝不该是压垮一次回合的那件事——
+        # ``issue_lifecycle._turn_run_id`` 是同一条纪律的孪生。
+        run_id = result.get("run_id") if isinstance(result, dict) else None
+        await publish_status(iid, "done", run_id=run_id)

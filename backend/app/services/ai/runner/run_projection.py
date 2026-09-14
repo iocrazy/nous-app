@@ -66,10 +66,13 @@ def empty_views() -> Views:
         },
         "cost": {
             # ``spent_cents`` is DERIVED: own_cents + Σ by_child +
-            # media_cents. It is what
-            # the UI and the budget gate read, and what RunRecorder writes
-            # into agent_runs.cost_cents on finish, so the view and the
-            # column never name different numbers (review I3).
+            # media_cents (3b §3.3 added the third part). It is what the UI
+            # and the budget gate read, and RunRecorder._finish writes the
+            # SAME three-part figure into agent_runs.cost_cents, so the view
+            # and the column never name different numbers (review I3) — the
+            # rollup reads the view while a run is running and the column
+            # once it has ended, so any part missing from one side makes an
+            # issue's spend step at the moment the run completes.
             "spent_cents": 0.0,
             "own_cents": 0.0,
             "by_step": [],

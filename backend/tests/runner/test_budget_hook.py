@@ -478,3 +478,96 @@ async def test_a_media_deliverable_pushes_the_gate_over_budget():
     assert await _hook(budget=100).before_llm_call(ctx) is StepDecision.STOP
     assert [e[0] for e in rec.events] == ["budget_check", "question_asked"]
     assert rec.events[0][1]["action"] == "halt"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_runs_media_shows_up_as_the_next_runs_prior_spend(monkeypatch):
+    """跨 run 的账只走一条路：``agent_runs.cost_cents`` 的 SUM。
+
+    run 1 生完图就结束了，它的钱此后只在那一列里。列不含媒体，run 2 的
+    ``prior_cents`` 就看不见它——同一个 issue 上每开一条新 run，媒体预算就能
+    再花一遍。这里把 run 1 的列值**按 _finish 推导它的方式**算出来，而不是写死
+    一个数字，否则这条测试与被测的那个公式就脱钩了。
+    """
+    from app.services.ai.runner import budget_hook as bh
+
+    persisted = await _column_written_by_finish(
+        monkeypatch, own_cents=10.0, media_cents=95.0
+    )
+    assert persisted == 105.0
+
+    class _Issues:
+        async def get_by_id(self, issue_id):
+            return {"id": issue_id, "budget_cents": 100}
+
+    class _Runs:
+        async def spent_cents_for_issue(self, **_kw):
+            # SUM(agent_runs.cost_cents) over the issue's earlier root runs.
+            return persisted
+
+    async def resolve(**_):
+        return [("issue", 7)]
+
+    import app.repositories.agent_runs_repository as runs_mod
+    import app.repositories.issue_repository as issues_mod
+    import app.services.ai.runner.inbox as inbox_mod
+
+    monkeypatch.setattr(issues_mod, "issue_repository", _Issues())
+    monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
+    monkeypatch.setattr(inbox_mod, "resolve_targets", resolve)
+
+    rec2 = _Rec(run_id=43)
+    rec2.conversation_id = None
+    rec2.issue_id = 7
+    info = await bh.load_issue_budget(rec2)
+    assert info.prior_cents == 105.0
+
+    # run 2 还没花一分钱，就已经因为 run 1 的图而超预算。
+    hook = BudgetGateHook(load=lambda _r: _done(info), consume=_always)
+    ctx = StepContext(turn=1, step=1, recorder=rec2)
+    assert await hook.before_llm_call(ctx) is StepDecision.STOP
+    assert rec2.events[0][1]["action"] == "halt"
+
+
+async def _done(value):
+    return value
+
+
+async def _always(_recorder, _info):
+    return True
+
+
+async def _column_written_by_finish(monkeypatch, *, own_cents, media_cents):
+    """``agent_runs.cost_cents`` as ``RunRecorder._finish`` really derives it.
+
+    Deriving this from the fold's ``spent_cents`` instead would decouple the
+    test from the thing under test: the defect is precisely that the COLUMN
+    and the view stopped naming the same number.
+    """
+    import contextlib
+
+    from app.db import session as dbs
+    from app.services.ai.runner import run_recorder as rr
+
+    captured: dict = {}
+
+    class _S:
+        async def execute(self, stmt, *a, **k):
+            captured.update(
+                {str(k): v for k, v in (stmt.compile().params or {}).items()}
+            )
+            return None
+
+    @contextlib.asynccontextmanager
+    async def _ws():
+        yield _S()
+
+    monkeypatch.setattr(dbs, "write_scope", _ws)
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    rec.run_id = "7"
+    writer = rec._writer()
+    writer.views["cost"]["own_cents"] = own_cents
+    writer.views["cost"]["media_cents"] = media_cents
+    writer._mirror = AsyncMock()
+    await rec._finish(status="completed")
+    return float(captured["cost_cents"])
