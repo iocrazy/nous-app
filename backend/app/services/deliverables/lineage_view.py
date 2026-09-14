@@ -46,6 +46,10 @@ _VERSION_KEYS = (
     "version",
     "parent_version",
     "run_id",
+    # 3b：人手登记的两列。``ledger_ref`` 刻意**不**在这里——它是服务端定位
+    # 字段（ops 行 id），上线等于把它交给浏览器。
+    "actor_user_id",
+    "reverted_from_version",
     "issue_id",
     "issue_key",
     "seq",

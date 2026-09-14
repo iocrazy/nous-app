@@ -318,6 +318,61 @@ def test_a_run_with_no_issue_is_visible_only_to_its_own_user(monkeypatch):
     )
 
 
+def test_a_human_revert_version_is_returned_and_does_not_decide_the_gate(monkeypatch):
+    """3b：回退版没有 run，也没有 issue。它必须出现在链上（否则面板上最新的
+    那一版凭空消失），而门禁必须落在最新的**有 run 的**那一版上——拿人手版
+    当判据会把 ``run_owner_user_id`` 喂成 None。"""
+    rows = [
+        _row(
+            4,
+            run_id=None,
+            actor_user_id=ME,
+            reverted_from_version=1,
+            issue_id=None,
+            issue_key=None,
+            team_id=None,
+            seq=None,
+            turn=None,
+            step=None,
+            model=None,
+            cost_cents=None,
+        ),
+        _row(3),
+        _row(2),
+        _row(1),
+    ]
+    body = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9").json()
+    assert [v["version"] for v in body["versions"]] == [4, 3, 2, 1]
+    human = body["versions"][0]
+    assert human["run_id"] is None
+    assert human["actor_user_id"] == ME
+    assert human["reverted_from_version"] == 1
+    # 门禁**真的**问了 v3 的 issue。断言这一句而不是断言 200：人手版走另一条
+    # 分支（run 属主）时照样能拿到 200，那样这个用例就证明不了任何事。
+    mod.assert_issue_visible.assert_awaited_once()
+    assert mod.assert_issue_visible.await_args.args[0] == int(ISSUE_ID)
+
+
+def test_a_human_revert_is_refused_when_the_gating_run_is_invisible(monkeypatch):
+    """反向对照：把门禁那一版的 issue 设成不可见，回退版也跟着 404 —— 证明
+    上面那次 200 是门禁放行的结果，不是门禁被人手版绕过了。"""
+    rows = [
+        _row(4, run_id=None, actor_user_id=ME, issue_id=None, team_id=None),
+        _row(3),
+    ]
+    r = _client(monkeypatch, rows, visible=False).get("/api/v1/outputs/script_shot/9")
+    assert r.status_code == 404
+
+
+def test_a_chain_with_no_run_at_all_is_404_not_a_crash(monkeypatch):
+    """没有任何一版能证明归属时，回答与「没登记过」一致。"""
+    rows = [_row(1, run_id=None, actor_user_id=SOMEONE_ELSE, issue_id=None)]
+    r = _client(monkeypatch, rows).get("/api/v1/outputs/script_shot/9")
+    assert r.status_code == 404
+    # 而且**没有**去问一个 NULL run 的属主：真栈上 ``int(None)`` 是 500。
+    mod.run_owner_user_id.assert_not_awaited()
+
+
 # ── diff ─────────────────────────────────────────────────────────────────
 
 

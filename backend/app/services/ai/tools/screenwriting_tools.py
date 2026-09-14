@@ -242,6 +242,12 @@ def _scene_deliverable_title(scene_no: Any, scene: Any) -> str:
     return f"S{scene_no} · {heading}" if heading else f"S{scene_no}"
 
 
+def _take_ledger_ref(shot: dict) -> Optional[str]:
+    """把账本位置从工具返回值里**取走**。宿主侧定位字段，留在 dict 里就会进模型
+    上下文（同 Tool.to_descriptor 的白名单投影纪律）。"""
+    return shot.pop("ledger_ref", None)
+
+
 async def _register_write(
     scope: AgentRunScope,
     run_context: dict,
@@ -249,6 +255,7 @@ async def _register_write(
     kind: str,
     ref_id: Any,
     title: Optional[str],
+    ledger_ref: Optional[str] = None,
 ) -> None:
     """3a：把一次已经**提交**的写入登记成这个 run 的产出。
 
@@ -268,6 +275,9 @@ async def _register_write(
         kind=kind,
         ref_id=str(ref_id),
         title=title,
+        # 这一版在账本上的位置。差这一步，``ledger_ref`` 就永远是 NULL，而
+        # 所有读侧测试照样绿（它们自己造账本）——写侧接线必须自己被钉住。
+        ledger_ref=ledger_ref,
         turn=run_context.get("turn"),
         step=run_context.get("step"),
         # 这一轮的活 recorder。少了它，登记口退回 ``for_run`` 另开一个
@@ -369,13 +379,16 @@ class ScreenwritingTools:
                 "error": f"could not create the shot: {exc.__class__.__name__}",
                 "error_code": "write_failed",
             }
-        # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。
+        # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。``_take_ledger_ref``
+        # 必须在 return 之前跑——它把账本位置从模型看得见的 dict 里摘掉。
+        ref = _take_ledger_ref(shot)
         await _register_write(
             scope,
             run_context,
             kind="script_shot",
             ref_id=shot.get("shot_id"),
             title=_shot_deliverable_title(shot),
+            ledger_ref=ref,
         )
         return {"ok": True, "scene_id": str(scene.id), "shot": shot}
 
@@ -583,12 +596,14 @@ class ScreenwritingTools:
         if updated is not None:
             # 提交之后才登记（见 ``_register_write`` 的 ⚠️）。``None`` 是
             # 「没有可写字段」的 no-op，不是新版本。
+            ref = _take_ledger_ref(updated)
             await _register_write(
                 scope,
                 run_context,
                 kind="script_shot",
                 ref_id=updated.get("shot_id"),
                 title=_shot_deliverable_title(updated),
+                ledger_ref=ref,
             )
         if updated is None:
             return {
@@ -800,6 +815,9 @@ class ScreenwritingTools:
             kind="script_scene",
             ref_id=scene.id,
             title=_scene_deliverable_title(scene_no, scene),
+            # 场次的账本位置就是新的 op_seq 水位——``content_version`` 按构造
+            # 即 ``MAX(op_seq)``（``services/script/version_service.py`` 顶部）。
+            ledger_ref=str(outcome.content_version),
         )
         return {
             "ok": True,

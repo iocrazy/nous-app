@@ -40,7 +40,12 @@ class OutputVersion(BaseModel):
     id: str
     version: int
     parent_version: Optional[int] = None
-    run_id: str
+    run_id: Optional[str] = None
+    #: 3b：人手登记的作者（回退是唯一的人手占号路径）。run_id 为空时它必非空，反之
+    #: 亦然——CHECK run_deliverables_run_or_actor 兜住。
+    actor_user_id: Optional[str] = None
+    #: 这一版是从哪一版回退来的。None = 正常前进的一版。
+    reverted_from_version: Optional[int] = None
     issue_id: Optional[str] = None
     issue_key: Optional[str] = None
     deep_link: Optional[str] = None
@@ -102,7 +107,8 @@ class OutputDiffSide(BaseModel):
     """
 
     version: int
-    run_id: str
+    #: 回退版没有 run（作者是人）。两侧都要能画，所以这里也是可空的。
+    run_id: Optional[str] = None
     issue_id: Optional[str] = None
     created_at: Optional[str] = None
     model: Optional[str] = None

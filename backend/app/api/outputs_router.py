@@ -97,7 +97,15 @@ async def _visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
             "not_registered",
             f"{kind}/{ref_id} is not in the deliverable registry",
         )
-    newest = rows[0]
+    # 门禁按 **run** 判定（3b）。回退写的是 ``run_id IS NULL`` 的人手版，它的
+    # ``issue_id`` 也必然是 NULL —— 拿它当判据，既证明不了归属，又会把
+    # ``run_owner_user_id`` 喂成 None（``int(None)`` 当场 500）。所以取最新的
+    # **有 run 的**那一版：人手版写在一条已经存在的链上，不引入新的可见性。
+    newest = next((row for row in rows if row.get("run_id") is not None), None)
+    if newest is None:
+        # 整条链都没有 run 的话没人能证明调用方看得见它。跟「不存在」同一个
+        # 回答——这条路上每一次拒绝都是 404。
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     issue_id = newest.get("issue_id")
     if issue_id is not None:
         await assert_issue_visible(int(issue_id), auth)

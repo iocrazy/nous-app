@@ -339,6 +339,10 @@ class _FakeResult:
     def scalar(self):
         return self._scalar
 
+    def scalar_one(self):
+        # 3b：ops INSERT 带 RETURNING(id)，网关读它当 ledger_ref。
+        return self._scalar
+
     def scalars(self):
         return SimpleNamespace(all=lambda: self._all, first=lambda: self._first_row)
 

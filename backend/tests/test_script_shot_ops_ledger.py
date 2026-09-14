@@ -33,6 +33,10 @@ class _FakeResult:
     def scalar(self):
         return self._scalar
 
+    def scalar_one(self):
+        # 3b：ops INSERT 现在带 RETURNING(id)，网关读它当 ledger_ref。
+        return self._scalar
+
     def scalars(self):
         return SimpleNamespace(all=lambda: self._all, first=lambda: self._first_row)
 
@@ -125,18 +129,20 @@ async def test_create_shot_writes_attribution_and_full_snapshot_ledger_row():
             _FakeResult(scalar=0),  # MAX(shot_number)
             _FakeResult(scalar=0),  # MAX(sort_order)
             _FakeResult(first_row=_returning_row()),  # INSERT..RETURNING
-            _FakeResult(),  # ledger INSERT
+            _FakeResult(scalar=7001),  # ledger INSERT ... RETURNING id
         ]
     )
     with (
         patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
         patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="1")),
     ):
-        await gateway_mod.create_shot(
+        out = await gateway_mod.create_shot(
             _scope(),
             _resolved_scene(),
             {"shot_type": "CU", "focal_length": "85mm", "description": "Her hands."},
         )
+    # 账本行的 id 必须一路交回调用方——它就是登记口要写的 ledger_ref（3b）。
+    assert out["ledger_ref"] == "7001"
     inserts = [s for s in session.statements if s.__class__.__name__ == "Insert"]
     assert len(inserts) == 2
     shot_values = inserts[0].compile().params
@@ -170,9 +176,11 @@ async def test_create_shot_sentinel_run_skips_ledger_and_attribution():
         patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
         patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="1")),
     ):
-        await gateway_mod.create_shot(
+        out = await gateway_mod.create_shot(
             _scope(run_id="0"), _resolved_scene(), {"description": "x"}
         )
+    # 没有 run 就没有账本行，也就没有位置可指——None，不是编一个。
+    assert out["ledger_ref"] is None
     inserts = [s for s in session.statements if s.__class__.__name__ == "Insert"]
     assert len(inserts) == 1
     assert "created_by_agent_run_id" not in inserts[0].compile().params
@@ -187,14 +195,17 @@ async def test_update_shot_ledger_carries_only_touched_fields_before_and_after()
             _FakeResult(
                 first_row=_returning_row(shot_type="CU", focal_length="35mm")
             ),  # UPDATE..RETURNING
-            _FakeResult(),  # ledger INSERT
+            _FakeResult(scalar=7002),  # ledger INSERT ... RETURNING id
         ]
     )
     with (
         patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
         patch.object(gateway_mod, "scene_no_for_shot", AsyncMock(return_value="1")),
     ):
-        await gateway_mod.update_shot(_scope(), _resolved_shot(), {"shot_type": "CU"})
+        out = await gateway_mod.update_shot(
+            _scope(), _resolved_shot(), {"shot_type": "CU"}
+        )
+    assert out["ledger_ref"] == "7002"
     ledger = (
         [s for s in session.statements if s.__class__.__name__ == "Insert"][0]
         .compile()

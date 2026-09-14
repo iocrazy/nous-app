@@ -819,6 +819,8 @@ async def create_shot(
     declares a produced state.
     """
     values = _writable(fields)
+    # ``async with`` 之外声明——否则 return 那一行看不见它。
+    ledger_ref = None
     async with write_scope() as session:
         base_num = (
             await session.scalar(
@@ -861,16 +863,23 @@ async def create_shot(
             raise RuntimeError("insert into script_shots returned no row")
         if rid is not None:
             # 同事务——写入失败不留账，记账失败连卡一起回滚。
-            await session.execute(
-                insert(ScriptShotOps).values(
-                    run_id=rid,
-                    shot_id=row.id,
-                    scene_id=scene.id,
-                    action="create",
-                    before_json=None,
-                    after_json={f: getattr(row, f) for f in _WRITABLE_SHOT_FIELDS},
+            # RETURNING 出来的 id 就是这次写入在账本上的位置（3b
+            # ``run_deliverables.ledger_ref``）：按它切前缀是外键，按
+            # ``created_at`` 切只是巧合单调的时间戳。
+            ledger_ref = (
+                await session.execute(
+                    insert(ScriptShotOps)
+                    .values(
+                        run_id=rid,
+                        shot_id=row.id,
+                        scene_id=scene.id,
+                        action="create",
+                        before_json=None,
+                        after_json={f: getattr(row, f) for f in _WRITABLE_SHOT_FIELDS},
+                    )
+                    .returning(ScriptShotOps.id)
                 )
-            )
+            ).scalar_one()
     scene_no = await scene_no_for(scope, scene)
     logger.info(
         "[scoped_script_gateway] CreateShot run=%s scene=%s shot=%s",
@@ -878,7 +887,10 @@ async def create_shot(
         scene.id,
         row.id,
     )
-    return _shot_dict(row, scene_no)
+    return {
+        **_shot_dict(row, scene_no),
+        "ledger_ref": str(ledger_ref) if ledger_ref is not None else None,
+    }
 
 
 async def update_shot(
@@ -895,6 +907,8 @@ async def update_shot(
     if not values:
         return None
     rid = ledger_run_id(scope)
+    # ``async with`` 之外声明——否则 return 那一行看不见它。
+    ledger_ref = None
     async with write_scope() as session:
         # Locked read of the pre-update values, over the full writable set
         # (not just `values`) — cheap and lets before_json below select
@@ -925,16 +939,21 @@ async def update_shot(
             )
         ).first()
         if rid is not None and old is not None and row is not None:
-            await session.execute(
-                insert(ScriptShotOps).values(
-                    run_id=rid,
-                    shot_id=shot.id,
-                    scene_id=shot.scene_id,
-                    action="update",
-                    before_json={f: getattr(old, f) for f in values},
-                    after_json={f: getattr(row, f) for f in values},
+            # 同事务 + RETURNING：见 ``create_shot`` 里同形的那一段。
+            ledger_ref = (
+                await session.execute(
+                    insert(ScriptShotOps)
+                    .values(
+                        run_id=rid,
+                        shot_id=shot.id,
+                        scene_id=shot.scene_id,
+                        action="update",
+                        before_json={f: getattr(old, f) for f in values},
+                        after_json={f: getattr(row, f) for f in values},
+                    )
+                    .returning(ScriptShotOps.id)
                 )
-            )
+            ).scalar_one()
     if row is None:  # pragma: no cover — resolver already proved it exists
         return None
     logger.info(
@@ -944,7 +963,10 @@ async def update_shot(
         sorted(values),
     )
     scene_no = await scene_no_for_shot(scope, shot)
-    return _shot_dict(row, scene_no)
+    return {
+        **_shot_dict(row, scene_no),
+        "ledger_ref": str(ledger_ref) if ledger_ref is not None else None,
+    }
 
 
 async def set_shot_status(

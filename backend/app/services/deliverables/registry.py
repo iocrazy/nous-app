@@ -10,6 +10,8 @@ transcript 上落一条 ``deliverable`` 事件 → 把那条事件的 seq 回写
 **``run_id`` 为空即 no-op**：人手编辑、画布保存、前端直传都会流经同一个
 写入点，它们不是 agent 产出，不占版本号，也不该在任何 run 上留事件。
 空的写法有三种（``None`` / ``""`` / 测试 sentinel ``"0"``），都算空。
+**3b 开了唯一的例外**：显式给了 ``actor_user_id`` 的一次登记（回退）照样
+落行——那一行由人署名，没有 run 可挂，所以也不落 transcript 事件。
 
 **没有 recorder 时事件走 ``RunEventWriter.for_run``**：分镜出图走 DBOS，
 登记发生在另一个进程/另一个时刻。这条路与 workforce 写 ``subagent_done`` 的
@@ -43,12 +45,16 @@ _EMPTY_RUN_IDS = (None, "", 0, "0")
 @dataclass(frozen=True)
 class DeliverableRow:
     id: str
-    run_id: str
+    #: ``None`` 的唯一来源是人手登记（3b 回退）——那一行由 ``actor_user_id``
+    #: 说出归属，CHECK ``run_deliverables_run_or_actor`` 保证两者必有其一。
+    run_id: Optional[str]
     kind: str
     ref_id: str
     version: int
     parent_version: Optional[int]
     title: Optional[str]
+    actor_user_id: Optional[str] = None
+    reverted_from_version: Optional[int] = None
 
 
 async def register_deliverable(
@@ -62,22 +68,38 @@ async def register_deliverable(
     turn: Optional[int] = None,
     step: Optional[int] = None,
     recorder: Any = None,
+    actor_user_id: Optional[str] = None,
+    reverted_from_version: Optional[int] = None,
+    ledger_ref: Optional[str] = None,
+    session: Any = None,
 ) -> Optional[DeliverableRow]:
-    """登记一次产出。``run_id`` 为空返回 ``None`` 且什么都不做。"""
-    if run_id in _EMPTY_RUN_IDS:
+    """登记一次产出。没有 run **也没有** actor 时返回 ``None`` 且什么都不做。
+
+    ``actor_user_id`` 是 3b 开的第二条占号路径，且只开给回退：人手改动依然
+    不占版本号（见下面 no-op 分支的注释），只有「某个人把某一版写回去」这件
+    事才需要在链上留一行——否则回到的那一版在血缘里无从指认。
+
+    ``session`` 非空时整条链加入调用方的事务（不自开、不 commit）：回退要把
+    「改内容 / 写账本 / 登记版本」放进同一个 postgres 事务，登记落在事务外
+    就会出现「内容回了、版本没记」（3b spec §2.3 步 4）。
+    """
+    if reverted_from_version is not None and actor_user_id is None:
+        raise ValueError(
+            "reverted_from_version needs an actor_user_id — a revert "
+            "is a human act and must say whose"
+        )
+    rid = None if run_id in _EMPTY_RUN_IDS else _bigint_run_id(run_id)
+    if rid is None and actor_user_id is None:
+        # 3a 不变量：普通人手改动 / 画布保存 / 前端直传不占号。非 bigint 的 run id
+        # 也落这里，但要说出来——静默会让一条真的接线错误永远不被发现。
+        if run_id not in _EMPTY_RUN_IDS:
+            logger.warning(
+                f"[deliverables] {kind}/{ref_id}: run_id {run_id!r} is "
+                "not a bigint and no actor was given — registered nothing"
+            )
         return None
     if kind not in ALL_KINDS:
         raise ValueError(f"unknown deliverable kind {kind!r}")
-    rid = _bigint_run_id(run_id)
-    if rid is None:
-        # 不是 BIGINT 的 run id 引用不到 ``agent_runs`` 的任何一行（画布车道
-        # 历史上传过 "r1" 这类字符串）。当成「没有 run」，而不是把整次写入
-        # 连坐——但说出来，静默会让一条真的接线错误永远不被发现。
-        logger.warning(
-            f"[deliverables] {kind}/{ref_id}: run_id {run_id!r} is not a bigint "
-            "— registered nothing"
-        )
-        return None
 
     repo = RunDeliverablesRepository()
     clipped = clip_claimed_text(title or "", TITLE_MAX) or None
@@ -92,7 +114,15 @@ async def register_deliverable(
         cost_cents=cost_cents,
         turn=turn,
         step=step,
+        actor_user_id=actor_user_id,
+        reverted_from_version=reverted_from_version,
+        ledger_ref=ledger_ref,
+        session=session,
     )
+
+    if rid is None:
+        # 人手版没有 run，也就没有 transcript 可写。血缘端点读的是行，不是事件。
+        return row
 
     rec = recorder if recorder is not None else await _writer_for(rid)
     recorded = await emit(
@@ -113,11 +143,13 @@ async def register_deliverable(
         step=step,
     )
     if recorded:
-        await _stamp_seq(repo, row, rec)
+        await _stamp_seq(repo, row, rec, session=session)
     return row
 
 
-async def _stamp_seq(repo: Any, row: DeliverableRow, recorder: Any) -> None:
+async def _stamp_seq(
+    repo: Any, row: DeliverableRow, recorder: Any, *, session: Any = None
+) -> None:
     """把刚落下的那条事件的 seq 回写到登记行上。
 
     行先于事件（见 ``register_deliverable`` 的顺序），所以插行时 seq 还不
@@ -143,7 +175,7 @@ async def _stamp_seq(repo: Any, row: DeliverableRow, recorder: Any) -> None:
     if not isinstance(seq, int) or isinstance(seq, bool):
         return
     try:
-        await repo.set_seq(row_id=row.id, seq=seq)
+        await repo.set_seq(row_id=row.id, seq=seq, session=session)
     except Exception as exc:  # noqa: BLE001 — 见 docstring
         if in_unit_of_work():
             raise
@@ -154,7 +186,9 @@ async def _stamp_seq(repo: Any, row: DeliverableRow, recorder: Any) -> None:
         )
 
 
-async def _insert_next_version(repo: Any, *, kind: str, ref_id: str, **values: Any):
+async def _insert_next_version(
+    repo: Any, *, kind: str, ref_id: str, session: Any = None, **values: Any
+):
     """SELECT max → INSERT，冲突重算一次。
 
     第二次一定读得到对方的值（它已提交，正是它让我们撞索引的），
@@ -162,13 +196,14 @@ async def _insert_next_version(repo: Any, *, kind: str, ref_id: str, **values: A
     from app.db.session import in_unit_of_work
 
     for attempt in (1, 2):
-        previous = await repo.latest_version(kind=kind, ref_id=ref_id)
+        previous = await repo.latest_version(kind=kind, ref_id=ref_id, session=session)
         try:
             inserted = await repo.insert_version(
                 kind=kind,
                 ref_id=ref_id,
                 version=(previous or 0) + 1,
                 parent_version=previous,
+                session=session,
                 **values,
             )
             return _as_row(inserted)
@@ -220,14 +255,20 @@ def _bigint_run_id(run_id: Any) -> Optional[int]:
 
 
 def _as_row(inserted: dict[str, Any]) -> DeliverableRow:
+    run_id = inserted.get("run_id")
+    actor = inserted.get("actor_user_id")
     return DeliverableRow(
         id=str(inserted.get("id")),
-        run_id=str(inserted.get("run_id")),
+        # ``str(None)`` 是 "None" —— 一个看起来像 id 的字符串，比 NULL 更难
+        # 发现。人手版的这两个字段各有一个必然为空，所以两边都先判再转。
+        run_id=str(run_id) if run_id is not None else None,
         kind=str(inserted.get("kind")),
         ref_id=str(inserted.get("ref_id")),
         version=int(inserted.get("version") or 0),
         parent_version=inserted.get("parent_version"),
         title=inserted.get("title"),
+        actor_user_id=str(actor) if actor is not None else None,
+        reverted_from_version=inserted.get("reverted_from_version"),
     )
 
 
