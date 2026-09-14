@@ -69,6 +69,10 @@ travel on the step's return value, and there isn't one. That matches the
 originators' own failure handling today (``GenerateShotImage`` rolls the shot
 back and fails in-band rather than raising), but it is a real gap for any future
 originator that lets an exception through after recording.
+
+Records appended AFTER the step snapshots the list (a fire-and-forget task that
+outlives the turn and records on its way out) are dropped silently — nothing
+reads the list again, and nothing logs the ones left behind.
 """
 
 from __future__ import annotations
@@ -176,15 +180,26 @@ def record_deferred_dispatch(
     """Append one dispatch onto the active collector; return the record.
 
     Raises ``DeferredDispatchError`` when there is no collector (a caller bug —
-    ``deferral_active()`` gates this) or when the record would not survive the
-    step boundary. Validating serialisability HERE rather than at drain is the
-    point: a dispatch that can never be replayed must fail while the originator
-    is still holding the pieces it would need to roll back.
+    ``deferral_active()`` gates this), when the callable is not one the dispatch
+    bundle exports, or when the record would not survive the step boundary.
+
+    Both refusals happen HERE, not at drain, and that is the point: a dispatch
+    that can never be performed must fail while the originator is still holding
+    the pieces it would need to roll back (``GenerateShotImage``'s shot claim
+    and its ``task_tracking`` row). The drain's own allowlist check stays as the
+    second net — it guards a *different* threat, a record that reached the body
+    without passing through here.
     """
     bucket = _collector.get()
     if bucket is None:
         raise DeferredDispatchError(
             "record_deferred_dispatch called with no active collector"
+        )
+    if not _is_dispatchable(dbos_workflow_callable):
+        raise DeferredDispatchError(
+            f"cannot defer {workflow_ref(dbos_workflow_callable)!r}: only "
+            "workflows exported by app.workflows._dispatch_bundle can be "
+            "dispatched from a workflow body"
         )
     record = DeferredDispatch(
         task_type=task_type,
@@ -205,13 +220,24 @@ def record_deferred_dispatch(
 
 
 def _is_dispatchable(target: Any) -> bool:
-    """Allowlist: ``target`` must be an object the dispatch bundle exports.
+    """Allowlist: ``target`` must be a WORKFLOW the dispatch bundle exports.
 
-    Identity, not name matching — the bundle IS the reviewed list of workflows
-    a dispatcher is allowed to hand out (see its module docstring). A step's
-    return value is untrusted input to the body; without this check the string
-    in it would name any importable callable in the process.
+    Two conditions, both required:
+
+    * it is defined in ``app.workflows`` — the bundle's namespace also holds
+      what the bundle itself imported to build it (``dbos.Queue``, the queue
+      instances). Those are in ``vars()`` without being anything a dispatcher
+      may hand out, and ``"dbos:Queue"`` resolves to one of them;
+    * it IS one of the bundle's objects, by identity — not by name. The bundle
+      is the reviewed list (see its module docstring), and a step's return
+      value is untrusted input to the body; without this the string in it would
+      name any importable callable in the process.
     """
+    if not callable(target):
+        return False
+    module = getattr(target, "__module__", "") or ""
+    if module != "app.workflows" and not module.startswith("app.workflows."):
+        return False
     try:
         from app.workflows import _dispatch_bundle
     except ImportError:  # pragma: no cover — the bundle is always importable
@@ -222,7 +248,13 @@ def _is_dispatchable(target: Any) -> bool:
 
 def _resolve_workflow(ref: str) -> Optional[Callable[..., Any]]:
     """``"<module>:<name>"`` → the callable, or ``None`` if it is not one the
-    dispatch bundle exports."""
+    dispatch bundle exports.
+
+    Only ``ImportError`` is swallowed (a module that is not there is simply not
+    in the bundle). An import that RUNS and then blows up propagates to
+    ``drain_deferred_dispatches``' per-record containment, where it is reported
+    with its real cause rather than flattened into "not in the bundle".
+    """
     module_name, sep, attr = (ref or "").partition(":")
     if not sep or not module_name or not attr:
         return None
@@ -231,9 +263,7 @@ def _resolve_workflow(ref: str) -> Optional[Callable[..., Any]]:
     except ImportError:
         return None
     target = getattr(module, attr, None)
-    if target is None or not callable(target):
-        return None
-    if not _is_dispatchable(target):
+    if target is None or not _is_dispatchable(target):
         return None
     return target
 
@@ -260,17 +290,56 @@ async def _fail_task(task_id: Optional[str], error_msg: str) -> None:
         )
 
 
+def _task_id_of(raw: Any) -> Optional[str]:
+    """The ``task_tracking`` row a record names, read without trusting its
+    shape — this runs on the failure path, where the record's shape is exactly
+    what may have gone wrong."""
+    if not isinstance(raw, dict):
+        return None
+    task_id = raw.get("task_id")
+    return str(task_id) if task_id else None
+
+
+async def _dispatch_one(raw: Any, start_workflow_routed: Any) -> dict[str, Any]:
+    """Parse, resolve and start ONE record. Raises on every failure mode.
+
+    Deliberately raises rather than returning a status: containment belongs to
+    the caller and belongs in ONE place. Parsing a malformed record, an import
+    that blows up, a refused callable and a dispatch that fails are four ways
+    for one record to go wrong, and a shape where three of them are handled
+    inline and one escapes is exactly the defect this structure removes.
+    """
+    record = DeferredDispatch.from_record(raw)
+    target = _resolve_workflow(record.workflow)
+    if target is None:
+        raise DeferredDispatchError(
+            f"refusing deferred dispatch {record.workflow!r}: not a workflow "
+            "exported by app.workflows._dispatch_bundle"
+        )
+    return await start_workflow_routed(
+        record.task_type,
+        dbos_workflow_callable=target,
+        dbos_workflow_kwargs=record.kwargs,
+        workflow_id=record.workflow_id or None,
+    )
+
+
 async def drain_deferred_dispatches(
     items: Optional[Iterable[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     """Perform the dispatches a step recorded. **Workflow body only.**
 
     Returns the ``start_workflow_routed`` result of each record that started,
-    in order. Every record is attempted independently: one that is refused (not
-    a bundle workflow) or that raises is logged at ERROR, has its
-    ``task_tracking`` row failed so it cannot sit queued forever, and the drain
-    moves on. Nothing here raises — a dispatch failure must not abort the
-    workflow body that is also routing the issue's status.
+    in order. Every record is attempted independently and **nothing here
+    raises** — not a malformed record, not an import that explodes, not a
+    refused callable, not a dispatch that fails. Each is logged at ERROR and
+    has its ``task_tracking`` row failed (so it cannot sit queued forever), and
+    the drain moves on.
+
+    That guarantee is load-bearing, not defensive habit: the callers in
+    ``issue_lifecycle`` drain BEFORE ``route_finish_outcome``, so anything
+    escaping here would eat the issue's status routing — the two results of a
+    turn are orthogonal and neither may swallow the other.
 
     The collector is detached for the duration, so a drain can never feed an
     enclosing collector and defer the very records it is draining.
@@ -285,32 +354,12 @@ async def drain_deferred_dispatches(
     token = _collector.set(None)
     try:
         for raw in records:
-            record = DeferredDispatch.from_record(raw)
-            target = _resolve_workflow(record.workflow)
-            if target is None:
-                msg = (
-                    f"refusing deferred dispatch {record.workflow!r}: not a "
-                    "workflow exported by app.workflows._dispatch_bundle"
-                )
-                logger.error(f"[deferred_dispatch] {msg}")
-                await _fail_task(record.task_id, msg)
-                continue
             try:
-                started.append(
-                    await start_workflow_routed(
-                        record.task_type,
-                        dbos_workflow_callable=target,
-                        dbos_workflow_kwargs=record.kwargs,
-                        workflow_id=record.workflow_id or None,
-                    )
-                )
+                started.append(await _dispatch_one(raw, start_workflow_routed))
             except Exception as exc:  # noqa: BLE001 — one record, not the body
-                msg = (
-                    f"deferred dispatch of {record.workflow} "
-                    f"(task_type={record.task_type}) failed: {exc!r}"
-                )
+                msg = f"deferred dispatch record {raw!r} failed: {exc!r}"[:1000]
                 logger.error(f"[deferred_dispatch] {msg}")
-                await _fail_task(record.task_id, msg)
+                await _fail_task(_task_id_of(raw), msg)
     finally:
         _collector.reset(token)
     return started

@@ -20,6 +20,7 @@ Two properties carry the weight here and each has its own test:
 
 from __future__ import annotations
 
+import importlib
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -261,6 +262,134 @@ async def test_one_failing_record_neither_aborts_the_drain_nor_the_body():
     assert started == [{"mode": "dbos", "task_type": "memory_tasks"}]
     mgr.fail.assert_awaited_once()
     assert mgr.fail.await_args.args[0] == "task-boom"
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_record_cannot_abort_the_drain():
+    """Review round 1, Important #1: parsing used to sit outside the per-record
+    try, so a non-dict element raised out of the drain — and the callers drain
+    BEFORE ``route_finish_outcome``, so that raise ate the issue's status
+    routing. Nothing may escape, whatever the step's return value holds."""
+    wf = _bundle_workflow()
+    dispatch = AsyncMock(return_value={"mode": "dbos"})
+    records = [
+        "not-a-record",
+        None,
+        {
+            "task_type": "memory_tasks",
+            "workflow": workflow_ref(wf),
+            "kwargs": {},
+            "workflow_id": _WF_ID,
+        },
+    ]
+    with patch(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", new=dispatch
+    ):
+        started = await drain_deferred_dispatches(records)
+
+    # The good record still went out — a bad neighbour is not contagious.
+    assert started == [{"mode": "dbos"}]
+    dispatch.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_import_that_explodes_cannot_abort_the_drain():
+    """Only ImportError means "not in the bundle". A module whose import RUNS
+    and then blows up used to propagate straight out of the drain."""
+    wf = _bundle_workflow()
+    dispatch = AsyncMock(return_value={"mode": "dbos"})
+    mgr = MagicMock()
+    mgr.fail = AsyncMock()
+
+    real_import = importlib.import_module
+
+    def _import(name, *args, **kwargs):
+        if name == "app.workflows.explodes_on_import":
+            raise RuntimeError("module-level boom")
+        return real_import(name, *args, **kwargs)
+
+    records = [
+        {
+            "task_type": "shot_generate",
+            "workflow": "app.workflows.explodes_on_import:some_workflow",
+            "kwargs": {},
+            "workflow_id": _WF_ID,
+            "task_id": "task-exploded",
+        },
+        {
+            "task_type": "memory_tasks",
+            "workflow": workflow_ref(wf),
+            "kwargs": {},
+            "workflow_id": "66666666-6666-6666-6666-666666666666",
+        },
+    ]
+    with (
+        patch(
+            "app.services.infra.dbos_orchestrator.start_workflow_routed", new=dispatch
+        ),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            return_value=mgr,
+        ),
+        patch.object(importlib, "import_module", _import),
+    ):
+        started = await drain_deferred_dispatches(records)
+
+    assert started == [{"mode": "dbos"}]
+    dispatch.assert_awaited_once()
+    mgr.fail.assert_awaited_once()
+    assert mgr.fail.await_args.args[0] == "task-exploded"
+    # The real cause is reported, not flattened into "not in the bundle".
+    assert "module-level boom" in mgr.fail.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_drain_refuses_a_bundle_object_that_is_not_a_workflow():
+    """The bundle's namespace also holds what it imported to build itself —
+    ``dbos.Queue`` and the queue instances. Identity-in-bundle alone accepted
+    them; ``"dbos:Queue"`` is the reachable one."""
+    import dbos
+
+    from app.workflows import _dispatch_bundle
+
+    assert any(v is dbos.Queue for v in vars(_dispatch_bundle).values())
+
+    dispatch = AsyncMock()
+    with patch(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", new=dispatch
+    ):
+        started = await drain_deferred_dispatches(
+            [
+                {
+                    "task_type": "shot_generate",
+                    "workflow": "dbos:Queue",
+                    "kwargs": {},
+                    "workflow_id": _WF_ID,
+                }
+            ]
+        )
+
+    assert started == []
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recording_a_callable_outside_the_bundle_is_refused_at_record_time():
+    """Refused while the originator can still roll back, rather than discovered
+    by the body after the shot is claimed and the task row exists."""
+    with pytest.raises(DeferredDispatchError):
+        async with collect_deferred_dispatches():
+            record_deferred_dispatch(
+                task_type="shot_generate",
+                dbos_workflow_callable=_import_module_for_test,
+                dbos_workflow_kwargs={},
+                workflow_id=_WF_ID,
+            )
+
+
+def _import_module_for_test(*args, **kwargs):
+    """A perfectly ordinary callable that is not a registered workflow."""
+    raise AssertionError("never called")
 
 
 @pytest.mark.asyncio
