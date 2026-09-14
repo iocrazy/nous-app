@@ -575,7 +575,11 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
         {/* Transcript Tab */}
         {activeTab === 'transcript' && (
-          <div className="space-y-4 animate-in fade-in duration-300">
+          /* `p-4 sm:p-6` mirrors what `MediaCard` brings to the Overview tab.
+             The padding lives on each tab rather than on the shared scroller
+             because Overview's card supplies its own — one on the wrapper
+             would double it there. */
+          <div className="space-y-4 p-4 sm:p-6 animate-in fade-in duration-300">
             {/* Processing state — active transcription in progress */}
             {transcribeStatus === 'processing' && !transcript && (
               <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -651,7 +655,13 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               <div className="space-y-2">
                 {/* One chrome row: what this transcript is, and what you can
                     do to it. Sticky against the panel body's scroller. */}
-                <div className={`sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-x-3 gap-y-2 px-1 py-2 ${island ? 'bg-island-1' : 'bg-ink-900'}`}>
+                {/* Bleeds to the panel edges (`-mx` cancelling the tab's own
+                    padding) so the backdrop covers the rows sliding under it,
+                    with the padding put back inside. No extra top padding: the
+                    tab container's already supplies the gap before the first
+                    scroll, and adding a second one stacked into a visible band
+                    above this row. */}
+                <div className={`sticky top-0 z-10 -mx-4 sm:-mx-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:px-6 ${island ? 'bg-island-1' : 'bg-ink-900'}`}>
                   <div className={`flex items-center gap-3 text-xs ${cText500}`}>
                     <span className="flex items-center gap-1">
                       <Clock size={12} />
@@ -810,7 +820,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
         {/* Analysis Tab */}
         {activeTab === 'analysis' && (
-          <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="space-y-6 p-4 sm:p-6 animate-in fade-in duration-300">
             {/* Summary Section */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
