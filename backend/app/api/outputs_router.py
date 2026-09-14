@@ -42,7 +42,10 @@ from app.services.deliverables.lineage_view import (
     redact_foreign_issue_links,
     version_of,
 )
-from app.services.issues.issue_visibility import assert_issue_visible
+from app.services.issues.issue_visibility import (
+    assert_issue_visible,
+    visible_issue_ids,
+)
 from app.services.modules.gate import require_module
 
 router = APIRouter(
@@ -114,13 +117,18 @@ async def get_output_lineage(
     """Every version of one object, newest first, each with the run / issue /
     coordinates / model / spend that produced it."""
     rows = await _visible_chain(kind, ref_id, auth)
-    # The gate above proved ONE issue visible — the newest version's. Any
-    # older version filed under a different issue keeps its coordinates but
-    # loses the link built from ITS team (3a Task 8b). The per-issue endpoint
-    # needs no equivalent: its rows were selected BY the issue it already
-    # checked, so every row there is on the gated issue by construction.
+    # The gate above proved ONE issue visible — the newest version's. Every
+    # OTHER issue in the chain is decided here, in one batch: the link a
+    # version carries is built from ITS team, so handing it over without
+    # asking would leak across the team boundary one row at a time (3a Task
+    # 8b), while blanking every foreign issue throws away links the caller may
+    # perfectly well follow (小票 A1). One IN query + one membership read per
+    # distinct team, for the whole chain. The per-issue endpoint needs no
+    # equivalent: its rows were selected BY the issue it already checked, so
+    # every row there is on the gated issue by construction.
+    visible = await visible_issue_ids({row.get("issue_id") for row in rows}, auth)
     versions = redact_foreign_issue_links(
-        [version_of(row) for row in rows], gated_issue_id=rows[0].get("issue_id")
+        [version_of(row) for row in rows], visible_issue_ids=visible
     )
     return OutputLineageResponse(
         kind=kind,

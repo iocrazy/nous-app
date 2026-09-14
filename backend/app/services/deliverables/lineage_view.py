@@ -26,7 +26,7 @@ id.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from app.services.issues.issue_links import issue_deep_link
 
@@ -34,6 +34,13 @@ from app.services.issues.issue_links import issue_deep_link
 #: ``dict(row)``: the row carries columns (and a joined ``issue_id`` /
 #: ``issue_key`` / ``team_id``) whose membership in the public shape should be a
 #: decision, not a leak.
+#:
+#: ``deep_link`` is NOT in here, and ``issue_key`` is only half here: neither is
+#: a column to copy. ``version_of`` assembles them below — the key can arrive
+#: from the per-issue reader instead of the row, and the link is BUILT from
+#: (team, key, step, turn) by the one shared builder. Adding either to this
+#: tuple would silently replace the assembled value with a raw column (3a 小票
+#: A2).
 _VERSION_KEYS = (
     "id",
     "version",
@@ -89,31 +96,34 @@ def version_of(
 
 
 def redact_foreign_issue_links(
-    versions: List[Dict[str, Any]], *, gated_issue_id: Any
+    versions: List[Dict[str, Any]], *, visible_issue_ids: Set[str]
 ) -> List[Dict[str, Any]]:
-    """Blank ``issue_key`` / ``deep_link`` on every version that answers to a
-    DIFFERENT issue than the one the caller was gated on (3a Task 8b).
+    """Keep ``issue_key`` / ``deep_link`` only on versions whose issue the
+    caller may actually see; blank them everywhere else (3a Task 8b, 小票 A1).
 
-    The per-object reader proves visibility once, against the newest version's
-    issue — but each row builds its own link out of its own ``team_id``, so an
-    older version filed under another issue would hand the caller a clickable,
-    team-scoped URL nobody checked they may follow. The rule is the cheap one:
-    same issue as the gate, or no link. It is deliberately WIDER than the leak
-    (a sibling issue the caller can see loses its link too) — the alternative
-    is one visibility round trip per distinct issue in the chain, to re-earn a
-    link the panel does not need.
+    The per-object reader gates on ONE issue — the newest version's — but each
+    row builds its own link out of its own ``team_id``, so an older version
+    filed under another issue would otherwise hand the caller a clickable,
+    team-scoped URL nobody checked they may follow.
+
+    ``visible_issue_ids`` is the answer to exactly that question, decided per
+    issue by ``services.issues.issue_visibility.visible_issue_ids`` and passed
+    in as STRING ids. This function does no IO and makes no policy: an id that
+    is not in the set loses its link, and so does a version that answers to no
+    issue at all (it had none to begin with). The set replaces the earlier
+    same-issue-as-the-gate rule, which was deliberately wider than the leak and
+    threw away a sibling issue's perfectly visible link.
 
     ``issue_id`` is left alone: Task 3b ruled the bare snowflake is a
     coordinate, not a route, and it was already on the wire before this.
 
     Returns new dicts; the inputs are not mutated.
     """
-    gate = str(gated_issue_id) if gated_issue_id is not None else None
     out: List[Dict[str, Any]] = []
     for version in versions:
         own = version.get("issue_id")
         own = str(own) if own is not None else None
-        if own == gate:
+        if own is not None and own in visible_issue_ids:
             out.append(version)
         else:
             out.append({**version, "issue_key": None, "deep_link": None})

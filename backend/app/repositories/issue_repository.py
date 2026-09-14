@@ -57,7 +57,7 @@ import datetime as _dt
 import json as _json
 import uuid as _uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from loguru import logger
 from sqlalchemy import and_, or_, select, text
@@ -213,6 +213,26 @@ class IssueRepository:
             )
             row = result.scalars().first()
             return _row(row) if row else None
+
+    async def get_by_ids(self, issue_ids: Iterable[Any]) -> list[dict[str, Any]]:
+        """Every issue in ``issue_ids``, in ONE ``IN`` query — the batch form of
+        ``get_by_id``, for callers holding a set of ids at once (3a 小票 A1: a
+        lineage chain spanning several issues needs a visibility answer per
+        issue, and one read per version does not scale with the chain).
+
+        Cost: exactly one round trip, or none at all when the (deduplicated) set
+        is empty. Ids missing from the table are simply absent from the result —
+        a deleted issue is not an error here, it is an issue the caller cannot
+        be handed a link into.
+
+        Order is the database's; callers key the result by ``id``.
+        """
+        wanted = {int(i) for i in issue_ids if i is not None}
+        if not wanted:
+            return []
+        async with read_scope() as session:
+            result = await session.execute(select(Issues).where(Issues.id.in_(wanted)))
+            return [_row(row) for row in result.scalars().all()]
 
     async def get_by_session(self, session_id: int) -> Optional[dict[str, Any]]:
         """The issue whose agent conversation is ``session_id`` (issues.ai_session_id).
