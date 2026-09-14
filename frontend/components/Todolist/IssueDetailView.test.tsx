@@ -53,7 +53,11 @@ vi.mock('../../services/issueChatSocket', () => ({
 }));
 
 vi.mock('../../supabaseClient', () => ({ getSupabaseClient: () => null }));
-vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+// Both hooks: `OutputDiffDialog` mounts under this view and uses the optional
+// one (it also mounts on the canvas, where no provider is above it). A mock
+// that exports only `useToast` makes that subtree throw — the note on
+// `useOptionalToast` in components/Toast.tsx says so.
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }), useOptionalToast: () => ({ addToast: vi.fn() }) }));
 
 // Child panels do their own fetching — out of scope for this view's test.
 vi.mock('./blocks/PipelineRunStrip', () => ({ PipelineRunStrip: () => null }));
@@ -148,6 +152,7 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
 
 const outputVersion = (version: number, parent: number | null) => ({
   id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: '1',
+  actor_user_id: null, reverted_from_version: null, cost_kind: 'allocated',
   issue_key: 'NOUS-1', deep_link: `/team/9/todolist/NOUS-1?step=${version}`, seq: version,
   turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max', cost_cents: 0.42,
   created_at: '2026-09-10T01:00:00Z',
@@ -162,7 +167,7 @@ function stubOutputs() {
   listIssueOutputs.mockResolvedValue([
     { kind: 'script_shot', ref_id: '9', title: 'Shot #1', latest_version: 2, versions: [outputVersion(2, 1), outputVersion(1, null)] },
   ]);
-  getOutputLineage.mockResolvedValue({ kind: 'script_shot', ref_id: '9', latest_version: 2, versions: [outputVersion(2, 1), outputVersion(1, null)] });
+  getOutputLineage.mockResolvedValue({ kind: 'script_shot', ref_id: '9', latest_version: 2, versions: [outputVersion(2, 1), outputVersion(1, null)], as_of_seq: '347786145852741' });
   getOutputDiff.mockResolvedValue({
     kind: 'script_shot', ref_id: '9', content_type: 'text',
     from: diffSide(1, 'the quick brown fox'), to: diffSide(2, 'the quick red fox'),

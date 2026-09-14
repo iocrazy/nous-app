@@ -22,6 +22,11 @@ type T = (key: string, fallback: string, vars?: Record<string, unknown>) => stri
 
 const UNRESOLVABLE = 'output_ref_unresolvable';
 const LIMIT_EXCEEDED = 'output_ref_limit_exceeded';
+/** An issue with no agent assigned cannot take attachments: there is nobody to
+ *  read them, so the server refuses the whole comment rather than posting one
+ *  whose references no turn will ever consume. The fix is assigning an agent,
+ *  not editing the reference — which is why it needs its own sentence. */
+const NEED_AGENT = 'citations_need_agent';
 
 /** Does this rejection belong to the citation channel?
  *
@@ -31,7 +36,7 @@ const LIMIT_EXCEEDED = 'output_ref_limit_exceeded';
 export function isOutputRefRejection(err: unknown): boolean {
   return (
     err instanceof IssueAnswerRejectedError
-    && (err.code === UNRESOLVABLE || err.code === LIMIT_EXCEEDED)
+    && (err.code === UNRESOLVABLE || err.code === LIMIT_EXCEEDED || err.code === NEED_AGENT)
   );
 }
 
@@ -50,6 +55,12 @@ export function outputRefErrorText(err: unknown, t: T): string {
       'outputs.refError.limitExceeded',
       'A comment can reference at most {{n}} outputs. Nothing was posted.',
       { n: MAX_OUTPUT_REF_ATTACHMENTS },
+    );
+  }
+  if (code === NEED_AGENT) {
+    return t(
+      'outputs.refError.needAgent',
+      'Attachments need an assigned agent — the comment was not posted',
     );
   }
   return t('outputs.refError.unknown', 'That reference was refused ({{code}}). Nothing was posted.', {

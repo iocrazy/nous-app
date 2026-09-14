@@ -32,6 +32,7 @@ import {
   OutputsError,
   type OutputLineage,
 } from '../../services/outputsService';
+import { formatOutputCost, outputCostTitle } from './outputCost';
 import { OutputDiffDialog } from '../Todolist/OutputDiffDialog';
 import { useChildRun } from '../Todolist/childRunContext';
 import type { DeliverableKind } from '../chat/deliverableKinds';
@@ -156,6 +157,14 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
             <span className="ml-2 tabular-nums">{latest.created_at.slice(0, 16).replace('T', ' ')}</span>
           )}
           {latest.model && <span className="ml-2 truncate">{latest.model}</span>}
+          {/* Same pair as the thread card and the right rail — see outputCost.ts. */}
+          <span
+            data-testid="output-provenance-cost"
+            title={outputCostTitle(latest.cost_cents, latest.cost_kind, { deliverableKind: lineage.kind, model: latest.model })}
+            className="ml-2 tabular-nums"
+          >
+            {formatOutputCost(latest.cost_cents, latest.cost_kind)}
+          </span>
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">

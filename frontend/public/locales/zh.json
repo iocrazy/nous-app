@@ -5587,6 +5587,7 @@
     "editBudget": "修改",
     "unlimited": "不限",
     "budgetRule": "80% 提醒，100% 记录",
+    "mediaSpend": "媒体 {{c}}",
     "budgetInvalid": "请输入 0 或以上的整数（分）",
     "done": "完成",
     "now": "正在",
@@ -5855,7 +5856,8 @@
     "refError": {
       "unresolvable": "其中一条产出引用读不到——它可能已被改版或删除。评论没有发出。",
       "limitExceeded": "一条评论最多引用 {{n}} 个产出。评论没有发出。",
-      "unknown": "这条引用被拒绝了（{{code}}）。评论没有发出。"
+      "unknown": "这条引用被拒绝了（{{code}}）。评论没有发出。",
+      "needAgent": "附件需要先给议题指派 Agent——评论没有发出。"
     },
     "mentionTab": "产出",
     "mentionLoading": "加载中…",
@@ -5887,7 +5889,13 @@
     "open": "打开",
     "diff": "对比",
     "revert": "回滚到 v{{n}}",
-    "revertHint": "3b 阶段上线",
+    "revertHint": "只有比最新版旧的剧本版本才能回退",
+    "revertConfirm": "回退到 v{{from}}？这会写出 v{{next}}。",
+    "revertGo": "回退",
+    "revertKept": "回退前的人手编辑已登记为 v{{n}}。",
+    "revertedChip": "v{{n}} ↩ v{{from}}",
+    "revertedBy": "已回退 · 你",
+    "cardStep": "第 {{n}} 步",
     "changeCount": "+{{added}} / −{{removed}} 词",
     "truncated": "文本过长，无法整篇比对——这里只显示改动的前一部分。",
     "noSnapshot": "这个版本没有留下快照",

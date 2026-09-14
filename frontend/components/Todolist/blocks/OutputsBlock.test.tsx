@@ -9,7 +9,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { OutputObject } from '../../../services/outputsService';
+import type { OutputObject, OutputVersion } from '../../../services/outputsService';
 import type { IssueBlockContext } from '../issueBlocks';
 import { OutputsBlockView, outputsBlock } from './OutputsBlock';
 
@@ -36,9 +36,10 @@ vi.mock('../OutputDiffDialog', () => ({
 
 const ISSUE_ID = 347474243723822;
 
-const version = (version: number, parent: number | null, over: Record<string, unknown> = {}) => ({
+const version = (version: number, parent: number | null, over: Partial<OutputVersion> = {}): OutputVersion => ({
   id: `d${version}`, version, parent_version: parent, run_id: '347786145852700', issue_id: String(ISSUE_ID),
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
+  actor_user_id: null, reverted_from_version: null, cost_kind: 'allocated',
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
   cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z', ...over,
 });
@@ -55,6 +56,13 @@ afterEach(cleanup);
 beforeEach(() => listIssueOutputs.mockReset().mockResolvedValue([shot, image]));
 
 describe('OutputsBlockView', () => {
+  it('shows each object’s latest cost', async () => {
+    // The row's price is the LATEST version's, because the row IS the latest
+    // version — the older ones live behind the dialog.
+    render(<OutputsBlockView ctx={ctx()} />);
+    expect((await screen.findAllByTestId('outputs-row-cost'))[0].textContent).toBe('≈¢0.42');
+  });
+
   it('shows one row per object with its latest version', async () => {
     render(<OutputsBlockView ctx={ctx()} />);
     const rows = await screen.findAllByTestId('outputs-row');
