@@ -4034,3 +4034,33 @@ git commit -m "feat(ui): 资源信息面板来源块 + 资源来源反查 servic
   ```
 
 - [ ] **Step 5: 文档 PR** — 完成账单独走一个 worktree：`git -C <worktree> add docs/superpowers/plans/2026-09-14-harness-p4-phase3b-revert-cost-realtime.md && git -C <worktree> commit -m "docs(plan): 三期 3b 完成账 —— 九个 Task 的 PR / SHA / 评审轮次 / 部署证据"`，推送开 PR（标题同 commit）。合并后 `gh run list -w ci.yml -L 3` 确认纯文档 PR 只跑到应跑的 job。
+
+---
+
+**完成账（2026-09-14）**
+
+全部在同一天内完成：spec（#2279）→ 计划（#2280，四段并行作者 + 拼装自审）→ 11 个代码 Task 各自独立 worktree（`origin/master` 建，合并后 `rebase --onto`）+ TDD + opus 对抗评审 + 突变记录 + 合并后盯部署链（后端：deploy-gpu + 容器符号 + readyz；前端：version.json 7 位 SHA）→ 真栈验收 → 两个验收修复。SDD 工作区 `.superpowers/sdd/2026-09-14-harness-p4-phase3b-revert-cost-realtime/`（ledger 含全部裁定、briefs、reports、评审包、Task 9 证据表）。
+
+| Task | PR | 合并 SHA | 评审轮次 | 部署验证 |
+|---|---|---|---|---|
+| 0 图片登记归因（两条路径写 adapter 解析出的 provider/model，provider 统一协议族键） | #2282 | 5797457c | 2 轮修复后复审 ✅ | deploy-gpu；worker 含 `_canonical_provider` / `gen_attribution.py`；readyz |
+| 1 mig 466（run_id 可空 + actor/reverted_from/ledger_ref/per_call_cents）+ ORM + 真 PG | #2281 | 697b308b | 1 轮 Minor 修复 | run-migration + deploy-gpu；information_schema 三列在、`script_shot_ops.run_id` 可空 |
+| 2 登记口扩参 + `ledger_ref` + `lineage_for` outer join + 人手版 issue 沿链 | #2283 | 173df184 | 1 轮修复后复审 ✅ | deploy-gpu；真栈 lineage 带 `actor_user_id` 等字段 |
+| 8 无 agent 评论拒任何附件 409 `citations_need_agent` + deliverables README | #2284 | 943baf3b | 1 轮修复（守卫扩到全部附件） | deploy-gpu；backend 含 `citations_need_agent` |
+| 7 `GET /resources/{id}/provenance`（不 404 不可见议题、人手版借链上议题、`as_of_seq` 字符串） | #2285 | f257ab44 | 1 轮修复后 ✅ | deploy-gpu；路由在；探针 404 `not_registered` |
+| 3 Revert To vN（两臂 + 保留版 + 同事务 + 23505→409 + 真 PG） | #2287 | fc74b0df | 2 轮修复 + 1 轮 CI（choke-point 白名单）后复审 ✅ | deploy-gpu；真栈媒体对象回退 → 400 `kind_not_revertible` |
+| 4 文本花费读时分摊 + 媒体目录价 + `as_of_seq: str` + `cost_kind` | #2286 | e4308abf | 1 轮修复后 ✅（真 PG RED 抓出 token-only 价目行遮蔽真价） | deploy-gpu；真栈 lineage `as_of_seq:"348431095414717"`、v7 `0.0527 / allocated` |
+| 4b 媒体花费进 run 账（持久化列同口径）+ WS done 帧 `run_id/seq/outputs` + progress `last_seq` | #2289 | bc163d5b | 1 轮修复后复审 ✅ | deploy-gpu；worker 含 `output_keys_for_run` / `media_cents` |
+| 5 回退弹层 + 花费四面显示 + Budget 媒体行 + `citations_need_agent` 前端半边 | #2288 | 2faedfc5 | 1 轮修复后复审 ✅ | deploy-pages；version.json 2faedfc |
+| 6 seq 水位信号 + 按键失效 + 三个消费方 + 在途读不回写 | #2290 | 2602caef | 1 轮修复后复审 ✅ | deploy-pages；version.json 2602cae |
+| 7b 资源信息面板来源块（类型化 404） | #2291 | cc77518f | 1 轮修复 | deploy-pages；version.json cc77518 |
+| 验收修复 #9：run 车道首信号封口 | #2292 | 1c66cc36 | 自审 + CI 两次抖动重跑 | deploy-pages；version.json 1c66cc3 |
+| 验收修复 A：分镜三档重建（不再抹掉未进账本的参数）+ diff 侧脱敏 + 借链上议题 | #2293 | c7f619b9 | 1 轮修复后复审 ✅ | deploy-gpu；diff.py 含 `_pre_image`；真栈 revert 无多余保留版 |
+
+**真栈验收（Task 9，`task-9-report.md`）**：12 项中 9 PASS（分镜/场次回退占号、内容真回、并发 409、媒体 400、文本读时分摊、保留未登记编辑、三面 ≤5 s 自刷新、常规走查全绿、资源来源反查 curl）。#9 首轮 FAIL（一回合重拉两遍）→ #2292 修后 复验 5/5 PASS（每回合恰 1 次重拉，无串键请求）。最终 10 PASS / 0 FAIL / 2 BLOCKED。#6（媒体价进 run 账）与 #11 正例（资源面板来源块看到 agent 图）**BLOCKED**：生产没有能走 agent 工具链的出图 provider——`jimeng-cli` 要会员，`openai-images` 两行 `is_enabled=f` 无 key，`GENMEDIA_DEFAULT_IMAGE_PROVIDER` 未设；验收代理已写入价目行 `gpt-image-2.5 / openai-images / per_call_cents 12`，探针 agent `9d38ea16-…` 与 issue 349595238173427 备好，解锁后按报告重跑。
+
+**验收撞出的问题**：A 分镜回退抹掉未进账本的五个字段（真缺陷，#2293 修；fixture 分镜 337650953731886 的 v9 keep op 349591363508654 带修复前坏代码写的假前像，行已按原值 PATCH 补回，账本行需人手 UPDATE）；B 改 issue assignee 不重绑 session（记票）；C diff 端点人手版不借议题（#2293 顺带修）；D `/api/v1/inbox` 500（kind 枚举漂移，无关，记票）。
+
+**裁定**（全文在 ledger，每条带代价）：`as_of_seq` = 登记行 id 字符串；文本花费读时折不回写、媒体价咽喉点填且持久化列同口径；WS 不另开帧、done 帧带 outputs；run 车道封口、seq 只在本地车道；回退前保留当前内容（只保账本可见编辑）；`revert.py`/`diff.py` 进 choke-point 白名单（照 undo 先例）；Task 1/0、3/4/7/8、4b、5 分批并发；`LATEST_MIGRATION` 不动；分摊分母含媒体卡与后端一致。
+
+**记票**：`PATCH /shots` 应写 `script_shot_ops` 行（否则保留臂看不见人手编辑）；删 agent 级联删 run 与血缘（应软删或拒绝）；改 assignee 不重绑；`/api/v1/inbox` 500；画布等其它登记车道仍写请求侧 provider/model；`seen` 50 窗口现在也管钱；前端分母按去重卡数 vs 后端按事件数；前端 vitest 在托管 runner 偶发单例失败（AssetShelf）；第三档读在事务外与 FOR UPDATE 有窗口。
