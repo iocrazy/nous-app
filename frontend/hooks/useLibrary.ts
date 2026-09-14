@@ -501,7 +501,6 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
             if (payload.eventType === 'INSERT') {
               // parsed_media is global — verify ownership via resources table.
-              // Fast early-out: only query when the record is plausibly ours.
               const mediaId = newRecord.id;
               if (!mediaId) return;
               const { data: resource } = await supabase
@@ -510,6 +509,13 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
                 .eq('media_id', mediaId)
                 .eq('creator_id', ownedUserId)
                 .maybeSingle();
+              // An empty answer means "not yours" OR "your resources row is
+              // still being written" — this read cannot tell them apart, so
+              // it must not be the only chance the item gets. Dropping it here
+              // is safe ONLY because the `resources` INSERT subscription below
+              // adds the item when that row lands. Remove that subscription
+              // and this line silently loses every download that wins the
+              // race against its own ownership row.
               if (!resource) return;
               // Attach the join field the list rows normally carry from
               // CARD_SELECT — the raw replication record doesn't have it, and
@@ -544,10 +550,66 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
         )
         .subscribe();
 
-      // Resources realtime — tracks download status changes. Server-filter by
+      // Resources realtime — this user's ownership rows. Server-filter by
       // creator_id so events for other users never hit this client.
+      //
+      // TWO subscriptions, and the INSERT one is why a fresh download used to
+      // need a page refresh to appear.
+      //
+      // A download writes `parsed_media` and `resources` in an order nothing
+      // guarantees. The list only ever learned about new items from the
+      // `parsed_media` INSERT above, which confirms ownership by reading
+      // `resources` — and that read answers empty for TWO different reasons:
+      // the media belongs to someone else, or its `resources` row is still
+      // being written. The handler treated both as "not mine" and returned,
+      // so an item that lost the race was dropped with no retry and no second
+      // chance: the UPDATE handlers below and above both bail on media that is
+      // not already in the list, by design (they merge, they do not add).
+      //
+      // Subscribing to the INSERT closes the race from the other side instead
+      // of polling for it: whichever of the two rows lands LAST is the one
+      // that puts the item on screen.
       const resourceChannel = supabase
         .channel('resources_download_realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'resources',
+            filter: `creator_id=eq.${ownedUserId}`,
+          },
+          async (payload) => {
+            const inserted = payload.new as any;
+            const mediaId = inserted?.media_id;
+            // A resources row with no media (an upload, an asset file) is not
+            // a download and has nothing to show here.
+            if (!mediaId) return;
+
+            const { data: pm } = await supabase
+              .from('parsed_media')
+              .select('*')
+              .eq('id', mediaId)
+              .maybeSingle();
+            // No media row to show yet. Unlike the ownership read above this
+            // one is NOT a race we have to win: the `parsed_media` INSERT is
+            // itself subscribed, and by then our `resources` row exists, so
+            // that handler adds the item.
+            if (!pm) return;
+
+            const withJoin = { ...(pm as Video), resource_id: String(inserted.id) } as Video;
+            setLibrary(prev => {
+              // Either side may have got here first; dedupe on both keys the
+              // two paths use to identify a row.
+              const already = prev.some(
+                item =>
+                  String(item.id) === String(mediaId) ||
+                  (!!withJoin.platform_id && item.platform_id === withJoin.platform_id),
+              );
+              return already ? prev : [withJoin, ...prev];
+            });
+          },
+        )
         .on(
           'postgres_changes',
           {
