@@ -145,6 +145,20 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "模型或用户供给的 scene/shot id；写入全部带 CAS WHERE（与并发编辑"
         "互斥），scene 正文只走 apply_element_ops 这一条 ops 通道。"
     ),
+    "services/deliverables/revert.py": (
+        "Revert To vN 执行器（三期 3b spec §2.3）。与上面的 undo 同族，不是"
+        "agent-tool 路径：入口是人触发的 POST /outputs/{kind}/{ref_id}/revert "
+        "REST 端点。`ref_id` **不是模型供给的 id** —— 进门先过 `visible_chain`"
+        "（血缘端点那把可见性尺子，不在链上/看不见一律 404），再过 "
+        "`verify_shot_access` / `verify_scene_access`（分镜 PATCH 与场次 ops 用的"
+        "同一对写权限守卫），两者都在任何一次读写之前，且各有会咬人的用例"
+        "（tests/services/deliverables/test_revert.py 的四个守卫用例，含"
+        "「守卫必须发生在 FOR UPDATE 之前」的顺序断言）。分镜臂的直接 ORM 是"
+        "`SELECT … FOR UPDATE` 锁行 + 六字段 UPDATE，与人手 script_shot_ops 行"
+        "同一个事务，并由 `expected_latest` 乐观锁 + run_deliverables 唯一索引"
+        "两道仲裁（输家 409 并整体回滚）；scene 正文只走 apply_element_ops "
+        "这一条 ops 通道，其余对 script_ops 的接触全是重放用的只读。"
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
@@ -293,6 +307,16 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "模型或用户供给的 scene/shot id；写入全部带 CAS WHERE（与并发编辑"
         "互斥），scene 正文只调 get_script_scene_repository() 的"
         "list_ops_by_scene + apply_element_ops 两个方法。"
+    ),
+    "services/deliverables/revert.py": (
+        "Revert To vN 执行器（三期 3b spec §2.3）。与上面的 undo 同族，不是"
+        "agent-tool 路径：入口是人触发的 POST /outputs/{kind}/{ref_id}/revert "
+        "REST 端点。`ref_id` **不是模型供给的 id** —— 进门先过 `visible_chain`"
+        "（血缘端点那把可见性尺子），再过 `verify_shot_access` / "
+        "`verify_scene_access`（分镜 PATCH 与场次 ops 用的同一对写权限守卫），"
+        "两者都在任何一次读写之前。对场次仓库**只调 apply_element_ops 一个"
+        "方法**（逆操作批经 ops 通道落库，与 undo 同机制，不造 replace-all op）；"
+        "账本的读走本模块自己的只读 select + 纯函数重放，不经仓库。"
     ),
     "api/canvases_router.py": (
         "shot-nodes-on-canvas Task 1 (mig 421/422, spec 2026-08-11 §2). "
