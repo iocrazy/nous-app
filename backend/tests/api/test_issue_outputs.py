@@ -247,3 +247,33 @@ async def test_a_human_row_with_stray_coordinates_still_gets_no_link(monkeypatch
     human = body["items"][0]["versions"][0]
     assert human["turn"] is None and human["step"] is None
     assert human["deep_link"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_media_version_with_a_registered_price_is_exact_here_too(monkeypatch):
+    """``cost_kind`` 是**投影**的一部分，不是对象页独有的装饰。
+
+    媒体类登记时就带真价（目录每次调用价），所以这条清单里它也必须说
+    ``exact``。在此之前只有 ``/outputs/{kind}/{ref_id}`` 那条路会定性，于是同一
+    个版本在两个读者眼里一个是「12 分，精确」、一个是「12 分，来路不明」——
+    「两个读者必须用同一种方式描述一个版本」正是 lineage_view 存在的理由。
+    """
+    rows = [_row("generated_media", "500", 1, run_id=RUN_B, cost_cents=12.0)]
+    _patch(monkeypatch, repo=_Repo(rows))
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+
+    media = body["items"][0]["versions"][0]
+    assert (media["cost_cents"], media["cost_kind"]) == (12.0, "exact")
+
+
+@pytest.mark.asyncio
+async def test_a_text_version_with_no_registered_cost_reports_neither(monkeypatch):
+    """文本类登记行的 ``cost_cents`` 是 NULL（不回写）。这条清单**不做**读时
+    分摊（它是清单不是版本页），所以两个键都是 None——不是 0，也不是凭空的
+    ``allocated``。"""
+    rows = [_row("script_shot", "9", 1, cost_cents=None)]
+    _patch(monkeypatch, repo=_Repo(rows))
+    body = (await mod.list_issue_outputs(ISSUE_ID, _Auth())).model_dump()
+
+    text = body["items"][0]["versions"][0]
+    assert text["cost_cents"] is None and text["cost_kind"] is None

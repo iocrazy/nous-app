@@ -89,6 +89,12 @@ def version_of(
     某次运行某一步的 URL，等于声称这一版是那一步产生的，而它不是。
     """
     out = {key: row.get(key) for key in _VERSION_KEYS}
+    # 登记行自带花费 ⇒ 这一版的价是**登记时就精确**的（媒体类的目录每次调用
+    # 价）。定性放在投影里而不是某一个读者里：两个读者必须用同一种方式描述同
+    # 一个版本，否则 per-issue 清单会把一个 12 分的精确价说成「来路不明」
+    # （3b fix 轮 1）。文本类这里是 None —— 它的花费是读时按步分摊出来的，由
+    # ``allocate_step_costs`` 在对象页那条路上补成 ``allocated``。
+    out["cost_kind"] = "exact" if out.get("cost_cents") is not None else None
     if out.get("issue_id") is None and issue_id is not None:
         out["issue_id"] = str(issue_id)
     if out.get("issue_key") is None and issue_key is not None:
@@ -189,7 +195,8 @@ def allocate_step_costs(
     ``step_costs`` 的值是**每件产出**的份额（``step_costs.load_step_shares`` 已
     除过那一步的产出件数），键 ``(run_id, turn, step)``（turn 今天恒为 1）。三态：
 
-    * 登记行自带 ``cost_cents``（媒体类，登记时就精确）→ 原值 + ``exact``；
+    * 登记行自带 ``cost_cents``（媒体类，登记时就精确）→ 原值 + ``exact``
+      （``version_of`` 通常已经定过性，这里幂等地再确认一次）；
     * 命中份额 → ``allocated``（**参考值，不是计费输入** —— 预算钩子只吃
       ``step_end`` 与媒体精确价）；
     * 都没有 → ``None`` + ``cost_kind=None``。**不是 0**：0 说「这一版不要钱」，
@@ -197,7 +204,9 @@ def allocate_step_costs(
     """
     out: List[Dict[str, Any]] = []
     for version in versions:
-        if version.get("cost_cents") is not None:
+        if version.get("cost_kind") == "exact" or version.get("cost_cents") is not None:
+            # ``version_of`` 已经定过性的就原样留着——这里只补分摊，绝不把一个
+            # 精确价改写成份额（3b fix 轮 1）。
             out.append({**version, "cost_kind": "exact"})
             continue
         run_id, turn, step = (
