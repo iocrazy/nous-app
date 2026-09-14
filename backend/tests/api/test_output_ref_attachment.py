@@ -87,6 +87,29 @@ def _wire(monkeypatch, lineage: list[dict]):
     return r, dispatch, repo
 
 
+def _wire_no_agent(monkeypatch):
+    """同一个路由，但 issue 没有 assignee agent —— legacy 评论分支。
+
+    只桩两处：可见性检查和 legacy 插入。**刻意不桩** session / dispatch 那几个，
+    因为这条路径根本不该走到它们；万一将来走到了，缺桩会当场炸而不是静静地绿。
+    """
+    importlib.import_module("app.api.issue_messages_router")
+    r = sys.modules["app.api.issue_messages_router"]
+
+    issue_row = {
+        "id": ISSUE_ID,
+        "assignee_agent_id": None,
+        "created_by_user_id": ME,
+        "assignee_user_id": None,
+        "paused_at": None,
+        "execution_state": {},
+    }
+    monkeypatch.setattr(r, "_assert_issue_visible", AsyncMock(return_value=issue_row))
+    legacy = AsyncMock(return_value=None)
+    monkeypatch.setattr(r, "_insert_legacy_comment", legacy)
+    return r, legacy
+
+
 async def _post(r, attachments):
     return await r.post_issue_message(
         ISSUE_ID,
@@ -212,3 +235,29 @@ async def test_over_cap_output_refs_are_a_typed_400(monkeypatch):
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "output_ref_limit_exceeded"
     repo.lineage_for.assert_not_awaited()
+
+
+# ── 无 agent 的 issue：引用无人可读 → 类型化 409 ────────────────────────────
+
+
+async def test_a_citation_on_an_agentless_issue_is_a_typed_409(monkeypatch):
+    """C17：legacy 评论路径在 3a 之后成了唯一静默吃附件的分支。引用只有
+    agent 读得懂，没有 agent 就该当面拒绝，而不是发帖成功、引用消失。"""
+    r, legacy = _wire_no_agent(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        await _post(r, [_att()])
+    assert exc.value.status_code == 409
+    assert isinstance(
+        exc.value.detail, dict
+    ), "detail 必须是 dict，否则 details.code 丢失"
+    assert exc.value.detail["code"] == "citations_need_agent"
+    legacy.assert_not_awaited()  # 一行都不许落库
+
+
+async def test_an_ordinary_comment_on_an_agentless_issue_still_posts(monkeypatch):
+    """守卫只认 output_ref：普通评论、文件附件都照旧走 legacy 插入。"""
+    r, legacy = _wire_no_agent(monkeypatch)
+    await _post(r, [{"kind": "image", "url": "https://x/y.png"}])
+    legacy.assert_awaited_once()
+    await r.post_issue_message(ISSUE_ID, IssueMessagePost(body="hi"), AUTH)
+    assert legacy.await_count == 2
