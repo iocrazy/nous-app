@@ -183,8 +183,9 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
 # generation sends `--quality high` and the 2.5 rows advertise `xhigh`/`max`
 # (see IMAGE_25_QUALITY_TIERS), so a silent enum change upstream would surface
 # as a runtime argument-parse failure on every image instead of a build break.
-# `xhigh` proves the 2.5 tiers; `[^x]high` proves plain `high` is still its own
-# value and not merely the tail of `xhigh`. Measured on 0.7.4:
+# The check is scoped to the `--quality` option's own `[possible values: …]`
+# bracket (not the whole help text, where prose like "higher" could match) and
+# needs BOTH `high` and `xhigh` as whole words there. Measured on 0.7.4:
 # `[possible values: auto, low, medium, high, xhigh, max]`.
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG GPT_IMAGE_2_SKILL_VERSION=0.7.4
@@ -195,8 +196,7 @@ RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-stat
     && install -m 0755 /tmp/package/bin/gpt-image-2-skill /usr/local/bin/gpt-image-2-skill \
     && rm -rf /tmp/gis.tgz /tmp/package \
     && gpt-image-2-skill -V 2>&1 | grep -q "${GPT_IMAGE_2_SKILL_VERSION}" \
-    && gpt-image-2-skill images generate --help 2>&1 | grep -q 'xhigh' \
-    && gpt-image-2-skill images generate --help 2>&1 | grep -qE '[^x]high'
+    && gpt-image-2-skill images generate --help 2>&1 | grep -A1 -- '--quality' | grep -qE '\[possible values: [^]]*[ ,]high,[^]]*[ ,]xhigh[],]'
 
 # Install uv package manager
 RUN --mount=type=cache,target=/root/.cache/pip pip install uv
