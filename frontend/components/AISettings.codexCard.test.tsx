@@ -94,7 +94,10 @@ describe('Codex provider card — image model note', () => {
     // model is OpenAI's rollout decision (measured 2026-09-09), so it points
     // at the catalog row by its unversioned display name instead.
     expect(note.textContent).not.toMatch(/gpt-image-2\b/);
-    expect(note.textContent).toContain('GPT Image (Codex)');
+    // The row serving THIS card is the local one. `codex-image` (the server
+    // twin) is hidden whenever the local engine can run, so naming it sends
+    // the reader looking for a row that is not in their picker at all.
+    expect(note.textContent).toContain('GPT Image (Codex, local)');
     expect(note.textContent).toContain('codex:gpt-6-astra');
   });
 });

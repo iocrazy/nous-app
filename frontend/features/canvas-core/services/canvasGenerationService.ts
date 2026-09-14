@@ -88,10 +88,13 @@ export interface ModelCapabilities {
    *  exists at all; this says what it may offer. `[]` whenever the provider
    *  honours no tier (always alongside `quality: false` today).
    *
-   *  A backend older than 2026-09-13 omits the key entirely, and the two
-   *  halves deploy independently, so consumers must read a missing value as
-   *  "unknown" (offer everything) rather than "supports nothing". */
-  quality_tiers: string[];
+   *  Optional because a backend older than 2026-09-13 omits the key entirely
+   *  and the two halves deploy independently: that wire shape is real for as
+   *  long as the window lasts, and consumers must read the missing value as
+   *  "unknown" (offer everything) rather than "supports nothing". Declaring
+   *  it required forced every test constructing the old shape to cast the
+   *  type away, which is the check disabling itself. */
+  quality_tiers?: string[];
   resolution: boolean;
   max_refs: number;
   negative: boolean;

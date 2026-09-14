@@ -250,8 +250,11 @@ describe('GenFooterControls quality tiers follow the model', () => {
     // shape for as long as that window lasts. Reading it as "supports no
     // tier" would strip working rungs; worse, a bare `.includes` on the
     // missing field throws and takes the whole footer down.
+    // No cast: `quality_tiers` is optional on `ModelCapabilities`, so the old
+    // backend's shape is expressible in the type the client actually uses.
+    // Casting here would have been the check switching itself off.
     const { quality_tiers: _dropped, ...legacy } = CODEX_LOCAL;
-    caps = legacy as ModelCapabilities;
+    caps = legacy;
     renderBar({ model: 'codex-local-image' });
     fireEvent.click(screen.getByTestId('pill-quality'));
     expect(qualityTexts()).toContain('Max');
@@ -264,5 +267,20 @@ describe('GenFooterControls quality tiers follow the model', () => {
     caps = CODEX_LOCAL;
     renderBar({ model: 'codex-local-image', quality: 'max' });
     expect(screen.getByTestId('pill-quality').textContent).toBe('Auto');
+  });
+
+  it('and the popover highlights Auto too, not nothing', () => {
+    // The stranded tier is filtered out of the list, so matching the popover
+    // against the RAW stored value highlights no row at all — the one rung
+    // that is actually about to run reads as unselected, contradicting the
+    // pill directly above it.
+    caps = CODEX_LOCAL;
+    renderBar({ model: 'codex-local-image', quality: 'max' });
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    const selected = screen
+      .getAllByTestId('quality-option')
+      .filter((b) => b.className.includes('font-bold'))
+      .map((b) => b.textContent);
+    expect(selected).toEqual(['Auto']);
   });
 });

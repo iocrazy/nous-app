@@ -2,8 +2,8 @@
 //
 // IC-parity generation footer (⑨, reference shots 20-23): every knob is a
 // PILL that pops an upward panel — model list (selected dot), ratio grid
-// with semantic labels (IC 尺寸选择), quality Auto/Low/Medium/High, count
-// 1-8 grid. Shared by the prompt node footer and the attached composer so
+// with semantic labels (IC 尺寸选择), quality (six rungs, Auto → Max,
+// filtered to the tiers the chosen model declares), count 1-8 grid. Shared by the prompt node footer and the attached composer so
 // the two stay identical. State lives with the caller (patch-style
 // onChange); only the open-popover bookkeeping is local.
 
@@ -90,9 +90,14 @@ export const VIDEO_MODES: Array<{ value: 'multimodal' | 'frames' | undefined; la
 /** Video clip lengths (IC 时长 pill: 8 quick picks; CLI snaps per model). */
 export const DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15] as const;
 
-/** The hint is the LONGEST EDGE the rung reaches, not a square. The exact
- *  pixels depend on the ratio (`IMAGE_SIZES` server-side), and the only
- *  provider that honours the knob at all tops out at 2880×2880 for 1:1 and
+/** The hint is the LONGEST EDGE the rung reaches, not a square, and the exact
+ *  pixels depend on the ratio.
+ *
+ *  Three protocols declare `resolution: true` — `openai-images`, `jimeng` and
+ *  `jimeng-local` — but they do not mean the same thing by it: openai-images
+ *  sends the exact pixels from the server-side `IMAGE_SIZES` table, while the
+ *  two jimeng rows map the rung onto their CLI's own resolution flag. These
+ *  hints describe the pixel table, which tops out at 2880×2880 for 1:1 and
  *  3840×2160 for 16:9 — so the old "4096×4096" was a size nothing produces.
  *  Naming a number no run can return is the same fake switch as offering a
  *  knob the provider drops. */
@@ -235,9 +240,16 @@ export function GenFooterControls({
   // this model no longer honours is dropped server-side before dispatch, so
   // the run really will be Auto and the pill must say so. (Unlike a stranded
   // ratio, which is kept and marked — that one IS sent as written.)
-  const qualityLabel =
-    qualityOptions.find((q) => q.value === (gen.quality ?? undefined))?.label ??
-    'Auto';
+  //
+  // ONE resolution feeds both the pill and the popover's selected row:
+  // matching the popover against the raw `gen.quality` would highlight
+  // nothing at all for a stranded tier, so the rung that is actually about to
+  // run would read as unselected directly under a pill saying Auto.
+  const qualityOption = qualityOptions.find(
+    (q) => q.value === (gen.quality ?? undefined),
+  );
+  const effectiveQuality = qualityOption?.value;
+  const qualityLabel = qualityOption?.label ?? 'Auto';
 
   return (
     <div
@@ -477,7 +489,7 @@ export function GenFooterControls({
                 data-testid="quality-option"
                 onClick={() => pick({ quality: q.value })}
                 className={`nodrag rounded-lg px-2.5 py-1 text-xs ${
-                  (gen.quality ?? undefined) === q.value
+                  effectiveQuality === q.value
                     ? 'bg-canvas-strong font-bold text-canvas-card'
                     : 'text-canvas-text'
                 }`}
