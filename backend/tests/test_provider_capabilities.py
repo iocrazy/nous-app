@@ -193,12 +193,20 @@ def test_every_quality_capable_protocol_declares_tiers():
     honours would let ``reconcile`` forward ``xhigh`` to a backend that
     silently rewrites it — the exact silent degradation this contract ends."""
     from app.services.ai.provider_protocols import PROTOCOLS
-    from app.services.ai.provider_protocols.base import LEGACY_QUALITY_TIERS
+    from app.services.ai.provider_protocols.base import (
+        LEGACY_QUALITY_TIERS,
+        QUALITY_TIER_ORDER,
+    )
 
     for p in PROTOCOLS:
         if p.generation_family is None:
             continue
         caps = p.capabilities
+        # A tier outside the wire vocabulary would survive ``reconcile`` (it
+        # only drops what the protocol did NOT declare) and then never reach
+        # the UI, which projects through QUALITY_TIER_ORDER — a knob that is
+        # honoured on paper and invisible in practice.
+        assert caps.quality_tiers <= frozenset(QUALITY_TIER_ORDER), p.key
         if caps.quality:
             assert caps.quality_tiers >= LEGACY_QUALITY_TIERS, p.key
         else:

@@ -225,6 +225,14 @@ class CodexCliProvider:
         # drives. "codex" is the ChatGPT subscription session (auth.json, no
         # key); "openai" is the public Images API (a key, and it HONOURS
         # --size). The two differ in more than the flag: see generate_image.
+        # ``Literal`` buys nothing at runtime, and every branch below asks
+        # ``== "openai"`` — so an unrecognised value would take the codex path
+        # silently: no key in the child env, --size discarded, the wrong
+        # upstream billed. Reject it at construction instead.
+        if provider_kind not in ("codex", "openai"):
+            raise ValueError(
+                f"unknown provider_kind {provider_kind!r} (expected 'codex' or 'openai')"
+            )
         self._provider_kind = provider_kind
         self._api_key = (api_key or "").strip()
         if provider_kind == "openai" and not self._api_key:

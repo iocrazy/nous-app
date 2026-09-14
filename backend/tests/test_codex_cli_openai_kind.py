@@ -136,7 +136,27 @@ async def test_openai_kind_unknown_resolution_falls_back_to_1k(cli_stub):
 
 
 @pytest.mark.unit
-async def test_codex_kind_is_unchanged(cli_stub):
+async def test_openai_kind_empty_aspect_and_no_resolution_is_square_1k(cli_stub):
+    """The no-knobs request still sends an explicit size.
+
+    ``image_size_for`` folds an unknown ratio to 1:1 and an unknown resolution
+    to 1k, so the API path never falls back to whatever the model feels like —
+    which is the whole difference from the codex path.
+    """
+    p = CodexCliProvider(provider_kind="openai", api_key="k", bin_path="gis")
+
+    await p.generate_image(prompt="a fox", aspect="")
+
+    cmd, _ = cli_stub.last
+    assert cmd[cmd.index("--size") + 1] == "1024x1024"
+
+
+@pytest.mark.unit
+async def test_codex_kind_is_unchanged(cli_stub, monkeypatch):
+    # The parent process may legitimately carry a key (the openai-images
+    # protocol runs in the same backend). Setting it here makes the assertion
+    # below prove the SCRUB rather than the key's mere absence.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-parent")
     p = CodexCliProvider(bin_path="gis", auth_file="/x/auth.json")
 
     await p.generate_image(
@@ -179,6 +199,15 @@ def test_openai_kind_rejects_a_blank_key():
 @pytest.mark.unit
 def test_codex_kind_needs_no_key():
     CodexCliProvider(provider_kind="codex")
+
+
+@pytest.mark.unit
+def test_an_unknown_provider_kind_is_rejected():
+    """``Literal`` is a type-checker fiction at runtime. Without this guard a
+    typo (``"openia"``) would fall through every ``== "openai"`` branch and
+    quietly drive the CODEX path — no key, no --size, wrong upstream."""
+    with pytest.raises(ValueError):
+        CodexCliProvider(provider_kind="openia", api_key="k")
 
 
 @pytest.mark.unit
