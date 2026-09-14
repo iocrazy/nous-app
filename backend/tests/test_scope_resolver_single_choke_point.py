@@ -308,6 +308,17 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "互斥），scene 正文只调 get_script_scene_repository() 的"
         "list_ops_by_scene + apply_element_ops 两个方法。"
     ),
+    "services/deliverables/diff.py": (
+        "产出重建（三期 3b fix A）。与同目录的 revert.py 同一条路：入口是人触发的"
+        " GET /outputs/{kind}/{ref_id}/diff 与那个回退端点，两者在读任何内容之前"
+        "都已经过了 `visible_chain`（血缘端点那把可见性尺子），`ref_id` 来自"
+        " run_deliverables 登记行，**不是模型或调用方随手给的 id**。这里只调仓库"
+        "的 `get_by_id` 一个只读方法，取分镜当下的六个可写字段 —— 那是「创建时"
+        "设好、之后没有任何 op 碰过」的字段唯一的来源（模块 docstring 第三档）。"
+        "不走仓库就得在本文件里自己开 ORM，而那正是这条门禁想拦的形状；仓库层"
+        "同时让这次读与 revert.py 的 FOR UPDATE 锁读分开 —— diff 是只读的，不该"
+        "去锁用户正在编辑的行。"
+    ),
     "services/deliverables/revert.py": (
         "Revert To vN 执行器（三期 3b spec §2.3）。与上面的 undo 同族，不是"
         "agent-tool 路径：入口是人触发的 POST /outputs/{kind}/{ref_id}/revert "

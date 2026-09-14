@@ -116,6 +116,33 @@ def version_of(
     return out
 
 
+def lend_chain_issue(
+    row: Dict[str, Any], *, issue_id: Any, issue_key: Optional[str]
+) -> Dict[str, Any]:
+    """人手版（``run_id IS NULL``，3b 回退写的）报出**这条链**的 issue 归属。
+
+    它自己的 ``issue_id`` 必然是 NULL（归属来自 ``agent_runs``，而它没有 run），
+    但它写在一条已经存在的链上，所以链的归属就是它的归属 —— 血缘端点与回退响应
+    早就这么补（都靠 ``outputs_router.newest_with_a_run``）。第三个读者 ``/diff``
+    不补的话，同一版在「回退刚返回的那一版」和「打开 diff 看到的那一版」之间会闪
+    一下 issue（Task 9 旁证 C）。
+
+    **只补给人手版**：agent 版自己答得出归属，补给它等于把一条别的 issue 的旧版本
+    说成这条链的（3b fix 轮 1 的那条纪律）。返回新 dict，不改入参。
+    """
+    if row.get("run_id") is not None:
+        return row
+    return {
+        **row,
+        "issue_id": (
+            row.get("issue_id")
+            if row.get("issue_id") is not None
+            else (str(issue_id) if issue_id is not None else None)
+        ),
+        "issue_key": row.get("issue_key") or issue_key,
+    }
+
+
 def redact_foreign_issue_links(
     versions: List[Dict[str, Any]], *, visible_issue_ids: Set[str]
 ) -> List[Dict[str, Any]]:
@@ -230,6 +257,7 @@ def allocate_step_costs(
 __all__ = [
     "allocate_step_costs",
     "group_by_object",
+    "lend_chain_issue",
     "redact_foreign_issue_links",
     "version_of",
 ]

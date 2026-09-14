@@ -19,10 +19,22 @@ def _at(day: int) -> _dt.datetime:
 
 
 SHOT = [
-    ({"shot_type": "WS", "description": "v1 text"}, _at(1), 101),
-    ({"description": "v2 text"}, _at(2), 102),
-    ({"description": "v3 text"}, _at(3), 103),
+    ({"after": {"shot_type": "WS", "description": "v1 text"}}, _at(1), 101),
+    (
+        {"after": {"description": "v2 text"}, "before": {"description": "v1 text"}},
+        _at(2),
+        102,
+    ),
+    (
+        {"after": {"description": "v3 text"}, "before": {"description": "v2 text"}},
+        _at(3),
+        103,
+    ),
 ]
+
+#: 这条分镜此刻的六个字段。账本碰过的字段一律由账本说了算，所以这里只是第三档的
+#: 兜底（这个文件里没有「从没被碰过」的字段，故全 None 即可）。
+CURRENT = {field: None for field in mod._SHOT_FIELDS}
 
 
 def _row(version, *, ledger_ref=None, created_at=None):
@@ -43,7 +55,7 @@ def test_a_ledger_ref_beats_a_timestamp_that_would_pick_the_wrong_prefix():
     ledger_ref 能把 v1 和 v3 分开。"""
     same_second = [(p, _at(3), k) for p, _c, k in SHOT]
     side = mod._shot_side(
-        _row(1, ledger_ref="101", created_at=_at(3).isoformat()), same_second
+        _row(1, ledger_ref="101", created_at=_at(3).isoformat()), same_second, CURRENT
     )
     assert side["available"] is True
     assert side["text"] == "shot_type: WS\ndescription: v1 text"
@@ -52,7 +64,9 @@ def test_a_ledger_ref_beats_a_timestamp_that_would_pick_the_wrong_prefix():
 @pytest.mark.parametrize("ref", [None, "not-a-number"])
 def test_a_missing_or_garbage_ledger_ref_falls_back_to_the_timestamp(ref):
     """存量行（None）与脏值走同一条退路——一条血缘不该因为一个字段而 500。"""
-    side = mod._shot_side(_row(2, ledger_ref=ref, created_at=_at(2).isoformat()), SHOT)
+    side = mod._shot_side(
+        _row(2, ledger_ref=ref, created_at=_at(2).isoformat()), SHOT, CURRENT
+    )
     assert side["text"] == "shot_type: WS\ndescription: v2 text"
 
 

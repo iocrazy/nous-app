@@ -8,7 +8,9 @@
 回退最多两行。**两条臂都有这个分支**，区别只在账本：
 
 * 分镜的人手编辑（``PATCH /shots/{id}``）根本不写 ops 行，所以保留版要**补一行账本**
-  才重建得出来；
+  才重建得出来；⚠️ 也因此这条臂只保得住**账本作证得了的**编辑：一个只被人手动过、
+  账本里从没出现过的字段走的是重建的第三档（当前行），比对时判不出差异（见
+  ``_revert_shot``）；
 * 场次的每一次编辑都经 ``apply_element_ops`` 写了 ``script_ops``，账本是全的——缺的
   只是「哪一版看到哪个水位」，所以保留版**不写新账本**，只把当前 ``max(op_seq)``
   记成它的 ``ledger_ref``。
@@ -332,6 +334,14 @@ async def _revert_shot(
             f"script_shot/{ref_id} is gone",
         )
     kept = None
+    # ``head`` = 最新登记版按账本重建出来的内容（``diff.rebuild_content``，三档）。
+    # 不同 ⇒ 水位之后有**账本看得见的**编辑没被登记，先把当前状态登记成一版。
+    #
+    # ⚠️ 这条臂只保得住账本作证得了的编辑。``PATCH /shots/{id}`` 不写 ops 行，所以
+    # 一个只被人手改过、账本里从没出现过的字段会走 ``rebuild_content`` 的第三档、
+    # 读出**当前**值 —— 于是 ``head`` 里已经有了它，这里判不出差异，那次人手编辑
+    # 也就没有被单独登记成一版（它没有被销毁：回退写回的同样是那个当前值）。
+    # 根治要让 ``PATCH /shots`` 也写一行账本（actor 记人），那是单独一票。
     if current != head:
         kept_ref = await _write_shot_fields(
             ref_id, current, actor=f"keep:{uid}", session=session, before=head

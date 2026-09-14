@@ -435,6 +435,126 @@ async def test_an_unregistered_hand_edit_is_kept_as_its_own_version(
     assert [r["ledger_ref"] for r in rows] == [str(o["id"]) for o in op_ids]
 
 
+#: 生产那个形状（Task 9 旁证 A）：分镜由 REST / 拆分工作流建出来，创建**没有**
+#: 账本行；此后只有 agent 改过 description。另外五个字段因此在账本里一次都不出现。
+_PARAMS_NEVER_IN_LEDGER = {
+    "shot_type": "MEDIUM",
+    "camera_angle": "eye_level",
+    "camera_movement": "static",
+    "focal_length": "50mm",
+    "lighting": "practical",
+}
+
+
+async def _seed_shot_chain_without_a_create_row(pg, fx) -> Dict[str, Any]:
+    """建分镜时就设好五个参数，然后**只**写一条改 description 的 update 账本行。"""
+    shot_id, run_id = fx["shot_id"], fx["run_id"]
+    await pg.execute(
+        "UPDATE public.script_shots SET shot_type=$2, camera_angle=$3, "
+        "camera_movement=$4, focal_length=$5, lighting=$6, description=$7 "
+        "WHERE id=$1",
+        shot_id,
+        *[
+            _PARAMS_NEVER_IN_LEDGER[f]
+            for f in (
+                "shot_type",
+                "camera_angle",
+                "camera_movement",
+                "focal_length",
+                "lighting",
+            )
+        ],
+        "Alpha rain on glass",
+    )
+    op1 = await pg.fetchval(
+        "INSERT INTO public.script_shot_ops "
+        "(run_id, shot_id, scene_id, action, before_json, after_json) "
+        "VALUES ($1, $2, $3, 'update', $4::jsonb, $5::jsonb) RETURNING id",
+        run_id,
+        shot_id,
+        fx["scene_id"],
+        __import__("json").dumps({"description": "seed text"}),
+        __import__("json").dumps({"description": "Alpha rain on glass"}),
+    )
+    await pg.execute(
+        "UPDATE public.script_shots SET description=$2 WHERE id=$1",
+        shot_id,
+        "Beta rain on glass",
+    )
+    op2 = await pg.fetchval(
+        "INSERT INTO public.script_shot_ops "
+        "(run_id, shot_id, scene_id, action, before_json, after_json) "
+        "VALUES ($1, $2, $3, 'update', $4::jsonb, $5::jsonb) RETURNING id",
+        run_id,
+        shot_id,
+        fx["scene_id"],
+        __import__("json").dumps({"description": "Alpha rain on glass"}),
+        __import__("json").dumps({"description": "Beta rain on glass"}),
+    )
+    for version, ledger_ref in ((1, op1), (2, op2)):
+        await pg.execute(
+            "INSERT INTO public.run_deliverables "
+            "(run_id, kind, ref_id, version, parent_version, title, ledger_ref) "
+            "VALUES ($1, 'script_shot', $2, $3, $4, $5, $6)",
+            run_id,
+            str(shot_id),
+            version,
+            version - 1 or None,
+            f"S1 \u00b7 Shot 1 \u00b7 v{version}",
+            str(ledger_ref),
+        )
+    return {"op1": op1, "op2": op2}
+
+
+@_skip
+async def test_a_revert_never_nulls_params_that_never_entered_the_ledger(
+    orm_dsn, fx, pg, unguarded
+):
+    """2026-09-14 生产实测的那次回退：``POST /outputs/script_shot/…/revert`` 之后
+    ``script_shots.shot_type`` 变成空。
+
+    只折叠 ``after_json`` 的话这五个字段任何一版都重建不出来，于是 UPDATE 把它们
+    写成 NULL，而且 ``rebuild_content(latest)`` 永远 ≠ 当前行 —— 「保留未登记编辑」
+    那条臂每次回退都白多写一版。真库跑，因为要证的正是那次 UPDATE 落下的值。
+    """
+    await _seed_shot_chain_without_a_create_row(pg, fx)
+    shot_id = fx["shot_id"]
+
+    out = await unguarded.revert_output(
+        kind="script_shot",
+        ref_id=str(shot_id),
+        to_version=1,
+        expected_latest=2,
+        auth=_auth(fx),
+    )
+
+    # ① 五个参数原地不动（不是 NULL），description 回到 v1。
+    assert await _shot_fields(pg, shot_id) == {
+        **_PARAMS_NEVER_IN_LEDGER,
+        "description": "Alpha rain on glass",
+    }
+    # ② 没有凭空多出来的「保留版」：当前内容与最新登记版重建内容现在真的相等。
+    assert out.kept_version is None
+    assert out.version["version"] == 3
+    chain = await pg.fetch(
+        "SELECT version FROM public.run_deliverables WHERE ref_id = $1 "
+        "ORDER BY version",
+        str(shot_id),
+    )
+    assert [r["version"] for r in chain] == [1, 2, 3]
+    # ③ 人手账本行也带着那五个参数 —— 否则这一版以后重建不出来。
+    import json
+
+    after = json.loads(
+        await pg.fetchval(
+            "SELECT after_json FROM public.script_shot_ops WHERE shot_id = $1 "
+            "AND run_id IS NULL ORDER BY id DESC LIMIT 1",
+            shot_id,
+        )
+    )
+    assert after["shot_type"] == "MEDIUM"
+
+
 @_skip
 async def test_a_failed_registration_rolls_the_content_back(
     orm_dsn, fx, pg, unguarded, monkeypatch

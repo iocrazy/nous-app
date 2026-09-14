@@ -177,6 +177,66 @@ async def test_unregistered_manual_edits_are_kept_as_their_own_version(wired):
     assert wired.applied[0][1] == f"keep:{ME}"
 
 
+#: 生产那个形状（2026-09-14，Task 9 旁证 A）：分镜是 REST / 拆分工作流建的，
+#: 创建没写账本行；此后只有 agent 改过 description。于是另外五个字段在账本里一次
+#: 都没出现过。
+_NEVER_IN_LEDGER = {
+    "shot_type": "MEDIUM",
+    "camera_angle": "EYE_LEVEL",
+    "camera_movement": "STATIC",
+    "focal_length": "35mm",
+    "lighting": "practical",
+}
+
+
+async def test_a_shot_whose_params_never_entered_the_ledger_reverts_without_nulls(
+    wired, monkeypatch
+):
+    """真的 ``rebuild_content``（不是桩）+ 只有 description 的账本。两条判据：
+
+    * 回退写回的六个字段里，那五个**不是 NULL** —— 它们从创建起就没变过，回退到
+      任何一版都不该动它们（生产上这次 UPDATE 把 ``shot_type`` 清空了）；
+    * 不多出一版：``rebuild_content(latest)`` 现在等于当前内容，所以「保留未登记
+      编辑」那条臂**不该**触发（生产上它每次回退都触发，凭空多一版）。
+    """
+    from app.services.deliverables import diff as diff_mod
+
+    ledger = [
+        (
+            {"after": {"description": "v1 text"}, "before": {}},
+            None,
+            101,
+        ),
+        (
+            {"after": {"description": "v3 text"}, "before": {"description": "v1 text"}},
+            None,
+            103,
+        ),
+    ]
+    live = {**_NEVER_IN_LEDGER, "description": "v3 text"}
+
+    async def _ledger(ref_id):
+        return ledger
+
+    async def _current(ref_id):
+        return dict(live)
+
+    monkeypatch.setattr(diff_mod, "_shot_ledger", _ledger)
+    monkeypatch.setattr(diff_mod, "_current_shot_fields", _current)
+    # 桩换回真货：这一条要钉的正是重建本身，而不是「我们把桩给的东西写下去了」。
+    monkeypatch.setattr(mod, "rebuild_content", diff_mod.rebuild_content)
+    wired.current = dict(live)
+
+    out = await mod.revert_output(
+        kind="script_shot", ref_id="9", to_version=1, expected_latest=3, auth=AUTH
+    )
+
+    assert out.kept_version is None and len(wired.registered) == 1
+    fields, actor = wired.applied[0]
+    assert actor == f"revert:{ME}"
+    assert fields == {**_NEVER_IN_LEDGER, "description": "v1 text"}
+
+
 async def test_content_that_cannot_be_rebuilt_refuses_instead_of_blanking(
     wired, monkeypatch
 ):

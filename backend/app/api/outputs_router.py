@@ -46,6 +46,7 @@ from app.services.deliverables.diff import build_diff
 from app.services.deliverables.kinds import ALL_KINDS
 from app.services.deliverables.lineage_view import (
     allocate_step_costs,
+    lend_chain_issue,
     redact_foreign_issue_links,
     version_of,
 )
@@ -224,11 +225,31 @@ async def get_output_diff(
             "version_not_found",
             f"{kind}/{ref_id} has no version {', '.join(str(v) for v in missing)}",
         )
+    # 人手版（回退写的）自己没有 issue —— 归属由这条链补上，和血缘端点、回退响应
+    # 用的是同一个 ``newest_with_a_run``。三个读者描述同一版必须说同一句话
+    # （Task 9 旁证 C：diff 曾是唯一说 ``issue_id: null`` 的那个）。
+    chain = newest_with_a_run(rows) or {}
+    lent = [
+        lend_chain_issue(
+            by_version[version],
+            issue_id=chain.get("issue_id"),
+            issue_key=chain.get("issue_key"),
+        )
+        for version in (from_version, to_version)
+    ]
+    # …补完立刻按可见性裁一刀，和 ``get_output_lineage`` 同一对函数。进门那道闸
+    # 只证明了「最新的有 run 的那一版」的 issue 可见；这两侧里任何一侧都可能是
+    # **另一件 issue** 下的旧版本，而 ``issue_key`` 是可路由的（``deep_link`` 的
+    # 锚点），直接透出去就是跨团队边界一行一行地漏（3a Task 8b / 小票 A1）。
+    # 借来的那一侧带的正是刚被判过的那件 issue，所以它照常活下来。
+    # 一次批量问答，最多两个 id —— 这一步是新增的开销，换掉的是一个泄露。
+    visible = await visible_issue_ids({row.get("issue_id") for row in lent}, auth)
+    from_row, to_row = redact_foreign_issue_links(lent, visible_issue_ids=visible)
     body = await build_diff(
         kind=kind,
         ref_id=str(ref_id),
-        from_row=by_version[from_version],
-        to_row=by_version[to_version],
+        from_row=from_row,
+        to_row=to_row,
     )
     return OutputDiffResponse.model_validate(body)
 
