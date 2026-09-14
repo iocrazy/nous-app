@@ -21,8 +21,12 @@ storyboard ShotCard renders them in a bare ``<img src>`` — the auth-gated
 ``/file`` endpoint can't carry a Bearer header from an ``<img>`` tag. ``/cover``
 serves the full image bytes (there is no downscaled thumbnail), so full-res and
 img-safe coincide. Frontend serves same-origin via the Vercel rewrite.
-Persistence is best-effort: on ANY failure the provider url is kept (logged
-loudly) rather than failing the whole generation.
+Persistence is best-effort ONLY for an http(s) provider url: on failure that
+url is kept (logged loudly) rather than failing the whole generation. A LOCAL
+provider product (codex / jimeng-cli scratch file) has no such fallback — the
+path is unreachable from a browser and its scratch dir is reaped in the same
+``finally``, so a persist failure there ``raise``s and the shot honestly goes
+``failed`` (see ``persist_generation``).
 
 Status machine (route-C aware — ``phase`` is trigger-owned, but ``shot.status``
 is a BUSINESS column this workflow may write):
@@ -170,11 +174,26 @@ async def persist_generation(
     """Persist the provider's ephemeral image through the generated-media store.
 
     Returns durable same-origin ``{image_url, thumbnail_url}`` (both ``/cover``,
-    see module docstring). Best-effort: on ANY failure — missing user_id,
-    unresolvable scope, download error, insert error — keeps the provider url
-    for both fields and logs loudly. Durability is the point of this step, so a
-    fallback is a real regression worth a WARNING, but it must never fail the
-    generation the user already paid for."""
+    see module docstring).
+
+    Failure handling depends on WHAT the provider handed back, because the two
+    shapes degrade differently (2026-09-14 真栈):
+
+    - ``http(s)`` url (Ark and friends): best-effort — on ANY failure (missing
+      user_id, unresolvable scope, download error, insert error) the provider
+      url is kept for both fields and the failure is logged loudly. It will rot
+      when the CDN link expires, but until then the user sees the image they
+      already paid for. A fallback here is a real regression worth a WARNING,
+      not a reason to fail the generation.
+    - **local file path** (codex / jimeng-cli write into a scratch dir): there
+      is no such trade-off. The path is inside the worker container, no browser
+      can open it, and ``reap_scratch_dir`` in this function's own ``finally``
+      deletes the directory before we even return. Keeping it would write a
+      permanently dead value onto a shot whose status says ``done`` — strictly
+      worse than an honest failure, because the retry UI never lights up. So it
+      ``raise``s and the workflow's existing failure branch marks the shot
+      failed. (Real row this produced: ``script_shots.id=337650953731886``,
+      ``status='done'``, ``image_url='/tmp/codeximg_y5nblpq4/gen.png'``.)"""
     from app.repositories.script_shot_repository import get_script_shot_repository
     from app.services.library.generated_media_service import (
         GenerationOrigin,
@@ -188,6 +207,13 @@ async def persist_generation(
     is_url = provider_url.startswith(("http://", "https://"))
     try:
         if not user_id:
+            if not is_url:
+                # 本地路径没有「先用着」这个选项——它在 finally 里就没了。
+                raise ValueError(
+                    f"shot {shot_id} persist has no user_id and the provider "
+                    f"product is a local file ({provider_url}) — refusing to "
+                    "write an unreachable path onto the shot"
+                )
             logger.warning(
                 "[script_shot_generate][persist] shot {} has no user_id — keeping "
                 "EPHEMERAL provider url (will rot): {}",
@@ -243,6 +269,17 @@ async def persist_generation(
             )
             return {"image_url": durable, "thumbnail_url": durable}
         except Exception:
+            if not is_url:
+                # 本地路径 + 登记失败：没有任何可保留的东西。原始错因原样抛出
+                # （DBOS 记的就是它），workflow 的失败分支把分镜标 failed。
+                logger.opt(exception=True).error(
+                    "[script_shot_generate][persist] durable persist FAILED for "
+                    "shot {} and the product is a LOCAL file ({}) — failing the "
+                    "shot instead of writing an unreachable path",
+                    shot_id,
+                    provider_url,
+                )
+                raise
             logger.opt(exception=True).warning(
                 "[script_shot_generate][persist] durable persist FAILED for shot {} "
                 "— keeping EPHEMERAL provider url (will rot): {}",

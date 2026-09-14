@@ -500,3 +500,21 @@ jobs:
           # wrong and the chain still passes every unit test while dispatching
           # nothing — the failure this whole task exists to prevent.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/integration/test_agent_workforce_repository_orm.py -v
+
+      - name: Exercise generated_media's TEXT origin_run_id against the built schema (3a)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place register_generated_media's INSERT meets a real
+          # driver with an int run_id. Its unit test stubs the session and
+          # asserts on the COMPILED bind value, which cannot settle the one
+          # question that took production down on 2026-09-14: does asyncpg
+          # reject an int for the TEXT column origin_run_id? It does —
+          # "invalid input for query argument $9: 349441401106307 (expected
+          # str, got int)" — and the whole INSERT dies with it, so a generated
+          # image registered nothing and had no lineage. The negative control
+          # in this file is what keeps the positive case a claim about
+          # Postgres rather than about SQLAlchemy's compiler.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_generated_media_int_run_id_integration.py -v

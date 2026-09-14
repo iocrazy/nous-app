@@ -230,3 +230,125 @@ async def test_register_leaves_the_column_null_when_no_asset_was_named(
     )
 
     assert captured["params"]["source_asset_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# TEXT 列收 int（2026-09-14 真栈）：分镜链的 run_id 是 int，agent 工具链是
+# str，同一个登记口两种形状都会到。asyncpg 对 TEXT 列只接受 str：
+#   DataError: invalid input for query argument $9: 349441401106307
+#              (expected str, got int)
+# 归一化的责任在咽喉点一处（「公共契约两侧都要遵守」），不是 17 个调用点。
+# ---------------------------------------------------------------------------
+
+#: 真栈里那次失败的 run（MH-96, 2026-09-14 10:01Z）。
+_REAL_INT_RUN_ID = 349441401106307
+
+
+def _text_columns() -> tuple[str, ...]:
+    """模型里真正是 TEXT 的列名——手数一份清单会随迁移漂移。"""
+    from sqlalchemy import Text
+
+    from app.models import GeneratedMedia
+
+    return tuple(
+        c.name
+        for c in GeneratedMedia.__table__.columns
+        if isinstance(c.type, Text.__class__) or isinstance(c.type, Text)
+    )
+
+
+def _assert_every_text_bind_is_str(params: dict) -> None:
+    for name in _text_columns():
+        if name not in params:
+            continue
+        value = params[name]
+        assert value is None or isinstance(value, str), (
+            f"TEXT 列 {name} 收到 {type(value).__name__} {value!r}"
+            " —— asyncpg 会拒绝整条 INSERT"
+        )
+
+
+@pytest.mark.asyncio
+async def test_register_normalises_an_int_run_id_into_the_text_column(
+    tmp_path, monkeypatch
+):
+    """DBOS 分镜链给的是 int run_id（``gateway.ledger_run_id``）。"""
+    import app.services.library.generated_media_service as gm
+
+    src = tmp_path / "gen.png"
+    src.write_bytes(b"\x89PNG")
+    captured: dict = {}
+
+    monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+    monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
+
+    await gm.register_generated_media(
+        user_id="u1",
+        scope_id=42,
+        source_path=str(src),
+        mime="image/png",
+        origin=gm.GenerationOrigin(
+            kind="shot_generate",
+            run_id=_REAL_INT_RUN_ID,
+            node_id=349441401106999,
+        ),
+    )
+
+    p = captured["params"]
+    assert p["origin_run_id"] == str(_REAL_INT_RUN_ID)
+    assert p["node_id"] == "349441401106999"
+    _assert_every_text_bind_is_str(p)
+
+
+@pytest.mark.asyncio
+async def test_register_keeps_a_str_run_id_untouched(tmp_path, monkeypatch):
+    """负向对照：agent 工具链给 str，归一化不许把它改成别的东西。"""
+    import app.services.library.generated_media_service as gm
+
+    src = tmp_path / "gen.png"
+    src.write_bytes(b"\x89PNG")
+    captured: dict = {}
+
+    monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+    monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
+
+    await gm.register_generated_media(
+        user_id="u1",
+        scope_id=42,
+        source_path=str(src),
+        mime="image/png",
+        origin=gm.GenerationOrigin(kind="agent_run", run_id="913402881190401"),
+    )
+
+    p = captured["params"]
+    assert p["origin_run_id"] == "913402881190401"
+    assert p["origin_kind"] == "agent_run"
+    _assert_every_text_bind_is_str(p)
+
+
+@pytest.mark.asyncio
+async def test_register_does_not_mutate_the_caller_s_origin(tmp_path, monkeypatch):
+    """归一化落在 INSERT 的值上，不回写调用方手里的 dataclass——
+    调用方随后还要用 ``origin.run_id`` 去登记血缘。"""
+    import app.services.library.generated_media_service as gm
+
+    src = tmp_path / "gen.png"
+    src.write_bytes(b"\x89PNG")
+    captured: dict = {}
+
+    monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+    monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
+
+    origin = gm.GenerationOrigin(kind="shot_generate", run_id=_REAL_INT_RUN_ID)
+    await gm.register_generated_media(
+        user_id="u1",
+        scope_id=42,
+        source_path=str(src),
+        mime="image/png",
+        origin=origin,
+    )
+
+    assert origin.run_id == _REAL_INT_RUN_ID
