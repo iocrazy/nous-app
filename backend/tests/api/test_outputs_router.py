@@ -52,7 +52,9 @@ def _row(version: int, **over) -> dict:
         "parent_version": version - 1 if version > 1 else None,
         "title": f"S1 · Shot {version}",
         "model": "qwen-max",
-        "cost_cents": 1.25,
+        # 文本类登记行的 ``cost_cents`` 永远是 NULL（3b：不回写，读时才按步
+        # 分摊）。写 1.25 会让整个文件在一个生产里不存在的形状上跑绿。
+        "cost_cents": None,
         "turn": 2,
         "step": 3,
         "created_at": f"2026-09-1{version}T00:00:00+00:00",
@@ -136,6 +138,10 @@ def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None, gate
     monkeypatch.setattr(
         mod, "build_diff", AsyncMock(return_value=diff if diff is not None else {})
     )
+    # 读时分摊默认「没有份额可分」：不打桩的话每个用例都会真的去读事件流
+    # （``load_step_shares`` 自己吞异常，于是失败会静默成 {} 而不是报错）。
+    # 关心分摊的用例在 ``_client`` 之后自己覆盖它。
+    monkeypatch.setattr(mod, "load_step_shares", AsyncMock(return_value={}))
     return TestClient(app)
 
 
@@ -169,7 +175,9 @@ def test_lineage_carries_the_lineage_columns(monkeypatch):
     assert top["parent_version"] == 2
     assert top["title"] == "S1 · Shot 3"
     assert top["model"] == "qwen-max"
-    assert top["cost_cents"] == 1.25
+    # 登记行没有花费；本用例没有 step_end 份额，所以两个键都是 None（分摊本身
+    # 由 test_lineage_allocates_the_step_cost_and_reports_the_kind 钉住）。
+    assert top["cost_cents"] is None and top["cost_kind"] is None
     assert top["turn"] == 2 and top["step"] == 3
 
 
@@ -316,6 +324,60 @@ def test_a_run_with_no_issue_is_visible_only_to_its_own_user(monkeypatch):
         .status_code
         == 404
     )
+
+
+def test_lineage_allocates_the_step_cost_and_reports_the_kind(monkeypatch):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(
+        mod, "load_step_shares", AsyncMock(return_value={(int(RUN_ID), 2, 3): 0.09})
+    )
+    body = client.get("/api/v1/outputs/script_shot/9").json()
+    assert [(v["cost_cents"], v["cost_kind"]) for v in body["versions"]] == [
+        (0.09, "allocated")
+    ] * 3
+
+
+def test_a_media_versions_registered_cost_stays_exact(monkeypatch):
+    """媒体类登记时就有真价（目录每次调用价）——读时不许拿份额把它盖掉。"""
+    client = _client(monkeypatch, rows=[_row(1, cost_cents=12.0)])
+    monkeypatch.setattr(
+        mod, "load_step_shares", AsyncMock(return_value={(int(RUN_ID), 2, 3): 0.09})
+    )
+    top = client.get("/api/v1/outputs/script_shot/9").json()["versions"][0]
+    assert (top["cost_cents"], top["cost_kind"]) == (12.0, "exact")
+
+
+def test_lineage_reports_the_chain_watermark(monkeypatch):
+    """``as_of_seq`` = 最新登记行的 seq——前端按它丢过期的刷新信号。"""
+    client = _client(monkeypatch)
+    assert client.get("/api/v1/outputs/script_shot/9").json()["as_of_seq"] == 3
+
+
+def test_a_version_with_no_seq_falls_back_to_its_row_id(monkeypatch):
+    """人手登记的版本不落 transcript 事件、没有 seq——用行 id 当水位。"""
+    client = _client(monkeypatch, rows=[_row(3, seq=None), _row(2), _row(1)])
+    body = client.get("/api/v1/outputs/script_shot/9").json()
+    assert body["as_of_seq"] == 700000000000003
+
+
+def test_a_version_with_no_run_asks_for_no_share(monkeypatch):
+    """人手版没有 run，不该出现在装载的 run 清单里（``int(None)`` 当场炸）。"""
+    asked: list[list] = []
+
+    async def _shares(run_ids):
+        asked.append(list(run_ids))
+        return {}
+
+    client = _client(
+        monkeypatch,
+        rows=[
+            _row(2, run_id=None, issue_id=None, issue_key=None, team_id=None, seq=None),
+            _row(1),
+        ],
+    )
+    monkeypatch.setattr(mod, "load_step_shares", _shares)
+    assert client.get("/api/v1/outputs/script_shot/9").status_code == 200
+    assert asked == [[int(RUN_ID)]]
 
 
 def test_a_human_revert_version_is_returned_and_does_not_decide_the_gate(monkeypatch):

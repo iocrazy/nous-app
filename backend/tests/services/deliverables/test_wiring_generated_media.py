@@ -132,3 +132,72 @@ async def test_an_upload_never_registers(register_spy, insert_stub, tmp_path):
         origin=gm.GenerationOrigin(kind="chat_upload", conversation_id=5),
     )
     assert register_spy == []
+
+
+@pytest.fixture
+def price_stub(monkeypatch):
+    import app.services.library.generated_media_service as gm
+
+    asked: list[tuple] = []
+
+    async def _price(model, provider):
+        asked.append((model, provider))
+        return 12.0
+
+    monkeypatch.setattr(gm, "media_price_cents", _price)
+    return asked
+
+
+async def test_media_cost_is_filled_from_the_catalog_price(
+    register_spy, insert_stub, price_stub
+):
+    """登记行与 generated_media 行拿到同一个数（3b spec §5 验收⑤）。"""
+    gm = insert_stub
+    out = await gm.register_generated_media(
+        user_id="u",
+        scope_id=1,
+        source_url="http://x/y.png",
+        mime="image/png",
+        origin=gm.GenerationOrigin(
+            kind="agent_run",
+            run_id="777",
+            model="doubao-seedream-4-0",
+            provider="ark",
+            prompt="A cafe at dusk",
+        ),
+    )
+    assert price_stub == [("doubao-seedream-4-0", "ark")]
+    assert register_spy[0]["cost_cents"] == 12.0
+    assert out["cost_cents"] == 12.0
+
+
+async def test_an_explicit_cost_is_never_overwritten(
+    register_spy, insert_stub, price_stub
+):
+    """调用方已经知道花费时不查表——目录价是兜底，不是覆盖。"""
+    gm = insert_stub
+    await gm.register_generated_media(
+        user_id="u",
+        scope_id=1,
+        source_url="http://x/y.png",
+        mime="image/png",
+        origin=gm.GenerationOrigin(
+            kind="agent_run", run_id="777", model="m", provider="p", cost_cents=0.5
+        ),
+    )
+    assert price_stub == [] and register_spy[0]["cost_cents"] == 0.5
+
+
+async def test_half_an_attribution_means_no_lookup(
+    register_spy, insert_stub, price_stub
+):
+    """归因缺一半就查不出价（Task 0 的理由）——不瞎猜，留 None。"""
+    gm = insert_stub
+    await gm.register_generated_media(
+        user_id="u",
+        scope_id=1,
+        source_url="http://x/y.png",
+        mime="image/png",
+        origin=gm.GenerationOrigin(kind="agent_run", run_id="777", model="m"),
+    )
+    assert price_stub == [] and register_spy[0]["cost_cents"] is None

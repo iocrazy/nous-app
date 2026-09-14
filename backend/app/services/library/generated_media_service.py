@@ -24,6 +24,7 @@ from app.boundary import MaxBytesExceededError, cap_aiter
 from app.core.config import settings
 from app.db.session import write_scope
 from app.models import GeneratedMedia
+from app.services.deliverables.media_price import media_price_cents
 from app.services.deliverables.registry import register_deliverable_best_effort
 from app.services.library.media_storage import (
     CHAT_MEDIA_BUCKET,
@@ -372,6 +373,13 @@ async def register_generated_media(
             size = await _download_to(dest, source_url)
         file_path = rel
 
+    # 媒体花费的唯一填写点（3b spec §3.2）。17 个调用点零改动——它们的区别只剩
+    # origin 里有没有归因。已经带 cost_cents 的调用方（真花费已知）不查表。
+    # ⚠️ 不改 ``origin``（它是调用方的对象，不可变纪律），只用局部变量。
+    cost_cents = origin.cost_cents
+    if cost_cents is None and origin.model and origin.provider:
+        cost_cents = await media_price_cents(origin.model, origin.provider)
+
     stmt = _generated_media_insert_stmt(
         scope_id=scope_id,
         creator_id=user_id,
@@ -390,7 +398,7 @@ async def register_generated_media(
         model=_as_text(origin.model),
         provider=_as_text(origin.provider),
         params=origin.params or {},
-        cost_cents=origin.cost_cents,
+        cost_cents=cost_cents,
         parent_resource_id=origin.parent_resource_id,
         derivation_kind=_as_text(origin.derivation_kind),
         conversation_id=origin.conversation_id,
@@ -409,9 +417,10 @@ async def register_generated_media(
             ref_id=str(out["id"]),
             title=_first_line(origin.prompt),
             model=origin.model,
-            # 今天没有任何调用点填 origin.cost_cents，所以媒体类产出的花费
-            # 在血缘里是空的（UI 显 —）。不伪造一个数字（小票已记）。
-            cost_cents=origin.cost_cents,
+            # 媒体类是登记时就精确的价（血缘里 ``cost_kind=exact``）：调用方
+            # 自己知道就用它的，否则取目录每次调用价。无价即 None，UI 显 '—'
+            # ——不伪造一个数字（3b spec §3.2）。
+            cost_cents=cost_cents,
             turn=origin.turn,
             step=origin.step,
             recorder=recorder,

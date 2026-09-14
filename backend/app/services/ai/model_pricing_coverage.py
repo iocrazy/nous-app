@@ -12,6 +12,10 @@ Orthogonal to the connectivity probe (``mediahub_model_health``): a model can be
 reachable AND unpriced, so this is its own field, never folded into
 ``last_test_status`` (the "orthogonal results report independently" rule).
 
+3b §3.2 起这道守卫也覆盖 image / video：它们的花费来自
+``ai_model_prices.per_call_cents``，没有那一行，生成的图在血缘与预算里都是
+'—'。两个价目面各查各的，按行的 ``type`` 选（见 ``_PRICE_FACE_BY_TYPE``）。
+
 Matching mirrors what the recorder actually looks up, observed on production:
 most runs record ``model = actual_model`` (``doubao-seed-2-0-lite-260428``), but
 the OpenAI-compatible self-hosted path records the catalog ``name``
@@ -35,29 +39,36 @@ from app.services.ai.mediahub_model_health import LOCAL_ENGINE_PROVIDERS
 # Closed enum. The admin UI keys its tag colours off these exact strings.
 PRICE_COVERAGE = ("priced", "missing", "not_applicable", "unknown")
 
-# Only per-token LLM traffic goes through RunRecorder's price snapshot. Image /
-# video / tts / asr / embedding rows are billed by other paths (or not at all)
-# and would be permanent false "missing" tags here.
-PRICED_MODEL_TYPES = frozenset({"llm"})
+# LLM 走 RunRecorder 的每千 token 价，image / video 走
+# ``ai_model_prices.per_call_cents``（3b §3.2）；tts / asr / embedding 仍由别的
+# 路径计费，留在外面——它们在这里只会是永久的假 "missing"。
+PRICED_MODEL_TYPES = frozenset({"llm", "image", "video"})
+
+# 每种 type 看价目表的哪一面。两个面不可互换：一个只配了每千 token 价的模型，
+# 在图片那一行必须报 missing，否则「已配价」这个标签就在说谎。
+_PRICE_FACE_BY_TYPE = {"llm": "token", "image": "per_call", "video": "per_call"}
 
 
 def price_coverage_for(
-    row: Mapping[str, Any], priced_models: Optional[Iterable[str]]
+    row: Mapping[str, Any], priced_models: Optional[Mapping[str, Iterable[str]]]
 ) -> str:
-    """Coverage status for one catalog row given the set of priced model keys.
+    """Coverage status for one catalog row given the priced model keys.
 
-    ``priced_models`` is ``None`` when the price table could not be read —
-    every applicable row then reports ``unknown`` rather than ``missing``.
+    ``priced_models`` maps a price FACE (``token`` / ``per_call``) to the model
+    keys that have a row on it; the row's ``type`` picks the face. It is
+    ``None`` when the price table could not be read — every applicable row then
+    reports ``unknown`` rather than ``missing``.
     """
-    if row.get("type") not in PRICED_MODEL_TYPES:
+    face = _PRICE_FACE_BY_TYPE.get(row.get("type"))
+    if face is None:
         return "not_applicable"
     if row.get("actual_provider") in LOCAL_ENGINE_PROVIDERS:
         # Runs on the user's own machine under their own subscription; there is
-        # no per-token price for the platform to snapshot.
+        # no price for the platform to snapshot.
         return "not_applicable"
     if priced_models is None:
         return "unknown"
-    priced = set(priced_models)
+    priced = set(priced_models.get(face) or ())
     keys = {row.get("actual_model") or "", row.get("name") or ""} - {""}
     return "priced" if keys & priced else "missing"
 
@@ -71,8 +82,29 @@ def _priced_models_select_stmt():
     return select(AiModelPrices.model).distinct()
 
 
-async def load_priced_models() -> Optional[set[str]]:
-    """All ``ai_model_prices.model`` keys, or ``None`` if the read failed.
+def _per_call_priced_models_select_stmt():
+    """同上，但只要**配了每次调用价**的模型（3b §3.2）。
+
+    ``per_call_cents IS NOT NULL`` 不能省：每个 LLM 行都有每千 token 价，不过滤
+    的话一个同名媒体模型会被判成「已配价」，而它生成的图在血缘里仍然是 '—'。
+    """
+    from sqlalchemy import select
+
+    from app.models import AiModelPrices
+
+    return (
+        select(AiModelPrices.model)
+        .where(AiModelPrices.per_call_cents.isnot(None))
+        .distinct()
+    )
+
+
+async def load_priced_models() -> Optional[dict[str, set[str]]]:
+    """两个价目面的模型键，或 ``None``（读失败）。
+
+    ``{"token": …, "per_call": …}`` —— 前者是有每千 token 价的（LLM 走它），
+    后者是有 ``per_call_cents`` 的（image / video 走它）。两条语句共用一次
+    session：这一页每次列表只该付一次连接的钱。
 
     Never raises: the catalog list must still render when the price table is
     unreachable, and the callers turn ``None`` into ``unknown`` per row.
@@ -81,8 +113,18 @@ async def load_priced_models() -> Optional[set[str]]:
 
     try:
         async with read_scope() as session:
-            rows = (await session.execute(_priced_models_select_stmt())).scalars().all()
-        return {str(m) for m in rows if m}
+            token = (
+                (await session.execute(_priced_models_select_stmt())).scalars().all()
+            )
+            per_call = (
+                (await session.execute(_per_call_priced_models_select_stmt()))
+                .scalars()
+                .all()
+            )
+        return {
+            "token": {str(m) for m in token if m},
+            "per_call": {str(m) for m in per_call if m},
+        }
     except Exception as e:  # noqa: BLE001 — diagnostic must degrade, not raise
         logger.warning(f"[model_pricing_coverage] price table read failed: {e}")
         return None

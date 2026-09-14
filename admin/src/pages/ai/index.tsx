@@ -45,8 +45,13 @@ interface NousModel {
   // the budget hook never fires (mig 454 fixed 6 of 7 models in use).
   //   priced          a row matches actual_model or the catalog name
   //   missing         no row — add one (supabase/migrations, see mig 454)
-  //   not_applicable  not an LLM, or runs on the user's own machine
+  //   not_applicable  billed by another path (tts/asr/embedding), or runs on
+  //                   the user's own machine
   //   unknown         the price table could not be read; not a verdict
+  // image / video look at `ai_model_prices.per_call_cents` (mig 466) instead of
+  // the per-1k-token columns — without it a generated image shows '—' in both
+  // the output lineage and the budget, so these types are no longer a
+  // permanent `not_applicable`.
   price_coverage?: 'priced' | 'missing' | 'not_applicable' | 'unknown' | null
 }
 
@@ -157,7 +162,7 @@ function PriceCoverageTag({ coverage }: { coverage?: NousModel['price_coverage']
     <Tag
       color="red"
       size="small"
-      title="No ai_model_prices row matches this model — its runs record cost as NULL (Usage shows '—', budget checks never fire). Add a row via a supabase migration, see mig 454."
+      title="No ai_model_prices row for this model — LLM runs record cost as NULL; image/video generations have no per_call_cents, so their spend shows '—' and never counts toward a budget. Add a row via a supabase migration."
     >
       No price row
     </Tag>

@@ -45,10 +45,12 @@ from app.schemas.outputs import (
 from app.services.deliverables.diff import build_diff
 from app.services.deliverables.kinds import ALL_KINDS
 from app.services.deliverables.lineage_view import (
+    allocate_step_costs,
     redact_foreign_issue_links,
     version_of,
 )
 from app.services.deliverables.revert import revert_output
+from app.services.deliverables.step_costs import load_step_shares
 from app.services.issues.issue_visibility import (
     assert_issue_visible,
     visible_issue_ids,
@@ -161,21 +163,38 @@ async def get_output_lineage(
     # 也说成属于这个 issue（3b fix 轮 1）。``version_of`` 会把它的 turn / step /
     # deep_link 一并清成 None。
     chain = newest_with_a_run(rows) or {}
+    # 文本类的花费不在登记行里（3b §3.1：不回写）。它是产出那一版的**那一步**的
+    # LLM 花费，按那一步产出了几件均摊 —— 一次查询装载整条链涉及的 run，装不出
+    # 来的步就没有份额（缺席 = 不知道，不是免费）。人手版没有 run，不进清单。
+    shares = await load_step_shares(
+        [int(r["run_id"]) for r in rows if r.get("run_id") is not None]
+    )
     versions = redact_foreign_issue_links(
-        [
-            version_of(
-                row,
-                issue_id=chain.get("issue_id") if row.get("run_id") is None else None,
-                issue_key=chain.get("issue_key") if row.get("run_id") is None else None,
-            )
-            for row in rows
-        ],
+        allocate_step_costs(
+            [
+                version_of(
+                    row,
+                    issue_id=(
+                        chain.get("issue_id") if row.get("run_id") is None else None
+                    ),
+                    issue_key=(
+                        chain.get("issue_key") if row.get("run_id") is None else None
+                    ),
+                )
+                for row in rows
+            ],
+            shares,
+        ),
         visible_issue_ids=visible,
     )
+    # 水位取最新那一行的 seq —— 人手版不落 transcript 事件、没有 seq，退回它的
+    # 行 id。两者都单调，前端只拿它比大小丢过期的刷新信号（3b §4）。
+    newest = rows[0]
     return OutputLineageResponse(
         kind=kind,
         ref_id=str(ref_id),
         latest_version=versions[0]["version"],
+        as_of_seq=int(newest.get("seq") or newest["id"]),
         versions=versions,
     )
 

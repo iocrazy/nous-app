@@ -181,4 +181,46 @@ def group_by_object(
     return items
 
 
-__all__ = ["group_by_object", "redact_foreign_issue_links", "version_of"]
+def allocate_step_costs(
+    versions: List[Dict[str, Any]], step_costs: Dict[tuple, float]
+) -> List[Dict[str, Any]]:
+    """给每个版本补上 ``cost_cents`` + ``cost_kind``（3b spec §3.1）。返回新 dict。
+
+    ``step_costs`` 的值是**每件产出**的份额（``step_costs.load_step_shares`` 已
+    除过那一步的产出件数），键 ``(run_id, turn, step)``（turn 今天恒为 1）。三态：
+
+    * 登记行自带 ``cost_cents``（媒体类，登记时就精确）→ 原值 + ``exact``；
+    * 命中份额 → ``allocated``（**参考值，不是计费输入** —— 预算钩子只吃
+      ``step_end`` 与媒体精确价）；
+    * 都没有 → ``None`` + ``cost_kind=None``。**不是 0**：0 说「这一版不要钱」，
+      None 说「不知道」。
+    """
+    out: List[Dict[str, Any]] = []
+    for version in versions:
+        if version.get("cost_cents") is not None:
+            out.append({**version, "cost_kind": "exact"})
+            continue
+        run_id, turn, step = (
+            version.get("run_id"),
+            version.get("turn"),
+            version.get("step"),
+        )
+        share = None
+        if run_id is not None and turn is not None and step is not None:
+            share = step_costs.get((int(run_id), int(turn), int(step)))
+        out.append(
+            {
+                **version,
+                "cost_cents": share,
+                "cost_kind": "allocated" if share is not None else None,
+            }
+        )
+    return out
+
+
+__all__ = [
+    "allocate_step_costs",
+    "group_by_object",
+    "redact_foreign_issue_links",
+    "version_of",
+]
