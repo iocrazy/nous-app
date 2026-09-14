@@ -58,6 +58,16 @@ export interface OutputProvenanceProps {
    * reader arrived from, and that beats the producing run's own issue.
    */
   issueHref?: string;
+  /** 宿主已经读到的链 —— 传了就不自取。资源面板走的是另一个端点
+   *  （`GET /resources/{id}/provenance`，键是资源 id 不是 generated_media id），
+   *  同一块 UI 不该为此长出第二条取数分支。`undefined` = 自取；
+   *  `null` = 宿主查过、没有来源（人手上传），渲染 null。
+   *
+   *  代价写明白：喂进来的链不参与本块的缓存失效（generation 按
+   *  `kind`/`ref_id` 记账，而这条链的键是资源 id），所以它的新鲜度由宿主负责。 */
+  lineage?: OutputLineage | null;
+  /** 允许 Diff 按钮。媒体在资源面板上没有可比的版本文本（3b §6）。 */
+  allowDiff?: boolean;
   className?: string;
 }
 
@@ -68,11 +78,17 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
   kind,
   refId,
   issueHref,
+  lineage: lineageProp,
+  allowDiff,
   className,
 }) => {
   const { t } = useTranslation();
   const childRun = useChildRun();
-  const [lineage, setLineage] = useState<OutputLineage | null>(null);
+  /** 自取回来的链。宿主喂了 `lineage` 时它保持不用 —— 屏幕上那条是下面派生的。 */
+  const [fetched, setFetched] = useState<OutputLineage | null>(null);
+  // 派生而不是把 prop 镜像进 state：镜像要靠一个 effect 回写，宿主内联一个对象
+  // 字面量就会让那个 effect 每次渲染都跑一遍（外加一次多余的 setState）。
+  const lineage = lineageProp !== undefined ? lineageProp : fetched;
   /** `null` = nothing wrong (including "not registered", which clears state
    *  entirely). A string is a code we have to SAY something about. */
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -88,17 +104,21 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
   // finishing would otherwise blank this block and shut an open version dialog
   // under the reader's hands.
   useEffect(() => {
-    setLineage(null);
+    setFetched(null);
     setErrorCode(null);
     setDiffOpen(false);
   }, [kind, refId]);
 
   useEffect(() => {
+    // 宿主给了答案就不再自问。`null` 也是答案（人手上传），所以判的是
+    // `undefined` 而不是真值 —— 真值判定会把「查过、没有」退回成「自己去取」，
+    // 对着一个本块根本不该问的端点。
+    if (lineageProp !== undefined) return;
     if (!refId) return;
     let live = true;
     getOutputLineage(kind, refId)
       .then((chain) => {
-        if (live) setLineage(chain);
+        if (live) setFetched(chain);
       })
       .catch((err) => {
         if (!live) return;
@@ -112,9 +132,11 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
     return () => {
       live = false;
     };
-  }, [kind, refId, gen]);
+  }, [kind, refId, gen, lineageProp]);
 
-  if (errorCode !== null) {
+  // 自取失败才说「读不到」。宿主喂着链的时候屏幕上那条不是自取来的，一个陈旧的
+  // 自取错误盖在它上面等于报了一件此刻不成立的事。
+  if (errorCode !== null && lineageProp === undefined) {
     return (
       <p
         data-testid="output-provenance-error"
@@ -135,6 +157,12 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
   // The host's answer wins; the lineage's own link is the fallback, and both
   // may be absent. Neither is ever synthesised — see the note at the top.
   const issueUrl = issueHref ?? latest.deep_link;
+  // 坐标还在、链接没了 = 被可见性抹掉，而不是「这个 run 本来就没有议题」。
+  // 两种情形读者要采取的行动完全不同（去要权限 vs 没什么可去）。
+  const redacted = latest.issue_id !== null && !issueUrl;
+  const unlinkedTitle = redacted
+    ? t('outputs.provenanceRedacted', 'Issue not visible to you')
+    : t('outputs.provenanceNoLink', 'The issue that produced this is not linked');
 
   return (
     <>
@@ -199,7 +227,7 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
           ) : (
             <span
               data-testid="output-provenance-issue-unlinked"
-              title={t('outputs.provenanceNoLink', 'The issue that produced this is not linked')}
+              title={unlinkedTitle}
               className={`${BTN} cursor-not-allowed opacity-50`}
             >
               <ExternalLink size={11} />
@@ -209,12 +237,24 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
 
           {/* Same contract Task 5's dialog uses: the run panel belongs to the
               issue page, so off that page there is nothing to open and the
-              control says why rather than silently doing nothing. */}
+              control says why rather than silently doing nothing.
+
+              Redacted goes the same way, for a different reason: the run
+              belongs to an issue this reader may not see, so opening its panel
+              is not ours to offer. The coordinates stay on screen — the reader
+              can name the run when asking for access — but the control says
+              why instead of doing nothing when clicked (3b §5 稿四). */}
           <button
             type="button"
             data-testid="output-provenance-run"
-            disabled={!childRun}
-            title={childRun ? undefined : t('outputs.openRunHint', 'The run panel is not open here')}
+            disabled={!childRun || redacted}
+            title={
+              redacted
+                ? unlinkedTitle
+                : childRun
+                  ? undefined
+                  : t('outputs.openRunHint', 'The run panel is not open here')
+            }
             onClick={() =>
               childRun?.open({
                 childRunId: latest.run_id,
@@ -234,7 +274,7 @@ export const OutputProvenance: React.FC<OutputProvenanceProps> = ({
           {/* Only with something to compare against. A Diff control on a
               single-version object could never work, and a control that can
               never work reads as broken rather than as absent. */}
-          {versions >= 2 && (
+          {allowDiff !== false && versions >= 2 && (
             <button
               type="button"
               data-testid="output-provenance-diff"

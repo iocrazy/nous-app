@@ -8,7 +8,8 @@ import {
   type KeysetListPage,
 } from './pagination';
 import { getAuthHeaders } from './parserService';
-import { apiClient } from './apiClient';
+import { apiClient, ApiError } from './apiClient';
+import type { OutputLineage } from './outputsService';
 import { getApiUrl } from '../utils/apiConfig';
 import { buildMediaUrl } from '../utils/mediaUrl';
 import { chunked, PG_IN_CHUNK } from '../utils/chunk';
@@ -2479,4 +2480,43 @@ export async function fetchResourceCanvasRefs(resourceId: string): Promise<Canva
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   return json.data as CanvasBackRef[];
+}
+
+// ─── Provenance (harness 三期 3b §5 稿四) ────────────────
+
+/**
+ * 这条路上「没有来源可画」的两种 404 —— 资源不存在、没有产出登记
+ * （`resources_provenance_router.py` 的两个 `_reject`）。两者对这块 UI 是同一个
+ * 答案，别的 404 都不是。
+ */
+const NO_CHAIN_CODES = new Set(['not_found', 'not_registered']);
+
+/**
+ * 这个资源是谁做出来的 —— `null` 表示后端说了「这里没有来源」，也就是人传的。
+ *
+ * 这两种 404 收成 null 而不是抛：库里绝大多数行都是人传的，把常态渲染成错误等于
+ * 在每一页挂一个永久假警报（`OutputProvenance` 顶部写的同一条规则）。其它失败
+ * 一律外抛 —— 静默成 null 会让「读不到」与「人传的」不可区分。
+ *
+ * **判据是 `details.code` 而不是 `err.code`，也不是光看状态码**：
+ * - 生产把每个 `HTTPException` 包进 ErrorResponse 外壳，`err.code` 拿到的是外壳的
+ *   `http_404`，类型码在 `details` 里（CLAUDE.md 2026-09-09）。本路由是**故意**用
+ *   dict `detail` 抛的，就是为了让类型码能原样落到那儿。
+ * - 光看 404 会把「这条路由还没部署」（FastAPI 裸 `{"detail":"Not Found"}`，无
+ *   类型码）读成「这个资源是人传的」—— 整块来源在全站静默消失，而没有一处会说出来。
+ *   那种 404 必须外抛，让面板的 `console.error` 看见它。
+ *
+ * 反查在后端：链接在 `generated_media.promoted_resource_id` 一侧，`resources` 没有
+ * 反向列，前端拿着资源 id 无从自己走到 generated_media。
+ */
+export async function getResourceProvenance(resourceId: string): Promise<OutputLineage | null> {
+  try {
+    return await apiClient.get<OutputLineage>(`/api/v1/resources/${resourceId}/provenance`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      const code = (err.details as { code?: string } | undefined)?.code;
+      if (code && NO_CHAIN_CODES.has(code)) return null;
+    }
+    throw err;
+  }
 }

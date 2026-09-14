@@ -37,6 +37,7 @@ vi.mock('../Todolist/OutputDiffDialog', () => ({
 
 import { OutputProvenance } from './OutputProvenance';
 import { invalidateOutputLineage, OutputsError } from '../../services/outputsService';
+import { ChildRunContext } from '../Todolist/childRunContext';
 
 afterEach(cleanup);
 
@@ -297,5 +298,84 @@ describe('OutputProvenance — live refresh', () => {
     act(() => invalidateOutputLineage('generated_media', '77'));
     await waitFor(() => expect(getOutputLineage).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId('output-diff-dialog')).not.toBeNull();
+  });
+});
+
+/**
+ * harness 3b Task 7b —— 宿主已经读到链的两个入口。
+ *
+ * 资源信息面板走的是**另一个端点**（`GET /resources/{id}/provenance`，键是资源
+ * id 而不是 generated_media id），但要画的是同一块 UI。所以这块不长第二条取数
+ * 分支，而是收下宿主读到的链：一块 UI，两个宿主。
+ *
+ * `ChildRunContext` 真的接上，不是装饰：没有它 Open Run 本来就是 disabled，
+ * 「被可见性抹掉就禁用」那一条会在一个恒真的断言上过关。
+ */
+describe('OutputProvenance — a host that already read the chain', () => {
+  const chain = {
+    ...lineage([version(1)]),
+    kind: 'generated_media',
+    ref_id: '347786145852739',
+  };
+  const twoVersions = {
+    ...lineage([version(2), version(1)]),
+    kind: 'generated_media',
+    ref_id: '347786145852739',
+  };
+  const childRun = { current: null, open: vi.fn(), close: vi.fn() };
+
+  const renderFed = (props: Partial<React.ComponentProps<typeof OutputProvenance>>) =>
+    render(
+      <MemoryRouter initialEntries={[OBJECT_ROUTE]}>
+        <ChildRunContext.Provider value={childRun}>
+          <OutputProvenance kind="generated_media" refId="347786145852739" {...props} />
+        </ChildRunContext.Provider>
+      </MemoryRouter>,
+    );
+
+  it('renders a lineage the host already read, without asking again', async () => {
+    renderFed({ lineage: chain });
+    expect(await screen.findByTestId('output-provenance')).toBeTruthy();
+    expect(getOutputLineage).not.toHaveBeenCalled();
+  });
+
+  it('hides Diff when the host forbids it', async () => {
+    // 媒体没有可比的版本文本（3b §6 明确不做媒体版本链）。
+    renderFed({ refId: '9', lineage: twoVersions, allowDiff: false });
+    await screen.findByTestId('output-provenance');
+    expect(screen.queryByTestId('output-provenance-diff')).toBeNull();
+  });
+
+  it('still offers Diff when the host says nothing', async () => {
+    // `allowDiff` 默认 true —— 既有的画布/剧本宿主一个字都不用改。
+    renderFed({ refId: '9', lineage: twoVersions });
+    expect(await screen.findByTestId('output-provenance-diff')).toBeTruthy();
+  });
+
+  it('disables both controls when the issue was redacted', async () => {
+    // 能看到已 promote 的资源 ≠ 能看到产出它的 issue。后端保留坐标、抹掉链接
+    // （deep_link / issue_key 为 null，issue_id 还在），前端据此说出原因，
+    // 而不是画一个点了没反应的按钮。
+    const redacted = { ...chain, versions: [{ ...chain.versions[0], issue_key: null, deep_link: null }] };
+    renderFed({ refId: '9', lineage: redacted });
+    expect((await screen.findByTestId('output-provenance-issue-unlinked')).getAttribute('title'))
+      .toBe('Issue not visible to you');
+    expect(screen.getByTestId('output-provenance-run')).toBeDisabled();
+  });
+
+  it('an issue that simply has none keeps the old wording', async () => {
+    const noIssue = { ...chain, versions: [{ ...chain.versions[0], issue_id: null, issue_key: null, deep_link: null }] };
+    renderFed({ refId: '9', lineage: noIssue });
+    expect((await screen.findByTestId('output-provenance-issue-unlinked')).getAttribute('title'))
+      .toBe('The issue that produced this is not linked');
+    // 没有议题不是权限问题 —— 运行面板照常可开。
+    expect(screen.getByTestId('output-provenance-run')).not.toBeDisabled();
+  });
+
+  it('renders nothing when the host looked and found no chain', async () => {
+    // `null` 是宿主查过、没有来源（人手上传）。`undefined` 才是「自己去取」。
+    const { container } = renderFed({ refId: '9', lineage: null });
+    await waitFor(() => expect(container.querySelector('[data-testid="output-provenance"]')).toBeNull());
+    expect(getOutputLineage).not.toHaveBeenCalled();
   });
 });

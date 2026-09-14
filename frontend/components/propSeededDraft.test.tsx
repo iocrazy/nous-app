@@ -58,6 +58,9 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
+  // ResourceInfoPanel 挂载即反查来源（3b Task 7b）。这个文件问的是草稿回种，
+  // 但真实现会去打网络 —— 答 null（人传的资源）让来源块整块不渲染。
+  getResourceProvenance: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('./EagleTagPicker', () => ({ EagleTagPicker: () => <div /> }));
