@@ -154,6 +154,7 @@ const CAPABILITIES = {
   [MODEL]: {
     ratios: ['1:1', '16:9'],
     quality: false,
+    quality_tiers: [],
     resolution: false,
     max_refs: 9,
     negative: true,

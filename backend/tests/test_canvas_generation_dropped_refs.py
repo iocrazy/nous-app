@@ -24,7 +24,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.provider_protocols.base import ALL_RATIOS, ProviderCapabilities
+from app.services.ai.provider_protocols.base import (
+    ALL_RATIOS,
+    LEGACY_QUALITY_TIERS,
+    ProviderCapabilities,
+)
 from app.services.library.generated_media_service import ResourceRefResolution
 from app.workflows.canvas_generation import (
     _resolve_reference_paths,
@@ -37,6 +41,7 @@ from app.workflows.canvas_generation import (
 _EVERYTHING = ProviderCapabilities(
     ratios=ALL_RATIOS,
     quality=True,
+    quality_tiers=LEGACY_QUALITY_TIERS,
     resolution=True,
     max_refs=9,
     negative=True,

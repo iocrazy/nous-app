@@ -18,6 +18,17 @@ from app.services.generation.aspect import ASPECT_RATIOS
 # second literal here is exactly the drift this contract exists to end.
 ALL_RATIOS: frozenset[str] = frozenset(ASPECT_RATIOS)
 
+# Quality tiers are a VOCABULARY, not a bool: gpt-image-2.5 added `xhigh`
+# and `max` and only the API-key path honours them (the codex subscription
+# backend rewrote `xhigh` to `medium` when measured 2026-09-09). A protocol
+# declares the tiers it can honour; reconcile drops the rest loudly.
+LEGACY_QUALITY_TIERS: frozenset[str] = frozenset({"low", "medium", "high"})
+IMAGE_25_QUALITY_TIERS: frozenset[str] = LEGACY_QUALITY_TIERS | {"xhigh", "max"}
+# The ONE place the low→max ramp is written down. Every ordered projection
+# derives from this; re-listing the strings anywhere else is the drift this
+# constant exists to prevent.
+QUALITY_TIER_ORDER: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
 
 class ProtocolCapabilityError(RuntimeError):
     """A protocol was asked to build a capability it does not support
@@ -37,13 +48,23 @@ class ProviderNotConfiguredError(ValueError):
     configure their own keys in Settings → AI Providers; platform models are
     managed by the admin in Admin → AI Models."""
 
-    def __init__(self, provider: str, model: str):
+    def __init__(self, provider: str, model: str, detail: str = ""):
         self.provider = provider
         self.model = model
+        # ``detail`` is read by ``describe_generation_failure`` (duck-typed on
+        # ``code`` / ``detail``), which puts it in the task's
+        # ``metadata.failure`` for the details pane. Optional because most
+        # raise sites have nothing to add beyond the sentence below; a
+        # provider whose remedy is more specific than "add a key somewhere"
+        # says so here and that exact wording is what the record keeps.
+        self.detail = detail
         super().__init__(
-            f"AI provider '{provider}' is not configured for model {model!r}. "
-            "Add your API key in Settings → AI Providers, or ask the admin "
-            "to enable a platform model (Admin → AI Models)."
+            detail
+            or (
+                f"AI provider '{provider}' is not configured for model {model!r}. "
+                "Add your API key in Settings → AI Providers, or ask the admin "
+                "to enable a platform model (Admin → AI Models)."
+            )
         )
 
 
@@ -58,6 +79,11 @@ class ProviderCapabilities:
 
     ratios: frozenset[str]
     quality: bool
+    # Which tiers ``quality`` actually means. Empty whenever ``quality`` is
+    # False — the bool says "this knob exists", the set says "and these are
+    # the values it accepts", and a provider that honours the knob for only
+    # some values can now say so instead of silently degrading the rest.
+    quality_tiers: frozenset[str]
     resolution: bool
     max_refs: int
     negative: bool
@@ -79,6 +105,7 @@ class ProviderCapabilities:
 _NONE = ProviderCapabilities(
     ratios=frozenset(),
     quality=False,
+    quality_tiers=frozenset(),
     resolution=False,
     max_refs=0,
     negative=False,

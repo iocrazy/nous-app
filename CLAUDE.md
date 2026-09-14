@@ -423,6 +423,7 @@ python3 -c "import os; os.setxattr('<目录>/.probe','user.t',b'1')"
 - **测试进程必须与本机网络环境隔离（2026-08-06 立约）**：`backend/tests/conftest.py` 与 `browser/tests/conftest.py` 各有一个 session 级 autouse fixture，把继承来的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 全部摘掉。
   起因：本机 shell 带 `ALL_PROXY=socks5://127.0.0.1:7891`（mihomo），httpx 从环境读到 socks 代理就在**构造时**抛 `ImportError: Using SOCKS proxy, but the 'socksio' package is not installed`——**87 个失败、跨 19 个文件，没有一个是真缺陷**。CI 上没有代理变量，同一套测试全绿。**一套结果取决于谁的机器在跑的测试，不构成门禁。**
   ⚠️ 这跟「代理问题一律在 mihomo 层解决、不要 unset 绕过」不冲突：那条针对的是**真的要连服务**的场景，依然有效。单元测试**碰到网络本身就是 bug**，摘代理是环境隔离不是绕过。故意验证代理行为的测试不受影响——它们自己 `monkeypatch.setenv`，在 fixture 之后生效且逐测试还原。
+- **两条出图链共用同一个二进制，区别在凭证、计费与真正被兑现的旋钮**：订阅行（`codex-image` / `codex-local-image`）的图像模型版本由 OpenAI 决定，quality 只到 `high`（`xhigh` 实测被改写成 `medium` 且不告知）、`--size` 被忽略；API-key 行（`openai-image-flare` / `-sunburst`，`openai-images` 协议）走 2.5 模型，按官方文档认 `xhigh`/`max` 与精确尺寸（2026-09-13 尚未真栈实测），key 放在 Admin → AI Models 的行里、按 token 计费。看着像一个产品，别把两者的结论互相套用；详见 [`docs/runbook/codex-image.md`](docs/runbook/codex-image.md)。
 
 ### Schema 迁移 / 代码漂移检查口径
 

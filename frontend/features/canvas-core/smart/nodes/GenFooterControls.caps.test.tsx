@@ -43,6 +43,9 @@ import { GenFooterControls } from './GenFooterControls';
 const ARK: ModelCapabilities = {
   ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
   quality: false,
+  // The router emits the ordered list beside the boolean; a provider that
+  // honours no tier sends `[]`, never a missing key.
+  quality_tiers: [],
   resolution: false,
   max_refs: 0,
   negative: false,
@@ -58,7 +61,22 @@ const ARK: ModelCapabilities = {
 const CODEX_LOCAL: ModelCapabilities = {
   ratios: ['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'],
   quality: true,
+  // LEGACY_QUALITY_TIERS, in the router's low→max order.
+  quality_tiers: ['low', 'medium', 'high'],
   resolution: false,
+  max_refs: 9,
+  negative: false,
+  video_modes: [],
+};
+
+/** OpenAIImagesProtocol.capabilities, verbatim: the gpt-image-2.5 rows are
+ *  the only ones that reach `xhigh` / `max`, and the only ones that honour
+ *  an exact --size. IMAGE_25_QUALITY_TIERS in the router's low→max order. */
+const OPENAI_25: ModelCapabilities = {
+  ratios: ['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'],
+  quality: true,
+  quality_tiers: ['low', 'medium', 'high', 'xhigh', 'max'],
+  resolution: true,
   max_refs: 9,
   negative: false,
   video_modes: [],
@@ -66,7 +84,8 @@ const CODEX_LOCAL: ModelCapabilities = {
 
 const MODELS = [
   { name: 'doubao-seedream', display_name: 'Seedream' },
-  { name: 'codex-local-image', display_name: 'GPT Image 2 (local)' },
+  { name: 'codex-local-image', display_name: 'GPT Image (Codex, local)' },
+  { name: 'openai-image-flare', display_name: 'GPT Image 2.5 Flare (OpenAI API)' },
 ];
 
 function renderBar(gen: Record<string, unknown> = {}) {
@@ -83,6 +102,9 @@ function renderBar(gen: Record<string, unknown> = {}) {
 
 const ratioTexts = () =>
   screen.getAllByTestId('ratio-option').map((b) => b.textContent ?? '');
+
+const qualityTexts = () =>
+  screen.getAllByTestId('quality-option').map((b) => b.textContent ?? '');
 
 beforeEach(() => {
   caps = null;
@@ -179,5 +201,86 @@ describe('GenFooterControls honours model capabilities', () => {
     // VIDEO_RATIOS' `auto` row is labelled Adaptive — still a frontend
     // concept, still kept.
     expect(texts.some((t) => t.includes('Adaptive'))).toBe(true);
+  });
+});
+
+/**
+ * The quality ramp is per-model, not per-app.
+ *
+ * `quality: true` only says the pill exists; WHICH rungs it offers is
+ * `quality_tiers`. Offering `Max` on a codex row is the same fake switch as
+ * offering a ratio the provider drops — the backend refuses the value and
+ * the run comes back at some other tier without saying so.
+ */
+describe('GenFooterControls quality tiers follow the model', () => {
+  it('offers only the tiers the model declares', () => {
+    caps = CODEX_LOCAL;
+    renderBar({ model: 'codex-local-image' });
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    // Auto always leads: "let the provider pick" is a frontend concept the
+    // backend never lists, exactly like the ratio grid's `auto` row.
+    expect(qualityTexts()).toEqual(['Auto', 'Low', 'Medium', 'High']);
+  });
+
+  it('offers xhigh and max on a gpt-image-2.5 row', () => {
+    caps = OPENAI_25;
+    renderBar({ model: 'openai-image-flare' });
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    expect(qualityTexts()).toEqual([
+      'Auto',
+      'Low',
+      'Medium',
+      'High',
+      'Extra High',
+      'Max',
+    ]);
+  });
+
+  it('caps unknown (null): every tier stays', () => {
+    caps = null;
+    renderBar();
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    expect(qualityTexts()).toContain('Max');
+    expect(qualityTexts()).toContain('Extra High');
+  });
+
+  it('a backend too old to send quality_tiers keeps every tier', () => {
+    // The two halves deploy independently (Cloudflare Pages vs gpupc, no
+    // ordering guarantee), so a caps row WITHOUT the key is a real wire
+    // shape for as long as that window lasts. Reading it as "supports no
+    // tier" would strip working rungs; worse, a bare `.includes` on the
+    // missing field throws and takes the whole footer down.
+    // No cast: `quality_tiers` is optional on `ModelCapabilities`, so the old
+    // backend's shape is expressible in the type the client actually uses.
+    // Casting here would have been the check switching itself off.
+    const { quality_tiers: _dropped, ...legacy } = CODEX_LOCAL;
+    caps = legacy;
+    renderBar({ model: 'codex-local-image' });
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    expect(qualityTexts()).toContain('Max');
+  });
+
+  it('a stored quality the model no longer offers reads as Auto', () => {
+    // Unlike the ratio, this one is NOT marked and kept: `request.py` drops a
+    // quality outside `caps.quality_tiers` before dispatch, so the run really
+    // will be Auto. Showing "Max" would promise a tier nobody will honour.
+    caps = CODEX_LOCAL;
+    renderBar({ model: 'codex-local-image', quality: 'max' });
+    expect(screen.getByTestId('pill-quality').textContent).toBe('Auto');
+  });
+
+  it('and the popover highlights Auto too, not nothing', () => {
+    // The stranded tier is filtered out of the list, so matching the popover
+    // against the RAW stored value highlights no row at all — the one rung
+    // that is actually about to run reads as unselected, contradicting the
+    // pill directly above it.
+    caps = CODEX_LOCAL;
+    renderBar({ model: 'codex-local-image', quality: 'max' });
+    fireEvent.click(screen.getByTestId('pill-quality'));
+    const selected = screen
+      .getAllByTestId('quality-option')
+      .filter((b) => b.className.includes('font-bold'))
+      .map((b) => b.textContent);
+    expect(selected).toEqual(['Auto']);
   });
 });

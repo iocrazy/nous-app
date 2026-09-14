@@ -44,6 +44,7 @@ class JimengLocalProtocol(ProviderProtocol):
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
         quality=False,
+        quality_tiers=frozenset(),
         resolution=True,
         # The image CLI is pure text2image — build_image_args takes no --image.
         # ``max_refs`` is read as an IMAGE cap only (see

@@ -87,10 +87,17 @@ describe('Codex provider card', () => {
 });
 
 describe('Codex provider card — image model note', () => {
-  it('says images use gpt-image-2 orchestrated by the first enabled model (user: "没有识别到图像模型?")', async () => {
+  it('says images ride the Codex subscription image model, orchestrated by the first enabled model (user: "没有识别到图像模型?")', async () => {
     render(<AISettings settings={base({ 'codex-local': { enabled: true, enabled_models: ['codex:gpt-6-astra'] } })} onSave={vi.fn()} section="providers" />);
     const note = await screen.findByTestId('provider-note-codex-local');
-    expect(note.textContent).toContain('gpt-image-2');
+    // The note no longer names a version: on the subscription path the image
+    // model is OpenAI's rollout decision (measured 2026-09-09), so it points
+    // at the catalog row by its unversioned display name instead.
+    expect(note.textContent).not.toMatch(/gpt-image-2\b/);
+    // The row serving THIS card is the local one. `codex-image` (the server
+    // twin) is hidden whenever the local engine can run, so naming it sends
+    // the reader looking for a row that is not in their picker at all.
+    expect(note.textContent).toContain('GPT Image (Codex, local)');
     expect(note.textContent).toContain('codex:gpt-6-astra');
   });
 });

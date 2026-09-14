@@ -22,6 +22,7 @@ class ArkProtocol(ProviderProtocol):
         # Exactly ark_image._ASPECT_TO_SIZE's keys — five, not eight.
         ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=False,
         max_refs=0,  # /images/generations is pure text-to-image
         negative=False,

@@ -58,6 +58,7 @@ vi.mock('./useModelCapabilities', () => ({
       : {
           ratios: ['1:1', '16:9'],
           quality: false,
+          quality_tiers: [],
           resolution: false,
           max_refs: v,
           negative: false,

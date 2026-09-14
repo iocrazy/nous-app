@@ -80,6 +80,7 @@ type Caps = import('../../services/canvasGenerationService').ModelCapabilities;
 const caps = vi.fn<() => Caps | null>(() => ({
   ratios: ['1:1'],
   quality: false,
+  quality_tiers: [],
   resolution: false,
   max_refs: 9,
   negative: false,

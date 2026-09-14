@@ -11,6 +11,10 @@ class Caps:
     max_refs: int = 0
     negative: bool = False
     video_modes: frozenset = field(default_factory=frozenset)
+    # The tiers a provider can actually honour. Defaults to the legacy trio so
+    # every pre-existing case in this file keeps meaning what it meant: a
+    # ``quality=True`` fake honours low/medium/high and nothing more.
+    quality_tiers: frozenset = frozenset({"low", "medium", "high"})
 
 
 def test_from_params_reads_the_frontend_keys_not_invented_ones():
@@ -392,3 +396,39 @@ def test_quality_survives_reconcile_and_reaches_the_codex_daemon_payload():
     assert dropped == []  # P1 had ["quality"] here
     payload = eff.to_codex_daemon_payload(engine_model="", ref_urls=[])
     assert payload["quality"] == "high"
+
+
+def test_reconcile_drops_quality_outside_the_providers_tiers():
+    """``quality=True`` is not a blank cheque. gpt-image-2.5 added ``xhigh``
+    and ``max``; a provider that honours only the legacy trio must drop them
+    LOUDLY rather than forward a tier the backend rewrites behind our back."""
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"quality": "xhigh"},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(
+        Caps(quality=True, quality_tiers=frozenset({"low", "medium", "high"}))
+    )
+    assert eff.quality is None
+    assert dropped == ["quality"]
+
+
+def test_reconcile_keeps_quality_inside_the_providers_tiers():
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"quality": "xhigh"},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(
+        Caps(
+            quality=True,
+            quality_tiers=frozenset({"low", "medium", "high", "xhigh", "max"}),
+        )
+    )
+    assert eff.quality == "xhigh"
+    assert dropped == []

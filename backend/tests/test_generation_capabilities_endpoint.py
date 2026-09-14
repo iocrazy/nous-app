@@ -182,6 +182,7 @@ async def test_unknown_provider_maps_to_restrictive_default_not_500(
     ghost = resp.json()["data"]["ghost-model"]
     assert ghost["ratios"] == []
     assert ghost["quality"] is False
+    assert ghost["quality_tiers"] == []
     assert ghost["resolution"] is False
     assert ghost["max_refs"] == 0
     assert ghost["negative"] is False
@@ -286,8 +287,38 @@ async def test_provider_string_never_reaches_the_response(client, monkeypatch):
         assert set(entry) == {
             "ratios",
             "quality",
+            "quality_tiers",
             "resolution",
             "max_refs",
             "negative",
             "video_modes",
         }
+
+
+@pytest.mark.asyncio
+async def test_quality_tiers_are_projected_in_declared_order(client, monkeypatch):
+    """``quality`` alone cannot tell the pill which tiers to offer.
+
+    The wire field is a LIST because order is meaning here — low→max is a
+    ramp the UI renders left to right — and it is derived from
+    ``QUALITY_TIER_ORDER`` rather than sorted, which would put ``high``
+    before ``low``. A model that honours no tiers projects an empty list, so
+    the pill has one thing to read instead of two.
+    """
+    from app.services.ai.provider_protocols.base import QUALITY_TIER_ORDER
+
+    _catalog(monkeypatch, _ROWS)
+    _gate(monkeypatch)
+
+    resp = await client.get("/api/v1/canvases/generation-capabilities")
+
+    data = resp.json()["data"]
+    assert data["codex-local-image"]["quality_tiers"] == ["low", "medium", "high"]
+    # Derived from the ordering constant, never re-listed: a tier added there
+    # must show up here in that position.
+    assert data["codex-local-image"]["quality_tiers"] == [
+        t for t in QUALITY_TIER_ORDER if t in {"low", "medium", "high"}
+    ]
+    # doubao declares quality=False, so it offers no tiers at all.
+    assert data["mediahub-doubao-seedream-t2i"]["quality"] is False
+    assert data["mediahub-doubao-seedream-t2i"]["quality_tiers"] == []

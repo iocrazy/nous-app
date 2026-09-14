@@ -184,3 +184,37 @@ async def test_a_local_catalog_row_never_yields_a_server_side_provider(
     )
     with pytest.raises(RuntimeError):
         await getattr(db_registry, resolve_name)()
+
+
+@pytest.mark.unit
+def test_every_quality_capable_protocol_declares_tiers():
+    """``quality`` is a bool but the tiers are a vocabulary, and the two must
+    agree. A protocol that says it honours quality without naming the tiers it
+    honours would let ``reconcile`` forward ``xhigh`` to a backend that
+    silently rewrites it — the exact silent degradation this contract ends."""
+    from app.services.ai.provider_protocols import PROTOCOLS
+    from app.services.ai.provider_protocols.base import (
+        LEGACY_QUALITY_TIERS,
+        QUALITY_TIER_ORDER,
+    )
+
+    for p in PROTOCOLS:
+        if p.generation_family is None:
+            continue
+        caps = p.capabilities
+        # A tier outside the wire vocabulary would survive ``reconcile`` (it
+        # only drops what the protocol did NOT declare) and then never reach
+        # the UI, which projects through QUALITY_TIER_ORDER — a knob that is
+        # honoured on paper and invisible in practice.
+        assert caps.quality_tiers <= frozenset(QUALITY_TIER_ORDER), p.key
+        if caps.quality:
+            assert caps.quality_tiers >= LEGACY_QUALITY_TIERS, p.key
+        else:
+            assert caps.quality_tiers == frozenset(), p.key
+
+
+@pytest.mark.unit
+def test_none_capabilities_have_no_tiers():
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
+
+    assert ProviderCapabilities.none().quality_tiers == frozenset()

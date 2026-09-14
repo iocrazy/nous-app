@@ -67,6 +67,7 @@ class JimengProtocol(ProviderProtocol):
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
         quality=False,
+        quality_tiers=frozenset(),
         resolution=True,
         # The image CLI is pure text2image — build_image_args takes no --image.
         # Video refs (first/last frame, multimodal) ride on video_modes instead.

@@ -35,7 +35,7 @@ on real hardware** — see "Platform support" below.
 ### Manual install (if you'd rather not pipe a script to a shell)
 
 ```bash
-npm i -g @openai/codex gpt-image-2-skill
+npm i -g @openai/codex gpt-image-2-skill   # 0.7.4 tested 2026-09-13
 codex login
 
 mkdir -p ~/.local/share/nous-codex

@@ -4220,7 +4220,7 @@
     "saveSettings": "Save Settings",
     "addTyped": "Add “{{model}}”",
     "providerNote": {
-      "codexLocal": "Text tasks run on the chips above. Images always use gpt-image-2 — it is not a pick — orchestrated by the first enabled model ({{model}}); in the canvas choose GPT Image 2."
+      "codexLocal": "Text tasks run on the chips above. Images go through the Codex subscription's image model (OpenAI picks the version; it is not a choice here), orchestrated by the first enabled model ({{model}}); in the canvas choose GPT Image (Codex, local)."
     }
   },
   "aiLibrary": {

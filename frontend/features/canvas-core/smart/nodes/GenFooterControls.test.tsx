@@ -12,7 +12,7 @@ import { GenFooterControls } from './GenFooterControls';
 afterEach(cleanup);
 
 const MODELS = [
-  { name: 'codex-image', display_name: 'GPT Image 2 (Codex)' },
+  { name: 'codex-image', display_name: 'GPT Image (Codex)' },
   { name: 'jimeng-cli-image', display_name: 'Dreamina Image' },
 ];
 
@@ -31,7 +31,7 @@ describe('GenFooterControls', () => {
   it('model pill pops a list; picking marks and patches', () => {
     const onChange = renderBar({});
     fireEvent.click(screen.getByTestId('pill-model'));
-    const opt = screen.getByRole('button', { name: /GPT Image 2/ });
+    const opt = screen.getByRole('button', { name: /GPT Image \(Codex\)/ });
     fireEvent.click(opt);
     expect(onChange).toHaveBeenCalledWith({ model: 'codex-image' });
   });
@@ -124,32 +124,41 @@ it('video kind has a resolution pill and an Adaptive aspect option', () => {
 // The picker used to say "GPT Image 2 (Local) · local": the server twin is
 // hidden whenever the local one can run (see visible_generation_rows), so
 // "local" is not a distinction the user needs twice — or at all.
+//
+// Migration 465 then renamed both codex rows to "GPT Image (Codex)" and
+// "GPT Image (Codex, local)" — the version number went because on the
+// subscription path OpenAI, not us, picks the image model. So the codex rows
+// no longer end in a bare "(Local)" tag and the strip rule never fires on
+// them; the rule itself still stands for any row that does, which is what the
+// Dreamina case below covers.
 import { modelLabel } from './GenFooterControls';
 
 describe('modelLabel', () => {
   it('drops the "(Local)" tag and never appends "· local"', () => {
-    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image 2 (Local)', is_local: true })).toBe('GPT Image 2');
     expect(modelLabel({ name: 'jimeng-local-image', display_name: 'Dreamina (Local)', is_local: true })).toBe('Dreamina');
+    expect(modelLabel({ name: 'a-row', display_name: 'Something (本地)', is_local: true })).toBe('Something');
   });
   it('leaves other names alone and falls back to the row name', () => {
-    expect(modelLabel({ name: 'codex-image', display_name: 'GPT Image 2 (Codex)', is_local: false })).toBe('GPT Image 2 (Codex)');
+    expect(modelLabel({ name: 'codex-image', display_name: 'GPT Image (Codex)', is_local: false })).toBe('GPT Image (Codex)');
+    // The post-465 local row: "local" sits INSIDE the parenthesis beside
+    // "Codex", so the tag rule must not bite a piece out of it.
+    expect(modelLabel({ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true })).toBe('GPT Image (Codex, local)');
     expect(modelLabel({ name: 'x-row' })).toBe('x-row');
   });
 });
 
 describe('GenFooterControls — model popover rows', () => {
-  it('lists a local row by its plain name: no "(Local)" tag, no "· local" suffix', () => {
+  it('lists a local row by its catalog name, with no "· local" suffix', () => {
     render(
       <GenFooterControls
         gen={{ kind: 'image', model: '', ratio: '1:1', count: 1 } as never}
-        models={[{ name: 'codex-local-image', display_name: 'GPT Image 2 (Local)', is_local: true }] as never}
+        models={[{ name: 'codex-local-image', display_name: 'GPT Image (Codex, local)', is_local: true }] as never}
         onChange={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByTestId('pill-model'));
-    const row = screen.getByRole('button', { name: /GPT Image 2/ });
-    expect(row.textContent).toBe('GPT Image 2');
+    const row = screen.getByRole('button', { name: /GPT Image \(Codex, local\)/ });
+    expect(row.textContent).toBe('GPT Image (Codex, local)');
     expect(screen.queryByText(/· local/)).toBeNull();
-    expect(screen.queryByText(/\(Local\)/)).toBeNull();
   });
 });

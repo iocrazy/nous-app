@@ -4,6 +4,7 @@ from typing import Any
 
 from app.services.ai.provider_protocols.base import (
     ALL_RATIOS,
+    LEGACY_QUALITY_TIERS,
     ProviderCapabilities,
     ProviderProtocol,
 )
@@ -61,6 +62,11 @@ class CodexLocalProtocol(ProviderProtocol):
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
         quality=True,
+        # The subscription CLI path: low/medium/high only. Measured
+        # 2026-09-09 — asking gpt-image-2.5 for ``xhigh`` here comes back
+        # rewritten to ``medium`` with no word said, so the tiers stop at
+        # what this transport can actually deliver.
+        quality_tiers=LEGACY_QUALITY_TIERS,
         resolution=False,  # the model picks the pixel size; --size is ignored
         max_refs=9,
         negative=False,

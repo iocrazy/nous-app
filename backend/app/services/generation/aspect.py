@@ -73,3 +73,46 @@ def nearest_ratio(width: int, height: int) -> Optional[str]:
         return None
     target = width / height
     return min(ASPECT_RATIOS, key=lambda r: abs(ASPECT_RATIOS[r] - target))
+
+
+# Exact pixel sizes for providers that HONOUR --size (the OpenAI Images API;
+# the codex subscription path does not, see CODEX_SIZES). Keyed by the
+# canvas's (ratio, resolution) pills. Every value satisfies gpt-image-2.5's
+# rules — multiples of 16, edge <= 3840, 655,360..8,294,400 pixels — which
+# test_aspect.py re-derives from the numbers rather than trusting this comment.
+IMAGE_RESOLUTIONS: tuple[str, ...] = ("1k", "2k", "4k")
+IMAGE_SIZES: dict[tuple[str, str], str] = {
+    ("21:9", "1k"): "1536x656",
+    ("21:9", "2k"): "2560x1104",
+    ("21:9", "4k"): "3840x1648",
+    ("16:9", "1k"): "1536x864",
+    ("16:9", "2k"): "2560x1440",
+    ("16:9", "4k"): "3840x2160",
+    ("3:2", "1k"): "1536x1024",
+    ("3:2", "2k"): "2304x1536",
+    ("3:2", "4k"): "3520x2352",
+    ("4:3", "1k"): "1408x1056",
+    ("4:3", "2k"): "2304x1728",
+    ("4:3", "4k"): "3264x2448",
+    ("1:1", "1k"): "1024x1024",
+    ("1:1", "2k"): "2048x2048",
+    ("1:1", "4k"): "2880x2880",
+    ("3:4", "1k"): "1056x1408",
+    ("3:4", "2k"): "1728x2304",
+    ("3:4", "4k"): "2448x3264",
+    ("2:3", "1k"): "1024x1536",
+    ("2:3", "2k"): "1536x2304",
+    ("2:3", "4k"): "2352x3520",
+    ("9:16", "1k"): "864x1536",
+    ("9:16", "2k"): "1440x2560",
+    ("9:16", "4k"): "2160x3840",
+}
+IMAGE_DEFAULT_SIZE = "1024x1024"
+
+
+def image_size_for(ratio: Optional[str], resolution: Optional[str]) -> str:
+    """The --size for a provider that honours it. Unknown ratio → 1:1, unknown
+    or empty resolution → 1k; both unknown → IMAGE_DEFAULT_SIZE."""
+    r = ratio if ratio in ASPECT_RATIOS else "1:1"
+    res = resolution if resolution in IMAGE_RESOLUTIONS else "1k"
+    return IMAGE_SIZES.get((r, res), IMAGE_DEFAULT_SIZE)

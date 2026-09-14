@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../client'
 
-// Codex (GPT Image 2) CLI auth — STATUS ONLY. Unlike jimeng there is no
+// Codex (GPT Image) CLI auth — STATUS ONLY. Unlike jimeng there is no
 // in-panel login: the Codex OAuth session is created on the host
 // (`codex login`, browser flow) and bind-mounted into the containers, so
 // re-auth happens on the host too (docs/runbook/codex-image.md). This

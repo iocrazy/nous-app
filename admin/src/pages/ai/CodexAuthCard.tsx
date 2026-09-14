@@ -16,7 +16,7 @@ const ERROR_HINTS: Record<string, string> = {
 }
 
 /**
- * Codex (GPT Image 2) CLI status panel — the session lives on the HOST
+ * Codex (GPT Image) CLI status panel — the session lives on the HOST
  * (`codex login`, browser OAuth) and is bind-mounted in, so unlike the
  * jimeng card there is no in-panel login; this card only makes the state
  * visible (green/red badge + the stable error code) without a shell.
@@ -31,7 +31,7 @@ export function CodexAuthCard() {
       <Space direction="vertical" size="small" style={{ width: '100%' }}>
         <Space align="center">
           <Title heading={6} style={{ margin: 0 }}>
-            Codex CLI (GPT Image 2)
+            Codex CLI (GPT Image)
           </Title>
           {status.isLoading ? (
             <Badge status="processing" text="Checking..." />

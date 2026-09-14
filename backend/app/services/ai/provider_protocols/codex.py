@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.services.ai.provider_protocols.base import (
     ALL_RATIOS,
+    LEGACY_QUALITY_TIERS,
     ProviderCapabilities,
     ProviderProtocol,
 )
@@ -28,10 +29,19 @@ class _CodexImageAdapter(BaseImageProvider):
     ``generate`` returns an ``ImageGenResult`` whose ``image_path`` is the local
     PNG the CLI produced (``image_url`` stays empty — there is no URL). The
     downstream persist step ingests the local file via ``source_path``.
+
+    ``provider_name`` is what the result CALLS itself. Two protocols drive the
+    same binary (``codex`` on the subscription session, ``openai-images`` on
+    the API key), so a hardcoded "codex" would mislabel half the generations —
+    ``_stamp_provider_key`` overwrites ``provider_key`` downstream, but the
+    result's own ``provider`` string is read on its way there.
     """
 
-    def __init__(self, provider: "CodexCliProvider") -> None:
+    def __init__(
+        self, provider: "CodexCliProvider", provider_name: str = "codex"
+    ) -> None:
         self._provider = provider
+        self._provider_name = provider_name
 
     async def generate(self, prompt: str, model: str, **kwargs) -> ImageGenResult:
         # Preferred channel: LOCAL reference paths the workflow already
@@ -59,11 +69,12 @@ class _CodexImageAdapter(BaseImageProvider):
             model_version=model or None,
             quality=kwargs.get("quality") or None,
             ref_image_paths=paths or None,
+            resolution=kwargs.get("resolution") or None,
         )
         return ImageGenResult(
             image_url="",
             image_path=result.local_path,
-            provider="codex",
+            provider=self._provider_name,
             model=model or "",
             metadata={"mime": result.mime, **(result.raw or {})},
         )
@@ -79,7 +90,7 @@ class _CodexImageAdapter(BaseImageProvider):
 
 class CodexProtocol(ProviderProtocol):
     key = "codex"
-    label = "Codex CLI (GPT Image 2)"
+    label = "Codex CLI (GPT Image)"
     description = (
         "Subprocess gpt-image-2-skill CLI over the local Codex OAuth session "
         "(no api_key; ChatGPT subscription quota). Image generation only."
@@ -90,6 +101,11 @@ class CodexProtocol(ProviderProtocol):
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
         quality=True,
+        # The subscription CLI path: low/medium/high only. Measured
+        # 2026-09-09 — asking gpt-image-2.5 for ``xhigh`` here comes back
+        # rewritten to ``medium`` with no word said, so the tiers stop at
+        # what this transport can actually deliver.
+        quality_tiers=LEGACY_QUALITY_TIERS,
         resolution=False,  # the model picks the pixel size; --size is ignored
         max_refs=9,
         negative=False,

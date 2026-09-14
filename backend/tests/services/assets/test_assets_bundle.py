@@ -45,6 +45,7 @@ def _caps(max_refs: int) -> ProviderCapabilities:
     return ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=False,
         max_refs=max_refs,
         negative=False,

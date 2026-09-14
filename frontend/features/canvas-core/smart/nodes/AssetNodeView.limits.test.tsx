@@ -200,6 +200,7 @@ beforeEach(() => {
     codex: {
       ratios: ['1:1'],
       quality: true,
+      quality_tiers: ['low', 'medium', 'high'],
       resolution: true,
       max_refs: 9,
       negative: true,
@@ -208,6 +209,7 @@ beforeEach(() => {
     'seedream-4': {
       ratios: ['1:1'],
       quality: false,
+      quality_tiers: [],
       resolution: false,
       max_refs: 2,
       negative: false,
@@ -216,6 +218,7 @@ beforeEach(() => {
     'ark-seedream': {
       ratios: ['1:1'],
       quality: false,
+      quality_tiers: [],
       resolution: false,
       max_refs: 0,
       negative: false,
@@ -226,6 +229,7 @@ beforeEach(() => {
     'ark-seedream-1ref': {
       ratios: ['1:1'],
       quality: false,
+      quality_tiers: [],
       resolution: false,
       max_refs: 1,
       negative: false,

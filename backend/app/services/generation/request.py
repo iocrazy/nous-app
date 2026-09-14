@@ -28,6 +28,7 @@ class CapabilitiesLike(Protocol):
 
     ratios: frozenset[str]
     quality: bool
+    quality_tiers: frozenset[str]
     resolution: bool
     max_refs: int
     negative: bool
@@ -132,7 +133,11 @@ class GenerationRequest:
         if eff.ratio and eff.ratio not in caps.ratios:
             eff = replace(eff, ratio=None)
             dropped.append("ratio")
-        if eff.quality and not caps.quality:
+        # Two ways to lose quality, one report: the provider has no such knob
+        # at all, or it has one that does not accept THIS tier. gpt-image-2.5's
+        # ``xhigh``/``max`` reach providers that stop at ``high``, and a bool
+        # check alone would forward them to be rewritten out of sight.
+        if eff.quality and (not caps.quality or eff.quality not in caps.quality_tiers):
             eff = replace(eff, quality=None)
             dropped.append("quality")
         if eff.resolution and not caps.resolution:

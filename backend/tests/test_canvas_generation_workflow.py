@@ -13,7 +13,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.provider_protocols.base import ALL_RATIOS, ProviderCapabilities
+from app.services.ai.provider_protocols.base import (
+    ALL_RATIOS,
+    LEGACY_QUALITY_TIERS,
+    ProviderCapabilities,
+)
 from app.services.generation.request import GenerationRequest
 from app.workflows.canvas_generation import (
     _actual_provider_of,
@@ -30,6 +34,7 @@ from app.workflows.canvas_generation import (
 _EVERYTHING = ProviderCapabilities(
     ratios=ALL_RATIOS,
     quality=True,
+    quality_tiers=LEGACY_QUALITY_TIERS,
     resolution=True,
     max_refs=9,
     negative=True,
@@ -437,6 +442,7 @@ async def test_server_video_branch_drops_unsupported_mode_and_refs_and_reports_t
     caps = ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=True,
         max_refs=9,
         negative=False,
@@ -493,6 +499,7 @@ async def test_server_video_branch_keeps_refs_when_provider_has_some_video_mode(
     caps = ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=True,
         max_refs=0,
         negative=False,
@@ -617,6 +624,7 @@ async def test_image_step_reports_dropped_knobs_for_ark_and_sends_only_supported
     ark_caps = ProviderCapabilities(
         ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=False,
         max_refs=0,
         negative=False,
@@ -662,6 +670,7 @@ async def test_image_step_dropped_knobs_is_empty_when_everything_is_supported():
     full = ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=True,
+        quality_tiers=LEGACY_QUALITY_TIERS,
         resolution=True,
         max_refs=9,
         negative=False,
@@ -822,6 +831,7 @@ async def test_codex_daemon_branch_sends_ratio_model_quality_not_size_only():
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),
                     quality=True,
+                    quality_tiers=LEGACY_QUALITY_TIERS,
                     resolution=False,
                     max_refs=9,
                     negative=False,
@@ -907,6 +917,7 @@ async def test_codex_daemon_branch_looks_capabilities_up_by_provider_key():
 _JIMENG_LOCAL_CAPS = ProviderCapabilities(
     ratios=frozenset({"16:9"}),
     quality=False,
+    quality_tiers=frozenset(),
     resolution=True,
     max_refs=0,  # about the IMAGE CLI; video refs ride on video_modes
     negative=False,
@@ -1040,6 +1051,7 @@ async def test_dreamina_daemon_video_mode_dropped_when_provider_lacks_it():
     caps = ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=True,
         max_refs=9,
         negative=False,
@@ -1553,6 +1565,7 @@ async def test_image_step_returns_the_knobs_it_asked_for_and_the_ones_it_sent():
     caps = ProviderCapabilities(
         ratios=frozenset({"16:9"}),
         quality=False,
+        quality_tiers=frozenset(),
         resolution=False,
         max_refs=0,
         negative=False,

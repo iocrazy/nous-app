@@ -177,17 +177,26 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
 # digest pins). NPM_REGISTRY follows the APT_MIRROR convention: CN mirror by
 # default, override with https://registry.npmjs.org for builds abroad (the
 # tarball is byte-identical, the sha256 pin still holds).
-# NB: the CLI's -V/--help exit non-zero by design, so the sanity check greps
-# the version string instead of trusting the exit code.
+# NB: the CLI's -V/--help exit non-zero by design (--help exits 2), so both
+# sanity checks pipe to grep and never trust the exit code.
+# The second check pins the --quality enum, not just the version: every codex
+# generation sends `--quality high` and the 2.5 rows advertise `xhigh`/`max`
+# (see IMAGE_25_QUALITY_TIERS), so a silent enum change upstream would surface
+# as a runtime argument-parse failure on every image instead of a build break.
+# The check is scoped to the `--quality` option's own `[possible values: …]`
+# bracket (not the whole help text, where prose like "higher" could match) and
+# needs BOTH `high` and `xhigh` as whole words there. Measured on 0.7.4:
+# `[possible values: auto, low, medium, high, xhigh, max]`.
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG GPT_IMAGE_2_SKILL_VERSION=0.7.3
-ARG GPT_IMAGE_2_SKILL_SHA256=9ff833f643736cd317e91c31ef976ff74356340c59ec95c343b112d98de92cc9
+ARG GPT_IMAGE_2_SKILL_VERSION=0.7.4
+ARG GPT_IMAGE_2_SKILL_SHA256=0488a72fa009cf69a1c0e57f9997de288da13f52673242826cae5420daffb575
 RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-static/-/gpt-image-2-skill-linux-x64-static-${GPT_IMAGE_2_SKILL_VERSION}.tgz" \
     && echo "${GPT_IMAGE_2_SKILL_SHA256}  /tmp/gis.tgz" | sha256sum -c - \
     && tar xzf /tmp/gis.tgz -C /tmp package/bin/gpt-image-2-skill \
     && install -m 0755 /tmp/package/bin/gpt-image-2-skill /usr/local/bin/gpt-image-2-skill \
     && rm -rf /tmp/gis.tgz /tmp/package \
-    && gpt-image-2-skill -V 2>&1 | grep -q "${GPT_IMAGE_2_SKILL_VERSION}"
+    && gpt-image-2-skill -V 2>&1 | grep -q "${GPT_IMAGE_2_SKILL_VERSION}" \
+    && gpt-image-2-skill images generate --help 2>&1 | grep -A1 -- '--quality' | grep -qE '\[possible values: [^]]*[ ,]high,[^]]*[ ,]xhigh[],]'
 
 # Install uv package manager
 RUN --mount=type=cache,target=/root/.cache/pip pip install uv

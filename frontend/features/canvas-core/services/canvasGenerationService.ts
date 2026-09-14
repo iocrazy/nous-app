@@ -82,6 +82,19 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
 export interface ModelCapabilities {
   ratios: string[];
   quality: boolean;
+  /** Which rungs of the quality ramp this provider honours, ordered low→max
+   *  by the router's one ordering constant (`QUALITY_TIER_ORDER`) — never
+   *  alphabetically, or "high" would lead. `quality` says whether the pill
+   *  exists at all; this says what it may offer. `[]` whenever the provider
+   *  honours no tier (always alongside `quality: false` today).
+   *
+   *  Optional because a backend older than 2026-09-13 omits the key entirely
+   *  and the two halves deploy independently: that wire shape is real for as
+   *  long as the window lasts, and consumers must read the missing value as
+   *  "unknown" (offer everything) rather than "supports nothing". Declaring
+   *  it required forced every test constructing the old shape to cast the
+   *  type away, which is the check disabling itself. */
+  quality_tiers?: string[];
   resolution: boolean;
   max_refs: number;
   negative: boolean;

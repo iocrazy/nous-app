@@ -4220,7 +4220,7 @@
     "saveSettings": "保存设置",
     "addTyped": "添加「{{model}}」",
     "providerNote": {
-      "codexLocal": "文本任务用上面的模型。出图固定用 gpt-image-2（不是可选项），由第一个启用的模型（{{model}}）编排；画布里选 GPT Image 2 即可。"
+      "codexLocal": "文本任务用上面的模型。出图走 Codex 订阅的出图模型（版本由 OpenAI 决定，这里不可选），由第一个启用的模型（{{model}}）编排；画布里选 GPT Image (Codex, local) 即可。"
     }
   },
   "aiLibrary": {

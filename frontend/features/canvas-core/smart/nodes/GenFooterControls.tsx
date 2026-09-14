@@ -2,8 +2,8 @@
 //
 // IC-parity generation footer (⑨, reference shots 20-23): every knob is a
 // PILL that pops an upward panel — model list (selected dot), ratio grid
-// with semantic labels (IC 尺寸选择), quality Auto/Low/Medium/High, count
-// 1-8 grid. Shared by the prompt node footer and the attached composer so
+// with semantic labels (IC 尺寸选择), quality (six rungs, Auto → Max,
+// filtered to the tiers the chosen model declares), count 1-8 grid. Shared by the prompt node footer and the attached composer so
 // the two stay identical. State lives with the caller (patch-style
 // onChange); only the open-popover bookkeeping is local.
 
@@ -90,18 +90,35 @@ export const VIDEO_MODES: Array<{ value: 'multimodal' | 'frames' | undefined; la
 /** Video clip lengths (IC 时长 pill: 8 quick picks; CLI snaps per model). */
 export const DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15] as const;
 
+/** The hint is the LONGEST EDGE the rung reaches, not a square, and the exact
+ *  pixels depend on the ratio.
+ *
+ *  Three protocols declare `resolution: true` — `openai-images`, `jimeng` and
+ *  `jimeng-local` — but they do not mean the same thing by it: openai-images
+ *  sends the exact pixels from the server-side `IMAGE_SIZES` table, while the
+ *  two jimeng rows map the rung onto their CLI's own resolution flag. These
+ *  hints describe the pixel table, which tops out at 2880×2880 for 1:1 and
+ *  3840×2160 for 16:9 — so the old "4096×4096" was a size nothing produces.
+ *  Naming a number no run can return is the same fake switch as offering a
+ *  knob the provider drops. */
 export const RESOLUTIONS: Array<{ value: string; label: string; hint: string }> = [
-  { value: '1k', label: '1K', hint: '1024×1024' },
-  { value: '2k', label: '2K', hint: '2048×2048' },
-  { value: '4k', label: '4K', hint: '4096×4096' },
+  { value: '1k', label: '1K', hint: 'up to 1536px' },
+  { value: '2k', label: '2K', hint: 'up to 2560px' },
+  { value: '4k', label: '4K', hint: 'up to 3840px' },
 ];
 export const FOOTER_RATIOS = Object.keys(RATIO_LABELS);
 
+/** The full ramp, low→max, mirroring the backend's `QUALITY_TIER_ORDER`.
+ *  Module-private: which rungs a given model may show is `quality_tiers`,
+ *  filtered per render below, so nothing outside this file should reason
+ *  about the unfiltered list. */
 const QUALITIES: Array<{ label: string; value: string | undefined }> = [
   { label: 'Auto', value: undefined },
   { label: 'Low', value: 'low' },
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
+  { label: 'Extra High', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
 ];
 
 type PopKey = 'model' | 'size' | 'quality' | 'count' | 'duration' | 'vres';
@@ -200,11 +217,39 @@ export function GenFooterControls({
     caps !== null &&
     ratioValue !== 'auto' &&
     !offeredRatios.some((o) => o.value === ratioValue);
+  // Which rungs of the ramp this model honours. `quality: true` only says the
+  // pill exists; offering `Max` on a codex row would be the same fake switch
+  // as offering a ratio the provider drops — request.py refuses the value and
+  // the run silently comes back at another tier.
+  //
+  // Unknown means EVERYTHING, exactly like the ratio grid: `caps === null`
+  // (loading / fetch failed / model absent) and a caps row from a backend too
+  // old to carry the field both land here. The Array.isArray guard is that
+  // second case — a bare `.includes` on the missing field would throw and
+  // take the whole footer down, not merely lose a rung.
+  const offeredTiers = caps?.quality_tiers;
+  const qualityOptions = QUALITIES.filter(
+    (q) =>
+      q.value === undefined ||
+      !Array.isArray(offeredTiers) ||
+      offeredTiers.includes(q.value),
+  );
   const found = models.find((m) => m.name === gen.model);
   const selectedModelLabel = found ? modelLabel(found) : gen.model || 'Default';
-  const qualityLabel =
-    QUALITIES.find((q) => q.value === (gen.quality ?? undefined))?.label ??
-    'Auto';
+  // Resolved against the OFFERED rungs, not the full ramp: a stored quality
+  // this model no longer honours is dropped server-side before dispatch, so
+  // the run really will be Auto and the pill must say so. (Unlike a stranded
+  // ratio, which is kept and marked — that one IS sent as written.)
+  //
+  // ONE resolution feeds both the pill and the popover's selected row:
+  // matching the popover against the raw `gen.quality` would highlight
+  // nothing at all for a stranded tier, so the rung that is actually about to
+  // run would read as unselected directly under a pill saying Auto.
+  const qualityOption = qualityOptions.find(
+    (q) => q.value === (gen.quality ?? undefined),
+  );
+  const effectiveQuality = qualityOption?.value;
+  const qualityLabel = qualityOption?.label ?? 'Auto';
 
   return (
     <div
@@ -437,14 +482,14 @@ export function GenFooterControls({
       {open === 'quality' && (
         <Pop title="Quality" left={anchorLeft}>
           <div className="flex gap-1">
-            {QUALITIES.map((q) => (
+            {qualityOptions.map((q) => (
               <button
                 key={q.label}
                 type="button"
                 data-testid="quality-option"
                 onClick={() => pick({ quality: q.value })}
                 className={`nodrag rounded-lg px-2.5 py-1 text-xs ${
-                  (gen.quality ?? undefined) === q.value
+                  effectiveQuality === q.value
                     ? 'bg-canvas-strong font-bold text-canvas-card'
                     : 'text-canvas-text'
                 }`}
