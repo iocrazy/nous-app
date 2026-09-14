@@ -53,6 +53,29 @@ def _generated_media_insert_stmt(**values: Any):
     return insert(GeneratedMedia).values(**values).returning(*_GENERATED_MEDIA_COLS)
 
 
+def _as_text(value: Any) -> Optional[str]:
+    """归一化一个要落进 **TEXT 列** 的值：None 保持 None，其余一律 str。
+
+    登记口有 17 个调用点，同一个字段在不同车道形状不同：``origin.run_id`` 在
+    agent 工具链是 str（``run_context["run_id"]``），在 DBOS 分镜链是 int
+    （``gateway.ledger_run_id(scope)``）。``generated_media.origin_run_id`` 是
+    TEXT，asyncpg 对 TEXT 列**只**接受 str —— 2026-09-14 真栈上这就是
+
+        DataError: invalid input for query argument $9:
+                   349441401106307 (expected str, got int)
+
+    整条 INSERT 被拒，一张已经生成好的图零登记、零血缘。归一化的责任在这一处
+    （「公共契约两侧都要遵守」：调用方给 int 或 str 都行，落库永远 str），
+    不是让 17 个调用点各自记得 ``str()``——那正是漏掉一个的方式。
+
+    只碰 INSERT 的值，不回写调用方手里的 ``GenerationOrigin``：``origin.run_id``
+    紧接着还要交给产出登记（``register_deliverable_best_effort`` 自己认 int）。
+    """
+    if value is None or isinstance(value, str):
+        return value
+    return str(value)
+
+
 def _date_bucket() -> str:
     """UTC yyyy/mm/dd path segment for new media writes.
 
@@ -253,10 +276,12 @@ async def _write_local_generation_to_object_store(
 @dataclass
 class GenerationOrigin:
     kind: str  # 'agent_run' | 'canvas_run' | 'chat_upload'
-    run_id: Optional[str] = None
-    agent_id: Optional[str] = None
+    # TEXT 列，但两种车道给的形状不同（agent 工具链 str / DBOS 分镜链 int）。
+    # 两种都收，登记口用 ``_as_text`` 归一化后落库 —— 见它的 docstring。
+    run_id: str | int | None = None
+    agent_id: Optional[str] = None  # uuid 列：str 或 uuid.UUID，不是随便的数字
     canvas_id: Optional[int] = None
-    node_id: Optional[str] = None
+    node_id: str | int | None = None
     prompt: Optional[str] = None
     model: Optional[str] = None
     provider: Optional[str] = None
@@ -355,18 +380,19 @@ async def register_generated_media(
         file_path=file_path,
         file_size_bytes=size,
         content_sha256=content_sha256,
-        origin_kind=origin.kind,
-        origin_run_id=origin.run_id,
+        # 下面每个 _as_text 都对着模型里一个 TEXT 列（见 _as_text 的 docstring）。
+        origin_kind=_as_text(origin.kind),
+        origin_run_id=_as_text(origin.run_id),
         agent_id=origin.agent_id,
         canvas_id=origin.canvas_id,
-        node_id=origin.node_id,
-        prompt=origin.prompt,
-        model=origin.model,
-        provider=origin.provider,
+        node_id=_as_text(origin.node_id),
+        prompt=_as_text(origin.prompt),
+        model=_as_text(origin.model),
+        provider=_as_text(origin.provider),
         params=origin.params or {},
         cost_cents=origin.cost_cents,
         parent_resource_id=origin.parent_resource_id,
-        derivation_kind=origin.derivation_kind,
+        derivation_kind=_as_text(origin.derivation_kind),
         conversation_id=origin.conversation_id,
         source_asset_id=origin.source_asset_id,
     )
@@ -427,7 +453,7 @@ async def _insert_uploaded_row(
         mime=mime,
         file_path=file_path,
         file_size_bytes=file_size_bytes,
-        origin_kind=origin.kind,
+        origin_kind=_as_text(origin.kind),
         conversation_id=origin.conversation_id,
         content_sha256=content_sha256,
     )

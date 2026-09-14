@@ -744,7 +744,15 @@ async def test_persist_generation_local_path_reaps_temp_dir_on_success(monkeypat
 
 async def test_persist_generation_local_path_reaps_temp_dir_on_failure(monkeypatch):
     """Even when the store raises, the jimeng_ scratch dir is still reaped — the
-    finally cleanup runs on every path so a persist failure can't leak files."""
+    finally cleanup runs on every path so a persist failure can't leak files.
+
+    2026-09-14: this case used to ALSO assert (by not expecting one) that no
+    exception escaped — the step kept the provider url as a fallback. For a
+    LOCAL product that fallback wrote a path this very ``finally`` had just
+    deleted onto a shot marked ``done``; it now raises instead (see
+    ``persist_generation``'s docstring and
+    ``tests/workflows/test_shot_persist_never_writes_a_local_path.py``). The
+    reap — which is what this case is about — is unchanged."""
     from app.workflows import script_shot_generate as m
 
     tmp_dir, local_path = _mk_jimeng_tmp()
@@ -760,7 +768,8 @@ async def test_persist_generation_local_path_reaps_temp_dir_on_failure(monkeypat
 
     p1, p2, p3, p4 = _persist_patches(shot_repo, scene_repo, script_repo, register)
     with p1, p2, p3, p4:
-        await m.persist_generation(_SHOT, local_path, "5.0", "jimeng-cli", _USER)
+        with pytest.raises(RuntimeError, match="storage down"):
+            await m.persist_generation(_SHOT, local_path, "5.0", "jimeng-cli", _USER)
 
     assert not os.path.exists(tmp_dir)  # H1: reaped despite the failure
 
