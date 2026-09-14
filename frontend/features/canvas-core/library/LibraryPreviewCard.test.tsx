@@ -154,6 +154,7 @@ beforeEach(() => {
     [MODEL]: {
       ratios: ['1:1'],
       quality: false,
+      quality_tiers: [],
       resolution: false,
       max_refs: 3,
       negative: false,

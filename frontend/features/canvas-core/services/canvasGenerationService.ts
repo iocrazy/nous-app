@@ -82,6 +82,16 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
 export interface ModelCapabilities {
   ratios: string[];
   quality: boolean;
+  /** Which rungs of the quality ramp this provider honours, ordered low→max
+   *  by the router's one ordering constant (`QUALITY_TIER_ORDER`) — never
+   *  alphabetically, or "high" would lead. `quality` says whether the pill
+   *  exists at all; this says what it may offer. `[]` whenever the provider
+   *  honours no tier (always alongside `quality: false` today).
+   *
+   *  A backend older than 2026-09-13 omits the key entirely, and the two
+   *  halves deploy independently, so consumers must read a missing value as
+   *  "unknown" (offer everything) rather than "supports nothing". */
+  quality_tiers: string[];
   resolution: boolean;
   max_refs: number;
   negative: boolean;

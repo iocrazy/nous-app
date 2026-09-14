@@ -90,18 +90,30 @@ export const VIDEO_MODES: Array<{ value: 'multimodal' | 'frames' | undefined; la
 /** Video clip lengths (IC 时长 pill: 8 quick picks; CLI snaps per model). */
 export const DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15] as const;
 
+/** The hint is the LONGEST EDGE the rung reaches, not a square. The exact
+ *  pixels depend on the ratio (`IMAGE_SIZES` server-side), and the only
+ *  provider that honours the knob at all tops out at 2880×2880 for 1:1 and
+ *  3840×2160 for 16:9 — so the old "4096×4096" was a size nothing produces.
+ *  Naming a number no run can return is the same fake switch as offering a
+ *  knob the provider drops. */
 export const RESOLUTIONS: Array<{ value: string; label: string; hint: string }> = [
-  { value: '1k', label: '1K', hint: '1024×1024' },
-  { value: '2k', label: '2K', hint: '2048×2048' },
-  { value: '4k', label: '4K', hint: '4096×4096' },
+  { value: '1k', label: '1K', hint: 'up to 1536px' },
+  { value: '2k', label: '2K', hint: 'up to 2560px' },
+  { value: '4k', label: '4K', hint: 'up to 3840px' },
 ];
 export const FOOTER_RATIOS = Object.keys(RATIO_LABELS);
 
+/** The full ramp, low→max, mirroring the backend's `QUALITY_TIER_ORDER`.
+ *  Module-private: which rungs a given model may show is `quality_tiers`,
+ *  filtered per render below, so nothing outside this file should reason
+ *  about the unfiltered list. */
 const QUALITIES: Array<{ label: string; value: string | undefined }> = [
   { label: 'Auto', value: undefined },
   { label: 'Low', value: 'low' },
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
+  { label: 'Extra High', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
 ];
 
 type PopKey = 'model' | 'size' | 'quality' | 'count' | 'duration' | 'vres';
@@ -200,10 +212,31 @@ export function GenFooterControls({
     caps !== null &&
     ratioValue !== 'auto' &&
     !offeredRatios.some((o) => o.value === ratioValue);
+  // Which rungs of the ramp this model honours. `quality: true` only says the
+  // pill exists; offering `Max` on a codex row would be the same fake switch
+  // as offering a ratio the provider drops — request.py refuses the value and
+  // the run silently comes back at another tier.
+  //
+  // Unknown means EVERYTHING, exactly like the ratio grid: `caps === null`
+  // (loading / fetch failed / model absent) and a caps row from a backend too
+  // old to carry the field both land here. The Array.isArray guard is that
+  // second case — a bare `.includes` on the missing field would throw and
+  // take the whole footer down, not merely lose a rung.
+  const offeredTiers = caps?.quality_tiers;
+  const qualityOptions = QUALITIES.filter(
+    (q) =>
+      q.value === undefined ||
+      !Array.isArray(offeredTiers) ||
+      offeredTiers.includes(q.value),
+  );
   const found = models.find((m) => m.name === gen.model);
   const selectedModelLabel = found ? modelLabel(found) : gen.model || 'Default';
+  // Resolved against the OFFERED rungs, not the full ramp: a stored quality
+  // this model no longer honours is dropped server-side before dispatch, so
+  // the run really will be Auto and the pill must say so. (Unlike a stranded
+  // ratio, which is kept and marked — that one IS sent as written.)
   const qualityLabel =
-    QUALITIES.find((q) => q.value === (gen.quality ?? undefined))?.label ??
+    qualityOptions.find((q) => q.value === (gen.quality ?? undefined))?.label ??
     'Auto';
 
   return (
@@ -437,7 +470,7 @@ export function GenFooterControls({
       {open === 'quality' && (
         <Pop title="Quality" left={anchorLeft}>
           <div className="flex gap-1">
-            {QUALITIES.map((q) => (
+            {qualityOptions.map((q) => (
               <button
                 key={q.label}
                 type="button"

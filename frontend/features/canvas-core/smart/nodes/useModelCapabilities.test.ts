@@ -23,7 +23,7 @@ import {
 
 const CAPS = {
   'codex-local-image': {
-    ratios: ['1:1', '16:9'], quality: false, resolution: false,
+    ratios: ['1:1', '16:9'], quality: false, quality_tiers: [], resolution: false,
     max_refs: 9, negative: false, video_modes: [],
   },
 };
