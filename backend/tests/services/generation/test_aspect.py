@@ -1,9 +1,15 @@
+import math
+
 from app.services.generation.aspect import (
     ASPECT_PHRASES,
     ASPECT_RATIOS,
+    ASPECT_TOLERANCE,
     CODEX_DEFAULT_SIZE,
     CODEX_SIZES,
+    IMAGE_RESOLUTIONS,
+    IMAGE_SIZES,
     aspect_instruction,
+    image_size_for,
     nearest_ratio,
 )
 
@@ -39,3 +45,41 @@ def test_nearest_ratio_snaps_to_offered_values():
 
 def test_codex_default_size_is_square():
     assert CODEX_DEFAULT_SIZE == "1024x1024"
+
+
+# OpenAI Images API constraints for gpt-image-2.5 (docs, 2026-09-13):
+# edges multiples of 16, aspect 1:3..3:1, no edge > 3840, pixels in
+# [655_360, 8_294_400].
+def _dims(s: str) -> tuple[int, int]:
+    w, h = s.split("x")
+    return int(w), int(h)
+
+
+def test_every_ratio_has_every_resolution():
+    assert set(IMAGE_SIZES) == {
+        (r, res) for r in ASPECT_RATIOS for res in IMAGE_RESOLUTIONS
+    }
+
+
+def test_sizes_obey_openai_constraints_and_the_ratio():
+    for (ratio, res), size in IMAGE_SIZES.items():
+        w, h = _dims(size)
+        assert w % 16 == 0 and h % 16 == 0, size
+        assert max(w, h) <= 3840, size
+        assert 655_360 <= w * h <= 8_294_400, size
+        assert 1 / 3 <= w / h <= 3, size
+        want = ASPECT_RATIOS[ratio]
+        assert abs((w / h) / want - 1) <= ASPECT_TOLERANCE, (ratio, size)
+
+
+def test_resolution_tiers_are_monotonic_in_pixels():
+    for ratio in ASPECT_RATIOS:
+        px = [math.prod(_dims(IMAGE_SIZES[(ratio, res)])) for res in IMAGE_RESOLUTIONS]
+        assert px == sorted(px) and len(set(px)) == 3, ratio
+
+
+def test_image_size_for_defaults():
+    assert image_size_for("16:9", "2k") == IMAGE_SIZES[("16:9", "2k")]
+    assert image_size_for("16:9", None) == IMAGE_SIZES[("16:9", "1k")]
+    assert image_size_for(None, "4k") == IMAGE_SIZES[("1:1", "4k")]
+    assert image_size_for("nonsense", "nonsense") == "1024x1024"
