@@ -37,7 +37,7 @@ def test_no_recorder_means_no_run_and_no_turn():
     assert ctx["run_id"] is None and ctx["turn"] is None
 
 
-def _stub_media_tools(monkeypatch, seen: dict, url_key: str):
+def _stub_media_tools(monkeypatch, seen: dict):
     import app.services.ai.tools.generate_media_tools as gmt
 
     async def _fake_register(**kwargs):
@@ -48,11 +48,12 @@ def _stub_media_tools(monkeypatch, seen: dict, url_key: str):
     monkeypatch.setattr(gmt, "_resolve_provider_model", lambda _a, _k: ("openai", "m1"))
 
     class _Svc:
+        # 真实 wire 形状：asdict(ImageGenResult) / asdict(VideoGenResult)
         async def generate_image(self, **_k):
-            return {url_key: "http://cdn/x.png"}
+            return {"image_url": "http://cdn/x.png", "image_path": None}
 
         async def generate_video(self, **_k):
-            return {url_key: "http://cdn/x.mp4"}
+            return {"video_url": "http://cdn/x.mp4", "video_path": None}
 
     monkeypatch.setattr(gmt.GenerateMediaTools, "_svc", lambda _self: _Svc())
     return gmt
@@ -60,7 +61,7 @@ def _stub_media_tools(monkeypatch, seen: dict, url_key: str):
 
 async def test_generate_image_tool_puts_the_coordinates_on_the_origin(monkeypatch):
     seen: dict = {}
-    gmt = _stub_media_tools(monkeypatch, seen, "url")
+    gmt = _stub_media_tools(monkeypatch, seen)
     ctx = {
         "run_id": 777,
         "user_id": "u",
@@ -78,7 +79,7 @@ async def test_generate_image_tool_puts_the_coordinates_on_the_origin(monkeypatc
 
 async def test_generate_video_tool_puts_the_coordinates_on_the_origin(monkeypatch):
     seen: dict = {}
-    gmt = _stub_media_tools(monkeypatch, seen, "url")
+    gmt = _stub_media_tools(monkeypatch, seen)
     ctx = {
         "run_id": 777,
         "user_id": "u",

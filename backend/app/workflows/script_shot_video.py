@@ -46,11 +46,8 @@ from typing import Any, AsyncIterator, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.workflows.script_shot_generate import (
-    _compose_prompt,
-    _reap_scratch_dir,
-    _resolve_scope_id,
-)
+from app.services.library.scratch_reaper import reap_scratch_dir
+from app.workflows.script_shot_generate import _compose_prompt, _resolve_scope_id
 
 # Default video aspect — shots carry no aspect field; 16:9 is the cinematic
 # default (the provider maps it to the CLI --ratio).
@@ -195,7 +192,7 @@ async def persist_video_generation(
         )
         return durable
     finally:
-        _reap_scratch_dir(local_path)
+        reap_scratch_dir(local_path)
 
 
 @DBOS.step()
