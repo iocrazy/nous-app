@@ -65,10 +65,14 @@ def empty_views() -> Views:
             "revision": 0,
         },
         "cost": {
-            # ``spent_cents`` is DERIVED: own_cents + Σ by_child. It is what
-            # the UI and the budget gate read, and what RunRecorder writes
-            # into agent_runs.cost_cents on finish, so the view and the
-            # column never name different numbers (review I3).
+            # ``spent_cents`` is DERIVED: own_cents + Σ by_child +
+            # media_cents (3b §3.3 added the third part). It is what the UI
+            # and the budget gate read, and RunRecorder._finish writes the
+            # SAME three-part figure into agent_runs.cost_cents, so the view
+            # and the column never name different numbers (review I3) — the
+            # rollup reads the view while a run is running and the column
+            # once it has ended, so any part missing from one side makes an
+            # issue's spend step at the moment the run completes.
             "spent_cents": 0.0,
             "own_cents": 0.0,
             "by_step": [],
@@ -78,6 +82,9 @@ def empty_views() -> Views:
             # phase 2b-2: cents per child run, KEYED so a replayed
             # subagent_done overwrites rather than adds.
             "by_child": {},
+            # 3b §3.3：媒体产出的精确价（登记时就知道）。与 own/by_child 并列的
+            # 第三个分量，不混进 own_cents——那是 LLM 每步的钱，来源不同。
+            "media_cents": 0.0,
         },
     }
 
@@ -90,17 +97,27 @@ LOCAL_FOLD_TYPES: frozenset[str] = frozenset({"context_measured"})
 
 
 def recompute_spent(cost: dict[str, Any]) -> None:
-    """``spent_cents = own_cents + Σ by_child``, in place.
+    """``spent_cents = own_cents + Σ by_child + media_cents``, in place.
 
-    Two folds move the parts (``step_end`` the run's own steps,
-    ``subagent_done`` a child's total) and both call this, so the total can
-    never drift from its parts. ``by_child`` is a MAPPING, not a running sum:
-    a ``subagent_done`` that arrives twice for the same child — a replayed
-    DBOS step, a re-fold of stored views — overwrites its entry instead of
-    inflating the parent's cost once per delivery.
+    THREE folds move the parts and all three call this, so the total can never
+    drift from its parts: ``step_end`` moves ``own_cents`` (this run's own LLM
+    steps), ``subagent_done`` moves one ``by_child`` entry (a child's total),
+    ``deliverable`` moves ``media_cents`` (3b §3.3 — a media deliverable's
+    exact price, known at registration). The three components are kept apart
+    because they come from different places; the total is always all three.
+
+    ``by_child`` is a MAPPING, not a running sum: a ``subagent_done`` that
+    arrives twice for the same child — a replayed DBOS step, a re-fold of
+    stored views — overwrites its entry instead of inflating the parent's cost
+    once per delivery. ``media_cents`` IS a running sum, guarded on the other
+    side: the ``deliverable`` fold adds only on a first sighting of its
+    ``(kind, ref_id, version)`` key.
     """
     children = sum(float(v or 0) for v in (cost.get("by_child") or {}).values())
-    cost["spent_cents"] = round(float(cost.get("own_cents") or 0.0) + children, 4)
+    media = float(cost.get("media_cents") or 0.0)
+    cost["spent_cents"] = round(
+        float(cost.get("own_cents") or 0.0) + children + media, 4
+    )
     if cost.get("budget_cents"):
         cost["pct"] = round(cost["spent_cents"] * 100 / cost["budget_cents"])
 

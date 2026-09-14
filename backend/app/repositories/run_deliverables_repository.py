@@ -17,7 +17,7 @@ import uuid as _uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, desc, insert, select, update
+from sqlalchemy import and_, desc, func, insert, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models.agents import AgentRuns, RunDeliverables
@@ -226,6 +226,30 @@ class RunDeliverablesRepository:
                 )
             ).scalar_one_or_none()
         return _row(row) if row is not None else None
+
+    async def output_keys_for_run(self, run_id: Any) -> List[Dict[str, Any]]:
+        """这条 run 登记过的 distinct ``(kind, ref_id)``，按首次登记 seq 升序。
+
+        WS 的 ``done`` 帧用它让前端按键精确失效血缘缓存（3b §4）；没登记过就是
+        ``[]``。同一个对象被改了几版只出现一次——失效的单位是对象，不是版本。
+        ``seq`` 可能是 NULL（登记口先插行后补 seq，见 ``set_seq``），排序按
+        ``MIN(seq)``，数据库把 NULL 排在最后，那正是「还没落到 transcript 上」
+        该待的位置。
+        """
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        RunDeliverables.kind,
+                        RunDeliverables.ref_id,
+                        func.min(RunDeliverables.seq).label("first_seq"),
+                    )
+                    .where(RunDeliverables.run_id == int(run_id))
+                    .group_by(RunDeliverables.kind, RunDeliverables.ref_id)
+                    .order_by(func.min(RunDeliverables.seq))
+                )
+            ).all()
+        return [{"kind": kind, "ref_id": str(ref_id)} for kind, ref_id, _ in rows]
 
     async def provenance_for(
         self, *, kind: str, ref_ids: List[Any]

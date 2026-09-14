@@ -38,11 +38,20 @@ def _run_cents(run: dict[str, Any]) -> float:
         return 0.0
 
 
+def _current_run(runs: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """这个 issue 此刻在跑的那条 run，没有就是 None。
+
+    ``derive_phase`` / ``compute_rollup`` / ``load_rollup`` 必须挑出**同一条**
+    run —— 前两个拿它定相位与填 ``current_run``，第三个拿它去问 transcript 水位。
+    同一个 next(...) 抄三遍，就是给它们三条分叉的机会。"""
+    return next((r for r in runs if r.get("status") == "running"), None)
+
+
 def derive_phase(issue: dict[str, Any], runs: list[dict[str, Any]]) -> str:
     state = issue.get("execution_state") or {}
     if not isinstance(state, dict):
         state = {}
-    current = next((r for r in runs if r.get("status") == "running"), None)
+    current = _current_run(runs)
     latest = runs[0] if runs else None
     if issue.get("paused_at"):
         return "paused"
@@ -75,10 +84,11 @@ def compute_rollup(
     origin: dict[str, Any],
     *,
     now: Optional[dt.datetime] = None,
+    last_seq: Optional[int] = None,
 ) -> dict[str, Any]:
     """``runs`` newest first, root runs only."""
     now = now or dt.datetime.now(dt.timezone.utc)
-    current = next((r for r in runs if r.get("status") == "running"), None)
+    current = _current_run(runs)
     spent = round(sum(_run_cents(r) for r in runs), 4)
     budget = issue.get("budget_cents")
     # Same reading as BudgetGateHook: NULL = unlimited (no pct), 0 = a real
@@ -109,6 +119,9 @@ def compute_rollup(
                 "model": current.get("model"),
                 "view": _view(current),
                 "cost": _cost(current),
+                # 该 run 的 transcript 水位，轮询边沿用它跟 WS 的 done 帧去重
+                # （3b §4）；读不到就是 None——0 会把最新的一帧当最旧的丢掉。
+                "last_seq": last_seq,
             }
             if current
             else None
@@ -177,7 +190,13 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
-    return compute_rollup(issue, runs, children, pending, origin)
+    current = _current_run(runs)
+    last_seq = (
+        await get_agent_runs_repository().last_transcript_seq(int(current["id"]))
+        if current
+        else None
+    )
+    return compute_rollup(issue, runs, children, pending, origin, last_seq=last_seq)
 
 
 __all__ = ["compute_rollup", "derive_phase", "load_rollup"]

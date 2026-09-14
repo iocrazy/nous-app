@@ -793,6 +793,15 @@ class RunRecorder:
         # one when rates are known, else whatever the step folds accumulated
         # (a run that emits no step_end events has only the former; one whose
         # model has no price row has only the latter).
+        #
+        # 3b §3.3 adds the THIRD part: ``media_cents``. The column must carry
+        # the same three parts ``recompute_spent`` sums, or the same I3 defect
+        # comes back one component over — an issue's spend would DROP by the
+        # media cost the moment a run that generated images completed, and
+        # ``prior_cents`` (SUM of this column across the issue's runs) would
+        # never see media at all, letting each new run spend the image budget
+        # again. A run whose ONLY spend is media must get a column too, which
+        # is why media joins the write condition and not just the sum.
         cost_cents: Optional[float] = None
         # Re-read the externally-written slices first: a background child that
         # finished mid-run put its ``subagent_done`` in the transcript, never
@@ -808,8 +817,9 @@ class RunRecorder:
         children_cents = sum(
             float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
         )
-        if own_cents is not None or children_cents:
-            cost_cents = round((own_cents or 0.0) + children_cents, 4)
+        media_cents = float((folded or {}).get("media_cents") or 0.0)
+        if own_cents is not None or children_cents or media_cents:
+            cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
         if folded is not None and own_cents is not None:
             folded["own_cents"] = round(own_cents, 4)
             recompute_spent(folded)
@@ -1291,7 +1301,10 @@ class RunEventWriter:
         self.views = nxt
         self._pending_mirror = False
         await self._mirror()
-        if event_type == "subagent_done":
+        if event_type in ("subagent_done", "deliverable"):
+            # Both land on a run that may have ENDED — the worker writes the
+            # first, the deliverables registry the second — and for an ended
+            # run the rollup reads the column, not the view (3b §3.3).
             await self._sync_cost_column()
 
     async def refold_external_slices(self) -> None:
@@ -1415,6 +1428,13 @@ class RunEventWriter:
                 # leaving it is the same "degrade to what we have" the
                 # failed-read branch below takes.
                 self.views["view"]["outputs"] = refolded_outputs
+                # The count and the money come off the SAME fold and share the
+                # same ``seen`` dedup key, so they have to be lifted together
+                # (3b §3.3). Lifting only the count is how you get "1 output on
+                # the panel, nothing on the bill": the deliverables registry
+                # usually writes its event through a ``for_run`` writer, so the
+                # live recorder never folded that money at all.
+                self.views["cost"]["media_cents"] = scratch["cost"]["media_cents"]
             recompute_spent(self.views["cost"])
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(
@@ -1427,7 +1447,9 @@ class RunEventWriter:
 
         The background ``subagent_done`` is written onto the parent run by the
         worker, often turns after that run finished — and for an ended run the
-        rollup reads the column, not the view. Restricted to ended rows
+        rollup reads the column, not the view. A late ``deliverable`` from the
+        deliverables registry is the same shape one component over (3b §3.3),
+        so both trigger this. Restricted to ended rows
         because a live run's ``_finish`` computes the same total at the end
         anyway. Idempotent: the value is a derived total over a keyed
         ``by_child``, so a replayed event assigns the same number.
