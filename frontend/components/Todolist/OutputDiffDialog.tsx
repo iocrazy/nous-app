@@ -121,10 +121,22 @@ const TONE: Record<DiffSegment['type'], string> = {
   same: '',
   add: 'bg-ok-soft text-ok rounded-sm',
   del: 'bg-danger-soft text-danger rounded-sm line-through',
+  // Neither side's content — it is the panel admitting a cut. Muted and
+  // centred so it reads as a rule across the text, not as one more word.
+  omit: 'block text-center text-[11px] text-ink-500 italic select-none',
 };
 
-/** One pane of the diff: the segments belonging to this side, in order. */
-const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string }> = ({ result, side, testId }) => {
+/** One pane of the diff: the segments belonging to this side, in order.
+ *
+ *  An `omit` segment belongs to NEITHER side, so it survives both filters —
+ *  a truncation drawn on only one pane is a truncation the other pane still
+ *  hides (C9). */
+const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string; t: T }> = ({
+  result,
+  side,
+  testId,
+  t,
+}) => {
   const skip = side === 'from' ? 'add' : 'del';
   return (
     <div
@@ -134,8 +146,15 @@ const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string }
       {result.segments
         .filter((s) => s.type !== skip)
         .map((s, i) => (
-          <span key={`${s.type}:${i}`} data-diff={s.type} className={TONE[s.type]}>
-            {s.text}
+          <span
+            key={`${s.type}:${i}`}
+            data-diff={s.type}
+            data-testid={s.type === 'omit' ? 'output-diff-omitted' : undefined}
+            className={TONE[s.type]}
+          >
+            {s.type === 'omit'
+              ? t('outputs.omitted', '… {{n}} lines omitted here …', { n: s.omitted?.[side] ?? 0 })
+              : s.text}
           </span>
         ))}
     </div>
@@ -455,7 +474,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 ) : diff.content_type === 'media' ? (
                   <MediaSide side={diff.from} t={tr} />
                 ) : (
-                  text && <Pane result={text} side="from" testId="output-diff-from" />
+                  text && <Pane result={text} side="from" testId="output-diff-from" t={tr} />
                 )}
               </div>
             )}
@@ -472,7 +491,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               ) : diff.content_type === 'media' ? (
                 <MediaSide side={diff.to} t={tr} />
               ) : (
-                text && <Pane result={text} side="to" testId={single ? 'output-diff-single-text' : 'output-diff-to'} />
+                text && <Pane result={text} side="to" testId={single ? 'output-diff-single-text' : 'output-diff-to'} t={tr} />
               )}
             </div>
           </div>
@@ -480,7 +499,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
 
         {text?.truncated && (
           <p data-testid="output-diff-truncated" className="mt-2 text-[11px] text-warn">
-            {t('outputs.truncated', 'This text is too long to compare in full — only the first part of the change is shown.')}
+            {t('outputs.truncated', 'This text is too long to compare in full — the middle of the change is left out, marked where it was cut.')}
           </p>
         )}
 

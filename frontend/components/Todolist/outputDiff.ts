@@ -12,13 +12,32 @@
  *    suffix come off first (a revision usually changes one line of many), and
  *    only what is left goes through the quadratic part, capped. `truncated`
  *    says so out loud so the dialog can, too.
+ *  - **A truncation leaves a mark where it cut** (C9). Until then the capped
+ *    middle was simply `slice(0, max)`: everything past the cap vanished while
+ *    the common SUFFIX was still appended, so the panel read as "the change
+ *    ends here" — a silent, invisible cut in the middle of the one thing the
+ *    reader opened the dialog to see. Now both ends of the changed middle
+ *    survive and an explicit `omit` segment sits between them, carrying how
+ *    many lines each side lost.
  */
 
-export type DiffOpKind = 'same' | 'add' | 'del';
+export type DiffOpKind = 'same' | 'add' | 'del' | 'omit';
+
+/** How many lines a truncation dropped, per side. */
+export interface OmittedLines {
+  from: number;
+  to: number;
+}
 
 export interface DiffSegment {
   type: DiffOpKind;
   text: string;
+  /**
+   * Only on `omit`. The renderer draws its own localized label from these
+   * counts; `text` carries a bare `…` fallback so a consumer that just joins
+   * the segments still shows SOMETHING at the cut rather than nothing.
+   */
+  omitted?: OmittedLines;
 }
 
 export interface DiffResult {
@@ -29,6 +48,8 @@ export interface DiffResult {
   removed: number;
   /** True when the changed middle was too large to diff in full. */
   truncated: boolean;
+  /** Lines dropped by that truncation, per side. `{from: 0, to: 0}` when not. */
+  omitted: OmittedLines;
 }
 
 /** Tokens per side that still go through the O(n·m) table. ~1600² cells is a
@@ -87,6 +108,20 @@ function lcsOps(a: string[], b: string[]): Array<[DiffOpKind, string]> {
   return ops;
 }
 
+/** How many lines a run of tokens spans.
+ *
+ *  Line FRAGMENTS, deliberately: a cut lands wherever the token budget ran
+ *  out, so the dropped run usually begins and ends mid-line. Counting the
+ *  pieces (`split('\n').length`) can never report fewer lines than were
+ *  really lost, and under-reporting is the one direction that would put this
+ *  marker back in the business of hiding a truncation. Anything dropped at
+ *  all is at least one — "0 lines omitted" next to missing text would be its
+ *  own small lie. */
+function lineCount(tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  return Math.max(1, tokens.join('').split('\n').length);
+}
+
 export function diffWords(from: string, to: string, opts: { maxTokens?: number } = {}): DiffResult {
   const max = opts.maxTokens ?? MAX_TOKENS;
   const a = tokenize(from);
@@ -101,33 +136,60 @@ export function diffWords(from: string, to: string, opts: { maxTokens?: number }
     tail += 1;
   }
 
-  let midA = a.slice(head, a.length - tail);
-  let midB = b.slice(head, b.length - tail);
+  const midA = a.slice(head, a.length - tail);
+  const midB = b.slice(head, b.length - tail);
   const truncated = midA.length > max || midB.length > max;
-  if (truncated) {
-    midA = midA.slice(0, max);
-    midB = midB.slice(0, max);
-  }
 
   const segments: DiffSegment[] = [];
   push(segments, 'same', a.slice(0, head).join(''));
   let added = 0;
   let removed = 0;
-  for (const [type, token] of lcsOps(midA, midB)) {
-    push(segments, type, token);
-    if (isSpace(token)) continue;
-    if (type === 'add') added += 1;
-    else if (type === 'del') removed += 1;
+  const emit = (opsA: string[], opsB: string[]): void => {
+    for (const [type, token] of lcsOps(opsA, opsB)) {
+      push(segments, type, token);
+      if (isSpace(token)) continue;
+      if (type === 'add') added += 1;
+      else if (type === 'del') removed += 1;
+    }
+  };
+
+  let omitted: OmittedLines = { from: 0, to: 0 };
+  if (!truncated) {
+    emit(midA, midB);
+  } else {
+    // Half the budget at each end, so the reader sees where the change STARTS
+    // and where it ENDS. The two halves are diffed independently: gluing a
+    // head to a tail and running one LCS over the seam would invent matches
+    // across text that is not adjacent.
+    const keep = Math.max(1, Math.floor(max / 2));
+    const cut = (mid: string[]): [string[], string[], string[]] => {
+      const end = Math.max(keep, mid.length - keep);
+      return [mid.slice(0, keep), mid.slice(keep, end), mid.slice(end)];
+    };
+    const [headA, dropA, tailA] = cut(midA);
+    const [headB, dropB, tailB] = cut(midB);
+    omitted = { from: lineCount(dropA), to: lineCount(dropB) };
+    emit(headA, headB);
+    // Its own segment, never merged into a neighbour (`push` would coalesce
+    // same-typed runs and lose the counts).
+    segments.push({ type: 'omit', text: '\n…\n', omitted });
+    emit(tailA, tailB);
   }
+
   push(segments, 'same', a.slice(a.length - tail).join(''));
-  return { segments, added, removed, truncated };
+  return { segments, added, removed, truncated, omitted };
 }
 
-/** One side of the diff, put back together. */
+/** One side of the diff, put back together.
+ *
+ *  A truncated result reconstructs to the two ends WITH the omission line
+ *  spelled out between them. That is the honest answer: the alternative —
+ *  splicing head to tail silently — is the very bug C9 fixed, and a caller
+ *  that cannot show the marker should be looking at `truncated` anyway. */
 export function renderedText(result: DiffResult, side: 'from' | 'to'): string {
   const skip: DiffOpKind = side === 'from' ? 'add' : 'del';
   return result.segments
     .filter((s) => s.type !== skip)
-    .map((s) => s.text)
+    .map((s) => (s.type === 'omit' ? `\n… ${s.omitted?.[side] ?? 0} lines omitted …\n` : s.text))
     .join('');
 }

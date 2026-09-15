@@ -96,6 +96,28 @@ describe('OutputDiffDialog', () => {
     expect(to.querySelector('[data-diff="add"]')?.textContent).toBe('red');
   });
 
+  it('C9：截断时两侧都画出省略行，「太长」那条提示照旧在', async () => {
+    // 旧行为：改动的中段被静默丢掉，面板只剩一条「只显示前一部分」的提示，
+    // 而文本本身读起来像是改动到那里就结束了。现在两端都在，中间有一条说得出
+    // 丢了多少行的标记 —— 而且**两侧都要有**：只画一侧的话，另一侧仍然是静默截断。
+    const long = (p: string) => Array.from({ length: 6000 }, (_, i) => `${p}${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, long('a')), to: side(2, long('b')),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    for (const pane of ['output-diff-from', 'output-diff-to']) {
+      const marker = screen.getByTestId(pane).querySelector('[data-testid="output-diff-omitted"]');
+      expect(marker).not.toBeNull();
+      expect(marker?.textContent).toMatch(/\d+ lines omitted/);
+    }
+    // 尾部确实回来了 —— 旧实现只留得住头。
+    expect(screen.getByTestId('output-diff-from').textContent).toContain('a5999');
+    expect(screen.getByTestId('output-diff-to').textContent).toContain('b5999');
+  });
+
   it('says a side could not be reconstructed instead of showing it empty', async () => {
     getOutputDiff.mockResolvedValueOnce({
       kind: 'script_shot', ref_id: '9', content_type: 'text',
