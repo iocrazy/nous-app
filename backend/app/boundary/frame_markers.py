@@ -36,8 +36,10 @@ from typing import Any, Final
 
 # Every frame literal this codebase renders around model-visible content.
 # Adding a frame to a prompt WITHOUT adding it here means user text can close
-# it — `test_every_owned_frame_is_registered` in
-# tests/services/ai/prompts/test_frame_escape_wiring.py is the guard.
+# it — `test_every_frame_rendered_in_prompt_code_is_registered` in
+# tests/services/ai/prompts/test_frame_escape_wiring.py is the guard. Since C3
+# it reads the prompt modules with `ast`, so a frame built with an f-string /
+# `.format()` / `%` counts too.
 OWNED_FRAMES: Final[frozenset[str]] = frozenset(
     {
         "available_resources",
