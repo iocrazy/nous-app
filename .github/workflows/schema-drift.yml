@@ -161,6 +161,9 @@ on:
       # 主账号名唯一性（mig 470）。函数唯一索引 + NOT NULL + 两条注册路径
       # 共用的 PL/pgSQL —— 只有真库能回答。
       - 'backend/tests/db/test_migration_470_username_integration.py'
+      # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
+      # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
+      - 'backend/tests/db/test_orm_indexes_integration.py'
       - 'backend/app/services/assets/**'
       # The canvas→asset mirror is written by CanvasService on save and rebuilt
       # by the backfill; both are exercised by the E2 case below, so a change to
@@ -171,7 +174,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-three, so it has to re-run
+      # to it changes what "green" means for all twenty-four, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -338,6 +341,19 @@ jobs:
           # the entire point of the gate. Known, registered drift is handled by
           # the ratchet allowlists inside the test itself.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_schema_drift.py -v
+
+      - name: Diff ORM-declared indexes against the built schema (C1)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步比表 / 列 / 可空 / 类型 / 外键 —— 唯独不比索引。于是
+          # `__table_args__` 里的 `Index(...)` 是这套模型里唯一没有任何东西
+          # 对账的声明：指着一个从来没建过的索引，两边都不会有人说话。
+          # 方向是单向的（ORM→库零容忍；库→ORM 只计数打印），理由与已知
+          # 漂移的逐条豁免都写在那个文件顶部。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_orm_indexes_integration.py -v
 
       - name: Assert social_accounts' Realtime/RLS + credential grants (mig 417)
         working-directory: backend

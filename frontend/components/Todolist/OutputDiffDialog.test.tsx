@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChildRunContext, type ChildRunState } from './childRunContext';
+import { diffWords } from './outputDiff';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
@@ -43,6 +44,14 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
 // rather than on a DOM node some other provider owns.
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({ useOptionalToast: () => ({ addToast }) }));
+// Spy-able but REAL by default: every case below goes through the genuine
+// word diff. Only the `omit`-without-counts case overrides it — that shape
+// cannot come out of `diffWords` (it always fills `omitted`), and the point
+// is exactly what the PANEL does when a segment fails to carry its counts.
+vi.mock('./outputDiff', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./outputDiff')>();
+  return { ...mod, diffWords: vi.fn(mod.diffWords) };
+});
 
 // Spied, not stubbed: the real store dedupes by watermark, and asserting
 // through it would be re-asserting the store's own rules.
@@ -94,6 +103,72 @@ describe('OutputDiffDialog', () => {
     expect(to.textContent).toContain('red');
     expect(from.querySelector('[data-diff="del"]')?.textContent).toBe('brown');
     expect(to.querySelector('[data-diff="add"]')?.textContent).toBe('red');
+  });
+
+  it('C9：截断时两侧都画出省略行，「太长」那条提示照旧在', async () => {
+    // 旧行为：改动的中段被静默丢掉，面板只剩一条「只显示前一部分」的提示，
+    // 而文本本身读起来像是改动到那里就结束了。现在两端都在，中间有一条说得出
+    // 丢了多少行的标记 —— 而且**两侧都要有**：只画一侧的话，另一侧仍然是静默截断。
+    const long = (p: string) => Array.from({ length: 6000 }, (_, i) => `${p}${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, long('a')), to: side(2, long('b')),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    for (const pane of ['output-diff-from', 'output-diff-to']) {
+      const marker = screen.getByTestId(pane).querySelector('[data-testid="output-diff-omitted"]');
+      expect(marker).not.toBeNull();
+      expect(marker?.textContent).toMatch(/\d+ lines omitted/);
+    }
+    // 尾部确实回来了 —— 旧实现只留得住头。
+    expect(screen.getByTestId('output-diff-from').textContent).toContain('a5999');
+    expect(screen.getByTestId('output-diff-to').textContent).toContain('b5999');
+  });
+
+  it('C9：一侧什么都没丢时，那一侧不画省略行', async () => {
+    // 两侧在同一个位置被切开，但很少丢掉一样多。短的那一侧可能一行都没丢 ——
+    // 此时画一条「0 lines omitted」等于宣布一次并没有发生在这一侧的切割。
+    const longSide = Array.from({ length: 6000 }, (_, i) => `a${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, longSide), to: side(2, 'b0\nb1'),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    // 长的那侧丢了东西 → 有标记；短的那侧一行没丢 → 没有标记。
+    const marks = (pane: string) =>
+      screen.getByTestId(pane).querySelectorAll('[data-testid="output-diff-omitted"]').length;
+    expect(marks('output-diff-from')).toBe(1);
+    expect(marks('output-diff-to')).toBe(0);
+    expect(screen.getByTestId('output-diff-to').textContent).not.toContain('omitted');
+  });
+
+  it('C9：omit 段没带计数时照样画标记 —— 不知道丢了多少 ≠ 什么都没丢', async () => {
+    // `?? 0` 会把「说不出丢了多少」读成「一行都没丢」，于是标记被过滤掉，
+    // 截断重新变成静默的 —— 正是 C9 要消灭的那个形状。这条用一个**没有**
+    // `omitted` 字段的 omit 段钉住：标记必须还在，数字退化成 0 无妨。
+    const frozen = {
+      segments: [
+        { type: 'same', text: 'head ' },
+        { type: 'omit', text: '\n…\n' }, // 刻意不带 omitted
+        { type: 'same', text: ' tail' },
+      ],
+      added: 0,
+      removed: 0,
+      truncated: true,
+      omitted: { from: 0, to: 0 },
+    };
+    vi.mocked(diffWords).mockReturnValueOnce(frozen as unknown as ReturnType<typeof diffWords>);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('output-diff-from').querySelector('[data-testid="output-diff-omitted"]'),
+      ).not.toBeNull(),
+    );
   });
 
   it('says a side could not be reconstructed instead of showing it empty', async () => {
