@@ -76,12 +76,51 @@ class TagGroups(Base):
     )
 
 
+class TagPresets(Base):
+    """The initial tags every user is handed at signup (mig 468).
+
+    A template, not a tag. No user ever sees a row here and no user-facing
+    endpoint writes one — editing a preset changes nobody's library, it only
+    changes what the NEXT new user starts with. That is the whole point of the
+    table: before mig 468 the "presets" WERE the users' tags, one shared set,
+    which is why they had to be read-only.
+
+    Keyed by ``slug``, the same stable key mig 467 put on ``tags`` — a seeded
+    tag carries its preset's slug, so the automation can still find "the
+    transcript tag" after the user renames it to 转录啦.
+    """
+
+    __tablename__ = "tag_presets"
+    __table_args__ = (
+        PrimaryKeyConstraint("slug", name="tag_presets_pkey"),
+        {"schema": "public"},
+    )
+
+    slug: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    name_zh: Mapped[Optional[str]] = mapped_column(String(50))
+    color: Mapped[Optional[str]] = mapped_column(String(20))
+    icon: Mapped[Optional[str]] = mapped_column(String(50))
+    #: Matched to ``tag_groups.name`` at seed time, NOT an FK: a preset has to
+    #: survive a database where that group row does not exist yet (fresh
+    #: install, CI's ephemeral schema). Unmatched = the seeded tag is ungrouped.
+    group_name: Mapped[Optional[str]] = mapped_column(String(50))
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    prompt_trigger: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+
+
 class Tags(Base):
     __tablename__ = "tags"
     __table_args__ = (
+        # mig 468 dropped 'system': there is no such thing as a system tag any
+        # more, every row belongs to a user. 'time' stays legal — zero rows
+        # today, but the code that reads it was not part of that change.
         CheckConstraint(
-            "type::text = ANY (ARRAY['system'::character varying::text,"
-            " 'user'::character varying::text, 'time'::character varying::text])",
+            "type::text = ANY (ARRAY['user'::text, 'time'::text])",
             name="tags_type_check",
         ),
         ForeignKeyConstraint(
@@ -106,10 +145,11 @@ class Tags(Base):
 
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
-    #: Stable automation key (mig 467). NULL on ordinary tags, and that absence
-    #: is meaningful — it is what keeps a hand-made tag called "Summary" from
-    #: triggering the AI pipeline. Never written by a user-facing endpoint: the
-    #: display name is the user's to change, this is not.
+    #: Stable automation key (mig 467), unique PER USER since mig 468. NULL on
+    #: a tag the user made themselves, and that absence is meaningful — it is
+    #: what keeps a hand-made tag called "Summary" from triggering the AI
+    #: pipeline. Never written by a user-facing endpoint: the display name is
+    #: the user's to change, this is not.
     slug: Mapped[Optional[str]] = mapped_column(Text)
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")

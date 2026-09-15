@@ -130,6 +130,7 @@ from app.models.library import (  # noqa: F401
     SmartCollections,
     StyleTemplates,
     TagGroups,
+    TagPresets,
     Tags,
     TempTokens,
 )
@@ -323,6 +324,7 @@ __all__ = [
     "SmartCollections",
     "StyleTemplates",
     "TagGroups",
+    "TagPresets",
     "Tags",
     "TempTokens",
     # media
