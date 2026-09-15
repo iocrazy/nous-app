@@ -3,11 +3,14 @@
  * Pure, dependency-free, and deliberately small: the dialog needs to colour
  * what changed, not to reproduce a three-way merge.
  *
- * Two rules it must not break:
- *  - **Both sides reconstruct exactly.** `renderedText(result, 'from' | 'to')`
- *    gives back the input it came from, whitespace included — a reader is
- *    comparing their own script, and a word shown on the wrong side reads as
- *    the agent having written something it never wrote.
+ * Three rules it must not break:
+ *  - **Both sides reconstruct exactly — until a truncation says otherwise.**
+ *    For an untruncated diff `renderedText(result, 'from' | 'to')` gives back
+ *    the input it came from, whitespace included: a reader is comparing their
+ *    own script, and a word shown on the wrong side reads as the agent having
+ *    written something it never wrote. A TRUNCATED diff reconstructs to the
+ *    two ends with an explicit omission line between them — still exact about
+ *    what it shows, and explicit about what it does not (see the third rule).
  *  - **A huge text truncates, it does not hang.** The common prefix and
  *    suffix come off first (a revision usually changes one line of many), and
  *    only what is left goes through the quadratic part, capped. `truncated`

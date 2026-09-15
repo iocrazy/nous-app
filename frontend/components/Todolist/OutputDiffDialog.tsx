@@ -148,7 +148,15 @@ const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string; 
         // the same point but rarely lose the same amount, and "0 lines
         // omitted" is a rule across the text announcing a cut that, for this
         // side, did not happen.
-        .filter((s) => s.type !== skip && !(s.type === 'omit' && (s.omitted?.[side] ?? 0) === 0))
+        //
+        // ⚠️ MISSING counts are not zero counts. `?? 0` would have turned an
+        // `omit` segment with no `omitted` at all into "nothing was lost here"
+        // and dropped the marker — silently un-marking a truncation, which is
+        // the exact bug C9 exists to prevent. A segment that cannot say how
+        // much it dropped still says THAT it dropped something.
+        .filter(
+          (s) => s.type !== skip && !(s.type === 'omit' && s.omitted !== undefined && s.omitted[side] === 0),
+        )
         .map((s, i) => (
           <span
             key={`${s.type}:${i}`}
