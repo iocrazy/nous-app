@@ -155,6 +155,9 @@ on:
       # 初始化标签每人一份（mig 468）。改这个测试或 tags 模型都要重跑：
       # 每人一份靠的是 (user_id, slug) 这条 partial unique，只有真库能回答。
       - 'backend/tests/db/test_migration_468_tag_presets_integration.py'
+      # 注册用户名推导（mig 469）。唯一约束 + NOT NULL + 触发器失败连带回滚
+      # auth.users 行 —— 三件都只有真库能回答。
+      - 'backend/tests/db/test_migration_469_signup_username_integration.py'
       - 'backend/app/services/assets/**'
       # The canvas→asset mirror is written by CanvasService on save and rebuilt
       # by the backfill; both are exercised by the E2 case below, so a change to
@@ -165,7 +168,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-one, so it has to re-run
+      # to it changes what "green" means for all twenty-two, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -400,6 +403,23 @@ jobs:
           # (kind, ref_id, version) — the registry's whole race story — or that
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
+
+      - name: Exercise the signup username derivation (mig 469)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # handle_new_user 是 auth.users 的 AFTER INSERT 触发器，它抛什么都会把
+          # 用户行一起回滚 —— 失败的不是「资料没建好」，是「注册不了」。两种形状
+          # 会让它抛：没有 email（团队名算出 NULL；生产的手机号与匿名注册都开着）、
+          # 以及 email 本地部分撞车（user_profiles.username 唯一，而那句
+          # ON CONFLICT (id) 盖不住它）。
+          #
+          # 每条都先用**迁移前的函数**跑一遍并断言它失败，所以这些是回归钉，
+          # 不是对当前行为的描述。只有真库能回答：NOT NULL、UNIQUE、以及触发器
+          # 失败会不会连带回滚 auth.users 行。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_469_signup_username_integration.py -v
 
       - name: Exercise the per-user initial tags (mig 468)
         working-directory: backend
