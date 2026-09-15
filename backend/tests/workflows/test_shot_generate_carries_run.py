@@ -9,8 +9,9 @@
 就是那条路的产出永远无 run 可挂。
 """
 
+import ast
 import pathlib
-from typing import Any
+from typing import Any, NamedTuple
 
 
 class _EnqueueSpy:
@@ -291,42 +292,121 @@ async def test_agent_tool_enqueue_carries_the_run_it_already_has(monkeypatch):
     assert (spy.kwargs[0]["turn"], spy.kwargs[0]["step"]) == (1, 4)
 
 
+#: 派发这两条 workflow 的调用，其 ``dbos_workflow_kwargs`` 必须带的三个键。
+_RUN_COORDINATES = ("run_id", "turn", "step")
+
+#: 只认这两条 workflow —— 同一个 router 里还有一个 breakdown workflow，
+#: 按文件名扫会把它算进来。
+_WATCHED_WORKFLOWS = ("script_shot_generate_workflow", "script_shot_video_workflow")
+
+
+class _EnqueueSite(NamedTuple):
+    where: str
+    which: str
+    #: ``dbos_workflow_kwargs`` 的字面量键集合；**载荷不是字面 dict 时是
+    #: None** —— 那种站点这条守卫读不懂，必须显式报出来而不是当成合格。
+    keys: frozenset[str] | None
+
+
+def _callee_name(node: ast.expr) -> str | None:
+    """``f`` / ``mod.f`` 这类表达式的末端名字。"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _scan_enqueue_sites() -> list[_EnqueueSite]:
+    """扫 ``app/`` 下每一处派发这两条 workflow 的调用。
+
+    ⚠️ 用 ``ast`` 而不是正则，这是 C2 这张票的全部内容。上一版锚定的是
+    ``dbos_workflow_callable=<名字>,`` **紧跟着** ``dbos_workflow_kwargs={``
+    这个字面形状，于是三种完全正常的写法它一个都看不见：
+
+    * 两个 kwarg 之间隔了别的参数（``workflow_id=`` 插在中间）；
+    * 载荷先赋给一个变量再传进来；
+    * 调用被格式化工具换行成别的样子。
+
+    看不见的代价不是转红而是**静默漏检**：新加的第五个站点如果长成上面任何
+    一种，正则只扫出原来那四个，数量断言照样是 4，于是它带没带 run 坐标
+    永远没人问。（本票落地前已用一个真实的第五个站点验过：旧守卫全绿。）
+    """
+    app = pathlib.Path(__file__).resolve().parents[2] / "app"
+    sites: list[_EnqueueSite] = []
+    for path in sorted(app.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+            callable_arg = kwargs.get("dbos_workflow_callable")
+            if callable_arg is None:
+                continue
+            which = _callee_name(callable_arg)
+            if which not in _WATCHED_WORKFLOWS:
+                continue
+            payload = kwargs.get("dbos_workflow_kwargs")
+            keys: frozenset[str] | None
+            if isinstance(payload, ast.Dict):
+                keys = frozenset(
+                    k.value
+                    for k in payload.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                )
+            else:
+                keys = None
+            sites.append(
+                _EnqueueSite(
+                    where=f"{path.relative_to(app.parent)}:{node.lineno}",
+                    which=which,
+                    keys=keys,
+                )
+            )
+    return sites
+
+
 def test_every_shot_enqueue_site_passes_the_three_keys():
     """四个站点全覆盖——而且是**扫出来的**，不是手数的。
 
     加宽站点这件事的失败模式就是漏掉一个，而漏掉的那个通常没有测试。
-    锚点是 ``dbos_workflow_callable=`` 那一行（不是"文件里提到过这个名字"
-    ——同一个 router 里还有一个 breakdown workflow，按文件扫会把它算进来），
-    取紧随其后的 kwargs 块。新加第五个站点忘了带坐标，这条一样转红。"""
-    import re
-
-    app = pathlib.Path(__file__).resolve().parents[2] / "app"
-    wanted = ("script_shot_generate_workflow", "script_shot_video_workflow")
-    pattern = re.compile(
-        r"dbos_workflow_callable=(" + "|".join(wanted) + r")\s*,"
-        r"\s*dbos_workflow_kwargs=\{(.*?)\}",
-        re.S,
-    )
-    sites = [
-        (str(path.relative_to(app.parent)), which, block)
-        for path in app.rglob("*.py")
-        for which, block in pattern.findall(path.read_text(encoding="utf-8"))
-    ]
+    新加第五个站点忘了带坐标，这条转红——无论那个站点的参数怎么排、
+    换不换行。
+    """
+    sites = _scan_enqueue_sites()
 
     assert len(sites) == 4, f"expected 4 enqueue sites, found {len(sites)}: {sites}"
     # 出图三个、出视频一个——数量对了但类型错了，说明扫到了别的 workflow。
-    assert sorted(w for _p, w, _b in sites) == [
+    assert sorted(s.which for s in sites) == [
         "script_shot_generate_workflow",
         "script_shot_generate_workflow",
         "script_shot_generate_workflow",
         "script_shot_video_workflow",
     ]
     missing = [
-        where
-        for where, _which, block in sites
-        if not all(k in block for k in ('"run_id"', '"turn"', '"step"'))
+        s.where
+        for s in sites
+        if s.keys is not None and not set(_RUN_COORDINATES) <= s.keys
     ]
     assert missing == [], f"这些派发方没带 run 坐标：{missing}"
+
+
+def test_no_enqueue_site_hides_its_payload_behind_a_variable():
+    """载荷读不出来 ≠ 载荷是对的。
+
+    上一条只能对**字面 dict** 下判断。``dbos_workflow_kwargs=payload`` 这种
+    写法它读不出键，此时唯一诚实的做法是**说出来**：把「这个站点我看不懂」
+    报成失败，而不是让它从缺失清单里消失、混成一次干净的通过。
+
+    CLAUDE.md 那条「探针够不着目标 ≠ 目标是坏的」的反面同样成立 —— 够不着
+    也**绝不等于**目标是好的。真要这么写，就在这里显式写下它并另想办法证明
+    那三个键在。
+    """
+    opaque = [s.where for s in _scan_enqueue_sites() if s.keys is None]
+    assert opaque == [], (
+        "这些派发方的 dbos_workflow_kwargs 不是字面 dict，守卫无法确认它带了 "
+        f"{list(_RUN_COORDINATES)}：{opaque}"
+    )
 
 
 # --------------------------------------------------------------------------
