@@ -359,6 +359,36 @@ describe('TodolistPage — agent / project map 晚到不得重挂载详情子树
     expect(screen.getByTestId('issue-context-rail').getAttribute('data-probe')).toBe('typed-comment');
   });
 
+  it('B8: says so when the post-dispatch re-read fails, instead of only logging it', async () => {
+    // 回读失败时行留在屏幕上、只是陈旧一拍——这是刻意的（换成错误页会吃掉
+    // 用户写了一半的评论）。但「什么都不说」就成了静默 no-op：用户刚点了
+    // Dispatch，看到的却是没变的状态，无从知道那是没生效还是没刷新。
+    renderPage();
+
+    const first = await screen.findByTestId('issue-context-rail');
+    await act(async () => {
+      agentsDeferred.resolve([AGENT]);
+      projectsDeferred.resolve([PROJECT]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(h.listIssues).toHaveBeenCalled());
+    h.addToast.mockClear();
+
+    h.getIssueByIdentifier.mockRejectedValueOnce(new Error('boom'));
+    fireEvent.click(screen.getByTitle(/^Dispatch to /));
+    const confirm = await screen.findByText('Start working');
+    await act(async () => { fireEvent.click(confirm); });
+
+    // 派发本身也会出一条 success toast，所以找的是「有没有那条错误回显」。
+    await waitFor(() =>
+      expect(
+        h.addToast.mock.calls.some((c) => c[1] === 'error' && String(c[0]).includes('out of date')),
+      ).toBe(true),
+    );
+    // 子树不许因此被拆掉（与上一条护栏同一条纪律）。
+    expect(screen.getByTestId('issue-context-rail')).toBe(first);
+  });
+
   it('still refetches and remounts when the identifier itself changes', async () => {
     renderPage();
 

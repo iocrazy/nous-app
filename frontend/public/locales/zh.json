@@ -5629,6 +5629,7 @@
     "wakesAt": "{{at}} 唤醒"
   },
   "issues": {
+    "refreshFailed": "刷新这条议题失败，你看到的可能不是最新状态",
     "pageTitle": "待办事项",
     "needsReplyChip": "等你回复",
     "waitingOnYou": "等我的",
