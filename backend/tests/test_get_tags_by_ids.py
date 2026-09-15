@@ -83,12 +83,19 @@ async def test_get_tags_by_ids_empty_short_circuits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_tags_by_ids_scopes_query_to_caller_visible_pool(monkeypatch):
-    """Spec §5: the compiled WHERE must restrict rows to
-    ``type IN ('system','time') OR (type='user' AND user_id = caller)`` — the
-    same predicate ``resolve_note_tags`` uses. Without it, a raw tag_id query
-    param could resolve another user's private tag's name/name_zh into a live
-    filter word (cross-user existence oracle + private-word-steered filtering).
+async def test_get_tags_by_ids_scopes_query_to_the_caller(monkeypatch):
+    """The compiled WHERE must restrict rows to the caller's own tags.
+
+    Without it, a raw tag_id query param could resolve another user's private
+    tag's name/name_zh into a live filter word (cross-user existence oracle +
+    private-word-steered filtering).
+
+    The predicate used to be ``type IN ('system','time') OR (type='user' AND
+    user_id = caller)``, because the first arm was a pool everyone shared. Mig
+    468 forked that pool into a copy per user, so ``user_id = caller`` is now
+    the whole of it — and that is strictly tighter, not looser: the arm that
+    went away was the one publishing rows across users.
+
     Asserted against the compiled statement's SQL text + bound params (not
     literal_binds — the Uuid column's literal renderer requires an already-
     typed uuid.UUID, not the plain str the repo is handed at the API
@@ -103,9 +110,13 @@ async def test_get_tags_by_ids_scopes_query_to_caller_visible_pool(monkeypatch):
     compiled = session.statements[0].compile()
     sql = str(compiled)
     params = compiled.params
-    assert "tags.type IN " in sql  # system/time branch
-    assert "tags.type = " in sql and "tags.user_id = " in sql  # own-user branch
+    assert "tags.user_id = " in sql
+    # `tags.type` still appears in the SELECT list (it is a column), so the
+    # assertion is on the BOUND PARAMS: no `type_*` bind means no arm of the
+    # WHERE keys on it any more.
+    assert not [k for k in params if k.startswith("type")], (
+        "type is no longer a visibility predicate — an arm that keys on it "
+        "would publish rows the owner check already settles"
+    )
     assert params["id_1"] == [1, 2]
-    assert params["type_1"] == ["system", "time"]
-    assert params["type_2"] == "user"
     assert params["user_id_1"] == caller_uid

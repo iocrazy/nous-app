@@ -67,7 +67,8 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import false as sa_false
+from sqlalchemy import func, or_, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -188,10 +189,7 @@ class TagsRepository:
                     func.lower(Tags.name).in_(words),
                     func.lower(Tags.name_zh).in_(words),
                 ),
-                or_(
-                    and_(Tags.type == "user", Tags.user_id == user_id),
-                    Tags.type.in_(("system", "time")),
-                ),
+                Tags.user_id == user_id,
             )
             rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
             for w in words:
@@ -226,23 +224,20 @@ class TagsRepository:
     async def get_all_tags(
         self, user_id: Optional[str] = None, enabled_only: bool = False
     ) -> List[dict]:
-        """Get all tags (system + time + user's own) with media_count + group_name.
+        """One user's tags, with media_count + group_name.
 
-        Reproduces the legacy: single tags query (or_ filter) + a single GROUP BY
-        count over resource_tags, then flatten group_name + attach media_count.
+        Used to be "system + time + the user's own". Mig 468 forked the shared
+        rows into a copy per user, so the visible pool is simply *yours* —
+        ``user_id`` is the whole predicate now.
+
+        No ``user_id`` means no tags: before the fork that argument-less call
+        returned the shared pool, and there is no such thing any more. An empty
+        list is the honest answer, not a bug.
         """
         async with read_scope() as session:
-            stmt = select(Tags)
-            if user_id:
-                stmt = stmt.where(
-                    or_(
-                        Tags.type == "system",
-                        Tags.type == "time",
-                        (Tags.type == "user") & (Tags.user_id == user_id),
-                    )
-                )
-            else:
-                stmt = stmt.where(or_(Tags.type == "system", Tags.type == "time"))
+            stmt = select(Tags).where(
+                Tags.user_id == user_id if user_id else sa_false()
+            )
             if enabled_only:
                 stmt = stmt.where(Tags.enabled.is_(True))
 
@@ -408,105 +403,41 @@ class TagsRepository:
     async def get_tag_by_name(
         self, name: str, user_id: Optional[str] = None
     ) -> Optional[dict]:
-        """Get a tag by name (case-insensitive English) or name_zh (exact).
+        """One of the caller's tags, by English name (case-insensitive) or by
+        exact ``name_zh``.
 
-        Mirrors the legacy precedence: system → time → (user). For system/time we
-        match English ILIKE OR exact ZH; for user we match English ILIKE scoped to
-        the user. ``ilike("name", value)`` with no ``%`` wildcards is an exact
-        case-insensitive match (the SQLAlchemy escaping of literal %/_ mirrors the
-        legacy's manual PostgREST escaping intent — no user input is treated as a
-        pattern)."""
+        This used to walk a precedence ladder — system, then time, then the
+        user's own — because the first two were a shared pool everyone saw. Mig
+        468 forked that pool per user, so there is one scope left.
+
+        ``ilike(name, value)`` with no ``%`` wildcards is an exact
+        case-insensitive match; SQLAlchemy escapes literal %/_ so no caller's
+        input is ever treated as a pattern.
+        """
+        if not user_id:
+            return None
         try:
             async with read_scope() as session:
-                for tag_type in ("system", "time"):
-                    row = (
-                        (
-                            await session.execute(
-                                select(Tags)
-                                .where(
-                                    or_(
-                                        Tags.name.ilike(name, escape="\\"),
-                                        Tags.name_zh == name,
-                                    )
-                                )
-                                .where(Tags.type == tag_type)
-                                .limit(1)
-                            )
-                        )
-                        .scalars()
-                        .first()
-                    )
-                    if row:
-                        return _tag_row(row)
-
-                if user_id:
-                    row = (
-                        (
-                            await session.execute(
-                                select(Tags)
-                                .where(Tags.name.ilike(name, escape="\\"))
-                                .where(Tags.user_id == user_id)
-                                .limit(1)
-                            )
-                        )
-                        .scalars()
-                        .first()
-                    )
-                    if row:
-                        return _tag_row(row)
-        except Exception as e:
-            logger.error(f"Error in get_tag_by_name: {e}")
-        return None
-
-    async def get_or_create_group(self, name: str) -> Optional[dict]:
-        """Find a tag_groups row by exact name, creating it when missing.
-
-        Used by the AI classification write-through (one group per
-        dimension). Race-safe: ON CONFLICT(name) DO NOTHING + re-select.
-        """
-        try:
-            async with write_scope() as session:
                 row = (
                     (
                         await session.execute(
-                            select(TagGroups).where(TagGroups.name == name).limit(1)
+                            select(Tags)
+                            .where(Tags.user_id == user_id)
+                            .where(
+                                or_(
+                                    Tags.name.ilike(name),
+                                    Tags.name_zh == name,
+                                )
+                            )
+                            .limit(1)
                         )
                     )
                     .scalars()
                     .first()
                 )
-                if row is None:
-                    row = (
-                        (
-                            await session.execute(
-                                pg_insert(TagGroups)
-                                .values(name=name)
-                                .on_conflict_do_nothing(index_elements=["name"])
-                                .returning(TagGroups)
-                            )
-                        )
-                        .scalars()
-                        .first()
-                    )
-                if row is None:  # lost the insert race — re-select
-                    row = (
-                        (
-                            await session.execute(
-                                select(TagGroups).where(TagGroups.name == name).limit(1)
-                            )
-                        )
-                        .scalars()
-                        .first()
-                    )
-                if row is None:
-                    return None
-                return {
-                    "id": row.id,
-                    "name": row.name,
-                    "sort_order": row.sort_order,
-                }
+                return _tag_row(row) if row else None
         except Exception as e:
-            logger.error(f"Error in get_or_create_group({name}): {e}")
+            logger.error(f"get_tag_by_name failed for {name!r}: {e}")
             return None
 
     async def create_tag(
@@ -845,8 +776,8 @@ class TagsRepository:
 
     async def get_tags_by_ids(self, ids: list[int], user_id: str) -> List[dict]:
         """Full tag rows for the given ids, scoped to the caller-visible pool
-        (spec §5: ``type IN ('system','time') OR (type='user' AND user_id =
-        caller)``), in ONE in-list query.
+        (their own rows — mig 468 retired the shared ``type IN ('system','time')``
+        pool), in ONE in-list query.
 
         Backs the topics feed's pool-tag filter, which resolves picked tag ids
         to their name/name_zh word set. Without this scoping, a caller could
@@ -863,10 +794,7 @@ class TagsRepository:
                     await session.execute(
                         select(Tags).where(
                             Tags.id.in_([int(t) for t in ids]),
-                            or_(
-                                Tags.type.in_(("system", "time")),
-                                and_(Tags.type == "user", Tags.user_id == user_id),
-                            ),
+                            Tags.user_id == user_id,
                         )
                     )
                 )
