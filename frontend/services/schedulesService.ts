@@ -121,12 +121,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * shape and requires `name` + `cron_expr`, neither of which a one-shot has.
  *
  * The id arrives as a STRING (B3: a Snowflake id is never round-tripped
- * through a JS number on the way here) and the `Number()` below is the one
- * place that converts it — because `issue_id` goes onto the wire as a JSON
- * NUMBER: issue ids are JSON numbers everywhere in `/issues/*` and the
- * backend matches on `payload->>'issue_id'`. Normalising at the boundary is
- * the rule; re-spelling the wire is not (CLAUDE.md 边界 mock 必须用真实 JSON
- * 形状).
+ * through a JS number on the way here) and the `Number()` below is the ONE
+ * place that converts it — **and it should not have to**.
+ * `schedules_router._validate_wakeup_payload_fields` normalises the field
+ * itself (`body["issue_id"] = int(issue_id)`, then
+ * `assert_issue_visible(int(body["issue_id"]))`), and Python ints are
+ * arbitrary precision, so a JSON string would be accepted and stored
+ * identically — losslessly. The number is kept here for one reason only:
+ * this is a REFACTOR, and changing a wire byte is not something it gets to
+ * do. Dropping the `Number()` is a one-line fix with its own ticket
+ * (frontend-convergence-report.md 记票 §F1) and needs the wire re-verified
+ * on the real stack, not a unit test.
  */
 export async function createIssueWakeup(
   issueId: string,

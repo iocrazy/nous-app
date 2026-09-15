@@ -134,8 +134,10 @@ export function decodeErrorEnvelope(body: unknown): DecodedErrorEnvelope {
  * two refusals of the same status apart.
  */
 export function decodeApiError(err: ApiError): DecodedErrorEnvelope {
-  const decoded = decodeErrorEnvelope({ details: err.details, code: err.code });
-  // `ApiError.message` already went through `toApiError`'s own chain, so it
-  // is the sentence this error is carrying — not a second `error` field.
-  return { ...decoded, message: decoded.message ?? asNonEmptyString(err.message) };
+  // Only the envelope. `ApiError.message` is NOT folded in as a last-resort
+  // `message`: it already went through `toApiError`'s own (deliberately
+  // different) chain, so re-serving it here would quietly hand callers a
+  // sentence composed by other rules under a field that means "what the
+  // route typed". A caller that wants that sentence reads `err.message`.
+  return decodeErrorEnvelope({ details: err.details, code: err.code });
 }

@@ -10,7 +10,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import type { AILibraryAgent } from '../../types';
 import type { NeedsInputItem } from '../../services/issuesService';
 
@@ -68,18 +68,12 @@ const item = (over: Partial<NeedsInputItem> = {}): NeedsInputItem => ({
 });
 
 function renderTab() {
-  // Mounted where production mounts it: under `/team/:teamId`, which is also
-  // where `urlPrefix` comes from. The deep link is built from that param
-  // (B7's one builder), so a bare router would have tested the team-less
-  // fallback instead of the path every user takes.
+  // Both team-shaped props, exactly as AgentEditor derives them from one
+  // route param — so the deep link under test is built by B7's builder, not
+  // by the team-less fallback.
   return render(
-    <MemoryRouter initialEntries={['/team/8/ai-library/agents/script-ai']}>
-      <Routes>
-        <Route
-          path="/team/:teamId/ai-library/agents/:slug"
-          element={<AgentWorkbenchTab agent={agent} slug="script-ai" urlPrefix="/team/8" />}
-        />
-      </Routes>
+    <MemoryRouter>
+      <AgentWorkbenchTab agent={agent} slug="script-ai" urlPrefix="/team/8" teamId="8" />
     </MemoryRouter>,
   );
 }

@@ -13,7 +13,7 @@ import { Frame } from 'lucide-react';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { originLabel, originPath, parseOriginId } from './issueOrigin';
 import { relativeTime } from '../../utils/taskDisplay';
-import { issueDeepLink } from '../../utils/issueLinks';
+import { issueDeepLinkOrLegacy } from '../../utils/issueLinks';
 
 interface IssueRelatedTabProps {
   issue: UiIssue;
@@ -21,11 +21,10 @@ interface IssueRelatedTabProps {
 
 export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
   const { teamId } = useParams<{ teamId: string }>();
-  // The one deep-link builder (B7, `utils/issueLinks.ts`). This tab lives
-  // inside the issue detail page, which only exists under `/team/:teamId`,
-  // so the builder's team-less refusal is unreachable; it keeps the string
-  // this file printed before rather than growing a disabled row here.
-  const relatedLink = (key: string) => issueDeepLink(teamId, key) ?? `/team/${teamId}/todolist/${key}`;
+  // The one deep-link builder (B7); `…OrLegacy` because both rows below are
+  // unconditional `<Link>`s — see the helper for why that fallback is
+  // unreachable inside the detail page.
+  const relatedLink = (key: string) => issueDeepLinkOrLegacy(teamId, key);
   const [children, setChildren] = useState<Issue[]>([]);
   const [parent, setParent] = useState<Issue | null>(null);
   const [loading, setLoading] = useState(true);

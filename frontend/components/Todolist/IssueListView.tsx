@@ -65,7 +65,7 @@ import {
   type IssueSort,
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
-import { issueDeepLink } from '../../utils/issueLinks';
+import { issueDeepLink, issueDeepLinkOrLegacy } from '../../utils/issueLinks';
 import { originModule } from './issueOrigin';
 import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
 import { buildAttentionItems } from './attentionItems';
@@ -210,12 +210,10 @@ interface IssueRowProps {
 }
 
 const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount, selected = false, queued }) => {
-  // The one deep-link builder (B7, `utils/issueLinks.ts`). It refuses without
-  // a team; this row only ever renders under `/team/:teamId`, so the `?? ''`
-  // its callers pass is TypeScript appeasement rather than a reachable state.
-  // That unreachable case keeps the string it printed before — growing a
-  // disabled row for it would be a behaviour change, not a refactor.
-  const rowLink = (key: string) => issueDeepLink(teamId, key) ?? `/team/${teamId}/todolist/${key}`;
+  // The one deep-link builder (B7, `utils/issueLinks.ts`); `…OrLegacy` because
+  // this row renders a `<Link>` unconditionally — the why, and why that is not
+  // a disabled state, is documented on the helper.
+  const rowLink = (key: string) => issueDeepLinkOrLegacy(teamId, key);
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;

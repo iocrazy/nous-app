@@ -43,3 +43,27 @@ export function issueDeepLink(
   }
   return url;
 }
+
+/**
+ * The refusal spelled out, for the callers that render a link unconditionally.
+ *
+ * Six sites (the issue rows, the board card, the related tab, the post-create
+ * redirect) sit **inside** `/team/:teamId` — `router.tsx` registers
+ * `todolist/:identifier` there and nowhere else — so `issueDeepLink` cannot
+ * actually refuse for them: the `teamId ?? ''` they thread through is
+ * TypeScript appeasement, not a reachable state. They still need a `string`
+ * to hand `<Link to>` / `navigate`, and answering that with a disabled
+ * control would be a BEHAVIOUR CHANGE, not a refactor. So the unreachable
+ * branch keeps the exact string those sites printed before this converged —
+ * once, here, instead of six times in five files.
+ *
+ * A site that has a real team-less case (`FileCard`, `NeedsInputSection`,
+ * `issueLinkFor`) must NOT use this: it should take the `null` from
+ * `issueDeepLink` and say something honest about it.
+ */
+export function issueDeepLinkOrLegacy(
+  teamId: string | number | null | undefined,
+  issueKey: string,
+): string {
+  return issueDeepLink(teamId, issueKey) ?? `/team/${teamId}/todolist/${issueKey}`;
+}

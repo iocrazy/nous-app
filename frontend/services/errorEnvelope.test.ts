@@ -136,7 +136,9 @@ describe('decodeApiError — the same envelope, already unwrapped by apiClient',
     const decoded = decodeApiError(err);
     expect(decoded.code).toBeNull();
     expect(decoded.details).toBeNull();
-    // The sentence still survives: it is the one apiClient already composed.
-    expect(decoded.message).toBe('Not Found');
+    // And no sentence either: `err.message` was composed by apiClient's own
+    // chain, so serving it here as "what the route typed" would be a lie.
+    // A caller that wants it reads `err.message` directly.
+    expect(decoded.message).toBeNull();
   });
 });
