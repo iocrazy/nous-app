@@ -52,7 +52,13 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // STRINGS (a Snowflake past 2^53 does not survive a JS number), and both
   // consumers below take one — so a `Number()` in the middle can only lose a
   // digit.
-  const issueId = String(ctx.issue.id);
+  //
+  // `null` when the host has no id to give: `String(undefined)` would send
+  // `GET /issues/undefined/outputs` and subscribe a listener under the key
+  // "undefined". Neither hook may be skipped (rules of hooks), so the empty
+  // key parks the subscription and the effect below returns before asking.
+  const rawId = ctx.issue?.id;
+  const issueId = rawId === null || rawId === undefined ? null : String(rawId);
   const refreshKey = ctx.env.refreshKey ?? 0;
   const [items, setItems] = useState<OutputObject[]>([]);
   const [failed, setFailed] = useState(false);
@@ -60,7 +66,7 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [justUpdated, setJustUpdated] = useState(false);
   // «A turn on this issue ended» — one broadcast, deduped by watermark, so the
   // WS `done` frame and the polling edge for one turn cost one re-read.
-  const signal = useTurnSignal(issueId);
+  const signal = useTurnSignal(issueId ?? '');
   /** The signal the badge has already spoken for. The effect re-runs for other
    *  reasons too (a rail `refreshKey` bump), and `signal !== null` stays true
    *  forever once the first turn lands — so without this the badge would claim
@@ -72,6 +78,9 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   useEffect(() => () => setHighlightedOutput(null), []);
 
   useEffect(() => {
+    // No id, no request and no listener — an issue block mounted without one
+    // has nothing to read, and asking anyway would spend a 404 per render.
+    if (issueId === null) return undefined;
     let live = true;
     // Claimed at the START of the run this signal caused, so a re-run for any
     // other reason cannot claim it a second time.

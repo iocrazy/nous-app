@@ -30,8 +30,11 @@ export function issueDeepLink(
   issueKey: string | null | undefined,
   coords: IssueDeepLinkCoords = {},
 ): string | null {
-  if (teamId === null || teamId === undefined || teamId === '') return null;
-  if (!issueKey) return null;
+  // Falsy, not null-ish: the backend's guard is `if not team_id or not
+  // issue_key`, which rejects `0` and `""` as well (L1). A team id of 0 is
+  // not a team — spelling the refusal differently on the two sides is the
+  // drift this mirror exists to prevent.
+  if (!teamId || !issueKey) return null;
   let url = `/team/${teamId}/todolist/${issueKey}`;
   const { step, turn } = coords;
   if (step !== null && step !== undefined) {

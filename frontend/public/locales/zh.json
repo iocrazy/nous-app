@@ -2516,6 +2516,9 @@
       "delivery": "交付"
     }
   },
+  "files": {
+    "issueLinkNoTeam": "当前没有团队上下文——请从议题看板打开"
+  },
   "projects": {
     "openByIdFailed": "无法打开该项目 — 项目可能已删除或你已失去访问权限",
     "episodeViews": {

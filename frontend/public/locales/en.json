@@ -2516,6 +2516,9 @@
       "delivery": "Delivery"
     }
   },
+  "files": {
+    "issueLinkNoTeam": "No team context — open the issue from its board"
+  },
   "projects": {
     "openByIdFailed": "Could not open this project — it may have been deleted or you no longer have access",
     "episodeViews": {

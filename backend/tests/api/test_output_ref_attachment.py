@@ -307,3 +307,19 @@ async def test_empty_registry_title_is_absence_not_an_empty_string(monkeypatch):
             "version": 2,
         }
     ]
+
+
+async def test_a_padded_registry_title_is_stamped_trimmed(monkeypatch):
+    """评审 N2 的另一半：归一发生在构造 ``ChatOutputRef`` 的地方。
+
+    上面那条（框渲染）证明模型看到的是 ``title="S3 · Shot #1"``；这一条证明
+    存进消息 ``attachments`` 的也是同一个值——两个读者读同一次归一，不是各
+    自 strip 一遍。
+    """
+    r, dispatch, _ = _wire(
+        monkeypatch,
+        lineage=[_lineage_row(2, title="  S3 · Shot #1  ", issue_id=ISSUE_ID)],
+    )
+    resp = await _post(r, [_att()])
+    assert resp.agent_dispatched is True
+    assert dispatch.await_args.kwargs["attachments"][0]["title"] == "S3 · Shot #1"

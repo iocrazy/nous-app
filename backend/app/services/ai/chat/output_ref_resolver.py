@@ -83,11 +83,15 @@ def _clean_title(value: Any) -> Optional[str]:
     归一放在**构造 ``ChatOutputRef`` 的每一处**，而不是三个读者各判一次：
     ``_stamped`` / ``citations_for_transcript`` / 框渲染都只问 ``title is
     None``，多一个读者就多一次漏判的机会。
+
+    **两侧空白一并去掉**（评审 N2）：``" S3 "`` 与 ``"S3"`` 是同一个标题，而
+    框里渲染成 ``title=" S3 "`` 会让模型把那两个空格读成标题的一部分。既然
+    「全是空白 ⇒ 没有标题」这条判定已经在用 ``strip()``，把去掉的那部分留在
+    值里只会让同一个函数对同一批空白给出两种答案。
     """
     if value is None:
         return None
-    text = str(value)
-    return text if text.strip() else None
+    return str(value).strip() or None
 
 
 @dataclass(frozen=True)

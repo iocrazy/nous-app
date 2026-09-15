@@ -35,11 +35,19 @@ describe('issueDeepLink', () => {
     expect(issueDeepLink('42', 'MH-1', { step: 0, turn: 0 })).toBe('/team/42/todolist/MH-1?step=0&turn=0');
   });
 
-  it('refuses without a team or without a key', () => {
+  it('refuses without a team or without a key — falsy counts, as Python does', () => {
     // There is no team-less route that takes an identifier: `router.tsx` has
     // `todolist/:identifier` under `/team/:teamId` only.
+    //
+    // `0` is in here because the backend guard is `if not team_id` (L1): a
+    // team id of 0 is not a team, and a TS side that only checked for
+    // null/undefined would build `/team/0/todolist/MH-1` where Python
+    // refuses. `test_issue_links_frontend_mirror.py` pins the same pair.
     expect(issueDeepLink(undefined, 'MH-91')).toBeNull();
+    expect(issueDeepLink(null, 'MH-91')).toBeNull();
     expect(issueDeepLink('', 'MH-91')).toBeNull();
+    expect(issueDeepLink(0, 'MH-91')).toBeNull();
     expect(issueDeepLink('42', null)).toBeNull();
+    expect(issueDeepLink('42', '')).toBeNull();
   });
 });

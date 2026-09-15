@@ -241,3 +241,18 @@ describe('OutputsBlockView — Snowflake discipline (B3)', () => {
     await waitFor(() => expect(__listenerCount(BIG)).toBe(1));
   });
 });
+
+describe('OutputsBlockView — no id to read (评审 Info)', () => {
+  it('asks for nothing and parks its listener when the host has no issue id', async () => {
+    // A block mounted without an id has nothing to read. `String(undefined)`
+    // would have sent `GET /issues/undefined/outputs` and subscribed under the
+    // key "undefined" — a 404 per mount, and a listener no `notifyTurn` can
+    // ever reach. Same posture as `useMentionOutputsTab`, which parks the
+    // subscription on the empty key.
+    render(<OutputsBlockView ctx={{ issue: {}, rollup: null, originKind: null, phase: null, env: {} } as IssueBlockContext} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).not.toHaveBeenCalled();
+    expect(__listenerCount('undefined')).toBe(0);
+    expect(screen.queryByTestId('outputs-block')).toBeNull();
+  });
+});

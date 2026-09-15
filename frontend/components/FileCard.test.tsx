@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { FileCard } from './FileCard';
@@ -6,8 +6,14 @@ import type { ProjectFile } from '../types';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, opts?: Record<string, unknown>) =>
-      opts && 'id' in opts ? `from ${opts.id}` : key,
+    // Two call shapes: `t(key, { id })` for the interpolated chip label, and
+    // `t(key, 'English fallback')` for copy whose default lives at the call
+    // site. Returning the fallback (not the key) is what lets an assertion
+    // name the SENTENCE a reader sees.
+    t: (key: string, opts?: Record<string, unknown> | string) => {
+      if (typeof opts === 'string') return opts;
+      return opts && 'id' in opts ? `from ${opts.id}` : key;
+    },
   }),
 }));
 
@@ -92,5 +98,26 @@ describe('FileCard source-issue chip — no team, no link (B7)', () => {
     const chip = screen.getByTestId('file-source-issue-chip');
     expect(chip).toHaveTextContent('from MH-42');
     expect(chip).not.toHaveAttribute('href');
+    // The tooltip says WHY, rather than leaving an inert control unexplained
+    // (评审 L3). The sentence, not the key.
+    expect(chip).toHaveAttribute('title', 'No team context — open the issue from its board');
+  });
+
+  it('swallows the click instead of letting it open the file', () => {
+    // The Link stopped propagation; the span must too, or clicking the
+    // provenance chip silently becomes "open this file".
+    const onClick = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/projects/500']}>
+        <Routes>
+          <Route
+            path="/projects/:projectId"
+            element={<FileCard file={{ ...baseFile, source_issue_identifier: 'MH-42' }} onClick={onClick} viewMode="grid" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId('file-source-issue-chip'));
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

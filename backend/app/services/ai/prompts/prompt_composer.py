@@ -1001,8 +1001,14 @@ def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
             f'version="{escape_frame_attr(ref.version)}"',
         ]
         title = getattr(ref, "title", None)
-        if title is not None and str(title).strip():
-            attrs.append(f'title="{escape_frame_attr(title)}"')
+        # Trimmed, and absent when nothing survives the trim. Upstream
+        # (`_clean_title`) already normalizes both, and this renderer holds the
+        # same line a second time because `refs` is typed `Any` — the next
+        # construction path should not get to decide whether the model sees
+        # `title=""` or two leading spaces inside the value.
+        text = "" if title is None else str(title).strip()
+        if text:
+            attrs.append(f'title="{escape_frame_attr(text)}"')
         lines.append(f"  <output {' '.join(attrs)}/>")
     lines.append("</referenced_outputs>")
     lines.append("")

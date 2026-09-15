@@ -7,6 +7,7 @@ import { createResourceMentionExtension } from '../chat/ChatInputResourceMention
 import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 import type { OutputObject, OutputVersion } from '../../services/outputsService';
 import type { ResourceSearchResult } from '../../types';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -252,15 +253,16 @@ const TEAM = '331438215859255';
  * alongside a step it actually has. A fixture that disagrees with itself is a
  * fixture no consumer can be held to.
  */
-const deepLinkFor = (step: number | null, turn: number | null): string => {
-  let url = `/team/${TEAM}/todolist/MH-94`;
-  // `step` is 0-based, so it is compared against null rather than truth-tested.
-  if (step !== null) {
-    url += `?step=${step}`;
-    if (turn !== null) url += `&turn=${turn}`;
-  }
-  return url;
-};
+const deepLinkFor = (step: number | null, turn: number | null): string =>
+  // The production builder itself, not a third spelling of its rule (L2):
+  // `utils/issueLinks.ts` is the frontend mirror of `issue_links.py`, and
+  // `backend/tests/services/issues/test_issue_links_frontend_mirror.py` holds
+  // the two sides to one string. Re-implementing the rule here would be a
+  // THIRD copy, free to drift from both.
+  //
+  // `!` because the arguments are literals: TEAM and the key are always
+  // present, so the builder's refusal branch is unreachable from here.
+  issueDeepLink(TEAM, 'MH-94', { step, turn })!;
 
 const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => {
   const row: OutputVersion = {
