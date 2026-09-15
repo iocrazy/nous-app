@@ -19,6 +19,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 /**
  * One registered version of one object.
@@ -172,21 +173,13 @@ async function reject(res: Response): Promise<never> {
   let message = `${res.status} ${res.statusText}`;
   let details: Record<string, unknown> | null = null;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      // The WHOLE object, not the two keys we happen to read here: a refusal's
-      // extra facts (`latest_version`, `reason`) are what the caller's copy
-      // names, and this parser must not decide which of them matter.
-      details = detail as Record<string, unknown>;
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    // The WHOLE object, not just the two keys read below: a refusal's extra
+    // facts (`latest_version`, `reason`) are what the caller's copy names,
+    // and neither this function nor the decoder gets to pick which matter.
+    details = decoded.details;
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     // Not JSON at all (a gateway's HTML) — keep the status line.
     console.error('[outputsService] error body was not JSON', err);

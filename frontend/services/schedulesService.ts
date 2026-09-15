@@ -7,6 +7,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 const base = (): string => `${getApiUrl()}/api/v1/schedules`;
 
@@ -83,11 +84,9 @@ export class ScheduleRejectedError extends Error {
 }
 
 /**
- * Turn a non-2xx into a typed error. Production wraps every HTTPException in
- * the ErrorResponse envelope (`app/core/exceptions.py`):
- * `{success, error, code: "http_<status>", request_id, details: <exc.detail>}`
- * — and `schedules_router._bad_request` always puts the typed `{code,message}`
- * under `details`. A bare FastAPI `{detail: …}` is accepted too.
+ * Turn a non-2xx into a typed error, reading the envelope through the one
+ * decoder (`services/errorEnvelope.ts`) — `schedules_router._bad_request`
+ * always puts the typed `{code, message}` under `details`.
  *
  * The raw body never leaves this function: it carries a request_id and the
  * whole internal envelope, which is not something to paint into a popover.
@@ -96,17 +95,9 @@ async function reject(res: Response): Promise<never> {
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     // Not JSON at all (a gateway's HTML, say) — keep the status line.
     console.error('[schedulesService] error body was not JSON', err);
