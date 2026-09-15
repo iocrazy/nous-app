@@ -183,7 +183,7 @@ BEGIN
    WHERE NOT EXISTS (
            -- Already has it — either a previous seed, or a tag they made
            -- themselves that happens to share the name. Never create a second
-           -- one; step 3 stamps the slug onto the row they already own.
+           -- one; step 4a stamps the slug onto the row they already own.
            SELECT 1 FROM public.tags t
             WHERE t.user_id = p_user
               AND (t.slug = p.slug OR lower(t.name) = lower(p.name))
@@ -263,10 +263,34 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- Same proof, contained.
 
 -- ---------------------------------------------------------------------------
--- 3. Fork the existing shared rows out to every existing user
+-- 3. A slug is unique PER USER now, not globally — BEFORE anything is forked
+-- ---------------------------------------------------------------------------
+-- mig 467's global unique was right for one shared row per slug. With a copy
+-- per user it would reject every user but the first.
+--
+-- ⚠️ ORDER MATTERS, and it cost a failed production run to learn it. This
+-- section used to sit AFTER the fork, and the fork's very first insert died on
+-- `duplicate key value violates unique constraint "uniq_tags_slug"` — the
+-- shared row still holds `slug='transcript'` while the global index is still
+-- in force, so user #1's copy collides with it. The drift database never
+-- caught it because it has no seeded system tags at all: the fork ran over
+-- zero rows and reported success. Swap the index first and both the shared row
+-- and every user's copy fit.
+DROP INDEX IF EXISTS public.uniq_tags_slug;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_tags_user_slug
+  ON public.tags (user_id, slug)
+  WHERE slug IS NOT NULL;
+
+COMMENT ON COLUMN public.tags.slug IS
+  'Stable automation key, unique per user. NULL on a tag the user created '
+  'themselves. Never user-editable: the display name (name / name_zh) is the '
+  'user''s to change, this is not.';
+
+-- ---------------------------------------------------------------------------
+-- 4. Fork the existing shared rows out to every existing user
 -- ---------------------------------------------------------------------------
 
--- 3a. A user who already owns a same-name tag keeps THAT row and inherits the
+-- 4a. A user who already owns a same-name tag keeps THAT row and inherits the
 --     slug — forking would have given them a duplicate, and skipping without
 --     the stamp would have left them with no row the automation can find.
 UPDATE public.tags t
@@ -280,58 +304,97 @@ UPDATE public.tags t
           WHERE o.user_id = t.user_id AND o.slug = p.slug
        );
 
--- 3b. Everyone gets the rest.
+-- 4b. Everyone gets the rest.
 SELECT public.seed_initial_tags(id) FROM auth.users;
 
--- 3c. Re-point the junction rows from the shared tag onto the owner's copy.
+-- 4c. Re-point the junction rows from the shared tag onto the owner's copy.
 --     Ownership comes from the row the link hangs off — resources.creator_id /
 --     inspiration_notes.user_id — NOT from whoever attached the tag: the AI
 --     attaches tags on the owner's behalf all the time.
 --     (⚠️ resources' owner column is `creator_id`, not `user_id` — CLAUDE.md
 --     records the 42703 this has already cost once.)
+--
+--     ⚠️ The shared row is matched to its preset by slug **OR BY NAME**, and the
+--     name arm is not decoration: only 16 of the 42 shared rows ever got a slug
+--     (mig 467 stamped the automation tags and nothing else). The other 26 —
+--     AI, Recreation, Finance, Post-production, Script, … — carry ~380 of
+--     production's links between them, and a slug-only match would strand every
+--     one of them. The preset list is keyed by slug, so the name is the only
+--     bridge from a slug-less shared row to the copy the user now owns.
 INSERT INTO public.resource_tags
   (resource_id, tag_id, source, confidence, created_at, tagged_by)
 SELECT rt.resource_id, mine.id, rt.source, rt.confidence, rt.created_at, rt.tagged_by
   FROM public.resource_tags rt
   JOIN public.tags shared   ON shared.id = rt.tag_id AND shared.type = 'system'
+  JOIN public.tag_presets p ON p.slug = shared.slug
+                            OR lower(p.name) = lower(shared.name)
   JOIN public.resources r   ON r.id = rt.resource_id
-  JOIN public.tags mine     ON mine.user_id = r.creator_id
-                           AND mine.slug = shared.slug
+  JOIN public.tags mine     ON mine.user_id = r.creator_id AND mine.slug = p.slug
 ON CONFLICT (resource_id, tag_id) DO NOTHING;
 
 INSERT INTO public.note_tags (note_id, tag_id, created_at)
 SELECT nt.note_id, mine.id, nt.created_at
   FROM public.note_tags nt
-  JOIN public.tags shared            ON shared.id = nt.tag_id AND shared.type = 'system'
-  JOIN public.inspiration_notes n    ON n.id = nt.note_id
-  JOIN public.tags mine              ON mine.user_id = n.user_id
-                                    AND mine.slug = shared.slug
+  JOIN public.tags shared         ON shared.id = nt.tag_id AND shared.type = 'system'
+  JOIN public.tag_presets p       ON p.slug = shared.slug
+                                  OR lower(p.name) = lower(shared.name)
+  JOIN public.inspiration_notes n ON n.id = nt.note_id
+  JOIN public.tags mine           ON mine.user_id = n.user_id AND mine.slug = p.slug
 ON CONFLICT (note_id, tag_id) DO NOTHING;
 
--- 3d. Refuse to delete anything we could not re-point.
---     `DELETE FROM tags` cascades to both junctions, so a link left pointing at
---     a shared row is a link about to disappear. Losing a user's tagging is not
+-- 4d. Refuse to delete anything we could not re-point.
+--     `DELETE FROM tags` cascades to both junctions, so a link with no copy to
+--     fall back on is a link about to disappear. Losing a user's tagging is not
 --     an acceptable silent outcome — stop and let a human look.
+--
+--     ⚠️ The question is NOT "are there still rows pointing at a shared tag" —
+--     there always are: 4c ADDS the replacement row and leaves the original for
+--     the CASCADE to clear. Asking it that way makes the guard fire on a
+--     perfectly good migration (it did, on the first draft). The real question
+--     is whether each original now has a counterpart on the owner's own copy.
 DO $$
 DECLARE
   v_orphans integer;
 BEGIN
-  SELECT (SELECT count(*) FROM public.resource_tags rt
-            JOIN public.tags s ON s.id = rt.tag_id AND s.type = 'system')
-       + (SELECT count(*) FROM public.note_tags nt
-            JOIN public.tags s ON s.id = nt.tag_id AND s.type = 'system')
+  SELECT
+      (SELECT count(*)
+         FROM public.resource_tags rt
+         JOIN public.tags shared ON shared.id = rt.tag_id AND shared.type = 'system'
+        WHERE NOT EXISTS (
+                SELECT 1
+                  FROM public.tag_presets p
+                  JOIN public.resources r ON r.id = rt.resource_id
+                  JOIN public.tags mine   ON mine.user_id = r.creator_id
+                                         AND mine.slug = p.slug
+                  JOIN public.resource_tags kept
+                    ON kept.resource_id = rt.resource_id AND kept.tag_id = mine.id
+                 WHERE p.slug = shared.slug OR lower(p.name) = lower(shared.name)
+              ))
+    + (SELECT count(*)
+         FROM public.note_tags nt
+         JOIN public.tags shared ON shared.id = nt.tag_id AND shared.type = 'system'
+        WHERE NOT EXISTS (
+                SELECT 1
+                  FROM public.tag_presets p
+                  JOIN public.inspiration_notes n ON n.id = nt.note_id
+                  JOIN public.tags mine           ON mine.user_id = n.user_id
+                                                 AND mine.slug = p.slug
+                  JOIN public.note_tags kept
+                    ON kept.note_id = nt.note_id AND kept.tag_id = mine.id
+                 WHERE p.slug = shared.slug OR lower(p.name) = lower(shared.name)
+              ))
     INTO v_orphans;
 
   IF v_orphans > 0 THEN
     RAISE EXCEPTION
-      'mig 468: % junction row(s) still point at a shared tag and would be '
-      'deleted with it. Most likely an owner column is NULL (resources.creator_id '
-      '/ inspiration_notes.user_id) or a preset slug is missing. Nothing was '
-      'deleted.', v_orphans;
+      'mig 468: % junction row(s) have no copy to fall back on and would be '
+      'deleted with the shared tag. Most likely an owner column is NULL '
+      '(resources.creator_id / inspiration_notes.user_id), or a shared tag '
+      'matches no preset by slug or by name. Nothing was deleted.', v_orphans;
   END IF;
 END $$;
 
--- 3e. The shared rows are now unreferenced. Goodbye.
+-- 4e. The shared rows are now unreferenced. Goodbye.
 DELETE FROM public.tags WHERE type = 'system';
 
 -- There is no such thing as a system tag any more; make that structural rather
@@ -340,21 +403,6 @@ DELETE FROM public.tags WHERE type = 'system';
 ALTER TABLE public.tags DROP CONSTRAINT IF EXISTS tags_type_check;
 ALTER TABLE public.tags ADD CONSTRAINT tags_type_check
   CHECK (type::text = ANY (ARRAY['user'::text, 'time'::text]));
-
--- ---------------------------------------------------------------------------
--- 4. A slug is unique PER USER now, not globally
--- ---------------------------------------------------------------------------
--- mig 467's global unique was right for one shared row per slug. With a copy
--- per user it would reject every user but the first.
-DROP INDEX IF EXISTS public.uniq_tags_slug;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_tags_user_slug
-  ON public.tags (user_id, slug)
-  WHERE slug IS NOT NULL;
-
-COMMENT ON COLUMN public.tags.slug IS
-  'Stable automation key, unique per user. NULL on a tag the user created '
-  'themselves. Never user-editable: the display name (name / name_zh) is the '
-  'user''s to change, this is not.';
 
 -- ---------------------------------------------------------------------------
 -- 5. Drop the type='user' guards — "yours" is `user_id`, not `type`
