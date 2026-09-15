@@ -72,3 +72,25 @@ describe('FileCard source-issue chip', () => {
     expect(screen.getByTestId('file-source-issue-chip')).toHaveTextContent('from MH-7');
   });
 });
+
+describe('FileCard source-issue chip — no team, no link (B7)', () => {
+  it('shows where the file came from but offers no dead click', () => {
+    // `router.tsx` registers `todolist/:identifier` under `/team/:teamId` and
+    // nowhere else, so the old team-less `/todolist/MH-42` fallback was a
+    // link to a route that does not exist. The backend's one builder refuses
+    // the same case (`issue_links.py`: no team → None → disabled control).
+    render(
+      <MemoryRouter initialEntries={['/projects/500']}>
+        <Routes>
+          <Route
+            path="/projects/:projectId"
+            element={<FileCard file={{ ...baseFile, source_issue_identifier: 'MH-42' }} onClick={() => {}} viewMode="grid" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const chip = screen.getByTestId('file-source-issue-chip');
+    expect(chip).toHaveTextContent('from MH-42');
+    expect(chip).not.toHaveAttribute('href');
+  });
+});
