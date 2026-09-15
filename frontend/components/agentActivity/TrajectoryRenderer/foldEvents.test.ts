@@ -362,6 +362,32 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     expect(steps[1].outputs).toHaveLength(0);
   });
 
+  it('B2: reads coordinates off the payload when the columns are null, like step_start does', () => {
+    // 真实 wire 形状：`registry.register_deliverable` 把 turn/step 同时写进
+    // 载荷和 mig 453 的两个列；**列** 只在 pre-453 的行、以及走 `emit` 的
+    // 位置参数回退的旧 recorder 上是 null——载荷里那份仍在。`step_start`
+    // 早就读 `num(ev.turn) ?? num(p.turn)`，deliverable 必须同形，否则这类
+    // 行会掉到「当前开着的那一步」而不是产它的那一步。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1 }, 1),
+      at(3, 'step_start', { turn: 1, step: 2 }, 2),
+      {
+        seq: 4,
+        event_type: 'deliverable',
+        payload: { kind: 'generated_media', ref_id: '77', version: 1, turn: 1, step: 1 },
+        step: null,
+        turn: null,
+        created_at: '',
+      } as AgentRunEvent,
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].outputs).toHaveLength(1);
+    expect(steps[1].outputs).toHaveLength(0);
+  });
+
   it('ignores a deliverable with no ref_id, no kind, or no version', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 1 }, 1),
