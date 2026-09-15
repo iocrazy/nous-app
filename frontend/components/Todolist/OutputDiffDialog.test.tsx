@@ -118,6 +118,25 @@ describe('OutputDiffDialog', () => {
     expect(screen.getByTestId('output-diff-to').textContent).toContain('b5999');
   });
 
+  it('C9：一侧什么都没丢时，那一侧不画省略行', async () => {
+    // 两侧在同一个位置被切开，但很少丢掉一样多。短的那一侧可能一行都没丢 ——
+    // 此时画一条「0 lines omitted」等于宣布一次并没有发生在这一侧的切割。
+    const longSide = Array.from({ length: 6000 }, (_, i) => `a${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, longSide), to: side(2, 'b0\nb1'),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    // 长的那侧丢了东西 → 有标记；短的那侧一行没丢 → 没有标记。
+    const marks = (pane: string) =>
+      screen.getByTestId(pane).querySelectorAll('[data-testid="output-diff-omitted"]').length;
+    expect(marks('output-diff-from')).toBe(1);
+    expect(marks('output-diff-to')).toBe(0);
+    expect(screen.getByTestId('output-diff-to').textContent).not.toContain('omitted');
+  });
+
   it('says a side could not be reconstructed instead of showing it empty', async () => {
     getOutputDiff.mockResolvedValueOnce({
       kind: 'script_shot', ref_id: '9', content_type: 'text',

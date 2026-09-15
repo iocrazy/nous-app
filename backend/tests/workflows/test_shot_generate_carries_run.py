@@ -440,9 +440,14 @@ def _stub_repos(monkeypatch):
 
 
 async def _call_step(step_fn, **kwargs):
-    """``@DBOS.step()`` 包过的函数——拿它底下的真身来调，单测里不起引擎。"""
-    fn = getattr(step_fn, "__wrapped__", step_fn)
-    return await fn(**kwargs)
+    """``@DBOS.step()`` 包过的函数——拿它底下的真身来调，单测里不起引擎。
+
+    与 ``_body`` 用的是同一个 ``inspect.unwrap``：DBOS 的装饰器**分层数不固定**
+    （step 一层、workflow 三层），只剥一层拿到的可能仍是引擎壳，调用即报
+    "invoked before DBOS initialized"。一路剥到底对两者都成立，也省得下一个人
+    再去数层数。
+    """
+    return await _body(step_fn)(**kwargs)
 
 
 def _stub_agent_dispatch(monkeypatch, st, spy):
@@ -498,13 +503,16 @@ def _stub_agent_dispatch(monkeypatch, st, spy):
 # 本体，单测里不起引擎（同 `tests/test_issue_reply_workflow.py` 的先例）。
 
 
-def _body(workflow):
-    """``@DBOS.workflow()`` 包了**三层**，只剥一层 ``__wrapped__`` 拿到的仍是
-    引擎壳（调用时报 "invoked before DBOS initialized"）。``inspect.unwrap``
-    一路剥到函数本体，单测里不起引擎。"""
+def _body(fn):
+    """剥掉 DBOS 的装饰器，拿到函数本体 —— ``@DBOS.step()`` 与
+    ``@DBOS.workflow()`` 共用这一个。
+
+    层数不一样：step 是一层，**workflow 是三层**，只剥一层 ``__wrapped__``
+    拿到的仍是引擎壳，调用时报 "invoked before DBOS initialized"。所以一律
+    ``inspect.unwrap`` 剥到底，而不是写死剥几层。"""
     import inspect
 
-    return inspect.unwrap(workflow)
+    return inspect.unwrap(fn)
 
 
 class _StepSpy:

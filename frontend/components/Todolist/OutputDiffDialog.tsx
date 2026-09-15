@@ -144,7 +144,11 @@ const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string; 
       className="max-h-[52vh] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded border border-ink-800 bg-ink-900/60 p-2 text-[12px] leading-relaxed text-ink-200"
     >
       {result.segments
-        .filter((s) => s.type !== skip)
+        // A side that lost NOTHING draws no marker: the two sides are cut at
+        // the same point but rarely lose the same amount, and "0 lines
+        // omitted" is a rule across the text announcing a cut that, for this
+        // side, did not happen.
+        .filter((s) => s.type !== skip && !(s.type === 'omit' && (s.omitted?.[side] ?? 0) === 0))
         .map((s, i) => (
           <span
             key={`${s.type}:${i}`}

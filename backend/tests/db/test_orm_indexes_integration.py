@@ -37,7 +37,7 @@ INTEGRATION_DATABASE_URL 未设时干净跳过（本地无库）；CI 里由
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, FrozenSet, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
 import asyncpg
 import pytest
@@ -47,6 +47,26 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
 
 
+# ── 这条门禁到底比什么（契约，读豁免之前先读这个）──────────────────────
+#
+# **比**（ORM 声明 → 库，逐条零容忍）：
+#   1. 索引存在（按名字）
+#   2. 所在的表
+#   3. **有序**的列清单 —— `(a, b)` 与 `(b, a)` 是两个不同的索引
+#   4. 唯一性（`indisunique`）
+#   5. 是不是部分索引（**只比有无**）
+#
+# **不比**（每条都有理由，不是懒）：
+#   * **谓词文本** —— SQLAlchemy 的 `text("deleted_at IS NULL")` 与
+#     `pg_get_indexdef` 吐的 `WHERE (deleted_at IS NULL)` 是同一件事的两种
+#     序列化。逐字比会把括号、空格、类型转换判成漂移，噪声淹掉信号。
+#   * **opclass / 排序方向 / NULLS FIRST|LAST** —— 同上，两侧不同源。
+#     所以 `(user_id, created_at DESC)` 与 `(user_id, created_at)` 在这条
+#     门禁下算一致；DESC 的得失要靠 review，不靠这里。
+#   * **INCLUDE 列 / 索引方法（btree / gin / …）/ 存储参数** —— 今天 ORM
+#     侧基本不声明它们，加进来只会得到一片假红。真要管，先让模型声明。
+#   * **库里有而 ORM 没声明的索引** —— 方向性的刻意选择，见文件头。
+#
 # ── RATCHET ALLOWLIST（已知漂移 —— 只许缩短，不许增长）─────────────────
 #
 # 同 `test_schema_drift.py` 的 `_ALLOWED_*` 与
@@ -58,7 +78,8 @@ _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
 # ⚠️ 加一条进来不是「修好了」。加之前先回答：是库该补这个索引（写迁移），
 # 还是声明写错了（改模型）？只有在两者都需要单独一票时，才把它记在这里。
 #
-# 下面六条是 C1 这条守卫**第一次跑起来就抓到的**，全部在本票之前就已存在。
+# 下面九条全部是 C1 这条守卫**第一次跑起来就抓到的**，在本票之前就已存在：
+# 前六条来自首轮（存在性 + 列），后三条来自 fix round 1 新加的部分索引轴。
 ALLOWED_INDEX_DRIFT: Dict[str, str] = {
     # ── 声明了一个库里根本不存在的索引 ──────────────────────────────
     "idx_hotspot_user_state_user": (
@@ -95,6 +116,24 @@ ALLOWED_INDEX_DRIFT: Dict[str, str] = {
         "models/distribution.py:176 只声明了 (user_id)；库里是 "
         "(user_id, created_at DESC)。同上：漏掉的是排序列。"
     ),
+    # ── ORM 声明成全表，库里其实是部分索引（fix round 1 新轴抓到）──────
+    # 三条同一个形状：读模型的人会以为这个索引服务全表，实际它只服务被
+    # WHERE 过滤剩下的那部分行 —— 于是「这条查询走不走索引」的判断是错的，
+    # 而且没有任何东西会说出来。补 `postgresql_where=` 是改模型能解决的，
+    # 但要逐条确认谓词与迁移里那条一字不差，所以留票不夹带。
+    "idx_agent_memory_agent": (
+        "models/ai.py:523 声明 agent_memory(agent_id) 全表索引；库里是 "
+        "WHERE (agent_id IS NOT NULL) 的部分索引。"
+    ),
+    "idx_inbox_notifications_user_unread": (
+        "models/reviews.py:266 声明 inbox_notifications(user_id) 全表索引；"
+        "库里是 WHERE (read_at IS NULL) 的部分索引 —— 名字里的 `unread` 正是"
+        "那个谓词，而声明把它丢了。"
+    ),
+    "idx_inspiration_notes_user_pinned": (
+        "models/inspiration.py:49 声明 inspiration_notes(user_id, pinned) "
+        "全表索引；库里是 WHERE (deleted_at IS NULL) 的部分索引。"
+    ),
 }
 
 
@@ -106,14 +145,23 @@ class DeclaredIndex(NamedTuple):
 
     name: str
     table: str
-    #: 能解析成真实列名的那些列。表达式列（`lower(x)`、`x DESC NULLS LAST`
-    #: 里的函数调用）不在其中 —— 见 `expressions`。
-    columns: FrozenSet[str]
-    #: 解析不出列名的表达式个数。>0 时本条只比名字与表，不比列集合：
+    #: 能解析成真实列名的那些列，**按声明顺序**。表达式列（`lower(x)`、
+    #: `x DESC NULLS LAST` 里的函数调用）不在其中 —— 见 `expressions`。
+    #:
+    #: 顺序是有意义的：`(a, b)` 上的复合索引服务「按 a 过滤」与「按 a 过滤再
+    #: 按 b 排序」，`(b, a)` 两个都不服务。库侧的 `array_agg(… ORDER BY k.ord)`
+    #: 早就是有序的，所以这边用元组而不是集合才对得上。
+    columns: Tuple[str, ...]
+    #: 解析不出列名的表达式个数。>0 时本条只比名字与表，不比列：
     #: 拿 SQLAlchemy 的表达式对象跟 pg_get_indexdef 的文本比对，比的是两套
     #: 序列化风格而不是索引，会产出大量假红。
     expressions: int
     unique: bool
+    #: 这条声明带不带 `postgresql_where`（部分索引）。**只比有无，不比谓词
+    #: 文本** —— 理由同上：SQLAlchemy 的 `text("deleted_at IS NULL")` 与
+    #: `pg_get_indexdef` 吐的 `WHERE (deleted_at IS NULL)` 是同一件事的两种
+    #: 序列化，逐字比会把括号和空格判成漂移。
+    partial: bool
     #: "index"（`Index(...)` / `index=True`）或 "unique"（`UniqueConstraint`
     #: / 列上的 `unique=True`）。两者在 Postgres 里都落成 pg_index 一行。
     kind: str
@@ -155,9 +203,10 @@ def _declared_indexes() -> List[DeclaredIndex]:
                 DeclaredIndex(
                     name=str(ix.name),
                     table=bare,
-                    columns=frozenset(columns),
+                    columns=tuple(columns),
                     expressions=expressions,
                     unique=bool(ix.unique),
+                    partial=ix.dialect_kwargs.get("postgresql_where") is not None,
                     kind="index",
                 )
             )
@@ -168,9 +217,12 @@ def _declared_indexes() -> List[DeclaredIndex]:
                 DeclaredIndex(
                     name=str(constraint.name),
                     table=bare,
-                    columns=frozenset(col.name for col in constraint.columns),
+                    columns=tuple(col.name for col in constraint.columns),
                     expressions=0,
                     unique=True,
+                    # Postgres 的 UNIQUE **约束**不能带谓词（只有部分唯一
+                    # **索引**能），所以约束这一侧恒为 False。
+                    partial=False,
                     kind="unique",
                 )
             )
@@ -239,8 +291,12 @@ async def live_indexes(integration_db_url: str) -> Dict[str, Dict[str, Any]]:
 
     return {
         r["index_name"]: {
+            # ⚠️ 元组，不是集合。SQL 那边 `array_agg(… ORDER BY k.ord)` 辛苦
+            # 排好的顺序，在这里换成 frozenset 就白排了 —— `(a, b)` 与
+            # `(b, a)` 会被读成同一个索引（L1；这一条是本文件自己的单测
+            # `test_column_ORDER_is_compared_not_just_the_set` 在真库上先抓到的）。
+            "columns": tuple(r["columns"] or ()),
             "table": r["table_name"],
-            "columns": frozenset(r["columns"] or []),
             "key_count": r["key_count"] or 0,
             "unique": r["is_unique"],
             "defn": r["defn"],
@@ -255,35 +311,68 @@ async def live_indexes(integration_db_url: str) -> Dict[str, Dict[str, Any]]:
 def _missing(live: Dict[str, Dict[str, Any]]) -> List[Tuple[str, str]]:
     """声明了、库里却没有同名索引的。返回 (name, 人话)。"""
     return [
-        (d.name, f"{d.table}({', '.join(sorted(d.columns)) or '<expr>'})")
+        (d.name, f"{d.table}({', '.join(d.columns) or '<expr>'})")
         for d in _declared_indexes()
         if d.name not in live
     ]
 
 
-def _mismatched(live: Dict[str, Dict[str, Any]]) -> List[Tuple[str, str]]:
-    """同名索引存在，但表或列集合对不上的。返回 (name, 人话)。"""
+def _mismatched(
+    live: Dict[str, Dict[str, Any]],
+    declared: List[DeclaredIndex] | None = None,
+) -> List[Tuple[str, str]]:
+    """同名索引存在，但定义对不上的。返回 (name, 人话)。
+
+    四条独立的轴，**每条各自上报**（一次不一致可以同时是好几件事 ——
+    CLAUDE.md「正交的结果各自独立上报」）：表、有序列、唯一性、部分索引有无。
+
+    ``declared`` 只为单测注入合成声明用；生产路径留空走真元数据。
+    """
     out: List[Tuple[str, str]] = []
-    for d in _declared_indexes():
+    for d in declared if declared is not None else _declared_indexes():
         row = live.get(d.name)
         if row is None:
             continue
         if row["table"] != d.table:
             out.append((d.name, f"表 orm={d.table} live={row['table']}"))
+            # 表都不是同一张，比列没有意义。
             continue
-        if d.expressions:
-            # 含表达式的声明只对到名字与表为止 —— 见 DeclaredIndex.expressions。
-            continue
-        if row["key_count"] != len(row["columns"]):
-            # 库里这个索引含表达式，ORM 侧却全是普通列：列集合没法直接比，
-            # 但「一边有表达式一边没有」本身就是要报的不一致。
-            out.append((d.name, f"库侧含表达式，ORM 侧没有 :: {row['defn']}"))
-            continue
-        if row["columns"] != d.columns:
+
+        # ── 唯一性（M1）──────────────────────────────────────────────
+        # `indisunique` 一直取着却从没比过。一个声明成 unique 而库里不是的
+        # 索引，是「这一列不会重复」这句承诺的凭空消失 —— 依赖它的
+        # `ON CONFLICT` 与并发去重全都建立在一个不存在的保证上。
+        if row["unique"] != d.unique:
+            out.append(
+                (d.name, f"唯一性 orm={d.unique} live={row['unique']} :: {row['defn']}")
+            )
+
+        # ── 部分索引的有无（M2）─────────────────────────────────────
+        # 只比**有无**，不比谓词文本。ORM 声明成全表而库里带 WHERE，意味着
+        # 那个索引只服务被过滤剩下的那部分行，而读模型的人会以为它服务全表。
+        live_partial = " WHERE " in row["defn"]
+        if live_partial != d.partial:
             out.append(
                 (
                     d.name,
-                    f"列 orm={sorted(d.columns)} live={sorted(row['columns'])} "
+                    f"部分索引 orm={d.partial} live={live_partial} :: {row['defn']}",
+                )
+            )
+
+        if d.expressions:
+            # 含表达式的声明的**列**这一轴对不上 —— 见 DeclaredIndex.expressions。
+            # 上面两条轴照比，它们与表达式无关。
+            continue
+        if row["key_count"] != len(row["columns"]):
+            # 库里这个索引含表达式，ORM 侧却全是普通列：列没法直接比，
+            # 但「一边有表达式一边没有」本身就是要报的不一致。
+            out.append((d.name, f"库侧含表达式，ORM 侧没有 :: {row['defn']}"))
+            continue
+        if tuple(row["columns"]) != d.columns:
+            out.append(
+                (
+                    d.name,
+                    f"列 orm={list(d.columns)} live={list(row['columns'])} "
                     f":: {row['defn']}",
                 )
             )

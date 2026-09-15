@@ -180,12 +180,20 @@ export function diffWords(from: string, to: string, opts: { maxTokens?: number }
   return { segments, added, removed, truncated, omitted };
 }
 
-/** One side of the diff, put back together.
+/**
+ * One side of the diff, put back together.
  *
- *  A truncated result reconstructs to the two ends WITH the omission line
- *  spelled out between them. That is the honest answer: the alternative —
- *  splicing head to tail silently — is the very bug C9 fixed, and a caller
- *  that cannot show the marker should be looking at `truncated` anyway. */
+ * @internal TEST HELPER. Nothing in the app renders through this — the panel
+ * draws the segments itself (`Pane`), which is also where the omission line
+ * gets its localized text. The English below is deliberately NOT an i18n key:
+ * making it one would imply a user ever reads it, and would drag i18n into a
+ * module whose whole point is being pure and dependency-free.
+ *
+ * A truncated result reconstructs to the two ends WITH the omission line
+ * spelled out between them. That is the honest answer: the alternative —
+ * splicing head to tail silently — is the very bug C9 fixed, and a caller
+ * that cannot show the marker should be looking at `truncated` anyway.
+ */
 export function renderedText(result: DiffResult, side: 'from' | 'to'): string {
   const skip: DiffOpKind = side === 'from' ? 'add' : 'del';
   return result.segments
