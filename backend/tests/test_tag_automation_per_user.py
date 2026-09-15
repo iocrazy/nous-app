@@ -96,74 +96,13 @@ async def test_auto_classification_uses_the_resource_owners_copy():
 
 
 # --------------------------------------------------------------------------
-# 兜底那一臂的方向
+# 归属人从哪来
 # --------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_slug_lookup_prefers_the_callers_own_row_over_the_shared_one():
-    """同一个 slug 既有共享行又有自己那行时，取自己那行。
-
-    分叉迁移与后端部署谁先落地不确定，所以两种形态都要能跑。方向反了不会报错
-    —— 只会长期把共享行（迁移后甚至是别人的行）挂上去。
-    """
-    from app.repositories.tags_repository import TagsRepository
-
-    captured = {}
-
-    class _Result:
-        @staticmethod
-        def all():
-            # DB 按 ORDER BY 给的顺序：自己的那行在前。
-            return [("transcript", 99), ("transcript", 11)]
-
-    class _Session:
-        async def execute(self, stmt):
-            captured["sql"] = str(stmt)
-            return _Result()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    with patch("app.repositories.tags_repository.read_scope", lambda: _Session()):
-        found = await TagsRepository().get_tag_ids_by_slugs(["transcript"], OWNER)
-
-    assert found == {"transcript": 99}, "先出现的（自己那行）必须赢"
-    # 方向必须钉死：``IS NULL ASC`` = false(自己那行) 在前、true(共享行) 在后。
-    # 写成 DESC 一样能跑、一样不报错，只是长期挂错标签 —— 所以断言的是 SQL
-    # 里的方向本身，不是桩 session 还回来的顺序（那是我自己写的，证明不了什么）。
-    assert (
-        "ORDER BY public.tags.slug, public.tags.user_id IS NULL ASC" in captured["sql"]
-    ), "自己那份必须排在共享行前面"
-
-
-@pytest.mark.asyncio
-async def test_slug_lookup_still_finds_the_shared_row_before_the_fork():
-    """分叉迁移还没跑时，库里只有共享行 —— 照样要取到。"""
-    from app.repositories.tags_repository import TagsRepository
-
-    class _Result:
-        @staticmethod
-        def all():
-            return [("summary", 22)]
-
-    class _Session:
-        async def execute(self, stmt):
-            return _Result()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-    with patch("app.repositories.tags_repository.read_scope", lambda: _Session()):
-        found = await TagsRepository().get_tag_ids_by_slugs(["summary"], OWNER)
-
-    assert found == {"summary": 22}
+#
+# 这里曾经有两条钉「共享行兜底方向」的用例（自己那份要赢过 user_id IS NULL 的
+# 那行；分叉前也要还能取到共享行）。兜底本身是分期部署的脚手架，迁移上线对账
+# 之后已随实现一起删除 —— 钉一个不存在的分支就是让下一个人以为它还在。取代
+# 它们的是文件末尾那两条：查询里不许再出现 IS NULL，以及「不知道是谁」返回空。
 
 
 @pytest.mark.asyncio
@@ -189,3 +128,123 @@ async def test_resource_owner_reads_creator_id_not_user_id():
 
     assert owner == OWNER
     assert "resources.creator_id" in captured["sql"]
+
+
+# ---------------------------------------------------------------------------
+# 共享行兜底已删除 —— 「不知道是谁」的答案是「一个都不给」
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_slug_lookup_no_longer_reaches_for_a_shared_row():
+    """查询里不许再出现 ``user_id IS NULL`` 那一臂。
+
+    它是为分期部署存在的：迁移与后端部署没有先后保证，那段时间共享行是唯一
+    存在的行。分叉迁移已上线并对账（生产无主标签行为 0），那一臂再无可命中的
+    行 —— 留着它只意味着「将来某天冒出一个无主行，自动化会去挂它」。
+    """
+    from app.repositories.tags_repository import TagsRepository
+
+    captured = {}
+
+    class _Result:
+        @staticmethod
+        def all():
+            return [("transcript", 99)]
+
+    class _Session:
+        async def execute(self, stmt):
+            captured["sql"] = str(stmt)
+            return _Result()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    with patch("app.repositories.tags_repository.read_scope", lambda: _Session()):
+        found = await TagsRepository().get_tag_ids_by_slugs(["transcript"], OWNER)
+
+    assert found == {"transcript": 99}
+    sql = captured["sql"]
+    assert "tags.user_id = " in sql, "必须按人限定"
+    assert "IS NULL" not in sql, "共享行兜底应当已经删除"
+    assert "ORDER BY" not in sql, "只剩一行可命中，不需要排序来挑赢家"
+
+
+@pytest.mark.asyncio
+async def test_no_user_means_no_tag_not_someone_elses():
+    """``user_id`` 为空时返回空，而不是「不过滤 → 随便给一行」。
+
+    删掉兜底那一臂之前，无 user 的查询是**不带 where 的**，于是拿到的是库里
+    任意一个持有该 slug 的人的标签 —— 分叉之后这正是跨用户错挂。
+    """
+    from app.repositories.tags_repository import TagsRepository
+
+    class _Session:
+        async def execute(self, stmt):  # pragma: no cover - 不该被调用
+            raise AssertionError("没有 user_id 时不该查库，更不该挂上别人的标签")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    repo = TagsRepository()
+    with patch("app.repositories.tags_repository.read_scope", lambda: _Session()):
+        assert await repo.get_tag_ids_by_slugs(["transcript"], "") == {}
+        assert await repo.get_tag_by_slug("transcript", "") is None
+        assert await repo.get_automation_tag("Food", "") is None
+
+
+@pytest.mark.asyncio
+async def test_a_resource_with_no_owner_is_reported_not_silently_skipped():
+    """没有主人 → 不打标，**并且留下一条日志**。
+
+    「不知道挂谁的」是一个真实结果，不是无事发生。仓库的纪律是触发路径不许
+    silent no-op；这里唯一的痕迹就是这条 WARNING。
+
+    这条同时钉住 ``logger`` 这个名字在两个模块里真的存在 —— 第一版
+    ``analyze_l1`` 里它压根没 import，而那是个只在真的撞上无主资源时才会炸的
+    NameError。
+    """
+    from app.services.ai.visual import classification_service as cs
+
+    repo = MagicMock()
+    repo.resolve_media_id_to_resource_id = AsyncMock(return_value="900")
+    repo.get_resource_owner_id = AsyncMock(return_value=None)
+    repo.get_automation_tag = AsyncMock()
+    repo.add_tag_to_resource = AsyncMock()
+
+    result = cs.ClassificationResult(
+        primary_tag="Food", confidence=0.9, secondary_tag=None, source="auto"
+    )
+    with (
+        patch.object(cs, "get_tags_repository", return_value=repo),
+        patch.object(
+            cs.ClassificationService, "classify_by_keywords", return_value=result
+        ),
+        patch.object(cs, "system_request_scope", _null_scope),
+        patch.object(cs.logger, "warning") as warned,
+    ):
+        added = await cs.ClassificationService.auto_tag_media(
+            media_id=500, title="Food time"
+        )
+
+    assert added == []
+    repo.get_automation_tag.assert_not_awaited()
+    repo.add_tag_to_resource.assert_not_awaited()
+    warned.assert_called_once()
+    assert "creator_id" in warned.call_args.args[0]
+
+
+def test_analyze_l1_has_a_logger_to_call():
+    """``analyze_l1`` 的无主分支要打日志 —— 那个名字得真的存在。
+
+    单独一条，因为那段代码只有在撞上无主资源时才会执行，NameError 会一直潜伏
+    到那一刻。"""
+    import app.workflows.analyze_l1 as m
+
+    assert hasattr(m, "logger")

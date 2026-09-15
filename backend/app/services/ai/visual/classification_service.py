@@ -206,8 +206,16 @@ class ClassificationService:
                 return added_tags
 
             # 打的是**这个资源的主人**自己那份分类标签：初始化标签每人一份
-            # 之后，不说是谁就会把别人的标签挂上来。
+            # 之后（mig 468），不说是谁就会把别人的标签挂上来。
             owner_id = await repo.get_resource_owner_id(resource_id)
+            if not owner_id:
+                # 说出口，别静默跳过 —— 没有主人就没有「他那份标签」，而随便
+                # 挂一个就是跨用户错挂。返回空列表，调用方看到的是「没打标」。
+                logger.warning(
+                    f"auto_tag_media: resource {resource_id} has no creator_id "
+                    "— skipping auto-tagging (no owner, no tag)"
+                )
+                return added_tags
 
             # slug 优先、显示名兜底 —— 策展分类标签改名后仍然命中
             primary_tag = await repo.get_automation_tag(result.primary_tag, owner_id)
