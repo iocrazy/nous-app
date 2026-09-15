@@ -158,6 +158,9 @@ on:
       # 注册用户名推导（mig 469）。唯一约束 + NOT NULL + 触发器失败连带回滚
       # auth.users 行 —— 三件都只有真库能回答。
       - 'backend/tests/db/test_migration_469_signup_username_integration.py'
+      # 主账号名唯一性（mig 470）。函数唯一索引 + NOT NULL + 两条注册路径
+      # 共用的 PL/pgSQL —— 只有真库能回答。
+      - 'backend/tests/db/test_migration_470_username_integration.py'
       - 'backend/app/services/assets/**'
       # The canvas→asset mirror is written by CanvasService on save and rebuilt
       # by the backfill; both are exercised by the E2 case below, so a change to
@@ -168,7 +171,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-two, so it has to re-run
+      # to it changes what "green" means for all twenty-three, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -403,6 +406,24 @@ jobs:
           # (kind, ref_id, version) — the registry's whole race story — or that
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
+
+      - name: Exercise the account name — unique, editable (mig 470)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 主账号名：系统发一个、用户能改、全局唯一。三件里有两件是数据库对象，
+          # 桩 session 回答不了：「唯一且大小写不敏感」是一条 lower(username) 的
+          # 函数唯一索引（既有的 user_profiles_username_key 是大小写敏感的，
+          # iocrazy 与 IOCrazy 能并存 —— 对一个用来认人的名字那是可冒充的）；
+          # 「每个账号都有名字」是 NOT NULL。
+          #
+          # 还有一条只有真跑触发器才看得见：注册的两条路径（handle_new_user 与
+          # 后端的 _bootstrap_user）现在共用 public.unique_username()，而它是
+          # PL/pgSQL。以前两边各写一份，Python 那份是 `... or "user"`，第二个没
+          # 邮箱的人就撞唯一约束、异常被吞、profile 悄悄没建成。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_470_username_integration.py -v
 
       - name: Exercise the signup username derivation (mig 469)
         working-directory: backend

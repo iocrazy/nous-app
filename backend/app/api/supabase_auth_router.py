@@ -6,11 +6,13 @@ Supabase 认证路由
 基于 Supabase Auth 的用户认证 API 端点。
 """
 
+import re
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, EmailStr
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.api.media_auth import revoke_media_tokens
 from app.core.admin_deps import AdminAuthDep
@@ -134,9 +136,18 @@ async def _ensure_personal_team_bootstrap(user_id: str) -> Optional[str]:
     if isinstance(raw, str):
         raw = json.loads(raw)
     raw = raw or {}
-    username = raw.get("username") or (auth_row.get("email") or "").split("@")[0]
-    if not username:
-        username = "user"
+    # 想要的名字，交给 `public.unique_username()` 去重（mig 470）。
+    #
+    # 这里曾经是 `... or "user"` 外加下面那个 `except Exception: warning` ——
+    # 于是第二个没有邮箱的人也想叫 "user"，撞 `user_profiles_username_key`，
+    # 异常被吞掉，**profile 悄悄没建成**，而调用方看到的是一切正常。
+    # 注册的另一条路径（handle_new_user 触发器）调的是同一个函数，两边不会再漂。
+    wanted = raw.get("username") or (auth_row.get("email") or "").split("@")[0]
+    async with read_scope() as session:
+        username = await session.scalar(
+            text("SELECT public.unique_username(:base, CAST(:uid AS uuid))"),
+            {"base": wanted or None, "uid": user_id},
+        )
 
     # 3. Backfill user_profiles (idempotent via PK upsert).
     try:
@@ -464,15 +475,25 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
         token = authorization.replace("Bearer ", "")
         auth_service = SupabaseAuthService()
 
-        metadata = {}
+        # ⚠️ username 不在这里处理。它曾经只写进 Supabase Auth 的
+        # `raw_user_meta_data`，而 `user_profiles.username`（带唯一约束、界面上
+        # 真正显示的那一列）纹丝不动 —— 一个收下改名请求、改到别处去、还回
+        # 「成功」的接口。改名走 PATCH /auth/profile：它校验形状、按大小写不敏感
+        # 查重、返回类型化的 409，并顺带同步这份 metadata。
         if request.username:
-            metadata["username"] = request.username
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "use_profile_endpoint",
+                    "message": "Change the account name via PATCH /api/v1/auth/profile",
+                },
+            )
 
         result = await auth_service.update_user(
             access_token=token,
             email=request.email,
             password=request.password,
-            metadata=metadata if metadata else None,
+            metadata=None,
         )
 
         if not result.get("success"):
@@ -507,7 +528,9 @@ async def update_user(request: UpdateUserRequest, authorization: str = Header(..
 # Phone auth helpers
 # ============================================
 
-import re
+# (`re` is imported at the top of the file — this section used to carry its own
+# mid-file `import re`, which flake8 flags as a redefinition once anything else
+# needs the module.)
 
 _PHONE_PATTERN = re.compile(r"^1[3-9]\d{9}$")
 
@@ -672,3 +695,159 @@ async def delete_user(user_id: str, auth: AdminAuthDep):
         raise HTTPException(status_code=400, detail=result.get("message", "删除失败"))
 
     return result
+
+
+# ============================================================================
+# 主账号名（user_profiles.username）
+# ============================================================================
+#
+# 用户的裁定（2026-09-15）：系统发一个默认的用户名，用户可以改，但全局唯一。
+#
+# 为什么要单开一对端点，而不是复用 `PUT /me`：那个写的是 Supabase Auth 的
+# `raw_user_meta_data`，**不是** `user_profiles.username` —— 后者才是带唯一约束、
+# 团队成员列表 / 积分榜 / ProjectCard 真正显示的那一列。收 username 却改到别处
+# 去，比不支持改名更糟，所以下面 `PUT /me` 的 username 分支也改成走这里。
+
+
+#: 主账号名的形状。宽松到能用中文（产品面向中文用户），严到不能塞进一句话。
+#: 不含空白：它是一个「名字」不是一段文字，而且要能出现在 "X's Workspace" 里。
+_USERNAME_RE = re.compile(r"^[\w一-鿿][\w一-鿿.\-]{1,29}$")
+
+_USERNAME_RULES = (
+    "2-30 characters; letters, digits, Chinese, underscore, dot or hyphen; "
+    "must not start with . or -"
+)
+
+
+class ProfileResponse(BaseModel):
+    """主账号信息 —— 参照账号中心的形状：一个可改的名字 + 一个不变的 ID。"""
+
+    #: 主账号名。注册时自动生成，用户可改，全局唯一（大小写不敏感）。
+    username: str
+    #: 稳定的数字 ID（snowflake）。用户改名之后它不变，所以它才是「你是谁」。
+    #: BIGINT 超出 JS 安全整数，按 5.3 陷阱以字符串出闸。
+    display_id: str
+    avatar_url: Optional[str] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    """改名请求。只有 username 一个字段 —— 头像/简介走别处，不混在一起。"""
+
+    username: str
+
+
+async def _load_profile(user_id: str) -> ProfileResponse:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import UserProfiles
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(
+                    UserProfiles.username,
+                    UserProfiles.display_id,
+                    UserProfiles.avatar_url,
+                ).where(UserProfiles.id == user_id)
+            )
+        ).first()
+    if row is None:
+        # profile 缺失不是「没名字」，是账号没落地（两条注册路径都没跑成）。
+        # 说出口，别返回一个空壳让前端显示成「未设置」。
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "profile_missing", "message": "No profile for this user"},
+        )
+    return ProfileResponse(username=row[0], display_id=str(row[1]), avatar_url=row[2])
+
+
+@router.get("/profile", response_model=ProfileResponse)
+async def get_profile(auth: AuthDep):
+    """当前用户的主账号信息（名字 + 不变的数字 ID）。"""
+    return await _load_profile(auth.user_id)
+
+
+@router.patch("/profile", response_model=ProfileResponse)
+async def update_profile(request: UpdateProfileRequest, auth: AuthDep):
+    """改主账号名。
+
+    被占用时返回 **409 + `username_taken`**，不是静默换一个别的名字：用户输入了
+    一个具体的名字，系统擅自改成 `iocrazy_3f2a1b` 再告诉他「保存成功」是最坏的
+    结果。自动加后缀只用在**注册时发默认名**那一处，那里用户没有表达过意愿。
+    """
+    from sqlalchemy import func, select, text
+    from sqlalchemy import update as sa_update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import UserProfiles
+
+    wanted = (request.username or "").strip()
+    if not _USERNAME_RE.match(wanted):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "username_invalid", "message": _USERNAME_RULES},
+        )
+
+    # 先问一次，好给出 409 这个**类型化**的拒绝；真正的裁决权在唯一索引上
+    # （下面的 IntegrityError 分支）—— 两个人同时抢同一个名字时，先到先得。
+    async with read_scope() as session:
+        taken = (
+            await session.execute(
+                select(UserProfiles.id)
+                .where(func.lower(UserProfiles.username) == wanted.lower())
+                .where(UserProfiles.id != auth.user_id)
+                .limit(1)
+            )
+        ).first()
+    if taken is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "username_taken", "message": "That name is taken"},
+        )
+
+    try:
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(UserProfiles)
+                .where(UserProfiles.id == auth.user_id)
+                .values(username=wanted)
+            )
+    except IntegrityError:
+        # 竞态：两个人同时提交同一个名字，索引挡下了后到的那个。这不是 500。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "username_taken", "message": "That name is taken"},
+        ) from None
+    except ProgrammingError as e:
+        # mig 470 还没跑到（部署顺序无保证，CLAUDE.md 已知缺口）。
+        # 42883 = undefined_function / 42P01 = undefined_table。让上层看到 503
+        # 「稍后再试」，而不是一个看起来像代码 bug 的 500。
+        if getattr(getattr(e, "orig", None), "sqlstate", None) in ("42883", "42P01"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "profile_schema_pending",
+                    "message": "Profile schema is still rolling out; retry shortly",
+                },
+            ) from None
+        raise
+
+    # Supabase Auth 的 metadata 跟着走一份。它不是真相（唯一约束在
+    # user_profiles 上），但前端有些地方直接读 session 的 user_metadata，
+    # 不同步就会出现「改完名字，右上角还是旧的」。失败不阻断 —— 真相已经写进去了。
+    try:
+        async with write_scope() as session:
+            await session.execute(
+                text(
+                    "UPDATE auth.users SET raw_user_meta_data = "
+                    "  COALESCE(raw_user_meta_data, '{}'::jsonb) "
+                    "  || jsonb_build_object('username', CAST(:name AS text)) "
+                    "WHERE id = CAST(:uid AS uuid)"
+                ),
+                {"name": wanted, "uid": auth.user_id},
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[profile] auth metadata username sync failed: {e}")
+
+    return await _load_profile(auth.user_id)
