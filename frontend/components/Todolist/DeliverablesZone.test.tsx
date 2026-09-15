@@ -26,7 +26,7 @@ function setup(over: Partial<React.ComponentProps<typeof DeliverablesZone>> = {}
   return render(
     <DeliverablesZone
       projectId="500"
-      issueId={42}
+      issueId="42"
       isStageMirror
       projectName="Launch Film"
       stageName="Script"

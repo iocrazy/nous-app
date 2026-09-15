@@ -119,11 +119,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * Arm a one-shot wake-up on an issue. NOT `create`: that one is the cron
  * shape and requires `name` + `cron_expr`, neither of which a one-shot has.
- * `issue_id` goes in as a NUMBER — issue ids are JSON numbers everywhere in
- * `/issues/*`, and the backend matches on `payload->>'issue_id'`.
+ *
+ * The id arrives as a STRING (B3: a Snowflake id is never round-tripped
+ * through a JS number on the way here) and the `Number()` below is the one
+ * place that converts it — because `issue_id` goes onto the wire as a JSON
+ * NUMBER: issue ids are JSON numbers everywhere in `/issues/*` and the
+ * backend matches on `payload->>'issue_id'`. Normalising at the boundary is
+ * the rule; re-spelling the wire is not (CLAUDE.md 边界 mock 必须用真实 JSON
+ * 形状).
  */
 export async function createIssueWakeup(
-  issueId: number,
+  issueId: string,
   opts: { fireAt: Date | string; text: string },
 ): Promise<ScheduleResponse> {
   const fire_at = typeof opts.fireAt === 'string' ? opts.fireAt : opts.fireAt.toISOString();
@@ -132,14 +138,15 @@ export async function createIssueWakeup(
     body: JSON.stringify({
       task_type: 'issue_wakeup',
       fire_at,
-      payload: { issue_id: issueId, text: opts.text, once: true },
+      payload: { issue_id: Number(issueId), text: opts.text, once: true },
     }),
   });
 }
 
 /** Everything timed on one issue. Lives under `/issues/…`, not `/schedules/…`,
- *  so it does not go through `request`. */
-export async function listIssueSchedules(issueId: number): Promise<IssueScheduleItem[]> {
+ *  so it does not go through `request`. The id stays a string all the way
+ *  into the path (B3) — a Snowflake past 2^53 does not survive a number. */
+export async function listIssueSchedules(issueId: string): Promise<IssueScheduleItem[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/issues/${issueId}/schedules`, { headers });
   if (!res.ok) throw new Error(`Issue schedules API ${res.status}`);

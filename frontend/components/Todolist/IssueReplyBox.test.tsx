@@ -866,7 +866,9 @@ describe('IssueReplyBox — the Assets tab', () => {
   // was produced ON THIS ISSUE, so a composer with no issue behind it has
   // nothing to check against and the chat panel refuses the kind outright.
 
-  const ISSUE = 727145299382534000;
+  // A string (B3): this Snowflake is past 2^53, so the number literal it
+  // used to be was already a different id than the backend's.
+  const ISSUE = '727145299382534000';
 
   async function openOutputsTab(): Promise<void> {
     await openMentionPicker();

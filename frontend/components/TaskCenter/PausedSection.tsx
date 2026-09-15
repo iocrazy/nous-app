@@ -56,8 +56,8 @@ export const PausedSection: React.FC = () => {
       return next;
     });
     try {
-      await resumeIssue(Number(item.issue_id));
-      notifyIssuePauseChanged(Number(item.issue_id));
+      await resumeIssue(item.issue_id);
+      notifyIssuePauseChanged(item.issue_id);
       await refresh();
     } catch (err) {
       console.error(`[PausedSection] resume failed for issue ${item.issue_id}:`, err);

@@ -18,7 +18,7 @@ import { useToast } from '../Toast';
 
 interface DeliverablesZoneProps {
   projectId: string;
-  issueId: number;
+  issueId: string;
   /** True when the issue mirrors a workflow node (files route to its stage folder). */
   isStageMirror: boolean;
   projectName: string;
@@ -44,7 +44,7 @@ export const DeliverablesZone: React.FC<DeliverablesZoneProps> = ({
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await fetchProjectFiles(projectId, false, null, String(issueId));
+      const list = await fetchProjectFiles(projectId, false, null, issueId);
       setFiles(list);
     } catch (err) {
       console.error('[DeliverablesZone] load failed', err);
@@ -61,7 +61,7 @@ export const DeliverablesZone: React.FC<DeliverablesZoneProps> = ({
       setUploading(true);
       try {
         for (const f of Array.from(fileList)) {
-          await uploadFile(projectId, f, undefined, String(issueId));
+          await uploadFile(projectId, f, undefined, issueId);
         }
         await refresh();
         addToast(t('projects.workflow.deliverables.filedToast'), 'success');

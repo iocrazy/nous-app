@@ -265,7 +265,7 @@ async function _controlJson<T>(res: Response): Promise<T> {
  *  root run to stop at its next step boundary. Rejects with IssueControlError
  *  (409 already_paused, 503 run_state_unavailable). */
 export async function pauseIssue(
-  issueId: number,
+  issueId: string,
 ): Promise<{ issue_id: string; paused_at: string; run_id: string | null }> {
   const res = await fetch(`${_base}/${issueId}/pause`, {
     method: 'POST',
@@ -278,7 +278,7 @@ export async function pauseIssue(
  *  queued work. `reason` says what happened (dispatched / withdrawn / running
  *  / parked / cleared). Rejects with IssueControlError (409 not_paused). */
 export async function resumeIssue(
-  issueId: number,
+  issueId: string,
 ): Promise<{ issue_id: string; dispatched: boolean; reason: string; workflow_id: string | null; run_id: string | null }> {
   const res = await fetch(`${_base}/${issueId}/resume`, {
     method: 'POST',
@@ -313,7 +313,7 @@ export async function getIssueByIdentifier(identifier: string): Promise<Issue> {
 }
 
 export async function updateIssue(
-  issueId: number,
+  issueId: string,
   patch: IssueUpdatePayload
 ): Promise<Issue> {
   const res = await fetch(`${_base}/${issueId}`, {

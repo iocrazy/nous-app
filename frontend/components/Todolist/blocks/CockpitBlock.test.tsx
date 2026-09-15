@@ -61,7 +61,9 @@ describe('CockpitBlockView — pause / resume (phase 2a §2)', () => {
     render(<CockpitBlockView ctx={ctx('running', onIssueChanged)} />);
     expect(screen.queryByTestId('cockpit-resume')).toBeNull();
     fireEvent.click(screen.getByTestId('cockpit-pause'));
-    await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith(5));
+    // The id exactly as the host gave it ('5'), with no Number() round trip:
+    // the assertion used to pin that conversion, and the intent has not changed.
+    await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith('5'));
     await waitFor(() => expect(onIssueChanged).toHaveBeenCalled());
     expect(screen.queryByTestId('cockpit-control-error')).toBeNull();
   });
@@ -70,7 +72,7 @@ describe('CockpitBlockView — pause / resume (phase 2a §2)', () => {
     render(<CockpitBlockView ctx={ctx('paused', vi.fn(), false)} />);
     expect(screen.queryByTestId('cockpit-pause')).toBeNull();
     fireEvent.click(screen.getByTestId('cockpit-resume'));
-    await waitFor(() => expect(resumeIssue).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(resumeIssue).toHaveBeenCalledWith('5'));
   });
 
   it('shows the failure on the cockpit as copy for the code, never the raw body', async () => {
