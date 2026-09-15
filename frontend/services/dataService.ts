@@ -160,6 +160,15 @@ export const fetchVideoByAwemeId = fetchVideoByPlatformId;
  * The check pairs with the L2 backstop in handle_media_fetch_dispatch — non-
  * browser callers (Shortcuts / API / extension) bypass this layer and
  * land on L2 instead.
+ *
+ * NB: this probe still matches `original_url` verbatim, so a re-submit whose
+ * tracking parameters changed (bilibili's `spm_id_from`, etc.) misses here.
+ * That is a wasted round trip, not a wrong outcome: L2 matches the canonical
+ * key (`parsed_media.canonical_url`, migration 471) and answers "already in
+ * your library". Porting the canonicaliser to TS would put a second
+ * implementation of a dedup key in the tree — see
+ * `backend/app/utils/url_canonical.py` for why that is the
+ * thing we are avoiding.
  */
 export const findOwnedVideoByUrl = async (url: string): Promise<ParsedMedia | null> => {
   const supabase = getSupabaseClient();

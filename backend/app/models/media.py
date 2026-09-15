@@ -56,6 +56,7 @@ class ParsedMedia(Base):
             name="videos_platform_source_unique",
         ),
         Index("idx_parsed_media_author", "author"),
+        Index("idx_parsed_media_canonical_url", "canonical_url"),
         Index("idx_parsed_media_cover_status", "cover_download_status"),
         Index("idx_parsed_media_created_at", "created_at"),
         Index("idx_parsed_media_download_status", "video_download_status"),
@@ -81,6 +82,15 @@ class ParsedMedia(Base):
         comment="Unique identifier on the source platform (was aweme_id)",
     )
     original_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    canonical_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment=(
+            "Dedup key derived from original_url (tracking params stripped, "
+            "host and scheme lowercased, query sorted). NULL until backfilled. "
+            "Never used to fetch — see app/utils/url_canonical.py."
+        ),
+    )
     source_platform: Mapped[str] = mapped_column(
         String(50),
         nullable=False,

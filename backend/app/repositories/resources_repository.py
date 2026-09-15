@@ -113,6 +113,7 @@ from app.models import (
     Teams,
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
+from app.utils.url_canonical import parsed_media_url_predicate as _url_matches
 
 # Working-set caps for the batch sweepers in this repo. They replace
 # unbounded SELECTs that PostgREST silently truncated at 1000. Each consuming
@@ -612,7 +613,17 @@ class ResourcesRepository(AsyncpgRepository):
         self, url: str, creator_id: str
     ) -> Optional[Dict[str, Any]]:
         """L2 dedup probe. JOIN with parsed_media on media_id, filter on
-        original_url and the appropriate completion status (image vs video).
+        the URL and the appropriate completion status (image vs video).
+
+        The URL predicate matches EITHER the verbatim ``original_url`` (legacy
+        behaviour, and the only thing that works for rows written before
+        migration 471 backfilled ``canonical_url``) OR the canonical dedup key.
+        Exact equality alone is what let this probe miss: share links carry
+        analytics parameters that differ per surface, so the same bilibili
+        video read as "never downloaded" on 2026-09-15 because its
+        ``spm_id_from`` differed from the value stored on 2026-09-08 — a full
+        re-parse plus a Download task the in-workflow cache check then
+        discarded. See ``app/utils/url_canonical.py``.
 
         Returns the same nested shape as legacy: ``{id, media_id,
         parsed_media: {id, platform_id, original_url, ...}}`` so call sites
@@ -646,7 +657,7 @@ class ResourcesRepository(AsyncpgRepository):
                     )
                     .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
                     .where(Resources.creator_id == creator_id)
-                    .where(ParsedMedia.original_url == url)
+                    .where(_url_matches(url))
                     .limit(1)
                 )
                 row = result.mappings().first()
