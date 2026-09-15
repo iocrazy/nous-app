@@ -47,7 +47,12 @@ export const KIND_LABEL: Record<DeliverableKind, [string, string]> = {
 
 export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const { t } = useTranslation();
-  const issueId = Number(ctx.issue.id);
+  // The id goes through as it arrived (B3). `IssueBlockContext.issue` is
+  // `Record<string, unknown>`, 3a's own wire fields carry issue ids as
+  // STRINGS (a Snowflake past 2^53 does not survive a JS number), and both
+  // consumers below take one — so a `Number()` in the middle can only lose a
+  // digit.
+  const issueId = String(ctx.issue.id);
   const refreshKey = ctx.env.refreshKey ?? 0;
   const [items, setItems] = useState<OutputObject[]>([]);
   const [failed, setFailed] = useState(false);
@@ -55,7 +60,7 @@ export const OutputsBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const [justUpdated, setJustUpdated] = useState(false);
   // «A turn on this issue ended» — one broadcast, deduped by watermark, so the
   // WS `done` frame and the polling edge for one turn cost one re-read.
-  const signal = useTurnSignal(String(issueId));
+  const signal = useTurnSignal(issueId);
   /** The signal the badge has already spoken for. The effect re-runs for other
    *  reasons too (a rail `refreshKey` bump), and `signal !== null` stays true
    *  forever once the first turn lands — so without this the badge would claim
