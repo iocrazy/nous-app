@@ -103,7 +103,7 @@ export const TagContent: React.FC<TagContentProps> = ({
   const handleTogglePromptTrigger = useCallback(async (tagId: string) => {
     // Find the current tag (check mergedTags for latest state)
     const currentTag = mergedTags.find((t) => String(t.id) === tagId);
-    if (!currentTag || currentTag.type !== 'user') {
+    if (!currentTag) {
       closeContextMenu();
       return;
     }
@@ -205,7 +205,7 @@ export const TagContent: React.FC<TagContentProps> = ({
           </button>
           {(() => {
             const tag = mergedTags.find((t) => String(t.id) === contextMenu.tagId);
-            return tag && tag.type === 'user' ? (
+            return tag ? (
               <button
                 onClick={() => { handleTogglePromptTrigger(contextMenu.tagId); }}
                 className={`w-full px-3 py-1.5 text-xs text-left hover:bg-ink-800 flex items-center gap-2 ${

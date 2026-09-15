@@ -56,28 +56,19 @@ describe('TagContent prompt trigger context menu', () => {
     expect(screen.getByText('Show Prompt Panel')).toBeInTheDocument();
   });
 
-  it('does not show "Show Prompt Panel" menu item for system tags', async () => {
-    const systemTag = tag({ type: 'system' });
-    render(<TagContent {...baseProps} allTags={[systemTag]} />);
+  // Two cases used to live here: "not shown for system tags" and "not shown
+  // for time tags". Mig 468 deleted the system rows outright (the CHECK no
+  // longer admits the value), and `time` has had zero rows for as long as the
+  // table has existed — so both asserted a branch that can no longer be
+  // reached. What replaces them is the positive case: an initial tag, which is
+  // now an ordinary tag of yours, DOES offer the option.
+  it('shows "Show Prompt Panel" for an initial tag — it is yours now', async () => {
+    render(<TagContent {...baseProps} allTags={[tag({ type: 'user' })]} />);
 
-    // Right-click on the tag button
     const tagButton = screen.getByRole('button', { name: /test-tag/ });
     fireEvent.contextMenu(tagButton, { clientX: 100, clientY: 100 });
 
-    // Menu should NOT have the prompt panel option
-    expect(screen.queryByText('Show Prompt Panel')).not.toBeInTheDocument();
-  });
-
-  it('does not show "Show Prompt Panel" menu item for time tags', async () => {
-    const timeTag = tag({ type: 'time' });
-    render(<TagContent {...baseProps} allTags={[timeTag]} />);
-
-    // Right-click on the tag button
-    const tagButton = screen.getByRole('button', { name: /test-tag/ });
-    fireEvent.contextMenu(tagButton, { clientX: 100, clientY: 100 });
-
-    // Menu should NOT have the prompt panel option
-    expect(screen.queryByText('Show Prompt Panel')).not.toBeInTheDocument();
+    expect(screen.getByText('Show Prompt Panel')).toBeInTheDocument();
   });
 
   it('shows checkmark when prompt_trigger is true', async () => {

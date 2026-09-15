@@ -252,7 +252,7 @@ export const TagsSettings: React.FC = () => {
     return tags.find(
       (tag) =>
         tag.name.toLowerCase() === q ||
-        (tag.type !== 'user' && (tag.name_zh ?? '').toLowerCase() === q),
+        ((tag.name_zh ?? '').toLowerCase() === q),
     );
   }, [tags, newTagName]);
 
@@ -1166,13 +1166,9 @@ export const TagsSettings: React.FC = () => {
                             </div>
                           ) : (
                             <div
-                              onClick={() => tag.type !== 'system' && handleStartEdit(tag)}
-                              draggable={tag.type !== 'system'}
+                              onClick={() => handleStartEdit(tag)}
+                              draggable
                               onDragStart={(e) => {
-                                if (tag.type === 'system') {
-                                  e.preventDefault();
-                                  return;
-                                }
                                 setDragTagId(tag.id);
                                 e.dataTransfer.effectAllowed = 'move';
                                 // Lead with a custom mediahub-only MIME.
@@ -1205,11 +1201,9 @@ export const TagsSettings: React.FC = () => {
                                 setDragTagId(null);
                                 setTagDropTargetGroupId(null);
                               }}
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all ${
-                                tag.type !== 'system'
-                                  ? 'cursor-pointer hover:scale-105 hover:shadow-lg'
-                                  : 'cursor-default'
-                              } ${dragTagId === tag.id ? 'opacity-40' : ''}`}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all cursor-pointer hover:scale-105 hover:shadow-lg ${
+                                dragTagId === tag.id ? 'opacity-40' : ''
+                              }`}
                               style={getTagStyle(tag.color, tag.enabled === false)}
                             >
                               <TagIcon size={11} className="shrink-0" />
@@ -1234,15 +1228,13 @@ export const TagsSettings: React.FC = () => {
                                   <Eye size={11} />
                                 )}
                               </button>
-                              {tag.type !== 'system' && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
-                                  className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
-                                  title={t('common.delete')}
-                                >
-                                  <X size={11} />
-                                </button>
-                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeletingTagId(tag.id); }}
+                                className="p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all opacity-0 group-hover:opacity-100"
+                                title={t('common.delete')}
+                              >
+                                <X size={11} />
+                              </button>
                             </div>
                           )}
                         </div>

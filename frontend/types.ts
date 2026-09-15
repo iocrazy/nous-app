@@ -485,7 +485,9 @@ export interface Tag {
   name_zh?: string | null;  // Chinese name for bilingual support
   color: string | null;
   icon: string | null;
-  type: 'system' | 'user' | 'time';
+  /** Mig 468 retired 'system': every tag belongs to a user. 'time' is
+   *  still legal in the DB CHECK but has had zero rows for a long time. */
+  type: 'user' | 'time';
   /** Stable automation key (mig 467). Present only on the tags the AI pipeline
    *  and auto-classification key off; absent on ordinary tags. Read-only — the
    *  display name is the user's to change, this is what keeps a rename from

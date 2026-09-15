@@ -100,7 +100,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   const [newColor, setNewColor] = useState(TAG_COLORS[5]);
   const [mergeOpen, setMergeOpen] = useState(false);
   const selectedUserTags = useMemo(
-    () => allTags.filter((t) => selectedIds.has(String(t.id)) && t.type === 'user'),
+    () => allTags.filter((t) => selectedIds.has(String(t.id))),
     [allTags, selectedIds],
   );
 

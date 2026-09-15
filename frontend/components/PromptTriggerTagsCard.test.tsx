@@ -37,13 +37,17 @@ describe('PromptTriggerTagsCard', () => {
     await waitFor(() => expect(updateTag).toHaveBeenCalledWith('1', { prompt_trigger: false }));
   });
 
-  it('filters out system tags from add candidates', async () => {
-    const mixedTags = [
+  // This used to assert that `type: 'system'` rows were filtered OUT of the
+  // candidate list. Mig 468 deleted those rows — the initial tags are ordinary
+  // tags of the user's now — so the filter that did it would only ever hide
+  // tags they own. What is left to check is the real rule: already-triggering
+  // tags are not offered again.
+  it('offers your tags that are not already prompt triggers', async () => {
+    fetchAllTags.mockResolvedValue([
       { id: '1', name: 'AI', prompt_trigger: true, type: 'user', color: '#6366f1' },
       { id: '2', name: 'cyberpunk', prompt_trigger: false, type: 'user', color: '#818cf8' },
-      { id: '3', name: 'system-tag', prompt_trigger: false, type: 'system', color: '#888888' },
-    ];
-    fetchAllTags.mockResolvedValue(mixedTags);
+      { id: '3', name: 'Tutorial', prompt_trigger: false, type: 'user', color: '#3b82f6' },
+    ]);
 
     render(<PromptTriggerTagsCard />);
     fireEvent.click(screen.getByText(/Add tag/));
@@ -52,7 +56,10 @@ describe('PromptTriggerTagsCard', () => {
       const select = screen.getByRole('combobox') as HTMLSelectElement;
       const optionTexts = Array.from(select.options).map((o) => o.textContent);
       expect(optionTexts).toContain('cyberpunk');
-      expect(optionTexts).not.toContain('system-tag');
+      // An initial tag is a candidate like any other.
+      expect(optionTexts).toContain('Tutorial');
+      // Already a trigger — not offered again.
+      expect(optionTexts).not.toContain('AI');
     });
   });
 });
