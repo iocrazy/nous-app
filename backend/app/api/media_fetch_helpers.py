@@ -31,10 +31,15 @@ def _coerce_str_to_list(v):
     return v
 
 
-INTENT_TAG_NAMES: dict[str, str] = {
-    "transcribe": "Transcript",
-    "summarize": "Summary",
-    "analyze": "Analyze",
+#: 意图 → Pipeline 标签的 **slug**（mig 467），不是显示名。
+#:
+#: 以前这里是英文名 "Transcript"/"Summary"/"Analyze"，于是整条 AI 链路把
+#: 用户可见的标签名当成了主键：用户一改名，这里查不到、只打一条 WARNING
+#: 就跳过，AI 悄无声息地不跑。slug 用户看不到也改不到，改名从此免费。
+INTENT_TAG_SLUGS: dict[str, str] = {
+    "transcribe": "transcript",
+    "summarize": "summary",
+    "analyze": "analyze",
 }
 
 
@@ -56,10 +61,10 @@ class AiIntentFields(BaseModel):
         return v
 
 
-def intent_tag_names(*, transcribe: bool, summarize: bool, analyze: bool) -> list[str]:
-    """(transcribe, summarize, analyze) → 需要挂上的系统标签英文名，顺序固定。"""
+def intent_tag_slugs(*, transcribe: bool, summarize: bool, analyze: bool) -> list[str]:
+    """(transcribe, summarize, analyze) → 需要挂上的标签 slug，顺序固定。"""
     flags = {"transcribe": transcribe, "summarize": summarize, "analyze": analyze}
-    return [INTENT_TAG_NAMES[key] for key, on in flags.items() if on]
+    return [INTENT_TAG_SLUGS[key] for key, on in flags.items() if on]
 
 
 # 快捷指令会把选择页 GET /auth/temp-token/{token}/selection?format=json 的整段
@@ -237,20 +242,22 @@ async def resolve_tag_names_to_ids(tag_names: list[str], user_id: str) -> list[s
 async def resolve_intent_tag_ids(
     *, transcribe: bool, summarize: bool, analyze: bool
 ) -> list[str]:
-    """意图布尔 → Pipeline 系统标签 id（str）。只查 type='system'，绝不创建；
-    查不到说明种子缺失（部署问题），WARNING 后跳过，不阻断抓取。"""
-    names = intent_tag_names(
+    """意图布尔 → Pipeline 标签 id（str）。按 slug 查，绝不创建；查不到说明
+    种子缺失（部署问题），WARNING 后跳过，不阻断抓取。
+
+    按 slug 而不是按显示名：标签名是用户的，改了不该让 AI 停摆。"""
+    slugs = intent_tag_slugs(
         transcribe=transcribe, summarize=summarize, analyze=analyze
     )
-    if not names:
+    if not slugs:
         return []
-    found = await get_tags_repository().get_system_tag_ids_by_names(names)
-    missing = [n for n in names if n not in found]
+    found = await get_tags_repository().get_tag_ids_by_slugs(slugs)
+    missing = [s for s in slugs if s not in found]
     if missing:
         logger.warning(
-            f"[Fetch] intent system tags missing (seed problem, skipped): {missing}"
+            f"[Fetch] intent pipeline tags missing (seed problem, skipped): {missing}"
         )
-    return [str(found[n]) for n in names if n in found]
+    return [str(found[s]) for s in slugs if s in found]
 
 
 async def resolve_and_attach_tags(

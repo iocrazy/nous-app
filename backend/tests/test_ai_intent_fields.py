@@ -54,30 +54,31 @@ def test_fetch_request_rejects_out_of_range_rating():
         MediaFetchRequest(url="https://v.douyin.com/x/", rating=6)
 
 
+# 映射到 **slug**，不是显示名（mig 467）。标签名是用户的，改名不该让 AI 停摆。
 @pytest.mark.parametrize(
     "flags, expected",
     [
         ((False, False, False), []),
-        ((True, False, False), ["Transcript"]),
-        ((False, True, False), ["Summary"]),
-        ((False, False, True), ["Analyze"]),
-        ((True, True, True), ["Transcript", "Summary", "Analyze"]),
+        ((True, False, False), ["transcript"]),
+        ((False, True, False), ["summary"]),
+        ((False, False, True), ["analyze"]),
+        ((True, True, True), ["transcript", "summary", "analyze"]),
     ],
 )
-def test_intent_tag_names_mapping(flags, expected):
-    from app.api.media_fetch_helpers import intent_tag_names
+def test_intent_tag_slugs_mapping(flags, expected):
+    from app.api.media_fetch_helpers import intent_tag_slugs
 
     t, s, a = flags
-    assert intent_tag_names(transcribe=t, summarize=s, analyze=a) == expected
+    assert intent_tag_slugs(transcribe=t, summarize=s, analyze=a) == expected
 
 
 @pytest.mark.asyncio
-async def test_resolve_intent_tag_ids_uses_system_lookup_and_skips_missing(caplog):
+async def test_resolve_intent_tag_ids_uses_slug_lookup_and_skips_missing(caplog):
     from app.api import media_fetch_helpers as h
 
     repo = MagicMock()
-    repo.get_system_tag_ids_by_names = AsyncMock(
-        return_value={"Transcript": 11, "Analyze": 33}
+    repo.get_tag_ids_by_slugs = AsyncMock(
+        return_value={"transcript": 11, "analyze": 33}
     )
     repo.create_tag = AsyncMock()
     with patch.object(h, "get_tags_repository", return_value=repo):
@@ -86,11 +87,12 @@ async def test_resolve_intent_tag_ids_uses_system_lookup_and_skips_missing(caplo
         )
 
     assert ids == ["11", "33"]
-    repo.get_system_tag_ids_by_names.assert_awaited_once_with(
-        ["Transcript", "Summary", "Analyze"]
+    # 查的是 slug。传显示名是这次重构要消灭的东西：用户改个名，AI 就静默停摆。
+    repo.get_tag_ids_by_slugs.assert_awaited_once_with(
+        ["transcript", "summary", "analyze"]
     )
     repo.create_tag.assert_not_called()
-    assert "Summary" in caplog.text
+    assert "summary" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -98,7 +100,7 @@ async def test_resolve_intent_tag_ids_no_flags_no_query():
     from app.api import media_fetch_helpers as h
 
     repo = MagicMock()
-    repo.get_system_tag_ids_by_names = AsyncMock()
+    repo.get_tag_ids_by_slugs = AsyncMock()
     with patch.object(h, "get_tags_repository", return_value=repo):
         assert (
             await h.resolve_intent_tag_ids(
@@ -106,7 +108,7 @@ async def test_resolve_intent_tag_ids_no_flags_no_query():
             )
             == []
         )
-    repo.get_system_tag_ids_by_names.assert_not_called()
+    repo.get_tag_ids_by_slugs.assert_not_called()
 
 
 @pytest.mark.asyncio

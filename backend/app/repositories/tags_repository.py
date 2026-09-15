@@ -297,23 +297,54 @@ class TagsRepository:
             )
             return _tag_row(row) if row else None
 
-    async def get_system_tag_ids_by_names(self, names: List[str]) -> Dict[str, int]:
-        """英文名 → id，只看 ``type = 'system'`` 行，永不创建。
+    async def get_tag_ids_by_slugs(self, slugs: List[str]) -> Dict[str, int]:
+        """slug → id，永不创建。
 
-        意图字段（transcribe / summarize / analyze）映射到 Pipeline 组的
-        Transcript / Summary / Analyze；mig 220 的约定是只匹配系统类型，
-        同名用户标签不算数。"""
-        if not names:
+        Slug 是自动化的稳定键（mig 467），显示名不是。这个方法取代了旧的
+        ``get_system_tag_ids_by_names``：那个按英文名 + ``type='system'`` 匹配，
+        于是用户一改名，意图标签就挂不上，而调用方只打一条 WARNING 就跳过 ——
+        AI 悄无声息地不跑。
+
+        **不再过滤 type**，因为已经不需要了：slug 只在 mig 467 里写给自动化
+        标签，用户建标签的任何路径都碰不到它，所以有 slug 本身就等价于
+        "这是自动化认得的那一个"。"""
+        if not slugs:
             return {}
         async with read_scope() as session:
             rows = (
                 await session.execute(
-                    select(Tags.name, Tags.id).where(
-                        Tags.type == "system", Tags.name.in_(list(names))
-                    )
+                    select(Tags.slug, Tags.id).where(Tags.slug.in_(list(slugs)))
                 )
             ).all()
-        return {str(name): int(tag_id) for name, tag_id in rows}
+        return {str(slug): int(tag_id) for slug, tag_id in rows}
+
+    async def get_tag_by_slug(self, slug: str) -> Optional[dict]:
+        """自动化按稳定键取一个标签。显示名改了也照样命中。"""
+        async with read_scope() as session:
+            row = (
+                (await session.execute(select(Tags).where(Tags.slug == slug)))
+                .scalars()
+                .first()
+            )
+            return _tag_row(row) if row else None
+
+    async def get_automation_tag(self, key: str) -> Optional[dict]:
+        """自动分类拿一个英文类别名（``Food`` / ``Tutorial`` / …）换标签。
+
+        **slug 优先，显示名兜底**，两者都要保留是有原因的：
+
+        * slug 命中的是 mig 467 种下的那 13 个策展分类标签，用户把它们改名后
+          依然命中 —— 这正是本次重构要修的（改名让自动打标静默失效）。
+        * 名字兜底保留了今天的另一半行为：AI 视觉分析的 category 词表存在库里
+          的 prompt 行中，可能吐出这 13 个以外的词，而那时 ``get_tag_by_name``
+          会去匹配用户自己的同名标签。那不是缺陷，砍掉它是另一回事。
+
+        ⚠️ 与 AI **触发**链（``download_helpers``）不同：那里是 slug-only，没有
+        名字兜底，因为一个手建的 "Summary" 标签能触发模型消费是真的洞。这里只是
+        打个分类标签，没有那种代价。"""
+        return await self.get_tag_by_slug(key.lower()) or await self.get_tag_by_name(
+            key
+        )
 
     async def get_tag_by_name(
         self, name: str, user_id: Optional[str] = None

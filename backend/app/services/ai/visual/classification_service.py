@@ -205,8 +205,8 @@ class ClassificationService:
                 )
                 return added_tags
 
-            # Get the system tag
-            primary_tag = await repo.get_tag_by_name(result.primary_tag)
+            # slug 优先、显示名兜底 —— 策展分类标签改名后仍然命中
+            primary_tag = await repo.get_automation_tag(result.primary_tag)
 
             if primary_tag and result.confidence >= min_confidence:
                 await repo.add_tag_to_resource(
@@ -222,7 +222,7 @@ class ClassificationService:
 
             # Add secondary tag if confidence is reasonable
             if result.secondary_tag and result.confidence >= 0.5:
-                secondary_tag = await repo.get_tag_by_name(result.secondary_tag)
+                secondary_tag = await repo.get_automation_tag(result.secondary_tag)
                 if secondary_tag:
                     secondary_confidence = round(
                         result.confidence * 0.7, 2

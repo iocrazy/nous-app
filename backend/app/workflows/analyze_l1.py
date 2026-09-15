@@ -274,7 +274,7 @@ async def call_analyze_l1(
             )
 
     if result.category and result.category != "Other":
-        tag = await tags_repo.get_tag_by_name(result.category)
+        tag = await tags_repo.get_automation_tag(result.category)
         if tag:
             await tags_repo.add_tag_to_resource(
                 resource_id=resource_id,

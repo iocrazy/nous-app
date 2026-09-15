@@ -486,6 +486,11 @@ export interface Tag {
   color: string | null;
   icon: string | null;
   type: 'system' | 'user' | 'time';
+  /** Stable automation key (mig 467). Present only on the tags the AI pipeline
+   *  and auto-classification key off; absent on ordinary tags. Read-only — the
+   *  display name is the user's to change, this is what keeps a rename from
+   *  silently switching the automation off. */
+  slug?: string | null;
   group_name?: string | null;
   group_id?: string | null;
   enabled?: boolean;

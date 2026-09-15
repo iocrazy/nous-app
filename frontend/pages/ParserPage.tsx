@@ -62,21 +62,23 @@ export function ParserPage() {
   // which the post-download chain (chain_ai_workflows_after_download)
   // turns into an AI workflow: Transcript → transcription,
   // Summary → summary (implies transcript), Analyze → cover analysis.
+  // Addressed by `slug` (mig 467), never by display name: the user owns the
+  // name now, and matching on it meant a rename silently switched the intent
+  // off — the button stayed, `aiTagId` returned undefined, and the click did
+  // nothing. The label here is the UI's own wording, not a lookup key.
   const AI_INTENTS = [
-    { name: 'Transcript', label: 'Transcript', Icon: Mic },
-    { name: 'Summary', label: 'Summary', Icon: FileText },
-    { name: 'Analyze', label: 'Analyze', Icon: Eye },
+    { slug: 'transcript', label: 'Transcript', Icon: Mic },
+    { slug: 'summary', label: 'Summary', Icon: FileText },
+    { slug: 'analyze', label: 'Analyze', Icon: Eye },
   ] as const;
 
-  const aiTagId = (name: string): string | undefined => {
-    const tag =
-      allTags.find(tg => tg.name === name && tg.type === 'system') ??
-      allTags.find(tg => tg.name === name);
+  const aiTagId = (slug: string): string | undefined => {
+    const tag = allTags.find(tg => tg.slug === slug);
     return tag ? String(tag.id) : undefined;
   };
 
-  const toggleAiIntent = (name: string) => {
-    const id = aiTagId(name);
+  const toggleAiIntent = (slug: string) => {
+    const id = aiTagId(slug);
     if (!id) return;
     setSelectedTagIds(prev =>
       prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
@@ -201,15 +203,15 @@ export function ParserPage() {
       <div className="bg-ink-900/50 border border-ink-800 rounded-xl p-3">
         <div className="text-xs font-medium text-ink-400 mb-2 px-1">AI Processing</div>
         <div className="grid grid-cols-3 gap-2">
-          {AI_INTENTS.map(({ name, label, Icon }) => {
-            const id = aiTagId(name);
+          {AI_INTENTS.map(({ slug, label, Icon }) => {
+            const id = aiTagId(slug);
             const checked = id ? selectedTagIds.includes(id) : false;
             return (
               <button
-                key={name}
+                key={slug}
                 type="button"
                 disabled={!id}
-                onClick={() => toggleAiIntent(name)}
+                onClick={() => toggleAiIntent(slug)}
                 className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                   checked
                     ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
