@@ -4114,6 +4114,14 @@
       "video": "文生视频模型",
       "speech": "语音模型"
     },
+    "nonChatKindShort": {
+      "embedding": "向量",
+      "rerank": "重排",
+      "image": "文生图",
+      "video": "文生视频",
+      "speech": "语音"
+    },
+    "nonChatKindTagHint": "「{{model}}」看起来是{{kind}}模型。它照常可用于该用途，只是该服务商的对话与文本任务不能用它。",
     "providerDesc": {
       "openai": "云端 GPT 与 Whisper 模型",
       "deepseek": "高性价比云端 AI",
@@ -4312,6 +4320,7 @@
       "modelHealthFailedReasonShort": "自检失败：{{reason}}",
       "modelHealthPassed": "自检通过",
       "modelHealthCheckedAgo": "检查于 {{ago}}",
+      "nonChatModelShort": "非对话模型",
       "usage": {
         "title": "使用方",
         "empty": "暂无模块使用此 Agent — 可在会话中调用它，或将它绑定到工作流。",

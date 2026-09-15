@@ -4114,6 +4114,14 @@
       "video": "a video-generation model",
       "speech": "a speech model"
     },
+    "nonChatKindShort": {
+      "embedding": "embedding",
+      "rerank": "rerank",
+      "image": "image",
+      "video": "video",
+      "speech": "speech"
+    },
+    "nonChatKindTagHint": "\"{{model}}\" looks like {{kind}}. It stays enabled and usable for that purpose — only this provider’s chat and text tasks cannot run on it.",
     "providerDesc": {
       "openai": "Cloud-hosted GPT & Whisper models",
       "deepseek": "Cost-effective cloud AI",
@@ -4312,6 +4320,7 @@
       "modelHealthFailedReasonShort": "health check failed: {{reason}}",
       "modelHealthPassed": "Health check passed",
       "modelHealthCheckedAgo": "checked {{ago}}",
+      "nonChatModelShort": "not a chat model",
       "usage": {
         "title": "Used By",
         "empty": "No module uses this agent yet — invoke it from chat or bind it to a workflow.",

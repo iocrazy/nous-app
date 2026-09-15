@@ -30,6 +30,19 @@
 // Deliberately NOT here: any notion of blocking. The caller warns; the user
 // still decides — consistent with the platform-model health line (#1838).
 //
+// ── Where the alarm colour belongs (2026-09-15) ─────────────────────────────
+// The first version painted EVERY suspect chip danger-red with a warning
+// triangle. A user whose doubao card legitimately holds embedding, image and
+// chat models — because this product needs all three — saw three red rows on a
+// perfectly working configuration and asked what was broken. Nothing was.
+//
+// Red now means exactly one thing: the model this provider's text tasks WILL
+// use looks like it cannot chat (AISettings' `non-chat-warnline`). Everywhere
+// a suspect model is merely PRESENT — the enabled-model chips, the agent
+// picker's options — the kind is stated in neutral type and the model stays
+// selectable. Same rule as above, one level up: an alarm that fires on a
+// working setup is the failure this guard exists to prevent.
+//
 // Deliberately NOT here: the wording. Callers translate; this module returns a
 // kind so it stays importable without the i18n instance.
 
@@ -108,4 +121,16 @@ export function suspectedNonChatKind(
 /** i18n key for a kind's noun phrase ("an embedding model" / "向量模型"). */
 export function nonChatKindKey(kind: NonChatKind): string {
   return `aiSettings.nonChatKind.${kind}`;
+}
+
+/**
+ * i18n key for a kind's SHORT noun ("embedding" / "向量") — the chip tag.
+ *
+ * Separate from {@link nonChatKindKey} on purpose. That one reads as a
+ * predicate inside a sentence ("looks like an embedding model"); this one is
+ * a label standing on its own next to the model id, where an article and the
+ * word "model" are noise.
+ */
+export function nonChatKindShortKey(kind: NonChatKind): string {
+  return `aiSettings.nonChatKindShort.${kind}`;
 }
