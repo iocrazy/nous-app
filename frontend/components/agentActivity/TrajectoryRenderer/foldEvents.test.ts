@@ -575,3 +575,62 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
     expect(step.citations).toHaveLength(2);
   });
 });
+
+describe('foldEvents — 迟到的 step_end 回到自己那一步 (C8)', () => {
+  const at = (n: number, event_type: string, payload: Record<string, unknown> = {}, step?: number): AgentRunEvent =>
+    ({ seq: n, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  it('把总结记在自己的步上，而不是当时开着的那一步', () => {
+    // step 1 的收尾在 step 2 已经开始之后才落库（与迟到的 deliverable /
+    // subagent_done 同族的乱序）。`current ?? …` 会把 step 1 的耗时、花费、
+    // 结束原因全记到 step 2 头上 —— 两条都错：step 1 显示不出它花了多久，
+    // step 2 凭空多出一笔不属于它的钱。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1, model: 'm' }, 1),
+      at(2, 'step_start', { turn: 1, step: 2, model: 'm' }, 2),
+      at(3, 'step_end', { turn: 1, step: 1, duration_ms: 1200, cost_cents: 0.3, finish_reason: 'tool_calls' }, 1),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].summary).toMatchObject({ durationMs: 1200, costCents: 0.3, finishReason: 'tool_calls' });
+    expect(steps[1].summary.durationMs).toBeNull();
+    expect(steps[1].summary.costCents).toBeNull();
+  });
+
+  it('迟到的 step_end 不会把当时开着的那一步关掉', () => {
+    // 「一条关于旧步骤的迟到行什么也不结束」—— 与 `ensureStep` 的既有约定
+    // 同一条。关错了步，直播标记会停在一个已经走过去的节点上。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_start', { turn: 1, step: 2 }, 2),
+      at(3, 'step_end', { turn: 1, step: 1 }, 1),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    if (steps[1].kind !== 'step') throw new Error();
+    expect(steps[1].live).toBe(true);
+  });
+
+  it('坐标只在载荷里的旧行同样回得去（与 deliverable 的 B2 同形）', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_start', { turn: 1, step: 2 }, 2),
+      { seq: 3, event_type: 'step_end', payload: { turn: 1, step: 1, cost_cents: 0.7 }, step: null, turn: null, created_at: '' } as AgentRunEvent,
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].summary.costCents).toBe(0.7);
+    expect(steps[1].summary.costCents).toBeNull();
+  });
+
+  it('按时到达的 step_end 照旧结束当前步', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1, duration_ms: 90 }, 1),
+    ], { isRunning: true });
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error();
+    expect(step.summary.durationMs).toBe(90);
+    expect(step.live).toBe(false);
+  });
+});

@@ -435,13 +435,30 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       }
 
       case 'step_end': {
-        const node = current ?? ensureStep(ev, null);
+        // Its own step FIRST, by coordinate — the same `stepAt` lookup
+        // `deliverable` and `subagent_done` already use (C8). A step_end can
+        // arrive after a LATER step has started (the same out-of-order the
+        // other two branches were fixed for), and `current ?? …` then files
+        // this step's duration, cost and finish reason under whichever step
+        // happens to be open: the step that really ran shows no time at all,
+        // and the one that is running picks up money it never spent.
+        //
+        // Columns first, payload second — the fallback `step_start` and the
+        // `deliverable` branch (B2) both have, for pre-453 rows whose
+        // coordinates live only in the payload.
+        const coord = num(ev.step) ?? num(p.step);
+        const own =
+          coord !== null ? stepAt(num(ev.turn) ?? num(p.turn) ?? 1, coord) : null;
+        const node = own ?? current ?? ensureStep(ev, null);
         node.summary.durationMs = num(p.duration_ms);
         node.summary.costCents = num(p.cost_cents);
         node.summary.finishReason = str(p.finish_reason);
         if (node.summary.costCents !== null) stepCost += node.summary.costCents;
         if (!node.model) node.model = str(p.model);
-        closeCurrent();
+        // A late row about an OLD step ends nothing — same rule `ensureStep`
+        // states for out-of-order events. Closing `current` here would strand
+        // the live marker on a step the run has already walked past.
+        if (node === current) closeCurrent();
         break;
       }
 
