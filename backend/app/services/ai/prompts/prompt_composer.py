@@ -983,7 +983,10 @@ def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
     ``title`` is omitted rather than rendered empty when the registry row has
     none — ``title=""`` reads as "its title is the empty string", absence
     reads as "it was never given one" (same rule as ``primary_resource_id``
-    in ``render_available_resources``).
+    in ``render_available_resources``). An empty (or all-whitespace) title is
+    the same absence: upstream normalizes it to ``None``, and this renderer
+    holds the line a second time because ``refs`` is typed ``Any`` — the next
+    construction path should not get to decide whether ``title=""`` appears.
 
     Returns the empty string when the turn cites nothing, so a turn without a
     citation is byte-for-byte what it was before this frame existed.
@@ -998,7 +1001,7 @@ def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
             f'version="{escape_frame_attr(ref.version)}"',
         ]
         title = getattr(ref, "title", None)
-        if title is not None:
+        if title is not None and str(title).strip():
             attrs.append(f'title="{escape_frame_attr(title)}"')
         lines.append(f"  <output {' '.join(attrs)}/>")
     lines.append("</referenced_outputs>")
