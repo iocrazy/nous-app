@@ -360,5 +360,6 @@ async def test_one_broken_provider_card_does_not_hide_the_others(monkeypatch):
             }
         ),
     )
-    rows = await byok_image_rows("u1")
+    rows, warnings = await _rows_capturing_warnings("u1")
     assert [r["actual_model"] for r in rows] == [SEEDREAM]
+    assert "openai" in warnings, "the junk card was skipped without a warning"

@@ -31,8 +31,9 @@ def generate_image_tool_spec() -> dict:
                             "Which image provider to use: a catalog model "
                             "name, or a model id / provider key the user "
                             "enabled under Settings → AI (e.g. 'doubao'). "
-                            "Required in practice — without it no provider "
-                            "is configured."
+                            "Without it, resolution falls back to the "
+                            "platform catalog, which may have no image "
+                            "model enabled."
                         ),
                     },
                 },

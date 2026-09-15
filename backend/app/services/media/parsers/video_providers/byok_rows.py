@@ -168,6 +168,9 @@ def _rows_from_settings(ai_settings: Any, user_id: str) -> list[dict]:
     rows: list[dict] = []
     for provider_key, entry in providers.items():
         if not isinstance(entry, dict):
+            logger.warning(
+                "BYOK image: skipping non-mapping provider card {!r}", provider_key
+            )
             continue
         rows.extend(_provider_rows(str(provider_key), entry, user_id, len(rows)))
     return rows
