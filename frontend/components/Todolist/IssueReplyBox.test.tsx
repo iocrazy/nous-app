@@ -242,23 +242,50 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
   return { ...actual, listIssueOutputs: (...args: unknown[]) => listIssueOutputs(...args) };
 });
 
-const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => ({
-  id: `7271452993825349${10 + v}`,
-  version: v,
-  parent_version: v > 1 ? v - 1 : null,
-  run_id: '727145299382534100',
-  issue_id: '727145299382534000',
-  issue_key: 'MH-94',
-  actor_user_id: null,
-  reverted_from_version: null,
-  cost_kind: null,
-  deep_link: '/team/331438215859255/todolist/MH-94?step=1&turn=1',
-  seq: null, turn: null, step: v,
-  title: 'S3 · Shot #1',
-  model: null, cost_cents: null,
-  created_at: '2026-09-10T00:00:00Z',
-  ...over,
-});
+const TEAM = '331438215859255';
+
+/**
+ * `deep_link` exactly as `issue_links.issue_deep_link` would build it for the
+ * SAME row (B9). The old fixture hard-coded `?step=1&turn=1` on every version,
+ * which contradicted its own coordinates twice over: the two versions sat on
+ * different steps, and `turn` was null — and the backend appends `&turn=` only
+ * alongside a step it actually has. A fixture that disagrees with itself is a
+ * fixture no consumer can be held to.
+ */
+const deepLinkFor = (step: number | null, turn: number | null): string => {
+  let url = `/team/${TEAM}/todolist/MH-94`;
+  // `step` is 0-based, so it is compared against null rather than truth-tested.
+  if (step !== null) {
+    url += `?step=${step}`;
+    if (turn !== null) url += `&turn=${turn}`;
+  }
+  return url;
+};
+
+const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => {
+  const row: OutputVersion = {
+    id: `7271452993825349${10 + v}`,
+    version: v,
+    parent_version: v > 1 ? v - 1 : null,
+    run_id: '727145299382534100',
+    issue_id: '727145299382534000',
+    issue_key: 'MH-94',
+    actor_user_id: null,
+    reverted_from_version: null,
+    cost_kind: null,
+    deep_link: null,
+    seq: null, turn: null, step: v,
+    title: 'S3 · Shot #1',
+    model: null, cost_cents: null,
+    created_at: '2026-09-10T00:00:00Z',
+    ...over,
+  };
+  // Derived AFTER the override, so a caller that moves the coordinates gets a
+  // link that still describes them.
+  return over.deep_link !== undefined
+    ? row
+    : { ...row, deep_link: deepLinkFor(row.step, row.turn) };
+};
 
 const SHOT_OUTPUT: OutputObject = {
   kind: 'script_shot',
