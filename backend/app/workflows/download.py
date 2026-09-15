@@ -85,80 +85,23 @@ async def check_global_cache_step(
     exist on disk. Otherwise return {cache_hit: False} so the workflow
     proceeds to the strategy dispatch.
 
-    The on-disk verification matters: dev DBs often carry status=completed
-    rows pointing at files that were moved / never copied during a
-    storage-isolation cut-over (or that prod cleaned up). Without it L4
-    happily writes a resource_version v1 against a missing file and the
-    user sees a black thumbnail + an empty video player."""
-    import os
+    The probe itself lives in ``app.services.media.download_cache`` because
+    ``dedup_and_dispatch`` runs the same question at the front door — it
+    decides whether creating a Download task is worth it at all. Two copies
+    of this logic would drift, and the drift would be invisible: the
+    entry-point copy saying "not cached" merely costs a redundant task, which
+    is exactly the symptom we set out to remove.
+    """
+    from app.services.media.download_cache import global_cache_hit
 
-    from app.core.config import settings
-    from app.repositories.media_repository import get_media_repository
-
-    async def _file_present(rel_or_abs_path: str | None) -> bool:
-        if not rel_or_abs_path:
-            return False
-        from app.services.library.media_storage import ObjectStore, resolve_media_source
-
-        loc = resolve_media_source(rel_or_abs_path)
-        if loc.is_object_store:
-            store = ObjectStore(loc.bucket)
-            try:
-                # I3: an album is a prefix (key ends in "/") — no single
-                # object lives AT loc.key, so exists()/get_size() (both HEAD
-                # a single key) always resolve False/0 for one, making the
-                # global cache permanently miss for every already-downloaded
-                # album (full re-download + re-upload on every request).
-                # list_prefix at least one object under the prefix = present.
-                if loc.is_prefix:
-                    return len(await store.list_prefix(loc.key)) > 0
-                return await store.exists(loc.key) and await store.get_size(loc.key) > 0
-            except Exception:
-                # 探测失败(网络抖动/storage-api 挂了)保守当没缓存,继续下载
-                # 而不是让整个 step 炸掉。
-                return False
-        # filesystem 分支:完全保留原逻辑
-        p = (
-            rel_or_abs_path
-            if os.path.isabs(rel_or_abs_path)
-            else os.path.join(settings.DOWNLOAD_PATH, rel_or_abs_path)
+    return {
+        "cache_hit": await global_cache_hit(
+            platform_id=platform_id,
+            media_type=media_type,
+            download_video=download_video,
+            download_cover=download_cover,
         )
-        try:
-            return os.path.exists(p) and os.path.getsize(p) > 0
-        except OSError:
-            return False
-
-    media_repo = get_media_repository()
-    global_media = await media_repo.get_by_platform_id(platform_id)
-    if not global_media:
-        return {"cache_hit": False}
-
-    video_path = global_media.get("download_path")
-    cover_path = global_media.get("cover_download_path")
-    has_video_path = bool(video_path)
-    has_cover_path = bool(cover_path)
-
-    all_cached = True
-    if download_video:
-        video_status_ok = (
-            global_media.get("image_download_status") == "completed"
-            if int(media_type) in (2, 68)
-            else global_media.get("video_download_status") == "completed"
-        )
-        all_cached = (
-            all_cached
-            and video_status_ok
-            and has_video_path
-            and await _file_present(video_path)
-        )
-    if download_cover:
-        all_cached = (
-            all_cached
-            and global_media.get("cover_download_status") == "completed"
-            and has_cover_path
-            and await _file_present(cover_path)
-        )
-    return {"cache_hit": bool(all_cached)}
+    }
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)

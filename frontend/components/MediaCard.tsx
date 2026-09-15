@@ -474,6 +474,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
 
     try {
       const result = await fetchMediaByType(data.platform_id, types);
+      if (result.already_in_library) {
+        // Nothing was dispatched — say that instead of "Fetch submitted",
+        // which would promise a Task Center card that never arrives.
+        addToast('Already in your library', 'info');
+        return;
+      }
       setRetrySuccess(true);
       // Optimistic UI: mark submitted items so menu hides them immediately
       setFetchSubmitted(prev => ({
