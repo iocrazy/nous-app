@@ -51,10 +51,11 @@ vi.mock('../../../contexts/ResourcesContext', () => ({
 }));
 
 vi.mock('../../../services/generatedMediaService', () => ({
-  generatedMediaCoverUrl: (id: string) => `https://api.test/gen/${id}/cover`,
+  generatedMediaCoverUrl: (id: string, opts?: { full?: boolean }) =>
+    `https://api.test/gen/${id}/cover${opts?.full ? '?full=1' : ''}`,
   generatedMediaStreamUrl: (id: string) => `https://api.test/gen/${id}/stream`,
-  // The FULL file, distinct from `/cover` — the lightbox must not be showing
-  // the thumbnail, so the two URLs have to be distinguishable here.
+  // The full tier is a distinct URL from the preview tier, so the two stay
+  // distinguishable here — the lightbox must not be showing the thumbnail.
   generatedMediaFileUrl: (id: string) => `https://api.test/gen/${id}/file`,
 }));
 
@@ -744,14 +745,16 @@ describe('GeneratedView — preview lightbox', () => {
     fireEvent.click(within(cards[0] as HTMLElement).getByRole('button', { name: /^Preview/ }));
   };
 
-  it('opens from the thumbnail on the FULL file, not the thumbnail URL', async () => {
+  it('opens the ORIGINAL through /cover?full=1 — never the auth-gated /file', async () => {
+    // /file requires a Bearer header; a bare <img src> cannot send one, so it
+    // 401s and the viewer shows a broken image (reported 2026-09-15).
     await openFirstCard();
 
     const lightbox = await screen.findByTestId('pin-lightbox');
     expect(lightbox).toBeTruthy();
-    expect(screen.getByTestId('pin-lightbox-image').getAttribute('src')).toBe(
-      'https://api.test/gen/727145299382534145/file',
-    );
+    const src = screen.getByTestId('pin-lightbox-image').getAttribute('src');
+    expect(src).toBe('https://api.test/gen/727145299382534145/cover?full=1');
+    expect(src).not.toContain('/file');
   });
 
   it('shows the metadata panel with source, model, state and prompt', async () => {

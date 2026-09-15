@@ -131,8 +131,14 @@ export function generatedMediaStreamUrl(id: string): string {
  * Returns the no-auth cover/thumbnail URL for a generated-media item.
  * Safe to use directly in browser <img src> without Authorization headers.
  */
-export function generatedMediaCoverUrl(id: string): string {
-  return `${getApiUrl()}/api/v1/generated-media/${id}/cover`;
+export function generatedMediaCoverUrl(id: string, opts: { full?: boolean } = {}): string {
+  const base = `${getApiUrl()}/api/v1/generated-media/${id}/cover`;
+  // `?full=1` is the ORIGINAL tier — what a lightbox or an editor opens.
+  // Both tiers are served without a Bearer header, which is the whole reason
+  // to reach the original through /cover rather than /file: a bare <img src>
+  // cannot carry one, so /file answers 401 and the viewer paints a broken
+  // image (reported 2026-09-15). /file remains the auth-gated download.
+  return opts.full ? `${base}?full=1` : base;
 }
 
 /**
