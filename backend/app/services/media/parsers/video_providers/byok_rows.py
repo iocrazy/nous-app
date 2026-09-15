@@ -55,8 +55,12 @@ BYOK_IMAGE_BASE_URLS: dict[str, str] = {
     "doubao": "https://ark.cn-beijing.volces.com/api/v3",
 }
 
-# Keeps BYOK rows behind every catalog row, so a call that names no model
-# behaves exactly as it did before this tier existed.
+# Catalog rows carry a ``sort_order``; these carry one too so the row shape
+# lines up. NOTHING sorts by it — the tier order that actually decides an
+# unspecified call is the list concatenation in
+# ``db_registry.resolve_image_provider`` (``[*catalog, *byok]``), pinned by
+# test_jimeng_dispatch's tier-order case. The base keeps the numbers from
+# colliding with real catalog values if anyone ever does sort.
 _BYOK_SORT_BASE = 10_000
 
 
@@ -117,7 +121,11 @@ def _provider_rows(
     model_ids = _image_model_ids(entry)
     if not model_ids:
         return []
-    base_url = (entry.get("base_url") or "").strip() or BYOK_IMAGE_BASE_URLS.get(
+    # ``str(...)`` because the value is whatever the user's PATCH stored: the
+    # settings schema types ai_providers as ``Dict[str, Any]`` and
+    # ``merge_ai_providers`` does not coerce, so a numeric base_url reaches
+    # here as an int.
+    base_url = str(entry.get("base_url") or "").strip() or BYOK_IMAGE_BASE_URLS.get(
         provider_key, ""
     )
     if not base_url:
@@ -146,11 +154,36 @@ def _provider_rows(
     ]
 
 
+def _rows_from_settings(ai_settings: Any, user_id: str) -> list[dict]:
+    """Project a settings mapping into rows. Tolerates a missing/empty
+    ``ai_providers`` and skips non-dict provider entries, so ONE junk card does
+    not cost the user the models they configured correctly."""
+    if not isinstance(ai_settings, dict):
+        raise TypeError(f"ai_settings is {type(ai_settings).__name__}, not a mapping")
+    providers = ai_settings.get("ai_providers")
+    if providers is None or providers == {}:
+        return []  # the ordinary "configured nothing" case — not a fault
+    if not isinstance(providers, dict):
+        raise TypeError(f"ai_providers is {type(providers).__name__}, not a mapping")
+    rows: list[dict] = []
+    for provider_key, entry in providers.items():
+        if not isinstance(entry, dict):
+            continue
+        rows.extend(_provider_rows(str(provider_key), entry, user_id, len(rows)))
+    return rows
+
+
 async def byok_image_rows(user_id: str | None) -> list[dict]:
     """The user's own image models as catalog-shaped rows (may be empty).
 
-    Never raises: an unreadable settings row degrades to ``[]`` with a warning
-    so the admin catalog tier keeps resolving. Silence would be wrong in the
+    Never raises — and that covers the PARSING, not just the load. This is
+    awaited by ``resolve_image_provider`` BEFORE it can use its own catalog
+    rows, so anything escaping here takes the catalog tier down with it. The
+    stored shapes are not hypothetical: the settings schema types
+    ``ai_providers`` as ``Dict[str, Any]`` and ``merge_ai_providers`` stores
+    values as-is, so one user PATCH can put a list where a mapping belongs.
+
+    Degrades loudly: a warning, then ``[]``. Silence would be wrong in the
     other direction — a bare ``[]`` is indistinguishable from "this user
     configured nothing".
     """
@@ -158,6 +191,7 @@ async def byok_image_rows(user_id: str | None) -> list[dict]:
         return []
     try:
         ai_settings = await get_ai_settings(str(user_id))
+        return _rows_from_settings(ai_settings, str(user_id))
     except Exception as exc:  # noqa: BLE001 — degrade loudly, never propagate
         logger.warning(
             "BYOK image tier unavailable for user {}: {!r}; "
@@ -166,11 +200,3 @@ async def byok_image_rows(user_id: str | None) -> list[dict]:
             exc,
         )
         return []
-
-    providers = (ai_settings or {}).get("ai_providers") or {}
-    rows: list[dict] = []
-    for provider_key, entry in providers.items():
-        if not isinstance(entry, dict):
-            continue
-        rows.extend(_provider_rows(provider_key, entry, str(user_id), len(rows)))
-    return rows

@@ -277,3 +277,88 @@ async def test_rows_are_built_only_for_the_requesting_user(monkeypatch):
     rows = await byok_image_rows("u-42")
     assert calls == ["u-42"]
     assert [r["owner_user_id"] for r in rows] == ["u-42"]
+
+
+# ── malformed settings (fix round 1, H1) ───────────────────────────────────
+#
+# ``AISettingsUpdate.ai_providers`` is typed ``Dict[str, Any]`` and
+# ``merge_ai_providers`` stores whatever it is given, so the shapes below are
+# reachable by one user PATCH — not hypotheticals. Anything that escapes this
+# function takes the CATALOG tier down with it (``resolve_image_provider``
+# awaits this before it can use its own rows), so "degrade to []" has to cover
+# the parsing too, not just the load.
+
+
+def _warnings_from(records: list) -> str:
+    return " ".join(str(r) for r in records)
+
+
+async def _rows_capturing_warnings(user_id: str) -> tuple[list[dict], str]:
+    records: list = []
+    sink_id = logger.add(records.append, level="WARNING")
+    try:
+        rows = await byok_image_rows(user_id)
+    finally:
+        logger.remove(sink_id)
+    return rows, _warnings_from(records)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        pytest.param({"ai_providers": ["doubao"]}, id="providers-is-a-list"),
+        pytest.param({"ai_providers": "doubao"}, id="providers-is-a-string"),
+        pytest.param(["ai_providers"], id="settings-is-not-a-mapping"),
+    ],
+)
+async def test_malformed_settings_degrade_to_no_rows_with_a_warning(
+    monkeypatch, settings
+):
+    _patch_settings(monkeypatch, settings)
+    rows, warnings = await _rows_capturing_warnings("u1")
+    assert rows == []
+    assert warnings, "a malformed settings row was swallowed without a warning"
+
+
+async def test_a_non_string_base_url_does_not_explode_the_tier(monkeypatch):
+    """A numeric base_url is junk the settings schema (``Dict[str, Any]``)
+    happily stores. The contract here is that it does not take the CATALOG
+    tier down with it — not that it gets sanitised: this module honours
+    whatever non-empty value the user typed (a garbage string is honoured
+    too), and the resulting request fails loudly at call time, attributably.
+    Second-guessing only the non-string case would be an arbitrary line."""
+    _patch_settings(
+        monkeypatch,
+        _settings(
+            {
+                "doubao": {
+                    "enabled": True,
+                    "api_key": "k1",
+                    "base_url": 8080,
+                    "enabled_models": [SEEDREAM],
+                }
+            }
+        ),
+    )
+    rows = await byok_image_rows("u1")
+    assert [r["base_url"] for r in rows] == ["8080"]
+
+
+async def test_one_broken_provider_card_does_not_hide_the_others(monkeypatch):
+    """Per-card isolation: a junk entry alongside a good one must not cost the
+    user the model they did configure correctly."""
+    _patch_settings(
+        monkeypatch,
+        _settings(
+            {
+                "openai": "not-a-dict",
+                "doubao": {
+                    "enabled": True,
+                    "api_key": "k1",
+                    "enabled_models": [SEEDREAM],
+                },
+            }
+        ),
+    )
+    rows = await byok_image_rows("u1")
+    assert [r["actual_model"] for r in rows] == [SEEDREAM]

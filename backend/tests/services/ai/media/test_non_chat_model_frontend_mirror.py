@@ -28,7 +28,8 @@ from app.services.ai.media.non_chat_model import (
 )
 
 # <this file> → media → ai → services → tests → backend → repo root
-MIRROR = Path(__file__).resolve().parents[5] / "frontend" / "utils" / "nonChatModel.ts"
+REPO_ROOT = Path(__file__).resolve().parents[5]
+MIRROR = REPO_ROOT / "frontend" / "utils" / "nonChatModel.ts"
 
 
 def _array_literal(source: str, name: str) -> str:
@@ -74,8 +75,25 @@ def _parse_kind_tokens(literal: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
 
 @pytest.fixture(scope="module")
 def mirror_source() -> str:
-    if not MIRROR.exists():
-        pytest.skip(f"frontend mirror not checked out: {MIRROR} (backend-only tree)")
+    """Skip ONLY when there is no frontend tree at all.
+
+    A missing file under an existing ``frontend/`` means the mirror moved or
+    ``REPO_ROOT`` is counted wrong — and that must FAIL. Skipping on
+    ``MIRROR.exists()`` alone is how this file spent its first run reporting
+    green while comparing nothing (the depth was off by one), which is the
+    exact failure mode a mirror test exists to prevent.
+    """
+    # The depth arithmetic is checked FIRST, against something that must be
+    # true of the repo root no matter which checkout this is: this very file
+    # lives under ``backend/tests/``. Guarding on ``frontend/`` alone cannot
+    # tell "backend-only checkout" from "parents[N] is off by one" — both look
+    # like a missing directory, and both would skip.
+    assert (
+        REPO_ROOT / "backend" / "tests"
+    ).is_dir(), f"REPO_ROOT miscounted — parents[N] is wrong: {REPO_ROOT}"
+    if not (REPO_ROOT / "frontend").is_dir():
+        pytest.skip(f"backend-only tree: no frontend/ under {REPO_ROOT}")
+    assert MIRROR.exists(), f"mirror moved or MIRROR path wrong: {MIRROR}"
     return MIRROR.read_text(encoding="utf-8")
 
 

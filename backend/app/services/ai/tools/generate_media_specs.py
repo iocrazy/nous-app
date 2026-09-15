@@ -27,7 +27,13 @@ def generate_image_tool_spec() -> dict:
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Optional provider override.",
+                        "description": (
+                            "Which image provider to use: a catalog model "
+                            "name, or a model id / provider key the user "
+                            "enabled under Settings → AI (e.g. 'doubao'). "
+                            "Required in practice — without it no provider "
+                            "is configured."
+                        ),
                     },
                 },
                 "required": ["prompt"],

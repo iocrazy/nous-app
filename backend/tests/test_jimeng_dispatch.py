@@ -248,13 +248,31 @@ async def test_an_explicit_byok_model_name_beats_an_unrelated_catalog_row(monkey
 
 async def test_the_provider_key_alone_selects_the_users_first_image_model(monkeypatch):
     """``provider="doubao"`` is what an agent naturally passes — it names the
-    provider card, not an upstream model id, and no catalog row is called that.
+    provider CARD, not an upstream model id, and no catalog row is called that.
+
+    The catalog holds a non-jimeng row here on purpose: with an empty catalog
+    the BYOK row is also ``rows[0]``, so the name match would be doing nothing
+    and deleting ``_explicit_match``'s ``byok_provider`` clause would keep this
+    green. The platform row is what makes the assertion mean something —
+    without the clause, resolution falls through to it.
     """
-    _patch_repo(monkeypatch, [])
+    _patch_repo(
+        monkeypatch,
+        [
+            _row(
+                name="ark-platform",
+                actual_provider="ark",
+                actual_model="plat-model",
+                api_key="platform-key",
+                base_url="https://ark.example/api/v3",
+            )
+        ],
+    )
     _patch_byok(monkeypatch, [_byok_row()])
     provider, model = await resolve_image_provider("doubao", user_id="u1")
     assert isinstance(provider, ArkImageProvider)
     assert model == _SEEDREAM
+    assert provider._api_key == "user-key"
 
 
 async def test_byok_rows_are_requested_for_the_caller_s_user_only(monkeypatch):
@@ -286,3 +304,32 @@ async def test_the_empty_message_names_both_tiers(monkeypatch):
     _patch_byok(monkeypatch, [])
     with pytest.raises(RuntimeError, match=r"mediahub_models catalog or user BYOK"):
         await resolve_image_provider(user_id="u1")
+
+
+async def test_the_catalog_tier_wins_an_unspecified_call(monkeypatch):
+    """Tier order is the compatibility promise of this whole change: a call
+    that names no model must resolve exactly as it did before the BYOK tier
+    existed.
+
+    ``jimeng_first`` ignores list order, so a catalog row that is NOT jimeng is
+    the only shape that can see the difference — with an ark catalog row and an
+    ark BYOK row, ``rows[0]`` is the only thing deciding, and flipping
+    ``[*catalog, *byok]`` to ``[*byok, *catalog]`` silently starts spending the
+    user's own key on calls the admin catalog used to serve.
+    """
+    _patch_repo(
+        monkeypatch,
+        [
+            _row(
+                name="ark-platform",
+                actual_provider="ark",
+                actual_model="plat-model",
+                api_key="platform-key",
+                base_url="https://ark.example/api/v3",
+            )
+        ],
+    )
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider(user_id="u1")
+    assert model == "plat-model"
+    assert provider._api_key == "platform-key"
