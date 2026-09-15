@@ -106,6 +106,11 @@ class Tags(Base):
 
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: Stable automation key (mig 467). NULL on ordinary tags, and that absence
+    #: is meaningful — it is what keeps a hand-made tag called "Summary" from
+    #: triggering the AI pipeline. Never written by a user-facing endpoint: the
+    #: display name is the user's to change, this is not.
+    slug: Mapped[Optional[str]] = mapped_column(Text)
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )

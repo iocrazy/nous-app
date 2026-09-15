@@ -101,26 +101,36 @@ async def maybe_chain_transcode(
         logger.error(f"[Transcode/Chain] Failed for {platform_id}: {e}", exc_info=True)
 
 
-async def read_resource_tag_names(resource_id: str) -> set[str]:
-    """Tag names attached to a resource. Runs on the full-privilege ORM
-    session (write-role engine) so RLS doesn't get in the way of chain
-    helpers / workflow steps — same reach as the old admin client. Async, so
-    it is loop-safe under the run_async fresh-loop bridge (NullPool → a fresh
-    asyncpg connection bound to the current loop)."""
+async def read_resource_tag_slugs(resource_id: str) -> set[str]:
+    """Automation SLUGS on a resource — the keys the AI chains branch on.
+
+    Reads ``tags.slug`` (mig 467), not ``tags.name``, and that closes a real
+    hole as well as unblocking renames. The name version had no ``type``
+    filter, so ANY tag called "Summary" dispatched a summary — a user could
+    hand-make one and spend model budget. A slug is only ever written by the
+    migration that seeds the automation tags; no user-facing endpoint sets it,
+    so having one IS the authorisation.
+
+    Tags without a slug (every ordinary tag) simply do not appear here.
+
+    Runs on the full-privilege ORM session (write-role engine) so RLS doesn't
+    get in the way of chain helpers / workflow steps — same reach as the old
+    admin client. Async, so it is loop-safe under the run_async fresh-loop
+    bridge (NullPool → a fresh asyncpg connection bound to the current loop)."""
     from sqlalchemy import select
 
     from app.db.session import read_scope
     from app.models import ResourceTags, Tags
 
     # resource_tags.tag_id → tags.id (both BIGINT, mig 078); resource_id BIGINT.
-    # The old PostgREST ``tags(name)`` embedding becomes an explicit join.
     async with read_scope() as session:
         rows = (
             await session.execute(
-                select(Tags.name)
+                select(Tags.slug)
                 .select_from(ResourceTags)
                 .join(Tags, Tags.id == ResourceTags.tag_id)
                 .where(ResourceTags.resource_id == int(resource_id))
+                .where(Tags.slug.is_not(None))
             )
         ).all()
     return {r[0] for r in rows if r[0]}
@@ -174,8 +184,8 @@ async def chain_transcript_summary_for_tags(
             return
         resource_id = str(resource["id"])
 
-        tag_names = await read_resource_tag_names(resource_id)
-        want_transcript = "Transcript" in tag_names or "Summary" in tag_names
+        tag_slugs = await read_resource_tag_slugs(resource_id)
+        want_transcript = "transcript" in tag_slugs or "summary" in tag_slugs
 
         if not want_transcript:
             logger.debug(
@@ -204,7 +214,8 @@ async def chain_transcript_summary_for_tags(
             logger.info(
                 f"[AI] No user_settings for {user_id} — skipping "
                 f"transcript/summary chain (user has not configured AI). "
-                f"Tags {tag_names} on resource={resource_id} would otherwise "
+                f"Pipeline tags {sorted(tag_slugs)} on resource={resource_id} would "
+                "otherwise "
                 "have triggered ai_transcription/ai_summary."
             )
             return
@@ -484,8 +495,8 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         # inbound user_id (the transcription caller) may be a teammate.
         owner_id = str(resource.get("creator_id") or user_id)
 
-        tag_names = await read_resource_tag_names(resource_id)
-        if "Summary" not in tag_names:
+        tag_slugs = await read_resource_tag_slugs(resource_id)
+        if "summary" not in tag_slugs:
             return
 
         await _dispatch_post_transcript_summary(
@@ -589,8 +600,8 @@ async def consume_summary_follow_up(parsed_media_id: int) -> None:
             )
             return
 
-        tag_names = await read_resource_tag_names(resource_id)
-        if "Summary" in tag_names:
+        tag_slugs = await read_resource_tag_slugs(resource_id)
+        if "summary" in tag_slugs:
             # The tag chain already dispatched on this very success path —
             # a second dispatch would double-bill for the same summary.
             await _clear_summary_follow_up(resource_id)
@@ -662,8 +673,8 @@ async def maybe_chain_ai_pipeline(
             return
         resource_id = str(resource["id"])
 
-        tag_names = await read_resource_tag_names(resource_id)
-        if "Analyze" not in tag_names:
+        tag_slugs = await read_resource_tag_slugs(resource_id)
+        if "analyze" not in tag_slugs:
             logger.debug(
                 f"[AI] No Analyze tag on resource={resource_id}, skip analyze chain"
             )

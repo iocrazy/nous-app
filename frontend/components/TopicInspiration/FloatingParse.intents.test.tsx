@@ -16,7 +16,8 @@ vi.mock('../../services/parserService', () => ({
 }));
 vi.mock('../../services/unifiedTagService', () => ({
   fetchAllTags: vi.fn().mockResolvedValue([
-    { id: '1', name: 'Transcript', type: 'system', group_name: 'Pipeline' },
+    // Renamed and regrouped on purpose: only the slug may identify it.
+    { id: '1', name: '转录啦', type: 'system', slug: 'transcript', group_name: '我改过的组' },
     { id: '2', name: 'Cats', type: 'user', group_name: 'Animals' },
   ]),
   createTag: vi.fn(),

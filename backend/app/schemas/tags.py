@@ -95,6 +95,16 @@ class TagResponse(TagBase):
 
     id: SnowflakeId
     type: Literal["system", "user", "time"]
+    slug: Optional[str] = Field(
+        None,
+        description=(
+            "Stable automation key (mig 467). Present only on the tags the AI "
+            "pipeline and auto-classification key off; NULL on ordinary tags. "
+            "Read-only: no request body writes it, because the display name is "
+            "the user's to change and this is what keeps a rename from "
+            "silently switching the automation off."
+        ),
+    )
     user_id: Optional[str] = None
     group_id: Optional[SnowflakeId] = None
     group_name: Optional[str] = Field(None, description="Tag group name")

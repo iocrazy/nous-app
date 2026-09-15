@@ -17,7 +17,7 @@ silently no-op'd (never even reaching the Summary-tag check). Two bugs:
      discoverable in logs (info level), not swallowed at debug/no-op.
 
 These tests patch the module-level boundaries chain_summary_for_tags
-imports (MediaRepository, ResourcesRepository, read_resource_tag_names,
+imports (MediaRepository, ResourcesRepository, read_resource_tag_slugs,
 get_task_manager, start_workflow_routed) and drive the coroutine
 directly — no DB, no DBOS runtime.
 """
@@ -62,8 +62,8 @@ async def test_chain_dispatches_as_resource_creator():
     async def _fake_get_resource(self, media_id):
         return {"id": "res-1", "creator_id": "owner-1"}
 
-    async def _fake_tag_names(_resource_id):
-        return {"Summary"}
+    async def _fake_tag_slugs(_resource_id):
+        return {"summary"}
 
     fake_mgr = AsyncMock()
     swr = AsyncMock()
@@ -73,7 +73,7 @@ async def test_chain_dispatches_as_resource_creator():
         patch.object(
             ResourcesRepository, "get_resource_by_media_id", _fake_get_resource
         ),
-        patch.object(dh, "read_resource_tag_names", _fake_tag_names),
+        patch.object(dh, "read_resource_tag_slugs", _fake_tag_slugs),
         patch("app.db.session.read_scope", _fake_read_scope),
         patch(
             "app.services.infra.unified_task_manager.get_task_manager",
@@ -128,8 +128,8 @@ async def test_chain_dispatches_as_resource_creator_when_enforced(monkeypatch):
         observed_scope["scope"] = current_scope()
         return {"id": "res-1", "creator_id": "owner-1"}
 
-    async def _fake_tag_names(_resource_id):
-        return {"Summary"}
+    async def _fake_tag_slugs(_resource_id):
+        return {"summary"}
 
     fake_mgr = AsyncMock()
     swr = AsyncMock()
@@ -139,7 +139,7 @@ async def test_chain_dispatches_as_resource_creator_when_enforced(monkeypatch):
         patch.object(
             ResourcesRepository, "get_resource_by_media_id", _fake_get_resource
         ),
-        patch.object(dh, "read_resource_tag_names", _fake_tag_names),
+        patch.object(dh, "read_resource_tag_slugs", _fake_tag_slugs),
         patch("app.db.session.read_scope", _fake_read_scope),
         patch(
             "app.services.infra.unified_task_manager.get_task_manager",

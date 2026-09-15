@@ -9,12 +9,16 @@ vi.mock('../components/ui', () => ({
 
 // Wire shape of GET /auth/temp-token/{token}/tags (TagListResponse): ids are
 // SnowflakeId → JSON strings, media_count is a number.
-const tag = (id: string, name: string, nameZh: string, groupId: string, groupName: string, mediaCount: number, type: string) => ({
-  id, name, name_zh: nameZh, color: '#000000', type, user_id: null, group_id: groupId, group_name: groupName,
+const tag = (id: string, name: string, nameZh: string, groupId: string, groupName: string, mediaCount: number, type: string, slug: string | null = null) => ({
+  id, name, name_zh: nameZh, color: '#000000', type, slug, user_id: null, group_id: groupId, group_name: groupName,
   enabled: true, origin: 'curated', created_at: '2026-09-10T00:00:00Z', media_count: mediaCount, prompt_trigger: false,
 });
+// The pipeline tag is identified by its `slug`, not by its group name — the
+// user may rename or regroup it now (mig 467). It is deliberately given a
+// NON-'Pipeline' group here so a filter that still keyed off the group name
+// would fail this fixture.
 const TAGS = [
-  tag('1', 'Transcript', '转录', '10', 'Pipeline', 9, 'system'),
+  tag('1', '转录啦', '转录啦', '10', '我改过的组', 9, 'system', 'transcript'),
   tag('2', 'Cats', '猫', '20', 'Animals', 3, 'user'),
   tag('3', 'Dogs', '狗', '20', 'Animals', 1, 'user'),
 ];
@@ -73,12 +77,13 @@ describe('ShortcutsTagsPage options', () => {
     vi.unstubAllGlobals();
   });
 
-  it('hides Pipeline-group tags', async () => {
+  it('hides the pipeline tags even after the user renamed and regrouped them', async () => {
     mockFetch();
     await renderPage();
     // The options row has a "转录" icon toggle (accessible name "转录"); a tag chip's accessible name is "转录 9".
     expect(screen.queryAllByRole('button', { name: /转录\s*9/ })).toHaveLength(0);
-    expect(screen.queryByText('Pipeline')).toBeNull();
+    expect(screen.queryByText('我改过的组')).toBeNull();
+    expect(screen.queryByText('转录啦')).toBeNull();
   });
 
   it('saves options together with tags in one POST', async () => {
@@ -347,13 +352,13 @@ describe('ShortcutsTagsPage options', () => {
     }
   });
 
-  it('keeps the Pipeline group out of the create-form group dropdown', async () => {
+  it('keeps the pipeline tag\'s group out of the create-form group dropdown', async () => {
     mockFetch();
     await renderPage();
     fireEvent.click(screen.getByRole('button', { name: '新建标签' }));
     const groups = screen.getAllByRole('option').map((o) => o.textContent);
     expect(groups).toContain('Animals');
-    expect(groups).not.toContain('Pipeline');
+    expect(groups).not.toContain('我改过的组');
   });
 });
 

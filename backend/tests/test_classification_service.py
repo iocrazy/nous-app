@@ -31,6 +31,15 @@ class _FakeTagsRepo:
         self.resolve_calls.append(media_id)
         return self._resource_id
 
+    async def get_automation_tag(self, key: str) -> Optional[dict]:
+        """Mirrors the real helper: slug first, display name as fallback. The
+        fake resolves both to the same row, which is the point — the service
+        must not care which one matched."""
+        return await self.get_tag_by_name(key)
+
+    async def get_tag_by_slug(self, slug: str) -> Optional[dict]:
+        return await self.get_tag_by_name(slug)
+
     async def get_tag_by_name(self, name: str) -> Optional[dict]:
         return self._tags_by_name.get(name)
 

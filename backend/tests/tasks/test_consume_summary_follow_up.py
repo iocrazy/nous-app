@@ -61,7 +61,7 @@ async def test_intent_present_dispatches_as_requester_and_clears():
     with (
         patch.object(MediaRepository, "get_by_id", _get_media),
         patch.object(ResourcesRepository, "get_resource_by_media_id", _get_resource),
-        patch.object(dh, "read_resource_tag_names", AsyncMock(return_value=[])),
+        patch.object(dh, "read_resource_tag_slugs", AsyncMock(return_value=[])),
         patch.object(dh, "_dispatch_post_transcript_summary", dispatch),
         patch.object(dh, "_clear_summary_follow_up", clear),
     ):
@@ -116,7 +116,7 @@ async def test_summary_tag_present_clears_without_double_dispatch():
         patch.object(MediaRepository, "get_by_id", _get_media),
         patch.object(ResourcesRepository, "get_resource_by_media_id", _get_resource),
         patch.object(
-            dh, "read_resource_tag_names", AsyncMock(return_value=["Summary"])
+            dh, "read_resource_tag_slugs", AsyncMock(return_value=["summary"])
         ),
         patch.object(dh, "_dispatch_post_transcript_summary", dispatch),
         patch.object(dh, "_clear_summary_follow_up", clear),
@@ -143,7 +143,7 @@ async def test_enqueue_failure_keeps_the_intent():
     with (
         patch.object(MediaRepository, "get_by_id", _get_media),
         patch.object(ResourcesRepository, "get_resource_by_media_id", _get_resource),
-        patch.object(dh, "read_resource_tag_names", AsyncMock(return_value=[])),
+        patch.object(dh, "read_resource_tag_slugs", AsyncMock(return_value=[])),
         patch.object(dh, "_dispatch_post_transcript_summary", dispatch),
         patch.object(dh, "_clear_summary_follow_up", clear),
     ):
@@ -189,7 +189,7 @@ async def test_requester_falls_back_to_creator_when_intent_is_malformed():
     with (
         patch.object(MediaRepository, "get_by_id", _get_media),
         patch.object(ResourcesRepository, "get_resource_by_media_id", _get_resource),
-        patch.object(dh, "read_resource_tag_names", AsyncMock(return_value=[])),
+        patch.object(dh, "read_resource_tag_slugs", AsyncMock(return_value=[])),
         patch.object(dh, "_dispatch_post_transcript_summary", dispatch),
         patch.object(dh, "_clear_summary_follow_up", clear),
     ):

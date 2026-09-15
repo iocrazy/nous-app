@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Tag as TagIcon, FolderOpen, Check, Flame, Plus, X, Star, FileText, BookOpen, ScanEye } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { UiSelect } from '../components/ui';
-import { PIPELINE_TAG_GROUP } from '../utils/aiIntents';
+import { isPipelineTag } from '../utils/aiIntents';
 
 interface Tag {
   id: string;
@@ -219,7 +219,8 @@ export const ShortcutsTagsPage: React.FC = () => {
 
   // Pipeline 组（Transcript / Summary / Analyze）由下方四项单选承载，不再当标签选。
   const pickableTags = useMemo(
-    () => tags.filter((t) => t.group_name !== PIPELINE_TAG_GROUP),
+    // By slug, not group name — see aiIntents.ts.
+    () => tags.filter((t) => !isPipelineTag(t)),
     [tags],
   );
 
