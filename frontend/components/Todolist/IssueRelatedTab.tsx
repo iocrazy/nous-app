@@ -13,6 +13,7 @@ import { Frame } from 'lucide-react';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { originLabel, originPath, parseOriginId } from './issueOrigin';
 import { relativeTime } from '../../utils/taskDisplay';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 interface IssueRelatedTabProps {
   issue: UiIssue;
@@ -20,6 +21,11 @@ interface IssueRelatedTabProps {
 
 export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
   const { teamId } = useParams<{ teamId: string }>();
+  // The one deep-link builder (B7, `utils/issueLinks.ts`). This tab lives
+  // inside the issue detail page, which only exists under `/team/:teamId`,
+  // so the builder's team-less refusal is unreachable; it keeps the string
+  // this file printed before rather than growing a disabled row here.
+  const relatedLink = (key: string) => issueDeepLink(teamId, key) ?? `/team/${teamId}/todolist/${key}`;
   const [children, setChildren] = useState<Issue[]>([]);
   const [parent, setParent] = useState<Issue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +100,7 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
         <section>
           <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Parent</h3>
           <Link
-            to={`/team/${teamId}/todolist/${parent.identifier}`}
+            to={relatedLink(parent.identifier)}
             className="block px-3 py-2 rounded border border-ink-800 bg-ink-900/50 hover:bg-ink-800/60 transition"
           >
             <div className="flex items-center gap-2 text-[13px]">
@@ -120,7 +126,7 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
             {children.map((c) => (
               <li key={c.id}>
                 <Link
-                  to={`/team/${teamId}/todolist/${c.identifier}`}
+                  to={relatedLink(c.identifier)}
                   className="flex items-center gap-2 px-3 py-1.5 rounded border border-ink-800/80 bg-ink-900/40 hover:bg-ink-800/60 transition text-[13px]"
                 >
                   <IssueStatusIcon status={c.status} size={12} />

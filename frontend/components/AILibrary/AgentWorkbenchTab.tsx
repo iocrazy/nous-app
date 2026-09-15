@@ -13,9 +13,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { MessageCircleQuestion, Plus } from 'lucide-react';
 import { relativeTime } from '../../utils/taskDisplay';
+import { issueDeepLink } from '../../utils/issueLinks';
 import type { AILibraryAgent, AgentRunGroupItem } from '../../types';
 import { listNeedsInput, type NeedsInputItem } from '../../services/issuesService';
 import { aiLibraryService, type AgentStatsItem } from '../../services/aiLibraryService';
@@ -61,6 +62,13 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
   urlPrefix,
 }) => {
   const { t } = useTranslation();
+  // The one deep-link builder (B7, `utils/issueLinks.ts`) needs the team on
+  // its own, while the rest of this tab links through `urlPrefix`. Both come
+  // from the same place — every caller computes `urlPrefix` as
+  // `teamId ? `/team/${teamId}` : ''` off this very route param — so reading
+  // it here cannot disagree with the prefix. The team-less case keeps the
+  // prefix's own (equally team-less) spelling rather than dropping the link.
+  const { teamId } = useParams<{ teamId?: string }>();
   // null = the runs view is closed. A group means the user clicked that
   // conversation; `true` means they used the "all runs" header link.
   const [showRuns, setShowRuns] = useState<AgentRunGroupItem | true | null>(null);
@@ -261,7 +269,7 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
                       {issue.identifier} · {relativeTime(issue.asked_at)}
                     </span>
                     <Link
-                      to={`${urlPrefix}/todolist/${issue.identifier}`}
+                      to={issueDeepLink(teamId, issue.identifier) ?? `${urlPrefix}/todolist/${issue.identifier}`}
                       data-testid="waitcard-answer-link"
                       className="ml-auto shrink-0 font-medium text-warn hover:underline"
                     >

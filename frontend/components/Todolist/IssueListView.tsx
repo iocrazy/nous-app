@@ -65,6 +65,7 @@ import {
   type IssueSort,
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
+import { issueDeepLink } from '../../utils/issueLinks';
 import { originModule } from './issueOrigin';
 import { runningChipLabel, needsReplyChip, queuedChip } from './issueChips';
 import { buildAttentionItems } from './attentionItems';
@@ -209,6 +210,12 @@ interface IssueRowProps {
 }
 
 const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount, selected = false, queued }) => {
+  // The one deep-link builder (B7, `utils/issueLinks.ts`). It refuses without
+  // a team; this row only ever renders under `/team/:teamId`, so the `?? ''`
+  // its callers pass is TypeScript appeasement rather than a reachable state.
+  // That unreachable case keeps the string it printed before — growing a
+  // disabled row for it would be a behaviour change, not a refactor.
+  const rowLink = (key: string) => issueDeepLink(teamId, key) ?? `/team/${teamId}/todolist/${key}`;
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
@@ -238,7 +245,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   const queuedLabel = queuedChip(queued, t);
   return (
     <Link
-      to={`/team/${teamId}/todolist/${issue.identifier}`}
+      to={rowLink(issue.identifier)}
       data-phase={phase}
       aria-current={selected ? 'true' : undefined}
       className={`flex items-center gap-3 px-4 py-1.5 hover:bg-ink-800/30 transition group ${selected ? 'bg-ink-800/40 ring-1 ring-inset ring-[var(--accent-border)]' : ''}`}
@@ -287,7 +294,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
       )}
       {visibleCols.has('parent') && parent && (
         <Link
-          to={`/team/${teamId}/todolist/${parent.identifier}`}
+          to={rowLink(parent.identifier)}
           onClick={(e) => e.stopPropagation()}
           className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-800/70 text-ink-400 text-[12px] hover:bg-ink-700"
           title={`Parent: ${parent.title}`}
@@ -587,7 +594,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   // to a non-clickable card when the issue isn't in this scope.
   const issueLinkFor = useCallback((issueId: number): string | null => {
     const match = issues.find((i) => i.id === issueId);
-    return match && teamId ? `/team/${teamId}/todolist/${match.identifier}` : null;
+    return match ? issueDeepLink(teamId, match.identifier) : null;
   }, [issues, teamId]);
 
   const handleAttentionToggle = useCallback((next: boolean) => {

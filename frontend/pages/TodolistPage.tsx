@@ -65,6 +65,7 @@ const ScopePill: React.FC<{
   </button>
 );
 import { getSupabaseClient } from '../supabaseClient';
+import { issueDeepLink } from '../utils/issueLinks';
 // useAuth gives currentUserId via context; UserProfile shape doesn't carry id.
 
 export function TodolistPage() {
@@ -437,7 +438,9 @@ export function TodolistPage() {
       const ui = toUiIssue(created, agentsById, projectsById);
       setIssues((prev) => [ui, ...prev]);
       setNewIssueOpen(false);
-      navigate(`/team/${teamId}/todolist/${created.identifier}`);
+      // The one deep-link builder (B7). This page IS `/team/:teamId/todolist`,
+      // so the team-less refusal is unreachable; it keeps the old string.
+      navigate(issueDeepLink(teamId, created.identifier) ?? `/team/${teamId}/todolist/${created.identifier}`);
       addToast(`Created ${created.identifier}`, 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Create failed', 'error');

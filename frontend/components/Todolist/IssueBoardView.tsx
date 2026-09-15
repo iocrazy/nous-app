@@ -18,6 +18,7 @@ import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
 import { STATUS_CONFIG } from './issueConfig';
 import { relativeTime } from '../../utils/taskDisplay';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 interface IssueBoardViewProps {
   issues: UiIssue[];
@@ -52,6 +53,11 @@ const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }>
 );
 
 const BoardCard: React.FC<{ issue: UiIssue; teamId: string; queued?: number }> = ({ issue, teamId, queued }) => {
+  // The one deep-link builder (B7, `utils/issueLinks.ts`). The board only
+  // renders under `/team/:teamId`, so the builder's team-less refusal is
+  // unreachable here; it keeps the string it printed before rather than
+  // growing a disabled card, which would be a behaviour change.
+  const cardLink = issueDeepLink(teamId, issue.identifier) ?? `/team/${teamId}/todolist/${issue.identifier}`;
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '');
   const { t } = useTranslation();
   // Board cards are narrow: the running chip keeps the turn/elapsed suffix
@@ -71,7 +77,7 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string; queued?: number }> =
           : null;
   return (
     <Link
-      to={`/team/${teamId}/todolist/${issue.identifier}`}
+      to={cardLink}
       className="block p-2 rounded-lg border border-line bg-island hover:border-line-strong transition"
     >
       <div className="flex items-center gap-1.5 mb-1.5">
