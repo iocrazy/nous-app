@@ -51,6 +51,16 @@ class _Session:
         self._results = list(results)
         self.inserts: list = []
         self.upserts: list = []
+        #: 每次 scalar() 收到的 SQL —— bootstrap 用它调
+        #: `public.unique_username()`（mig 470），两条注册路径共用那一份去重
+        #: 实现。以前这里是 Python 里的 `... or "user"`，于是第二个没有邮箱的人
+        #: 也想叫 "user"，撞唯一约束，异常被下面的 except 吞掉，**profile 悄悄
+        #: 没建成**。
+        self.scalars: list[str] = []
+
+    async def scalar(self, stmt, params=None):
+        self.scalars.append(str(stmt))
+        return self._results.pop(0) if self._results else None
 
     async def execute(self, stmt, params=None):
         if isinstance(stmt, Insert):
@@ -99,7 +109,8 @@ async def test_returns_existing_team_id_without_inserts(patch_scopes):
 async def test_cold_start_inserts_profile_and_team(patch_scopes):
     """No team_members row → look up auth.users, upsert user_profiles +
     INSERT teams. The trigger adds team_members."""
-    # Order: probe(None), auth.users(row), upsert(unused), teams insert(id).
+    # Order: probe(None), auth.users(row), unique_username("newbie"),
+    #        upsert(unused), teams insert(id).
     session = patch_scopes(
         [
             None,
@@ -108,6 +119,7 @@ async def test_cold_start_inserts_profile_and_team(patch_scopes):
                 "email": "newbie@example.com",
                 "raw_user_meta_data": {"username": "newbie"},
             },
+            "newbie",
             None,
             311999999900001,
         ]
@@ -124,6 +136,8 @@ async def test_cold_start_inserts_profile_and_team(patch_scopes):
     assert team_payload["kind"] == "personal"
     assert team_payload["name"] == "newbie's Workspace"
     assert team_payload["owner_id"] == "9f3c0eaa-..."
+    # 名字是问数据库要的，不是这里自己拼的 —— 那正是两条注册路径漂移的起点。
+    assert any("unique_username" in sql for sql in session.scalars)
 
 
 @pytest.mark.asyncio
@@ -149,6 +163,7 @@ async def test_falls_back_to_email_prefix_when_username_missing(patch_scopes):
                 "email": "alice@corp.com",
                 "raw_user_meta_data": {},
             },
+            "alice",  # unique_username('alice', …) —— 没人占用，原样返回
             None,
             999,
         ]

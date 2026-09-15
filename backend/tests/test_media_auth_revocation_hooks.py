@@ -175,7 +175,9 @@ async def test_update_user_without_password_does_not_revoke(monkeypatch):
         patch.object(auth_router, "SupabaseAuthService", return_value=auth_svc_mock),
         patch("app.api.supabase_auth_router.revoke_media_tokens", revoke_mock),
     ):
-        req = UpdateUserRequest(username="new-name")
+        # 载体换成 email：username 那一支现在会 400（改名要走
+        # PATCH /auth/profile），而本条钉的是「没有密码就不该吊销」。
+        req = UpdateUserRequest(email="new@example.com")
         await auth_router.update_user(req, authorization="Bearer fake-token")
 
     revoke_mock.assert_not_awaited()
