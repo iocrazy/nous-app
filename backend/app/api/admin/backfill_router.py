@@ -32,6 +32,9 @@ from app.workflows.backfill_issue_scope import backfill_issue_scope_workflow
 from app.workflows.backfill_normalize_personal_project_team_ids import (
     backfill_normalize_personal_project_team_ids_workflow,
 )
+from app.workflows.backfill_parsed_media_canonical_url import (
+    backfill_parsed_media_canonical_url_workflow,
+)
 from app.workflows.backfill_project_stage_issue_team_ids import (
     backfill_project_stage_issue_team_ids_workflow,
 )
@@ -61,6 +64,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     "canvas_upload_roles": backfill_canvas_upload_roles_workflow,
     "generated_inbox": backfill_generated_inbox,
     "agent_runs_issue_id": backfill_agent_runs_issue_id_workflow,
+    "parsed_media_canonical_url": backfill_parsed_media_canonical_url_workflow,
 }
 
 
