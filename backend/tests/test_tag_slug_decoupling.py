@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+_USER = "11111111-1111-1111-1111-111111111111"
+
 # --------------------------------------------------------------------------
 # 意图 → 标签 id：按 slug 解析
 # --------------------------------------------------------------------------
@@ -36,11 +38,11 @@ async def test_renamed_pipeline_tag_still_resolves():
     repo.get_tag_ids_by_slugs = AsyncMock(return_value={"transcript": 11})
     with patch.object(h, "get_tags_repository", return_value=repo):
         ids = await h.resolve_intent_tag_ids(
-            transcribe=True, summarize=False, analyze=False
+            transcribe=True, summarize=False, analyze=False, user_id=_USER
         )
 
     assert ids == ["11"]
-    repo.get_tag_ids_by_slugs.assert_awaited_once_with(["transcript"])
+    repo.get_tag_ids_by_slugs.assert_awaited_once_with(["transcript"], _USER)
 
 
 @pytest.mark.asyncio
@@ -55,9 +57,11 @@ async def test_intent_resolution_never_passes_a_display_name():
     repo = MagicMock()
     repo.get_tag_ids_by_slugs = AsyncMock(return_value={})
     with patch.object(h, "get_tags_repository", return_value=repo):
-        await h.resolve_intent_tag_ids(transcribe=True, summarize=True, analyze=True)
+        await h.resolve_intent_tag_ids(
+            transcribe=True, summarize=True, analyze=True, user_id=_USER
+        )
 
-    (passed,), _ = repo.get_tag_ids_by_slugs.await_args
+    (passed, _uid), _ = repo.get_tag_ids_by_slugs.await_args
     assert passed == ["transcript", "summary", "analyze"]
     assert all(s == s.lower() for s in passed), "slug 必须是小写稳定键，不是显示名"
 
@@ -155,4 +159,4 @@ async def test_automation_tag_lowercases_before_the_slug_lookup():
         patch.object(repo, "get_tag_by_name", AsyncMock()),
     ):
         await repo.get_automation_tag("Tutorial")
-    by_slug.assert_awaited_once_with("tutorial")
+    by_slug.assert_awaited_once_with("tutorial", None)
