@@ -5869,6 +5869,7 @@
     "mentionCount_other": "{{count}} outputs",
     "citationRemove": "Remove This Reference",
     "citationLimit": "A comment can reference at most {{n}} outputs",
+    "citationUnusable": "That output is missing its version — it cannot be referenced",
     "cited_one": "References {{count}} output · pinned to version",
     "cited_other": "References {{count}} outputs · pinned to version",
     "citedChip": "@{{title}} v{{n}}",

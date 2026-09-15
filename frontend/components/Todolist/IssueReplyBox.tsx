@@ -548,8 +548,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
    */
   const handleMentionOutputSelect = useCallback(
     (row: OutputMentionRow) => {
-      const next = stageOutput(stagedOutputs, toStagedOutput(row));
-      if (next === null) {
+      const res = stageOutput(stagedOutputs, toStagedOutput(row));
+      if (res.outcome === 'limit') {
         addToast(
           t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
             n: MAX_OUTPUT_REF_ATTACHMENTS,
@@ -558,7 +558,18 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
         );
         return;
       }
-      setStagedOutputs(next);
+      // A row whose coordinates are incomplete stages nothing. Saying so is
+      // the point: the old code returned the list unchanged, which looked
+      // exactly like «already staged», so the picker closed on a pick that
+      // never happened (B6).
+      if (res.outcome === 'unusable') {
+        addToast(
+          t('outputs.citationUnusable', 'That output is missing its version — it cannot be referenced'),
+          'error',
+        );
+        return;
+      }
+      setStagedOutputs(res.list);
       dropMentionTrigger();
       closeMentionPicker();
       setMentionQuery('');

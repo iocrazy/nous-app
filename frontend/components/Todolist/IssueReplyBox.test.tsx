@@ -1022,6 +1022,30 @@ describe('IssueReplyBox — the Assets tab', () => {
     expect(addToast.mock.calls[0][0]).not.toContain('outputs.citationLimit');
   });
 
+  it('B6: says so when a picked row carries no usable coordinates', async () => {
+    // A response that VIOLATES the documented shape (`version` is a number on
+    // the wire) — which is exactly what this branch is for. Staging nothing
+    // while closing the picker is the silent no-op this repo bans: the writer
+    // sees no chip and is told nothing.
+    listIssueOutputs.mockResolvedValue([
+      {
+        kind: 'script_shot',
+        ref_id: '727145299382534999',
+        title: 'S3 · Shot #1',
+        latest_version: 1,
+        versions: [{ ...outputVersion(1), version: null as unknown as number }],
+      },
+    ]);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    expect(screen.queryAllByTestId('staged-output-chip')).toHaveLength(0);
+    // The SENTENCE from `en.json`, not the key.
+    expect(addToast).toHaveBeenCalledWith(
+      'That output is missing its version — it cannot be referenced',
+      'error',
+    );
+  });
+
   it('leaves the "@query" alone when the pick was REFUSED by the cap', async () => {
     // The refusal returns before anything is staged, so the picker session is
     // not over: eating the query there would delete the writer's text and give
