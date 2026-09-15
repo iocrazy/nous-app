@@ -9,6 +9,18 @@
  *
  * The guard marks and never blocks: a BYOK catalog has no type field, so the
  * warning is a naming guess and the user may know better.
+ *
+ * ── Where the red belongs (2026-09-15) ─────────────────────────────────────
+ * The first version painted every suspect chip danger-red with a warning
+ * triangle. A user whose doubao card legitimately holds embedding, image AND
+ * chat models — this product needs all three — saw three red rows on a working
+ * configuration and asked what was broken. Nothing was: the selected model was
+ * the chat one, and the red line that matters was correctly silent.
+ *
+ * So red is now reserved for the one model the provider's text tasks will
+ * actually use. A merely PRESENT suspect model gets its family stated in
+ * neutral type and stays enabled. Several assertions below exist specifically
+ * to keep the chips out of the alarm palette.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
@@ -126,27 +138,51 @@ describe('AISettings — BYOK non-chat model guard', () => {
       expect(screen.getByText('doubao-seed-2-0-pro-260215')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('non-chat-warnline')).toBeNull();
-    expect(screen.queryByTestId('non-chat-chip')).toBeNull();
+    expect(screen.queryByTestId('non-chat-kind-tag')).toBeNull();
   });
 
-  it('marks a suspect model chip even when it is not the selected one', async () => {
-    // Still worth flagging: the agent pickers in AI Library offer every
-    // enabled model, so this one can be chosen there and fail the same way.
+  it('names the family on a suspect chip, in neutral type', async () => {
+    // Worth saying: the agent picker offers every enabled model, so this one
+    // can be chosen there. Worth saying QUIETLY: having it enabled is normal.
     renderWithDoubao(['doubao-seed-2-0-pro-260215', INCIDENT_MODEL]);
 
-    const chips = await screen.findAllByTestId('non-chat-chip');
-    expect(chips).toHaveLength(1);
-    expect(chips[0].textContent).toContain(INCIDENT_MODEL);
-    // …but the headline warning is about what the tasks WILL use, and the
+    const tags = await screen.findAllByTestId('non-chat-kind-tag');
+    expect(tags).toHaveLength(1);
+    expect(tags[0].textContent).toBe('embedding');
+    // The hint names the model and says, in as many words, that it still works.
+    expect(tags[0].getAttribute('title')).toContain(INCIDENT_MODEL);
+    // …and the headline warning is about what the tasks WILL use, and the
     // selected model here is fine.
+    expect(screen.queryByTestId('non-chat-warnline')).toBeNull();
+  });
+
+  it('does not paint a working configuration red', async () => {
+    // The reported case: three enabled models, only one of which chats — a
+    // correct setup for a product that also does embeddings and images. The
+    // chips must carry no part of the danger palette, and no alert icon.
+    renderWithDoubao([
+      'doubao-seed-2-0-lite-260428',
+      'doubao-embedding-large-text-250515',
+      'doubao-seedream-5-0-pro-260628',
+    ]);
+
+    const tags = await screen.findAllByTestId('non-chat-kind-tag');
+    expect(tags.map((n) => n.textContent)).toEqual(['embedding', 'image']);
+    for (const tag of tags) {
+      // Walk up to the chip and assert the whole thing is off the alarm palette.
+      const chip = tag.parentElement as HTMLElement;
+      expect(chip.className).not.toMatch(/danger/);
+      expect(chip.querySelector('svg.lucide-triangle-alert')).toBeNull();
+    }
+    // The selected model is the chat one, so nothing is actually wrong.
     expect(screen.queryByTestId('non-chat-warnline')).toBeNull();
   });
 
   it('does not block: the suspect model stays enabled and removable', async () => {
     renderWithDoubao([INCIDENT_MODEL]);
 
-    const chip = await screen.findByTestId('non-chat-chip');
-    expect(chip.textContent).toContain(INCIDENT_MODEL);
+    const tag = await screen.findByTestId('non-chat-kind-tag');
+    expect((tag.parentElement as HTMLElement).textContent).toContain(INCIDENT_MODEL);
     // The escape hatch is the same X as any other chip.
     fireEvent.click(screen.getByLabelText(`Remove ${INCIDENT_MODEL}`));
     await waitFor(() => {

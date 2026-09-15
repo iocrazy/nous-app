@@ -140,3 +140,61 @@ describe('visiblePlatformModels', () => {
     expect(visiblePlatformModels(rows, undefined)).toHaveLength(2);
   });
 });
+
+describe('renderModelSelect — non-chat note', () => {
+  // The user's report (2026-09-15): a doubao card holding an embedding model,
+  // an image model and a chat model is a CORRECT setup for this product. The
+  // picker should say which is which — without implying anything is broken.
+  const BYOK: ProviderModelGroup[] = [
+    {
+      providerKey: 'doubao',
+      providerName: 'Doubao',
+      models: ['doubao-seed-2-0-lite-260428', 'doubao-embedding-large-text-250515'],
+    },
+  ];
+
+  it('marks a non-chat model without claiming a health failure', () => {
+    renderSelect({
+      value: 'doubao-seed-2-0-lite-260428',
+      groups: BYOK,
+      noteLabels: { 'doubao-embedding-large-text-250515': 'not a chat model' },
+    });
+
+    const embed = optionFor('doubao-embedding-large-text-250515');
+    expect(embed.textContent).toContain('not a chat model');
+    // `data-note`, NOT `data-health="fail"`. A BYOK model is never probed, so
+    // saying its health check failed would be a claim about something that
+    // never ran — and it is the DOM hook any styling would key on.
+    expect(embed.dataset.note).toBe('non-chat');
+    expect(embed.dataset.health).toBeUndefined();
+    // Selectable, like every other marked option on this picker.
+    expect(embed.disabled).toBe(false);
+  });
+
+  it('leaves ordinary chat models untouched', () => {
+    renderSelect({
+      value: 'doubao-seed-2-0-lite-260428',
+      groups: BYOK,
+      noteLabels: { 'doubao-embedding-large-text-250515': 'not a chat model' },
+    });
+
+    const chat = optionFor('doubao-seed-2-0-lite-260428');
+    expect(chat.textContent).toBe('doubao-seed-2-0-lite-260428');
+    expect(chat.dataset.note).toBeUndefined();
+  });
+
+  it('carries both suffixes when a model is failing AND non-chat', () => {
+    // Can happen on a platform row: both maps are keyed by model name and
+    // neither knows about the other, so the option must not drop one.
+    renderSelect({
+      unhealthyLabels: { 'mediahub-deepseek-v4-flash': 'health check failed' },
+      noteLabels: { 'mediahub-deepseek-v4-flash': 'not a chat model' },
+    });
+
+    const flash = optionFor('mediahub-deepseek-v4-flash');
+    expect(flash.textContent).toContain('health check failed');
+    expect(flash.textContent).toContain('not a chat model');
+    expect(flash.dataset.health).toBe('fail');
+    expect(flash.dataset.note).toBe('non-chat');
+  });
+});

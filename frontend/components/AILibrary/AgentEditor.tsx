@@ -42,7 +42,12 @@ import { AgentCostTab } from './AgentCostTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import PermissionChangeLog from './PermissionChangeLog';
-import { PROVIDER_DISPLAY_NAMES, getAvailableModels, visiblePlatformModels } from './agentEditorModel';
+import {
+  PROVIDER_DISPLAY_NAMES,
+  getAvailableModels,
+  nonChatModelNotes,
+  visiblePlatformModels,
+} from './agentEditorModel';
 import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
@@ -223,6 +228,26 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     }
     return out;
   }, [modelHealth, t]);
+
+  // BYOK models whose id reads as embedding / image / speech. The picker lists
+  // every enabled model of every enabled provider, and a user who keeps an
+  // embedding and an image model on the same card — which this product needs
+  // them to — would otherwise see them here with nothing to distinguish them
+  // from a chat model until a run failed.
+  //
+  // Marked, not removed: the kind is a guess from the NAME (utils/nonChatModel
+  // explains why there is nothing better to read), and the same "advise, don't
+  // veto" rule as the health map above applies. Platform rows are excluded on
+  // purpose — their `name` is an admin-chosen alias, and `codex-image` is a
+  // real row whose actual model is the chat model gpt-5.4 (mig 430).
+  const nonChatModelLabels = useMemo(
+    () =>
+      nonChatModelNotes(
+        modelGroups,
+        t('aiLibrary.agents.nonChatModelShort', 'not a chat model'),
+      ),
+    [modelGroups, t],
+  );
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const sub = resolveSubTab(searchParams.get('tab'));
@@ -748,6 +773,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           localModelNames={localModelNames}
           modelHealth={modelHealth}
           unhealthyModelLabels={unhealthyModelLabels}
+          nonChatModelLabels={nonChatModelLabels}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}

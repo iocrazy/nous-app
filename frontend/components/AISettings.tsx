@@ -45,7 +45,11 @@ import { useTranslation } from 'react-i18next';
 import { visiblePlatformModels } from './AILibrary/agentEditorModel';
 import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
-import { suspectedNonChatKind, nonChatKindKey } from '../utils/nonChatModel';
+import {
+  suspectedNonChatKind,
+  nonChatKindKey,
+  nonChatKindShortKey,
+} from '../utils/nonChatModel';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { HotwordChipInput } from './settings/HotwordChipInput';
 import { ApprovalsPanel } from './ApprovalsPanel';
@@ -321,9 +325,20 @@ const EnabledModelsField: React.FC<{
   selectedModel?: string;
   /**
    * Already-localized warning for a model whose NAME suggests it cannot chat,
-   * or null. A guess, so it marks and never blocks — see utils/nonChatModel.
+   * or null. Feeds the ONE red line on this card — the model the provider's
+   * text tasks will actually use. A guess, so it marks and never blocks.
    */
   nonChatWarning?: (modelId: string) => string | null;
+  /**
+   * Already-localized `{label, hint}` naming what family a model id looks
+   * like, or null when the name doesn't say.
+   *
+   * This is the chip's treatment, and it is deliberately NOT the warning
+   * above: an enabled embedding or image model is a normal thing to have —
+   * this product needs both — so the chip states the kind in neutral type
+   * rather than painting a working configuration danger-red (2026-09-15).
+   */
+  nonChatKindTag?: (modelId: string) => { label: string; hint: string } | null;
 }> = ({
   providerKey,
   enabledModels,
@@ -332,6 +347,7 @@ const EnabledModelsField: React.FC<{
   onRemove,
   selectedModel,
   nonChatWarning,
+  nonChatKindTag,
 }) => {
   const { t } = useTranslation();
   const [picking, setPicking] = useState(false);
@@ -351,26 +367,26 @@ const EnabledModelsField: React.FC<{
       <label className="text-xs font-medium text-ink-400">{t('aiSettings.enabledModels')}</label>
       <div className="flex flex-wrap items-center gap-2">
         {enabledModels.map((m) => {
-          const suspect = nonChatWarning?.(m) ?? null;
+          const kind = nonChatKindTag?.(m) ?? null;
           return (
           <span
             key={m}
-            data-testid={suspect ? 'non-chat-chip' : undefined}
-            title={suspect ?? undefined}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-mono ${
-              suspect
-                ? 'bg-danger-soft border border-danger-line text-danger'
-                : 'bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)]'
-            }`}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-mono bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)]"
           >
-            {suspect && <AlertTriangle size={11} className="shrink-0" aria-hidden />}
             {m}
+            {kind && (
+              <span
+                data-testid="non-chat-kind-tag"
+                title={kind.hint}
+                className="rounded-sm bg-ink-800/60 px-1 py-px font-sans text-[10px] leading-none text-ink-400"
+              >
+                {kind.label}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => onRemove(m)}
-              className={`transition-opacity hover:opacity-70 ${
-                suspect ? 'text-danger' : 'text-[var(--accent-text)]'
-              }`}
+              className="text-[var(--accent-text)] transition-opacity hover:opacity-70"
               aria-label={t('aiSettings.removeModel', { model: m })}
             >
               <X size={12} />
@@ -786,6 +802,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       model: modelId,
       kind: t(nonChatKindKey(kind)),
     });
+  };
+
+  // What a chip says about a suspect model. Same guess, different register:
+  // this one only tells the user WHICH family the id looks like, because
+  // having an embedding / image model enabled is normal — the product needs
+  // them. The alarm is reserved for the model text tasks will actually use
+  // (the warn line below the chips).
+  const nonChatKindTag = (
+    modelId: string,
+  ): { label: string; hint: string } | null => {
+    const kind = suspectedNonChatKind(modelId);
+    if (!kind) return null;
+    const label = t(nonChatKindShortKey(kind));
+    return {
+      label,
+      hint: t('aiSettings.nonChatKindTagHint', { model: modelId, kind: label }),
+    };
   };
 
   const nousConfig = localSettings.providers.nous;
@@ -1645,6 +1678,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                         onRemove={(model) => removeEnabledModel(providerKey, model)}
                         selectedModel={config.selected_model}
                         nonChatWarning={nonChatWarning}
+                        nonChatKindTag={nonChatKindTag}
                       />
                     )}
 

@@ -7,6 +7,8 @@
 // move, not a rewrite.
 
 import React from 'react';
+
+import { suspectedNonChatKind } from '../../utils/nonChatModel';
 import type { AIProviderConfig, AISettings as AISettingsType } from '../../types';
 import { UiSelect } from '../ui';
 
@@ -94,6 +96,37 @@ export function getAvailableModels(
 }
 
 /**
+ * Which of these models look like they cannot hold a chat, mapped to the
+ * caller's already-localized note.
+ *
+ * The picker lists every enabled model of every enabled provider, so an
+ * embedding or image model a user legitimately keeps on the same provider card
+ * shows up here too. Naming the family is the whole fix — the option stays
+ * selectable, because the kind is a guess from the id string and nothing more
+ * (utils/nonChatModel explains why there is nothing better to read).
+ *
+ * ⚠️ Platform (`nous`) rows are skipped, and that exclusion is the reason this
+ * is a function rather than three lines at the call site. A platform row's
+ * `name` is an admin-chosen ALIAS, not an upstream model id: `codex-image` is
+ * a real catalog row whose `actual_model` is the chat model gpt-5.4 (mig 430).
+ * Running the name heuristic over those would mark a working chat model as
+ * non-chat — precisely the false alarm this whole treatment exists to undo.
+ */
+export function nonChatModelNotes(
+  groups: ProviderModelGroup[],
+  note: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const group of groups) {
+    if (group.providerKey === 'nous') continue;
+    for (const m of group.models) {
+      if (suspectedNonChatKind(m)) out[m] = note;
+    }
+  }
+  return out;
+}
+
+/**
  * Render the grouped model <select>. If the current value is not present in
  * any provider group (e.g. the user has disabled the provider that owned it),
  * we still show it as a leading disabled option so the user sees the stale
@@ -103,6 +136,13 @@ export function getAvailableModels(
  * (built by the caller, so this module stays free of i18n). A marked option is
  * still SELECTABLE: the health probe has produced a false negative in
  * production, so it advises rather than vetoes.
+ *
+ * ``noteLabels`` is the same shape for a NON-alarming remark — today, "this id
+ * looks like an embedding/image model". It is a separate map rather than a
+ * second kind of entry in ``unhealthyLabels`` so the DOM never claims a health
+ * probe failed on a model that was never probed: these options carry
+ * ``data-note``, not ``data-health="fail"``. Both are suffixes, both stay
+ * selectable, and an option can carry one of each.
  */
 export function renderModelSelect(params: {
   value: string;
@@ -112,6 +152,7 @@ export function renderModelSelect(params: {
   providerNotEnabledLabel: string;
   noModelsLabel: string;
   unhealthyLabels?: Record<string, string>;
+  noteLabels?: Record<string, string>;
 }): React.ReactElement {
   const {
     value,
@@ -121,6 +162,7 @@ export function renderModelSelect(params: {
     providerNotEnabledLabel,
     noModelsLabel,
     unhealthyLabels,
+    noteLabels,
   } = params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
   const showOrphan = value !== '' && !knownModels.has(value);
@@ -144,14 +186,19 @@ export function renderModelSelect(params: {
         <optgroup key={group.providerKey} label={group.providerName}>
           {group.models.map((m) => {
             const warning = unhealthyLabels?.[m];
+            const note = noteLabels?.[m];
             const label = group.labels?.[m] ?? m;
+            const suffixes = [warning, note].filter(Boolean);
             return (
               <option
                 key={`${group.providerKey}:${m}`}
                 value={m}
                 data-health={warning ? 'fail' : undefined}
+                data-note={note ? 'non-chat' : undefined}
               >
-                {warning ? `${label} — ${warning}` : label}
+                {suffixes.length > 0
+                  ? `${label} — ${suffixes.join(' · ')}`
+                  : label}
               </option>
             );
           })}

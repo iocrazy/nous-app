@@ -55,6 +55,13 @@ interface AgentPersonaTabProps {
   /** Localized warning suffixes for failing models, passed to the picker. */
   unhealthyModelLabels?: Record<string, string>;
   /**
+   * Localized neutral suffixes for BYOK models whose id looks like an
+   * embedding / image / speech model. Separate from the warning map on
+   * purpose — these are still perfectly valid things to have enabled, so the
+   * picker states the fact and leaves the option selectable.
+   */
+  nonChatModelLabels?: Record<string, string>;
+  /**
    * Platform model names that run on the USER's own machine (backend
    * `is_local`). Passed in rather than matched by name here — the display
    * name is admin-editable, and a hint keyed on a guessed string would go
@@ -78,6 +85,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   modelGroups,
   modelHealth,
   unhealthyModelLabels,
+  nonChatModelLabels,
   localModelNames,
   localSkillIds,
   allSkills,
@@ -255,6 +263,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
             ),
             noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
             unhealthyLabels: unhealthyModelLabels,
+            noteLabels: nonChatModelLabels,
           })}
           {/* The local Codex link is plain text — no tool calling — so the
               backend rejects a run whose agent has Skills or tools bound
