@@ -26,21 +26,34 @@ class _FakeTagsRepo:
         self._tags_by_name = tags_by_name
         self.resolve_calls: List[str] = []
         self.add_resource_calls: List[dict[str, Any]] = []
+        #: 每次 get_automation_tag 拿到的归属人 —— 自动打标必须挂**资源主人**
+        #: 自己那份分类标签（初始化标签每人一份之后，无主查询会跨用户错挂）。
+        self.automation_owners: List[Optional[str]] = []
 
     async def resolve_media_id_to_resource_id(self, media_id: str) -> Optional[str]:
         self.resolve_calls.append(media_id)
         return self._resource_id
 
-    async def get_automation_tag(self, key: str) -> Optional[dict]:
+    async def get_resource_owner_id(self, resource_id: str) -> Optional[str]:
+        return f"owner-of-{resource_id}"
+
+    async def get_automation_tag(
+        self, key: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
         """Mirrors the real helper: slug first, display name as fallback. The
         fake resolves both to the same row, which is the point — the service
         must not care which one matched."""
+        self.automation_owners.append(user_id)
         return await self.get_tag_by_name(key)
 
-    async def get_tag_by_slug(self, slug: str) -> Optional[dict]:
+    async def get_tag_by_slug(
+        self, slug: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
         return await self.get_tag_by_name(slug)
 
-    async def get_tag_by_name(self, name: str) -> Optional[dict]:
+    async def get_tag_by_name(
+        self, name: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
         return self._tags_by_name.get(name)
 
     async def add_tag_to_resource(

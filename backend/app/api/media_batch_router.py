@@ -176,6 +176,7 @@ async def fetch_videos_batch(
             transcribe=request.transcribe,
             summarize=request.summarize,
             analyze=request.analyze,
+            user_id=auth.user_id,
         )
     except Exception as e:
         logger.warning(f"[Fetch/Batch] intent tag resolution failed (non-fatal): {e}")

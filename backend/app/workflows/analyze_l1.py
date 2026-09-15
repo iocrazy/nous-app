@@ -274,7 +274,10 @@ async def call_analyze_l1(
             )
 
     if result.category and result.category != "Other":
-        tag = await tags_repo.get_automation_tag(result.category)
+        # 打的是**这个资源的主人**自己那份分类标签。初始化标签每人一份之后，
+        # 不说是谁就会把别人的标签挂上来。
+        owner_id = await tags_repo.get_resource_owner_id(str(resource_id))
+        tag = await tags_repo.get_automation_tag(result.category, owner_id)
         if tag:
             await tags_repo.add_tag_to_resource(
                 resource_id=resource_id,

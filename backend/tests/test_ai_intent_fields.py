@@ -83,13 +83,14 @@ async def test_resolve_intent_tag_ids_uses_slug_lookup_and_skips_missing(caplog)
     repo.create_tag = AsyncMock()
     with patch.object(h, "get_tags_repository", return_value=repo):
         ids = await h.resolve_intent_tag_ids(
-            transcribe=True, summarize=True, analyze=True
+            transcribe=True, summarize=True, analyze=True, user_id="u1"
         )
 
     assert ids == ["11", "33"]
-    # 查的是 slug。传显示名是这次重构要消灭的东西：用户改个名，AI 就静默停摆。
+    # 查的是 slug，而且限定在**发起人**自己那份上：初始化标签每人一份之后，
+    # 不带用户就会把别人的标签挂到这次抓取上。
     repo.get_tag_ids_by_slugs.assert_awaited_once_with(
-        ["transcript", "summary", "analyze"]
+        ["transcript", "summary", "analyze"], "u1"
     )
     repo.create_tag.assert_not_called()
     assert "summary" in caplog.text
@@ -104,7 +105,7 @@ async def test_resolve_intent_tag_ids_no_flags_no_query():
     with patch.object(h, "get_tags_repository", return_value=repo):
         assert (
             await h.resolve_intent_tag_ids(
-                transcribe=False, summarize=False, analyze=False
+                transcribe=False, summarize=False, analyze=False, user_id="u1"
             )
             == []
         )
@@ -413,7 +414,9 @@ async def test_batch_route_merges_intent_ids_and_forwards_rating():
     )
 
     assert resp["submitted"] == 1
-    intent.assert_awaited_once_with(transcribe=True, summarize=False, analyze=False)
+    intent.assert_awaited_once_with(
+        transcribe=True, summarize=False, analyze=False, user_id="u1"
+    )
     assert len(attach) == 1
     assert attach[0].args == ("pid1", ["5", "11"], None, "u1")
     assert attach[0].kwargs == {"rating": 3}

@@ -297,54 +297,113 @@ class TagsRepository:
             )
             return _tag_row(row) if row else None
 
-    async def get_tag_ids_by_slugs(self, slugs: List[str]) -> Dict[str, int]:
-        """slug → id，永不创建。
+    # ------------------------------------------------------------------
+    # 自动化按 slug 取标签 —— 「谁的那一份」由 ``user_id`` 决定
+    # ------------------------------------------------------------------
+    #
+    # 初始化标签正在从「全局共享一行」改成「每个用户自己一份」（用户 2026-09-14
+    # 的裁定：这些不是系统标签，是发给你的初始标签，你自己的那份自己改）。迁移
+    # 分叉之后，同一个 slug 在库里会有 N 行，每行属于一个用户 —— 所以自动化**必须
+    # 说清楚要谁的那一份**，否则就会把 A 的标签挂到 B 的资源上。
+    #
+    # 这里的排序孤零零地承担着分期部署：迁移与后端部署没有先后保证
+    # （CLAUDE.md「已知缺口」），所以两种 schema 都要能跑。
+    #
+    #   * 分叉后：该用户自己的那行 —— 正确答案。
+    #   * 分叉前：全局共享行（``user_id IS NULL``）—— 今天唯一存在的那行。
+    #
+    # ``NULLS LAST`` 让自己的那份永远赢过共享行，于是两种形态下都取到对的行，
+    # 迁移与部署谁先落地都不会错挂。分叉迁移上线并稳定后，兜底那一臂连同这段
+    # 注释一起删掉（那是计划中的收尾 PR，不是遗留）。
+    _OWN_COPY_FIRST = Tags.user_id.is_(None).asc()
+
+    async def get_tag_ids_by_slugs(
+        self, slugs: List[str], user_id: Optional[str] = None
+    ) -> Dict[str, int]:
+        """slug → id，永不创建；``user_id`` 给谁就取谁的那一份。
 
         Slug 是自动化的稳定键（mig 467），显示名不是。这个方法取代了旧的
         ``get_system_tag_ids_by_names``：那个按英文名 + ``type='system'`` 匹配，
         于是用户一改名，意图标签就挂不上，而调用方只打一条 WARNING 就跳过 ——
         AI 悄无声息地不跑。
 
-        **不再过滤 type**，因为已经不需要了：slug 只在 mig 467 里写给自动化
-        标签，用户建标签的任何路径都碰不到它，所以有 slug 本身就等价于
-        "这是自动化认得的那一个"。"""
+        **不过滤 type**：slug 只由迁移写给初始化标签，用户建标签的任何路径都
+        碰不到它，所以有 slug 本身就等价于「这是自动化认得的那一个」。
+
+        ``user_id=None`` 只剩一种合法用法 —— 调用方确实没有用户上下文。那时拿
+        到的是任意一行，分叉之后这**不是**一个安全的默认值，所以每个调用方都
+        应该传。"""
         if not slugs:
             return {}
         async with read_scope() as session:
+            stmt = select(Tags.slug, Tags.id).where(Tags.slug.in_(list(slugs)))
+            if user_id:
+                stmt = stmt.where(or_(Tags.user_id == user_id, Tags.user_id.is_(None)))
+            # 同一个 slug 有多行时，自己的那份排在共享行前面；
+            # 下面的 setdefault 让**先出现**的那行赢。
             rows = (
-                await session.execute(
-                    select(Tags.slug, Tags.id).where(Tags.slug.in_(list(slugs)))
-                )
+                await session.execute(stmt.order_by(Tags.slug, self._OWN_COPY_FIRST))
             ).all()
-        return {str(slug): int(tag_id) for slug, tag_id in rows}
+        out: Dict[str, int] = {}
+        for slug, tag_id in rows:
+            out.setdefault(str(slug), int(tag_id))
+        return out
 
-    async def get_tag_by_slug(self, slug: str) -> Optional[dict]:
-        """自动化按稳定键取一个标签。显示名改了也照样命中。"""
+    async def get_tag_by_slug(
+        self, slug: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """自动化按稳定键取一个标签。显示名改了也照样命中。
+
+        ``user_id`` 给谁就取谁的那一份（口径同 ``get_tag_ids_by_slugs``）。"""
         async with read_scope() as session:
+            stmt = select(Tags).where(Tags.slug == slug)
+            if user_id:
+                stmt = stmt.where(or_(Tags.user_id == user_id, Tags.user_id.is_(None)))
             row = (
-                (await session.execute(select(Tags).where(Tags.slug == slug)))
+                (await session.execute(stmt.order_by(self._OWN_COPY_FIRST).limit(1)))
                 .scalars()
                 .first()
             )
             return _tag_row(row) if row else None
 
-    async def get_automation_tag(self, key: str) -> Optional[dict]:
+    async def get_automation_tag(
+        self, key: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
         """自动分类拿一个英文类别名（``Food`` / ``Tutorial`` / …）换标签。
 
         **slug 优先，显示名兜底**，两者都要保留是有原因的：
 
         * slug 命中的是 mig 467 种下的那 13 个策展分类标签，用户把它们改名后
-          依然命中 —— 这正是本次重构要修的（改名让自动打标静默失效）。
+          依然命中 —— 这正是 slug 重构要修的（改名让自动打标静默失效）。
         * 名字兜底保留了今天的另一半行为：AI 视觉分析的 category 词表存在库里
           的 prompt 行中，可能吐出这 13 个以外的词，而那时 ``get_tag_by_name``
           会去匹配用户自己的同名标签。那不是缺陷，砍掉它是另一回事。
 
+        ``user_id`` 两条臂都要传：打标是往**某个人的资源**上打，用的就该是他自己
+        的那份标签。
+
         ⚠️ 与 AI **触发**链（``download_helpers``）不同：那里是 slug-only，没有
         名字兜底，因为一个手建的 "Summary" 标签能触发模型消费是真的洞。这里只是
         打个分类标签，没有那种代价。"""
-        return await self.get_tag_by_slug(key.lower()) or await self.get_tag_by_name(
-            key
-        )
+        return await self.get_tag_by_slug(
+            key.lower(), user_id
+        ) or await self.get_tag_by_name(key, user_id)
+
+    async def get_resource_owner_id(self, resource_id: str) -> Optional[str]:
+        """资源的归属人（``resources.creator_id``）。
+
+        自动打标的两个入口（视觉分类、analyze_l1）手上都只有 resource_id，而
+        「该挂谁的标签」的答案是**资源的主人**。让它们各自去 JOIN 一次
+        ``resources`` 会把这个判断散到两处，所以收在这里一个口。
+
+        ⚠️ 列名是 ``creator_id`` 不是 ``user_id``（CLAUDE.md 记过这个 42703）。"""
+        async with read_scope() as session:
+            owner = await session.scalar(
+                select(Resources.creator_id)
+                .where(Resources.id == int(resource_id))
+                .limit(1)
+            )
+        return str(owner) if owner is not None else None
 
     async def get_tag_by_name(
         self, name: str, user_id: Optional[str] = None

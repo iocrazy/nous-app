@@ -240,18 +240,21 @@ async def resolve_tag_names_to_ids(tag_names: list[str], user_id: str) -> list[s
 
 
 async def resolve_intent_tag_ids(
-    *, transcribe: bool, summarize: bool, analyze: bool
+    *, transcribe: bool, summarize: bool, analyze: bool, user_id: str
 ) -> list[str]:
-    """意图布尔 → Pipeline 标签 id（str）。按 slug 查，绝不创建；查不到说明
-    种子缺失（部署问题），WARNING 后跳过，不阻断抓取。
+    """意图布尔 → **该用户自己那份** Pipeline 标签的 id（str）。按 slug 查，绝不
+    创建；查不到说明种子缺失（部署问题），WARNING 后跳过，不阻断抓取。
 
-    按 slug 而不是按显示名：标签名是用户的，改了不该让 AI 停摆。"""
+    按 slug 而不是按显示名：标签名是用户的，改了不该让 AI 停摆。
+
+    ``user_id`` 不是可选的：初始化标签正在改成每人一份，同一个 slug 会有 N 行，
+    不说是谁就会把别人的标签挂到这次抓取上。两个调用方手上都有 ``auth.user_id``。"""
     slugs = intent_tag_slugs(
         transcribe=transcribe, summarize=summarize, analyze=analyze
     )
     if not slugs:
         return []
-    found = await get_tags_repository().get_tag_ids_by_slugs(slugs)
+    found = await get_tags_repository().get_tag_ids_by_slugs(slugs, user_id)
     missing = [s for s in slugs if s not in found]
     if missing:
         logger.warning(
@@ -508,6 +511,7 @@ async def handle_media_fetch_dispatch(
             transcribe=request.transcribe,
             summarize=request.summarize,
             analyze=request.analyze,
+            user_id=auth.user_id,
         ):
             if tid not in effective_tag_ids:
                 effective_tag_ids.append(tid)
