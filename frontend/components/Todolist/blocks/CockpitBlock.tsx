@@ -127,7 +127,9 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // Target-level pause / resume (phase 2a §2). Both re-read the issue +
   // rollup afterwards; a failure is shown on the cockpit (typed path, never a
   // silent no-op).
-  const issueId = Number(ctx.issue.id);
+  // The host's id as given (B3) — `pauseIssue` / `resumeIssue` put it in a
+  // URL path, and a Snowflake past 2^53 does not survive a JS number.
+  const issueId = String(ctx.issue.id);
   const pause = async () => {
     if (pausing) return;
     setPausing(true);

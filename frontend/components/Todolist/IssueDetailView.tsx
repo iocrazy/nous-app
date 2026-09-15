@@ -829,7 +829,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               : undefined
           }
           teamId={teamId}
-          issueId={Number(issue.id)}
+          issueId={String(issue.id)}
           onScheduled={() => setSchedulesRefresh((n) => n + 1)}
         />
         </div>

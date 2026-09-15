@@ -27,7 +27,7 @@ import { wakeupPresets } from './laterPresets';
 const HORIZON_DAYS = 30;
 
 interface LaterPopoverProps {
-  issueId: number;
+  issueId: string;
   /** Starting value for the note — the composer's draft, or '' from the rail. */
   text: string;
   onClose: () => void;

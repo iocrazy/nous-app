@@ -11,6 +11,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 export interface Profile {
   /** 主账号名. Generated at signup, user-editable, globally unique (case-insensitive). */
@@ -33,27 +34,27 @@ export class ProfileError extends Error {
 }
 
 /**
- * Read the backend's typed error envelope.
+ * Read the backend's typed error envelope through the one decoder
+ * (`services/errorEnvelope.ts`).
  *
- * Production wraps every HTTPException as
- * `{success, error, code: "http_<status>", request_id, details}` — NOT FastAPI's
- * bare `{detail}` (CLAUDE.md, 2026-09-09). The route-specific reason we care
- * about (`username_taken` vs `username_invalid`) rides in `details.code`;
- * the envelope's own `code` is only ever `http_409`, which cannot tell the two
- * apart. `detail` stays in the chain for any route still on the plain shape.
+ * The route-specific reason we care about (`username_taken` vs
+ * `username_invalid`) rides in `details.code`; the envelope's own `code` is
+ * only ever `http_409`, which cannot tell the two apart — it is kept as the
+ * SECOND choice here (the other services drop it), because a profile refusal
+ * that typed nothing is still better named `http_409` than by a status the
+ * caller re-derives.
+ *
+ * The copy chain is this service's own and deliberately unlike the canonical
+ * one: the envelope's `error` comes before a plain-string `detail`, because
+ * every profile route that refuses in prose does it through `error`.
  */
 async function profileError(res: Response, fallback: string): Promise<ProfileError> {
   let code = `http_${res.status}`;
   let message = `${fallback} (HTTP ${res.status})`;
   try {
-    const body = await res.json();
-    const detail = body?.details ?? body?.detail;
-    code = detail?.code ?? body?.code ?? code;
-    message =
-      detail?.message ??
-      body?.error ??
-      (typeof detail === 'string' ? detail : undefined) ??
-      message;
+    const decoded = decodeErrorEnvelope(await res.json());
+    code = decoded.code ?? decoded.envelopeCode ?? code;
+    message = decoded.typedMessage ?? decoded.error ?? decoded.detailText ?? message;
   } catch {
     /* body was not JSON — keep the status-derived fallback */
   }

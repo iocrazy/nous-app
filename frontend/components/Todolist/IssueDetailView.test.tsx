@@ -425,7 +425,8 @@ describe('IssueDetailView — cockpit + 区块注册表 (harness P4 T8)', () => 
     });
     fireEvent.change(input, { target: { value: '500' } });
     fireEvent.submit(input.closest('form')!);
-    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(1, { budget_cents: 500 }));
+    // The id as the issue carries it, unconverted (B3).
+    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith('1', { budget_cents: 500 }));
   });
 });
 

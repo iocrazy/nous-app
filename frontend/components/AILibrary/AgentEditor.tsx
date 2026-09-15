@@ -759,7 +759,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       </nav>
 
       {sub === 'workbench' && (
-        <AgentWorkbenchTab agent={agent} slug={slug} urlPrefix={urlPrefix} />
+        <AgentWorkbenchTab agent={agent} slug={slug} urlPrefix={urlPrefix} teamId={teamId ?? null} />
       )}
 
       {sub === 'persona' && (

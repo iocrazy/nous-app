@@ -113,7 +113,7 @@ interface IssueReplyBoxProps {
   /** The issue this composer belongs to. Absent on surfaces that have no
    *  issue behind them — the "Later" affordance is then hidden rather than
    *  posting a wake-up at nothing (harness 2b-2 §5-2). */
-  issueId?: number;
+  issueId?: string;
   /** A wake-up was armed; the page re-reads its schedules panel. */
   onScheduled?: () => void;
 }

@@ -231,7 +231,7 @@ describe('WorkspaceStageBoard', () => {
 
     expect(await screen.findByTestId('deliverables-zone-stub')).toBeInTheDocument();
     expect(mockDeliverablesZone).toHaveBeenCalledWith(
-      expect.objectContaining({ issueId: 100, isStageMirror: true, projectName: 'Spring Campaign' }),
+      expect.objectContaining({ issueId: '100', isStageMirror: true, projectName: 'Spring Campaign' }),
     );
   });
 

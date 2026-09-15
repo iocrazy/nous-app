@@ -20,7 +20,10 @@ import { RailCard } from './StatusBlock';
 
 export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const { t } = useTranslation();
-  const issueId = Number(ctx.issue.id);
+  // The id is the host's, as given (B3): a Snowflake past 2^53 does not
+  // survive a round trip through a JS number, and every consumer below
+  // (the path, the popover) wants the string anyway.
+  const issueId = String(ctx.issue.id);
   const refreshKey = ctx.env.schedulesRefreshKey ?? 0;
   const [items, setItems] = useState<IssueScheduleItem[]>([]);
   // A CODE, not a sentence: `t` is a fresh function on every render, so

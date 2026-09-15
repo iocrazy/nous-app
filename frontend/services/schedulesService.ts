@@ -7,6 +7,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 const base = (): string => `${getApiUrl()}/api/v1/schedules`;
 
@@ -83,11 +84,9 @@ export class ScheduleRejectedError extends Error {
 }
 
 /**
- * Turn a non-2xx into a typed error. Production wraps every HTTPException in
- * the ErrorResponse envelope (`app/core/exceptions.py`):
- * `{success, error, code: "http_<status>", request_id, details: <exc.detail>}`
- * — and `schedules_router._bad_request` always puts the typed `{code,message}`
- * under `details`. A bare FastAPI `{detail: …}` is accepted too.
+ * Turn a non-2xx into a typed error, reading the envelope through the one
+ * decoder (`services/errorEnvelope.ts`) — `schedules_router._bad_request`
+ * always puts the typed `{code, message}` under `details`.
  *
  * The raw body never leaves this function: it carries a request_id and the
  * whole internal envelope, which is not something to paint into a popover.
@@ -96,17 +95,9 @@ async function reject(res: Response): Promise<never> {
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     // Not JSON at all (a gateway's HTML, say) — keep the status line.
     console.error('[schedulesService] error body was not JSON', err);
@@ -128,11 +119,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * Arm a one-shot wake-up on an issue. NOT `create`: that one is the cron
  * shape and requires `name` + `cron_expr`, neither of which a one-shot has.
- * `issue_id` goes in as a NUMBER — issue ids are JSON numbers everywhere in
- * `/issues/*`, and the backend matches on `payload->>'issue_id'`.
+ *
+ * The id arrives as a STRING (B3: a Snowflake id is never round-tripped
+ * through a JS number on the way here) and the `Number()` below is the ONE
+ * place that converts it — **and it should not have to**.
+ * `schedules_router._validate_wakeup_payload_fields` normalises the field
+ * itself (`body["issue_id"] = int(issue_id)`, then
+ * `assert_issue_visible(int(body["issue_id"]))`), and Python ints are
+ * arbitrary precision, so a JSON string would be accepted and stored
+ * identically — losslessly. The number is kept here for one reason only:
+ * this is a REFACTOR, and changing a wire byte is not something it gets to
+ * do. Dropping the `Number()` is a one-line fix with its own ticket
+ * (frontend-convergence-report.md 记票 §F1) and needs the wire re-verified
+ * on the real stack, not a unit test.
  */
 export async function createIssueWakeup(
-  issueId: number,
+  issueId: string,
   opts: { fireAt: Date | string; text: string },
 ): Promise<ScheduleResponse> {
   const fire_at = typeof opts.fireAt === 'string' ? opts.fireAt : opts.fireAt.toISOString();
@@ -141,14 +143,15 @@ export async function createIssueWakeup(
     body: JSON.stringify({
       task_type: 'issue_wakeup',
       fire_at,
-      payload: { issue_id: issueId, text: opts.text, once: true },
+      payload: { issue_id: Number(issueId), text: opts.text, once: true },
     }),
   });
 }
 
 /** Everything timed on one issue. Lives under `/issues/…`, not `/schedules/…`,
- *  so it does not go through `request`. */
-export async function listIssueSchedules(issueId: number): Promise<IssueScheduleItem[]> {
+ *  so it does not go through `request`. The id stays a string all the way
+ *  into the path (B3) — a Snowflake past 2^53 does not survive a number. */
+export async function listIssueSchedules(issueId: string): Promise<IssueScheduleItem[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/issues/${issueId}/schedules`, { headers });
   if (!res.ok) throw new Error(`Issue schedules API ${res.status}`);

@@ -480,7 +480,7 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
         {hasFolder && issue ? (
           <DeliverablesZone
             projectId={projectId}
-            issueId={Number(issue.id)}
+            issueId={String(issue.id)}
             isStageMirror
             projectName={projectName}
             stageName={node.name}

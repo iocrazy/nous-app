@@ -8,6 +8,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -241,11 +242,9 @@ export class IssueControlError extends Error {
 }
 
 /** Like `_json`, but a non-2xx becomes an IssueControlError carrying the
- *  server's typed code. Production wraps every HTTPException in the
- *  ErrorResponse envelope (`backend/app/core/exceptions.py`):
- *  `{error, code: "http_<status>", request_id, details: <exc.detail | null>}`
- *  — the typed `{code, message}` lives under `details`. A bare FastAPI
- *  `{detail: …}` (unwrapped routers, tests) is accepted too. Found on the
+ *  server's typed code, read by the one envelope decoder
+ *  (`services/errorEnvelope.ts` — the envelope's own shape and the
+ *  `details`-before-`detail` rule are documented there). Found on the
  *  real stack 2026-09-09: reading only `detail` made every refusal
  *  `http_409` with "409 Conflict" as its copy. */
 async function _controlJson<T>(res: Response): Promise<T> {
@@ -253,17 +252,9 @@ async function _controlJson<T>(res: Response): Promise<T> {
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     console.error('[issuesService] control error body was not JSON', err);
   }
@@ -274,7 +265,7 @@ async function _controlJson<T>(res: Response): Promise<T> {
  *  root run to stop at its next step boundary. Rejects with IssueControlError
  *  (409 already_paused, 503 run_state_unavailable). */
 export async function pauseIssue(
-  issueId: number,
+  issueId: string,
 ): Promise<{ issue_id: string; paused_at: string; run_id: string | null }> {
   const res = await fetch(`${_base}/${issueId}/pause`, {
     method: 'POST',
@@ -287,7 +278,7 @@ export async function pauseIssue(
  *  queued work. `reason` says what happened (dispatched / withdrawn / running
  *  / parked / cleared). Rejects with IssueControlError (409 not_paused). */
 export async function resumeIssue(
-  issueId: number,
+  issueId: string,
 ): Promise<{ issue_id: string; dispatched: boolean; reason: string; workflow_id: string | null; run_id: string | null }> {
   const res = await fetch(`${_base}/${issueId}/resume`, {
     method: 'POST',
@@ -322,7 +313,7 @@ export async function getIssueByIdentifier(identifier: string): Promise<Issue> {
 }
 
 export async function updateIssue(
-  issueId: number,
+  issueId: string,
   patch: IssueUpdatePayload
 ): Promise<Issue> {
   const res = await fetch(`${_base}/${issueId}`, {

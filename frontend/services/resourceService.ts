@@ -9,6 +9,7 @@ import {
 } from './pagination';
 import { getAuthHeaders } from './parserService';
 import { apiClient, ApiError } from './apiClient';
+import { decodeApiError } from './errorEnvelope';
 import type { OutputLineage } from './outputsService';
 import { getApiUrl } from '../utils/apiConfig';
 import { buildMediaUrl } from '../utils/mediaUrl';
@@ -2498,7 +2499,7 @@ const NO_CHAIN_CODES = new Set(['not_found', 'not_registered']);
  * 在每一页挂一个永久假警报（`OutputProvenance` 顶部写的同一条规则）。其它失败
  * 一律外抛 —— 静默成 null 会让「读不到」与「人传的」不可区分。
  *
- * **判据是 `details.code` 而不是 `err.code`，也不是光看状态码**：
+ * **判据是 `details.code`（经 `decodeApiError` 读）而不是 `err.code`，也不是光看状态码**：
  * - 生产把每个 `HTTPException` 包进 ErrorResponse 外壳，`err.code` 拿到的是外壳的
  *   `http_404`，类型码在 `details` 里（CLAUDE.md 2026-09-09）。本路由是**故意**用
  *   dict `detail` 抛的，就是为了让类型码能原样落到那儿。
@@ -2514,7 +2515,7 @@ export async function getResourceProvenance(resourceId: string): Promise<OutputL
     return await apiClient.get<OutputLineage>(`/api/v1/resources/${resourceId}/provenance`);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
-      const code = (err.details as { code?: string } | undefined)?.code;
+      const { code } = decodeApiError(err);
       if (code && NO_CHAIN_CODES.has(code)) return null;
     }
     throw err;

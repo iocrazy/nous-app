@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { issueDeepLink } from './issueLinks';
+import { issueDeepLink, issueDeepLinkOrLegacy } from './issueLinks';
 
 describe('issueDeepLink', () => {
   it('builds the team-scoped todolist route', () => {
@@ -49,5 +49,17 @@ describe('issueDeepLink', () => {
     expect(issueDeepLink(0, 'MH-91')).toBeNull();
     expect(issueDeepLink('42', null)).toBeNull();
     expect(issueDeepLink('42', '')).toBeNull();
+  });
+});
+
+describe('issueDeepLinkOrLegacy', () => {
+  it('is the builder where the builder answers, and the old spelling where it refuses', () => {
+    // Left side: the only side production reaches — every caller of this
+    // helper renders inside `/team/:teamId`. Right side: the string those
+    // callers printed before B7, kept so the refactor introduced no disabled
+    // state; it is a dead route either way, which is why nothing may start
+    // depending on it.
+    expect(issueDeepLinkOrLegacy('8', 'MH-7')).toBe('/team/8/todolist/MH-7');
+    expect(issueDeepLinkOrLegacy('', 'MH-7')).toBe('/team//todolist/MH-7');
   });
 });

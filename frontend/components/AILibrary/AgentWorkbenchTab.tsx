@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { MessageCircleQuestion, Plus } from 'lucide-react';
 import { relativeTime } from '../../utils/taskDisplay';
+import { issueDeepLink } from '../../utils/issueLinks';
 import type { AILibraryAgent, AgentRunGroupItem } from '../../types';
 import { listNeedsInput, type NeedsInputItem } from '../../services/issuesService';
 import { aiLibraryService, type AgentStatsItem } from '../../services/aiLibraryService';
@@ -30,6 +31,10 @@ interface AgentWorkbenchTabProps {
   slug: string;
   /** Team URL prefix, for the link into the issue list. */
   urlPrefix: string;
+  /** The team on its own, for the one deep-link builder (B7). The caller
+   *  derives BOTH from the same route param, so they cannot disagree —
+   *  reading the param again here instead would just be a second source. */
+  teamId: string | null;
 }
 
 const Panel: React.FC<{
@@ -59,6 +64,7 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
   agent,
   slug,
   urlPrefix,
+  teamId,
 }) => {
   const { t } = useTranslation();
   // null = the runs view is closed. A group means the user clicked that
@@ -261,7 +267,11 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
                       {issue.identifier} · {relativeTime(issue.asked_at)}
                     </span>
                     <Link
-                      to={`${urlPrefix}/todolist/${issue.identifier}`}
+                      // The one builder (B7). NOT `issueDeepLinkOrLegacy`:
+                      // this tab also renders team-less (`urlPrefix` is then
+                      // `''`), so the fallback has to be the prefix's own
+                      // spelling, which is what this card printed before.
+                      to={issueDeepLink(teamId, issue.identifier) ?? `${urlPrefix}/todolist/${issue.identifier}`}
                       data-testid="waitcard-answer-link"
                       className="ml-auto shrink-0 font-medium text-warn hover:underline"
                     >
