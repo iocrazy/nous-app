@@ -131,6 +131,11 @@ async def retry_download(
         if request.cover_bool:
             status_updates["cover_download_status"] = DownloadStatus.PENDING.value
 
+        # NB: resetting the requested statuses to ``pending`` here is what
+        # keeps ``dedup_and_dispatch``'s already-in-library short circuit from
+        # firing on this path — and that is deliberate. A retry is an explicit
+        # "download it again", so it must dispatch even when the bytes are
+        # already on shared storage.
         await repo.update(platform_id, status_updates)
 
         resource_id = None

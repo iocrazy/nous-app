@@ -315,6 +315,10 @@ export interface TypeFetchResponse {
   types_submitted: string[];
   types_skipped: string[];
   types_subscribed: string[];
+  /** True when the backend created NO download task because every requested
+   * asset is already in this user's library. `task_id` is null in that case —
+   * no Task Center card will ever appear, so don't promise one. */
+  already_in_library?: boolean;
 }
 
 export const fetchMediaByType = async (

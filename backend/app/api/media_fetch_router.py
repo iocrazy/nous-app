@@ -342,9 +342,19 @@ async def fetch_media_by_type(
             aweme_id=platform_id,
         )
 
+        already_owned = bool(dispatch_result.get("already_in_library"))
         return {
             "success": True,
-            "message": "Fetch submitted",
+            # Typed outcome, not a silent no-op: when nothing was dispatched
+            # because the user already owns every requested asset, say so —
+            # the caller shows "already in your library" instead of a
+            # "submitted" toast for a task that will never appear.
+            "message": (
+                "You already have this in your library"
+                if already_owned
+                else "Fetch submitted"
+            ),
+            "already_in_library": already_owned,
             "platform_id": platform_id,
             "task_id": dispatch_result.get("unified_task_id")
             or dispatch_result.get("task_id"),
