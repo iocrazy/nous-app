@@ -138,16 +138,86 @@ describe('focusTrajectoryStep', () => {
     cancel();
   });
 
-  it('falls back to step-only when nothing carries the named turn', async () => {
+  it('falls back to step-only when nothing carries the named turn — but not before half the deadline', async () => {
     // A transcript folded before `data-turn` existed — or a link naming a turn
     // this run never had. The turn is a refinement, never a precondition: the
     // new link must not be weaker than the one-key link it replaced.
-    const node = drawStep({ step: 2 });
-    const clicked = vi.fn();
-    node.querySelector('button')!.addEventListener('click', clicked);
-    const cancel = focusTrajectoryStep({ step: 2, turn: 1 });
-    expect(clicked).toHaveBeenCalledTimes(1);
-    cancel();
+    //
+    // C11: the fallback is DELAYED, not removed. Taking it on the very first
+    // pass hands the reader whichever same-numbered step mounted first, while
+    // the one the link actually names is still loading.
+    vi.useFakeTimers();
+    try {
+      const node = drawStep({ step: 2 });
+      const clicked = vi.fn();
+      node.querySelector('button')!.addEventListener('click', clicked);
+      const cancel = focusTrajectoryStep({ step: 2, turn: 1 });
+      expect(clicked).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(5_100);
+      expect(clicked).toHaveBeenCalledTimes(1);
+      cancel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('C11: an exact node that arrives before half-time wins over the step-only one already there', async () => {
+    // 深链与流式到达并存的那一刻：同号的旧步骤先挂载，链接真正指的那个还在
+    // 路上。立刻放宽 = 把读者送到错误的回合上，而且是**静默**的。
+    vi.useFakeTimers();
+    try {
+      const legacy = drawStep({ step: 2 });
+      const hits: string[] = [];
+      legacy.querySelector('button')!.addEventListener('click', () => hits.push('legacy'));
+      const cancel = focusTrajectoryStep({ step: 2, turn: 7 });
+
+      vi.advanceTimersByTime(2_000);
+      expect(hits).toEqual([]); // 还在等精确节点
+
+      const exact = drawStep({ step: 2, turn: 7 });
+      exact.querySelector('button')!.addEventListener('click', () => hits.push('exact'));
+      vi.advanceTimersByTime(200);
+      expect(hits).toEqual(['exact']);
+      cancel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('C11: 半程过了精确节点仍没来，才退回 step-only；onSettled 也只在那时才报', async () => {
+    vi.useFakeTimers();
+    try {
+      const legacy = drawStep({ step: 2 });
+      const hits: string[] = [];
+      legacy.querySelector('button')!.addEventListener('click', () => hits.push('legacy'));
+      const onSettled = vi.fn();
+      const cancel = focusTrajectoryStep({ step: 2, turn: 7 }, onSettled);
+
+      vi.advanceTimersByTime(4_800);
+      expect(hits).toEqual([]);
+      expect(onSettled).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(400);
+      expect(hits).toEqual(['legacy']);
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      cancel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('C11: 链接根本不带 turn 时，第一趟就落地——放宽只针对「有 turn 但没匹配上」', async () => {
+    vi.useFakeTimers();
+    try {
+      const node = drawStep({ step: 2 });
+      const clicked = vi.fn();
+      node.querySelector('button')!.addEventListener('click', clicked);
+      const cancel = focusTrajectoryStep({ step: 2 });
+      expect(clicked).toHaveBeenCalledTimes(1);
+      cancel();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('prefers the exact (turn, step) over the fallback when both could match', async () => {

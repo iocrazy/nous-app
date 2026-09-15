@@ -24,6 +24,11 @@
 
 const POLL_MS = 120;
 const DEADLINE_MS = 10_000;
+/** How long the search insists on an exact `(turn, step)` before it will
+ *  settle for the step alone. Half the deadline: long enough for a transcript
+ *  to arrive and fold, short enough that a link naming a turn this run never
+ *  had still lands well inside the ten seconds. */
+const RELAX_AFTER_MS = DEADLINE_MS / 2;
 
 /** The step nodes for this coordinate, in document order.
  *
@@ -38,8 +43,17 @@ const DEADLINE_MS = 10_000;
  * — a transcript folded before `data-turn` existed, or a link naming a turn
  * this run never had — the search falls back to the step alone. A new link
  * must not be weaker than the one-key link it replaced; landing on the right
- * step of the wrong turn beats landing at the top of the issue. */
-function stepNodes({ step, turn }: StepCoordinate): HTMLElement[] {
+ * step of the wrong turn beats landing at the top of the issue.
+ *
+ * ⚠️ But that fallback WAITS (`relaxed`, C11). Taking it on the first pass is
+ * a race the reader always loses when a deep link and a streaming transcript
+ * arrive together: the same-numbered step of an EARLIER turn is already
+ * mounted, the one the link names is still loading, and the search lands on
+ * the wrong turn — silently, since both are "step 2". Holding out for the
+ * exact pair until half the deadline costs nothing when the exact node is
+ * there (the very first pass matches) and costs a few seconds only in the
+ * case that was already a compromise. */
+function stepNodes({ step, turn }: StepCoordinate, relaxed: boolean): HTMLElement[] {
   const query = (at: string) => [
     ...document.querySelectorAll<HTMLElement>(
       `[data-testid="traj-step"]${at}, [data-testid="traj-step-live"]${at}`,
@@ -49,6 +63,8 @@ function stepNodes({ step, turn }: StepCoordinate): HTMLElement[] {
   if (turn != null) {
     const exact = query(`${onStep}[data-turn="${turn}"]`);
     if (exact.length > 0) return exact;
+    // Not yet allowed to settle for a same-numbered step of another turn.
+    if (!relaxed) return [];
   }
   return query(onStep);
 }
@@ -86,11 +102,11 @@ function expandRunGroups(seen: WeakSet<HTMLElement>): void {
 }
 
 /** Expand + scroll, once the node is there. `false` means "not yet". */
-function openStep(where: StepCoordinate): boolean {
+function openStep(where: StepCoordinate, relaxed: boolean): boolean {
   // The LAST match: the thread runs oldest-first, and several runs of one
   // issue each have a step N. The link carries no run id, so the newest run
   // that reached that step is the best answer available.
-  const node = stepNodes(where).at(-1);
+  const node = stepNodes(where, relaxed).at(-1);
   if (!node) return false;
   const toggle = node.querySelector<HTMLElement>('button[aria-expanded]');
   // Only ever opens. A live step is already expanded by the renderer, and
@@ -133,11 +149,15 @@ export function focusTrajectoryStep(
   // Per search, not per module: a later deep link is entitled to unfold the
   // same cards again.
   const unfolded = new WeakSet<HTMLElement>();
-  const deadline = Date.now() + DEADLINE_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + DEADLINE_MS;
+  // Only after this does a same-numbered step of another turn become an
+  // acceptable answer — see `stepNodes`.
+  const relaxAt = startedAt + RELAX_AFTER_MS;
   const tick = () => {
     timer = null;
     if (cancelled) return;
-    if (openStep(where)) {
+    if (openStep(where, Date.now() >= relaxAt)) {
       // Only NOW is the deep link spent. Reporting it any earlier would let a
       // caller mark the job done for a search that never found its step.
       onSettled?.();
