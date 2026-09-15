@@ -103,6 +103,23 @@ export function useMentionOutputsTab({
     setObjects(null);
   }, [signal]);
 
+  /**
+   * The SAME composer can move to another issue (the detail page keeps its
+   * subtree and swaps `issueId`), and the one-shot guard knows nothing about
+   * that — so the tab went on offering the previous issue's outputs, which
+   * are by definition un-citable here: the resolver's whole check is "was
+   * this version produced on THIS issue" (B5).
+   *
+   * Same placement argument as the turn-signal effect above: declared before
+   * the fetch effect so the guard is already down, and the stale rows already
+   * gone, when that effect re-runs for the new id.
+   */
+  useEffect(() => {
+    requested.current = false;
+    setObjects(null);
+    setErrorCode(null);
+  }, [issueId]);
+
   useEffect(() => {
     if (!active || issueId == null || requested.current) return;
     requested.current = true;

@@ -43,6 +43,42 @@ LOCALES = {
 }
 
 
+def _require_anchored_root() -> None:
+    """The depth arithmetic, checked against something true of EVERY checkout.
+
+    Asserted BEFORE any skip decision (B10, same shape as
+    ``tests/services/ai/media/test_non_chat_model_frontend_mirror.py``): a
+    miscounted ``parents[N]`` makes every path below miss, and every miss
+    would otherwise read as "frontend not checked out" and SKIP — 19 skipped
+    tests reporting a green run that compared nothing. "Not found" must never
+    read as "agrees".
+    """
+    assert (_ROOT / "backend" / "tests").is_dir(), (
+        f"_ROOT misresolved to {_ROOT} — the parents[N] index is wrong, so "
+        "every mirror path below would miss and every case would skip into a "
+        "green run that checked nothing"
+    )
+
+
+def _frontend_file(path: Path, what: str) -> str:
+    """Read a mirror, telling the three states apart.
+
+    * ``_ROOT`` wrong → FAIL (above).
+    * no ``frontend/`` at all → a backend-only tree genuinely cannot answer,
+      so it skips.
+    * ``frontend/`` is there and THIS file is not → somebody moved or deleted
+      the mirror, which is exactly the drift this file exists to catch. FAIL.
+    """
+    _require_anchored_root()
+    if not (_ROOT / "frontend").is_dir():
+        pytest.skip(f"backend-only tree: no frontend/ under {_ROOT}")
+    assert path.exists(), (
+        f"{what} is missing while the frontend IS checked out: {path} — it was "
+        "moved or renamed, and the pair it guards is now unguarded"
+    )
+    return path.read_text(encoding="utf-8")
+
+
 def _ts_int_const(source: str, name: str) -> int:
     """The value of ``export const <name> = <int>;``.
 
@@ -57,9 +93,7 @@ def _ts_int_const(source: str, name: str) -> int:
 
 @pytest.fixture(scope="module")
 def mirror_source() -> str:
-    if not MIRROR.exists():
-        pytest.skip(f"frontend mirror not checked out: {MIRROR} (backend-only tree)")
-    return MIRROR.read_text(encoding="utf-8")
+    return _frontend_file(MIRROR, "the attachment-limits mirror")
 
 
 @pytest.mark.unit
@@ -78,9 +112,7 @@ def test_the_copy_interpolates_the_constant_instead_of_a_literal(locale):
     to read "8" today passes any equality check against the constant and then
     goes stale the moment the cap moves. `{{n}}` cannot go stale.
     """
-    if not LOCALES[locale].exists():
-        pytest.skip("frontend locales not checked out (backend-only tree)")
-    data = json.loads(LOCALES[locale].read_text(encoding="utf-8"))
+    data = json.loads(_frontend_file(LOCALES[locale], f"the {locale} locale"))
     copy = data["chat"]["attachmentFailureReason"][ATTACHMENT_LIMIT_REASON]
     assert "{{n}}" in copy, f"{locale}: the cap must be interpolated, not written"
     assert str(MAX_ASSET_REF_ATTACHMENTS) not in copy, (
@@ -164,9 +196,7 @@ def test_the_citation_limit_copy_interpolates_the_cap(locale):
     """The refusal sentence must say ``{{n}}``, never the digit."""
     from app.services.ai.chat.output_ref_resolver import MAX_OUTPUT_REF_ATTACHMENTS
 
-    if not LOCALES[locale].exists():
-        pytest.skip("frontend locales not checked out (backend-only tree)")
-    data = json.loads(LOCALES[locale].read_text(encoding="utf-8"))
+    data = json.loads(_frontend_file(LOCALES[locale], f"the {locale} locale"))
     copy = data["outputs"]["refError"]["limitExceeded"]
     assert "{{n}}" in copy, f"{locale}: the cap must be interpolated, not written"
     assert str(MAX_OUTPUT_REF_ATTACHMENTS) not in copy
@@ -212,9 +242,7 @@ def _ts_string_set(source: str, name: str) -> set[str]:
 
 @pytest.fixture(scope="module")
 def banner_source() -> str:
-    if not BANNER.exists():
-        pytest.skip(f"frontend banner not checked out: {BANNER} (backend-only tree)")
-    return BANNER.read_text(encoding="utf-8")
+    return _frontend_file(BANNER, "the attachment-failure banner")
 
 
 @pytest.mark.unit
@@ -241,11 +269,9 @@ def test_every_declared_reason_has_copy_in_both_locales(locale):
 
     from app.services.ai.chat.asset_ref_resolver import AssetRefFailureReason
 
-    if not LOCALES[locale].exists():
-        pytest.skip("frontend locales not checked out (backend-only tree)")
-    strings = json.loads(LOCALES[locale].read_text(encoding="utf-8"))["chat"][
-        "attachmentFailureReason"
-    ]
+    strings = json.loads(_frontend_file(LOCALES[locale], f"the {locale} locale"))[
+        "chat"
+    ]["attachmentFailureReason"]
     for reason in get_args(AssetRefFailureReason):
         assert strings.get(reason), f"{locale}: no copy for {reason}"
 

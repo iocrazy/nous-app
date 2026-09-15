@@ -424,3 +424,29 @@ describe('OutputDiffDialog — a revert announces itself (3b Task 6)', () => {
     expect(notifyTurn).not.toHaveBeenCalled();
   });
 });
+
+describe('OutputDiffDialog — B4：坏坐标不许变成坏请求', () => {
+  it('names the version_not_found refusal by its own copy', async () => {
+    // `errorText` 一直有这个分支，但没有任何用例走过它——后端 409/404 的
+    // 真实外壳（`details.code`）由 `outputsService` 解出来，这里断言的是
+    // 「解出来之后说的是哪句话」。
+    const { OutputsError } = await import('../../services/outputsService');
+    getOutputDiff.mockRejectedValueOnce(new OutputsError('version_not_found', 404, '404 Not Found'));
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const err = await screen.findByTestId('output-diff-error');
+    expect(err.textContent).toContain('not in this object’s chain');
+    expect(screen.queryByTestId('output-diff-from')).toBeNull();
+  });
+
+  it('asks for no diff at all when the chain answers without a usable version', async () => {
+    // 真栈上 `latest_version` 来自 `versions[0]["version"]`，所以缺席只可能
+    // 来自坏响应 / 旧缓存条目——而那时 `to` 变成 `undefined`，既不等于 `null`
+    // 也过得了守卫，于是发出 `?from=undefined&to=undefined`。空答案要说
+    // 「读不出来」，不是发一个注定 422 的请求。
+    getOutputLineage.mockResolvedValueOnce({ kind: 'script_shot', ref_id: '9', versions: [], as_of_seq: '0' } as unknown as OutputLineage);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff-error');
+    expect(getOutputDiff).not.toHaveBeenCalled();
+    expect(screen.queryByText('Loading…')).toBeNull();
+  });
+});

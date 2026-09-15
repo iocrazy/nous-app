@@ -227,6 +227,16 @@ export function TodolistPage() {
     mapsRef.current = { agentsById, projectsById };
   }, [agentsById, projectsById]);
 
+  // Same reason as `mapsRef`, one step stronger: `t` is a fresh function on
+  // every render under i18next, so listing it on `loadSelectedIssue` would
+  // give that callback a new identity each render and re-run the fetch effect
+  // that depends on it — a reload loop. The copy used is the one at throw
+  // time, which is what we want anyway.
+  const notifyRef = useRef({ addToast, t });
+  useEffect(() => {
+    notifyRef.current = { addToast, t };
+  }, [addToast, t]);
+
   // Bumped by every request and by the effect's teardown, so a response only
   // lands if nothing newer has been asked for since — the single fetch path is
   // shared by the URL effect and by the post-dispatch re-read.
@@ -280,7 +290,18 @@ export function TodolistPage() {
       if (inPlace) {
         // Non-fatal on purpose: the row is already on screen, just a beat
         // stale. Same posture as the live-row refetch below.
+        //
+        // But it is SAID (B8). The trigger for an in-place re-read is a thing
+        // the user just did — Dispatch, above all — so a silent failure shows
+        // them an unchanged row with no way to tell "it did not take" from
+        // "it took and I could not refresh". A toast, not an error page: the
+        // half-typed comment stays where it is.
         console.error('[TodolistPage] selected issue refetch failed', err);
+        const { addToast: toast, t: tr } = notifyRef.current;
+        toast(
+          tr('issues.refreshFailed', 'Could not refresh this issue — what you see may be out of date'),
+          'error',
+        );
         return;
       }
       setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');

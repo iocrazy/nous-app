@@ -72,6 +72,28 @@ class ChatOutputRef:
     title: Optional[str] = None
 
 
+def _clean_title(value: Any) -> Optional[str]:
+    """标题归一：**空的就是没有**（B1）。
+
+    登记表里 ``""``（以及只有空白的串）和 ``NULL`` 说的是同一件事——这一版没
+    被起过名字。留着空串会一路走到 ``<referenced_outputs>`` 渲染成
+    ``title=""``，而那对模型读作「它的标题就是空字符串」，与本模块 docstring
+    和渲染层承诺的「省略」正好相反。
+
+    归一放在**构造 ``ChatOutputRef`` 的每一处**，而不是三个读者各判一次：
+    ``_stamped`` / ``citations_for_transcript`` / 框渲染都只问 ``title is
+    None``，多一个读者就多一次漏判的机会。
+
+    **两侧空白一并去掉**（评审 N2）：``" S3 "`` 与 ``"S3"`` 是同一个标题，而
+    框里渲染成 ``title=" S3 "`` 会让模型把那两个空格读成标题的一部分。既然
+    「全是空白 ⇒ 没有标题」这条判定已经在用 ``strip()``，把去掉的那部分留在
+    值里只会让同一个函数对同一批空白给出两种答案。
+    """
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
 @dataclass(frozen=True)
 class OutputRefResolution:
     """``resolve_output_refs`` 的结果。
@@ -202,12 +224,11 @@ def _verified(
             UNRESOLVABLE,
             f"{ref_kind}/{ref_id} v{version} was not produced on this issue",
         )
-    title = row.get("title")
     return ChatOutputRef(
         ref_kind=ref_kind,
         ref_id=ref_id,
         version=version,
-        title=str(title) if title is not None else None,
+        title=_clean_title(row.get("title")),
     )
 
 
@@ -303,13 +324,12 @@ def output_refs_from_attachments(
                 f"[output_ref] dropping an unvalidated citation from a turn: {exc}"
             )
             continue
-        title = mapping.get("title")
         out.append(
             ChatOutputRef(
                 ref_kind=ref_kind,
                 ref_id=ref_id,
                 version=version,
-                title=str(title) if title is not None else None,
+                title=_clean_title(mapping.get("title")),
             )
         )
     return out

@@ -628,9 +628,14 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // strand the live marker on an empty phantom node. Only when the run
         // has no step at all does one get made, because the alternative is
         // dropping the card entirely (修复轮 1)。
-        const coord = num(ev.step);
+        // Columns first, payload second — the same fallback `step_start`
+        // has (B2). The registry writes both, but a pre-453 row (and any
+        // recorder that fell back to `emit`'s positional signature) carries
+        // the coordinates ONLY in the payload; without this they land on
+        // whatever step is open instead of the one that produced them.
+        const coord = num(ev.step) ?? num(p.step);
         const node =
-          (coord !== null ? stepAt(num(ev.turn) ?? 1, coord) : null) ??
+          (coord !== null ? stepAt(num(ev.turn) ?? num(p.turn) ?? 1, coord) : null) ??
           current ??
           lastStep() ??
           ensureStep(ev, null);

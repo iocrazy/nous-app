@@ -548,17 +548,41 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
    */
   const handleMentionOutputSelect = useCallback(
     (row: OutputMentionRow) => {
-      const next = stageOutput(stagedOutputs, toStagedOutput(row));
-      if (next === null) {
-        addToast(
-          t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
-            n: MAX_OUTPUT_REF_ATTACHMENTS,
-          }),
-          'error',
-        );
-        return;
+      const res = stageOutput(stagedOutputs, toStagedOutput(row));
+      // A `switch` rather than two `if`s so the compiler owns the fifth case:
+      // `_exhaustive` stops compiling the day `StageOutputOutcome` grows one,
+      // instead of letting it fall through to the staged path and close the
+      // picker on a pick that did not happen (N1).
+      switch (res.outcome) {
+        case 'limit':
+          addToast(
+            t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
+              n: MAX_OUTPUT_REF_ATTACHMENTS,
+            }),
+            'error',
+          );
+          return;
+        // A row whose coordinates are incomplete stages nothing. Saying so is
+        // the point: the old code returned the list unchanged, which looked
+        // exactly like «already staged» (B6).
+        case 'unusable':
+          addToast(
+            t('outputs.citationUnusable', 'That output is missing its version — it cannot be referenced'),
+            'error',
+          );
+          return;
+        // `duplicate` shares the staged path on purpose: the row IS in the
+        // list, so the picker closing is the right answer and `res.list` is
+        // the same array back (React bails on identity).
+        case 'staged':
+        case 'duplicate':
+          break;
+        default: {
+          const _exhaustive: never = res.outcome;
+          return _exhaustive;
+        }
       }
-      setStagedOutputs(next);
+      setStagedOutputs(res.list);
       dropMentionTrigger();
       closeMentionPicker();
       setMentionQuery('');

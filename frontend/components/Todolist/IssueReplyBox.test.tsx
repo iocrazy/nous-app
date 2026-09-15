@@ -7,6 +7,7 @@ import { createResourceMentionExtension } from '../chat/ChatInputResourceMention
 import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 import type { OutputObject, OutputVersion } from '../../services/outputsService';
 import type { ResourceSearchResult } from '../../types';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -242,23 +243,51 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
   return { ...actual, listIssueOutputs: (...args: unknown[]) => listIssueOutputs(...args) };
 });
 
-const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => ({
-  id: `7271452993825349${10 + v}`,
-  version: v,
-  parent_version: v > 1 ? v - 1 : null,
-  run_id: '727145299382534100',
-  issue_id: '727145299382534000',
-  issue_key: 'MH-94',
-  actor_user_id: null,
-  reverted_from_version: null,
-  cost_kind: null,
-  deep_link: '/team/331438215859255/todolist/MH-94?step=1&turn=1',
-  seq: null, turn: null, step: v,
-  title: 'S3 · Shot #1',
-  model: null, cost_cents: null,
-  created_at: '2026-09-10T00:00:00Z',
-  ...over,
-});
+const TEAM = '331438215859255';
+
+/**
+ * `deep_link` exactly as `issue_links.issue_deep_link` would build it for the
+ * SAME row (B9). The old fixture hard-coded `?step=1&turn=1` on every version,
+ * which contradicted its own coordinates twice over: the two versions sat on
+ * different steps, and `turn` was null — and the backend appends `&turn=` only
+ * alongside a step it actually has. A fixture that disagrees with itself is a
+ * fixture no consumer can be held to.
+ */
+const deepLinkFor = (step: number | null, turn: number | null): string =>
+  // The production builder itself, not a third spelling of its rule (L2):
+  // `utils/issueLinks.ts` is the frontend mirror of `issue_links.py`, and
+  // `backend/tests/services/issues/test_issue_links_frontend_mirror.py` holds
+  // the two sides to one string. Re-implementing the rule here would be a
+  // THIRD copy, free to drift from both.
+  //
+  // `!` because the arguments are literals: TEAM and the key are always
+  // present, so the builder's refusal branch is unreachable from here.
+  issueDeepLink(TEAM, 'MH-94', { step, turn })!;
+
+const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => {
+  const row: OutputVersion = {
+    id: `7271452993825349${10 + v}`,
+    version: v,
+    parent_version: v > 1 ? v - 1 : null,
+    run_id: '727145299382534100',
+    issue_id: '727145299382534000',
+    issue_key: 'MH-94',
+    actor_user_id: null,
+    reverted_from_version: null,
+    cost_kind: null,
+    deep_link: null,
+    seq: null, turn: null, step: v,
+    title: 'S3 · Shot #1',
+    model: null, cost_cents: null,
+    created_at: '2026-09-10T00:00:00Z',
+    ...over,
+  };
+  // Derived AFTER the override, so a caller that moves the coordinates gets a
+  // link that still describes them.
+  return over.deep_link !== undefined
+    ? row
+    : { ...row, deep_link: deepLinkFor(row.step, row.turn) };
+};
 
 const SHOT_OUTPUT: OutputObject = {
   kind: 'script_shot',
@@ -1020,6 +1049,30 @@ describe('IssueReplyBox — the Assets tab', () => {
     );
     expect(addToast.mock.calls[0][0]).not.toContain('{{');
     expect(addToast.mock.calls[0][0]).not.toContain('outputs.citationLimit');
+  });
+
+  it('B6: says so when a picked row carries no usable coordinates', async () => {
+    // A response that VIOLATES the documented shape (`version` is a number on
+    // the wire) — which is exactly what this branch is for. Staging nothing
+    // while closing the picker is the silent no-op this repo bans: the writer
+    // sees no chip and is told nothing.
+    listIssueOutputs.mockResolvedValue([
+      {
+        kind: 'script_shot',
+        ref_id: '727145299382534999',
+        title: 'S3 · Shot #1',
+        latest_version: 1,
+        versions: [{ ...outputVersion(1), version: null as unknown as number }],
+      },
+    ]);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    expect(screen.queryAllByTestId('staged-output-chip')).toHaveLength(0);
+    // The SENTENCE from `en.json`, not the key.
+    expect(addToast).toHaveBeenCalledWith(
+      'That output is missing its version — it cannot be referenced',
+      'error',
+    );
   });
 
   it('leaves the "@query" alone when the pick was REFUSED by the cap', async () => {

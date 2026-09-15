@@ -2516,6 +2516,9 @@
       "delivery": "Delivery"
     }
   },
+  "files": {
+    "issueLinkNoTeam": "No team context — open the issue from its board"
+  },
   "projects": {
     "openByIdFailed": "Could not open this project — it may have been deleted or you no longer have access",
     "episodeViews": {
@@ -5629,6 +5632,7 @@
     "wakesAt": "Wakes at {{at}}"
   },
   "issues": {
+    "refreshFailed": "Could not refresh this issue — what you see may be out of date",
     "pageTitle": "Issues",
     "needsReplyChip": "Needs your reply",
     "waitingOnYou": "Waiting on you",
@@ -5869,6 +5873,7 @@
     "mentionCount_other": "{{count}} outputs",
     "citationRemove": "Remove This Reference",
     "citationLimit": "A comment can reference at most {{n}} outputs",
+    "citationUnusable": "That output is missing its version — it cannot be referenced",
     "cited_one": "References {{count}} output · pinned to version",
     "cited_other": "References {{count}} outputs · pinned to version",
     "citedChip": "@{{title}} v{{n}}",

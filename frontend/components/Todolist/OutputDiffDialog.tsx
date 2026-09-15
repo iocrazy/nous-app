@@ -107,6 +107,16 @@ function revertErrorText(err: unknown, from: number | null, t: T): string {
   }
 }
 
+/** A version number the diff endpoint will actually accept (B4).
+ *
+ *  `from` / `to` are `Query(..., ge=1)` on the backend, and the chain is the
+ *  only source of them. A chain that answers without one leaves `to` as
+ *  `undefined` — which is not `null`, so a plain null-check waves it through
+ *  and the dialog asks for `?from=undefined&to=undefined`. A request that
+ *  cannot succeed is worse than no request: it turns "I could not read the
+ *  chain" into a 422 the reader has to decode. */
+const usableVersion = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 1;
+
 const TONE: Record<DiffSegment['type'], string> = {
   same: '',
   add: 'bg-ok-soft text-ok rounded-sm',
@@ -237,8 +247,20 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
     getOutputLineage(kind, refId)
       .then((chain) => {
         if (!live) return;
-        setVersions(chain.versions);
-        setTo((cur) => cur ?? chain.latest_version);
+        // The chain's own answer for "which version do we open on", or
+        // nothing at all — never `undefined` masquerading as a number.
+        const latest = usableVersion(chain.latest_version)
+          ? chain.latest_version
+          : chain.versions?.find((v) => usableVersion(v.version))?.version ?? null;
+        setVersions(chain.versions ?? []);
+        setTo((cur) => (usableVersion(cur) ? cur : latest));
+        if (latest === null && !usableVersion(initialTo)) {
+          // Nothing to compare and nothing to show: say so and stop the
+          // spinner, rather than leaving «Loading…» up for ever.
+          setError(errorText(null, tr));
+          setLoading(false);
+          return;
+        }
         setError(null);
       })
       .catch((err) => {
@@ -315,7 +337,9 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   };
 
   useEffect(() => {
-    if (to === null || from === null) return;
+    // Both ends must be numbers the endpoint accepts (B4) — `null` is the
+    // "not known yet" case and `undefined` the "chain never said" one.
+    if (!usableVersion(to) || !usableVersion(from)) return;
     let live = true;
     setLoading(true);
     getOutputDiff(kind, refId, from, to)
