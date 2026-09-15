@@ -6,6 +6,10 @@ from DrissionPage import ChromiumOptions, ChromiumPage
 from loguru import logger
 
 from app.core.utils import SingletonMeta, Utils
+from app.services.media.parsers.douyin_parse.failures import (
+    DouyinFailure,
+    DouyinParseError,
+)
 
 
 class DrissionPageParser(metaclass=SingletonMeta):
@@ -407,7 +411,14 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     logger.warning(
                         "[DrissionPage] Aborting parse: captcha blocking API calls"
                     )
-                    return None
+                    # Typed, not `return None`: the chain above turns every
+                    # falsy return into the same "all methods failed" sentence,
+                    # and a captcha is the one failure where "try again in a
+                    # few minutes" is real advice (2026-09-15).
+                    raise DouyinParseError(
+                        DouyinFailure.CAPTCHA,
+                        f"captcha via {detection_method}",
+                    )
 
                 # 获取所有网络请求
                 aweme_response = None
@@ -524,6 +535,10 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     logger.error("未能获取到有效的抖音视频数据")
                     return None
 
+            except DouyinParseError:
+                # 类型化失败必须穿过这里。压成 None 就等于把「抖音要求验证」重新
+                # 变成那句谁也看不懂的 "all methods failed"（2026-09-15）。
+                raise
             except Exception as e:
                 logger.error(f"获取抖音视频数据失败: {e}")
                 return None

@@ -1162,6 +1162,8 @@
     "downloadResult": "下载",
     "tabActive": "进行中",
     "tabHistory": "历史",
+    "retryBadge": "第{{count}}次重试",
+    "retryCount": "已重试 {{count}} 次 —— 同一个任务的新一次尝试",
     "waitingInput": "等你回复",
     "running": "运行",
     "queued": "排队",

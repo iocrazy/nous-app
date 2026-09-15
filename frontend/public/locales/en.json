@@ -1162,6 +1162,8 @@
     "downloadResult": "Download",
     "tabActive": "Active",
     "tabHistory": "History",
+    "retryBadge": "retry {{count}}",
+    "retryCount": "Retried {{count}} time(s) — same task, new attempt",
     "waitingInput": "Waiting for your input",
     "running": "Running",
     "queued": "Queued",

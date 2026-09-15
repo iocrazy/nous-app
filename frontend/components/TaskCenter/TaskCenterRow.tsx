@@ -10,7 +10,12 @@ import {
   type UnifiedTask,
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
-import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
+import {
+  taskAwaitingInput,
+  taskRetryCount,
+  taskRowActions,
+  taskShowsCover,
+} from './taskRowPresentation';
 import { AgentNameBadge } from './AgentNameBadge';
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
@@ -68,6 +73,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   const [coverFailed, setCoverFailed] = useState(false);
 
   const actions = taskRowActions(task);
+  const retryCount = taskRetryCount(task);
   const isActive = task.status === 'pending' || task.status === 'processing';
   const showCover = taskShowsCover(task) && !coverFailed;
   const awaiting = taskAwaitingInput(task);
@@ -108,6 +114,18 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs text-ink-300 truncate max-w-[160px]">{task.title}</span>
             <div className="flex items-center gap-1.5 shrink-0 ml-2">
+              {/* Attempt N of the same task. Retrying re-keys this row to a
+                  fresh workflow instead of spawning a second task, so without
+                  the badge four attempts and one attempt look identical. */}
+              {retryCount !== null && (
+                <span
+                  data-testid="task-retry-count"
+                  title={t('topbar.retryCount', { count: retryCount })}
+                  className="rounded-sm bg-ink-800/70 px-1 py-px text-[10px] leading-none text-ink-400 tabular-nums"
+                >
+                  {t('topbar.retryBadge', { count: retryCount })}
+                </span>
+              )}
               {isActive && (
                 <>
                   {task.progress > 0 && (
