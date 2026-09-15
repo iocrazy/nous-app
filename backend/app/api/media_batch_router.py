@@ -26,6 +26,7 @@ from app.core.utils import Utils
 from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_logs_repository import log_user_action
 from app.services.billing.points_service import PointsService
+from app.services.media.parsers.douyin_parse.failures import DouyinParseError
 from app.services.media.parsers.douyin_parse.parse_chain import fetch_douyin_detail
 from app.services.media.parsers.media_service import MediaService
 from app.services.modules.gate import require_module
@@ -387,13 +388,23 @@ async def debug_raw_parse(
     # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.
     validated = await validate_url_async(url)
 
-    chain_result = await fetch_douyin_detail(
-        validated,
-        user_id=auth.user_id,
-        download_video=False,
-        download_music=False,
-        download_cover=False,
-    )
+    try:
+        chain_result = await fetch_douyin_detail(
+            validated,
+            user_id=auth.user_id,
+            download_video=False,
+            download_music=False,
+            download_cover=False,
+        )
+    except DouyinParseError as e:
+        # The chain now says WHY (captcha / rejected signature / ...). Passing
+        # that through as a typed 422 beats letting a RuntimeError become a
+        # 500, which would tell the operator running this probe that WE broke
+        # rather than that douyin refused.
+        raise HTTPException(
+            status_code=422,
+            detail={"code": e.kind.value, "message": str(e)},
+        ) from e
     if not chain_result:
         raise HTTPException(status_code=404, detail="Douyin parse chain returned None")
 

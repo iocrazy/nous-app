@@ -128,13 +128,25 @@ async def test_formatter_empty_after_abogus_falls_through():
 
 
 @pytest.mark.asyncio
-async def test_all_methods_fail_returns_none():
+async def test_all_methods_fail_raises_a_typed_failure():
+    """Contract change 2026-09-15: a fully failed chain RAISES ``DouyinParseError``
+    instead of returning None. Returning None collapsed every reason (captcha,
+    Argus rejection, nothing-said) into one opaque sentence upstream; see
+    tests/services/media/test_douyin_parse_failure_reasons.py for the why.
+    With no method offering a reason, the kind is UNKNOWN — not a guess."""
+    from app.services.media.parsers.douyin_parse.failures import (
+        DouyinFailure,
+        DouyinParseError,
+    )
+
     with (
         patch(ABOGUS_PARSE, new=AsyncMock(return_value=None)),
         patch(DRISSION_FETCH, new=AsyncMock(return_value=None)),
         patch(FORMATTER, new=AsyncMock()),
     ):
-        assert await _run_chain() is None
+        with pytest.raises(DouyinParseError) as exc:
+            await _run_chain()
+    assert exc.value.kind is DouyinFailure.UNKNOWN
 
 
 @pytest.mark.asyncio
@@ -157,13 +169,20 @@ async def test_abogus_flag_disabled_skips_abogus(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_all_flags_disabled_returns_none(monkeypatch):
+async def test_all_flags_disabled_raises_not_none(monkeypatch):
+    """Operator switched every method off: still a typed failure (UNKNOWN with a
+    message naming admin settings), so the task row says what happened instead
+    of the caller inventing "all methods failed" for a chain that never ran."""
+    from app.services.media.parsers.douyin_parse.failures import DouyinParseError
+
     monkeypatch.setattr(
         parse_chain,
         "get_douyin_method_flags",
         AsyncMock(return_value=_flags(abogus=False, drissionpage=False)),
     )
-    assert await _run_chain() is None
+    with pytest.raises(DouyinParseError) as exc:
+        await _run_chain()
+    assert "admin settings" in str(exc.value)
 
 
 def test_coerce_flag_handles_jsonb_types():

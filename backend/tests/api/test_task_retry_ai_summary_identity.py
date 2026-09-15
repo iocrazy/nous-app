@@ -56,7 +56,17 @@ def _patch_retry_row(monkeypatch, tm, *, resource_id: str, media_id: str):
         }
     )
     monkeypatch.setattr(tm, "get_task_manager", lambda: tracker)
-    monkeypatch.setattr(tm, "_peek_task_type", AsyncMock(return_value="ai_summary"))
+    monkeypatch.setattr(
+        tm,
+        "_peek_task_row",
+        AsyncMock(
+            return_value={
+                "task_type": "ai_summary",
+                "dedup_key": None,
+                "status": "failed",
+            }
+        ),
+    )
     return tracker
 
 

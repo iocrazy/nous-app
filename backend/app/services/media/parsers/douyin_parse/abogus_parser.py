@@ -29,6 +29,10 @@ from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.boundary import safe_async_client
+from app.services.media.parsers.douyin_parse.failures import (
+    DouyinFailure,
+    DouyinParseError,
+)
 
 SignEngine = Literal["python", "node"]
 
@@ -84,6 +88,12 @@ _ID_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def _cookie_value(cookie_header: str, name: str) -> str:
+    """One cookie's value out of a `k=v; k=v` header, or "" when absent."""
+    m = re.search(rf"(?:^|;\s*){re.escape(name)}=([^;]*)", cookie_header or "")
+    return m.group(1) if m else ""
+
+
 class ABogusDouyinParser:
     """轻量级抖音解析器（HTTP + a_bogus 签名直达 /aweme/v1/web/aweme/detail/）。
 
@@ -131,6 +141,12 @@ class ABogusDouyinParser:
             signed_url = await cls._sign(url, ua, eng, fp)
 
             return await cls._fetch_detail(signed_url, ua, cookie, extra_headers)
+        except DouyinParseError:
+            # A typed failure is the ONE thing this handler must not flatten:
+            # turning it back into None here would undo the whole point of
+            # raising it (CLAUDE.md "catch 静默吞错"). The chain above decides
+            # what to do with it.
+            raise
         except Exception as err:
             logger.error(f"[ABogus] parse failed (engine={eng}): {err}")
             return None
@@ -335,6 +351,22 @@ class ABogusDouyinParser:
         }
         if cookie:
             headers["Cookie"] = cookie
+        # Douyin's Argus plugin reads the device fingerprint from a `uifid`
+        # REQUEST HEADER, not from the cookie of the same name — even though
+        # the browser sends both and we already hold the value.
+        #
+        # Measured against production on 2026-09-15, same URL, same cookie:
+        #   without the header → 403 "ArgusSecurityPlugin Uifid Not Found"
+        #   with the header    → 403 "ArgusSecurityPlugin Signature Not Found"
+        # The error MOVED, which is what proves the header is read. It does not
+        # make the call succeed: there is a second Argus gate behind it that
+        # wants a signature header we do not produce, so `abogus` stays down
+        # against douyin's current web API and `drissionpage` is the tier that
+        # can still work. Forwarding this costs nothing and stops the first
+        # gate from masking whatever the second one says.
+        uifid = _cookie_value(cookie, "UIFID")
+        if uifid:
+            headers.setdefault("uifid", uifid)
 
         async with safe_async_client(timeout=cls.DETAIL_TIMEOUT) as client:
             resp = await client.get(signed_url, headers=headers)
@@ -348,7 +380,17 @@ class ABogusDouyinParser:
             try:
                 data = resp.json()
             except json.JSONDecodeError:
-                logger.warning(f"[ABogus] non-JSON body: {resp.text[:500]}")
+                body = resp.text[:500]
+                logger.warning(f"[ABogus] non-JSON body: {body}")
+                # Douyin's anti-bot plugin answers in plain text when it
+                # rejects the request outright. Distinguishing this from a
+                # generic miss matters: a rejected signature fails identically
+                # on every retry, so telling the user to "try again" would be
+                # a lie (2026-09-15 — `ArgusSecurityPlugin Uifid Not Found`).
+                if "ArgusSecurityPlugin" in body or "Uifid" in body:
+                    raise DouyinParseError(
+                        DouyinFailure.SIGNATURE_REJECTED, body.strip()[:200]
+                    )
                 return None
 
             aweme_detail = data.get("aweme_detail")

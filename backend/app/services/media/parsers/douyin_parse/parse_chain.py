@@ -26,6 +26,12 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.services.media.parsers.douyin_parse.failures import (
+    DouyinFailure,
+    DouyinParseError,
+    message_for,
+)
+
 # Admin toggles in system_settings. The legacy `douyin_lighthttp_enabled`
 # key is intentionally gone — the tier no longer exists.
 _METHOD_FLAG_KEYS: dict[str, str] = {
@@ -125,14 +131,31 @@ async def fetch_douyin_detail(
         methods.append(("drissionpage", DrissionPageParser.fetch_one_video))
     if not methods:
         logger.warning("[DouyinChain] all parse methods disabled in admin settings")
-        return None
+        raise DouyinParseError(
+            DouyinFailure.UNKNOWN,
+            "Every Douyin parse method is switched off in admin settings.",
+        )
 
     src_clip = str(url_or_id)[:80]
+    # The reason the LAST method gave, if any gave one. Every branch below used
+    # to `continue` and the function ended on a bare `return None`, so a parse
+    # that failed for a knowable reason (douyin served a captcha; douyin
+    # rejected our signature) reached the user as the same opaque sentence as
+    # a parse that failed for no reason anyone recorded. Keeping the reason is
+    # the difference between "try again in a few minutes" and "retrying will
+    # never work" — opposite advice, previously indistinguishable.
+    last_failure: DouyinFailure | None = None
     for method, parse_fn in methods:
         try:
             aweme_detail = await parse_fn(
                 url_or_id, user_id=user_id, user_agent=user_agent
             )
+        except DouyinParseError as e:
+            last_failure = e.kind
+            logger.warning(
+                f"[DouyinChain] {method} failed for {src_clip}: {e.kind.value} ({e})"
+            )
+            continue
         except Exception as e:
             logger.warning(f"[DouyinChain] {method} raised for {src_clip}: {e}")
             continue
@@ -154,8 +177,14 @@ async def fetch_douyin_detail(
             logger.info(f"[DouyinChain] succeeded via {method} for {src_clip}")
             return aweme_detail, parsed_data, method
 
-    logger.warning(f"[DouyinChain] all enabled methods failed for {src_clip}")
-    return None
+    logger.warning(
+        f"[DouyinChain] all enabled methods failed for {src_clip}"
+        + (f" — last reason: {last_failure.value}" if last_failure else "")
+    )
+    raise DouyinParseError(
+        last_failure or DouyinFailure.UNKNOWN,
+        message_for(last_failure or DouyinFailure.UNKNOWN),
+    )
 
 
 async def reparse_douyin(
@@ -179,22 +208,37 @@ async def reparse_douyin(
     sources = [
         src for src in (original_url, str(platform_id) if platform_id else None) if src
     ]
+    last_failure: DouyinParseError | None = None
     for idx, src in enumerate(sources):
         if idx:
             logger.info(
                 f"[DouyinChain] re-parse via URL failed, retrying with bare "
                 f"aweme_id {src}"
             )
-        result = await fetch_douyin_detail(
-            src,
-            user_id=user_id,
-            user_agent=user_agent,
-            download_video=download_video,
-            download_music=download_music,
-            download_cover=download_cover,
-            valid_url=original_url,
-        )
+        try:
+            result = await fetch_douyin_detail(
+                src,
+                user_id=user_id,
+                user_agent=user_agent,
+                download_video=download_video,
+                download_music=download_music,
+                download_cover=download_cover,
+                valid_url=original_url,
+            )
+        except DouyinParseError as e:
+            # Per-source, NOT per-call: this loop exists so a failed URL parse
+            # can still be retried with the bare aweme_id. Letting the first
+            # source's typed failure escape would skip that second attempt
+            # entirely — the reason is worth keeping, but not at the price of
+            # the fallback it would silently delete.
+            last_failure = e
+            continue
         if result:
             _detail, parsed_data, method = result
             return parsed_data, method
+    # Every source exhausted. Re-raise the last typed reason if we have one;
+    # callers of THIS function have always treated None as "no luck", so a
+    # source list that was empty stays None rather than inventing a failure.
+    if last_failure is not None:
+        raise last_failure
     return None
