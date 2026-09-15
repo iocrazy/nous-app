@@ -482,3 +482,161 @@ def _stub_agent_dispatch(monkeypatch, st, spy):
         "app.services.infra.unified_task_manager.get_task_manager", lambda: _Mgr()
     )
     return scope, shot
+
+
+# --------------------------------------------------------------------------
+# workflow 本体 → step 那一跳（C4）
+# --------------------------------------------------------------------------
+#
+# 在本票之前，这一跳**一条测试都没有**：既有的要么直接调 step 函数（本文件
+# 上半部分就是），要么只 `inspect.signature` / 查注册表。于是「派发方把坐标
+# 交给了 workflow」与「step 收到了坐标」两头都钉住了，中间那根线没人拉过 ——
+# workflow 体里把 `run_id` 写成 `None`、或者把 `turn` 和 `step` 传反，
+# 全仓库没有一条测试会红。
+#
+# 跑法：`@DBOS.workflow()` 是 functools.wraps 包的，`__wrapped__` 就是函数
+# 本体，单测里不起引擎（同 `tests/test_issue_reply_workflow.py` 的先例）。
+
+
+def _body(workflow):
+    """``@DBOS.workflow()`` 包了**三层**，只剥一层 ``__wrapped__`` 拿到的仍是
+    引擎壳（调用时报 "invoked before DBOS initialized"）。``inspect.unwrap``
+    一路剥到函数本体，单测里不起引擎。"""
+    import inspect
+
+    return inspect.unwrap(workflow)
+
+
+class _StepSpy:
+    """记下每次调用的位置参数与关键字参数。"""
+
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append((args, kwargs))
+        return self.result
+
+
+async def test_image_workflow_hands_the_run_coordinates_to_its_persist_step(
+    monkeypatch,
+):
+    import app.workflows.script_shot_generate as wf
+
+    generate = _StepSpy({"url": "http://cdn/x.png", "provider": "ark", "model": "m"})
+    persist = _StepSpy({"image_url": "/i", "thumbnail_url": "/t"})
+    done = _StepSpy(None)
+    monkeypatch.setattr(wf, "generate_shot_image_step", generate)
+    monkeypatch.setattr(wf, "persist_generation", persist)
+    monkeypatch.setattr(wf, "mark_shot_done", done)
+
+    out = await _body(wf.script_shot_generate_workflow)(
+        "1", model="m", provider="p", user_id="u", run_id=777, turn=3, step=9
+    )
+
+    assert out == {"status": "success", "shot_id": "1", "image_url": "/i"}
+    args, kwargs = persist.calls[0]
+    # 位置传参，所以断言的是**位置**——把 turn 和 step 传反正是这条要拦的。
+    passed = dict(zip(_PERSIST_POSITIONAL, args)) | kwargs
+    assert (passed["run_id"], passed["turn"], passed["step"]) == (777, 3, 9)
+    # 顺带钉住 step 真跑出来的那一行被回填进登记（而不是请求侧的目录行名）。
+    assert (kwargs["resolved_provider"], kwargs["resolved_model"]) == ("ark", "m")
+
+
+async def test_video_workflow_hands_the_run_coordinates_to_its_persist_step(
+    monkeypatch,
+):
+    import app.workflows.script_shot_video as wf
+
+    generate = _StepSpy(
+        {"path": "/tmp/jimeng_x/out.mp4", "provider": "jimeng-cli", "model": "sd2"}
+    )
+    persist = _StepSpy("/api/v1/generated-media/66/stream")
+    done = _StepSpy(None)
+    monkeypatch.setattr(wf, "generate_shot_video_step", generate)
+    monkeypatch.setattr(wf, "persist_video_generation", persist)
+    monkeypatch.setattr(wf, "mark_shot_video_done", done)
+
+    out = await _body(wf.script_shot_video_workflow)(
+        "1", model="m", provider="p", user_id="u", run_id=777, turn=3, step=9
+    )
+
+    assert out["status"] == "success"
+    args, kwargs = persist.calls[0]
+    passed = dict(zip(_VIDEO_PERSIST_POSITIONAL, args)) | kwargs
+    assert (passed["run_id"], passed["turn"], passed["step"]) == (777, 3, 9)
+    assert (kwargs["resolved_provider"], kwargs["resolved_model"]) == (
+        "jimeng-cli",
+        "sd2",
+    )
+
+
+async def test_a_human_click_reaches_the_step_with_no_run_at_all(monkeypatch):
+    """人手点的 /generate 没有 run。workflow 体把 None 原样传下去才对 ——
+    回填成 0 或者省略键都会让登记口把一次人手生成记成某个 run 的产出。"""
+    import app.workflows.script_shot_generate as wf
+
+    persist = _StepSpy({"image_url": "/i", "thumbnail_url": "/t"})
+    monkeypatch.setattr(wf, "generate_shot_image_step", _StepSpy("http://cdn/x.png"))
+    monkeypatch.setattr(wf, "persist_generation", persist)
+    monkeypatch.setattr(wf, "mark_shot_done", _StepSpy(None))
+
+    await _body(wf.script_shot_generate_workflow)("1", user_id="u")
+
+    args, kwargs = persist.calls[0]
+    passed = dict(zip(_PERSIST_POSITIONAL, args)) | kwargs
+    assert (passed["run_id"], passed["turn"], passed["step"]) == (None, None, None)
+
+
+#: ``persist_generation`` 的位置参数顺序（workflow 体是位置传参的）。
+#: ⚠️ 这份顺序必须跟 step 的签名一致，否则上面的断言会读错格子而不是转红 ——
+#: `test_the_positional_map_matches_the_step_signature` 钉住这一点。
+_PERSIST_POSITIONAL = (
+    "shot_id",
+    "provider_url",
+    "model",
+    "provider",
+    "user_id",
+    "run_id",
+    "turn",
+    "step",
+)
+_VIDEO_PERSIST_POSITIONAL = (
+    "shot_id",
+    "local_path",
+    "model",
+    "provider",
+    "user_id",
+    "run_id",
+    "turn",
+    "step",
+)
+
+
+def test_the_positional_map_matches_the_step_signature():
+    """上面三条靠 ``_PERSIST_POSITIONAL`` 把位置参数翻译成名字。
+
+    那份顺序如果跟 step 的真签名分了家，断言就会去读错误的格子 —— 最坏的
+    情况是它读到一个**碰巧相等**的值，于是一条本该转红的改动安静通过。
+    所以拿 ``inspect.signature`` 把两边对上。
+    """
+    import inspect
+
+    import app.workflows.script_shot_generate as img
+    import app.workflows.script_shot_video as vid
+
+    def _positional(fn) -> tuple[str, ...]:
+        params = inspect.signature(getattr(fn, "__wrapped__", fn)).parameters
+        return tuple(
+            name
+            for name, p in params.items()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)  # noqa: E501
+        )
+
+    assert _positional(img.persist_generation)[: len(_PERSIST_POSITIONAL)] == (
+        _PERSIST_POSITIONAL
+    )
+    assert _positional(vid.persist_video_generation)[
+        : len(_VIDEO_PERSIST_POSITIONAL)
+    ] == (_VIDEO_PERSIST_POSITIONAL)
