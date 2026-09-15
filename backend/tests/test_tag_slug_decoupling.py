@@ -124,7 +124,7 @@ async def test_automation_tag_prefers_slug():
         patch.object(repo, "get_tag_by_slug", AsyncMock(return_value={"id": 7})),
         patch.object(repo, "get_tag_by_name", AsyncMock()) as by_name,
     ):
-        assert await repo.get_automation_tag("Food") == {"id": 7}
+        assert await repo.get_automation_tag("Food", _USER) == {"id": 7}
     by_name.assert_not_awaited()
 
 
@@ -143,7 +143,7 @@ async def test_automation_tag_falls_back_to_name():
         patch.object(repo, "get_tag_by_slug", AsyncMock(return_value=None)),
         patch.object(repo, "get_tag_by_name", AsyncMock(return_value={"id": 9})),
     ):
-        assert await repo.get_automation_tag("Cooking") == {"id": 9}
+        assert await repo.get_automation_tag("Cooking", _USER) == {"id": 9}
 
 
 @pytest.mark.asyncio
@@ -158,5 +158,5 @@ async def test_automation_tag_lowercases_before_the_slug_lookup():
         ) as by_slug,
         patch.object(repo, "get_tag_by_name", AsyncMock()),
     ):
-        await repo.get_automation_tag("Tutorial")
-    by_slug.assert_awaited_once_with("tutorial", None)
+        await repo.get_automation_tag("Tutorial", _USER)
+    by_slug.assert_awaited_once_with("tutorial", _USER)
