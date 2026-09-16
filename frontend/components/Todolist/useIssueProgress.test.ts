@@ -41,6 +41,8 @@ const base = {
   sub_issues: { total: 0, done: 0, items: [] },
   inbox_pending: 0,
   budget: { budget_cents: null, spent_cents: 0, pct: null, state: 'ok' },
+  // 3c §3.3：后端对每个议题都发这个键（没跑过 run 也是零值而不是缺席）。
+  efficiency: { runs: 0, steps: 0, tool_calls: 0, tool_errors: 0, deliverables: 0, avg_run_ms: null, cost_per_deliverable_cents: null, turn_end_reasons: {} },
   origin: { kind: 'manual', origin_id: null },
   execution_state: {},
   computed_at: '2026-09-14T00:00:00Z',

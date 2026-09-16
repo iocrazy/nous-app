@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -853,6 +853,79 @@ class AgentRunsRepository(AsyncpgRepository):
             # logged; Top up answer: typed 503).
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             raise
+
+    async def efficiency_for_issue(self, issue_id: int) -> Dict[str, Any]:
+        """这个议题上所有 run 的工作量（3c §3.3）。
+
+        **不**加 root 过滤：五个计数是每个 run 的自身量，父行不含子行，全体求和才是
+        真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
+        ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
+
+        ``avg_run_ms`` 的分母只数两端时间戳都有的 run；一个都没有 → None（不知道，
+        不是 0 毫秒）。读失败返回 {}：驾驶舱少两个格子，不该把整个议题页拖垮。
+        """
+        try:
+            timed = and_(
+                AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None)
+            )
+            stmt = (
+                select(
+                    AgentRuns.turn_end_reason.label("reason"),
+                    func.count().label("runs"),
+                    func.coalesce(func.sum(AgentRuns.steps), 0).label("steps"),
+                    func.coalesce(func.sum(AgentRuns.tool_calls), 0).label(
+                        "tool_calls"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.tool_errors), 0).label(
+                        "tool_errors"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
+                        "deliverables"
+                    ),
+                    func.count().filter(timed).label("timed_runs"),
+                    # FILTER 挂在 ``sum`` 上，不是挂在 ``extract`` 上——Postgres
+                    # 的 FILTER 只对聚合函数合法，挂错位置 SQLAlchemy 在建语句时
+                    # 就 AttributeError，而那一抛正好落进下面的 except，整个效率账
+                    # 会永远静默返回 {}。``test_efficiency_sql_compiles_and_folds``
+                    # 钉住这个形状。
+                    func.coalesce(
+                        func.sum(
+                            func.extract(
+                                "epoch", AgentRuns.ended_at - AgentRuns.started_at
+                            )
+                        ).filter(timed),
+                        0,
+                    ).label("total_seconds"),
+                )
+                .where(AgentRuns.issue_id == int(issue_id))
+                .group_by(AgentRuns.turn_end_reason)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
+        except Exception as e:
+            logger.error(f"[agent_runs] efficiency_for_issue({issue_id}) failed: {e}")
+            return {}
+        out: Dict[str, Any] = {
+            "runs": 0,
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reasons": {},
+        }
+        timed_runs, total_seconds = 0, 0.0
+        for row in rows:
+            out["runs"] += int(row["runs"])
+            for key in ("steps", "tool_calls", "tool_errors", "deliverables"):
+                out[key] += int(row[key] or 0)
+            timed_runs += int(row["timed_runs"] or 0)
+            total_seconds += float(row["total_seconds"] or 0.0)
+            if row["reason"]:
+                out["turn_end_reasons"][str(row["reason"])] = int(row["runs"])
+        out["avg_run_ms"] = (
+            int(total_seconds * 1000 / timed_runs) if timed_runs else None
+        )
+        return out
 
     async def list_for_issue(
         self,
