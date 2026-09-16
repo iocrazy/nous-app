@@ -234,8 +234,15 @@ async def reconcile_run(
     this exactly once per run. Repeated calls would double-charge.
 
     ``cost_points`` 是这个 run 的**自身**花费（own + media），不是树总额 ——
-    每个子 run 自己也会调一次 reconcile_run 扣它那份，父行再按树总额扣一遍就
-    是对同一笔钱收两次（3c A3，与 ai_usage_hourly 的 A1 同口径）。
+    父行再按树总额扣一遍就是对同一笔钱收两次（3c A3，与 ai_usage_hourly 的
+    A1 同口径）。
+
+    这条口径成立的前提是**子 run 自己也扣得到**，而它一度不成立：
+    ``subagent_task_service`` 与 ``agent_worker`` 两个派发站点都硬编码
+    ``team_id=None``，子 run 在下面的 ``if not team_id`` 早退，于是委派烧掉的
+    钱两边都不收。评审轮 1 已让两处继承父 run 的 team（``team_of_run``），所以
+    现在是父子各扣各的。**仍然不扣的只有顶层 workforce 派发** —— 它没有父 run
+    可继承，team 为空，按设计不计费。
 
     Stated Limitation（BYOK 重复计费，3c A3）：``agent_runs`` / ``generated_media``
     都没有 run 级 BYOK 标记，``RunRecorder`` 也没有对应 kwarg，所以调用方一律
@@ -302,7 +309,7 @@ async def reconcile_run(
         # 静默跳过 —— 「余额没动」必须能在日志里跟「扣失败」区分开。
         logger.info(
             f"[token_billing] points charging disabled by kill switch: "
-            f"run_id={run_id} points={cost_points}"
+            f"team_id={team_id} run_id={run_id} points={cost_points}"
         )
         return ReconcileResult(
             charged=False,
@@ -321,7 +328,18 @@ async def reconcile_run(
         # 「第一次付费动作恰好是 agent run」的团队就永远拿 rpc_consume_team_points
         # 的 `Team quota not found`（mig 120）而扣不到分：本 Task 要修的缺陷换个
         # 机制继续存在。放在急停判断之后 —— 关掉计费时不该顺手发欢迎积分。
-        await ps.ensure_team_quota(str(team_id), user_id=str(user_id))
+        #
+        # 自己一个 try：与扣分共用时，开配额抖一下就把扣分一起吞掉，日志还写
+        # "points consume failed" —— 而扣分其实从未尝试。往下走永远更安全：
+        # 真缺行时 RPC 自己会回 Team quota not found，语义一点不丢。
+        try:
+            await ps.ensure_team_quota(str(team_id), user_id=str(user_id))
+        except Exception as exc:  # noqa: BLE001 — 开配额失败不该拦住扣分尝试
+            logger.warning(
+                f"[token_billing] quota provisioning failed (charging anyway): "
+                f"team_id={team_id} run_id={run_id} error={exc}"
+            )
+
         # 真签名见 points_service.py::check_and_consume。此前这里传 points= /
         # action= / metadata= —— 三个不存在的关键字，外加缺了必填的 user_id /
         # action_type，于是每一次 completed + cost>0 的 run 都 TypeError 并被下面
@@ -350,20 +368,23 @@ async def reconcile_run(
         ok = bool(res.get("success"))
         if not ok:
             logger.warning(
-                f"[token_billing] points consume denied: run_id={run_id} "
-                f"points={cost_points} reason={res.get('reason')!r}"
+                f"[token_billing] points consume denied: team_id={team_id} "
+                f"run_id={run_id} points={cost_points} "
+                f"reason={res.get('reason')!r}"
             )
         return ReconcileResult(
             charged=ok,
-            charged_points=cost_points if ok else 0.0,
+            # 实际从余额扣走的整数（ceil 之后），不是 ceil 之前的 float ——
+            # 一个叫 charged_points 的字段在计费结构里报别的数就是在骗人。
+            charged_points=float(res.get("points_cost") or 0.0) if ok else 0.0,
             byo_key=False,
             usage_logged=usage_logged,
             note=None if ok else (res.get("reason") or "points consume denied"),
         )
     except Exception as exc:
         logger.warning(
-            f"[token_billing] points consume failed: run_id={run_id} "
-            f"points={cost_points} error={exc}"
+            f"[token_billing] points consume failed: team_id={team_id} "
+            f"run_id={run_id} points={cost_points} error={exc}"
         )
         return ReconcileResult(
             charged=False,

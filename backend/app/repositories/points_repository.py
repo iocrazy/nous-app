@@ -391,22 +391,66 @@ class PointsRepository:
         Returns:
             Created team quota row dict.
         """
+        out, _created = await self.create_team_quota_if_absent(
+            team_id=team_id,
+            points_balance=points_balance,
+            storage_limit_bytes=storage_limit_bytes,
+        )
+        return out
+
+    async def create_team_quota_if_absent(
+        self,
+        team_id: str,
+        points_balance: int = 0,
+        storage_limit_bytes: int = 5368709120,
+    ) -> tuple[Dict[str, Any], bool]:
+        """Same INSERT, but idempotent, and it reports whether it created.
+
+        ``team_id`` is the PRIMARY KEY (``team_quotas_pkey``), so a bare INSERT
+        makes concurrent first-time provisioning a coin flip: one caller wins
+        and the other raises. That was invisible while the only caller was the
+        signup background task; 3c A3 made an agent run provision too, so two
+        concurrent runs for one brand-new team would lose one charge outright.
+
+        ``created`` is the ONLY safe basis for the welcome bonus. Both racers
+        getting a row back is correct; both claiming they created it would
+        write two 500-point gift transactions for the same team.
+        """
         try:
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(TeamQuotas)
+                    pg_insert(TeamQuotas)
                     .values(
                         team_id=int(team_id),
                         points_balance=points_balance,
                         storage_limit_bytes=storage_limit_bytes,
                         storage_used_bytes=0,
                     )
+                    .on_conflict_do_nothing(index_elements=["team_id"])
                     .returning(TeamQuotas)
                 )
                 row = result.scalars().first()
-                out = _team_quota_row(row) if row else {}
-            logger.info(f"Created team quota for team {team_id}")
-            return out
+                if row is not None:
+                    logger.info(f"Created team quota for team {team_id}")
+                    return _team_quota_row(row), True
+
+                # DO NOTHING ⇒ RETURNING is empty. Someone else created it
+                # between our read and our write; hand back THEIR row rather
+                # than {} — add_points does .get() on this result immediately.
+                existing = (
+                    (
+                        await session.execute(
+                            select(TeamQuotas).where(TeamQuotas.team_id == int(team_id))
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+            logger.info(
+                f"Team quota for team {team_id} already existed (a concurrent "
+                f"writer won); no welcome bonus from this caller"
+            )
+            return (_team_quota_row(existing) if existing else {}), False
         except Exception as e:
             logger.error(f"Failed to create team quota for {team_id}: {e}")
             raise

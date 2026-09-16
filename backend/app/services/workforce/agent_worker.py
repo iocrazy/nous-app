@@ -75,7 +75,7 @@ from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
-from app.services.ai.scope.scope_binding import resolve_dispatch_scope
+from app.services.ai.scope.scope_binding import resolve_dispatch_scope, team_of_run
 
 logger = logging.getLogger(__name__)
 
@@ -283,12 +283,17 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         # workforce dispatch) leaves both None, i.e. no screenwriting reach.
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
 
+        # 3c A3：团队跟着派发者走，理由同 subagent_task_service。顶层 workforce
+        # 派发没有父 run，继承不到就保持 None —— 回落到 get_team_id_for_user
+        # 语义上不等价（一个用户可能属于多个团队），记到别人头上比不记更糟。
+        child_team_id = await team_of_run(parent_run_id)
+
         async with RunRecorder(
             agent_id=composed.agent_id,
             user_id=user_id,
             trigger="workforce",
             session_id=None,
-            team_id=None,
+            team_id=child_team_id,
             **dispatch_scope.as_recorder_kwargs(),
             model=model or None,
             provider=provider,

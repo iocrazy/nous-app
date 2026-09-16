@@ -76,10 +76,16 @@ class _FakeSession:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.scalar_rows: list[Any] = []
         self.all_rows: list[Any] = []
+        # 第二次及以后的 execute 用这批行。给「INSERT ... ON CONFLICT DO NOTHING
+        # 没插进去 → 回读那一行」这种两步流程用；不设就保持单步行为不变。
+        self.followup_scalar_rows: list[Any] | None = None
 
     async def execute(self, stmt: Any, params: Any = None) -> _FakeResult:
         self.calls.append((str(stmt), stmt.compile().params))
-        return _FakeResult(self.scalar_rows, self.all_rows)
+        rows = self.scalar_rows
+        if self.calls and self.followup_scalar_rows is not None and len(self.calls) > 1:
+            rows = self.followup_scalar_rows
+        return _FakeResult(rows, self.all_rows)
 
 
 class _ScopeCM:
@@ -215,6 +221,61 @@ async def test_create_team_quota_inserts_native_int(
     assert "INSERT INTO public.team_quotas" in sql
     values = set(binds.values())
     assert 7 in values and 500 in values  # team_id coerced to int, balance native
+
+
+@pytest.mark.asyncio
+async def test_create_team_quota_does_not_collide_with_a_concurrent_writer(
+    repo: PointsRepository, fake_session: _FakeSession
+) -> None:
+    """裸 INSERT 在并发首次开通时必有一方撞 team_quotas_pkey（team_id 是主键）。
+
+    在 3c A3 之前这不可见：唯一的调用方是注册后台任务。agent run 结束也要开通
+    之后，两个并发 run 为同一个全新团队开通就会让其中一次扣分整条丢掉。
+    ON CONFLICT DO NOTHING 按真实唯一键写 —— 谁先谁后都不炸。"""
+    fake_session.scalar_rows = [
+        TeamQuotas(team_id=7, points_balance=500, storage_limit_bytes=5368709120)
+    ]
+    await repo.create_team_quota(team_id="7", points_balance=500)
+
+    sql, _ = fake_session.calls[-1]
+    assert "ON CONFLICT" in sql and "DO NOTHING" in sql
+    # 按真实唯一键（主键就是 team_id 单列），不是瞎猜一个约束名
+    assert "team_id" in sql.split("ON CONFLICT", 1)[1]
+
+
+@pytest.mark.asyncio
+async def test_the_loser_of_the_race_still_gets_the_row_back(
+    repo: PointsRepository, fake_session: _FakeSession
+) -> None:
+    """DO NOTHING 时 RETURNING 是空的。调用方 add_points 拿到结果立刻
+    ``.get("points_balance")`` —— 返回 {} 或 None 就换成了 AttributeError /
+    静默清零。输了竞态就回读那一行，返回真实配额。"""
+    # 第一次 execute（INSERT ... RETURNING）没有行，第二次（回读）有。
+    fake_session.scalar_rows = []
+    fake_session.followup_scalar_rows = [
+        TeamQuotas(team_id=7, points_balance=500, storage_limit_bytes=5368709120)
+    ]
+    out, created = await repo.create_team_quota_if_absent(
+        team_id="7", points_balance=500
+    )
+    assert created is False
+    assert out["points_balance"] == 500
+
+
+@pytest.mark.asyncio
+async def test_the_winner_of_the_race_reports_that_it_created(
+    repo: PointsRepository, fake_session: _FakeSession
+) -> None:
+    """``created`` 是欢迎积分该不该发的唯一依据 —— 两个并发调用都报 True 就是
+    发两份 500 分的赠送流水。"""
+    fake_session.scalar_rows = [
+        TeamQuotas(team_id=7, points_balance=500, storage_limit_bytes=5368709120)
+    ]
+    out, created = await repo.create_team_quota_if_absent(
+        team_id="7", points_balance=500
+    )
+    assert created is True
+    assert out["points_balance"] == 500
 
 
 @pytest.mark.asyncio

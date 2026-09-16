@@ -985,10 +985,11 @@ class RunRecorder:
             try:
                 from app.services.ai.billing.token_billing import reconcile_run
 
-                # cost_cents is the cents amount; PointsService treats
-                # cost_points as the same scalar (1 cent ≈ 1 point in
-                # the current billing model). If a future change splits
-                # them, this conversion happens here.
+                # own_media_cents is this run's OWN cents (own + media);
+                # PointsService treats cost_points as the same scalar (1 cent
+                # ≈ 1 point in the current billing model), then ceils it to an
+                # integer. If a future change splits the two units, that
+                # conversion belongs here.
                 await reconcile_run(
                     run_id=self.run_id,
                     user_id=self.user_id,

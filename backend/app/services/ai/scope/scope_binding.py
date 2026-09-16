@@ -181,6 +181,45 @@ async def _scope_of_run(run_id: Any) -> DispatchScope:
     return DispatchScope(project_id=row.project_id, episode_id=row.episode_id)
 
 
+async def team_of_run(run_id: Any) -> Optional[int]:
+    """The team a parent run is billed to, so a child can inherit it (3c A3).
+
+    Deliberately a sibling of ``DispatchScope`` rather than a field on it.
+    Three of the five ``as_recorder_kwargs()`` splat sites already pass
+    ``team_id=`` explicitly right next to the splat, so folding it in would be
+    a duplicate keyword and a ``TypeError`` at dispatch — the same shape
+    CLAUDE.md records for ``safe_popen_kwargs``.
+
+    Why a child needs it at all: A3 changed the parent to charge its OWN
+    spend instead of the tree total, and both child-spawning sites hardcoded
+    ``team_id=None``. Delegated spend was therefore billed to nobody — the
+    child early-returns at ``if not team_id`` in ``reconcile_run``. It also
+    never appeared in any per-team efficiency ledger, because
+    ``idx_agent_runs_billing`` (mig 145) is ``WHERE team_id IS NOT NULL``.
+
+    ``None`` in, ``None`` out, and no query: a top-level workforce dispatch
+    has no parent to inherit from. Guessing via ``get_team_id_for_user`` is
+    NOT equivalent — a user can belong to several teams, and billing the
+    wrong one is worse than billing none. A lookup failure degrades to
+    ``None`` like every other read in this module: losing one delegation's
+    charge beats failing the dispatch.
+    """
+    rid = _as_int(run_id)
+    if rid is None:
+        return None
+    try:
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(AgentRuns.team_id).where(AgentRuns.id == rid).limit(1)
+                )
+            ).first()
+    except Exception:  # noqa: BLE001 — a lookup failure must not break dispatch
+        logger.exception("[scope_binding] parent run team lookup failed run=%s", rid)
+        return None
+    return _as_int(row.team_id) if row is not None else None
+
+
 async def _scope_of_conversation(conversation_id: Any) -> DispatchScope:
     """The project a conversation belongs to, and the episode its AI-meta
     context implies.
@@ -247,4 +286,4 @@ async def _scope_of_conversation(conversation_id: Any) -> DispatchScope:
     return DispatchScope(project_id=project_id, episode_id=episode_id)
 
 
-__all__ = ["DispatchScope", "resolve_dispatch_scope"]
+__all__ = ["DispatchScope", "resolve_dispatch_scope", "team_of_run"]

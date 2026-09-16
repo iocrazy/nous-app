@@ -32,6 +32,11 @@ pytestmark = pytest.mark.unit
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 CHAT = BACKEND / "app/services/ai/chat/ai_library_chat_service.py"
 CONV = BACKEND / "app/services/chat/conversation_agent_turn.py"
+# 3c A3 修复轮 1：两条派发链此前硬编码 team_id=None，落在
+# idx_agent_runs_billing(WHERE team_id IS NOT NULL) 之外 —— 正是本文件顶部
+# 那条不变量要防的退化，而守卫当时只扫上面两个文件，一次都没拦到。
+SUB = BACKEND / "app/services/ai/runner/subagent_task_service.py"
+WORKER = BACKEND / "app/services/workforce/agent_worker.py"
 
 
 def _recorder_kwargs(path: pathlib.Path) -> dict[str, str]:
@@ -139,6 +144,26 @@ def test_the_conversation_module_still_has_no_notion_of_an_issue():
     才算。前提一旦不成立，裁定要重做。"""
     src = CONV.read_text(encoding="utf-8")
     assert not re.search(r"\bissue", src, re.IGNORECASE)
+
+
+def test_the_subagent_dispatch_site_still_binds_a_team():
+    """字面 None 是这条不变量唯一栽过的形状，所以钉的就是「不是 None」。
+    值本身走哪条路（父 recorder 快路径 / team_of_run 读库）由
+    tests/test_child_run_inherits_team.py 的行为断言负责。"""
+    kwargs = _recorder_kwargs(SUB)
+    assert kwargs["team_id"] == "child_team_id"
+
+
+def test_the_workforce_dispatch_site_still_binds_a_team():
+    kwargs = _recorder_kwargs(WORKER)
+    assert kwargs["team_id"] == "child_team_id"
+
+
+def test_no_dispatch_site_hardcodes_a_null_team():
+    """四个站点一起扫。新加派发站点时这条会漏 —— 它守的是既有四处不退化，
+    不是「所有站点都对」，后者只有 grep 全仓 RunRecorder 才做得到。"""
+    for path in (CHAT, CONV, SUB, WORKER):
+        assert _recorder_kwargs(path)["team_id"] != "None", path.name
 
 
 def test_the_scope_columns_are_still_insert_only():

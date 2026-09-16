@@ -119,7 +119,8 @@ async def record_usage(
     ``cost_cents`` 是这个 run 的**自身**花费（own + media），不是树总额：每个子
     run 自己也会写一行，父行再把子的加进来就是双计，而这张表没有 parent_run_id
     维度，事后剔不掉（3c A1）。五个计数列同理 —— 数的都是自身量，跨 run 求和
-    天然正确。``event_count`` 不跟着 run_count 走：它数的是有 token 的完成，与 run_count 语义不同。
+    天然正确。``event_count`` 不跟着 run_count 走：它数的是有 token
+    的完成，与 run_count 语义不同。
     """
     try:
         occurred = occurred_at or datetime.datetime.now(datetime.timezone.utc)

@@ -446,7 +446,10 @@ class SubAgentTaskService:
                 PromptComposer,
             )
             from app.services.ai.runner.run_recorder import RunRecorder
-            from app.services.ai.scope.scope_binding import resolve_dispatch_scope
+            from app.services.ai.scope.scope_binding import (
+                resolve_dispatch_scope,
+                team_of_run,
+            )
 
             # _attach_to_parent_run is private to agent_worker; keep an
             # eye on it during workforce refactors. The function writes
@@ -532,6 +535,18 @@ class SubAgentTaskService:
         # Task/Delegate arguments.
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
 
+        # 3c A3：子 run 必须继承父的团队。父行改成只付自身花费之后，委派烧掉
+        # 的钱两边都不收（子 run 在 reconcile_run 的 `if not team_id` 早退），
+        # 而且 team_id IS NULL 的行落在 idx_agent_runs_billing(mig 145) 之外,
+        # 对按团队的效率账等于不存在 —— 违反 Task 6/A6 立的不变量。
+        # 先问内存里的父 recorder（它就在手边），没有再按 run 读库。
+        _parent_team = getattr(self.parent_recorder, "team_id", None)
+        child_team_id = (
+            _as_int(_parent_team)
+            if _parent_team is not None
+            else await team_of_run(parent_run_id)
+        )
+
         started = time.monotonic()
         # Set once ``subagent_spawned`` has gone out. The crash path below
         # reads it to decide whether it OWES a matching ``subagent_done``:
@@ -551,7 +566,7 @@ class SubAgentTaskService:
                 user_id=self.caller_user_id,
                 trigger="subagent_task",
                 session_id=self.session_id,
-                team_id=None,
+                team_id=child_team_id,
                 issue_id=self.issue_id,
                 **dispatch_scope.as_recorder_kwargs(),
                 model=model or None,

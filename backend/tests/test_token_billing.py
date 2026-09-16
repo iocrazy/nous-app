@@ -251,7 +251,9 @@ async def test_reconcile_calls_the_real_signature_exactly():
     assert kwargs["override_cost"] == 3  # ceil(2.5)
     assert "nous_qwen-max" in kwargs["description"]
     assert "30 tokens" in kwargs["description"]
-    assert result.charged is True and result.charged_points == 2.5
+    # 实际从余额扣走的是 ceil 后的整数 3，不是 ceil 前的 2.5 —— 一个叫
+    # charged_points 的字段在计费结构里必须报真扣了多少。
+    assert result.charged is True and result.charged_points == 3
 
 
 @pytest.mark.unit
@@ -271,6 +273,90 @@ async def test_the_charge_lands_as_the_row_shape_the_readers_query():
     assert kwargs["reference_id"] == "900000000000007"
 
 
+def _loguru_sink(level: str):
+    """loguru 不进 pytest 的 stdlib 捕获（caplog 会一直空），所以直接挂一个
+    sink。同 tests/test_codex_daemon_adapter.py 的裁定。"""
+    from loguru import logger as _loguru
+
+    records: list[str] = []
+    sink_id = _loguru.add(records.append, level=level, format="{message}")
+    return records, sink_id
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_denial_warning_names_the_team_and_the_run():
+    """拒绝必须留下能回查的坐标。只写 reason 的日志在生产上等于「某处有人
+    没扣到分」—— 查不到是谁、哪一次。"""
+    from loguru import logger as _loguru
+
+    records, sink_id = _loguru_sink("WARNING")
+    try:
+        ps = _fake_points(
+            {
+                "success": False,
+                "points_cost": 3,
+                "balance_after": 0,
+                "reason": "Insufficient balance",
+            }
+        )
+        await _reconcile(ps)
+    finally:
+        _loguru.remove(sink_id)
+
+    line = next(r for r in records if "points consume denied" in r)
+    assert "team_id=42" in line
+    assert "run_id=900000000000007" in line
+    assert "Insufficient balance" in line
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_kill_switch_says_so_out_loud():
+    """「余额没动」必须能在日志里跟「扣失败」分开 —— 否则拉了闸之后，
+    每一条没扣成的 run 看起来都像故障。"""
+    from loguru import logger as _loguru
+
+    records, sink_id = _loguru_sink("INFO")
+    try:
+        ps = _fake_points(
+            {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+        )
+        with patch.object(tb.settings, "AGENT_POINTS_CHARGE_ENABLED", False):
+            await _reconcile(ps)
+    finally:
+        _loguru.remove(sink_id)
+
+    line = next(r for r in records if "charging disabled" in r)
+    assert "team_id=42" in line and "run_id=900000000000007" in line
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_provisioning_still_attempts_the_charge():
+    """开配额与扣分是两件事，不能共用一个 try。
+
+    共用时 DB 抖一下就把扣分一起吞掉，日志还写 "points consume failed" ——
+    而扣分其实从未尝试过。真缺行时 RPC 自己会回 Team quota not found，
+    语义一点不丢，所以往下走永远比早退安全。"""
+    from loguru import logger as _loguru
+
+    records, sink_id = _loguru_sink("WARNING")
+    try:
+        ps = _fake_points(
+            {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+        )
+        ps.ensure_team_quota = AsyncMock(side_effect=RuntimeError("db flaked"))
+        result = await _reconcile(ps)
+    finally:
+        _loguru.remove(sink_id)
+
+    ps.check_and_consume.assert_awaited_once()
+    assert result.charged is True
+    line = next(r for r in records if "quota provisioning failed" in r)
+    assert "team_id=42" in line and "run_id=900000000000007" in line
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_the_team_gets_provisioned_before_the_debit():
@@ -285,11 +371,8 @@ async def test_the_team_gets_provisioned_before_the_debit():
     await _reconcile(ps)
     ps.ensure_team_quota.assert_awaited_once()
     # 顺序要紧：先建配额行再扣，反过来第一次必然扣空。
-    assert ps.mock_calls.index(
-        next(c for c in ps.mock_calls if c[0] == "ensure_team_quota")
-    ) < ps.mock_calls.index(
-        next(c for c in ps.mock_calls if c[0] == "check_and_consume")
-    )
+    names = [c[0] for c in ps.mock_calls]
+    assert names.index("ensure_team_quota") < names.index("check_and_consume")
 
 
 @pytest.mark.unit
@@ -366,31 +449,21 @@ async def test_fractional_cost_rounds_up_never_to_zero():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_reconcile_points_failure_does_not_raise():
-    """PointsService raising → ReconcileResult with charged=False, not exception."""
-    fake_ps = MagicMock()
+    """PointsService raising → ReconcileResult with charged=False, not exception.
+
+    ⚠️ 必须走 ``_fake_points``（它把 ensure_team_quota 也建成 AsyncMock）。用裸
+    MagicMock 时 `await ps.ensure_team_quota(...)` 自己先抛 TypeError，于是
+    check_and_consume 的 side_effect 一次都执行不到 —— 用例照样绿，但断言的
+    变成了「await 一个非协程会被兜住」，不是它上面说的那件事。
+    """
+    fake_ps = _fake_points(None)
     fake_ps.check_and_consume = AsyncMock(
         side_effect=RuntimeError("insufficient balance")
     )
 
-    with (
-        patch("app.db.session.write_scope", new=_write_scope(ok=True)),
-        patch(
-            "app.services.billing.points_service.PointsService", return_value=fake_ps
-        ),
-    ):
-        result = await tb.reconcile_run(
-            run_id=uuid4(),
-            user_id=uuid4(),
-            team_id=42,
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=2.0,
-            byo_key=False,
-        )
+    result = await _reconcile(fake_ps, model="qwen-max", cost_points=2.0)
+
+    fake_ps.check_and_consume.assert_awaited_once()  # 真执行到了
     assert result.charged is False
     assert result.usage_logged is True  # log still wrote
     assert "errored" in (result.note or "")
