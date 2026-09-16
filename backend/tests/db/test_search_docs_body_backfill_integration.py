@@ -504,3 +504,31 @@ async def test_the_limit_really_reaches_the_query(orm_dsn, pg, fx):
     assert stats.filled == 1
     filled = [b for b in (await _body_of(pg, d1), await _body_of(pg, d2)) if b]
     assert len(filled) == 1
+
+
+@_skip
+async def test_an_orphan_that_already_has_a_body_is_not_counted(orm_dsn, pg, fx):
+    """孤儿普查数的是**回填够不着的空行**，不是所有孤儿。
+
+    一条没有登记行、但正文已经有了的投影行，对这份回填而言不是个问题：它在检索
+    里搜得到，回填也没有该做而没做的事。把它算进来，那个数就从「还欠着多少」
+    退化成「历史上有多少行对不上登记表」—— 后者是个真问题，但**不是这个汇总要
+    回答的问题**，而混在一起会让运维看着一个永远归不了零的数。
+    """
+    # 按**增量**断言，不按绝对值：普查数的是全表，而库里可能已经有别的孤儿
+    # （本地实测就有 —— 见下面那条记在报告里的 test_revert_output_integration
+    # 夹具缺口）。增量才是这两行自己的贡献。
+    before = (await _run_backfill()).orphans
+
+    await _output_doc(pg, fx, kind="script_shot", ref_id=str(fx["shot_id"]))
+    await _output_doc(
+        pg,
+        fx,
+        kind="script_scene",
+        ref_id=str(fx["scene_id"]),
+        body="this orphan already reads fine in search",
+    )
+    # 两条都没有 run_deliverables 行 —— 都是孤儿，但只有一条是空的。
+
+    after = (await _run_backfill()).orphans
+    assert after - before == 1

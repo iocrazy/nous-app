@@ -200,6 +200,12 @@ async def test_every_outcome_is_counted_on_its_own_axis(monkeypatch):
         1,
         0,
     )
+    # 总账等式：扫过的每一行都必须恰好落进一个结局桶。逐桶断言拦不住「某个分支
+    # 一个桶都没加」或者「同一行加了两个桶」—— 前者让行凭空消失，后者让汇总的
+    # 数加起来比扫过的还多，两种都会让「这批到底补完没有」答错。
+    assert stats.scanned == (
+        stats.filled + stats.unavailable + stats.raced + stats.failed
+    )
     assert repo.calls == [
         ("output", "script_shot:1:1", render_shot(SHOT)),
         ("run", "77", "wrote three shots"),

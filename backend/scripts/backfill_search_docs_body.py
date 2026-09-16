@@ -63,8 +63,9 @@ async def _run(dry_run: bool, limit: int | None) -> None:
         "backfill {}: {} empty rows scanned, {} filled, {} had no "
         "reconstructible body (chapters and deleted refs — not failures), "
         "{} were filled by the live writer first, {} errored; "
-        "{} projection rows have no run_deliverables row at all (NOT touched, "
-        "and NOT part of the scanned count — investigate separately)",
+        "{} still-empty projection rows have no run_deliverables row at all, so "
+        "this backfill cannot reach them (NOT touched, and NOT part of the "
+        "scanned count — investigate separately)",
         "dry run (nothing written)" if dry_run else "done",
         stats.scanned,
         stats.filled,
