@@ -89,7 +89,14 @@ RENDERED_EMPTY = "rendered_empty"
 
 @dataclass(frozen=True)
 class BackfillStats:
-    """一次回填的账。四个数各自独立 —— 不许把一个塞进另一个的分支里。"""
+    """一次回填的账。
+
+    五个计数器各自独立 —— **不许把一个塞进另一个的分支里**（CLAUDE.md「正交的
+    结果各自独立上报」）。filled=0 单独看分不清「没有空行」「每行都重建不
+    出来」「每行都写炸了」，而这三件事要做的处置完全不同。
+
+    orphans 不是计数器而是一次性普查（还是三态），见下面那条。
+    """
 
     #: 读回来的空正文行数（产出 + run）。
     scanned: int = 0
