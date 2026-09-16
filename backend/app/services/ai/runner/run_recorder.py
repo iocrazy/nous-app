@@ -908,11 +908,27 @@ class RunRecorder:
             updates["error_message"] = error_message
 
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 sa_update(AgentRuns)
                 .where(AgentRuns.id == int(self.run_id))
                 .where(AgentRuns.status == "running")  # idempotent guard
                 .values(**updates)
+            )
+        # 3c 终审 M2：把上面那道守卫的**结论**读出来。此前 rowcount 没人看，于是
+        # 守卫只护住了这一行 UPDATE，下面的小时表与 ``reconcile_run`` 照跑 ——
+        # 而 ``reconcile_run`` 的 docstring 明写「Repeated calls would
+        # double-charge」并把幂等责任推回调用方。窗口很窄（``_finish`` 跑两次，或
+        # liveness 清扫器先把 status 翻了），但 A3 之后那是真钱。
+        #
+        # ⚠️ **只有明确为 0 才算没抢到**。拿不到这个数（测试桩、不报 rowcount 的
+        # 驱动）读作「别人已经收工了」就是拿「不知道」换一次静默的少扣 —— 与本仓
+        # 「空输出不是否定结论」同一条纪律。
+        closed_by_us = getattr(result, "rowcount", None) != 0
+        if not closed_by_us:
+            logger.warning(
+                f"[RunRecorder] run {self.run_id} was already terminal when "
+                f"_finish ran (status={status}); skipping usage rollup and "
+                f"billing reconcile so neither is counted twice"
             )
 
         # 只在终态写一次。放在 UPDATE 之后，投影读到的就是刚落库的那份
@@ -947,41 +963,43 @@ class RunRecorder:
         # moment anything sums across runs — and the table has no
         # parent_run_id dimension to subtract it back out afterwards.
         #
-        # 无条件写：`_finish` 只在终态被调（completed / failed / cancelled），
-        # 而**每一个**终态 run 都是效率账的一行样本，cost 与 token 可以是 0。
-        # 预检即拒、provider 认证失败、预算门禁停机 —— 这三类恰恰零 token 零
-        # 花费，也恰恰是 `failed_runs` 最该看见的那一类；任何以「烧了东西没有」
-        # 为条件的守门都会把它们整行丢掉，让失败率从第一天起偏低。
+        # 唯一的条件是 `closed_by_us`（上面那道幂等守卫的结论），**不看烧了多少**：
+        # `_finish` 只在终态被调（completed / failed / cancelled），而每一个终态
+        # run 都是效率账的一行样本，cost 与 token 可以是 0。预检即拒、provider
+        # 认证失败、预算门禁停机 —— 这三类恰恰零 token 零花费，也恰恰是
+        # `failed_runs` 最该看见的那一类；任何以「烧了东西没有」为条件的守门都会
+        # 把它们整行丢掉，让失败率从第一天起偏低。
         eff_counts = self._efficiency_counts()
-        try:
-            from app.services.ai_usage import record_usage
+        if closed_by_us:
+            try:
+                from app.services.ai_usage import record_usage
 
-            await record_usage(
-                module=self.trigger,
-                attribution=effective_attribution,
-                prompt_tokens=self._prompt_tokens,
-                completion_tokens=self._completion_tokens,
-                cached_input_tokens=self._cached_input_tokens,
-                team_id=self.team_id,
-                project_id=self.project_id,
-                agent_id=self.agent_id,
-                model=self.model,
-                cost_cents=own_media_cents,
-                run_count=1,
-                # 「非 completed」而不是「status == failed」：cancelled 同样
-                # 是一次没走到头的 run，成功率的分子只该数真的成功的那些。
-                failed_runs=int(status != "completed"),
-                tool_calls=eff_counts["tool_calls"],
-                tool_errors=eff_counts["tool_errors"],
-                deliverables=eff_counts["deliverables"],
-            )
-        except Exception as exc:  # noqa: BLE001 — defence in depth
-            logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
+                await record_usage(
+                    module=self.trigger,
+                    attribution=effective_attribution,
+                    prompt_tokens=self._prompt_tokens,
+                    completion_tokens=self._completion_tokens,
+                    cached_input_tokens=self._cached_input_tokens,
+                    team_id=self.team_id,
+                    project_id=self.project_id,
+                    agent_id=self.agent_id,
+                    model=self.model,
+                    cost_cents=own_media_cents,
+                    run_count=1,
+                    # 「非 completed」而不是「status == failed」：cancelled 同样
+                    # 是一次没走到头的 run，成功率的分子只该数真的成功的那些。
+                    failed_runs=int(status != "completed"),
+                    tool_calls=eff_counts["tool_calls"],
+                    tool_errors=eff_counts["tool_errors"],
+                    deliverables=eff_counts["deliverables"],
+                )
+            except Exception as exc:  # noqa: BLE001 — defence in depth
+                logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
 
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
         # able to roll back a finished agent_runs row.
-        if status == "completed" and own_media_cents > 0:
+        if status == "completed" and own_media_cents > 0 and closed_by_us:
             try:
                 from app.services.ai.billing.token_billing import reconcile_run
 
