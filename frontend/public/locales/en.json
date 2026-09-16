@@ -5650,6 +5650,10 @@
   },
   "issues": {
     "refreshFailed": "Could not refresh this issue — what you see may be out of date",
+    "count_one": "{{count}} issue",
+    "count_other": "{{count}} issues",
+    "countOfTotal_one": "{{n}} of {{count}} issue",
+    "countOfTotal_other": "{{n}} of {{count}} issues",
     "pageTitle": "Issues",
     "needsReplyChip": "Needs your reply",
     "waitingOnYou": "Waiting on you",
