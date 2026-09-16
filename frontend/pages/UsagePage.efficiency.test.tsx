@@ -157,6 +157,25 @@ describe('UsagePage efficiency wiring', () => {
     await waitFor(() => expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument());
   });
 
+  it('clears a previous failure while the next attempt is in flight', async () => {
+    // 第一轮 503，用户换个范围再试：飞行期间该显示「正在加载」，而不是继续挂着
+    // 上一轮的错误——那会让一次正在进行的重试看起来像是又失败了一次。
+    let release: (v: unknown) => void = () => {};
+    getEfficiency.mockRejectedValueOnce(
+      new UsageRequestError('efficiency_unavailable', 503, 'nope'),
+    );
+    render(<UsagePage />);
+    await waitFor(() => expect(screen.getByTestId('efficiency-error')).toBeInTheDocument());
+
+    getEfficiency.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+    fireEvent.click(screen.getByText('90d'));
+    await waitFor(() => expect(screen.getByTestId('efficiency-loading')).toBeInTheDocument());
+    expect(screen.queryByTestId('efficiency-error')).toBeNull();
+
+    release(EFFICIENCY);
+    await waitFor(() => expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument());
+  });
+
   // ─── 修复轮 1 #3：慢的旧响应不许覆盖新的 ─────────────────────────────────
 
   it('drops a stale response that lands after a newer request', async () => {

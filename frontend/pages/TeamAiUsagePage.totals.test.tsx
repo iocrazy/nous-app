@@ -41,6 +41,21 @@ vi.mock('../services/aiLibraryService', () => ({
 
 const { TeamAiUsagePage } = await import('./TeamAiUsagePage');
 
+/**
+ * 读出某一格自己的值。
+ *
+ * 不用全页 `getAllByText('—')` 计数：那个数字会被页面上任何**别处**的 em dash 影响
+ * （预算卡、表格空行），于是这条断言可能因为一个完全无关的改动而红，也可能在这两格
+ * 坏掉时因为别处恰好多出两个破折号而绿。要问的是「这一格显示什么」。
+ */
+const statValue = (label: string): string => {
+  const labelEl = screen.getByText(label);
+  const cell = labelEl.parentElement;
+  if (!cell) throw new Error(`stat cell not found for ${label}`);
+  const value = cell.querySelector('div:last-child');
+  return value?.textContent ?? '';
+};
+
 // 真实 wire 形状（`backend/app/schemas/usage.py::UsageTotals`）：五个计数 + 一个可空单价。
 const total = (over: Record<string, unknown> = {}) => ({
   prompt_tokens: 900, completion_tokens: 120, total_tokens: 1020,
@@ -94,6 +109,9 @@ describe('TeamAiUsagePage totals', () => {
     });
     render(<TeamAiUsagePage />);
     await waitFor(() => expect(screen.getByText('Cost / output')).toBeInTheDocument());
-    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(statValue('Cost / output')).toBe('—');
+    expect(statValue('Tool errors')).toBe('—');
+    // 同一次渲染里，有数的那几格必须仍然有数——「两个 — 」不能是整页塌掉换来的。
+    expect(statValue('Total cost')).toBe('$0.41');
   });
 });

@@ -60,6 +60,12 @@ export function formatToolErrorRate(
  *
  * 解析不了的 month 退回 days 预设——宁可问一个能答的窗口，也不要发一个
  * `invalid_range` 出去。
+ *
+ * ⚠️ 与 `presetRange` **刻意**不同，两者不可合并：这一个服务 `/usage/daily` 与
+ * `/ai-library/usage/efficiency`（个人用量页），days 分支是**滚动时刻**
+ * `[now - days, now]`，复刻后端的 `now - timedelta(days)`；`presetRange` 服务
+ * `/usage/summary`（团队用量页），对齐到 UTC 日界。把它们「统一」成一个，另一张
+ * 页面上的数字会跟着改变，而没有任何测试会告诉你是哪一张。
  */
 export function usageWindow(
   opts: { days: number; month?: string },
@@ -94,6 +100,12 @@ export function formatIssueCostLine(totalTokens: number, costCents: number): str
 /**
  * Resolve a preset to a [from, to) ISO window (UTC). `to` is exclusive: the
  * start of tomorrow, so today's usage is included.
+ *
+ * 服务的是 `/usage/summary`（团队用量页），按 **UTC 日界**对齐——那个端点读的是
+ * 小时 rollup 表，窗口本来就是按天切的。
+ *
+ * ⚠️ 与 `usageWindow` **刻意**不同，两者不可合并：那一个服务个人用量页的两个
+ * 端点，days 分支是滚动时刻而非日界。合并会让其中一张页面的数字改变。
  */
 export function presetRange(
   preset: RangePreset,

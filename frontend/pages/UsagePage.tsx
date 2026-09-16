@@ -136,6 +136,9 @@ export const UsagePage: React.FC = () => {
         // 不叫 `window`：那会在这个作用域里遮掉全局的 `window`，下一个在这里写
         // `window.localStorage` 的人会拿到一个 `{from, to}`。
         const win = usageWindow({ days, month: monthArg });
+        // 先把上一轮的错误清掉：重试飞行期间该显示「正在加载」，继续挂着上一轮的
+        // 错误会让一次正在进行的重试看起来像是又失败了一次。
+        setEfficiencyError(null);
         try {
           const eff = await usageService.getEfficiency({
             scope: 'user',
