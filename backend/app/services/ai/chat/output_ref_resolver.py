@@ -128,7 +128,7 @@ class OutputRefRefused(Exception):
 
 #: 一条引用在附件表里用到的键。非 dict、又没有 ``model_dump`` 的对象按这几个
 #: 键逐个取属性。
-_CITATION_FIELDS = ("kind", "ref_kind", "ref_id", "version", "title")
+_CITATION_FIELDS = ("kind", "ref_kind", "ref_id", "version", "title", "issue_key")
 
 
 def _kind_of(att: Any) -> Optional[str]:
@@ -319,8 +319,8 @@ def output_refs_from_attachments(
 ) -> List[ChatOutputRef]:
     """本轮附件里的引用，**纯投影，不查库**。
 
-    读的是 ``resolve_output_refs`` 在发帖口盖好的那份坐标，所以这里不重复
-    校验。安全上站得住是因为这个框**只交付坐标**：即使某条路径送进来一条没
+    读的是 ``resolve_output_refs`` 在发帖口盖好的那份坐标（含 3c 的
+    ``issue_key``），所以这里不重复校验。安全上站得住是因为这个框**只交付坐标**：即使某条路径送进来一条没
     校验过的引用，模型拿到的也只是一个 kind/id/version 和一个经
     ``escape_frame_attr`` 转义过的标题——没有内容、没有权限、没有可被伪造的
     结构。登记表校验存在的意义是**让用户被告知**，不是替模型挡内容。
@@ -346,6 +346,11 @@ def output_refs_from_attachments(
                 ref_id=ref_id,
                 version=version,
                 title=_clean_title(mapping.get("title")),
+                # 3c §2.4：来源议题也读回来。``citations_for_transcript`` 的
+                # **生产读者是这一条投影**（轮次里），不是发帖口那次解析——
+                # 这里不读，线程「引用 N 件」那一行就永远说不出来源，而发帖口
+                # 的单测照样绿。
+                issue_key=_clean_title(mapping.get("issue_key")),
             )
         )
     return out

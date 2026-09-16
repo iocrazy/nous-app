@@ -73,3 +73,21 @@ def test_the_chat_entry_point_still_refuses_outright():
     # 聊天面板没有议题可作用域，引用一律拒绝（spec §2.4 明写仍然拒绝）。
     with pytest.raises(mod.OutputRefRefused):
         mod.refuse_citations_without_issue([_att()])
+
+
+def test_the_turn_time_projection_keeps_the_source_issue():
+    """``citations_for_transcript`` 的**生产读者**是轮次里的投影
+    （``ai_library_chat_service`` 用的是 ``output_refs_from_attachments``），
+    不是发帖口那次解析。投影不读 ``issue_key``，线程「引用 N 件」那一行就永远
+    说不出来源——而只测发帖口的那条断言照样绿。"""
+    stored = {**_att(), "title": "S3 · Shot 1 · MS", "issue_key": "MH-98"}
+    refs = mod.output_refs_from_attachments([stored])
+    assert refs[0].issue_key == "MH-98"
+    assert mod.citations_for_transcript(refs)[0]["issue_key"] == "MH-98"
+
+
+def test_a_pre_3c_stored_citation_projects_without_a_source_issue():
+    """3c 之前落库的引用没有这个键——缺席就是「不知道来源」，不是空串。"""
+    refs = mod.output_refs_from_attachments([{**_att(), "title": "S3"}])
+    assert refs[0].issue_key is None
+    assert "issue_key" not in mod.citations_for_transcript(refs)[0]
