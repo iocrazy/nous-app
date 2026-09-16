@@ -48,6 +48,37 @@ interface VideoPlayerProps {
   resumeKey?: string;
 }
 
+/**
+ * The part of a media URL that identifies WHAT is playing, with the rotating
+ * credentials removed.
+ *
+ * Callers build media URLs with the current media token baked into the query,
+ * and `DownloadDetailPage` does it inline during render. Supabase refreshes
+ * that token whenever a long-open tab comes back to the foreground, so the
+ * `src` prop changes even though the video did not — and re-pointing a
+ * `<video>` at a new URL restarts it. That is the reported flash: black frame,
+ * spinner, duration back to 00:00.
+ *
+ * Swapping `src` does not even achieve anything: an element that has already
+ * loaded a source keeps streaming from the URL it opened with, so the fresh
+ * token in the new string buys nothing. Leave the element alone and let later
+ * requests pick the new token up (see `authTokenRef`).
+ */
+export const mediaIdentity = (url: string): string => {
+  if (!url) return '';
+  // Only http(s) URLs carry the credential in a query string. A `blob:` handle
+  // (what hls.js hands the element) is already unique and `new URL` mangles it
+  // against a base, so it is returned as-is.
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('/')) return url;
+  try {
+    const u = new URL(url, window.location.origin);
+    for (const p of ['token', 'access_token']) u.searchParams.delete(p);
+    return `${u.origin}${u.pathname}${u.search}`;
+  } catch {
+    return url.split('?')[0];
+  }
+};
+
 const QUALITY_PREF_KEY = 'mediahub_quality_pref';
 const VOLUME_PREF_KEY = 'mediahub_volume_pref';
 
@@ -205,6 +236,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   /** The media the previous attachment was for, to tell "same video, new
    * token" from "a different video". */
   const attachedKey = useRef<string | null>(null);
+  /** Freshest `src` / `originalSrc` / `authToken`, read at attach time and by
+   * the HLS request hook. Keeping them in refs is what lets a rotated token
+   * reach future requests WITHOUT re-pointing the element. */
+  const srcRef = useRef(src);
+  const originalSrcRef = useRef(originalSrc);
+  const authTokenRef = useRef(authToken);
+  srcRef.current = src;
+  originalSrcRef.current = originalSrc;
+  authTokenRef.current = authToken;
   /** Consecutive fatal HLS errors we have tried to recover from. */
   const hlsRecoveryAttempts = useRef(0);
 
@@ -232,6 +272,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const effectiveFps = fps || 30;
   const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
   const positionKey = resumeKeyFor(resumeKey, src);
+  // What the attach effect keys on: the video's identity, not whichever
+  // credential happens to be in the URL right now.
+  const srcIdentity = mediaIdentity(src);
+  const originalSrcIdentity = originalSrc ? mediaIdentity(originalSrc) : '';
   // `useOptionalAuth`, not `useAuth`: this component is rendered in isolation
   // by its own tests and by the cover grabber, neither of which mounts the
   // provider. A missing provider means "signed out", which the store already
@@ -380,16 +424,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (isOriginalMode && isHls && Hls.isSupported()) {
       setIsOriginalMode(false);
       const hlsConfig: Partial<Hls['config']> = {};
-      if (authToken) {
-        hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
-          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
-        };
-      }
+      // Reads the ref, not a captured value: a token refreshed mid-session
+      // is picked up by the NEXT segment request, with no re-attach.
+      hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
+        const t = authTokenRef.current;
+        if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+      };
       const pos = video.currentTime;
       const wasPlaying = !video.paused;
       const hls = new Hls(hlsConfig);
       hlsRef.current = hls;
-      hls.loadSource(src);
+      hls.loadSource(srcRef.current);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         hls.currentLevel = levelIndex;
@@ -429,11 +474,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }, 100);
     }
-  }, [isOriginalMode, isHls, authToken, src, playerRef, hlsLevels]);
+    // Reads `srcRef` / `authTokenRef`, so neither a rotated token nor the URL
+    // carrying it belongs in this list.
+  }, [isOriginalMode, isHls, playerRef, hlsLevels]);
 
   // Switch to original (non-HLS) direct file playback
   const switchToOriginal = useCallback(() => {
-    if (!originalSrc || !playerRef.current) return;
+    // Refs, not props: this callback sits in the source-attach effect's
+    // dependency list, so closing over `originalSrc` would let a rotated media
+    // token re-create it and re-attach the element — the flash again.
+    const original = originalSrcRef.current;
+    if (!original || !playerRef.current) return;
     const video = playerRef.current;
     const pos = video.currentTime;
     const wasPlaying = !video.paused;
@@ -445,7 +496,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     // Switch to direct file
-    video.src = originalSrc;
+    video.src = original;
     video.currentTime = pos;
     if (wasPlaying) video.play().catch(() => {});
 
@@ -455,7 +506,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     // Persist quality preference
     localStorage.setItem(QUALITY_PREF_KEY, 'original');
-  }, [originalSrc, playerRef]);
+    // No URL in the list at all — everything reactive is read through a ref,
+    // which keeps this callback stable and therefore keeps the source-attach
+    // effect (which depends on it) from re-running.
+  }, [playerRef]);
 
   // Attach or detach HLS / native source
   useEffect(() => {
@@ -492,14 +546,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
-      if (authToken) {
-        hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
-          xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
-        };
-      }
+      // Reads the ref, not a captured value: a token refreshed mid-session
+      // is picked up by the NEXT segment request, with no re-attach.
+      hlsConfig.xhrSetup = (xhr: XMLHttpRequest) => {
+        const t = authTokenRef.current;
+        if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+      };
       const hls = new Hls(hlsConfig);
       hlsRef.current = hls;
-      hls.loadSource(src);
+      hls.loadSource(srcRef.current);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         setIsLoading(false);
@@ -574,9 +629,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari)
-      video.src = src;
+      video.src = srcRef.current;
     } else {
-      video.src = src;
+      video.src = srcRef.current;
     }
 
     return () => {
@@ -585,11 +640,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-    // `positionKey` is listed because the carry-over above reads it. In
-    // practice it never fires this effect on its own — it is derived from
-    // `src` (or an explicit `resumeKey` the caller changes alongside the
-    // source), so `src` already covers every real case.
-  }, [src, isHls, authToken, playerRef, originalSrc, switchToOriginal, positionKey]);
+    // Keyed on IDENTITY, not on the raw strings: `src` / `originalSrc` /
+    // `authToken` all change when the media token rotates, and re-running this
+    // effect for that is exactly the flash being removed here. The attach
+    // itself reads the freshest values through refs, so nothing goes stale.
+    //
+    // `positionKey` is listed because the carry-over above reads it; in
+    // practice it only moves when the identity does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcIdentity, originalSrcIdentity, isHls, playerRef, switchToOriginal, positionKey]);
 
   // Video event listeners
   useEffect(() => {
