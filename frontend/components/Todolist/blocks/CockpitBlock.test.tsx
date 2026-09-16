@@ -351,6 +351,24 @@ describe('CockpitBlockView — efficiency cells (3c §3.3)', () => {
     expect(screen.getByTestId('cockpit-cost-per-output')).toHaveTextContent('/ output');
   });
 
+  it('survives a response from a backend that predates the efficiency key', () => {
+    // 前端（Cloudflare Pages）与后端（gpupc）两条部署链独立触发，前端常先上。
+    // 唯一的 ErrorBoundary 在 index.tsx 根部，所以驾驶舱读 undefined 不是「少两个
+    // 格子」，是整站白屏。类型上这个键是必填的（mock 纪律不变），组件仍然要扛住
+    // 这个兼容窗口。
+    const base = ctx('running');
+    const r = base.rollup as IssueProgress;
+    const { efficiency: _dropped, ...withoutEfficiency } = r;
+    const c = { ...base, rollup: withoutEfficiency as unknown as IssueProgress };
+    render(<CockpitBlockView ctx={c} />);
+    expect(screen.queryByTestId('cockpit-cost-per-output')).toBeNull();
+    expect(screen.queryByTestId('cockpit-tool-errors')).toBeNull();
+    // 面板其余部分照常
+    expect(screen.getByTestId('cockpit-steps')).toBeTruthy();
+    expect(screen.getByTestId('cockpit-budget')).toBeTruthy();
+    expect(screen.getByTestId('cockpit-runs')).toBeTruthy();
+  });
+
   it('hides both efficiency cells while replaying a frozen step', () => {
     // 它们是**全议题、当下**的数，跟「as of 某一步」不是同一个时刻 —— 与冻结时
     // 花费只显示那一步的 spend 同一语义。

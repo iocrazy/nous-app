@@ -9,13 +9,17 @@ SQL 文本，CI 的 schema-drift 才是真执行方。断言只读**可执行正
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import re
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import Index
+from sqlalchemy.dialects import postgresql
 
 from app.models import PointTransactions
+from app.repositories.points_repository import PointsRepository
 
 pytestmark = pytest.mark.unit
 
@@ -35,13 +39,63 @@ def test_creates_the_index_idempotently():
     assert f"CREATE INDEX IF NOT EXISTS {INDEX}" in _SQUEEZED
 
 
-def test_the_predicate_matches_the_query_word_for_word():
-    """planner 只在索引谓词能蕴含查询条件时才用它。这两个等值条件就是
-    ``PointsRepository.charged_points_for_references`` 发出去的那两个；
-    改了其中任何一边而不改另一边，索引会静默失效——查询照常返回正确结果，
-    只是又变回全表扫描，没有任何探针会说出来。"""
+class _Session:
+    def __init__(self) -> None:
+        self.stmts: list = []
+
+    async def execute(self, stmt):
+        self.stmts.append(stmt)
+
+        class _R:
+            def all(self):
+                return []
+
+        return _R()
+
+
+def _compiled_query_where() -> str:
+    """``charged_points_for_references`` **真发出去**的那条语句的 WHERE 子句。
+
+    重新拼一条一样的 select 是没有意义的——那只会证明这个测试自己会写 SQL。
+    走真实方法 + 桩 session，改了实现这里才会跟着动。"""
+    sess = _Session()
+
+    @contextlib.asynccontextmanager
+    async def _scope():
+        yield sess
+
+    async def _run():
+        with patch("app.repositories.points_repository.read_scope", _scope):
+            await PointsRepository().charged_points_for_references(
+                reference_type="agent_run", reference_ids=["1"]
+            )
+
+    import asyncio
+
+    asyncio.run(_run())
+    sql = str(sess.stmts[0].compile(dialect=postgresql.dialect()))
+    return sql[sql.index("WHERE") :]
+
+
+def test_the_index_predicate_and_the_query_agree_on_both_equalities():
+    """planner 只在索引谓词能蕴含查询条件时才用它，所以这条测试钉的是**两侧**：
+    迁移里写的 partial 谓词，和仓库真发出去的 WHERE。
+
+    单钉迁移一侧是不够的——查询那边把 ``reference_type`` 的等值改成 IN、或者
+    干脆去掉，迁移文本一字不变，测试照样绿，而索引已经静默失效：结果仍然正确，
+    只是又变回全表扫描，没有任何探针会说出来。
+
+    查询侧只比**形状**不比取值：两个等值条件编译成 bind 参数（``%(type_1)s``），
+    取值由调用方传入，已经在 ``tests/repositories/test_points_charged_references.py``
+    里按绑定值断言过了。"""
+    # 迁移侧：字面谓词
     assert "ON public.point_transactions (reference_id)" in _SQUEEZED
     assert "WHERE type = 'consume' AND reference_type = 'agent_run'" in _SQUEEZED
+
+    # 查询侧：同样两列，同样是等值（而不是 IN / LIKE / 函数包裹）
+    where = _compiled_query_where()
+    assert re.search(r"point_transactions\.type = %\(\w+\)s", where), where
+    assert re.search(r"point_transactions\.reference_type = %\(\w+\)s", where), where
 
 
 def test_it_is_not_unique():

@@ -11,6 +11,7 @@ import { GitFork, Pause, Play, Square } from 'lucide-react';
 import { aiLibraryService } from '../../../services/aiLibraryService';
 import { fmtWhen } from '../../../utils/fmtWhen';
 import { pauseIssue, resumeIssue } from '../../../services/issuesService';
+import type { IssueProgress } from '../../../services/issuesService';
 import {
   budgetState,
   childrenState,
@@ -38,6 +39,25 @@ const PHASE_TONE: Record<string, string> = {
   blocked: 'text-danger bg-danger-soft border-danger-line',
   done: 'text-ink-400 bg-ink-900 border-ink-800',
   idle: 'text-ink-400 bg-ink-900 border-ink-800',
+};
+
+/**
+ * 后端 `issue_rollup.EMPTY_EFFICIENCY` 的镜像，用作 wire 侧兼容窗口的兜底。
+ *
+ * 类型上 `IssueProgress.efficiency` 是必填的（后端对每个议题都发，边界 mock 也必须
+ * 带上），但**运行时**这个键可能不来：前端走 Cloudflare Pages、后端走 gpupc，两条
+ * 部署链独立触发且前端常先上。而唯一的 ErrorBoundary 在 index.tsx 根部 —— 驾驶舱
+ * 读 undefined 不是「少两个格子」，是整站白屏。零值让两个格子自然隐藏。
+ */
+const EMPTY_EFFICIENCY: IssueProgress['efficiency'] = {
+  runs: 0,
+  steps: 0,
+  tool_calls: 0,
+  tool_errors: 0,
+  deliverables: 0,
+  avg_run_ms: null,
+  cost_per_deliverable_cents: null,
+  turn_end_reasons: {},
 };
 
 /** Tailwind needs the class written out; a template string is not scanned. */
@@ -112,13 +132,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const outputs = outputsState(view);
   const wakeups = wakeupsState(view);
   // 3c §3.3：整个议题的效率账（后端按全体 run 求和）。这里只显示，不重算。
-  // 不加 `eff &&` 守卫：后端对每一个议题都发这个键（EMPTY_EFFICIENCY），没跑过 run
-  // 也是零值而不是缺席，所以类型上它是必填的。加一个永远为真的守卫只会让读代码的人
-  // 以为这个键可能不来。
-  const eff = rollup.efficiency;
+  // `?? EMPTY_EFFICIENCY` 是 wire 侧兼容窗口，不是类型上的可选 —— 理由见常量注释。
+  const eff = rollup.efficiency ?? EMPTY_EFFICIENCY;
   // 冻结回放时两个效率格隐藏：它们是**全议题、当下**的数，跟「as of 某一步」不是
   // 同一个时刻——与冻结时花费只显示那一步的 spend 同一语义。
-  const showCostPerOutput = !frozen && eff.deliverables > 0 && eff.cost_per_deliverable_cents != null;
+  // 成本先算成一个值：渲染条件只有这一处，格子里不必再断言它非空。
+  const costPerOutput = !frozen && eff.deliverables > 0 ? eff.cost_per_deliverable_cents : null;
   const showToolErrors = !frozen && eff.tool_errors > 0;
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
@@ -282,7 +301,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
       {/* Four fixed cells plus the five conditional ones — the column count
           follows what is actually rendered, so a cell never sits alone on a
           half-empty row. */}
-      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (showToolErrors ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0) + (showCostPerOutput ? 1 : 0)]}`}>
+      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (showToolErrors ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0) + (costPerOutput != null ? 1 : 0)]}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -364,13 +383,13 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         {/* 单独一格，不挂在 Outputs 格里：`outputs` 是**当前这条 run** 的产出，
             而 deliverables / 花费是**全议题**的。挂在一起的话，「上一条 run 产出
             了 3 件、这条刚开始」这个常见时刻整格就消失了。 */}
-        {showCostPerOutput && (
+        {costPerOutput != null && (
           <Cell
             label={t('issueDetail.costPerOutput', 'Cost / output')}
             testId="cockpit-cost-per-output"
             title={t('issueDetail.costPerOutputHint', 'Across all runs of this issue')}
           >
-            {t('issueDetail.costPerOutputValue', '{{c}} / output', { c: formatCents(eff.cost_per_deliverable_cents as number) })}
+            {t('issueDetail.costPerOutputValue', '{{c}} / output', { c: formatCents(costPerOutput) })}
           </Cell>
         )}
       </div>
