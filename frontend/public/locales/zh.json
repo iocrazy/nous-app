@@ -4809,7 +4809,24 @@
     "emptyRange": "该时间范围内无用量。",
     "runsTitleRange": "最近调用明细（最近 {{days}} 天）",
     "rangeMonth": "按月",
-    "runsTitleMonth": "最近调用明细（{{month}}）"
+    "runsTitleMonth": "最近调用明细（{{month}}）",
+    "statCostPerOutput": "每件产出花费",
+    "statToolErrors": "工具错误率",
+    "turnEndTitle": "回合都是怎么结束的",
+    "turnEndEmpty": "还没有结束的运行",
+    "efficiencyLoading": "正在加载效率数据...",
+    "efficiencyUnavailable": "效率数据暂时读不到。上面的用量汇总不受影响。",
+    "efficiencyRangeTooLong": "这个时间范围对效率统计来说太长了，请选 366 天以内的窗口。",
+    "efficiencyInvalidRange": "这个时间范围的结束时间早于开始时间。",
+    "efficiencyFailed": "效率数据加载失败。",
+    "turnEnd": {
+      "completed": "已完成",
+      "awaitingInput": "等待输入",
+      "error": "出错",
+      "interrupted": "被中断",
+      "cancelled": "已取消",
+      "other": "其他"
+    }
   },
   "clockDrift": {
     "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",

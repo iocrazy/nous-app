@@ -2252,6 +2252,27 @@ export interface UsageDailySummary {
   daily: UsageDailyRow[];
 }
 
+/**
+ * One run's money line — `GET /api/v1/ai-library/runs/costs` (3c §4.2).
+ *
+ * Mirror of `backend/app/schemas/efficiency.py::RunCostRow`. Three fields are
+ * nullable and each null means something a 0 would lie about:
+ *   `cost_cents`     — no recorded cost, not a free run
+ *   `charged_points` — **nobody billed this run** (BYOK, billing off, or the
+ *                      charge never landed), not «charged zero»
+ *   `status`         — the row never recorded one
+ * Keyed by run id as a STRING everywhere: these are snowflake BIGINTs and JS
+ * loses precision past 2^53.
+ */
+export interface RunCost {
+  cost_cents: number | null;
+  charged_points: number | null;
+  model: string | null;
+  status: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
 // ─── AI Library chat ────────────────────────────────────────────────────────
 // Mirror of backend/app/schemas/ai_library_chat.py. One session = one agent
 // binding; messages + run telemetry flow through AgentRunner + RunRecorder.

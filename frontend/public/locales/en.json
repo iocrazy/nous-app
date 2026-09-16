@@ -4809,7 +4809,24 @@
     "emptyRange": "No usage in this range.",
     "runsTitleRange": "Recent calls (last {{days}} days)",
     "rangeMonth": "Month",
-    "runsTitleMonth": "Recent calls ({{month}})"
+    "runsTitleMonth": "Recent calls ({{month}})",
+    "statCostPerOutput": "Cost / output",
+    "statToolErrors": "Tool error rate",
+    "turnEndTitle": "How turns ended",
+    "turnEndEmpty": "No finished runs yet",
+    "efficiencyLoading": "Loading efficiency...",
+    "efficiencyUnavailable": "Efficiency stats are unavailable right now. Usage totals above are unaffected.",
+    "efficiencyRangeTooLong": "That range is too long for efficiency stats. Pick a window of 366 days or less.",
+    "efficiencyInvalidRange": "That range ends before it starts.",
+    "efficiencyFailed": "Efficiency stats could not be loaded.",
+    "turnEnd": {
+      "completed": "Completed",
+      "awaitingInput": "Awaiting input",
+      "error": "Error",
+      "interrupted": "Interrupted",
+      "cancelled": "Cancelled",
+      "other": "Other"
+    }
   },
   "clockDrift": {
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
