@@ -14,6 +14,8 @@ import asyncio
 import datetime as dt
 from typing import Any, Optional
 
+from loguru import logger
+
 from app.services.issues.origin_resolvers import resolve_origin
 
 TERMINAL_ISSUE = frozenset({"done", "cancelled", "closed"})
@@ -221,14 +223,33 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
+
     # 效率账与积分账互不依赖，串行只是白等一个往返 —— 这个端点是被轮询的。
     # ``agent_run`` 是 A3 票定的 reference_type。runs 已是 root-only，就是 UI 要显示
     # 的那几行，不必为子 run 多查。
+    async def _charged() -> dict[str, float]:
+        """积分账读失败只空掉这一个字段，不带走整个 rollup。
+
+        仓库层一律 raise —— 另一个读方 ``/ai-library/runs/costs`` 要靠它答 503，
+        而不是把一个真花了钱的 run 显示成免费。降级的责任因此落在各消费方；这里是
+        被轮询的驾驶舱，一个字段读不到不该让进度、子议题、收件箱计数一起消失。
+
+        ⚠️ 必须自己 catch：``asyncio.gather`` 默认任何一个协程抛出就整体抛出。
+        用 ``return_exceptions=True`` 则会连带吞掉效率账那条的失败，那不是想要的。
+        """
+        try:
+            return await get_points_repository().charged_points_for_references(
+                reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"[issue_rollup] charged points read failed for {issue_id}: {e}"
+            )
+            return {}
+
     efficiency, charged = await asyncio.gather(
         get_agent_runs_repository().efficiency_for_issue(issue_id),
-        get_points_repository().charged_points_for_references(
-            reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
-        ),
+        _charged(),
     )
     current = _current_run(runs)
     last_seq = (

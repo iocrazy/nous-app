@@ -25,7 +25,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -48,10 +48,13 @@ from app.repositories.agent_workforce_repository import (
     tt_row_to_task_shape,
 )
 from app.repositories.issue_repository import get_issue_repository
+from app.repositories.points_repository import get_points_repository
+from app.repositories.projects_repository import get_projects_repository
 from app.repositories.skill_repository import (
     SkillRepository,
     get_skill_repository,
 )
+from app.repositories.team_repository import get_team_repository
 from app.schemas.agent_runs import (
     RunDetail,
     RunGroupListResponse,
@@ -83,11 +86,18 @@ from app.schemas.ai_library_chat import (
     SessionUpdate,
     SessionWithMessages,
 )
+from app.schemas.efficiency import (
+    EfficiencyGroup,
+    EfficiencyResponse,
+    RunCostsResponse,
+)
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.permissions.high_risk_caps import high_risk_caps
 from app.services.ai.runner.seed_loader import SeedLoader
+from app.services.issues.issue_visibility import visible_issue_ids
 from app.services.modules.gate import require_module
+from app.utils.time_window import parse_window_dt, window_error
 
 router = APIRouter(
     prefix="/ai-library",
@@ -104,6 +114,27 @@ router = APIRouter(
 def _repos() -> tuple[AgentRepository, SkillRepository]:
     """Return a fresh (AgentRepository, SkillRepository) pair per request."""
     return get_agent_repository(), get_skill_repository()
+
+
+async def _agent_labels(keys: Iterable[Any]) -> Dict[str, str]:
+    """Display names for a set of agent uuids, keyed by the uuid string.
+
+    Shared by every grouped-by-agent read face (``/usage/daily``,
+    ``/usage/efficiency``) so one agent never shows under two names. Bounded by
+    the distinct agents in the caller's own window. Best-effort: a label is
+    cosmetic, so a failed lookup logs and leaves the key to stand for itself
+    rather than failing the page.
+    """
+    agent_repo, _ = _repos()
+    labels: Dict[str, str] = {}
+    for key in {str(k) for k in keys if k}:
+        try:
+            agent = await agent_repo.get_by_id(UUID(key))
+            if agent:
+                labels[key] = agent.get("name") or agent.get("slug") or key
+        except Exception as exc:  # noqa: BLE001 — label is cosmetic
+            logger.warning(f"[ai-library] agent label failed for {key}: {exc}")
+    return labels
 
 
 def _coerce_user_uuid(user_id: str) -> UUID:
@@ -2324,6 +2355,82 @@ async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
 
 
 @router.get(
+    "/runs/costs",
+    response_model=RunCostsResponse,
+    summary="Batch cost + charged points for up to 50 runs",
+)
+async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
+    """一次拿一屏气泡的花费（3c §4.2）。可见性复用 ``visible_issue_ids``（与血缘同一
+    把尺）；**看不见的 id 是键省略**，不是 404。
+
+    NOTE: 必须注册在 ``/runs/{run_id}`` 之前（同 ``/runs/live``）——否则 ``costs``
+    会被当成一个 run_id 吃掉，端点永远拿不到请求，而单测直接调函数看不出来。"""
+    # Deduplicate BEFORE the cap: the limit is on distinct runs, not on commas.
+    # A client repainting one screen may well send the same run twice, and the
+    # query is an IN over the deduplicated set either way — refusing that batch
+    # would be a 400 the user cannot act on.
+    wanted = list(
+        dict.fromkeys(
+            int(t) for t in (s.strip() for s in ids.split(",")) if t.isdigit()
+        )
+    )
+    if len(wanted) > 50:
+        raise HTTPException(status_code=400, detail={"code": "too_many_ids"})
+    if not wanted:
+        return {"items": {}}
+    try:
+        rows = await get_agent_runs_repository().cost_rows_for_ids(wanted)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"[runs/costs] read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
+    me = str(auth.user_id)
+    try:
+        visible = await visible_issue_ids({r.get("issue_id") for r in rows}, auth)
+    except Exception as exc:  # noqa: BLE001
+        # Degrading to "nothing is visible" would hand back a short batch that
+        # reads as a permission answer — "those runs are not yours" — when the
+        # truth is that we could not find out. Same wire code as the other two
+        # arms: one endpoint, one unavailable; the log line says which read.
+        logger.error(f"[runs/costs] visibility read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
+    allowed = [
+        r
+        for r in rows
+        if str(r.get("user_id")) == me or str(r.get("issue_id")) in visible
+    ]
+    try:
+        charged = await get_points_repository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=[str(r["id"]) for r in allowed]
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 不降级成「没扣过」——那等于告诉用户这些 run 是免费的。整条 503，让调用方
+        # 知道账目这会儿读不到。
+        logger.error(f"[runs/costs] charged points read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
+    return {
+        "items": {
+            str(r["id"]): {
+                "cost_cents": (
+                    float(r["cost_cents"]) if r["cost_cents"] is not None else None
+                ),
+                "charged_points": charged.get(str(r["id"])),
+                "model": r["model"],
+                "status": r["status"],
+                "prompt_tokens": int(r["prompt_tokens"] or 0),
+                "completion_tokens": int(r["completion_tokens"] or 0),
+            }
+            for r in allowed
+        }
+    }
+
+
+@router.get(
     "/runs/{run_id}",
     response_model=RunDetail,
     summary="Get run detail",
@@ -2869,16 +2976,9 @@ async def get_usage_daily(
 
     # Agent grouping keys are uuids — enrich to display labels (bounded by
     # the caller's distinct agents). Model keys label as themselves.
-    labels: Dict[str, str] = {}
-    if group_by == "agent":
-        agent_repo, _ = _repos()
-        for key in {str(r["key"]) for r in rows if r.get("key")}:
-            try:
-                agent = await agent_repo.get_by_id(UUID(key))
-                if agent:
-                    labels[key] = agent.get("name") or agent.get("slug") or key
-            except Exception as exc:  # noqa: BLE001 — label is cosmetic
-                logger.warning(f"[usage/daily] agent label failed for {key}: {exc}")
+    labels: Dict[str, str] = (
+        await _agent_labels([r.get("key") for r in rows]) if group_by == "agent" else {}
+    )
 
     daily = [
         {
@@ -2908,6 +3008,108 @@ async def get_usage_daily(
         "total_cost_cents": sum(d["cost_cents"] for d in daily),
         "daily": daily,
     }
+
+
+@router.get(
+    "/usage/efficiency",
+    response_model=EfficiencyResponse,
+    summary="Run efficiency (turn-end mix, tool error rate, cost per output)",
+)
+async def get_usage_efficiency(
+    auth: AuthDep,
+    scope: str = "user",
+    id: int | None = None,
+    frm: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    group_by: str = "model",
+) -> EfficiencyResponse:
+    """从 ``agent_runs`` 的效率五列出一张按 model / agent 的分组表。
+
+    user scope 硬锁调用者；team scope 过 ``get_team_by_id``（非成员 None → 404，不泄露
+    存在性）；project scope 先解析出它的 team 再过同一道门。``agent_runs`` 不在
+    SCOPE_ENFORCE 清单里，SQL 层不会兜底——这道门是唯一的一道。
+    """
+    if scope not in ("user", "team", "project"):
+        raise HTTPException(status_code=400, detail={"code": "invalid_scope"})
+    if group_by not in ("model", "agent"):
+        raise HTTPException(status_code=400, detail={"code": "invalid_group_by"})
+    if scope != "user" and id is None:
+        raise HTTPException(status_code=400, detail={"code": "scope_requires_id"})
+    now = datetime.now(timezone.utc)
+    to_dt = parse_window_dt(to, default=now)
+    frm_dt = parse_window_dt(frm, default=to_dt - timedelta(days=30))
+    # Same cap as /usage/summary, from the same constant. agent_runs has no
+    # index on project_id and grows forever, so an unbounded window here is a
+    # full scan of the busiest table in the schema.
+    problem = window_error(frm_dt, to_dt)
+    if problem:
+        raise HTTPException(status_code=400, detail={"code": problem})
+
+    user_uuid: UUID | None = None
+    team_id: int | None = None
+    project_id: int | None = None
+    if scope == "user":
+        user_uuid = _coerce_user_uuid(auth.user_id)
+    else:
+        if scope == "project":
+            project = await get_projects_repository().get_project_by_id(str(id))
+            gate_team, project_id = (project or {}).get("team_id"), int(id)
+        else:
+            gate_team, team_id = int(id), int(id)
+        if gate_team is None or not await get_team_repository().get_team_by_id(
+            str(gate_team), auth.user_id
+        ):
+            raise HTTPException(status_code=404, detail={"code": "not_found"})
+    try:
+        rows, reasons = await get_agent_runs_repository().efficiency_groups(
+            frm=frm_dt,
+            to=to_dt,
+            user_id=user_uuid,
+            team_id=team_id,
+            project_id=project_id,
+            group_by=group_by,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"[usage/efficiency] read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "efficiency_unavailable"}
+        ) from exc
+
+    labels = (
+        await _agent_labels([r["key"] for r in rows]) if group_by == "agent" else {}
+    )
+    groups = []
+    for r in rows:
+        calls, delivered = int(r["tool_calls"] or 0), int(r["deliverables"] or 0)
+        timed, cost = int(r["timed_runs"] or 0), float(r["cost_cents"] or 0.0)
+        errors = int(r["tool_errors"] or 0)
+        groups.append(
+            EfficiencyGroup(
+                key=r["key"],
+                label=labels.get(r["key"], r["key"] or "unknown"),
+                run_count=int(r["run_count"] or 0),
+                failed_runs=int(r["failed_runs"] or 0),
+                avg_run_ms=(int(r["total_ms"] / timed) if timed else None),
+                tool_calls=calls,
+                tool_errors=errors,
+                # 0 次调用 → 0 的错误率（确定没错过），不是 null。
+                tool_error_rate=(round(errors / calls, 4) if calls else 0.0),
+                deliverables=delivered,
+                cost_cents=round(cost, 4),
+                # 0 件产出 → null（不知道单价），绝不是 0。
+                cost_per_deliverable_cents=(
+                    round(cost / delivered, 4) if delivered else None
+                ),
+            )
+        )
+    return EfficiencyResponse(
+        scope=scope,
+        group_by=group_by,
+        **{"from": frm_dt},
+        to=to_dt,
+        groups=groups,
+        turn_end_reasons=reasons,
+    )
 
 
 # ---------------------------------------------------------------------------

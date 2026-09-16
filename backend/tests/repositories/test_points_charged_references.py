@@ -1,8 +1,12 @@
 """``PointsRepository.charged_points_for_references`` (3c §3.3) —— 真扣掉的积分
 来自 ``point_transactions`` 的 consume 流水，效率账**引用**积分账而不复制一份。
 
-同 ``efficiency_for_issue``：整段包在 try/except 里返回 ``{}``，所以建语句时的任何
-错误都会被读成「这些 run 都没扣过分」。这里真编译一次语句。
+读失败**一律 raise**，降级交给消费方：``/ai-library/runs/costs`` 转 503（把一个真花了
+钱的 run 显示成免费是最坏的答案），``issue_rollup.load_rollup`` 自己 catch 成 ``{}``（被
+轮询的驾驶舱不该因为一个字段读不到就整块消失）。一个返回 ``{}`` 的仓库无法同时伺候这
+两个，所以失败必须往上走。
+
+建语句时的错误因此也会冒出去，而不是被读成「这些 run 都没扣过分」。这里真编译一次语句。
 """
 
 from __future__ import annotations
@@ -81,14 +85,19 @@ async def test_an_empty_id_list_asks_nothing():
     assert out == {} and sess.stmts == []
 
 
-async def test_a_failed_read_is_empty_not_an_exception():
+async def test_a_failed_read_raises_so_each_consumer_can_choose():
+    """A billing read that answered ``{}`` would tell the cost bubble every run
+    was free. The two readers want opposite things from a failure and only one
+    of them can be served by a default, so the failure travels and each side
+    decides (``load_rollup`` catches it; ``/runs/costs`` answers 503)."""
+
     @contextlib.asynccontextmanager
     async def _boom():
         raise RuntimeError("connection reset")
         yield  # pragma: no cover
 
     with patch("app.repositories.points_repository.read_scope", _boom):
-        out = await PointsRepository().charged_points_for_references(
-            reference_type="agent_run", reference_ids=["101"]
-        )
-    assert out == {}
+        with pytest.raises(RuntimeError):
+            await PointsRepository().charged_points_for_references(
+                reference_type="agent_run", reference_ids=["101"]
+            )

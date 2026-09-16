@@ -64,6 +64,25 @@ _GROUP_KEY_FACTORY: dict[str, Callable[[], Any]] = {
 VALID_GROUP_BY = frozenset(_GROUP_KEY_FACTORY)
 
 
+def _counter_cols():
+    """五个计数列的 SUM。每个 SELECT 各调一次——Label 实例不可跨 SELECT 复用，理由
+    同本模块顶部的 ``_GROUP_KEY_FACTORY``。"""
+    from sqlalchemy import func
+
+    from app.models import AiUsageHourly
+
+    return [
+        func.coalesce(func.sum(getattr(AiUsageHourly, name)), 0).label(name)
+        for name in (
+            "run_count",
+            "failed_runs",
+            "tool_calls",
+            "tool_errors",
+            "deliverables",
+        )
+    ]
+
+
 def _coerce_bigint(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -117,6 +136,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
                             "event_count"
                         ),
+                        *_counter_cols(),
                     ).where(*where_clause)
                 )
             )
@@ -154,6 +174,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
                             "event_count"
                         ),
+                        *_counter_cols(),
                     )
                     .where(*where_clause)
                     .group_by(grp_label)
@@ -180,6 +201,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.cost_cents), 0).label(
                             "cost_cents"
                         ),
+                        *_counter_cols(),
                     )
                     .where(*where_clause)
                     .group_by(day_label, daily_grp_label)
