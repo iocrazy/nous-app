@@ -968,7 +968,20 @@
       "tags": "标签",
       "notes": "笔记",
       "name": "名称"
-    }
+    },
+    "palettePlaceholder": "搜索议题、运行与产出",
+    "paletteHint": "输入至少 2 个字符，搜索议题、运行与产出",
+    "paletteSearching": "搜索中…",
+    "paletteEmpty": "没有匹配 “{{q}}” 的结果",
+    "paletteError": "搜索没能执行（{{code}}）",
+    "paletteErrorPlain": "搜索没能执行",
+    "paletteNoPage": "无页面",
+    "paletteFooter": "↑↓ 选择 · ↵ 打开 · esc 关闭",
+    "groupIssues": "议题",
+    "groupRuns": "运行",
+    "groupOutputs": "产出",
+    "groupOf": "共 {{total}} 条，显示 {{shown}} 条",
+    "paletteResults": "搜索结果"
   },
   "dashboard": {
     "title": "数据统计",
@@ -5967,6 +5980,12 @@
     "kindShot": "分镜",
     "kindScene": "场次",
     "kindChapter": "章节",
-    "kindOther": "产出"
+    "kindOther": "产出",
+    "citedTimes": "被引 ×{{n}}",
+    "mentionSearchError": "无法搜索该项目的产出",
+    "mentionSearchErrorCode": "无法搜索该项目的产出（{{code}}）",
+    "citedInTitle": "被引用于",
+    "citedInNoIssue": "一件没有编号的议题",
+    "citedInHidden": "另有 {{n}} 条在你看不到的议题上"
   }
 }

@@ -968,7 +968,20 @@
       "tags": "Tags",
       "notes": "Notes",
       "name": "Name"
-    }
+    },
+    "palettePlaceholder": "Search issues, runs and outputs",
+    "paletteHint": "Type at least 2 characters to search issues, runs and outputs",
+    "paletteSearching": "Searching…",
+    "paletteEmpty": "Nothing matches “{{q}}”",
+    "paletteError": "The search could not run ({{code}})",
+    "paletteErrorPlain": "The search could not run",
+    "paletteNoPage": "no page",
+    "paletteFooter": "↑↓ navigate · ↵ open · esc close",
+    "groupIssues": "Issues",
+    "groupRuns": "Runs",
+    "groupOutputs": "Outputs",
+    "groupOf": "{{shown}} of {{total}}",
+    "paletteResults": "Search results"
   },
   "dashboard": {
     "title": "Analytics",
@@ -5967,6 +5980,12 @@
     "kindShot": "Shot",
     "kindScene": "Scene",
     "kindChapter": "Chapter",
-    "kindOther": "Output"
+    "kindOther": "Output",
+    "citedTimes": "Cited ×{{n}}",
+    "mentionSearchError": "Could not search this project’s outputs",
+    "mentionSearchErrorCode": "Could not search this project’s outputs ({{code}})",
+    "citedInTitle": "Referenced in",
+    "citedInNoIssue": "An issue with no key",
+    "citedInHidden": "{{n}} hidden — on issues you cannot see"
   }
 }

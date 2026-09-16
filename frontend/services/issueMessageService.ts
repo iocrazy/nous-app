@@ -130,6 +130,16 @@ export type IssueMessageAttachment =
       ref_id: string;
       version: number;
       title: string | null;
+      /** The issue the cited version was PRODUCED on — `MH-98` (3c §2.4).
+       *
+       *  A citation may now point at another issue's output: the resolver's
+       *  check widened from "produced on THIS issue" to "the chain is visible
+       *  to you", so the chip needs somewhere to say where it came from.
+       *
+       *  Optional because it is absent on every row written before 3c and on
+       *  any chain answering to no issue. Like `title`, it is the server's to
+       *  fill in — a client never composes one. */
+      issue_key?: string | null;
     };
 
 export interface IssueMessagePostPayload {

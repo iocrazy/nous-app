@@ -545,3 +545,51 @@ describe('useCanvasShortcuts — read-only withdraws the write chords', () => {
     expect(readClipboard()?.nodes).toHaveLength(1);
   });
 });
+
+/**
+ * ⌘K 有两个监听者：画布这一个，和 app 外壳里的统一检索面
+ * （`components/search/CommandPalette.tsx`，3c Task 17）。两者都挂在 window 上。
+ *
+ * **画布是主人** —— 画布内的 ⌘K 是既有功能，不能被新来的面板抢走。而外壳那个
+ * 组件挂在布局里、在路由之上，所以它的 bubble 监听器先注册也先跑。靠注册顺序
+ * 不可能让画布赢：画布必须在 **capture** 阶段认领这个和弦，那才是「画布内
+ * ⌘K 归画布」这句话成立的机制，而不是一个关于挂载顺序的祈祷。
+ */
+describe('useCanvasShortcuts — ⌘K 的归属', () => {
+  it('抢在先注册的 bubble 监听器之前认领，让它看到 defaultPrevented', () => {
+    const palette = vi.fn();
+    // 先注册 —— 正是生产里 AppLayout 那个面板相对于画布路由的位置。
+    const shellHandler = vi.fn((e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      palette();
+    });
+    window.addEventListener('keydown', shellHandler);
+    try {
+      const onOpenPalette = vi.fn();
+      render(<Host onOpenPalette={onOpenPalette} />);
+      const event = fireKey({ key: 'k', meta: true });
+      expect(onOpenPalette).toHaveBeenCalledTimes(1);
+      expect(event.defaultPrevented).toBe(true);
+      // 外壳那个仍然被调用（它就挂在那儿），但它看到的是一个已被处理的事件，
+      // 于是面板不开 —— 一次按键一个结果。
+      expect(shellHandler).toHaveBeenCalled();
+      expect(palette).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', shellHandler);
+    }
+  });
+
+  it('别人已经处理过的按键，画布不再动作', () => {
+    const onOpenPalette = vi.fn();
+    const onOpenHelp = vi.fn();
+    render(<Host onOpenPalette={onOpenPalette} onOpenHelp={onOpenHelp} />);
+    const event = new KeyboardEvent('keydown', {
+      key: '?',
+      bubbles: true,
+      cancelable: true,
+    });
+    event.preventDefault();
+    window.dispatchEvent(event);
+    expect(onOpenHelp).not.toHaveBeenCalled();
+  });
+});

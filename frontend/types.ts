@@ -2568,6 +2568,16 @@ export type OutputRefAttachment = {
   version: number;
   /** Registry title snapshot, or null when the row carries none. */
   title: string | null;
+  /** The issue the cited version was PRODUCED on — `MH-98` (3c §2.4).
+   *
+   *  A citation may now point at another issue's output: the resolver's check
+   *  widened from "produced on THIS issue" to "the chain is visible to you".
+   *  So the chip needs somewhere to say where the version came from.
+   *
+   *  Absent on every row written before 3c and on any chain answering to no
+   *  issue. Like `title`, the value the client sends is the server's to
+   *  overwrite — it is read, never composed here. */
+  issue_key?: string | null;
 };
 
 /** AI processing state of a resource (`resources.transcript_status`

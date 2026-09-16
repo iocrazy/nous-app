@@ -510,9 +510,13 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
   const ev = (seq: number, event_type: string, payload: Record<string, unknown>, step?: number): AgentRunEvent =>
     ({ seq, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
 
+  // ⚠️ **每条可解析的引用都带 `issue_key`** —— `output_ref_resolver._stamped`
+  // 填的是这一版产出在哪，不与任何「当前议题」比较，所以同议题那条照样有。
+  // 第一条是同议题的形状，第二条是跨议题的，两者在 wire 上只差值不差形状。
+  // 键真正缺席的只有一种情况：3c 之前写下的行（最后那条覆盖它）。
   const CITED = [
-    { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM' },
-    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' },
+    { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM', issue_key: 'MH-96' },
+    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1', issue_key: 'MH-98' },
   ];
 
   it('hangs this turn’s citations on the step that consumed them', () => {
@@ -524,8 +528,22 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
     const step = nodes.find((n) => n.kind === 'step');
     if (!step || step.kind !== 'step') throw new Error('no step node');
     expect(step.citations).toEqual([
-      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
-      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM', issueKey: 'MH-96' },
+      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1', issueKey: 'MH-98' },
+    ]);
+  });
+
+  it('3c 之前写下的行没有这个键，读成 null 而不是丢掉整条', () => {
+    // 「键缺席」和「值为空」在这条链上是同一个答案：那一版确实产出在某处，只是
+    // 当时没记。丢掉整条会让一条老评论看起来什么都没引用过。
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'revise', referenced_outputs: [{ kind: 'script_shot', ref_id: '9', version: 1 }] }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toEqual([
+      { key: 'script_shot:9:1', kind: 'script_shot', refId: '9', version: 1, title: null, issueKey: null },
     ]);
   });
 

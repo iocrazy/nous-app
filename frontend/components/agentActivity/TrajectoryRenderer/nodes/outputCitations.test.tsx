@@ -16,6 +16,7 @@ import en from '../../../../public/locales/en.json';
 import zh from '../../../../public/locales/zh.json';
 import type { OutputCitation, StepNode } from '../foldEvents';
 import { OutputCitations } from './builtins';
+import { TrajectoryIssueKeyContext } from '../trajectoryRunContext';
 
 // Resolved against the REAL shipped English copy, with i18next's plural-suffix
 // lookup, because the plural forms are the thing under test: a `{{count}}` key
@@ -41,8 +42,12 @@ vi.mock('react-i18next', () => {
 });
 
 const CITED: OutputCitation[] = [
-  { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
-  { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+  // ⚠️ **每条可解析的引用都带 `issueKey`**。`output_ref_resolver._stamped` 不与
+  // 任何「当前议题」比较 —— 它填的是这一版产出在哪，本议题产出的那条也照填。
+  // 把同议题那条写成 null 等于给一个后端不会发的响应写测试，而「只在不同时才
+  // 画」这条规则就永远不会被这组断言碰到。
+  { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM', issueKey: 'MH-96' },
+  { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1', issueKey: 'MH-98' },
 ];
 
 const step = (citations?: OutputCitation[]): StepNode => ({
@@ -83,17 +88,47 @@ describe('OutputCitations', () => {
   });
 
   it('names each cited version the way the composer chip did', () => {
-    render(<OutputCitations node={step(CITED)} />);
+    // 在「就是这件议题」的 provider 里渲染，来源标签才不会混进被断言的名字里。
+    render(
+      <TrajectoryIssueKeyContext.Provider value="MH-96">
+        <OutputCitations node={step(CITED)} />
+      </TrajectoryIssueKeyContext.Provider>,
+    );
     const chips = screen.getAllByTestId('output-citation-chip');
     expect(chips).toHaveLength(2);
     expect(chips[0].textContent).toBe('@MEDIUM v2');
     expect(chips[0].getAttribute('data-ref')).toBe('337650953731886');
     expect(chips[0].getAttribute('data-version')).toBe('2');
-    expect(chips[1].textContent).toBe('@S3 · Shot #1 v1');
+    expect(chips[1].textContent).toContain('@S3 · Shot #1 v1');
+  });
+
+  it('只在来源议题与正在读的这件不同时才画', () => {
+    render(
+      <TrajectoryIssueKeyContext.Provider value="MH-96">
+        <OutputCitations node={step(CITED)} />
+      </TrajectoryIssueKeyContext.Provider>,
+    );
+    // 两条都带 issueKey（后端对每条都填），但只有 MH-98 与当前议题不同。
+    // 判「有没有」而不是「同不同」会让每条引用都挂一个指着你正看着的议题的
+    // 标签 —— 整片都画，唯一真的来自别处的那一条就不再显眼了。
+    const marks = screen.getAllByTestId('output-citation-issue');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('MH-98');
+  });
+
+  it('不知道自己在哪时全画 —— 聊天面板的轨迹背后没有议题', () => {
+    // Provider 之外（chat 的 Trajectory 页签、Task Center 详情）默认 null。
+    // 那时「不比较」是诚实答案：每条引用都该说出自己来自哪。
+    render(<OutputCitations node={step(CITED)} />);
+    expect(screen.getAllByTestId('output-citation-issue')).toHaveLength(2);
   });
 
   it('falls back to the coordinates when the citation kept no title', () => {
-    render(<OutputCitations node={step([{ ...CITED[0], title: null }])} />);
+    render(
+      <TrajectoryIssueKeyContext.Provider value="MH-96">
+        <OutputCitations node={step([{ ...CITED[0], title: null }])} />
+      </TrajectoryIssueKeyContext.Provider>,
+    );
     expect(screen.getByTestId('output-citation-chip').textContent).toBe('@script shot #337650953731886 v2');
   });
 

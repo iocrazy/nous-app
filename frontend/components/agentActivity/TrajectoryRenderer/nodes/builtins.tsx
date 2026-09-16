@@ -12,6 +12,7 @@ import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
 import { generatedMediaCoverUrl } from '../../../../services/generatedMediaService';
 import { useChildRun } from '../../../Todolist/childRunContext';
+import { useTrajectoryIssueKey } from '../trajectoryRunContext';
 import { useHighlightedOutput } from '../../../Todolist/outputHighlight';
 import { OutputDiffDialog } from '../../../Todolist/OutputDiffDialog';
 import type {
@@ -371,6 +372,9 @@ const OutputThumb: React.FC<{ card: OutputCard }> = ({ card }) => {
  */
 export const OutputCitations: React.FC<{ node: StepNode }> = ({ node }) => {
   const { t } = useTranslation();
+  // Which issue the reader is on, so a source can be called "another one".
+  // Null outside a thread — nothing is compared and every source is drawn.
+  const currentIssueKey = useTrajectoryIssueKey();
   const cited = node.citations ?? [];
   if (cited.length === 0) return null;
   return (
@@ -395,6 +399,17 @@ export const OutputCitations: React.FC<{ node: StepNode }> = ({ node }) => {
             title: c.title ?? `${c.kind.replace(/_/g, ' ')} #${c.refId}`,
             n: c.version,
           })}
+          {/* Where the cited version came from — drawn only when that is NOT
+              the issue being read. The backend stamps a source onto EVERY
+              resolvable citation (`output_ref_resolver._stamped` compares
+              nothing), so testing for presence would label every row with the
+              issue already on screen and bury the one that came from
+              elsewhere. */}
+          {c.issueKey && c.issueKey !== currentIssueKey && (
+            <span data-testid="output-citation-issue" className="ml-1 text-ink-500">
+              {c.issueKey}
+            </span>
+          )}
         </span>
       ))}
     </div>

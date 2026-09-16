@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChildRunContext, type ChildRunState } from './childRunContext';
 import { diffWords } from './outputDiff';
+import { fmtWhen } from '../../utils/fmtWhen';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
@@ -68,6 +69,8 @@ const v = (version: number, parent: number | null): OutputLineage['versions'][nu
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
   cost_cents: 0.42, created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+  cited_count: 0, cited_in: [],
 });
 
 // `as_of_seq` is a Snowflake id and therefore a STRING on the wire — a number
@@ -92,6 +95,91 @@ beforeEach(() => {
 });
 
 describe('OutputDiffDialog', () => {
+  /**
+   * 版本链上的「被引 ×n」（harness 三期 3c §2.2）。
+   *
+   * 显示的是 `cited_count`（全量）而不是 `cited_in.length`（只是你看得见的那几
+   * 条）。两者不同是允许且正确的 —— 一条引用发生在一件议题上，而议题可见性会挡
+   * 掉其中一些。把列表长度当计数显示，等于对读者说「只被引了 1 次」，而真相是
+   * 「被引 3 次，其中 2 次发生在你看不到的地方」。
+   */
+  it('版本 chip 上显示被引次数，用的是全量计数而不是可见列表的长度', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [{ issue_id: '5', issue_key: 'MH-91', message_id: 'm1', user_id: 'u1', at: '2026-09-15T00:00:00Z' }] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff-versions');
+    const marks = await screen.findAllByTestId('output-version-cited');
+    // 从没被引用过的那一版不画 —— 「零次」是答案，但它不值一个 chip。
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toContain('3');
+  });
+
+  it('展开被引列表：只列你看得见的那几条，看不见的说出有几条', async () => {
+    const cited = (n: number) => ({
+      issue_id: String(90 + n),
+      issue_key: `MH-9${n}`,
+      message_id: `m${n}`,
+      user_id: `u${n}`,
+      at: '2026-09-15T03:04:05Z',
+    });
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [cited(1), cited(2)] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const chip = await screen.findByTestId('output-version-cited');
+    fireEvent.click(chip);
+    const rows = await screen.findAllByTestId('output-version-cited-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('MH-91');
+    expect(rows[0].textContent).toContain('u1');
+    // 时间走 `fmtWhen` —— 读者拿它和自己的表比，不是拿它和 UTC 比。原样吐 ISO
+    // 串（末尾那个 Z）是把服务端的内部表示当成给人看的东西。
+    expect(rows[0].textContent).not.toContain('2026-09-15T03:04:05Z');
+    expect(rows[0].textContent).toContain(fmtWhen('2026-09-15T03:04:05Z'));
+    // 计数 3、列表 2 —— 差额必须说出来。不说的话读者会把「2」当成全部，而那
+    // 正是可见性裁剪想避免的误导。
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('1');
+  });
+
+  it('全都看得见时不画那一行 —— 「0 条看不见」不是一句话', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        {
+          ...v(2, 1),
+          cited_count: 1,
+          cited_in: [{ issue_id: '90', issue_key: 'MH-90', message_id: 'm', user_id: 'u', at: '2026-09-15T03:04:05Z' }],
+        },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(await screen.findAllByTestId('output-version-cited-row')).toHaveLength(1);
+    expect(screen.queryByTestId('output-version-cited-hidden')).toBeNull();
+  });
+
+  it('一条都看不见时只说有几条被挡住', async () => {
+    // 「被引 2 次，你一条都看不到」是一个合法答案，不是一次失败。
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [{ ...v(2, 1), cited_count: 2, cited_in: [] }, v(1, null)],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(screen.queryAllByTestId('output-version-cited-row')).toHaveLength(0);
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('2');
+  });
+
   it('opens on the latest change and colours what moved', async () => {
     render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
     await screen.findByTestId('output-diff');

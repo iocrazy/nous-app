@@ -87,19 +87,18 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
+      // Someone already answered this keystroke — including our own ⌘K claim
+      // below, which runs in the capture phase. Acting again would give one
+      // key press two results.
+      if (event.defaultPrevented || event.isComposing) return;
       if (isInsideEditable(event.target)) return;
       const meta = event.metaKey || event.ctrlKey;
       const key = event.key;
 
       const store = useCanvasCoreStore.getState();
 
-      // Cmd+K — open command palette (before all other meta+key branches so
-      // it takes priority and its callback is clearly separated from store ops).
-      if (meta && (key === 'k' || key === 'K')) {
-        event.preventDefault();
-        onOpenPaletteRef.current?.();
-        return;
-      }
+      // ⌘K is NOT here — it is claimed in the capture phase by the effect
+      // below. See the comment there for why the phase is the mechanism.
 
       // ? (Shift+/) — open the shortcut help panel. No modifier: it's a
       // bare punctuation key, not a chord.
@@ -264,6 +263,41 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [enabled, readOnly]);
+
+  /**
+   * ⌘K, claimed in the CAPTURE phase.
+   *
+   * The app shell mounts a second ⌘K listener — the unified search palette
+   * (`components/search/CommandPalette.tsx`, 3c Task 17) — on `window`, and it
+   * lives in the layout ABOVE this route, so its bubble-phase listener is
+   * registered first and would run first. Inside a canvas, ⌘K belongs to the
+   * canvas: its palette is what the chord has always opened here.
+   *
+   * The phase is the mechanism, not the registration order. Capture runs
+   * before every bubble listener whatever mounted when, so this claims the
+   * chord, calls `preventDefault()`, and the shell's handler — which checks
+   * `defaultPrevented` — stands down. Relying on mount order instead would
+   * make the answer depend on which route rendered first.
+   *
+   * Kept apart from the main handler so only THIS chord jumps the queue:
+   * moving the whole handler to capture would let every canvas shortcut
+   * preempt listeners that legitimately run before it today.
+   */
+  useEffect(() => {
+    if (!enabled) return;
+    const claim = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key !== 'k' && event.key !== 'K') return;
+      // Same guard the bubble handler opens with: a node-rename input (and the
+      // palette's own search box) keeps its keystrokes.
+      if (isInsideEditable(event.target)) return;
+      event.preventDefault();
+      onOpenPaletteRef.current?.();
+    };
+    window.addEventListener('keydown', claim, true);
+    return () => window.removeEventListener('keydown', claim, true);
+  }, [enabled]);
 }
 
 function isInsideEditable(target: EventTarget | null): boolean {

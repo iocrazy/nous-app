@@ -71,6 +71,45 @@ vi.mock('../../services/workflowService', () => ({
   fetchStageBoard: vi.fn(async () => ({ node: { brief: '', status: 'todo' } })),
 }));
 
+// What the page hands the composer. A RECORDING mock: it renders the real
+// component and keeps the props, so the hand-off is pinned without this file
+// having to know anything about how the composer works (3c Task 17 收尾).
+//
+// Worth its own probe because the failure is silent: drop `issueKey` here and
+// every existing assertion in this file and in `IssueReplyBox.test` stays
+// green, while the `@` picker labels every row with the issue already on
+// screen.
+const replyBoxProps: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('./IssueReplyBox', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./IssueReplyBox')>();
+  return {
+    ...mod,
+    IssueReplyBox: (props: React.ComponentProps<typeof mod.IssueReplyBox>) => {
+      replyBoxProps.last = props as unknown as Record<string, unknown>;
+      return <mod.IssueReplyBox {...props} />;
+    },
+  };
+});
+
+// The trajectory's own events. A test can put a turn's citations on screen
+// without a websocket by filling `runActivity.events` (3c Task 17 修复轮 2).
+//
+// Delegates to the real hook when that array is empty: every other test in
+// this file drives the trajectory through the services it already stubs, and
+// a blanket stub would quietly empty their timelines.
+const runActivity: { events: unknown[] } = { events: [] };
+vi.mock('../agentActivity/useRunToolActivity', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../agentActivity/useRunToolActivity')>();
+  return {
+    ...mod,
+    useRunToolActivity: (...args: Parameters<typeof mod.useRunToolActivity>) => {
+      const real = mod.useRunToolActivity(...args);
+      if (runActivity.events.length === 0) return real;
+      return { ...real, events: runActivity.events, loaded: true };
+    },
+  };
+});
+
 // issue.rollup — the cockpit + rail read it; the default is a running issue
 // with one live run so the cockpit has something to draw.
 const progressState: { value: Record<string, unknown> | null } = { value: null };
@@ -279,6 +318,8 @@ describe('IssueDetailView — 右栏进度/关联轨道', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     progressState.value = mkProgress();
+    runActivity.events = [];
+    replyBoxProps.last = null;
   });
 
   it('renders the progress panel with status, run count and assignee', async () => {
@@ -958,5 +999,66 @@ describe('IssueDetailView — WS done frame (3b Task 6)', () => {
     act(() => onEvent({ type: 'status', phase: 'running', run_id: '777', seq: 1, outputs: [] }));
     expect(notifyTurn).not.toHaveBeenCalled();
     expect(invalidateOutputLineage).not.toHaveBeenCalled();
+  });
+});
+
+// ── harness 3c Task 17 修复轮 2：来源议题 chip 的作用域 ─────────────────────
+//
+// `TrajectoryIssueKeyContext` 原先由 `IssueChatThread` 自己提供，而
+// `DetachedRunPanel`（被回放/子运行打开的那块面板）是它的**兄弟**，在 provider
+// 之外。于是那块面板里的每一条引用都拿到 null（「不知道自己在哪」→ 全画），
+// 包括本议题自己产出的 —— 正是「判有无」那个缺陷换了个界面复活。
+//
+// 页面才是知道「这是哪件议题」的那一层，所以 provider 属于页面。
+describe('IssueDetailView — 子运行面板里的引用也知道自己在哪件议题上', () => {
+  it('同议题的引用在 detached 面板里不画来源', async () => {
+    progressState.value = mkProgress();
+    // 777 既不在线程里、也不是当前运行 → 它作为 detached 面板画在线程之上。
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [] });
+    runActivity.events = [
+      { seq: 1, event_type: 'user', turn: 1, step: null, created_at: '', payload: { content: 'revise', referenced_outputs: [
+        // 两条都带来源（后端对每条都填），只有 MH-98 与当前议题不同。
+        { kind: 'script_shot', ref_id: '9', version: 2, title: 'MEDIUM', issue_key: 'NOUS-1' },
+        { kind: 'generated_media', ref_id: '77', version: 1, title: 'Cover', issue_key: 'MH-98' },
+      ] } },
+      { seq: 2, event_type: 'step_start', turn: 1, step: 1, created_at: '', payload: { turn: 1, step: 1, model: 'm' } },
+    ];
+    render(
+      <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1?run=777&seq=4']}>
+        <Routes>
+          <Route path="/team/:teamId/todolist/:identifier" element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId('output-citation-chip')).toHaveLength(2));
+    // 两条引用都带来源（后端对每条都填），但只有 MH-98 与当前议题不同。
+    const marks = screen.getAllByTestId('output-citation-issue');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('MH-98');
+  });
+});
+
+/**
+ * 页面交给回复框的那两把钥匙（3c Task 17 收尾）。
+ *
+ * 用**记录型 mock** 钉住，而不是去驱动 `@` 的检索：这条链断掉时，两端消费方
+ * （`OutputMentionList` / `ChatAttachmentPicker`）自己的用例照样全绿，而界面上
+ * 每一行都挂上读者正看着的那件议题 —— 一个没有任何断言会说话的缺陷。
+ */
+describe('IssueDetailView — 交给回复框的议题坐标', () => {
+  it('把议题编号传下去，@ 选单与 staged chip 才有得比较', async () => {
+    render(
+      <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1']}>
+        <Routes>
+          <Route path="/team/:teamId/todolist/:identifier" element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(replyBoxProps.last).not.toBeNull());
+    expect(replyBoxProps.last?.issueKey).toBe('NOUS-1');
+    // `project_id` 走 `raw`，不是给显示用的 `project` 引用 —— 后者在项目名没解析
+    // 出来时是空的，而检索要的是那一列本身。
+    expect(replyBoxProps.last?.projectId).toBe('7');
   });
 });

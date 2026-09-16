@@ -13,6 +13,7 @@ import {
   removeStagedOutput,
   stageOutput,
   toOutputAttachment,
+  toStagedOutput,
   type StagedOutputRef,
 } from './stagedOutputs';
 import { MAX_OUTPUT_REF_ATTACHMENTS } from './attachmentLimits';
@@ -22,6 +23,8 @@ const pick = (version: number, refId = '727145299382534999'): Omit<StagedOutputR
   ref_id: refId,
   version,
   title: `S3 · Shot #1`,
+  // 本议题产出的行 —— 跨议题那一侧见文件末尾那组（3c §2.4）。
+  issue_key: null,
 });
 
 describe('stageOutput', () => {
@@ -98,13 +101,15 @@ describe('removeStagedOutput', () => {
 });
 
 describe('toOutputAttachment', () => {
-  it('emits the five wire keys and nothing composer-side', () => {
+  it('emits the wire keys and nothing composer-side', () => {
     expect(toOutputAttachment(pick(2))).toEqual({
       kind: 'output_ref',
       ref_kind: 'script_shot',
       ref_id: '727145299382534999',
       version: 2,
       title: 'S3 · Shot #1',
+      // 与 `title` 同一口径：服务端会覆盖它，它 travel 是为了乐观渲染。
+      issue_key: null,
     });
   });
 
@@ -112,5 +117,45 @@ describe('toOutputAttachment', () => {
     // `''` reads as "the title is the empty string"; the registry's absent
     // title is null, and the resolver overwrites it anyway.
     expect(toOutputAttachment({ ...pick(1), title: null })).toMatchObject({ title: null });
+  });
+});
+
+/**
+ * 来源议题跟着草稿走（3c Task 17 修复轮 1）。
+ *
+ * 跨议题引用在选单行上看得见来源（`MH-98`），staged 之后消失，发出去之后又出现
+ * —— 同一条引用在三个相邻画面上换了两次身份。读者会合理地以为自己选错了，或者
+ * 以为 staged 的这条已经变成了本议题的东西。
+ */
+describe('staged citation 保留来源议题', () => {
+  const row = {
+    key: 'script_shot:9:4',
+    ref_kind: 'script_shot',
+    ref_id: '9',
+    version: 4,
+    title: 'S3 · Shot 1',
+    issue_key: 'MH-98',
+    latest: false,
+    startsOlderGroup: false,
+  };
+
+  it('从选单行带过来', () => {
+    expect(toStagedOutput(row)).toMatchObject({ issue_key: 'MH-98' });
+  });
+
+  it('本议题的行带 null，不是「不知道」', () => {
+    expect(toStagedOutput({ ...row, issue_key: null }).issue_key).toBeNull();
+  });
+
+  it('`stageOutput` 存下来而不是在归一化时丢掉', () => {
+    const { outcome, list } = stageOutput([], toStagedOutput(row));
+    expect(outcome).toBe('staged');
+    expect(list[0].issue_key).toBe('MH-98');
+  });
+
+  it('随 wire 形状一起发出去，乐观渲染才不会比服务端少一块', () => {
+    // 服务端会用登记表里的值覆盖它（与 `title` 同一口径）。它照样travel，是为了
+    // 往返回来之前那一瞬，线程里的 chip 已经有话可说。
+    expect(toOutputAttachment(toStagedOutput(row))).toMatchObject({ issue_key: 'MH-98' });
   });
 });

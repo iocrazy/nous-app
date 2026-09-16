@@ -19,6 +19,7 @@
  */
 
 import type { OutputObject } from '../../services/outputsService';
+import type { SearchHit } from '../../services/unifiedSearchService';
 import type { DeliverableKind } from './deliverableKinds';
 
 /** One citable version — the unit the picker offers and the chip carries. */
@@ -31,6 +32,18 @@ export interface OutputMentionRow {
   version: number;
   /** The registry's title for this version, or the object's, or null. */
   title: string | null;
+  /** The issue this version was produced on (3c §2.4) — a FACT about the
+   *  version, recorded whatever it is.
+   *
+   *  It is NOT "set only when the row came from elsewhere": the `@` search is
+   *  scoped to the PROJECT, so this issue's own outputs are necessarily in the
+   *  results and the backend stamps a source onto every hit. Deciding whether
+   *  to SAY it belongs to whoever draws the row, which is the only layer that
+   *  knows which issue the reader is on.
+   *
+   *  `null` on rows read from this issue's own outputs endpoint, which answers
+   *  about one issue and so has nothing to add. */
+  issue_key: string | null;
   /** This is the object's newest registered version. */
   latest: boolean;
   /** First row of the Older group — the list draws the header before it.
@@ -95,6 +108,9 @@ export function toMentionRows(objects: OutputObject[], query: string): OutputMen
         // treated as absent so the row renders its kind word instead of a
         // blank line.
         title: v.title || obj.title || null,
+        // This path reads ONE issue's outputs — the endpoint answers about the
+        // issue the composer is on, so there is no source to add.
+        issue_key: null,
         latest: idx === 0,
         startsOlderGroup: false,
       };
@@ -104,4 +120,44 @@ export function toMentionRows(objects: OutputObject[], query: string): OutputMen
 
   if (older.length > 0) older[0] = { ...older[0], startsOlderGroup: true };
   return [...latest, ...older];
+}
+
+/**
+ * 一条检索命中 → 一行可引用的版本（3c §2.4）。
+ *
+ * 与 `toMentionRows` 的区别不是「另一个数据源」，是**另一个单位**：那一条路读
+ * 的是对象（一条链），这一条路读的是命中（一版）。所以 `latest` 恒 false ——
+ * 标成「最新」等于对一个我们没读过链的对象下结论，而读者会据此以为「这就是它
+ * 现在的样子」。同理没有 Older 分组：一版构不成「更早的那些」。
+ */
+export function searchHitsToMentionRows(hits: SearchHit[]): OutputMentionRow[] {
+  const out: OutputMentionRow[] = [];
+  for (const h of hits) {
+    const kind = h.meta?.kind;
+    const refId = h.meta?.ref_id;
+    const version = h.meta?.version;
+    // 引用是三坐标的。缺一个就拼不出 chip，塞进去只会在发帖时 400 —— 一次在
+    // 用户按下发送之后才出现的失败，比一行从没出现过的行糟得多。
+    // `ref_id` 只认 string：它是 Snowflake，number 形态已经丢过精度了，认下来
+    // 等于把一个错的 id 拼进 key。
+    if (typeof kind !== 'string' || typeof refId !== 'string' || typeof version !== 'number') {
+      continue;
+    }
+    out.push({
+      // key 由**这三个坐标**拼，不读 `h.id`。两者今天字面相同（后端的身份键是
+      // 同一个拼法），但这一行的键要和 `toMentionRows` 产的行可比 —— 那一条路
+      // 没有 `h.id` 可读，两种拼法会让同一版在两条路上得到两个 key。
+      key: `${kind}:${refId}:${version}`,
+      ref_kind: kind,
+      ref_id: refId,
+      version,
+      // `''` 当作没有标题，与 `toMentionRows` 同一口径：行渲染 kind + id 而不是
+      // 一行空白。
+      title: h.title || null,
+      issue_key: h.issue_key ?? null,
+      latest: false,
+      startsOlderGroup: false,
+    });
+  }
+  return out;
 }

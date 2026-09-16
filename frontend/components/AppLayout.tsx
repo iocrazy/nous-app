@@ -16,6 +16,7 @@ import { useNavigation } from '../hooks/useNavigation';
 import { LibraryProvider, useLibraryContext } from '../contexts/LibraryContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { CommandPalette } from './search/CommandPalette';
 import { ToastProvider } from './Toast';
 import { ConfirmProvider } from './ConfirmDialog';
 import { UploadProvider } from '../contexts/UploadContext';
@@ -640,6 +641,11 @@ function AppLayoutInner() {
           />
         </Suspense>
       )}
+
+      {/* ⌘K search — mounted once, for the whole app. It draws nothing until
+          it is open, and its shortcut listener has to live somewhere that is
+          always rendered: the reader presses ⌘K from wherever they are. */}
+      <CommandPalette />
 
       {/* Create Project Modal */}
       {isCreateProjectModalOpen && (
