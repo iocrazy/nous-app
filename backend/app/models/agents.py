@@ -240,6 +240,9 @@ class AgentRuns(Base):
             "last_useful_action_at",
             postgresql_where="(status = 'running'::text)",
         ),
+        # 472: 用户视角的时间窗（/ai-library/usage/efficiency?scope=user）。
+        # 既有 11 个索引全是坐标索引，按 user 扫时间段只能全表。
+        Index("idx_agent_runs_user_created", "user_id", "created_at"),
         {"schema": "public"},
     )
 
@@ -408,6 +411,14 @@ class AgentRuns(Base):
             "issue origin_kind at dispatch. NULL = legacy / unclassified."
         ),
     )
+    # 472 (3c §3.2): 效率指标，_finish 时由 folds/efficiency.py 一次写入。
+    # 存量行 NULL ——「那时还没在数」不是「一次都没调」，UI 显示 '—'。
+    steps: Mapped[Optional[int]] = mapped_column(Integer)
+    tool_calls: Mapped[Optional[int]] = mapped_column(Integer)
+    tool_errors: Mapped[Optional[int]] = mapped_column(Integer)
+    deliverables: Mapped[Optional[int]] = mapped_column(Integer)
+    #: TurnEndReason 的 10 值之一；interrupted 由事后 sweeper 补写。
+    turn_end_reason: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class AgentSkills(Base):

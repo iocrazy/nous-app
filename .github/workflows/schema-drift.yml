@@ -161,6 +161,9 @@ on:
       # 主账号名唯一性（mig 470）。函数唯一索引 + NOT NULL + 两条注册路径
       # 共用的 PL/pgSQL —— 只有真库能回答。
       - 'backend/tests/db/test_migration_470_username_integration.py'
+      # 3c mig 472：两张新表 + 两组计数列。trgm opclass 在不在、UNIQUE 拦不拦得住
+      # 第二行、五个累加器是不是 NOT NULL DEFAULT 0 —— 只有真库能答。
+      - 'backend/tests/db/test_mig_472_integration.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -174,7 +177,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-four, so it has to re-run
+      # to it changes what "green" means for all twenty-five, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -701,3 +704,17 @@ jobs:
           # ORDER BY MIN(seq) puts a not-yet-stamped registration (seq is
           # NULLABLE — the registry back-fills it) last instead of dropping it.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_seq_and_output_keys_integration.py -v
+
+      - name: Assert mig 472's projection tables, trgm indexes & counter defaults
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 472 建的两张表是 3c 检索与引用反查的全部地基。文本测试读迁移写了什么；
+          # 只有服务器能回答：pg_trgm 的 gin_trgm_ops opclass 是否真的可用（没装则
+          # CREATE INDEX 直接报错，而文本测试照样绿）、UNIQUE (entity_kind,
+          # entity_id) 是否真把同一个对象收成一行、ai_usage_hourly 那五个**加法
+          # 累加器**是否真是 NOT NULL DEFAULT 0（可空的话 col + EXCLUDED.col 会把
+          # 一整个小时桶算成 NULL），以及两张新表有没有给 anon/authenticated 开策略。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_mig_472_integration.py -v

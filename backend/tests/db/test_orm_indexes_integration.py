@@ -181,14 +181,6 @@ ALLOWED_INDEX_DRIFT: Dict[str, Dict[str, Any]] = {
             "WHERE (agent_id IS NOT NULL) 的部分索引。"
         ),
     },
-    "idx_inbox_notifications_user_unread": {
-        "axes": frozenset({AXIS_PARTIAL}),
-        "why": (
-            "models/reviews.py:266 声明 inbox_notifications(user_id) 全表索引；"
-            "库里是 WHERE (read_at IS NULL) 的部分索引 —— 名字里的 `unread` 正是"
-            "那个谓词，而声明把它丢了。"
-        ),
-    },
     "idx_inspiration_notes_user_pinned": {
         "axes": frozenset({AXIS_PARTIAL}),
         "why": (

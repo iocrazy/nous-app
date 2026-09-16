@@ -235,15 +235,18 @@ class UserNotifications(Base):
 
 
 class InboxNotifications(Base):
-    """W3d narrow inbox — one row per recipient, exactly three producer kinds
-    (generation_result / publish_result / autopilot_output). Distinct from the
-    broadcast ``notifications`` table (migration 009). See migration 373."""
+    """W3d narrow inbox — one row per recipient, five producer kinds
+    (generation_result / publish_result / autopilot_output / workflow_stage /
+    agent_question): migration 373 created the first three, 387 added
+    workflow_stage, 399 added agent_question. Distinct from the broadcast
+    ``notifications`` table (migration 009)."""
 
     __tablename__ = "inbox_notifications"
     __table_args__ = (
         CheckConstraint(
             "kind = ANY (ARRAY['generation_result'::text, 'publish_result'::text, "
-            "'autopilot_output'::text, 'workflow_stage'::text])",
+            "'autopilot_output'::text, 'workflow_stage'::text, "
+            "'agent_question'::text])",
             name="inbox_notifications_kind_check",
         ),
         CheckConstraint(
@@ -263,7 +266,14 @@ class InboxNotifications(Base):
         ),
         PrimaryKeyConstraint("id", name="inbox_notifications_pkey"),
         Index("idx_inbox_notifications_user_created", "user_id", "created_at"),
-        Index("idx_inbox_notifications_user_unread", "user_id"),
+        # mig 399 起库里是五值；ORM 停在四值，是 /api/v1/inbox 500 的四份口径
+        # 之一。谓词同理：库里这个索引是 WHERE read_at IS NULL —— 名字里的
+        # `unread` 就是它。
+        Index(
+            "idx_inbox_notifications_user_unread",
+            "user_id",
+            postgresql_where=text("read_at IS NULL"),
+        ),
         Index(
             "idx_inbox_notifications_dedupe",
             "user_id",
