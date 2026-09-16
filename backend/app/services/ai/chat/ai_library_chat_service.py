@@ -71,6 +71,10 @@ from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in test
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
 
+# 3c §4.2：SSE 的 done 帧与 WS 的 done 帧报同一个数，所以共用同一个取数函数
+# （run 行 + 积分行）。第二条读路径迟早会和这条说出不同的钱。
+from app.services.issues.issue_chat_stream import run_cost_for_frame
+
 # How many `asset_ref` attachments one turn may resolve.
 #
 # ASSET REFS ONLY, and the asymmetry is the whole reason the cap exists (final
@@ -283,14 +287,29 @@ class AILibraryChatService:
         delta chunks.
 
         Each ``delta`` event carries (text, offset). ``done`` has usage
-        + run_id + assistant message id + tool_calls trace + total_chars.
+        + run_id + assistant message id + tool_calls trace + total_chars
+        + this turn's money (3c §4.2).
+
+        A ``start`` event goes out first, as soon as the ``agent_runs`` row
+        exists, carrying that run id (3c §4.1). It is a separate event rather
+        than a field on the first delta on purpose: production's
+        ``chunk_callback`` turns take ``stream_turn``'s buffered fallback,
+        which hands the whole answer over in ONE callback at the end of the
+        turn — a run id riding the first delta would therefore arrive after
+        everything it was meant to label.
         """
         import asyncio as _asyncio
 
-        queue: _asyncio.Queue[Optional[str]] = _asyncio.Queue()
+        # The queue carries EVENTS, not bare text: two different things now
+        # travel this lane (the run id and the deltas) and they must keep
+        # their order. A second queue would have to be raced against this one.
+        queue: _asyncio.Queue[Optional[dict]] = _asyncio.Queue()
 
         async def _on_chunk(text: str) -> None:
-            await queue.put(text)
+            await queue.put({"kind": "delta", "text": text})
+
+        async def _on_run_started(run_id: str) -> None:
+            await queue.put({"kind": "start", "run_id": str(run_id)})
 
         # Run chat() in the background; consume queue as deltas arrive.
         chat_task = _asyncio.create_task(
@@ -303,6 +322,7 @@ class AILibraryChatService:
                 attachments=attachments,
                 script_context=script_context,
                 answer_to=answer_to,
+                run_started_callback=_on_run_started,
             ),
             name=f"chat-stream-{session_id}",
         )
@@ -326,11 +346,15 @@ class AILibraryChatService:
                 item = await queue.get()
                 if item is None:
                     break
+                if item["kind"] == "start":
+                    yield {"type": "start", "data": {"run_id": item["run_id"]}}
+                    continue
+                text = item["text"]
                 yield {
                     "type": "delta",
-                    "data": {"text": item, "offset": offset},
+                    "data": {"text": text, "offset": offset},
                 }
-                offset += len(item)
+                offset += len(text)
         except _asyncio.CancelledError:
             chat_task.cancel()
             raise
@@ -364,6 +388,9 @@ class AILibraryChatService:
                 # M2: surface attachment failures so streaming UI can show
                 # "couldn't read X.pdf" — empty list on success.
                 "attachment_failures": result.get("attachment_failures", []),
+                # 3c §4.2：刚结束的这一轮，气泡不必再发一次 /runs/costs。
+                # 与 WS done 帧同形、同一个取数方法：两个键恒定存在，读不到为 null。
+                **(await run_cost_for_frame(result.get("run_id"))),
             },
         }
 
@@ -524,6 +551,7 @@ class AILibraryChatService:
         attachments: Optional[list] = None,
         script_context: Optional[dict] = None,
         answer_to: Optional[str] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -566,6 +594,7 @@ class AILibraryChatService:
             attachments=attachments,
             script_context=script_context,
             answer_to=answer_to,
+            run_started_callback=run_started_callback,
         )
 
     async def run_session_turn(
@@ -585,6 +614,7 @@ class AILibraryChatService:
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -623,6 +653,7 @@ class AILibraryChatService:
                 fork_steer=fork_steer,
                 issue_id=issue_id,
                 message_source=message_source,
+                run_started_callback=run_started_callback,
             )
 
     async def _run_session_turn_inner(
@@ -642,6 +673,7 @@ class AILibraryChatService:
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -1485,6 +1517,23 @@ class AILibraryChatService:
                 fork_of_run_id=int(fork_of[0]) if fork_of else None,
                 fork_at_seq=int(fork_of[1]) if fork_of else None,
             ) as recorder:
+                # 3c §4.1: hand the run id over the moment the row exists —
+                # before compose, before the model, before the first token.
+                # The chat panel's temp bubble carries no ``metadata_json``, so
+                # until this fires there is no run to ask about and the
+                # "Step N · 4s" line cannot render at all. It must NOT be hung
+                # off the first delta: production's chunk_callback turns take
+                # ``stream_turn``'s buffered fallback, which delivers the whole
+                # answer in one lump at the END of the turn.
+                if run_started_callback is not None and recorder.run_id:
+                    try:
+                        await run_started_callback(str(recorder.run_id))
+                    except Exception as cb_exc:  # noqa: BLE001
+                        # A caller-supplied listener that raises loses its
+                        # notification, never the turn (same rule as
+                        # ``chunk_callback`` below, and as the dispatcher
+                        # discipline in CLAUDE.md).
+                        logger.warning(f"[chat] run_started_callback raised: {cb_exc}")
                 if fork_of is not None:
                     # First event of a forked run — before user / step_start —
                     # so replay / the UI see the branch point at seq 1.

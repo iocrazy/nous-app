@@ -5805,6 +5805,12 @@
     "inboxSubagent": "Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}",
     "inboxWakeup": "Wake-up · set by {{who}} · read before step {{n}}"
   },
+  "cost": {
+    "tailTokens": "{{p}} prompt · {{c}} completion tokens",
+    "charged": "Charged ◇ {{n}}",
+    "notCharged": "Not charged ({{why}})",
+    "notChargedPlain": "Not charged"
+  },
   "fork": {
     "title": "Fork from {{step}}",
     "body": "A new run starts from this point with the same history. The original run and its conversation are kept as they are.",

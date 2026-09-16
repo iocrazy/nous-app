@@ -36,9 +36,14 @@ async def test_done_frame_carries_the_run_and_its_last_seq(monkeypatch):
         assert run_id == 777
         return [{"kind": "script_shot", "ref_id": "9"}]
 
+    async def _cost(run_id):
+        assert run_id == 777
+        return {"cost_cents": 0.82, "charged_points": 0.82}
+
     monkeypatch.setattr(st, "_publish", _sink(published))
     monkeypatch.setattr(st, "_last_transcript_seq", _last_seq)
     monkeypatch.setattr(st, "_run_output_keys", _keys)
+    monkeypatch.setattr(st, "run_cost_for_frame", _cost)
 
     await st.publish_status(1, "done", run_id="777")
 
@@ -49,6 +54,9 @@ async def test_done_frame_carries_the_run_and_its_last_seq(monkeypatch):
             "run_id": "777",
             "seq": 42,
             "outputs": [{"kind": "script_shot", "ref_id": "9"}],
+            # 3c §4.2：这一回合的钱与它旁边的水位一起出门。
+            "cost_cents": 0.82,
+            "charged_points": 0.82,
         }
     ]
 
@@ -69,6 +77,8 @@ async def test_a_frame_without_a_run_still_goes_out(monkeypatch):
             "run_id": None,
             "seq": None,
             "outputs": [],
+            "cost_cents": None,
+            "charged_points": None,
         }
     ]
 
@@ -193,6 +203,8 @@ async def test_an_unusable_run_id_still_gets_a_frame_out(monkeypatch):
 
     monkeypatch.setattr(st, "_last_transcript_seq", _boom)
     monkeypatch.setattr(st, "_run_output_keys", _boom)
+    # 3c §4.2 的第三次读同样要被那道守卫挡住，不是「反正它自己 try 住了」。
+    monkeypatch.setattr(st, "run_cost_for_frame", _boom)
 
     await st.publish_status(1, "done", run_id="abc")
 
@@ -203,6 +215,8 @@ async def test_an_unusable_run_id_still_gets_a_frame_out(monkeypatch):
             "run_id": "abc",
             "seq": None,
             "outputs": [],
+            "cost_cents": None,
+            "charged_points": None,
         }
     ]
 
