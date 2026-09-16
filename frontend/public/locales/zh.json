@@ -5582,9 +5582,13 @@
   "issueDetail": {
     "outputs": "产出",
     "outputsRevised": "{{n}} 个修订",
+    "costPerOutput": "{{c}} / 件",
     "tools": "工具",
     "toolsTimedOut_one": "{{count}} 个超时",
     "toolsTimedOut_other": "{{count}} 个超时",
+    "toolErrors": "工具出错",
+    "toolErrorCount": "{{n}} 次出错",
+    "toolCallCount": "{{n}} 次调用",
     "openConversation": "展开对话流",
     "progress": "进度",
     "links": "关联",

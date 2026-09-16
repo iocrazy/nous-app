@@ -46,6 +46,7 @@ const GRID_COLS: Record<number, string> = {
   5: 'sm:grid-cols-5',
   6: 'sm:grid-cols-6',
   7: 'sm:grid-cols-7',
+  8: 'sm:grid-cols-8',
 };
 
 const Cell: React.FC<React.PropsWithChildren<{ label: string; testId: string; bar?: { pct: number; tone: string } }>> = ({
@@ -108,6 +109,8 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   // harness 3a §5: an outputs cell only once this run registered something.
   const outputs = outputsState(view);
   const wakeups = wakeupsState(view);
+  // 3c §3.3：整个议题的效率账（后端按全体 run 求和）。这里只显示，不重算。
+  const eff = rollup.efficiency;
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
   // while the issue marker is absent. A parked issue (marker present) draws
@@ -267,10 +270,10 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         </div>
       )}
-      {/* Four fixed cells plus the three conditional ones — the column count
+      {/* Four fixed cells plus the four conditional ones — the column count
           follows what is actually rendered, so a cell never sits alone on a
           half-empty row. */}
-      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0)]}`}>
+      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (eff && eff.tool_errors > 0 ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0)]}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -318,6 +321,14 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             {tools.last_timed_out && <div className="text-[11px] text-ink-500 truncate">{tools.last_timed_out}</div>}
           </Cell>
         )}
+        {eff && eff.tool_errors > 0 && (
+          <Cell label={t('issueDetail.toolErrors', 'Tool errors')} testId="cockpit-tool-errors">
+            <span className="text-danger">{t('issueDetail.toolErrorCount', '{{n}} errors', { n: eff.tool_errors })}</span>
+            <div className="text-[11px] text-ink-500 truncate">
+              {t('issueDetail.toolCallCount', '{{n}} calls', { n: eff.tool_calls })}
+            </div>
+          </Cell>
+        )}
         {children && (
           <Cell label={t('issueDetail.subagents', 'Sub-agents')} testId="cockpit-children">
             {children.done}
@@ -336,6 +347,12 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
               <span className="text-ink-500 text-[12px]">
                 {' · '}
                 {t('issueDetail.outputsRevised', '{{n}} revised', { n: outputs.revised })}
+              </span>
+            )}
+            {eff?.cost_per_deliverable_cents != null && (
+              <span className="text-ink-500 text-[12px]">
+                {' · '}
+                {t('issueDetail.costPerOutput', '{{c}} / output', { c: formatCents(eff.cost_per_deliverable_cents) })}
               </span>
             )}
             {outputs.last?.title && <div className="text-[11px] text-ink-500 truncate">{outputs.last.title}</div>}

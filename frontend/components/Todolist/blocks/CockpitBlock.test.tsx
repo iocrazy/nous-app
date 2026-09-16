@@ -45,6 +45,7 @@ function rollup(phase: IssueProgress['phase'], withRun = true): IssueProgress {
     sub_issues: { total: 0, done: 0, items: [] },
     inbox_pending: 0,
     budget: { budget_cents: null, spent_cents: 0, pct: null, state: 'ok' },
+    efficiency: { runs: 0, steps: 0, tool_calls: 0, tool_errors: 0, deliverables: 0, avg_run_ms: null, cost_per_deliverable_cents: null, turn_end_reasons: {} },
     origin: { kind: 'manual' },
     execution_state: {},
     computed_at: '2026-09-08T00:00:00Z',
@@ -308,5 +309,40 @@ describe('CockpitBlockView — outputs (harness 3a §5)', () => {
     const { container } = render(<CockpitBlockView ctx={c} />);
     // Tailwind never scans a template string, so the literal has to be there.
     expect(container.querySelector('.sm\\:grid-cols-7')).toBeTruthy();
+  });
+});
+
+// ── 3c §3.3: efficiency cells ───────────────────────────────────────────────
+describe('CockpitBlockView — efficiency cells (3c §3.3)', () => {
+  // `current_run.view` 是后端折好的 run view：`selectRunView` 要求 `v` + `phase`，
+  // 少了它整块 view 读成 null、Outputs 格根本不渲染。照真实 wire 形状写。
+  const VIEW = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0, running: 0, async_pending: 0, last: null }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
+
+  function withEfficiency(eff: Partial<IssueProgress['efficiency']>): IssueBlockContext {
+    const base = ctx('running');
+    const r = base.rollup as IssueProgress;
+    return { ...base, rollup: { ...r, efficiency: { ...r.efficiency, ...eff },
+      current_run: r.current_run
+        ? { ...r.current_run, view: { ...VIEW, outputs: { total: 4, revised: 1, last: null, seen: [] } } }
+        : null } };
+  }
+
+  it('shows cost per output next to the outputs count', () => {
+    render(<CockpitBlockView ctx={withEfficiency({ deliverables: 4, cost_per_deliverable_cents: 5 })} />);
+    expect(screen.getByTestId('cockpit-outputs')).toHaveTextContent('/ output');
+  });
+
+  it('shows nothing rather than \u00a20.00 when no output has been priced', () => {
+    render(<CockpitBlockView ctx={withEfficiency({ deliverables: 0, cost_per_deliverable_cents: null })} />);
+    expect(screen.getByTestId('cockpit-outputs')).not.toHaveTextContent('/ output');
+  });
+
+  it('surfaces tool errors as their own cell, and hides it when nothing failed', () => {
+    const { unmount } = render(<CockpitBlockView ctx={withEfficiency({ tool_calls: 20, tool_errors: 3 })} />);
+    expect(screen.getByTestId('cockpit-tool-errors')).toHaveTextContent('3 errors');
+    expect(screen.getByTestId('cockpit-tool-errors')).toHaveTextContent('20 calls');
+    unmount();
+    render(<CockpitBlockView ctx={withEfficiency({ tool_calls: 20, tool_errors: 0 })} />);
+    expect(screen.queryByTestId('cockpit-tool-errors')).toBeNull();
   });
 });

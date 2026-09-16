@@ -76,6 +76,18 @@ def derive_phase(issue: dict[str, Any], runs: list[dict[str, Any]]) -> str:
     return "idle"
 
 
+#: 一个还没跑过 run 的议题也得有完整形状——前端无条件读这八个键。
+EMPTY_EFFICIENCY: dict[str, Any] = {
+    "runs": 0,
+    "steps": 0,
+    "tool_calls": 0,
+    "tool_errors": 0,
+    "deliverables": 0,
+    "avg_run_ms": None,
+    "turn_end_reasons": {},
+}
+
+
 def compute_rollup(
     issue: dict[str, Any],
     runs: list[dict[str, Any]],
@@ -85,6 +97,8 @@ def compute_rollup(
     *,
     now: Optional[dt.datetime] = None,
     last_seq: Optional[int] = None,
+    efficiency: Optional[dict[str, Any]] = None,
+    charged_points: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
     """``runs`` newest first, root runs only."""
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -106,6 +120,16 @@ def compute_rollup(
     if pct is not None:
         state = "over" if pct >= 100 else "warn" if pct >= 80 else "ok"
     done_children = sum(1 for s in sub_issues if s.get("status") in TERMINAL_ISSUE)
+    # 3c §3.3：计数按全体 run 求和（root + children），因为计数是每个 run 的自身量，
+    # 不像 cost_cents 那样父行已含子行。分子 ``spent`` 却是 root-only 的树总额——换
+    # 成 root-only 的计数会漏掉子 agent 干的活，换成全体求和的花费会把子 agent 的钱
+    # 数两遍。
+    eff = {**EMPTY_EFFICIENCY, **(efficiency or {})}
+    delivered = int(eff.get("deliverables") or 0)
+    eff["cost_per_deliverable_cents"] = (
+        round(spent / delivered, 4) if delivered > 0 else None
+    )
+    points = charged_points or {}
     return {
         "issue_id": str(issue["id"]),
         "status": issue.get("status"),
@@ -137,6 +161,7 @@ def compute_rollup(
                 "cost_cents": _run_cents(r),
                 "ended": _view(r).get("ended"),
                 "step": _view(r).get("step"),
+                "charged_points": points.get(str(r["id"])),
             }
             for r in runs
         ],
@@ -154,6 +179,7 @@ def compute_rollup(
             ],
         },
         "inbox_pending": int(inbox_pending),
+        "efficiency": eff,
         "budget": {
             "budget_cents": budget if isinstance(budget, int) else None,
             "spent_cents": spent,
@@ -178,6 +204,7 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
     )
     from app.repositories.agent_runs_repository import get_agent_runs_repository
     from app.repositories.issue_repository import issue_repository
+    from app.repositories.points_repository import get_points_repository
 
     issue_id = int(issue["id"])
     session_id = issue.get("ai_session_id")
@@ -190,13 +217,28 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
+    efficiency = await get_agent_runs_repository().efficiency_for_issue(issue_id)
+    # ``agent_run`` 是 A3 票定的 reference_type。runs 已是 root-only，就是 UI 要显示
+    # 的那几行，不必为子 run 多查。
+    charged = await get_points_repository().charged_points_for_references(
+        reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
+    )
     current = _current_run(runs)
     last_seq = (
         await get_agent_runs_repository().last_transcript_seq(int(current["id"]))
         if current
         else None
     )
-    return compute_rollup(issue, runs, children, pending, origin, last_seq=last_seq)
+    return compute_rollup(
+        issue,
+        runs,
+        children,
+        pending,
+        origin,
+        last_seq=last_seq,
+        efficiency=efficiency,
+        charged_points=charged,
+    )
 
 
 __all__ = ["compute_rollup", "derive_phase", "load_rollup"]

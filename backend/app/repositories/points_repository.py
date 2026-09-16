@@ -188,7 +188,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import insert, select, text
+from sqlalchemy import func, insert, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -766,6 +766,38 @@ class PointsRepository:
         except Exception as e:
             logger.error(f"Failed to create transaction: {e}")
             raise
+
+    async def charged_points_for_references(
+        self, *, reference_type: str, reference_ids: List[str]
+    ) -> Dict[str, float]:
+        """这些引用各自真扣掉的积分（正数）。
+
+        真相在 ``point_transactions``（``type='consume'``，``amount`` 为负），不在任
+        何效率表里——效率账引用积分账，不复制它。同一引用可能有多行（重试、补扣），
+        所以求和。**没扣过的 id 不出现**：调用方读到 None 才能把「没扣」和「扣了 0」
+        分开。"""
+        wanted = [str(r) for r in reference_ids if r is not None]
+        if not wanted:
+            return {}
+        try:
+            stmt = (
+                select(
+                    PointTransactions.reference_id,
+                    func.sum(PointTransactions.amount).label("amount"),
+                )
+                .where(PointTransactions.type == "consume")
+                .where(PointTransactions.reference_type == reference_type)
+                .where(PointTransactions.reference_id.in_(wanted))
+                .group_by(PointTransactions.reference_id)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).all()
+            # 取负而不是 abs()：``type='consume'`` 的行一律是负数，取负正好还原
+            # 扣了多少。abs() 会把一个本不该出现的正数悄悄读成扣分，掩盖数据异常。
+            return {str(ref): -float(amount or 0) for ref, amount in rows}
+        except Exception as e:
+            logger.error(f"Failed to read charged points for {reference_type}: {e}")
+            return {}
 
     async def get_transactions(
         self,

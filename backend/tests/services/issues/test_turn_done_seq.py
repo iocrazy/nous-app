@@ -90,6 +90,7 @@ async def test_load_rollup_asks_the_running_run_for_its_watermark(monkeypatch):
     import app.repositories.agent_run_inbox_repository as inbox_mod
     import app.repositories.agent_runs_repository as runs_mod
     import app.repositories.issue_repository as issue_mod
+    import app.repositories.points_repository as points_mod
     import app.services.issues.issue_rollup as rollup
 
     asked: list = []
@@ -105,12 +106,21 @@ async def test_load_rollup_asks_the_running_run_for_its_watermark(monkeypatch):
             asked.append(run_id)
             return 42
 
+        # 3c §3.3：``load_rollup`` 也问效率账。桩不报数，这条钉的仍是水位。
+        async def efficiency_for_issue(self, _issue_id):
+            return {}
+
     class _Inbox:
         async def pending_count(self, **_kw):
             return 0
 
+    class _Points:
+        async def charged_points_for_references(self, **_kw):
+            return {}
+
     monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
     monkeypatch.setattr(inbox_mod, "get_agent_run_inbox_repository", lambda: _Inbox())
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _Points())
     monkeypatch.setattr(
         issue_mod.issue_repository, "list_children", AsyncMock(return_value=[])
     )
@@ -128,6 +138,7 @@ async def test_load_rollup_asks_nobody_when_no_run_is_running(monkeypatch):
     import app.repositories.agent_run_inbox_repository as inbox_mod
     import app.repositories.agent_runs_repository as runs_mod
     import app.repositories.issue_repository as issue_mod
+    import app.repositories.points_repository as points_mod
     import app.services.issues.issue_rollup as rollup
 
     asked: list = []
@@ -142,12 +153,21 @@ async def test_load_rollup_asks_nobody_when_no_run_is_running(monkeypatch):
             asked.append(run_id)
             return 42
 
+        # 3c §3.3：``load_rollup`` 也问效率账。桩不报数，这条钉的仍是水位。
+        async def efficiency_for_issue(self, _issue_id):
+            return {}
+
     class _Inbox:
         async def pending_count(self, **_kw):
             return 0
 
+    class _Points:
+        async def charged_points_for_references(self, **_kw):
+            return {}
+
     monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
     monkeypatch.setattr(inbox_mod, "get_agent_run_inbox_repository", lambda: _Inbox())
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _Points())
     monkeypatch.setattr(
         issue_mod.issue_repository, "list_children", AsyncMock(return_value=[])
     )

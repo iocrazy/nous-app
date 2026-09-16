@@ -5582,9 +5582,13 @@
   "issueDetail": {
     "outputs": "Outputs",
     "outputsRevised": "{{n}} revised",
+    "costPerOutput": "{{c}} / output",
     "tools": "Tools",
     "toolsTimedOut_one": "{{count}} timed out",
     "toolsTimedOut_other": "{{count}} timed out",
+    "toolErrors": "Tool errors",
+    "toolErrorCount": "{{n}} errors",
+    "toolCallCount": "{{n}} calls",
     "openConversation": "Open conversation",
     "progress": "Progress",
     "links": "Links",
