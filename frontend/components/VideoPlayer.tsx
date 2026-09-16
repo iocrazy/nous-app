@@ -177,10 +177,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
    * `null` = the server is not known to hold anything, so any push is news.
    */
   const serverHoldsPosition = useRef<number | null>(null);
-  /** The media identity the current element has already been seeked for.
-   * Quality switches re-attach HLS and re-fire `loadedmetadata`; without this
-   * the restore would fight the switch's own position preservation. */
-  const resumedFor = useRef<string | null>(null);
+  /**
+   * Which ATTACHMENT has already been seeked, not which media.
+   *
+   * Two different events both fire `loadedmetadata` and they need opposite
+   * treatment:
+   *   - a quality switch restores its own position and fires metadata again,
+   *     so seeking a second time would undo it;
+   *   - the source-attach effect re-running (the auth token churns, or the
+   *     browser drops a backgrounded tab's media) genuinely resets the element
+   *     to zero and nothing else will put the viewer back.
+   *
+   * Keying on the media made the first case right and the second wrong: a
+   * video paused at 05:13, the user switched browser tabs, came back, and it
+   * was on frame 0 — the restore was refused because that media had "already
+   * resumed". Keying on the attachment tells them apart.
+   */
+  const attachmentId = useRef(0);
+  const resumedForAttachment = useRef(-1);
+  /** Where the element was just before the current attachment replaced it —
+   * only when it is the SAME media. Fresher than storage, which lags by up to
+   * the save throttle. */
+  const carriedPosition = useRef<number | null>(null);
+  /** The element's live position, kept current so the value above has
+   * something truthful to carry. */
+  const livePosition = useRef(0);
+  /** The media the previous attachment was for, to tell "same video, new
+   * token" from "a different video". */
+  const attachedKey = useRef<string | null>(null);
   /** Consecutive fatal HLS errors we have tried to recover from. */
   const hlsRecoveryAttempts = useRef(0);
 
@@ -453,6 +477,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     syncSettled.current = false;
     serverHoldsPosition.current = null;
 
+    // A new attachment begins here. Carry the viewer's place across it only
+    // when it is the same video: a token refresh must be invisible, while
+    // navigating to a different video must NOT inherit the old position.
+    const sameMedia = attachedKey.current === positionKey;
+    carriedPosition.current = sameMedia
+      ? Math.max(video.currentTime || 0, livePosition.current)
+      : null;
+    if (!sameMedia) {
+      livePosition.current = 0;
+    }
+    attachedKey.current = positionKey;
+    attachmentId.current += 1;
+
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
       if (authToken) {
@@ -548,7 +585,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [src, isHls, authToken, playerRef, originalSrc, switchToOriginal]);
+    // `positionKey` is listed because the carry-over above reads it. In
+    // practice it never fires this effect on its own — it is derived from
+    // `src` (or an explicit `resumeKey` the caller changes alongside the
+    // source), so `src` already covers every real case.
+  }, [src, isHls, authToken, playerRef, originalSrc, switchToOriginal, positionKey]);
 
   // Video event listeners
   useEffect(() => {
@@ -578,6 +619,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleTimeUpdate = () => {
       const t = video.currentTime;
+      livePosition.current = t;
       setCurrentTime(t);
       onTimeUpdate(t);
       updateBuffered();
@@ -616,19 +658,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.volume = volume;
       video.muted = isMuted;
 
-      // Resume — once per media. A quality switch re-attaches HLS and fires
-      // this again, and those paths restore their own position; seeking a
-      // second time would undo them.
-      if (resumedFor.current !== positionKey) {
-        resumedFor.current = positionKey;
+      // Resume — once per ATTACHMENT (see `attachmentId`).
+      if (resumedForAttachment.current !== attachmentId.current) {
+        resumedForAttachment.current = attachmentId.current;
 
-        // Local first, applied synchronously: it is already here, and a
-        // viewer should not watch the first seconds twice while a request
+        // A position carried across a re-attach of the same media wins over
+        // storage: it is where the viewer actually was, whereas the stored
+        // value can be up to one save-interval stale.
+        //
+        // Local before remote, applied synchronously: it is already here, and
+        // a viewer should not watch the first seconds twice while a request
         // flies. The server answer arrives below and corrects it if another
         // device is further along.
-        const saved = loadPosition(viewerId, positionKey, video.duration);
+        const carried = carriedPosition.current;
+        carriedPosition.current = null;
+        const saved =
+          carried !== null && carried > 0
+            ? carried
+            : loadPosition(viewerId, positionKey, video.duration);
         if (saved !== null) {
           video.currentTime = saved;
+          livePosition.current = saved;
           setCurrentTime(saved);
           onTimeUpdate(saved);
         }
