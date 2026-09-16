@@ -162,10 +162,90 @@ describe('@ 页签：两套契约按有没有查询切换', () => {
 
   it('检索失败说出来，而不是显示成一份空货架', async () => {
     searchFn.mockRejectedValue(Object.assign(new Error('nope'), { code: 'query_too_short' }));
-    const { result } = mount({ query: 'r' });
+    // 两个字符 —— 客户端的下限，所以请求真的会发出去。写一个字符的话这条断言
+    // 测的是「短查询不搜」，不是「搜失败要说出来」。
+    const { result } = mount({ query: 'ra' });
     act(() => result.current.outputs.onActivate?.());
     await waitFor(() => expect(result.current.outputs.error).toBeTruthy());
     expect(result.current.outputs.error).toContain('query_too_short');
     expect(result.current.outputs.rows).toHaveLength(0);
+  });
+});
+
+/**
+ * 短查询、错误清除与 loading 复位（3c Task 17 修复轮 1）。
+ */
+describe('@ 页签：查询太短、清空与在途取消', () => {
+  beforeEach(() => {
+    listIssueOutputs.mockReset();
+    listIssueOutputs.mockResolvedValue([]);
+    searchFn.mockReset();
+    searchFn.mockResolvedValue({
+      groups: { issues: [], runs: [], outputs: [OUT_HIT] },
+      totals: { issues: 0, runs: 0, outputs: 1 },
+      took_ms: 5,
+    });
+  });
+
+  const props = (over: Partial<Parameters<typeof useMentionOutputsTab>[0]> = {}) => ({
+    pickerOpen: true,
+    issueId: 42,
+    query: '',
+    projectId: '3' as string | number | null,
+    onSelect: vi.fn(),
+    ...over,
+  });
+
+  const mount = (over: Partial<Parameters<typeof useMentionOutputsTab>[0]> = {}) =>
+    renderHook((p: Parameters<typeof useMentionOutputsTab>[0]) => useMentionOutputsTab(p), {
+      initialProps: props(over),
+    });
+
+  it('第一个字符不发请求 —— 端点会拒，那次往返只换回一条注定的错误', () => {
+    // 输入是逐字符到达的，所以「一个字符」不是边角情况，是**每一次**搜索的第一
+    // 帧。让它打出去，等于每次用户开始打字界面都闪一次 query_too_short。
+    const { result } = mount({ query: 'r' });
+    act(() => result.current.outputs.onActivate?.());
+    expect(searchFn).not.toHaveBeenCalled();
+    // 也不该退化成「读本议题」：读者正在打字，本议题那份此刻没人看。
+    expect(result.current.outputs.error).toBeNull();
+  });
+
+  it('删回空串后错误横幅消失 —— 即使本议题那份早就读过了', async () => {
+    // 顺序很重要：**先**空查询读一次本议题（`requested` 从此为真），再搜、再
+    // 失败、再删回空串。这时本议题那条路会被自己的守卫早退，于是没有任何人去
+    // 清那个错误码 —— 一条关于「那次搜索」的横幅，留在一份「本议题产出」的列表
+    // 上方，说的是一件此刻没有发生的失败。
+    //
+    // 反过来写（先搜后清）是测不出来的：那时列表路径会真的跑一次并顺手清掉错
+    // 误，缺陷被另一条路的副作用盖住。
+    const { result, rerender } = mount({ query: '' });
+    act(() => result.current.outputs.onActivate?.());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+
+    searchFn.mockRejectedValue(Object.assign(new Error('nope'), { code: 'boom' }));
+    rerender(props({ query: 'rain' }));
+    await waitFor(() => expect(result.current.outputs.error).toBeTruthy());
+
+    rerender(props({ query: '' }));
+    await waitFor(() => expect(result.current.outputs.error).toBeNull());
+    // 本议题那份没有被重读 —— 守卫仍然成立，清错误不是靠再发一次请求。
+    expect(listIssueOutputs).toHaveBeenCalledTimes(1);
+  });
+
+  it('搜索在途时关掉 mention，loading 不会永远卡住', async () => {
+    // cleanup 把 `live` 置 false，于是那次请求的 `finally` 再也不会
+    // `setLoading(false)`。清空查询时碰巧有另一条路接手并自己复位，所以那条路
+    // 掩盖了缺陷；真正暴露它的是**没有接手者**的那次切换 —— 关掉 mention。
+    // 后果是下次打开时一条永远转着的 Loading…，而没有任何请求在飞。
+    let settle: ((v: unknown) => void) | null = null;
+    searchFn.mockReturnValue(new Promise((res) => { settle = res; }));
+    const { result } = mount({ query: 'rain' });
+    act(() => result.current.outputs.onActivate?.());
+    await waitFor(() => expect(result.current.outputs.loading).toBe(true));
+    act(() => result.current.reset());
+    await waitFor(() => expect(result.current.outputs.loading).toBe(false));
+    act(() => settle?.({ groups: { issues: [], runs: [], outputs: [] }, totals: { issues: 0, runs: 0, outputs: 0 }, took_ms: 1 }));
+    await waitFor(() => expect(result.current.outputs.loading).toBe(false));
   });
 });

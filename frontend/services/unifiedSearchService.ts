@@ -32,6 +32,18 @@ import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
 import { decodeErrorEnvelope } from './errorEnvelope';
 
+/**
+ * 少于这么多字符，端点直接 `query_too_short` 拒绝。
+ *
+ * 镜像 `backend/app/api/search_router.py::MIN_QUERY_CHARS`：一个字的查询在
+ * trgm 上退化成全表匹配，而它几乎一定是「还在打字」。
+ *
+ * 每个调用方都必须在发请求前拦一道 —— **不是**重复校验，是不让读者输入的第一
+ * 个字符换回一次注定的 400 并在界面上闪一条错误。两个调用方（⌘K 面、`@` 页签
+ * 的跨议题检索）用同一个常量，否则「第一个字符会不会报错」在两处会有两个答案。
+ */
+export const MIN_SEARCH_QUERY_CHARS = 2;
+
 /** 后端认得的三类。多送一个不认得的 kind 不会让整次检索失败（端点丢掉它），
  *  全都不认得才是 `unknown_kinds` 拒绝。 */
 export type SearchKind = 'issue' | 'run' | 'output';

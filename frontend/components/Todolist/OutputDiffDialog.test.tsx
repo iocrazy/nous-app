@@ -118,6 +118,63 @@ describe('OutputDiffDialog', () => {
     expect(marks[0].textContent).toContain('3');
   });
 
+  it('展开被引列表：只列你看得见的那几条，看不见的说出有几条', async () => {
+    const cited = (n: number) => ({
+      issue_id: String(90 + n),
+      issue_key: `MH-9${n}`,
+      message_id: `m${n}`,
+      user_id: `u${n}`,
+      at: '2026-09-15T03:04:05Z',
+    });
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [cited(1), cited(2)] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const chip = await screen.findByTestId('output-version-cited');
+    fireEvent.click(chip);
+    const rows = await screen.findAllByTestId('output-version-cited-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('MH-91');
+    expect(rows[0].textContent).toContain('u1');
+    // 计数 3、列表 2 —— 差额必须说出来。不说的话读者会把「2」当成全部，而那
+    // 正是可见性裁剪想避免的误导。
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('1');
+  });
+
+  it('全都看得见时不画那一行 —— 「0 条看不见」不是一句话', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        {
+          ...v(2, 1),
+          cited_count: 1,
+          cited_in: [{ issue_id: '90', issue_key: 'MH-90', message_id: 'm', user_id: 'u', at: '2026-09-15T03:04:05Z' }],
+        },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(await screen.findAllByTestId('output-version-cited-row')).toHaveLength(1);
+    expect(screen.queryByTestId('output-version-cited-hidden')).toBeNull();
+  });
+
+  it('一条都看不见时只说有几条被挡住', async () => {
+    // 「被引 2 次，你一条都看不到」是一个合法答案，不是一次失败。
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [{ ...v(2, 1), cited_count: 2, cited_in: [] }, v(1, null)],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(screen.queryAllByTestId('output-version-cited-row')).toHaveLength(0);
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('2');
+  });
+
   it('opens on the latest change and colours what moved', async () => {
     render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
     await screen.findByTestId('output-diff');

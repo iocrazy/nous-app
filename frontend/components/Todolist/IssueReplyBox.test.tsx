@@ -973,6 +973,9 @@ describe('IssueReplyBox — the Assets tab', () => {
         ref_id: '727145299382534999',
         version: 2,
         title: 'S3 · Shot #1',
+        // 本议题自己的产出 —— 跨议题搜来的那一条才带编号（3c §2.4）。与
+        // `title` 同一口径：服务端覆盖它，客户端送出去只为乐观渲染。
+        issue_key: null,
       },
     ]);
   });

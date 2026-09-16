@@ -13,6 +13,7 @@ import { Link } from 'react-router-dom';
 import { Zap, ChevronRight, ChevronDown, Clock, Paperclip, GitFork } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { OutputChipBody } from '../chat/OutputChipBody';
+import { TrajectoryIssueKeyContext } from '../agentActivity/TrajectoryRenderer/trajectoryRunContext';
 import { simulateAgentRunComplete, startedByWakeup } from '../../services/issueMessageService';
 import type { ChildRunOrigin } from './childRunContext';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
@@ -681,6 +682,12 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
   // grouping is exactly what destroys it.
   const wakeupRuns = wakeupRunIds(messages);
   return (
+    // Every trajectory rendered inside this thread belongs to this issue, so
+    // the citations line can tell "produced here" from "produced elsewhere".
+    // Provided once at the top rather than threaded through `RunTrajectory` →
+    // `TrajectoryRenderer` → node: the nodes that read it sit several
+    // components down, and `DetachedRunPanel` renders its own trajectory.
+    <TrajectoryIssueKeyContext.Provider value={issueKey ?? null}>
     <div className="px-4 py-3">
       {renderItems.map((item) => {
         if (item.kind === 'status_group') {
@@ -697,5 +704,6 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
       })}
       {hasStreaming && <StreamingBubble text={streamingText as string} />}
     </div>
+    </TrajectoryIssueKeyContext.Provider>
   );
 };

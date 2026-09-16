@@ -980,7 +980,8 @@
     "groupIssues": "议题",
     "groupRuns": "运行",
     "groupOutputs": "产出",
-    "groupOf": "共 {{total}} 条，显示 {{shown}} 条"
+    "groupOf": "共 {{total}} 条，显示 {{shown}} 条",
+    "paletteResults": "搜索结果"
   },
   "dashboard": {
     "title": "数据统计",
@@ -5955,6 +5956,9 @@
     "kindOther": "产出",
     "citedTimes": "被引 ×{{n}}",
     "mentionSearchError": "无法搜索该项目的产出",
-    "mentionSearchErrorCode": "无法搜索该项目的产出（{{code}}）"
+    "mentionSearchErrorCode": "无法搜索该项目的产出（{{code}}）",
+    "citedInTitle": "被引用于",
+    "citedInNoIssue": "一件没有编号的议题",
+    "citedInHidden": "另有 {{n}} 条在你看不到的议题上"
   }
 }

@@ -231,6 +231,10 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
           refId={o.ref_id}
           version={o.version}
           title={o.title}
+          // No comparison here: a staged citation is always about to be posted
+          // to the issue in front of the writer, and the row only carries a
+          // source at all when it came from another one.
+          sourceIssueKey={o.issue_key}
           onRemove={() => removeOutput(o.ref_kind, o.ref_id, o.version)}
         />
       ))}

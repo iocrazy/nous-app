@@ -980,7 +980,8 @@
     "groupIssues": "Issues",
     "groupRuns": "Runs",
     "groupOutputs": "Outputs",
-    "groupOf": "{{shown}} of {{total}}"
+    "groupOf": "{{shown}} of {{total}}",
+    "paletteResults": "Search results"
   },
   "dashboard": {
     "title": "Analytics",
@@ -5955,6 +5956,9 @@
     "kindOther": "Output",
     "citedTimes": "Cited ×{{n}}",
     "mentionSearchError": "Could not search this project’s outputs",
-    "mentionSearchErrorCode": "Could not search this project’s outputs ({{code}})"
+    "mentionSearchErrorCode": "Could not search this project’s outputs ({{code}})",
+    "citedInTitle": "Referenced in",
+    "citedInNoIssue": "An issue with no key",
+    "citedInHidden": "{{n}} hidden — on issues you cannot see"
   }
 }

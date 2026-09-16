@@ -29,12 +29,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 const searchMock = vi.fn();
-vi.mock('../../services/unifiedSearchService', () => ({
-  unifiedSearch: (...a: unknown[]) => searchMock(...a),
-  UnifiedSearchError: class UnifiedSearchError extends Error {
-    code = 'x';
-  },
-}));
+vi.mock('../../services/unifiedSearchService', async (importOriginal) => {
+  // 部分 mock：只换掉网络那一层。`MIN_SEARCH_QUERY_CHARS` 是**契约里的数**（端点
+  // 的 `MIN_QUERY_CHARS` 的镜像），在 mock 里再写一遍就等于让测试里的阈值和生产
+  // 的阈值各自演化。
+  const actual = await importOriginal<typeof import('../../services/unifiedSearchService')>();
+  return { ...actual, unifiedSearch: (...a: unknown[]) => searchMock(...a) };
+});
 
 const { CommandPalette } = await import('./CommandPalette');
 const { useCommandPalette } = await import('../../stores/commandPaletteStore');
@@ -203,5 +204,142 @@ describe('CommandPalette', () => {
     // 「搜不到」与「搜不成」是读者会采取不同行动的两个答案。
     expect(screen.getByTestId('command-palette-error').textContent).toContain('query_too_short');
     expect(screen.queryByTestId('command-palette-empty')).toBeNull();
+  });
+});
+
+/**
+ * 面板作为「第二个监听者」的义务（3c Task 17 修复轮 1）。
+ *
+ * ⌘K 在画布路由下有两个监听者。裁定是**画布赢**：画布内的 ⌘K 是既有功能。
+ * 画布在 capture 阶段认领并 `preventDefault()`，面板这一侧的义务就是——不抢
+ * 已经被处理过的按键。
+ */
+describe('CommandPalette — 不抢别人已经处理过的按键', () => {
+  it('capture 阶段有人认领了 ⌘K，面板不打开', () => {
+    const owner = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) e.preventDefault();
+    };
+    window.addEventListener('keydown', owner, true);
+    try {
+      mount();
+      open();
+      expect(screen.queryByTestId('command-palette')).toBeNull();
+    } finally {
+      window.removeEventListener('keydown', owner, true);
+    }
+  });
+
+  it('Escape 只关这一层 —— 不让外面的 handler 跟着关', () => {
+    // 全仓其他 Escape handler 不判 `defaultPrevented`，所以光 preventDefault
+    // 拦不住它们：一次 Escape 会同时关掉面板和它背后的对话框。
+    const outer = vi.fn();
+    window.addEventListener('keydown', outer);
+    try {
+      mount();
+      open();
+      expect(screen.getByTestId('command-palette')).toBeTruthy();
+      outer.mockClear();
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Escape' });
+      });
+      expect(screen.queryByTestId('command-palette')).toBeNull();
+      expect(outer).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', outer);
+    }
+  });
+});
+
+/**
+ * 可访问性（3c Task 17 修复轮 1）。
+ *
+ * 一个用键盘开、用键盘选的面板，是屏幕阅读器用户最依赖也最容易被落下的那种
+ * 控件：高亮只存在于一个 class 里，读屏软件无从知道「现在停在哪一行」。
+ */
+describe('CommandPalette — 可访问性', () => {
+  it('把高亮说成 aria-activedescendant，而不只是一个背景色', async () => {
+    searchMock.mockResolvedValue(RESULT);
+    mount();
+    open();
+    type('rain');
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    const input = screen.getByTestId('command-palette-input');
+    const list = screen.getByRole('listbox');
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(list).toBeTruthy();
+    expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown' });
+    });
+    expect(input.getAttribute('aria-activedescendant')).toBe(screen.getAllByRole('option')[1].id);
+    expect(screen.getAllByRole('option')[1].getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('关闭后焦点回到打开它的那个元素', () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    try {
+      mount();
+      open();
+      // 面板拿走焦点是对的 —— 它是一个 modal。
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(document.activeElement).toBe(screen.getByTestId('command-palette-input'));
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Escape' });
+      });
+      // 关掉之后不还回去，读者的键盘位置就丢在 body 上了。
+      expect(document.activeElement).toBe(trigger);
+    } finally {
+      trigger.remove();
+    }
+  });
+
+  it('Tab 在面板内循环，不会把焦点丢到背后的页面上', async () => {
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    searchMock.mockResolvedValue(RESULT);
+    try {
+      mount();
+      open();
+      type('rain');
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      const input = screen.getByTestId('command-palette-input');
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(document.activeElement).toBe(input);
+      // 输入框 → 三个结果行，每一步都还在面板里。
+      const rowEls = rows();
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Tab' });
+      });
+      expect(document.activeElement).toBe(rowEls[0]);
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Tab' });
+        fireEvent.keyDown(window, { key: 'Tab' });
+      });
+      expect(document.activeElement).toBe(rowEls[2]);
+      // 最后一个再 Tab 回到开头，而不是落到面板外那个按钮上。
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Tab' });
+      });
+      expect(document.activeElement).toBe(input);
+      expect(document.activeElement).not.toBe(outside);
+      // 反向同理。
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+      });
+      expect(document.activeElement).toBe(rowEls[2]);
+    } finally {
+      outside.remove();
+    }
   });
 });

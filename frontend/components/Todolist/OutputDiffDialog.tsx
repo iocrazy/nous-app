@@ -51,6 +51,15 @@ export interface OutputDiffDialogProps {
 
 type T = (key: string, fallback: string, vars?: Record<string, unknown>) => string;
 
+/** A citation's timestamp, in the reader's locale. Falls back to the raw
+ *  string rather than printing "Invalid Date" — the value came from the
+ *  server and saying it plainly beats inventing a wrong one. */
+function formatCitedAt(at: string): string {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime()) ? at : d.toLocaleString();
+}
+
+
 /** Why a version cannot be shown — the backend's own three reasons. */
 function unavailableText(reason: string | null, t: T): string {
   switch (reason) {
@@ -233,10 +242,18 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const [versions, setVersions] = useState<OutputVersion[]>([]);
   const [to, setTo] = useState<number | null>(initialTo ?? null);
   const [pinnedFrom, setPinnedFrom] = useState<number | null>(initialFrom ?? null);
+  /** Which version's citation list is unfolded, by version number. One at a
+   *  time: two open lists next to each other read as one list of everything,
+   *  and the counts stop being attributable. */
+  const [citedOpen, setCitedOpen] = useState<number | null>(null);
   const [diff, setDiff] = useState<OutputDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
+  // Looked up rather than held: a revert PREPENDS to `versions`, and a copy of
+  // the row taken when the chip was clicked would keep describing the version
+  // as it was before that write.
+  const citedVersion = citedOpen === null ? null : versions.find((v) => v.version === citedOpen) ?? null;
   // Someone ELSE can move this chain while the dialog is open (an agent run
   // finishing, a revert in another pane). The generation is how that reaches a
   // component that holds no reference to the cache.
@@ -435,35 +452,89 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
         {versions.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="output-diff-versions">
             {versions.map((v) => (
-              <button
-                key={v.version}
-                type="button"
-                data-testid={`output-diff-version-${v.version}`}
-                onClick={() => {
-                  setPinnedFrom(null);
-                  setTo(v.version);
-                  // "your edits were kept as v3" answers a question about the
-                  // revert just performed; carried onto another version it
-                  // becomes a claim about the wrong object. Cleared here
-                  // rather than in the diff effect, because `doRevert` moves
-                  // `to` itself and would wipe the note it just earned.
-                  setKept(null);
-                  setConfirming(false);
-                }}
-                className={`rounded border px-1.5 py-0.5 text-[11px] ${
-                  v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
-                }`}
-              >
-                {t('outputs.version', 'v{{n}}', { n: v.version })}
+              // The count is a SECOND control, so it cannot live inside the
+              // version button — a button inside a button is invalid markup and
+              // one click would both switch versions and toggle the list.
+              <span key={v.version} className="inline-flex items-center gap-0.5">
+                <button
+                  type="button"
+                  data-testid={`output-diff-version-${v.version}`}
+                  onClick={() => {
+                    setPinnedFrom(null);
+                    setTo(v.version);
+                    // "your edits were kept as v3" answers a question about the
+                    // revert just performed; carried onto another version it
+                    // becomes a claim about the wrong object. Cleared here
+                    // rather than in the diff effect, because `doRevert` moves
+                    // `to` itself and would wipe the note it just earned.
+                    setKept(null);
+                    setConfirming(false);
+                  }}
+                  className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                    v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
+                  }`}
+                >
+                  {t('outputs.version', 'v{{n}}', { n: v.version })}
+                </button>
                 {/* 被引次数是**全量**的，`cited_in` 只列你看得见的那几条——所以
                     这里显示的是计数，不是列表长度。详见 `OutputVersion`。 */}
                 {v.cited_count > 0 && (
-                  <span data-testid="output-version-cited" className="ml-1 text-ink-500">
+                  <button
+                    type="button"
+                    data-testid="output-version-cited"
+                    aria-expanded={citedOpen === v.version}
+                    onClick={() => setCitedOpen((cur) => (cur === v.version ? null : v.version))}
+                    className="rounded border border-ink-800 px-1 py-0.5 text-[11px] text-ink-500 hover:border-ink-600 hover:text-ink-300"
+                  >
                     {t('outputs.citedTimes', 'Cited ×{{n}}', { n: v.cited_count })}
-                  </span>
+                  </button>
                 )}
-              </button>
+              </span>
             ))}
+          </div>
+        )}
+
+        {/*
+          Who pointed at this version. The list and the count answer different
+          questions and are allowed to disagree: `cited_count` is the whole
+          truth, `cited_in` is only what THIS caller may see. Showing the list
+          alone would quietly present a filtered view as the total, which is
+          exactly what the visibility trim must not be mistaken for — so the
+          difference gets its own line rather than being smoothed over.
+
+          No "Open" link: the backend sends `CitedIn` no `deep_link`, and this
+          codebase does not let a frontend assemble an issue URL (the reason
+          `OutputVersion.deep_link` exists at all). The key is printed so the
+          reader can find it; the link waits for the backend to hand one over.
+        */}
+        {citedOpen !== null && citedVersion && (
+          <div
+            data-testid="output-version-cited-list"
+            className="mt-2 rounded border border-ink-800 bg-ink-900/40 px-2 py-1.5"
+          >
+            <p className="pb-1 text-[10px] uppercase tracking-wide text-ink-600">
+              {t('outputs.citedInTitle', 'Referenced in')}
+            </p>
+            {citedVersion.cited_in.map((c) => (
+              <div
+                key={c.message_id}
+                data-testid="output-version-cited-row"
+                className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-[11px] text-ink-400"
+              >
+                <span className="text-ink-300">
+                  {c.issue_key ?? t('outputs.citedInNoIssue', 'An issue with no key')}
+                </span>
+                <span className="text-ink-500">{c.user_id}</span>
+                <span className="text-ink-600 tabular-nums">{formatCitedAt(c.at)}</span>
+              </div>
+            ))}
+            {citedVersion.cited_count > citedVersion.cited_in.length && (
+              <p data-testid="output-version-cited-hidden" className="pt-0.5 text-[11px] text-ink-600">
+                {t('outputs.citedInHidden', '{{n}} hidden — on issues you cannot see', {
+                  n: citedVersion.cited_count - citedVersion.cited_in.length,
+                })}
+              </p>
+            )}
           </div>
         )}
 

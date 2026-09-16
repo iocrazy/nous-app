@@ -30,6 +30,7 @@ import { useNavigate } from 'react-router-dom';
 import { FileOutput, ListChecks, Play, Search as SearchIcon } from 'lucide-react';
 
 import {
+  MIN_SEARCH_QUERY_CHARS,
   unifiedSearch,
   type SearchHit,
   type UnifiedSearchResponse,
@@ -40,13 +41,15 @@ import { useCommandPalette } from '../../stores/commandPaletteStore';
  *  长到一个词不会打出五次请求。3c §2.5 定的值。 */
 export const SEARCH_DEBOUNCE_MS = 200;
 
-/** 少于这么多字符不发请求。端点的 `MIN_QUERY_CHARS` 是同一个数：一个字的查询
- *  在 trgm 上退化成全表匹配，而它几乎一定是「还在打字」。在这里先拦一道不是
- *  重复校验——是不让每次输入的第一个字符都换回一次注定的 400。 */
-const MIN_QUERY_CHARS = 2;
-
 /** 每组要多少条。面板是一屏，不是一页结果。 */
 const LIMIT_PER_GROUP = 10;
+
+/** 读屏软件靠 `aria-activedescendant` 指向的 id 知道高亮停在哪一行，所以这两个
+ *  必须是稳定可拼的字符串，而不是命中自己的 id —— 产出命中的 id 是
+ *  `kind:ref_id:version`，冒号在 CSS 选择器里要转义，而这里的 id 只服务于一次
+ *  引用关系，用位置最省事也最不会撞。 */
+const LISTBOX_ID = 'command-palette-listbox';
+const optionId = (index: number): string => `command-palette-option-${index}`;
 
 /**
  * 失败 → 一个可显示的码。
@@ -120,13 +123,29 @@ export const CommandPalette: React.FC = () => {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  /** Who had the keyboard before the panel took it. Restored on close — a
+   *  modal that hands focus back to `<body>` leaves a keyboard reader with no
+   *  position at all, and the next Tab starts over from the top of the page. */
+  const returnFocusTo = useRef<HTMLElement | null>(null);
 
   const flat = useMemo(() => flatten(result), [result]);
 
   // 打开时从头开始。上一次的查询词和结果留着，等于读者一开面板就看见一份可能
   // 早就过时的答案——而它长得和刚搜出来的一模一样。
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Give the keyboard back to whoever had it. Guarded on `isConnected`:
+      // the trigger may have unmounted while the panel was up (a row in a list
+      // that re-rendered), and focusing a detached node silently does nothing
+      // while looking like it worked.
+      const back = returnFocusTo.current;
+      returnFocusTo.current = null;
+      if (back && back.isConnected) back.focus();
+      return;
+    }
+    returnFocusTo.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setQuery('');
     setResult(null);
     setErrorCode(null);
@@ -143,7 +162,7 @@ export const CommandPalette: React.FC = () => {
   useEffect(() => {
     if (!open) return;
     const term = query.trim();
-    if (term.length < MIN_QUERY_CHARS) {
+    if (term.length < MIN_SEARCH_QUERY_CHARS) {
       setResult(null);
       setErrorCode(null);
       setAnsweredFor('');
@@ -195,55 +214,111 @@ export const CommandPalette: React.FC = () => {
   );
 
   /**
-   * 全局键。形状照 `IssueListView` 那段守卫抄：`defaultPrevented`（别抢别人已经
-   * 处理过的键）、`isComposing`（输入法组合中的键不是命令）、排掉 `altKey` /
-   * `shiftKey`。
+   * 打开面板的那一个和弦 —— bubble 阶段，只管 ⌘K。
    *
-   * 两处刻意不同：
+   * 形状照 `IssueListView` 那段守卫抄：`defaultPrevented`（别抢别人已经处理过
+   * 的键）、`isComposing`（输入法组合中的键不是命令）、排掉 `altKey` /
+   * `shiftKey`。两处刻意不同：
+   *
    *  1. **不排 `metaKey` / `ctrlKey`** —— ⌘K 本身就是组合键。
    *  2. **不排输入上下文。** 那道守卫存在的理由是 `IssueListView` 的快捷键是
    *     裸字母（`c` / `/`），会和打字撞车；一个修饰键和弦不可能被误当成打字，
-   *     而 ⌘K 要在任何地方都能开——包括读者正在写评论的时候，那恰恰是最想跳去
-   *     别处查一眼的时刻。
+   *     而 ⌘K 要在任何地方都能开 —— 包括读者正在写评论的时候，那恰恰是最想跳
+   *     去别处查一眼的时刻。
+   *
+   * **留在 bubble 阶段是有意的。** 画布在 capture 阶段认领 ⌘K
+   * （`features/canvas-core/ui/useCanvasShortcuts.ts`）：画布内那个和弦是既有
+   * 功能，归画布。它认领后 `defaultPrevented` 为真，上面第一道守卫就让这里站
+   * 住 —— 一次按键一个结果。
    */
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onOpenKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || e.altKey || e.shiftKey) return;
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        setOpen(true);
-        return;
-      }
-      if (!open) return;
-      if (e.metaKey || e.ctrlKey) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key !== 'k' && e.key !== 'K') return;
+      e.preventDefault();
+      setOpen(true);
+    };
+    window.addEventListener('keydown', onOpenKey);
+    return () => window.removeEventListener('keydown', onOpenKey);
+  }, [setOpen]);
+
+  /**
+   * 面板开着时它自己的那几个键 —— **capture 阶段**，只在开着时挂。
+   *
+   * 为什么是 capture：面板是最上面那一层，而「最上面那一层」这句话只有在它能
+   * **先**看到按键时才成立。同一个 target 上的 `stopPropagation` 拦不住并排的
+   * 监听器，而 `document` 上的监听器本来就跑在 window 的 bubble 之前 —— 全仓
+   * 其他 Escape handler 又都不判 `defaultPrevented`。结果就是一次 Escape 同时
+   * 关掉面板和它背后的对话框。在 window 的 capture 阶段接住并 `stopPropagation`
+   * 是唯一让「Escape 只关最上面那层」为真的做法。
+   *
+   * 只在 `open` 时注册：关着的时候面板对 Escape / 方向键 / Tab 没有主张，挂着
+   * 一个什么都不做的 capture 监听器只会让别人的键路径多一次误判的机会。
+   */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         setOpen(false);
         return;
       }
+
+      if (e.key === 'Tab') {
+        // A modal that lets Tab wander onto the page behind it puts a keyboard
+        // reader somewhere they cannot see, with the overlay still swallowing
+        // their clicks.
+        const focusables = dialogRef.current
+          ? Array.from(
+              dialogRef.current.querySelectorAll<HTMLElement>(
+                'input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+              ),
+            ).filter((el) => !el.hasAttribute('disabled'))
+          : [];
+        if (focusables.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const at = focusables.indexOf(document.activeElement as HTMLElement);
+        if (e.shiftKey) (at <= 0 ? last : focusables[at - 1]).focus();
+        else (at === -1 || at === focusables.length - 1 ? first : focusables[at + 1]).focus();
+        return;
+      }
+
+      if (e.shiftKey) return;
+
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         if (flat.length === 0) return;
         e.preventDefault();
+        e.stopPropagation();
         const delta = e.key === 'ArrowDown' ? 1 : -1;
         // 一个列表，一个环——三组是画上去的分隔，不是三个独立的游标。
         setActiveIndex((cur) => (cur + delta + flat.length) % flat.length);
         return;
       }
+
       if (e.key === 'Enter') {
         const row = flat[activeIndex];
         if (!row) return;
         e.preventDefault();
+        e.stopPropagation();
         openHit(row.hit);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, flat, activeIndex, openHit, setOpen]);
 
   if (!open) return null;
 
   const term = query.trim();
-  const showHint = term.length < MIN_QUERY_CHARS;
+  const showHint = term.length < MIN_SEARCH_QUERY_CHARS;
   const showError = !showHint && errorCode !== null;
   const showEmpty = !showHint && !showError && result !== null && flat.length === 0;
 
@@ -257,6 +332,7 @@ export const CommandPalette: React.FC = () => {
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t('topbar.search', 'Search (⌘K)')}
@@ -267,6 +343,14 @@ export const CommandPalette: React.FC = () => {
           <input
             ref={inputRef}
             data-testid="command-palette-input"
+            // combobox + the id of the highlighted option: without this the
+            // highlight exists only as a background colour, and a screen
+            // reader has no way to say which row ↓ just moved to.
+            role="combobox"
+            aria-expanded={flat.length > 0}
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={flat.length > 0 ? optionId(activeIndex) : undefined}
+            aria-autocomplete="list"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('search.palettePlaceholder', 'Search issues, runs and outputs')}
@@ -280,7 +364,12 @@ export const CommandPalette: React.FC = () => {
           )}
         </div>
 
-        <div className="max-h-[52vh] overflow-y-auto py-1">
+        <div
+          id={LISTBOX_ID}
+          role={flat.length > 0 ? 'listbox' : undefined}
+          aria-label={t('search.paletteResults', 'Search results')}
+          className="max-h-[52vh] overflow-y-auto py-1"
+        >
           {showHint && (
             <p data-testid="command-palette-hint" className="px-3 py-8 text-center text-[12px] text-ink-500">
               {t('search.paletteHint', 'Type at least 2 characters to search issues, runs and outputs')}
@@ -327,6 +416,9 @@ export const CommandPalette: React.FC = () => {
                 )}
                 <button
                   type="button"
+                  id={optionId(idx)}
+                  role="option"
+                  aria-selected={active}
                   data-testid="command-palette-row"
                   data-kind={row.hit.kind}
                   data-active={active ? 'true' : 'false'}

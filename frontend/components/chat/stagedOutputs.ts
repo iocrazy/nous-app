@@ -31,6 +31,15 @@ export interface StagedOutputRef {
   ref_id: string;
   version: number;
   title: string | null;
+  /** The issue this version was produced on, when the row came from a search
+   *  that crossed issues (3c §2.4); `null` for this issue's own outputs.
+   *
+   *  Staged rather than dropped because the chip is the SAME citation the
+   *  picker showed and the thread will show: losing the source here makes one
+   *  reference change identity twice across three adjacent screens, and a
+   *  reader would reasonably read that as "the one I staged is a local one
+   *  now". */
+  issue_key: string | null;
 }
 
 /** The picker's row, reduced to what a citation needs. */
@@ -40,6 +49,7 @@ export function toStagedOutput(row: OutputMentionRow): StagedOutputRef {
     ref_id: row.ref_id,
     version: row.version,
     title: row.title,
+    issue_key: row.issue_key,
   };
 }
 
@@ -88,6 +98,7 @@ export function stageOutput(
     ref_id: String(row.ref_id ?? ''),
     version: row.version,
     title: row.title ?? null,
+    issue_key: row.issue_key ?? null,
   };
   // A chip with no id could never resolve; staging it would promise the writer
   // a reference that comes back refused.
@@ -130,5 +141,9 @@ export function toOutputAttachment(staged: StagedOutputRef): OutputRefAttachment
     ref_id: staged.ref_id,
     version: staged.version,
     title: staged.title,
+    // Overwritten server-side from the registry, exactly like `title`. It
+    // travels so the optimistic row in the thread is not missing a chip the
+    // refetched one has.
+    issue_key: staged.issue_key,
   };
 }

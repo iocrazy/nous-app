@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { listIssueOutputs, OutputsError, type OutputObject } from '../../services/outputsService';
-import { unifiedSearch, type SearchHit } from '../../services/unifiedSearchService';
+import {
+  MIN_SEARCH_QUERY_CHARS,
+  unifiedSearch,
+  type SearchHit,
+} from '../../services/unifiedSearchService';
 import { useTurnSignal } from '../Todolist/issueTurnSignal';
 import { searchHitsToMentionRows, toMentionRows, type OutputMentionRow } from './outputMentionRows';
 import type { OutputMentionListHandle } from './OutputMentionList';
@@ -145,7 +149,25 @@ export function useMentionOutputsTab({
    * 「effect 按检索取数、`rows` 按列表渲染」这种两边各对一半的状态。
    */
   const term = query.trim();
-  const searching = term !== '' && projectId !== null && projectId !== undefined && String(projectId) !== '';
+  const searching =
+    // 端点少于 MIN_SEARCH_QUERY_CHARS 个字符直接拒。输入是逐字符到达的，所以
+    // 「一个字符」不是边角情况而是**每一次**搜索的第一帧 —— 放它出去等于每次
+    // 用户开始打字，界面都闪一条 query_too_short。与 ⌘K 面共用同一个常量，
+    // 否则「第一个字符会不会报错」在两个入口会有两个答案。
+    term.length >= MIN_SEARCH_QUERY_CHARS &&
+    projectId !== null &&
+    projectId !== undefined &&
+    String(projectId) !== '';
+
+  /**
+   * 查询短到发不出去时（1 个字符），既不搜也不把上一次搜索的错误留在屏幕上。
+   *
+   * 那条横幅说的是「那次搜索失败了」；挂在一份本议题产出的列表上方，它描述的
+   * 是一件此刻没有发生的失败。
+   */
+  useEffect(() => {
+    if (!searching) setErrorCode(null);
+  }, [searching]);
 
   // 本议题那条路：读一次，内存过滤。`requested` 守卫挡住重复激活。
   useEffect(() => {
@@ -213,6 +235,10 @@ export function useMentionOutputsTab({
     return () => {
       live = false;
       controller.abort();
+      // **同步**复位，而不是靠那次请求的 `finally` —— `live` 已经是 false，那
+      // 个分支再也不会跑。没有接手者的切换（关掉 mention）会把 loading 永远留
+      // 在 true：下次打开是一条转着的 Loading…，而没有任何请求在飞。
+      setLoading(false);
     };
   }, [active, searching, term, projectId]);
 
