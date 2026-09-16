@@ -2269,8 +2269,12 @@ export interface RunCost {
   charged_points: number | null;
   model: string | null;
   status: string | null;
-  prompt_tokens: number;
-  completion_tokens: number;
+  /** 两列**可选**：只有 `/ai-library/runs/costs` 给得出它们，议题 rollup 的
+   *  `runs[]` 没有这两列。缺席必须读作「不知道」—— `RunCostTail` 靠
+   *  `undefined` 把整行浮层省掉，填 0 会把「没这个数」说成「一个 token 都没烧」
+   *  （同该组件「两个都没有读作 —，不是 ¢0.00」那条纪律）。 */
+  prompt_tokens?: number;
+  completion_tokens?: number;
 }
 
 // ─── AI Library chat ────────────────────────────────────────────────────────

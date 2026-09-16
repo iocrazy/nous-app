@@ -26,16 +26,16 @@ export function mergeRunCosts(
 ): Record<string, RunCost> {
   const out: Record<string, RunCost> = {};
   for (const r of runs ?? []) {
-    // ⚠️ rollup 的 `runs[]` 没有 token 列，所以议题侧浮层第一行恒为
-    // `0 prompt · 0 completion`。这是取舍不是缺陷：补它要改 Part B 的聚合 SQL
-    // （Task 23 已记票），而这一行要回答的「花了多少」本身是准的。
+    // ⚠️ rollup 的 `runs[]` 没有 token 列，所以这两列**一个都不填**——让
+    // `RunCostTail` 的 `undefined` 分支把浮层那一行整个省掉。此前硬填 0，而那个
+    // 组件的判据是 `!== undefined`，于是议题侧恒显示 `0 prompt · 0 completion
+    // tokens`：一个我们根本没有的数字被说成了「这次一个 token 都没烧」。补真数
+    // 要改 Part B 的聚合 SQL（已记票）；在那之前，沉默比编造对。
     out[String(r.id)] = {
       cost_cents: r.cost_cents,
       charged_points: r.charged_points ?? null,
       model: r.model,
       status: r.status,
-      prompt_tokens: 0,
-      completion_tokens: 0,
     };
   }
   if (!live) return out;
@@ -45,8 +45,7 @@ export function mergeRunCosts(
     charged_points: live.charged_points ?? prev?.charged_points ?? null,
     model: prev?.model ?? null,
     status: prev?.status ?? 'completed',
-    prompt_tokens: prev?.prompt_tokens ?? 0,
-    completion_tokens: prev?.completion_tokens ?? 0,
+    // token 两列同样不填：帧不带，`prev` 也不会有（上面那个循环不填）。
   };
   return out;
 }
