@@ -1,4 +1,4 @@
-"""473 的形状由这里钉住：一个 partial 索引，谓词与查询里那两个等值条件逐字一致，
+"""474 的形状由这里钉住：一个 partial 索引，谓词与查询里那两个等值条件逐字一致，
 幂等写法，不 SET ROLE，以及同 PR 的 ORM 镜像。
 
 照 tests/db/test_migration_462_deliverables.py 的读文件断言风格——不连库，纯读
@@ -20,7 +20,7 @@ from app.models import PointTransactions
 pytestmark = pytest.mark.unit
 
 MIG = pathlib.Path(__file__).resolve().parents[3] / "supabase/migrations"
-_RAW = (MIG / "473_point_transactions_agent_run_index.sql").read_text(encoding="utf-8")
+_RAW = (MIG / "474_point_transactions_agent_run_index.sql").read_text(encoding="utf-8")
 BODY = "\n".join(
     line for line in _RAW.splitlines() if not line.strip().startswith("--")
 )

@@ -1,4 +1,4 @@
--- 473: point_transactions —— 给「这条 run 扣了多少分」那次查询一个索引。
+-- 474: point_transactions —— 给「这条 run 扣了多少分」那次查询一个索引。
 --
 -- 3c §3.3 的 issue.rollup 每次轮询都要问一遍 `charged_points_for_references`：
 --   SELECT reference_id, sum(amount) FROM point_transactions
