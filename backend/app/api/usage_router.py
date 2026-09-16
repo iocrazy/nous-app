@@ -12,6 +12,7 @@ import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories import usage_repository
@@ -24,14 +25,15 @@ from app.schemas.usage import (
     UsageTotals,
 )
 
-# Shared with ai_library_router's efficiency endpoint — one parser so the two
-# windows cannot drift apart. Aliased to the historical private name so every
-# call site stays put.
-from app.utils.time_window import parse_window_dt as _parse_dt
+# Shared with ai_library_router's efficiency endpoint — one parser and one cap
+# so the two windows cannot drift apart.
+from app.utils.time_window import MAX_RANGE_DAYS, parse_window_dt, window_error
 
 router = APIRouter(prefix="/usage", tags=["Usage"])
 
-_MAX_RANGE_DAYS = 366
+#: Re-exported under the historical private name; it is the SAME object, so the
+#: two endpoints cannot be capped differently.
+_MAX_RANGE_DAYS = MAX_RANGE_DAYS
 
 
 def _num(value: Any) -> float:
@@ -82,22 +84,33 @@ async def usage_summary(
         )
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    to_dt = _parse_dt(to, default=now)
-    frm_dt = _parse_dt(frm, default=to_dt - datetime.timedelta(days=30))
-    if frm_dt >= to_dt:
+    to_dt = parse_window_dt(to, default=now)
+    frm_dt = parse_window_dt(frm, default=to_dt - datetime.timedelta(days=30))
+    problem = window_error(frm_dt, to_dt)
+    if problem == "invalid_range":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="'from' must be before 'to'",
         )
-    if (to_dt - frm_dt).days > _MAX_RANGE_DAYS:
+    if problem == "range_too_long":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"range exceeds {_MAX_RANGE_DAYS} days",
+            detail=f"range exceeds {MAX_RANGE_DAYS} days",
         )
 
-    data = await usage_repository.summarize(
-        team_id=team_id, frm=frm_dt, to=to_dt, group_by=group_by
-    )
+    try:
+        data = await usage_repository.summarize(
+            team_id=team_id, frm=frm_dt, to=to_dt, group_by=group_by
+        )
+    except Exception as exc:  # noqa: BLE001
+        # A failed rollup read must not render as a quiet month. The concrete
+        # case is a 42703 in the window between a migration landing and the
+        # code that reads its new columns: zeros look calm, a 503 does not.
+        logger.error(f"[usage/summary] rollup read failed for team {team_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "usage_summary_unavailable"},
+        ) from exc
     total = data["total"]
     return UsageSummaryResponse(
         team_id=str(team_id),

@@ -34,3 +34,27 @@ class EfficiencyResponse(BaseModel):
     turn_end_reasons: Dict[str, int]
 
     model_config = {"populate_by_name": True}
+
+
+class RunCostRow(BaseModel):
+    """One run's money line for ``GET /ai-library/runs/costs`` (3c §4.2).
+
+    ``cost_cents`` and ``charged_points`` are both ``None``-able and mean
+    different things by it: no recorded cost, versus nobody billed this run
+    (BYOK, or billing switched off). Neither is 0.
+    """
+
+    cost_cents: Optional[float] = None
+    charged_points: Optional[float] = None
+    model: Optional[str] = None
+    status: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+class RunCostsResponse(BaseModel):
+    """Keyed by run id as a STRING — these are snowflake BIGINTs, and JS loses
+    precision past 2^53. A run the caller may not see is simply absent from
+    ``items``; the batch is not refused over it."""
+
+    items: Dict[str, RunCostRow]

@@ -1007,8 +1007,27 @@ class AgentRunsRepository(AsyncpgRepository):
         最危险的查询。返回原始计数而不是比率：分母语义（0 次调用 vs 0 件产出）在路由
         层统一处理一次，两处各算一遍必然漂移。读失败一律 raise（路由转 503）——空结果
         会被读成「这段时间没花钱」。
+
+        **两种粒度混在一张表里，每一列的口径写死在这里（同 ``issue_totals``）：**
+
+        - ``cost_cents`` —— **只算 root run**。root 行的 ``cost_cents`` 已经是整棵树
+          的总额（``run_recorder._finish`` 把 own + children + media 加起来），子 run
+          自己还有一行，不过滤就是双计。同一条谓词也用在 ``usage_repository
+          .issue_totals`` 与 ``spent_cents_for_issue``；**三处必须一致**，否则同一笔
+          花费在 Usage 面、驾驶舱 Budget 格、效率表上是三个数。
+        - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
+          ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
+          不上滚；按 root 过滤会把子 run 干的活整个丢掉。
+          ⚠️ 所以这个 ``run_count`` 与 ``ai_usage_hourly.run_count`` **不是同一个口径**
+          （小时表按计费事件累加），两处数字对不上是预期的，不是漂移。
+        - ``avg_run_ms`` —— 样本里父子混在一起。一个 root run 的墙钟覆盖它孩子的墙钟，
+          所以这是「一次运行平均多久」而不是「独立工作量平均多久」，两者在有子 run 的
+          agent 上会显著不同。
+
+        所以 root 谓词写成聚合上的 ``FILTER (WHERE ...)``，不写进 ``WHERE``。
         """
         key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
+        root_only = AgentRuns.parent_run_id.is_(None)
         scope = [AgentRuns.created_at >= frm, AgentRuns.created_at < to]
         if user_id is not None:
             scope.append(AgentRuns.user_id == user_id)
@@ -1049,9 +1068,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
                         "deliverables"
                     ),
-                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                        "cost_cents"
-                    ),
+                    func.coalesce(
+                        func.sum(AgentRuns.cost_cents).filter(root_only), 0
+                    ).label("cost_cents"),
                 )
                 .where(*scope)
                 .group_by(key_col)

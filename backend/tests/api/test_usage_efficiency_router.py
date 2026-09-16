@@ -117,3 +117,24 @@ async def test_the_wire_body_carries_the_from_alias(monkeypatch):
     assert "from" in body and "to" in body and "from_" not in body
     assert body["groups"][0]["cost_per_deliverable_cents"] == 4.0
     assert body["turn_end_reasons"] == REASONS
+
+
+async def test_an_over_long_window_is_refused_with_the_shared_cap():
+    """One cap, shared with /usage/summary. An unbounded window on agent_runs
+    is a full-table scan on the busiest table in the schema — and the column it
+    ranges over is the only thing keeping the query off every row ever written.
+    """
+    with pytest.raises(HTTPException) as e:
+        await R.get_usage_efficiency(
+            _Auth(), scope="user", frm="2020-01-01", to="2026-01-01"
+        )
+    assert e.value.status_code == 400 and e.value.detail["code"] == "range_too_long"
+
+
+async def test_the_cap_is_the_same_number_both_endpoints_use():
+    """Not 'both happen to be 366' — literally the same constant. Two copies
+    drift, and the one that drifts upward is the one nobody notices."""
+    from app.utils.time_window import MAX_RANGE_DAYS
+
+    ur = importlib.import_module("app.api.usage_router")
+    assert ur._MAX_RANGE_DAYS is MAX_RANGE_DAYS

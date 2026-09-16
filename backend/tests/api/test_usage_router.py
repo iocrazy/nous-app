@@ -241,3 +241,23 @@ async def test_a_window_with_no_outputs_has_a_null_ratio(monkeypatch):
     assert (
         await ur.usage_summary(_AuthStub(), team_id="1", group_by="model")
     ).total.cost_per_deliverable_cents is None
+
+
+async def test_a_read_failure_is_a_typed_503_not_a_zeroed_dashboard(monkeypatch):
+    """A rollup read that fails must not render as a month with no spend.
+
+    Same failure shape as the two AI-library endpoints: ``details.code`` in the
+    ErrorResponse envelope, not prose. The concrete case this guards is a
+    42703 during the window between a migration landing and the code that reads
+    its new columns — the panel would otherwise show zeros and look calm.
+    """
+
+    async def _summarize(**kw):
+        raise RuntimeError("column ai_usage_hourly.deliverables does not exist")
+
+    monkeypatch.setattr(ur.usage_repository, "summarize", _summarize)
+    monkeypatch.setattr(ur, "get_team_repository", lambda: _TeamOk())
+    with pytest.raises(ur.HTTPException) as e:
+        await ur.usage_summary(_AuthStub(), team_id="1", group_by="model")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "usage_summary_unavailable"

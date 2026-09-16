@@ -73,8 +73,9 @@ async def test_the_statement_compiles_and_filters_the_aggregates_not_the_extract
     sess = await _run(user_id=None, team_id=7, group_by="model")
     sql = _sql(sess.stmts[0])
 
-    # Two filtered aggregates: the timed-run count and the duration sum.
-    assert sql.count("FILTER (WHERE") == 2
+    # Three filtered aggregates: the timed-run count, the duration sum, and
+    # the root-only money column (see the cost test below).
+    assert sql.count("FILTER (WHERE") == 3
     assert "count(*) FILTER (WHERE" in sql
     assert "sum(EXTRACT(epoch FROM" in sql
     # The bad form would read ``EXTRACT(...) FILTER (WHERE ...)`` — the FILTER
@@ -160,3 +161,28 @@ async def test_a_read_failure_raises_instead_of_returning_an_empty_aggregate():
     with patch("app.repositories.agent_runs_repository.read_scope", _boom):
         with pytest.raises(RuntimeError):
             await AgentRunsRepository().cost_rows_for_ids([1])
+
+
+async def test_only_the_money_column_is_root_filtered():
+    """The double-count guard, in the one place it can be checked cheaply.
+
+    A root run's ``cost_cents`` is already the whole tree's total (own +
+    children + media — ``run_recorder._finish`` rolls it up), so summing every
+    row would bill each child twice. Same predicate as ``issue_totals`` and
+    ``spent_cents_for_issue``; if these three ever disagree, one screen shows a
+    different number for the same spend.
+
+    The counters are the opposite: ``tool_calls`` / ``tool_errors`` /
+    ``deliverables`` count what a run did ITSELF and never roll up, so filtering
+    them to roots would silently drop every child's work.
+    """
+    sql = _sql((await _run(team_id=7, group_by="model")).stmts[0])
+
+    assert (
+        "sum(public.agent_runs.cost_cents) FILTER "
+        "(WHERE public.agent_runs.parent_run_id IS NULL)" in sql
+    )
+    for own_metric in ("tool_calls", "tool_errors", "deliverables"):
+        assert f"sum(public.agent_runs.{own_metric}) FILTER" not in sql
+    # The root predicate belongs to the money column alone.
+    assert sql.count("parent_run_id IS NULL") == 1

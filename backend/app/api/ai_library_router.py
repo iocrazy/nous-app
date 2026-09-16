@@ -86,14 +86,18 @@ from app.schemas.ai_library_chat import (
     SessionUpdate,
     SessionWithMessages,
 )
-from app.schemas.efficiency import EfficiencyGroup, EfficiencyResponse
+from app.schemas.efficiency import (
+    EfficiencyGroup,
+    EfficiencyResponse,
+    RunCostsResponse,
+)
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.permissions.high_risk_caps import high_risk_caps
 from app.services.ai.runner.seed_loader import SeedLoader
 from app.services.issues.issue_visibility import visible_issue_ids
 from app.services.modules.gate import require_module
-from app.utils.time_window import parse_window_dt as _parse_iso
+from app.utils.time_window import parse_window_dt, window_error
 
 router = APIRouter(
     prefix="/ai-library",
@@ -2350,14 +2354,26 @@ async def list_live_runs(auth: AuthDep) -> Dict[str, Any]:
     return {"items": items, "count": len(items)}
 
 
-@router.get("/runs/costs", summary="Batch cost + charged points for up to 50 runs")
+@router.get(
+    "/runs/costs",
+    response_model=RunCostsResponse,
+    summary="Batch cost + charged points for up to 50 runs",
+)
 async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
     """一次拿一屏气泡的花费（3c §4.2）。可见性复用 ``visible_issue_ids``（与血缘同一
     把尺）；**看不见的 id 是键省略**，不是 404。
 
     NOTE: 必须注册在 ``/runs/{run_id}`` 之前（同 ``/runs/live``）——否则 ``costs``
     会被当成一个 run_id 吃掉，端点永远拿不到请求，而单测直接调函数看不出来。"""
-    wanted = [int(t) for t in (s.strip() for s in ids.split(",")) if t.isdigit()]
+    # Deduplicate BEFORE the cap: the limit is on distinct runs, not on commas.
+    # A client repainting one screen may well send the same run twice, and the
+    # query is an IN over the deduplicated set either way — refusing that batch
+    # would be a 400 the user cannot act on.
+    wanted = list(
+        dict.fromkeys(
+            int(t) for t in (s.strip() for s in ids.split(",")) if t.isdigit()
+        )
+    )
     if len(wanted) > 50:
         raise HTTPException(status_code=400, detail={"code": "too_many_ids"})
     if not wanted:
@@ -3010,10 +3026,14 @@ async def get_usage_efficiency(
     if scope != "user" and id is None:
         raise HTTPException(status_code=400, detail={"code": "scope_requires_id"})
     now = datetime.now(timezone.utc)
-    to_dt = _parse_iso(to, default=now)
-    frm_dt = _parse_iso(frm, default=to_dt - timedelta(days=30))
-    if frm_dt >= to_dt:
-        raise HTTPException(status_code=400, detail={"code": "invalid_range"})
+    to_dt = parse_window_dt(to, default=now)
+    frm_dt = parse_window_dt(frm, default=to_dt - timedelta(days=30))
+    # Same cap as /usage/summary, from the same constant. agent_runs has no
+    # index on project_id and grows forever, so an unbounded window here is a
+    # full scan of the busiest table in the schema.
+    problem = window_error(frm_dt, to_dt)
+    if problem:
+        raise HTTPException(status_code=400, detail={"code": problem})
 
     user_uuid: UUID | None = None
     team_id: int | None = None

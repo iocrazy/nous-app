@@ -17,7 +17,33 @@ whole contract is "never fail".
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, Optional
+
+#: The widest window any usage-style endpoint will aggregate over. Shared, not
+#: copied: both readers scan a table that grows forever, and a second copy of
+#: this number only ever drifts in the direction nobody notices — upward, on the
+#: endpoint with no index to save it.
+MAX_RANGE_DAYS = 366
+
+
+def window_error(
+    frm: datetime.datetime,
+    to: datetime.datetime,
+    *,
+    max_days: int = MAX_RANGE_DAYS,
+) -> Optional[str]:
+    """``None`` if the window is usable, else a stable reason code.
+
+    Returns a code rather than raising so each caller can dress it in its own
+    error shape — the Usage panel answers in prose it has always answered in,
+    the AI-library endpoints answer with ``details.code`` — without either one
+    owning the rule itself.
+    """
+    if frm >= to:
+        return "invalid_range"
+    if (to - frm).days > max_days:
+        return "range_too_long"
+    return None
 
 
 def parse_window_dt(value: Any, *, default: datetime.datetime) -> datetime.datetime:

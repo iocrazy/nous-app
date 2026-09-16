@@ -141,3 +141,41 @@ async def test_a_billing_read_failure_is_a_typed_503_not_a_free_run(monkeypatch)
         await R.get_run_costs(_Auth(), ids="1")
     assert e.value.status_code == 503
     assert e.value.detail["code"] == "run_costs_unavailable"
+
+
+async def test_duplicate_ids_collapse_before_the_fifty_cap(monkeypatch):
+    """The cap is on distinct runs, not on commas. A client repainting one
+    screen may well send the same run twice; refusing that batch outright
+    would be a 400 the user cannot act on, and the work is identical either
+    way because the query is an ``IN`` over the deduplicated set."""
+    _stub(monkeypatch, {"77"})
+    out = await R.get_run_costs(_Auth(), ids="1,1,1,2,2")
+    assert sorted(out["items"]) == ["1", "2"]
+
+    # 60 commas, 2 distinct runs — allowed.
+    many = ",".join(["1", "2"] * 30)
+    assert sorted((await R.get_run_costs(_Auth(), ids=many))["items"]) == ["1", "2"]
+
+
+async def test_fifty_one_distinct_ids_is_still_a_typed_400():
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids=",".join(str(i) for i in range(1, 53)))
+    assert e.value.status_code == 400 and e.value.detail["code"] == "too_many_ids"
+
+
+async def test_the_endpoint_declares_a_real_response_model():
+    """Every other endpoint in this router declares one, and it is what puts the
+    batch's shape into the OpenAPI schema the frontend generates types from.
+
+    ``is not None`` would not do: FastAPI infers a response model from the
+    return annotation, so a bare ``Dict[str, Any]`` already satisfies that and
+    documents nothing. The assertion is that it is a declared schema.
+    """
+    from pydantic import BaseModel
+
+    route = next(
+        r for r in R.router.routes if getattr(r, "path", "") == "/ai-library/runs/costs"
+    )
+    model = route.response_model
+    assert isinstance(model, type) and issubclass(model, BaseModel)
+    assert "items" in model.model_fields
