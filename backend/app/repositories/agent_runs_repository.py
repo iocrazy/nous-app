@@ -41,6 +41,7 @@ from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import AgentRuns
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.ai.runner.turn_end import TurnEndReason
 
 # agent_runs DB-column-name → mapped-attribute-name. Built once from the mapper.
 # For agent_runs every name == key (no reserved-name remap), but we resolve via
@@ -1179,7 +1180,15 @@ class AgentRunsRepository(AsyncpgRepository):
         each transcript with ``turn_end{reason:interrupted}`` (mig 453 spine:
         the event log is replay-complete only if a crashed run still gets its
         terminal event). SET-based, idempotent; committed via write_scope.
-        Datetimes bound as ``datetime`` objects, never isoformat strings."""
+        Datetimes bound as ``datetime`` objects, never isoformat strings.
+
+        ⚠️ 这条 UPDATE 同批写 ``turn_end_reason='heartbeat_lost'``（3c 终审 I4），
+        而它**先于**调用方的 ``close_interrupted_runs``，后者的补写带
+        ``turn_end_reason IS NULL`` 守卫。所以列上是 ``heartbeat_lost``，而
+        transcript 事件仍是 ``turn_end{reason:interrupted, detail:heartbeat_lost}``。
+        两者不冲突，是两个粒度：事件说「这一轮被腰斩」，列多说了一句「因为心跳
+        没了」—— 分布条要的正是后者，否则崩溃类失败与普通中断混成一段。
+        """
         try:
             async with write_scope() as session:
                 result = await session.execute(
@@ -1191,22 +1200,37 @@ class AgentRunsRepository(AsyncpgRepository):
                         ended_at=datetime.now(timezone.utc),
                         error_code="heartbeat_lost",
                         error_message="No heartbeat for >2 minutes",
+                        turn_end_reason=TurnEndReason.HEARTBEAT_LOST.value,
                     )
-                    .returning(AgentRuns.id)
+                    # 维度随行返回：小时表那一行要 team / project / agent /
+                    # model / trigger，全在这张表上（3c 终审 I4）。
+                    .returning(
+                        AgentRuns.id,
+                        AgentRuns.team_id,
+                        AgentRuns.project_id,
+                        AgentRuns.agent_id,
+                        AgentRuns.model,
+                        AgentRuns.trigger,
+                        AgentRuns.attribution,
+                    )
                 )
-                swept = [int(r[0]) for r in result.fetchall()]
+                rows = result.fetchall()
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
 
-        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影只
-        # 能由这里跟上（3c Task 13 评审 Important 1）。在 ``write_scope()``
-        # 之外：投影读回的必须是刚提交的那份 status，而它失败绝不该把已经扫
-        # 成功的 id 吞掉——调用方拿这些 id 去补 ``turn_end`` 事件。
+        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影与
+        # ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审
+        # Important 1 / 终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是
+        # 刚提交的那份 status，而这两件事失败都绝不该把已经扫成功的 id 吞掉——
+        # 调用方拿这些 id 去补 ``turn_end`` 事件。
+        from app.services.liveness.crash_rollup import record_crash_terminal_runs
         from app.services.search.projection import project_run_id_best_effort
 
+        swept = [int(r.id) for r in rows]
         for run_id in swept:
             await project_run_id_best_effort(run_id)
+        await record_crash_terminal_runs(rows)
         return swept
 
     # ------------------------------------------------------------------

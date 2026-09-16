@@ -4836,6 +4836,9 @@
       "completed": "已完成",
       "awaitingInput": "等待输入",
       "error": "出错",
+      "dead": "进程已死",
+      "heartbeatLost": "心跳丢失",
+      "stranded": "重启中断",
       "interrupted": "被中断",
       "cancelled": "已取消",
       "other": "其他"

@@ -49,6 +49,24 @@ describe('TurnEndBreakdown', () => {
     expect(screen.getByTestId('turn-end-cancelled').className).toContain('bg-ink-');
   });
 
+  it('gives the three crash classes their own segments, not Other', () => {
+    // 3c 终审 I4：进程死掉 / 心跳丢失 / 重启被斩是用户最想从成功率上看见的失败。
+    // 在此之前这三类连 `turn_end_reason` 都不写，分布条上根本不存在；归进 Other
+    // 等于把它们又藏起来一次。
+    render(<TurnEndBreakdown reasons={{ completed: 1, dead: 1, heartbeat_lost: 1, stranded: 1 }} />);
+    expect(screen.getByTestId('turn-end-dead').className).toContain('bg-danger');
+    expect(screen.getByTestId('turn-end-heartbeat_lost').className).toContain('bg-warn');
+    expect(screen.getByTestId('turn-end-stranded').className).toContain('bg-warn');
+    expect(screen.queryByTestId('turn-end-other')).toBeNull();
+  });
+
+  it('asks for camelCase keys for the crash classes too', () => {
+    render(<TurnEndBreakdown reasons={{ heartbeat_lost: 1, stranded: 1 }} />);
+    expect(askedKeys).toContain('aiUsage.turnEnd.heartbeatLost');
+    expect(askedKeys).toContain('aiUsage.turnEnd.stranded');
+    expect(askedKeys).not.toContain('aiUsage.turnEnd.heartbeat_lost');
+  });
+
   it('omits a reason nobody hit rather than drawing a zero-width sliver', () => {
     render(<TurnEndBreakdown reasons={{ completed: 3 }} />);
     expect(screen.queryByTestId('turn-end-error')).toBeNull();
