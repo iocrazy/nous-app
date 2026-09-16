@@ -264,3 +264,74 @@ describe('the open-time gate', () => {
     await waitFor(() => expect(pushRemotePosition).toHaveBeenCalledWith(SRC, 240, 600, {}));
   });
 });
+
+describe('never re-assert a position this device did not change', () => {
+  it('unload does not push a position the server already holds', async () => {
+    // The production bug this pins: a reload fires BOTH the pagehide flush and
+    // the unmount flush, each re-sending the same untouched position — so
+    // simply reopening a video overwrote the newer position another device had
+    // written while this tab sat paused.
+    savePosition(ALICE, SRC, 67, 600);
+    markSynced(ALICE, SRC, 'T1');
+    fetchRemotePosition.mockResolvedValue({
+      media_key: SRC,
+      position_seconds: 67,
+      duration_seconds: 600,
+      updated_at: 'T1',
+    });
+
+    const { video, unmount } = await open(ALICE);
+    await waitFor(() => expect(fetchRemotePosition).toHaveBeenCalled());
+    video.currentTime = 67;
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    unmount();
+
+    expect(pushRemotePosition).not.toHaveBeenCalled();
+  });
+
+  it('still pushes once the viewer has actually moved', async () => {
+    savePosition(ALICE, SRC, 67, 600);
+    markSynced(ALICE, SRC, 'T1');
+    fetchRemotePosition.mockResolvedValue({
+      media_key: SRC,
+      position_seconds: 67,
+      duration_seconds: 600,
+      updated_at: 'T1',
+    });
+    pushRemotePosition.mockResolvedValue('T2');
+
+    const { video } = await open(ALICE);
+    await waitFor(() => expect(fetchRemotePosition).toHaveBeenCalled());
+
+    await act(async () => {
+      video.currentTime = 240;
+      video.dispatchEvent(new Event('pause'));
+    });
+
+    await waitFor(() =>
+      expect(pushRemotePosition).toHaveBeenCalledWith(SRC, 240, 600, {}),
+    );
+  });
+
+  it('a second push of the same position is skipped', async () => {
+    fetchRemotePosition.mockResolvedValue(null); // server holds nothing
+    pushRemotePosition.mockResolvedValue('T2');
+
+    const { video } = await open(ALICE);
+    await waitFor(() => expect(fetchRemotePosition).toHaveBeenCalled());
+
+    await act(async () => {
+      video.currentTime = 240;
+      video.dispatchEvent(new Event('pause'));
+    });
+    await waitFor(() => expect(pushRemotePosition).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(pushRemotePosition).toHaveBeenCalledTimes(1);
+  });
+});
