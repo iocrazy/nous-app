@@ -50,6 +50,7 @@ from app.api.media_router import router as media_router
 from app.api.modules_router import router as modules_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
+from app.api.playback_router import router as playback_router
 from app.api.points_router import router as points_router
 from app.api.project_assets_router import router as _project_assets_router
 from app.api.projects_router import router as projects_router
@@ -107,6 +108,9 @@ api_router.include_router(router=media_auth_router, tags=["Media Auth"])
 api_router.include_router(router=temp_token_router, tags=["Temp Token"])
 
 api_router.include_router(router=media_router, tags=["Media"])
+api_router.include_router(
+    router=playback_router, prefix="/playback-positions", tags=["Playback"]
+)
 
 api_router.include_router(router=media_content_router, tags=["Media Content"])
 
