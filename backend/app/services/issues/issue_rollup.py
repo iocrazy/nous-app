@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
 from app.services.issues.origin_resolvers import resolve_origin
 
 TERMINAL_ISSUE = frozenset({"done", "cancelled", "closed"})
@@ -239,7 +240,8 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         """
         try:
             return await get_points_repository().charged_points_for_references(
-                reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
+                reference_type=AGENT_RUN_REFERENCE_TYPE,
+                reference_ids=[str(r["id"]) for r in runs],
             )
         except Exception as e:  # noqa: BLE001
             logger.error(

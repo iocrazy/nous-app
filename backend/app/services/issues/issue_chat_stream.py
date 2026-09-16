@@ -10,6 +10,8 @@ from uuid import UUID
 
 from loguru import logger
 
+from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+
 
 async def _get_redis():
     from app.core.redis import get_async_redis
@@ -90,7 +92,7 @@ async def _charged_points_for(rid: int) -> Optional[float]:
         from app.repositories.points_repository import get_points_repository
 
         charged = await get_points_repository().charged_points_for_references(
-            reference_type="agent_run", reference_ids=[str(rid)]
+            reference_type=AGENT_RUN_REFERENCE_TYPE, reference_ids=[str(rid)]
         )
         return charged.get(str(rid))
     except Exception as e:  # noqa: BLE001

@@ -95,6 +95,7 @@ from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.permissions.high_risk_caps import high_risk_caps
 from app.services.ai.runner.seed_loader import SeedLoader
+from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
 from app.services.issues.issue_visibility import visible_issue_ids
 from app.services.modules.gate import require_module
 from app.utils.time_window import parse_window_dt, window_error
@@ -2404,7 +2405,8 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
     ]
     try:
         charged = await get_points_repository().charged_points_for_references(
-            reference_type="agent_run", reference_ids=[str(r["id"]) for r in allowed]
+            reference_type=AGENT_RUN_REFERENCE_TYPE,
+            reference_ids=[str(r["id"]) for r in allowed],
         )
     except Exception as exc:  # noqa: BLE001
         # 不降级成「没扣过」——那等于告诉用户这些 run 是免费的。整条 503，让调用方

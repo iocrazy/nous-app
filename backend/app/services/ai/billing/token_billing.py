@@ -34,6 +34,7 @@ from uuid import UUID
 from loguru import logger
 
 from app.core.config import settings
+from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
 
 
 @dataclass(frozen=True)
@@ -348,17 +349,18 @@ async def reconcile_run(
         # 的 except 吞成 WARNING：ai_usage_logs 有记录、余额一分没动，整整一个
         # 上线周期。
         #
-        # action_type 是**字面量** "agent_run" 而不是 ``action``（= RunRecorder
-        # 的 trigger）：PointsService 把它原样写进 point_transactions.reference_type，
-        # 而效率账按 reference_type='agent_run' + reference_id=<run_id> 反查扣分。
-        # 跟着 trigger 走会让那张表按触发方式碎成若干值，读方一条都查不到。
+        # action_type 是**常量**而不是 ``action``（= RunRecorder 的 trigger）：
+        # PointsService 把它原样写进 point_transactions.reference_type，而效率账按
+        # reference_type=<该常量> + reference_id=<run_id> 反查扣分。跟着 trigger 走
+        # 会让那张表按触发方式碎成若干值，读方一条都查不到。读方与索引谓词共用
+        # ``AGENT_RUN_REFERENCE_TYPE``，五处逐字一致（见该模块 docstring）。
         #
         # override_cost 是整数积分，向上取整：0.3 分的 run 扣 1 分而不是 0 ——
         # 向下取整会让一整类小额 run 白跑。
         res = await ps.check_and_consume(
             team_id=str(team_id),
             user_id=str(user_id),
-            action_type="agent_run",
+            action_type=AGENT_RUN_REFERENCE_TYPE,
             reference_id=str(run_id),
             override_cost=int(math.ceil(cost_points)),
             description=f"{model} · {total_tokens} tokens",
