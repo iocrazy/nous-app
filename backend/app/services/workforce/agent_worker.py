@@ -294,6 +294,16 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             trigger="workforce",
             session_id=None,
             team_id=child_team_id,
+            # 3c 终审 I1：这一行缺席时，委派出去的活与钱在议题维度整个消失。
+            # `issue_id` 从「Runs 树上的一个链接」变成了四个读面的连接键 ——
+            # 驾驶舱效率两格、`¢/output` 的分母、`/usage/issues/{id}` 的 token
+            # 三列、`search_docs` 的深链，全按它连。子孙有议题（上面交给
+            # build_agent_runner_stack 的那个），自己没有，于是这次委派的产出
+            # 不进分母、而它的钱通过 root 的树总额进了分子，单价系统性偏高。
+            # ⚠️ 在 INSERT 时写是唯一合法的时机：`_finish` 那段注释禁止事后
+            # PATCH 的是 project_id / team_id / episode_id 三列，issue_id 不在
+            # 其中（phase 2b-2 §4.2 明确它在 INSERT 时写）。
+            issue_id=payload_issue_id(payload),
             **dispatch_scope.as_recorder_kwargs(),
             model=model or None,
             provider=provider,

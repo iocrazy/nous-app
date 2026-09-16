@@ -33,12 +33,17 @@ def _task(
     depth: int = 0,
     parent_run_id: UUID | None = None,
     inbox_message_id: UUID | None = None,
+    issue_id: int | str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"prompt": prompt}
     if depth:
         payload["delegated_at_depth"] = depth
     if parent_run_id:
         payload["parent_run_id"] = str(parent_run_id)
+    if issue_id is not None:
+        # Snowflake ids cross the payload as numbers OR strings — the parameter
+        # takes both so a caller can pin down which shape it is testing.
+        payload["issue_id"] = issue_id
     task_id = str(uuid4())
     return {
         "id": task_id,

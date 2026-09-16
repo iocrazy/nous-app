@@ -861,6 +861,13 @@ class AgentRunsRepository(AsyncpgRepository):
         真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
         ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
 
+        ⚠️ 「全体」的准确口径是**带着这个 ``issue_id`` 的全部 run**，不是「这棵树的
+        全部 run」——这里的 WHERE 只认这一列，树结构（``root_run_id``）根本没进查询。
+        两者相等的前提是每个派发站点都在 INSERT 时戳上议题；3c 终审 I1 抓到
+        ``workforce/agent_worker`` 漏了这一戳，于是委派出去的活整个不计，而
+        ``compute_rollup`` 的 ``¢/output`` 分子（root 的树总额，含子的钱）照算不误，
+        单价系统性偏高。**加新的派发站点时，issue_id 与 team_id 一样是必戳项。**
+
         ``avg_run_ms`` 的分母只数两端时间戳都有的 run；一个都没有 → None（不知道，
         不是 0 毫秒）。读失败返回 {}：驾驶舱少两个格子，不该把整个议题页拖垮。
         """
