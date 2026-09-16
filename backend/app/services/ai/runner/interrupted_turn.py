@@ -73,7 +73,16 @@ async def close_interrupted_run(run_id: int, *, detail: Optional[str] = None) ->
     if detail:
         payload["detail"] = detail
     await writer.append(TURN_END_EVENT_TYPE, payload, turn=1)
-    # 3c §3.2：事件与列一起补，否则崩溃的 run 那一列永远空着。
+    # 列与事件说的**不是同一个词**，这是现状而不是漂移（3c 终审 I4 之后）：
+    #
+    #   · 列 —— 唯一的活路径（sweeper）上由仓库先写：
+    #     ``AgentRunsRepository.mark_heartbeat_lost_ids`` 在那条终态 UPDATE 里写
+    #     ``turn_end_reason='heartbeat_lost'``，**先于**本函数。所以下面这次 stamp
+    #     的 ``IS NULL`` 守卫在那条路径上一定不命中，它是空转的。留着是为了兜住
+    #     别的调用方与存量 NULL 行 —— 不是为了那条路径。
+    #   · 事件 —— 仍是 ``turn_end{reason:"interrupted", detail:"heartbeat_lost"}``。
+    #     事件说「这一轮被腰斩」，列多说了一句「因为心跳没了」；分布条要的正是
+    #     后者那个粒度，否则崩溃类失败与普通中断混成一段。
     #
     # 补列失败**不**回退返回值：事件已经落在 transcript 上了，而幂等守卫读的正是
     # 事件（``_last_seq_and_has_turn_end``），报 False 只会让下一轮 sweeper 再
