@@ -68,7 +68,12 @@ def wired(monkeypatch):
     class _Docs:
         async def search(self, **kw):
             state["last_search"] = kw
-            return [d for d in state["docs"] if d["entity_kind"] in kw["kinds"]]
+            state.setdefault("searches", []).append(kw)
+            # 桩也照真 repository 的行为截断：`limit` 是服务端的，不截的话
+            # 「一条查询里产出把 run 挤掉」这个缺陷在桩上根本复现不出来。
+            hits = [d for d in state["docs"] if d["entity_kind"] in kw["kinds"]]
+            hits.sort(key=lambda d: d.get("score", 0.0), reverse=True)
+            return hits[: kw["limit"]]
 
     async def _issues(**kw):
         state["last_issues"] = kw
@@ -132,6 +137,45 @@ async def test_the_sql_layer_is_asked_for_three_times_the_page(wired):
     # 裁剪发生在 Python 里，所以 SQL 要多取——否则一页里有几条不可见，
     # 用户看到的就是一页残缺的结果而不是十条。
     assert wired["last_search"]["limit"] == 30
+
+
+async def test_each_kind_gets_its_own_query(wired):
+    """两组各发一次，每次只问自己那个 kind。
+
+    合成一条 ``kinds IN ('run','output')`` 会让两组在同一个 ORDER BY score
+    里抢名额。
+    """
+    await _run(wired, kinds={"run", "output"}, limit_per_group=10)
+    asked = [sorted(s["kinds"]) for s in wired["searches"]]
+    assert asked == [["output"], ["run"]]
+    assert all(s["limit"] == 30 for s in wired["searches"])
+
+
+async def test_a_flood_of_outputs_does_not_starve_the_run_group(wired):
+    """30 条高分产出 + 1 条低分 run —— run 组**必须**非空。
+
+    这是「分组返回」这个设计本身的失效模式：一条共用查询下前 30 名全是产出，
+    ``groups.runs`` 空着，而库里明明有一条可见的 run。读者会把它读成「没有
+    匹配的 run」，真相是「run 没挤进一条共用的排行榜」。
+    """
+    wired["docs"] = [
+        _doc(entity_id=f"script_shot:{i}:1", score=0.9) for i in range(30)
+    ] + [
+        _doc(
+            entity_kind="run",
+            entity_id="913",
+            kind=None,
+            ref_id=None,
+            version=None,
+            title="run",
+            body="rain gauge run",
+            status="completed",
+            score=0.01,
+        )
+    ]
+    res = await _run(wired, kinds={"run", "output"}, limit_per_group=10)
+    assert [h.id for h in res.groups.runs] == ["913"]
+    assert len(res.groups.outputs) == 10
 
 
 async def test_the_issue_group_goes_through_the_repository_not_the_projection(wired):

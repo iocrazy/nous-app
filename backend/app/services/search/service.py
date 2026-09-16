@@ -10,8 +10,9 @@
    指派人 / team 成员）。它不在 SQL 里，因为议题可见性有自己的口径，复制一份
    迟早和 ``issue_visibility`` 分叉成两套。
 
-**无议题的 run 不进第二道。** 它在第一道已经按 ``owner_user_id`` 过滤过，再裁
-一次会把「没有议题」读成「议题不可见」，于是每个人自己的画布道 run 永远搜不到。
+**无议题的 run 不进第二道。** 第一道那条谓词是 ``team_id ∈ 我的 team OR
+owner_user_id = 我``，无议题的 run 由它的 owner 那条臂收下；再裁一次会把
+「没有议题」读成「议题不可见」，于是每个人自己的画布道 run 永远搜不到。
 这个形状有专门的测试钉着（``test_a_run_without_an_issue_survives_the_visibility_pass``）。
 
 **议题组也不进第二道**，理由相反：它走的是 ``visibility_predicate``，即同一条
@@ -196,13 +197,17 @@ async def unified_search(
         )
         issues = [_issue_hit(row, q) for row in rows]
 
-    doc_kinds = {k for k in kinds if k in ("run", "output")}
-    runs: list[SearchHit] = []
-    outputs: list[SearchHit] = []
-    if doc_kinds:
+    by_kind: dict[str, list[SearchHit]] = {"run": [], "output": []}
+    # **每个 kind 各发一次查询。** 合成一条 `kinds IN ('run','output')` 会让两组
+    # 在同一个 ORDER BY score 里抢名额，而产出行的数量级远大于 run（一件产出
+    # 每改一版就是一行）。前 30 名全是产出时 `groups.runs` 空着，而库里明明有
+    # 可见的 run —— 那是「分组返回」这个设计本身的失效：读者会读成「没有匹配
+    # 的 run」，真相是「run 没挤进一条共用的排行榜」。
+    # 代价是每组一次往返；换来的是每组的 limit 只对自己负责。
+    for kind in sorted(k for k in kinds if k in by_kind):
         docs = await get_search_docs_repository().search(
             q=q,
-            kinds=doc_kinds,
+            kinds={kind},
             team_ids=[int(team_id)] if team_id is not None else [],
             user_id=str(auth.user_id),
             project_id=project_id,
@@ -212,15 +217,17 @@ async def unified_search(
         with_issue = {d.get("issue_id") for d in docs if d.get("issue_id") is not None}
         visible = await visible_issue_ids(with_issue, auth)
         coords = await _issue_coordinates(visible)
+        bucket = by_kind[kind]
         for doc in docs:
             iid = doc.get("issue_id")
-            # 无议题的 run 在 SQL 层已按 owner 过滤，第二道不再碰它。
+            # 无议题的 run 在 SQL 层已被那条谓词的 owner 臂收下（谓词是
+            # `team_id ∈ 我的 team OR owner_user_id = 我`），第二道不再碰它。
             if iid is not None and str(iid) not in visible:
                 continue
-            bucket = runs if doc.get("entity_kind") == "run" else outputs
             if len(bucket) < limit_per_group:
                 bucket.append(_doc_hit(doc, q, coords))
 
+    runs, outputs = by_kind["run"], by_kind["output"]
     return UnifiedSearchResponse(
         groups=SearchGroups(issues=issues, runs=runs, outputs=outputs),
         totals=SearchTotals(issues=issue_total, runs=len(runs), outputs=len(outputs)),

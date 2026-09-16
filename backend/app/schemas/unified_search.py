@@ -73,8 +73,9 @@ class UnifiedSearchResponse(BaseModel):
     检索是交互式的，慢下来时读者要能分清是网络还是这个端点。
 
     类名带 ``Unified`` 前缀而契约写的是 ``SearchResponse``：见模块 docstring，
-    ``schemas/search.py`` 那个名字已经被资源库检索占了。本模块导出
-    ``SearchResponse`` 作为别名，所以按契约那个名字 import 也拿得到同一个类。
+    ``schemas/search.py`` 那个名字已经被资源库检索占了。**不提供
+    ``SearchResponse`` 别名** —— 一个能同时从两个模块 import 到的同名类，正是
+    「这是哪一个 SearchResponse」这个问题的来源，而前缀存在就是为了消掉它。
     """
 
     groups: SearchGroups
@@ -82,14 +83,9 @@ class UnifiedSearchResponse(BaseModel):
     took_ms: int
 
 
-#: 契约 §1 的拼法。同一个类，两个名字——别名让契约里的写法可用，而带前缀的
-#: 真名让它在 ``schemas/search.py`` 的 ``SearchResponse`` 旁边不产生歧义。
-SearchResponse = UnifiedSearchResponse
-
 __all__ = [
     "SearchGroups",
     "SearchHit",
-    "SearchResponse",
     "SearchTotals",
     "UnifiedSearchResponse",
 ]
