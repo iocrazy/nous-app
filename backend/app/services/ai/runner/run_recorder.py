@@ -767,6 +767,21 @@ class RunRecorder:
                 f"(task_id={self.task_id} run_id={self.run_id}): {err}"
             )
 
+    def _efficiency_counts(self) -> dict[str, Any]:
+        """折叠出来的工作量，永远是一个可加的 dict。没有 event writer（预检即拒的
+        run、测试替身）时返回全零——A1 票直接相加，不该先判空。``_finish`` 写列时
+        另判一次「有没有折叠数据」，那里 NULL 与 0 必须分得开。"""
+        empty = {
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reason": None,
+        }
+        if self._event_writer is None:
+            return empty
+        return {**empty, **(self._event_writer.views.get("efficiency") or {})}
+
     async def _finish(
         self,
         *,
@@ -850,6 +865,14 @@ class RunRecorder:
             "skill_slugs_used": self._skill_slugs_used,
             "attribution": effective_attribution,
         }
+        # 3c §3.2：与 cost_cents 同一次 UPDATE。存量行留 NULL——一个没有折叠数据的
+        # run「不知道干了多少活」，写 0 会把它伪装成「什么都没干」。
+        if self._event_writer is not None:
+            eff = self._efficiency_counts()
+            for column in ("steps", "tool_calls", "tool_errors", "deliverables"):
+                updates[column] = int(eff[column])
+            if eff["turn_end_reason"] is not None:
+                updates["turn_end_reason"] = str(eff["turn_end_reason"])
         # Terminal liveness (mig 406). Without this every finished run sat at
         # liveness_state='running' forever — this is the only writer on the
         # ordinary exit path, so nothing else ever closed the column out.
@@ -1435,6 +1458,16 @@ class RunEventWriter:
                 # usually writes its event through a ``for_run`` writer, so the
                 # live recorder never folded that money at all.
                 self.views["cost"]["media_cents"] = scratch["cost"]["media_cents"]
+                # 同一份折叠的第三个分量（3c §3.2）：``_finish`` 从这里读
+                # ``deliverables`` 列。登记口常走 ``for_run`` writer，所以活
+                # recorder 也没折过这件产出的计数——只抬 outputs 不抬计数，就是
+                # 「面板 2 件、run 行 1 件」，与上面那条钱的理由逐字相同。
+                self.views["efficiency"] = {
+                    **(self.views.get("efficiency") or {}),
+                    "deliverables": int(
+                        (scratch.get("efficiency") or {}).get("deliverables") or 0
+                    ),
+                }
             recompute_spent(self.views["cost"])
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(

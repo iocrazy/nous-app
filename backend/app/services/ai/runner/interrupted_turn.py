@@ -38,19 +38,43 @@ async def _last_seq_and_has_turn_end(run_id: int) -> tuple[int, bool]:
     return int(row[0]), int(row[1]) > 0
 
 
+def _writer_factory(run_id, *, seq_start):
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    return RunEventWriter(run_id, seq_start=seq_start)
+
+
+async def _stamp_turn_end_reason(run_id: int, reason: str) -> None:
+    """仅当 ``turn_end_reason`` 还空着时补写。``IS NULL`` 守卫有两个作用：sweeper 重
+    放（DBOS 重试）不改写，一个真跑完并自己写了结论的 run 也绝不会被事后改成
+    ``interrupted``。"""
+    from sqlalchemy import update as sa_update
+
+    from app.db.session import write_scope
+    from app.models import AgentRuns
+
+    async with write_scope() as session:
+        await session.execute(
+            sa_update(AgentRuns)
+            .where(AgentRuns.id == int(run_id))
+            .where(AgentRuns.turn_end_reason.is_(None))
+            .values(turn_end_reason=reason)
+        )
+
+
 async def close_interrupted_run(run_id: int, *, detail: Optional[str] = None) -> bool:
     """Append ``turn_end{reason:interrupted}`` unless one already exists.
     Returns True when an event was written."""
-    from app.services.ai.runner.run_recorder import RunEventWriter
-
     last_seq, has_end = await _last_seq_and_has_turn_end(run_id)
     if has_end:
         return False
-    writer = RunEventWriter(run_id, seq_start=last_seq)
+    writer = _writer_factory(run_id, seq_start=last_seq)
     payload = {"reason": TurnEndReason.INTERRUPTED.value}
     if detail:
         payload["detail"] = detail
     await writer.append(TURN_END_EVENT_TYPE, payload, turn=1)
+    # 3c §3.2：事件与列一起补，否则崩溃的 run 那一列永远空着。
+    await _stamp_turn_end_reason(int(run_id), TurnEndReason.INTERRUPTED.value)
     return True
 
 

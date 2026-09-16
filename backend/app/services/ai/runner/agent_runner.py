@@ -48,6 +48,7 @@ from app.services.ai.runner.step_hooks import (
     StepHookChain,
     default_step_hooks,
 )
+from app.services.ai.runner.tool_events import emit_tool_call, tool_error_code
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.ai.tools.ask_user_tool import (
     ASK_USER_TOOL_NAME,
@@ -884,6 +885,7 @@ class AgentRunner:
                 loop_guard.observe(tool_name, args_repr)
                 inc_metric("loop_guard_observed")
 
+                _tool_t0 = _time.monotonic()
                 if tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
@@ -1044,16 +1046,16 @@ class AgentRunner:
                     }
                 )
 
-                # P3 transcript (mig 285): mirror of run_turn's tool event.
-                await emit_event(
+                # P3 transcript (mig 285) — 3c §3.2 起走 tool_events 的唯一发射点；
+                # 耗时只包工具本身（钩子与图片裁剪在此之外）。
+                await emit_tool_call(
                     recorder,
-                    "tool_call",
-                    {
-                        "tool": tool_name,
-                        "args": args,
-                        "result": result,
-                        "iteration": iteration,
-                    },
+                    tool=tool_name,
+                    args=args,
+                    result=result,
+                    iteration=iteration,
+                    duration_ms=int((_time.monotonic() - _tool_t0) * 1000),
+                    error_code=tool_error_code(result),
                 )
 
                 # ── PostToolUse chain (mirrors run_turn) ────────────────────
@@ -1272,10 +1274,16 @@ class AgentRunner:
             tool_call_trace.append(
                 {"name": name, "args": {}, "result": result, "iteration": iteration}
             )
-            await emit_event(
+            await emit_tool_call(
                 recorder,
-                "tool_call",
-                {"tool": name, "args": {}, "result": result, "iteration": iteration},
+                tool=name,
+                args={},
+                result=result,
+                iteration=iteration,
+                # 没执行过所以没有耗时；``skipped`` 结果自带 ``error`` 键，会被算进
+                # 工具错误——这是想要的：被腰斩的回合里那几个调用确实没成。
+                duration_ms=0,
+                error_code=tool_error_code(result),
             )
 
     @staticmethod
@@ -1986,6 +1994,7 @@ class AgentRunner:
                         args = pre_result.modified_args
 
                 # ── Tool dispatch ──────────────────────────────────────────
+                _tool_t0 = _time.monotonic()
                 # Phase L (L1): cache check — only for idempotent skills.
                 cache_key: Optional[str] = None
                 cached_result: Optional[dict] = None
@@ -2154,18 +2163,16 @@ class AgentRunner:
                     }
                 )
 
-                # P3 transcript (mig 285): one event per executed tool call
-                # (args + result in one payload — the Nice renderer shows it
-                # as a folded card). record_event truncates long values.
-                await emit_event(
+                # P3 transcript (mig 285) — 3c §3.2：与 stream_turn 同一发射点。
+                # record_event 仍会截断过长的 args/result。
+                await emit_tool_call(
                     recorder,
-                    "tool_call",
-                    {
-                        "tool": tool_name,
-                        "args": args,
-                        "result": result,
-                        "iteration": iteration,
-                    },
+                    tool=tool_name,
+                    args=args,
+                    result=result,
+                    iteration=iteration,
+                    duration_ms=int((_time.monotonic() - _tool_t0) * 1000),
+                    error_code=tool_error_code(result),
                 )
 
                 # Wave G (G3): observe for loop detection. Args

@@ -27,6 +27,10 @@ Views = dict[str, Any]
 Fold = Callable[[Views, dict[str, Any]], Views | None]
 
 _REGISTRY: dict[str, Fold] = {}
+# 计数道：与主 fold 并列，同一事件可以有多个。主 fold 负责「这个族的整值视图」，一
+# 族只许一个（``register`` 对重复 raise）；计数只是在同一批事件上加法，没有整值语
+# 义，所以允许多个并存且**不**替换主 fold。
+_COUNTERS: dict[str, list[Fold]] = {}
 
 VIEW_VERSION = 1
 
@@ -86,6 +90,16 @@ def empty_views() -> Views:
             # 第三个分量，不混进 own_cents——那是 LLM 每步的钱，来源不同。
             "media_cents": 0.0,
         },
+        # 3c §3.2：与 ``cost`` 并列的计数道。花费回答「花了多少钱」，这里回答「干了
+        # 多少活」——两者分母不同（花费是树总额、计数是自身量），合进一个字典必然
+        # 有人取错分母。``_finish`` 把这五个值落进 agent_runs 同名列。
+        "efficiency": {
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reason": None,
+        },
     }
 
 
@@ -132,19 +146,44 @@ def register(event_type: str) -> Callable[[Fold], Fold]:
     return deco
 
 
+def register_counter(event_type: str) -> Callable[[Fold], Fold]:
+    """注册一个计数道折叠。主 fold 之后运行，拿到同一个可变副本。"""
+
+    def deco(fn: Fold) -> Fold:
+        _COUNTERS.setdefault(event_type, []).append(fn)
+        return fn
+
+    return deco
+
+
 def registered_types() -> tuple[str, ...]:
-    return tuple(sorted(_REGISTRY))
+    return tuple(sorted(set(_REGISTRY) | set(_COUNTERS)))
 
 
 def apply(
     views: Views, event_type: str, payload: dict[str, Any], *, seq: int | None = None
 ) -> Views:
-    """Pure: ``views`` is never mutated. Unknown event → same object."""
+    """Pure: ``views`` is never mutated. Unknown event → same object.
+
+    主 fold 与计数道都跑：主 fold 说「没什么好说的」（返回 None）时计数道仍要计——
+    一次没超时的 ``tool_call`` 对 ``view.tools`` 无话可说，对工作量却是实打实的一
+    次。两道都没改动才返回原对象（dsh「同一引用 = 零下游工作」）。
+    """
     fold = _REGISTRY.get(event_type)
-    if fold is None:
+    counters = _COUNTERS.get(event_type) or ()
+    if fold is None and not counters:
         return views
-    nxt = fold(copy.deepcopy(views), payload or {})
-    if nxt is None:
+    nxt = copy.deepcopy(views)
+    changed = False
+    if fold is not None:
+        folded = fold(nxt, payload or {})
+        if folded is not None:
+            nxt, changed = folded, True
+    for counter in counters:
+        counted = counter(nxt, payload or {})
+        if counted is not None:
+            nxt, changed = counted, True
+    if not changed:
         return views
     if seq is not None:
         nxt["view"]["revision"] = seq
@@ -169,6 +208,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     compaction,
     context,
     deliverables,
+    efficiency,
     fork,
     inbox,
     question,
@@ -187,6 +227,7 @@ __all__ = [
     "empty_views",
     "recompute_spent",
     "register",
+    "register_counter",
     "registered_types",
     "replay",
 ]
