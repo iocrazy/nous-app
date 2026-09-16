@@ -6958,3 +6958,282 @@ for w in 3c-t19 3c-t20 3c-t21 3c-ledger; do
   git -C /Volumes/program/project-code/repos/nous-app worktree remove ".worktrees/$w"
 done
 ```
+
+---
+
+## 完成账（2026-09-16）
+
+18 个代码 Task 各一个 worktree（从 `origin/master` 建）+ 独立 PR + TDD + 突变记录 + opus 对抗评审；
+合并后逐条盯部署链（后端：`deploy-gpu` success + 容器内新符号 + `readyz`；迁移：`run-migration`
+success + `\dt` / information_schema 实证；前端：`version.json` 前 7 位 SHA）。
+Task 7 / 12 / 18 是三段的「合并顺序与部署验证」节，**无代码产出**，其部署证据分摊在各段
+最后一个 Task 的行里。收尾另有两个 PR：全分支终审的最终修复批（#2347）与补充票（#2346）。
+
+SDD 工作区 `.superpowers/sdd/2026-09-15-harness-p4-phase3c-search-efficiency/`：四份侦察报告 +
+共享接口契约 + 四段计划的 briefs / reports + 每轮评审 diff 包 + Task 22 三批真栈证据 +
+终审报告 `final-review-report.md`。
+
+### 一、每个 Task 的 PR / 合并 SHA / 评审轮次 / 部署验证
+
+| Task | PR | 合并 SHA | 评审轮次 | 部署验证 |
+|---|---|---|---|---|
+| 1 mig 472 四段 + ORM 镜像 + 真 PG 集成用例接门禁 | #2319 | `c8555e23` | 初审 + 修复轮 1 | `run-migration` success；`\dt` 见 `search_docs` / `output_citations`；生产核对 == 回填前基线预期（`search_docs` run 273 行 / output 35 行，`agent_runs.team_id` NULL 79→67，四条 FK 在，五列在）；`deploy-gpu` 35059442310 success；`readyz` status=ready / dbos=enabled |
+| 2（A1）小时表推自身花费 + `record_usage` 五个计数关键字 | #2325 | `a1204af8b` | 初审 + 修复轮 1 + 复审 | `deploy-gpu` success；容器内 `record_usage` 符号在；`readyz` ready |
+| 3（A2）`issue_totals` 加 root 过滤 | #2322 | `eaac5a38f` | 初审（spec ❌ 一条，改判口径）+ 修复轮 1 | `deploy-gpu` 35063762038 success；`readyz` ready |
+| 4（A3）积分真扣 + 急停开关 | #2337 | `3538a106f` | 初审 + 修复轮 1 + 复审 + 收尾 | `deploy-gpu` success，**完成于 2026-09-16T09:26:59Z**（= 存量报数的截止点）；生产 `AGENT_POINTS_CHARGE_ENABLED=True`；容器内 `team_of_run` 符号在（`app.services.ai.scope.scope_binding`）；`readyz` ready |
+| 5（A4）`InboxKind` 单一来源 + 收件箱逐行容错 | #2324 | `0b0f46b52` | 初审 + 修复轮 1 | `deploy-gpu` success；`readyz` ready；生产 `application_logs` 的 inbox `ValidationError`：部署后 2 分钟内 0 条（部署前 24 h 内 31 条） |
+| 6（A6）run 的 `team_id` / `project_id` 从议题兜底 | #2323 | `f97932a39` | 初审 + 修复轮 1 | `deploy-gpu` success；`readyz` `"status":"ready"` |
+| 8 `tool_call` 耗时/错误码 + efficiency 计数道 + run 行五列 | #2320 | `bcf591037` | 初审 + 修复轮 1 | `deploy-gpu` 35063620855 success；容器内 `tool_events` / `efficiency` 符号在；`readyz` ready / dbos enabled |
+| 9 `rollup.efficiency` + `charged_points` + 驾驶舱两格（含 mig 474 partial index） | #2326 | `30b3d388b` | 初审 + 修复轮 1 + 复审 + 修复轮 2 + 复审 2 | `run-migration` 474 success（生产 `idx_point_transactions_agent_run_consume` 已在）；`deploy-gpu` 35074857938 success，符号 `EMPTY_EFFICIENCY` 在，`readyz` ready；`deploy-pages` success，`version.json` `30b3d38` |
+| 10 `/usage/summary` 新列 + `/usage/efficiency` + `/runs/costs` | #2330 | `cf06382bd` | 初审（分两份报告）+ 修复轮 1 + 复审 + 收尾 | `deploy-gpu` success；符号 `MAX_RANGE_DAYS` 在；`readyz` ready；两个新端点无 token 返回 401（路由确已挂载） |
+| 11 用量页六 tile + turn_end 分布条 + 团队页两 tile | #2342 | `e139da343` | 初审 + 修复轮 1 + 复审 + 收尾 | `deploy-pages` success；`version.json` `"commitSha":"e139da3"` |
+| 13 `search_docs` 投影表与四个写方 | #2321 | `f18620b43` | 初审 + 修复轮 1 | `deploy-gpu` success；符号 `project_run_id_best_effort` 在；`readyz` `"status":"ready"` |
+| 14 `GET /api/v1/search` 统一检索端点 | #2329 | `053d551ec` | 初审 + 修复轮 1 + 复审 | `deploy-gpu` success；符号 `unified_search` 在（探针原写成 `search_all`，部署后手动补探）；`readyz` `"status":"ready"` |
+| 15 `GET /issues?q=` 与 Issues 页搜索改服务端 | #2336 | `32bf94b0b` | 初审 + 修复轮 1 + 复审 + 修复轮 2（控制方核 diff，不再派复审） | `deploy-gpu` success；`readyz` ready；`deploy-pages` success，`version.json` `32bf94b` |
+| 16 引用镜像表 + 血缘 `cited_in` + 引用归属放宽为「链可见」 | #2331 | `612e30a1e` | 初审 + 修复轮 1 + 复审（rebase 后 CI 11 项全绿，两个真库 step 实跑 success） | `deploy-gpu` success；符号 `record_output_citations` 在；`readyz` ready |
+| 17 前端 ⌘K 面 + @ 页签跨议题 + 引用卡被引显示 | #2340 | `3722c0ea8` | 初审 + 修复轮 1 + 复审 + 修复轮 2 + 复审 2 + 收尾 | `deploy-pages` success；`version.json` `"commitSha":"3722c0e"` |
+| 19 带工具调用的步也写 `assistant{partial:true}` | #2327 | `844a498c9` | 初审 + 修复轮 1 | `deploy-gpu` success；符号 `emit_partial_narration` 在；`readyz` `"status":"ready"` |
+| 20 narration 节点 + 动作动词 + `RunStatusLine` | #2333 | `80534e45e` | 初审（1 Critical）+ 修复轮 1 | `deploy-pages` success；`version.json` `"commitSha":"80534e4"` |
+| 21 `RunCostTail` 两处宿主 + done 帧带花费 + SSE 回合开始帧 `run_id` | #2345 | `f9eec9c40` | 初审 + 修复轮 1 + 复审 + 收尾 | `deploy-gpu` success，符号 `run_cost_for_frame` 在，`readyz` ready；`deploy-pages` success，`version.json` `f9eec9c` |
+| **终审修复批**（I1–I5 + 六项零风险顺手项） | #2347 | `f9c3f06fb` | 全分支终审（0 Critical / 5 Important）+ scoped 复审 + 收尾 | `deploy-gpu` success；符号 `AGENT_RUN_REFERENCE_TYPE` 在；`deploy-pages` success，`version.json` `f9c3f06` |
+| **补充票**（`search_docs` 存量正文回填脚本） | #2346 | `c2ff98449` | 初审 + 修复轮 1 + 复审 + 收尾 | `deploy-gpu` 35106713857 success；生产回填：`--dry-run` scanned=35 / filled=35，实跑同数（`unavailable=0` / `raced=0` / `failed=0` / `orphans=0`，2026-09-16 14:13 UTC）；容器内 `backfill_search_docs_bodies` 符号在 |
+| 7 / 12 / 18 | **无代码** | — | — | 计划里三段的「合并顺序与部署验证」节，不产出 PR；其验证动作已落在上面各段最后一个 Task 的部署证据里 |
+
+### 二、真栈验收（spec §9 十二条 — 证据全文见 `task-22-report.md`）
+
+目标栈 API `https://cn.nous.ink:88`、前端 `https://app.nous.ink`、DB `nous-db`；
+固定 fixture：team `331438215859255`、project `337650825568029`、议题 MH-95 `348431024148383`。
+第一批（①–⑨、⑪）在 `3722c0ea8` 上跑，第二批（⑩、⑫）在 `f9eec9c40` 上跑。
+
+| # | 判据 | 结论 | 证据 |
+|---|---|---|---|
+| ① | 第 201+ 条议题也能搜到 | **PASS**（深度口径按真实数据修正） | 全库最大团队仅 45 条议题，`OFFSET 240` 取不到行，「第 201 条」在当前生产数据上不可构造；改判「列表最深处的议题能否搜到」并两端都验：`/api/v1/search?kinds=issue` 命中该条深处议题的 `issue_key`，Issues 页搜索框输同一词也出该行 |
+| ② | 分镜正文里的词能搜到并深链到 step | **PASS** | 取 `search_docs` 里**不在 title 中**的词，`/search?kinds=output&project_id=337650825568029` 命中行 `id` 含 `337650953731886`；`deep_link` 只到议题页（`?step=` 按裁定不编造，`search_docs` 无 step 列） |
+| ③ | agent 结论摘要里的词能搜到 | **PASS** | `/search?kinds=run` 命中；`meta` = `status` / `model` / `error_code`（契约原写 `cost_cents` / `agent_name`，Task 14 裁定按实况降级，见第四节） |
+| ④ | 跨团队零命中（不是 404） | **PASS** | 前提先证伪：`TOK2` 的 `/api/v1/teams` 不含 `331438215859255`（`contains_fixture=False`）。该 token 请求返回 HTTP `200` + `{"i":0,"r":0,"o":0}`；**正对照**同一 URL 换 `TOK` 至少一组非空 |
+| ⑤ | 跨议题 @ 引用 | **PASS** | MH-95 回复框 @ 页签命中 MH-94 的分镜产出（行上带来源 chip）→ 发帖 201；`output_citations` 末行 `issue_id=348431024148383`；`/outputs/script_shot/<ref>` 的 `cited_count` 0→1、`cited_in[]` 含 `issue_key="MH-95"` |
+| ⑥ | 小时表与 run 对账 | **PASS** | 一次派子 agent 的回合（6 条 run，链深 4 层）：`sum(ai_usage_hourly.cost_cents)` 近 2 h = `0.7744` == `sum(agent_runs.cost_cents)` 全部 run = `0.7744`（root-only 为 `0.3348`，仅对照）；`/usage/issues/348431024148383` 的 `cost_cents=2.6145` == 驾驶舱 `Budget ¢2.6 / ∞` |
+| ⑦ | 积分真扣 + 急停 | **PASS（真扣）/ 急停 UNVERIFIED** | 真扣：回合前 `reference_type='agent_run'` 行数 = 0（最强正对照），回合后 6 条 consume 行（root + 5 子 run 各一条），`reference_id` == 各自 run id，每条 `ceil(自身花费)` = 1，`team_quotas.points_balance` 600→594、`balance_after` 单调。急停：按裁定**未在生产验**——避免改 `backend.env` + `up.sh` 重启打断生产 run；已由单测与本地 env 覆盖验证 |
+| ⑧ | 收件箱不再 500 | **PASS** | `GET /api/v1/inbox` HTTP `200`，顶层键 `notifications` / `total` / `unread_count`（不是 `items`），`kind` 含 `agent_question` 与 `generation_result`；本账号本来就有该类行，无需触发 AskUser |
+| ⑨ | 叙述与动作交错 | **PASS** | transcript 里有 `assistant{partial:true}` 行且排在 `tool_call` 之前，页面 DOM 顺序 == `seq` 顺序；动作行读作 `Edited shot …` 而非工具名；断言一律 `toBeVisible()` |
+| ⑩ | 消耗行 + 只发一次 `/runs/costs` | **PASS**（⑩e 记「已知」，非 FAIL） | ⑩a 议题侧尾栏 `◇ 1.00 · doubao-…`、浮层含 `¢` 与积分；⑩b 带历史的会话整个加载期间 `/ai-library/runs/costs` 命中 **1** 次；⑩c 流式期间 `run-status-line` 读 `Step 1 · 0s`；⑩d 新回合尾栏数值与库内 run 行逐字段吻合；⑩e 回合结束时多 1 次请求（共 2 次），且是**一次批量带两个 id**，不是每 run 一次（记票 K39） |
+| ⑪ | run 行五列 + `tool_call` 两字段 + 读面 | **PASS** | root run 五列全非空（`steps=4 tool_calls=3 tool_errors=1 deliverables=1 turn_end_reason=completed`）；`tool_call` 三行 `duration_ms` 全非空，两次成功调用 `error_code` 为 null；驾驶舱 `cockpit-tool-errors` / `cockpit-cost-per-output` / `cockpit-budget` / `cockpit-runs` 四格可见；`/usage` 页 `tile-cost-per-output` `¢14.43`、`tile-tool-errors` `40.0%` 与 `turn-end-completed` 分布条可见 |
+| ⑫ | 常规走查不回归 | **PASS** | `npm run e2e:prod` → 3 passed / 1 skipped（skip 的是 README 写明默认跳过的 `get-token`）；⑫ 在删掉两个临时 spec **之后**才跑，覆盖的就是仓库里真实的那套 |
+
+**第三批（终审修复批 #2347 上线后的复核，A–D）** —— 在 `f9c3f06fb` 上跑一个会派子 agent 的回合
+（root `350206443694958` + 2 条后代，全部 `completed`）：
+
+| # | 判据 | 结论 | 证据 |
+|---|---|---|---|
+| A | 消耗行取整棵 run 树的合计 | **PASS** | 树查询得 3 条 consume 行、`SUM=3`；尾栏读 `◇ 3.00 · doubao-…`、hover `¢0.32` + `Charged ◇ 3.00 (incl. sub-agents)`；团队余额 591→588。正对照：同线程三棵不同规模的树分别读 `◇ 6.00` / `◇ 3.00` / `◇ 1.00`，无积分行时退回 `¢0.14 · Not charged (completed)` |
+| B1 | workforce 委派子 run 带 `issue_id` | **PASS** | 三条 run 的 `issue_id` 全是 `348431024148383`；第一批同形态回合的 5 条子 run `issue_id` **全为空**，对照明确 |
+| B2 | 驾驶舱 Tools 格含子 run | **PASS** | 驾驶舱读 `Tool errors 3 errors 8 calls`；库内该议题全部 run `tool_calls=8`、仅 root `=7`，`8` 只可能来自含子 run 的口径 |
+| B3 | `/usage/issues` 含子 run | **FAIL** | 端点返回 `cost_cents=3.0837 / run_count=18`，逐字段等于库内 **root-only**；全部 run 是 `20 条 / 3.1952¢`，差额 `2 条 / 0.1115¢` 恰为本回合那两条 workforce 后代。**机理**：`issue_totals` 的 root FILTER 依赖「root 的 `cost_cents` 是树总额」，而 `_finish` 只折 fold store 里 `by_child` 已有的条目——进程内 subagent 已折，**workforce 委派子 run 是独立 workflow、父行定稿时不在那份 fold 里**。小时表实证：13:00 桶三行分别等于各 run 自己的花费，合计 `0.4335` ≠ root 的 `0.3220`。净效果是同一回合 UI 上「钱按 root 报（`¢0.32`）、分按全树报（`◇ 3.00`）」。已裁定不在 3c 硬修，记 **3d 第 0 票（P1）**，见第三节 (d) |
+| C | 议题侧 hover 不再显示 0 tokens | **PASS** | 线程上 18 个 `run-cost-tail` 全部取 `title` 检查，`anyTitleHasPrompt = false`；对照第二批同一位置当时是三行含 `0 prompt · 0 completion tokens`，现为两行 |
+| D | `/usage/efficiency` 分组 | **无此组，逻辑由单测覆盖** | `group_by=model` 只有 1 组且 `cost_cents>0`，不存在 `cost_cents==0 && deliverables>0` 的组。正对照 `group_by=agent` 拿 4 组：分母为 0 时 `cost_per_deliverable` 给 `null`（不是 0 也不是 ∞），分母非 0 时正常相除；回合后 `deliverables 2 / cost 14.8055 → 7.4027`，除法随数据更新 |
+
+### 三、口径披露（本期改变了钱怎么算，这些必须先说出来）
+
+终审报告的「金额口径总表」把同一棵 run 树在六个面上各显示什么列全了。**能合法不一致的
+格子是设计不是缺陷**，但下面八条是「用户读到的数字会变、或者数字没说出自己的口径」，
+一条都不能只留在 SDD 工作区里。
+
+**(a) 团队月度「已花」在 A1 上线那一刻变小了，这不是数据丢失。**
+预算门禁读的 `get_team_month_spend_cents` 走小时表。A1（Task 2 / #2325）之前，子 agent 的
+花费既滚进父 run 又各自进小时表，是**双计**；A1 之后小时表改成「每个终态 run 一行、只记
+自身花费」，于是同一段历史的合计变小。没有任何 UI 或发布说明提到这次口径变更——这里就是
+那句说明。
+
+**(b) 两处 UI 与用户验过的 spec §6 画板有差，差在这里：**
+- **⌘K 面**：画板稿一的每行带 `¢` / `model` / `status` 与 `Cited ×N`，实装没有——行上只有
+  标题与来源，三组结果平铺（记票 K40）。
+- **消耗行**：终审修复批之后它显示的是**整棵 run 树的积分合计**（`◇ 3.00 (incl. sub-agents)`），
+  不是画板上那个 root 自己的数。这是有意改的（原先只算 root 是 I2），但读数与画板不一致。
+- 另有一处契约降级：`/search` 的 run `meta` 给 `status` / `model` / `error_code`，议题 `meta`
+  给 `assignee_user_id` / `assignee_agent_id` 而**不是** `assignee_name` / `cost_cents`——后端没有
+  显示名来源，Task 14 裁定按实况降级，前端按 id 读。
+
+**(c) 效率账的 `¢/output` 分子分母来自不同的 run 集合。**
+分母（`deliverables` 等计数）是「带这个 `issue_id` 的全部 run 的自身计数」，分子（`cost_cents`）
+是挂在 root 上的树总额。终审修复批（I1）让 workforce 子 run 戳上 `issue_id` 之后分母补全了，
+但在那之前委派出去的活不在分母里，**单价偏高**。存量 run 不回填，所以历史区间的 `¢/output`
+仍偏高。
+
+**(d) ⚠️ B3：workforce 委派子 run 的花费不进 root 的树总额。**
+进程内 subagent 的花费在 `_finish` 时已折进父行，**workforce 委派出去的子 run 是独立
+workflow、父行定稿时不在那份 fold 里，所以没折**。后果：凡是按「root = 树总额」解释的读面
+（`/usage/issues/{id}`、驾驶舱 Budget 格、效率账的分子）在有 workforce 委派时**少计那部分钱**；
+**积分是全的**（每个 run 各自扣，A 已实证全树 3 条流水）。
+真栈实例：某议题 `/usage/issues` 报 `18 run / ¢3.0837`，库内实际 `20 run / ¢3.1952`，
+少的 `¢0.1115` 正是两条 workforce 后代。同一回合 UI 上读作「`¢0.32` 配 `◇ 3.00`」。
+**已裁定不在 3c 收尾硬修**——正解要结构改动（`agent_runs` 加 `own_cost_cents` 由 `_finish` 写
+自身花费、root-only 读面改为按树求和 own；或 workforce 子 run 定稿时原子累加到 root 且 root
+定稿不覆盖已累加值），牵动 A2 / Task 3、Task 9、Task 10 三处读面加回填，值一份小 spec。
+记为 **3d 第 0 票（P1）**。
+
+**(e) ⚠️ ceil 最低消费按子 run 个数叠加，待用户拍板。**
+扣分是「每个 run 各自 `ceil(自身花费)`」，每个付费 run 至少 1 分。真栈实测：一次三层委派回合
+（root + 5 子 run）自身花费合计 **≈¢0.92**，扣了 **7 分**——约 10 倍的最低消费放大。
+两个选项：**保持现状**（逐 run ceil，简单、每个 run 都有下限），或**改为只在 root 按树总额
+ceil 一次**（子 run 不扣；晚于 root 结束的后台子 run 单独扣）。**默认保持现状直到用户回话。**
+⚠️ `run_recorder.py` 调用处的注释只说「按自身花费扣，不按树总额」，没提每个 run 各有 1 分
+下限——只读那一处的人会以为总额 = `ceil(总花费)`。
+
+**(f) A3 之前「有记录未扣分」的存量：只报数，不追扣。**
+按 A3 上线时刻 `2026-09-16T09:26:59Z`（Task 4 的 `deploy-gpu` 成功时间）切：
+
+```sql
+SELECT count(*) AS logged_never_charged, coalesce(sum(cost_points),0) AS points
+FROM public.ai_usage_logs
+WHERE cost_points > 0 AND created_at < '2026-09-16T09:26:59Z';
+→ 133 行 / 59.67 分
+```
+
+交叉确认成立：同一时刻 `SELECT count(*) FROM point_transactions WHERE reference_type='agent_run'`
+= **0**，证明这 133 行确实一分未扣。`ai_usage_logs` 没有 `run_id` 列，无法按 run 配对，所以
+口径就是「截止点之前全部 `cost_points>0` 的行」。**只向前，不追扣。**
+
+**(g) BYOK 风险面 3 个 run，急停开关默认是开的。**
+没有 run 级 BYOK 标记，`run_recorder` 里 `byo_key=False` 恒定，所以**用户自带 key 的图片 run
+也会按平台价扣积分**（记票 K16）。生产风险面实测 3 条：`ark` 的 `doubao-seedream-5-0-pro`
+2 run、`codex` 的 `gpt-6-astra` 1 run（两者的 `per_call_cents` 都已配）。
+急停 `AGENT_POINTS_CHARGE_ENABLED` **默认保持开启**（用户裁定「修好并真扣」，且这 3 个历史 run
+都在用户自己团队）。**用户可以选择关掉急停开关，或摘掉这两个 BYOK 图片模型的 `per_call_cents`。**
+多扣的分可从 `point_transactions` 对账退回。
+
+**(h) 补充票超出 spec §7「明确不做」，是有意扩范围。**
+spec §7 把「存量产出正文回填」列在明确不做里；Task 22 实测 `search_docs` 的 35 条 output 行
+`body` 全空（mig 472 的回填段只填了 run 行的 `output_summary`，产出段漏了 `body` 那一列），
+表现为「老分镜按正文搜不到、改过一次之后才能搜到」——检索这一交付的主用例在存量数据上是坏的，
+所以扩了范围。
+两点必须说清：① 它**是脚本不是迁移**（35 条里 32 条要走 `diff.rebuild_content()` 逐条重放
+账本，SQL 表达不出来；为剩下 3 条另写一份 SQL 会造出两侧各算一遍、写进同一列、而且没有任何
+东西会说出分叉的缝）；② **需要人手在容器里跑**，先 `--dry-run` 再实跑，不随部署自动发生。
+生产回填结果：2026-09-16 14:13 UTC 在容器内先 `--dry-run` 后实跑，两次同数：
+`scanned=35 filled=35 unavailable=0 raced=0 failed=0`，孤儿普查 `orphans=0`。
+验收 SQL：`search_docs` 的 output 行**空正文 0 / 37**（比回填时的 35 多出的 1 条是验收期间
+新登记的产出，由实时写方带正文，不是漏网）。
+⚠️ **run 行空正文 87 / 285 不变，这是对的**：mig 472 的 run 段本来就写了 `output_summary`，
+那 87 条为空是因为 `output_summary` 本身是 NULL——「这次运行没有摘要」不是「回填漏了」，
+无可重建的正文，按设计不在候选集里。脚本仍带 run 那条臂，它补的是**顺序**不是历史：摘要若在
+472 之后被补上（回溯修数据、以后新加的摘要生成），这条臂就是它进检索的路。
+
+### 四、裁定（全文在 SDD ledger，每条带「错了代价」）
+
+| 裁定 | 理由 | 错了代价 |
+|---|---|---|
+| Task 8 先合，Task 2 rebase 时把内联读法换成 `_efficiency_counts()` | 两 Task 改同一函数体，键名相同、语义不变 | 两处并存的读法，一处漏零 |
+| A6 兜底只改 `ai_library_chat_service.py:1440`，另一侧加回归 fixture | `conversation_agent_turn.py` 那侧是死分支 | 某条未知派发链 `team_id` 仍 NULL，A6 回填 SQL 兜底 |
+| BYOK 不跳过扣分：保留 `byo_key=False` + 急停开关 + 完成账对照，写成 Stated Limitation | 没有 run 级 BYOK 标记 | BYOK 图片 run 按平台价扣分（用户可从 `point_transactions` 对账退回） |
+| 存量未扣分按 A3 上线时刻切，全部 `cost_points>0` 行即存量 | `ai_usage_logs` 无 `run_id`，无法按 run 配对 | 只是报数口径 |
+| 阶段性叙述做两处 diff + 「adapter 无 `stream` 属性」用例 | 缓冲回退已委托 `run_turn`，那是生产唯一路径 | 缓冲分支漏事件，用例会红 |
+| 深链只到议题页，不编造 `?step=` | `search_docs` 无 step 列 | 少一个锚点（记票 K35） |
+| Task 1：给两张新表四条外键加级联（run CASCADE / issue SET NULL） | 投影随真相消失是 `canvas_asset_refs` 的既有语义；spec 说投影可重建但没说可残留 | 删 run 时级联多删两张派生表的行，都可重建 |
+| Task 1：C1 门禁不覆盖 `using` / `opclass` 的缺口本 PR 只在测试里补断言，门禁本身记票 | 改门禁是另一件事 | 门禁上仍看不出 opclass 漂移（记票 K17） |
+| 多次并行派发（13∥8、3∥5∥6、9∥10∥19、20、14∥16） | 独立 worktree / PR，文件集互不相交 | 一次 rebase 冲突手解 |
+| Task 3：`cost_cents` / `run_count` 按 root-only，token 三列按全部 run | 值相等一致性在桩 session 层不可实现，交 Task 22 ⑥ 真栈兜 | token 口径若将来也上滚，需再对齐一次 |
+| Task 8：`duration_ms` 在派发结束处取；主 fold 返回 None 时回滚快照再跑计数道 | 真测工具执行时间；计数道不该救回主 fold 已弃的改动 | 每事件多一次深拷贝（可忽略） |
+| Task 13：补接两处终态写方 + 分支测试 + 真 PG 集成用例接 `schema-drift` | `_finish` 不是唯一终态写方 | 两处写方多一次 best-effort 写、集成多一个 step |
+| Task 13：章节正文与 gateway `lighting` 不在本 Task 扩范围，记票 | 章节 create 路径行未必有 content，接线非一行 | 章节只能按标题搜（记票 K23 / K24） |
+| Task 5：`NOTIFICATION_KINDS` 挪到 `app/schemas/inbox_kinds.py` 作单一来源 | schemas 反向 import services 会拉起 sqlalchemy / settings | 一次三行 import 的搬家 |
+| Task 5：整表皆坏时按请求聚合 skipped 计数、一条 ERROR | 每行一条 ERROR 会打穿日志 | 单行定位粒度变粗 |
+| Task 2：终态 run **无条件**写小时行（cost / token 可为 0），`event_count = int(tokens>0)` | 零花费失败 run 不进表会让 `failed_runs` 偏低 | 小时表行数略增（每 run 一行本就是设计） |
+| Task 9：本 PR 带 mig 474 只加 partial index，扣分写方由 Task 4 落地 | 索引缺席只是慢不是坏，迁移与代码顺序无所谓 | 一次额外迁移号 |
+| Task 9：`efficiency` 缺席守卫必须留（类型可选 + `?? EMPTY_EFFICIENCY` 兼容窗口） | 前端链（~2 min）先于后端链（~10 min）上线，两链无顺序保证 | 类型宽一档 |
+| Task 10：`charged_points_for_references` 保留 raise 版单一定义，Task 9 先合、Task 10 再 rebase 删重复 | 同一方法两份定义且失败语义相反 | Task 10 多等 Task 9 一轮 |
+| Task 14：每个 kind 各发一次 search（不共用一次 overfetch） | 高分组会饿死另一组 | 多一次查询 |
+| Task 14：契约 `meta.assignee_name` → `assignee_user_id` / `assignee_agent_id` | 后端没有显示名来源 | Task 17 少两个显示字段 |
+| Task 15：搜索态下新建改为触发一次重拉（不前插） | 前插会绕过服务端 `q` | 搜索态下新建后多一次请求 |
+| Task 16：引用归属逐版判 `issue_key` + 可见性，判不过退链级 | `newest_with_a_run(chain)` 会把跨议题链标错来源 | 多一条集成 step |
+| Task 17：⌘K 的主人定为画布，在 capture 阶段认领 | 画布是既有功能，双主人必须有一个赢 | 结果行获焦时画布仍抢 ⌘K（记票） |
+| Task 20：状态行只显示 step；`run_id` 实时接线归 Task 21 | `openTool` 判据在 Task 8 之后恒不命中（`tool_call` 执行后才写）；`Running <tool>` 需 `tool_start` 事件 | 状态行少一个词（记票 K37） |
+| Task 4：子 run 的 `team_id` 走旁路 helper `team_of_run` 真透传 | A6 不变量 + partial 索引让 NULL run 在团队效率账里不存在，正是 3c 交付的读面 | PR 多两文件，委派计费打开（自身口径，正确模型） |
+| Task 4：`ensure_team_quota` 独立 try + `create_team_quota_if_absent`（DO NOTHING + 回读） | 并发开通撞唯一键会丢一次扣分；回读修掉「输家 `{}` 覆盖赢家余额」的静默清零 | 多一次回读 |
+| Task 4：ceil 最低消费按子 run 个数叠加，接受并写进 PR body + 完成账 | 积分是整数，每个付费 run 至少 1 分 | 多子 run 的回合多扣几分（见 (e)） |
+| Task 22 ⑦：急停不在生产改 `backend.env` / `up.sh` 重启 | 会打断正在跑的生产 run | 急停少一次真栈证据（单测 + 本地 env 已覆盖） |
+| 注释一词的改动不值一轮复审（Task 14 / 16 的 schema-drift 计数注释） | 控制方 grep 核实即可 | 一处注释少一双眼 |
+| 终审：最终修复批一次派发 = I1–I5 + 六项零风险顺手项，且 **I2 做全**（不是只加说明） | 五条都是「用户读到的数字或文字与真相不符」，每条 1–10 行 | 一批多约 40 行 |
+| 终审 scoped：`heartbeat_lost` 取代 `interrupted` 写进 `turn_end_reason` | 列更具体，transcript 事件 detail 里本来就是同一个词；分布条需要「因为心跳没了」这一层 | `INTERRUPTED` 对该列再无写方，`interrupted` 段对新 run 归零（存量行仍在） |
+| B3 不在 3c 收尾硬修，记 3d 第 0 票（P1） | 正解要结构改动 + 三处读面 + 回填，值一份小 spec | 委派回合的议题账 / 效率账在 3d 前少计 workforce 子 run 的钱（分是全的） |
+| 补充票选 Python 脚本而非 SQL 迁移 475 | 35 条里 32 条要重放账本，SQL 表达不出 `rebuild_content()` | 回填不随部署自动发生，需人手跑 |
+### 五、本轮记的票
+
+以终审报告的「记票合并表」41 条为底（ledger 约 50 条散票去重归并），加终审修复批与第三批
+验收之后新发现的 10 条，共 **51 条**。归属：**已解决** = 本期后续 PR 吃掉；**3d** = 下一期顺手；
+**票** = 独立开票；**用户** = 需要产品决策。
+
+| # | 内容 | 位置 | 级别 | 归属 | 状态 |
+|---|---|---|---|---|---|
+| K1 | workforce run 不戳 `issue_id`，效率账与议题账漏计委派 | `workforce/agent_worker.py:291` | Important | — | **已解决（#2347）**，真栈 B1 PASS |
+| K2 | 消耗行只算 root 的 `charged_points` | `issue_rollup.py:241` / `ai_library_router.py:2406` | Important | — | **已解决（#2347）**，真栈 A PASS |
+| K3 | 议题侧 hover 恒说 `0 prompt · 0 completion` | `mergeRunCosts.ts:30-36` | Important | — | **已解决（#2347）**，真栈 C PASS |
+| K4 | 崩溃类终态不进 `turn_end_reason` / 小时表 | `liveness_scanner` / `liveness/reconcile.py:57` / `mark_heartbeat_lost_ids` | Important | — | **已解决（#2347）**，两半都做了 |
+| K5 | 分组效率表 `¢0.00 / output`（cost 带 root FILTER 而计数不带） | `agent_runs_repository.py:1074` + `ai_library_router.py:3100` | Important | — | **已解决（#2347）**，改 null + docstring |
+| K6 | `reference_type="agent_run"` 五处字面量无常量 | token_billing / issue_rollup / issue_chat_stream / ai_library_router / models.billing | Minor | — | **已解决（#2347）** `AGENT_RUN_REFERENCE_TYPE` |
+| K7 | `reconcile_run` 扣费未被 rowcount 幂等守卫罩住 | `run_recorder.py:906-1005` | Minor（钱） | — | **已解决（#2347）** |
+| K8 | `reconcile_stranded_runs` 未接投影 | `services/liveness/reconcile.py:57-71` | Minor | — | **已解决（#2347）**，与 K4 同一处改动 |
+| K9 | CLAUDE.md「LIKE 无默认转义符」说法错，已复制到两处代码注释 | `CLAUDE.md:197` / `like_escape.py:12-15` / `issue_repository.py:308-311` | Minor | — | **已解决（#2347）**，三处同改 |
+| K10 | CostAuditor 摘除后的失真注释 | `hooks_protocol.py:4,15` / `hooks_bridge.py:4` / `agent_runner.py:1085` | Minor | — | **已解决（#2347）** |
+| K11 | `schema-drift.yml` 的 step 数词靠注释管，已错四次 | `.github/workflows/schema-drift.yml:198-204` | Minor | — | **已解决（#2347）**，加了 grep 门禁 |
+| K12 | `schema-drift.yml` `push.paths` 未跟着扩 | 同上 :211-216 | Minor | 票 | 部分（#2346 给自己的新 step 补了两条 paths，既有缺口仍在） |
+| K13 | 存量 35 条 output 行 `body` 为空 | mig 472 回填段 | Minor | — | **已解决（#2346）**。⚠️ 超出 spec §7「明确不做」，是有意扩范围，见第三节 (h) |
+| K14 | ceil 逐子 run 叠加（真栈 ≈¢0.92 → 7 分） | `token_billing.py:362` | 产品决策 | **用户** | 已上报，默认保持现状（见 (e)） |
+| K15 | 急停 `AGENT_POINTS_CHARGE_ENABLED` 真栈未验 | — | — | **用户** | 裁定接受（避免重启生产），单测 + 本地 env 已覆盖 |
+| K16 | BYOK run 按平台价扣分（`byo_key=False` 恒定） | `run_recorder.py:1007-1012` | Stated Limitation | 票（加 run 级 BYOK 标记） | 否，有急停兜底；风险面 3 run，见 (g) |
+| K17 | C1 门禁不比 `using` / `opclass` | `tests/db/test_orm_indexes_integration.py` | Minor | 票 | 否 |
+| K18 | C1 门禁不比 `ondelete`；`pg_constraint` 守卫只按 `conname` | 同上 | Minor | 票 | 否 |
+| K19 | `efficiency` 视图未进 `metadata_json` 镜像 | `run_recorder._mirror` | Minor | 票 | 否（不影响落列，运行中读不到而已） |
+| K20 | `interrupted_turn` 注释「可自愈」不实 | `interrupted_turn.py` | Minor | 3d | 否 |
+| K21 | Skill 分支 `tool_cache.put` 留在 duration 窗口内 | `agent_runner.py` | Minor | 3d | 否 |
+| K22 | 有计数道的四类事件 `apply` 双 deepcopy | `run_projection.py:180-186` | Minor（性能） | 票 | 否 |
+| K23 | `script_chapter` 登记未接正文 → 章节只能按标题搜 | `script_service.py:190` | Minor | 3d | 否（回填脚本对该 kind 记 `unavailable`） |
+| K24 | gateway `_shot_dict` 缺 `lighting` → 分镜正文少一列 | `scoped_script_gateway.py` | Minor | 3d | 否 |
+| K25 | 心跳清扫 N+1；`agent_runs_repository:955` import 在 try 外；`_run_title` strip 与 SQL `LEFT` 分叉 | Task 13 三个 minor | Minor | 票 | 否 |
+| K26 | `_hourly_upsert_stmt` 的 `set_` 子句全仓零真库覆盖 | `ai_usage.py` | Minor（假绿） | 票 | 否 |
+| K27 | `event_count = int(tokens>0)` 让零 token 出图 run 在 Calls 列显示 0；`run_count` 尚无 UI 出口 | `ai_usage.py:149` / UsagePage | Minor | 3d | 否（#2347 之后崩溃类 run 的 Calls 与 run 数差得更明显） |
+| K28 | `charged_points_for_references` 无 team 维度（靠调用方保证） | `points_repository.py:814` | Minor | 票 | 否 |
+| K29 | `agent_runs.project_id` 无索引（project scope 效率查询全扫） | — | Minor（性能） | 票（下一个 mig） | 否 |
+| K30 | `parse_window_dt` 放宽到 `Any`；`get_project_by_id` 吞错成 404 | `utils/time_window.py` / projects repo | Minor | 票 | 否 |
+| K31 | `assert route.response_model is not None` 是假绿（FastAPI 从返回注解推），需扫其他 router | 全仓 | Minor（测试质量） | 票 | 否 |
+| K32 | `/runs/costs` 50 个 id 的 query string 长度 | `ai_library_router.py:2370` | Minor | 票 | 否 |
+| K33 | `q` 超长走 422 非 typed 400；`issue_id` 过滤对议题组不生效（router docstring 未写明） | `search_router.py:587` | Minor | 3d | 否 |
+| K34 | 分 kind 后两次串行 `await` 可 `gather` | `services/search/service.py:212` | Minor（性能） | 3d | 否 |
+| K35 | 深链没有 `?step=`（`search_docs` 无 step 列） | 裁定 | Minor | 票（加列或不做） | 否，有裁定 |
+| K36 | `toolActivity.ts:162` 的 ok 判定仍是旧形（协作时间线把 denied 读成成功） | `toolActivity.ts` | Minor | **票（建议提前）** | 否——`foldEvents` 已修，这是同一缺陷的第二份拷贝 |
+| K37 | `error_code` 未进 detail；被跳过的调用渲成 0ms；`Running <tool>` 需 `tool_start` 事件 | Task 20 三条 | Minor | 3d | 否 |
+| K38 | `liveRunCost` / `liveRunId` 永不清除；`status` 缺省 `completed` | `mergeRunCosts.ts` / `AIChatPanel.tsx:297` | Minor | 3d | 否 |
+| K39 | `getRunCosts` 并发无上限；回合结束后整屏重取一次（Task 22 ⑩e 实测） | `aiLibraryService.ts:749` / `AIChatPanel.tsx:300` | Minor | 3d | 否 |
+| K40 | ⌘K 行缺 spec §6 稿一的 `¢` / `model` / `status` 与 `Cited ×N` | `CommandPalette.tsx:433` | Minor（与用户验过的画板不符） | 票 | 否，见 (b) |
+| K41 | `add_points` 非原子读-改-写；`cost_points` 小数 vs `amount` 整数系统性差；两条按变量名钉的既有守卫 | 既有 | Minor | 票 | 否（既有，本期未加剧） |
+| K42 | **B3：workforce 委派子 run 的花费不进 root 树总额**，`/usage/issues`、驾驶舱 Budget、效率账分子在有委派时少计 | `run_recorder._finish` 折 fold store `by_child` / `usage_repository.issue_totals` | **Important** | **3d 第 0 票（P1）** | 否，见 (d)。真栈实例 `¢0.1115` / `¢3.1952` |
+| K43 | 消耗行 hover 的 `(incl. sub-agents)` 文案无条件，单 run 也这么说（NF1） | `RunCostTail` 文案 | Minor | 3d | 否 |
+| K44 | 崩溃词与 `turn_end` 分类器词表交集为空这件事没有断言钉住（NF3） | `tests/runner/test_turn_end_reasons.py` 一带 | Minor（测试质量） | 票 | 否 |
+| K45 | `_finish` 的 rowcount 幂等守卫不罩 `project_run_best_effort` 投影（NF4）——CAS 没抢到时再投一次会覆盖清扫器刚写的真终态 | `run_recorder.py` | Minor | 票 | 否（`liveness_scanner._mark_dead` 那边已有这道守卫） |
+| K46 | `run_ids_in_trees` 问一个中间节点只回它自己（不递归） | `agent_runs_repository.run_ids_in_trees` | Minor | 3d | 否。现状正确（两个宿主问的都是 root），将来要给子 run 单独画消耗行得换递归 CTE |
+| K47 | 树合计多一次 RTT（先取树、再取流水） | `charged_points_for_run_trees` | Minor（性能） | 3d | 否，与 K39 同一个被整屏重取的端点 |
+| K48 | `_attach_to_parent_run` 失败被吞 → `parent_run_id` / `root_run_id` 双 NULL 的子 run 被所有 root-only 读面当成 root | `run_recorder` | Minor | 票 | 否 |
+| K49 | `test_revert_output_integration.py` 的 `fx` 夹具 `finally` 不清 `search_docs`，本地复用库累积孤儿投影行（`run_id` NULL，外键 CASCADE 带不走） | `tests/db/test_revert_output_integration.py` | Minor（测试基建） | 票 | 否。CI 每次新建库所以看不出来，也不会假红；是补充票的孤儿普查第一次让它们现形 |
+| K50 | `agent_run_events` / `provider_monthly_spend` 停写后的 DROP 迁移 | 两张表 | Minor | 票（等一个发布周期） | 否 |
+| K51 | `turn` 仍硬编码 1 | 坐标写入处 | Minor | 票 | 否——改它牵动 3a 的坐标契约，本期**明确不做** |
+
+**已被后续 PR 吃掉、不再需要开票的**：`point_transactions` 缺 partial index（Task 9 带 mig 474）；
+`InboxKind` 四处口径（Task 5 的 `schemas/inbox_kinds.py` 单一来源）；`_finish` 不是唯一终态写方的
+**投影**那一半（Task 13 修复轮接了两处）；`efficiency_for_issue` 的 `.filter()` 挂错位置导致永远
+返回 `{}`（Task 9 实施期自查修掉，单测当时全绿）。
+
+### 六、文档更正（终审提出，已随 #2347 落地或记票）
+
+- **D1** — CLAUDE.md「Postgres 的 LIKE 没有默认转义符」**是错的**。反斜杠本来就是
+  `LIKE` / `ILIKE` 的默认转义符，Python 侧 `escape_like` 本身就有效；SQL 侧显式
+  `ESCAPE '\'` 是**把默认钉死的声明**，不是让转义生效的机制。同一交付里
+  `search_docs_repository.py` 写对了、`like_escape.py` 与 `issue_repository.py` 沿用了错的说法，
+  一个分支里两种互相矛盾的措辞会让下一个人把「某处漏了 `ESCAPE`」误判成 P0。**三处已随 #2347 同改。**
+- **D2** — `runner/replay.py` 现在会改变模型看到什么（Task 19 让回放跳过 `assistant{partial:true}`
+  行，理由正确：真实历史里那一步是**一条**带 text + tool_use 的消息，单独重放文本会造成相邻
+  同角色消息、Anthropic 拒绝），但 `app/services/ai/runner/` **没有 README**，CLAUDE.md 的
+  「Model Experience 三问」从这一刻起咬住它。**记票**：给该目录补一份 README，三问覆盖
+  `replay.py` + `narration_events.py` 这一对（模型看到的是 `user` / 非 partial `assistant` 两类行；
+  叙述行不进历史所以 fork 上下文不随叙述条数增长；fork 是另起一次请求，本模块不承诺前缀复用）。
+- **D3** — `agent_runs_repository.py` 两处 docstring 的口径追不上实现（`efficiency_for_issue` 的
+  「root + children」实际取决于 children 有没有 `issue_id`；分组粒度写清了但没说分组后的后果）。
+  **已随 #2347 改。**
