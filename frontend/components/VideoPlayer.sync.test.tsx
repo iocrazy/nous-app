@@ -218,3 +218,49 @@ describe('writing back', () => {
     expect(getEntry(ALICE, SRC)?.sv).toBeUndefined();
   });
 });
+
+describe('the open-time gate', () => {
+  it('does not push this device\'s stale position before it knows the server\'s', async () => {
+    // The production bug this pins: the periodic push fires on the first
+    // `timeupdate` after mount (its throttle window starts satisfied), and the
+    // resume seek itself produces that `timeupdate`. So opening a video on
+    // device A overwrote the newer position device B had just written.
+    savePosition(ALICE, SRC, 67, 600);
+    markSynced(ALICE, SRC, 'T1');
+
+    let resolveFetch: (v: unknown) => void = () => {};
+    fetchRemotePosition.mockReturnValue(new Promise((r) => { resolveFetch = r; }));
+
+    const { video } = await open(ALICE);
+
+    // Local resume applied; the reconcile is still in flight.
+    expect(video.currentTime).toBeCloseTo(67, 3);
+    await act(async () => {
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+    expect(pushRemotePosition).not.toHaveBeenCalled();
+
+    // Pausing inside the window must not clobber either.
+    await act(async () => {
+      video.dispatchEvent(new Event('pause'));
+    });
+    expect(pushRemotePosition).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveFetch({ media_key: SRC, position_seconds: 410, duration_seconds: 600, updated_at: 'T2' });
+    });
+    await waitFor(() => expect(video.currentTime).toBeCloseTo(410, 3));
+  });
+
+  it('opens the gate even when the server is unreachable, so offline progress still syncs later', async () => {
+    fetchRemotePosition.mockRejectedValue(new Error('offline'));
+    const { video } = await open(ALICE);
+
+    await act(async () => {
+      video.currentTime = 240;
+      video.dispatchEvent(new Event('pause'));
+    });
+
+    await waitFor(() => expect(pushRemotePosition).toHaveBeenCalledWith(SRC, 240, 600, {}));
+  });
+});
