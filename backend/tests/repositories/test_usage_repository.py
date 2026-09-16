@@ -178,7 +178,7 @@ def test_valid_group_by_set():
     )
 
 
-# ── A2：议题合计只算 root run ────────────────────────────────────────
+# ── A2：钱按 root 算，token 按全树算 ──────────────────────────────────
 
 _EMPTY_TOTALS = {
     "prompt_tokens": 0,
@@ -188,20 +188,66 @@ _EMPTY_TOTALS = {
     "run_count": 0,
 }
 
+# issue_totals 的 SELECT 列表顺序（也是下面拆片段的切点顺序）。
+_TOTALS_LABELS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cost_cents",
+    "run_count",
+)
+
+
+def _select_fragments(sql: str) -> dict[str, str]:
+    """把编译出的 SELECT 列表拆成 ``{输出别名: 该列的聚合表达式}``。
+
+    切点是 ``AS <label>``，按 ``_TOTALS_LABELS`` 的顺序逐个向后找 —— 这样每个
+    聚合的 ``FILTER (WHERE ...)`` 归属到底是哪一列就不会含糊。整串 SQL 里
+    ``in`` 一下是不够的：一列带 root 谓词、另一列不带，也照样能让整串命中。
+    """
+    select_list = sql.split("\nFROM ")[0]
+    out: dict[str, str] = {}
+    cursor = len("SELECT ")
+    for label in _TOTALS_LABELS:
+        marker = f" AS {label}"
+        end = select_list.index(marker, cursor)
+        out[label] = select_list[cursor:end].lstrip(", ")
+        cursor = end + len(marker)
+    return out
+
 
 @pytest.mark.asyncio
-async def test_issue_totals_filters_to_root_runs(monkeypatch):
+async def test_issue_totals_bills_root_runs_but_counts_every_run_s_tokens(monkeypatch):
+    """同一个查询里两条口径。
+
+    ``cost_cents`` 上滚：子 run 的花费已经加进父行（run_recorder 的树总额），
+    所以求和必须只取 root，否则双计。``prompt/completion/total_tokens``
+    **不**上滚 —— 每行只记自己那一次的 token，子 run 是独立行 —— 所以按 root
+    过滤会把子 run 的 token 整个丢掉。共用一条 WHERE 必然错一边。
+    """
     session = _RecordingSession(_FakeResult(_EMPTY_TOTALS))
     _install(monkeypatch, session)
     await usage_repository.issue_totals(900000000000001)
+
     sql, binds = session.calls[0]
-    assert "parent_run_id IS NULL" in sql
-    assert 900000000000001 in binds.values()
+    frags = _select_fragments(sql)
+
+    # 钱与条数：root-only。
+    assert "parent_run_id IS NULL" in frags["cost_cents"]
+    assert "parent_run_id IS NULL" in frags["run_count"]
+    # token 三列：该议题的全部 run。
+    assert "parent_run_id IS NULL" not in frags["prompt_tokens"]
+    assert "parent_run_id IS NULL" not in frags["completion_tokens"]
+    assert "parent_run_id IS NULL" not in frags["total_tokens"]
+    # 过滤必须留在聚合的 FILTER 里，不能爬进 WHERE —— 那会把 token 也砍掉。
+    assert "parent_run_id IS NULL" not in sql.split("\nFROM ")[1]
+
+    assert binds["issue_id_1"] == 900000000000001
 
 
 @pytest.mark.asyncio
 async def test_issue_totals_and_the_budget_gate_use_the_same_predicate(monkeypatch):
-    """两处「这个议题花了多少」必须同一条谓词。比的是编译出的 SQL 片段，不是
+    """两处「这个议题花了多少钱」必须同一条谓词。比的是编译出的 SQL 片段，不是
     各自的注释 —— 注释不会在漂移时报错。"""
     from app.repositories import agent_runs_repository as gate_module
 
@@ -225,5 +271,6 @@ async def test_issue_totals_and_the_budget_gate_use_the_same_predicate(monkeypat
     monkeypatch.setattr(gate_module, "read_scope", fake_read_scope)
     await gate_module.AgentRunsRepository().spent_cents_for_issue(issue_id=1)
 
-    assert "parent_run_id IS NULL" in totals_sql
+    # 比的是**钱那一列**，不是整串 SQL：token 列现在刻意不带这条谓词。
+    assert "parent_run_id IS NULL" in _select_fragments(totals_sql)["cost_cents"]
     assert "parent_run_id IS NULL" in gate_session.calls[0][0]
