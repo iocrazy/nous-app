@@ -19,7 +19,7 @@ import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
 import { loadPanelWidth, savePanelWidth } from './detail/DetailCardKit';
-import { computeJustifiedRows } from '../utils/justifiedLayout';
+import { computeJustifiedRows, distributeRowWidths } from '../utils/justifiedLayout';
 import { aspectRatioOf, needsAspectMeasurement, matchesCurrentAspect } from '../utils/resourceAspect';
 import { useMeasuredAspectRatios } from '../hooks/useMeasuredAspectRatios';
 import { useContainerWidth } from '../hooks/useContainerWidth';
@@ -29,6 +29,22 @@ import { useContainerWidth } from '../hooks/useContainerWidth';
  *  covers, which read as too small at that height. */
 const JUSTIFIED_TARGET_ROW_HEIGHT = 200;
 const JUSTIFIED_GAP = 12;
+/**
+ * Narrowest a download card may render, in px.
+ *
+ * Not a taste number — it is what the four-column stats strip under the
+ * thumbnail needs. The card spends 16px on `p-2` padding and 18px on the
+ * strip's three `gap-1.5` gaps, so each of the four cells gets `(W - 34) / 4`,
+ * and the widest value those cells carry (`142.7K` at 9px bold) needs ~35px.
+ * That puts the hard floor at 174px; 190 leaves the digits room to breathe.
+ *
+ * Portrait video is the case that hits it: 9:16 lays out 2.4x narrower than a
+ * 4:3 image at the same row height, which is how a douyin column ended up with
+ * its likes/comments/shares/collects clipped into unreadable blocks
+ * (2026-09-15). Enforced by `distributeRowWidths`, which funds it from the
+ * wide items in the SAME row rather than by growing the row.
+ */
+const JUSTIFIED_MIN_CARD_WIDTH = 190;
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -402,6 +418,21 @@ export const DownloadsView: React.FC = () => {
       gap: JUSTIFIED_GAP,
     }),
     [justifiedAspects, justifiedWidth],
+  );
+  // Rendered widths per row, with the stats-strip floor applied. Computed once
+  // per layout rather than per card: the redistribution is a property of the
+  // whole row (what one card gains, its neighbours fund), so it cannot be
+  // decided while mapping an individual item.
+  const justifiedRowWidths = useMemo(
+    () =>
+      justifiedRows.map((row) =>
+        distributeRowWidths(
+          justifiedAspects.slice(row.start, row.end),
+          row.height,
+          { minWidth: JUSTIFIED_MIN_CARD_WIDTH },
+        ),
+      ),
+    [justifiedRows, justifiedAspects],
   );
 
   // ─── Search handlers ──────────────────────────────────
@@ -1337,7 +1368,7 @@ export const DownloadsView: React.FC = () => {
           <>
             {libraryViewMode === 'justified' && (
               <div ref={justifiedContainerRef} className="w-full">
-                {justifiedRows.map((row) => (
+                {justifiedRows.map((row, rowIdx) => (
                   <div
                     key={`row-${row.start}`}
                     className="flex items-start"
@@ -1345,10 +1376,17 @@ export const DownloadsView: React.FC = () => {
                   >
                     {filteredLibrary.slice(row.start, row.end).map((item, idx) => {
                       const ar = justifiedAspects[row.start + idx] || 1;
+                      // Rendered width honours the stats-strip floor, so it is
+                      // NOT `ar * row.height` any more. The card's media box
+                      // has to follow it (`object-cover` crops rather than
+                      // letterboxes), or the thumbnail would sit in a box of a
+                      // different shape than the card it fills.
+                      const width =
+                        justifiedRowWidths[rowIdx]?.[idx] ?? ar * row.height;
                       return (
                         <div
                           key={item.platform_id}
-                          style={{ width: ar * row.height, flexShrink: 0 }}
+                          style={{ width, flexShrink: 0 }}
                           onTouchStart={() => startLongPress(item)}
                           onTouchMove={cancelLongPress}
                           onTouchEnd={cancelLongPress}
@@ -1358,7 +1396,7 @@ export const DownloadsView: React.FC = () => {
                             data={item}
                             resourceId={resourceIdMap[item.id]}
                             aiStatus={aiStatusMap[item.id]}
-                            aspectRatio={ar}
+                            aspectRatio={width / row.height}
                             onThumbnailAspect={
                               needsAspectMeasurement(item)
                                 ? (measuredAr) => {
