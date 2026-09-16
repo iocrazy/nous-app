@@ -1,17 +1,16 @@
 """Narrow notification inbox — the ``notify()`` producer helper (W3d).
 
 This is the ONLY write path into ``public.inbox_notifications``. It is called
-best-effort from exactly three producer sites (a notification failure must never
-break the producing flow), so every insert is wrapped: any exception is logged
-loudly and swallowed — the caller's success/failure is never affected.
+best-effort from every producer site (a notification failure must never break
+the producing flow), so every insert is wrapped: any exception is logged loudly
+and swallowed — the caller's success/failure is never affected.
 
 NARROWNESS (the design): the inbox carries a closed set of ``kind`` values,
-each one a "a result landed / needs my action" event — ``generation_result`` /
-``publish_result`` / ``autopilot_output`` / ``workflow_stage`` /
-``agent_question`` (mig 399, an agent paused waiting for the user's answer).
-If you find yourself tempted to add another producer, make sure it fits that
-definition — Realtime already covers immediacy elsewhere, and comment/@mention
-notifications are deliberately out of scope.
+each one a "a result landed / needs my action" event — see
+``NOTIFICATION_KINDS`` below, which is the single source every other surface
+derives from. If you find yourself tempted to add another producer, make sure
+it fits that definition — Realtime already covers immediacy elsewhere, and
+comment/@mention notifications are deliberately out of scope.
 
 DEDUPE: producers can double-fire across retry/mirror seams (e.g. a DBOS step
 replay). Before inserting, an identical (user_id, kind, link_kind, link_id) row
@@ -30,13 +29,18 @@ from sqlalchemy import and_, insert, select
 from app.db.session import read_scope, write_scope
 from app.models import InboxNotifications
 
-NotificationKind = Literal[
+#: kind 的**唯一来源**。DB CHECK（最新 migration）、ORM CheckConstraint、
+#: schemas.inbox.InboxKind、前端 notificationsService.ts 四处都对着它，
+#: tests/api/test_inbox_kind_mirror.py 逐处比对。加一个 kind = 改这里 + 写迁移
+#: + 改 ORM + 改前端，四处缺一个测试就红。
+NOTIFICATION_KINDS: tuple[str, ...] = (
     "generation_result",
     "publish_result",
     "autopilot_output",
     "workflow_stage",
     "agent_question",
-]
+)
+NotificationKind = Literal[*NOTIFICATION_KINDS]
 NotificationSeverity = Literal["info", "success", "error"]
 NotificationLinkKind = Literal["issue", "resource", "publish_batch"]
 
