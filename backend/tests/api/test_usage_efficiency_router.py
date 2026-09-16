@@ -138,3 +138,117 @@ async def test_the_cap_is_the_same_number_both_endpoints_use():
 
     ur = importlib.import_module("app.api.usage_router")
     assert ur._MAX_RANGE_DAYS is MAX_RANGE_DAYS
+
+
+def _teams(member: bool):
+    class _Teams:
+        calls: list = []
+
+        async def get_team_by_id(self, team_id, user_id):
+            _Teams.calls.append((team_id, user_id))
+            return {"id": team_id} if member else None
+
+    _Teams.calls = []
+    return _Teams
+
+
+async def test_team_scope_passes_the_team_down_and_does_not_lock_the_user(monkeypatch):
+    """The mirror image of the user-scope test, and the one that matters more.
+
+    A scope argument that fails to reach the repository is not a slow query on
+    this chain — ``agent_runs`` is not in the SCOPE_ENFORCE list, so the SQL
+    layer adds no predicate of its own, and a dropped ``team_id`` means every
+    team's runs come back. Asserting the response would not catch it; only the
+    kwargs will.
+    """
+    captured: dict = {}
+    _stub(monkeypatch, captured=captured)
+    teams = _teams(member=True)
+    monkeypatch.setattr(R, "get_team_repository", lambda: teams())
+
+    out = await R.get_usage_efficiency(_Auth(), scope="team", id=42)
+    assert captured["team_id"] == 42
+    assert captured["user_id"] is None and captured["project_id"] is None
+    assert out.scope == "team"
+    # The gate was asked about THIS caller, not merely about the team.
+    assert teams.calls == [("42", _Auth.user_id)]
+
+
+def _projects(row):
+    class _Projects:
+        asked: list = []
+
+        async def get_project_by_id(self, project_id):
+            _Projects.asked.append(project_id)
+            return row
+
+    _Projects.asked = []
+    return _Projects
+
+
+async def test_project_scope_resolves_its_team_then_passes_the_project_down(
+    monkeypatch,
+):
+    captured: dict = {}
+    _stub(monkeypatch, captured=captured)
+    projects = _projects({"id": 9, "team_id": 42})
+    teams = _teams(member=True)
+    monkeypatch.setattr(R, "get_projects_repository", lambda: projects())
+    monkeypatch.setattr(R, "get_team_repository", lambda: teams())
+
+    out = await R.get_usage_efficiency(_Auth(), scope="project", id=9)
+    assert projects.asked == ["9"]
+    # Gated on the project's OWNING team, not on the project id.
+    assert teams.calls == [("42", _Auth.user_id)]
+    assert captured["project_id"] == 9
+    assert captured["team_id"] is None and captured["user_id"] is None
+    assert out.scope == "project"
+
+
+async def test_project_scope_404s_for_a_non_member_of_its_team(monkeypatch):
+    projects = _projects({"id": 9, "team_id": 42})
+    teams = _teams(member=False)
+    monkeypatch.setattr(R, "get_projects_repository", lambda: projects())
+    monkeypatch.setattr(R, "get_team_repository", lambda: teams())
+    with pytest.raises(HTTPException) as e:
+        await R.get_usage_efficiency(_Auth(), scope="project", id=9)
+    assert e.value.status_code == 404 and e.value.detail["code"] == "not_found"
+
+
+async def test_a_project_that_does_not_resolve_is_404_not_an_unscoped_read(monkeypatch):
+    """A missing project must not fall through with ``team_id`` unset — that
+    would be an aggregate with no tenant predicate at all."""
+    monkeypatch.setattr(R, "get_projects_repository", lambda: _projects(None)())
+    monkeypatch.setattr(R, "get_team_repository", lambda: _teams(member=True)())
+    with pytest.raises(HTTPException) as e:
+        await R.get_usage_efficiency(_Auth(), scope="project", id=9)
+    assert e.value.status_code == 404
+
+
+async def test_a_repository_failure_is_a_typed_503_not_an_empty_table(monkeypatch):
+    """An empty efficiency table reads as "nothing ran and nothing was spent".
+    The read failing must not be able to say that."""
+
+    class _Boom:
+        async def efficiency_groups(self, **kw):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(R, "get_agent_runs_repository", lambda: _Boom())
+    with pytest.raises(HTTPException) as e:
+        await R.get_usage_efficiency(_Auth(), scope="user")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "efficiency_unavailable"
+
+
+@pytest.mark.parametrize("grouping", ["model", "agent"])
+async def test_the_response_echoes_the_grouping_it_used(monkeypatch, grouping):
+    """Same shape as /usage/summary. A chart legend that has to remember what it
+    asked for will eventually render one grouping's data under another's title.
+
+    ``agent`` is the case that carries the test: asserting only the default
+    grouping would pass even if the endpoint stopped echoing the value
+    altogether, because the schema would supply it.
+    """
+    _stub(monkeypatch)
+    out = await R.get_usage_efficiency(_Auth(), scope="user", group_by=grouping)
+    assert out.group_by == grouping

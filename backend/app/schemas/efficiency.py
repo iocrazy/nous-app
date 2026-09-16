@@ -28,6 +28,12 @@ class EfficiencyGroup(BaseModel):
 
 class EfficiencyResponse(BaseModel):
     scope: str
+    #: Echoed back so a chart never has to remember what it asked for — the
+    #: same contract ``/usage/summary`` already has. REQUIRED, and required for
+    #: a reason: a default would let a caller that forgot to pass it through
+    #: still validate, and every test asking for the default grouping would go
+    #: on passing.
+    group_by: str
     from_: datetime.datetime = Field(..., alias="from")
     to: datetime.datetime
     groups: List[EfficiencyGroup]

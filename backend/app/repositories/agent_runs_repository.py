@@ -1044,11 +1044,14 @@ class AgentRunsRepository(AsyncpgRepository):
                 select(
                     key_col.label("key"),
                     func.count().label("run_count"),
-                    func.sum(
-                        case(
-                            (AgentRuns.status.in_(("failed", "heartbeat_lost")), 1),
-                            else_=0,
-                        )
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (AgentRuns.status.in_(("failed", "heartbeat_lost")), 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
                     ).label("failed_runs"),
                     func.count().filter(timed).label("timed_runs"),
                     func.coalesce(

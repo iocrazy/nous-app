@@ -3094,6 +3094,7 @@ async def get_usage_efficiency(
         )
     return EfficiencyResponse(
         scope=scope,
+        group_by=group_by,
         **{"from": frm_dt},
         to=to_dt,
         groups=groups,

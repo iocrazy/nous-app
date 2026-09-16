@@ -186,3 +186,11 @@ async def test_only_the_money_column_is_root_filtered():
         assert f"sum(public.agent_runs.{own_metric}) FILTER" not in sql
     # The root predicate belongs to the money column alone.
     assert sql.count("parent_run_id IS NULL") == 1
+
+
+async def test_the_failed_run_count_coalesces_like_its_neighbours():
+    """``sum(CASE ...)`` over zero rows is NULL, not 0 — every other counter in
+    this SELECT is wrapped, and an unwrapped one hands the route a None that
+    only shows up on an empty window."""
+    sql = _sql((await _run(team_id=7, group_by="model")).stmts[0])
+    assert "coalesce(sum(CASE WHEN" in sql

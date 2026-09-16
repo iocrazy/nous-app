@@ -179,3 +179,19 @@ async def test_the_endpoint_declares_a_real_response_model():
     model = route.response_model
     assert isinstance(model, type) and issubclass(model, BaseModel)
     assert "items" in model.model_fields
+
+
+async def test_a_run_read_failure_is_a_typed_503_too(monkeypatch):
+    """The sibling of the billing-arm test: the runs read has its own arm, and
+    an empty batch would read as "these runs cost nothing"."""
+    _stub(monkeypatch, {"77"})
+
+    class _Boom:
+        async def cost_rows_for_ids(self, ids):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(R, "get_agent_runs_repository", lambda: _Boom())
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids="1,2")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "run_costs_unavailable"
