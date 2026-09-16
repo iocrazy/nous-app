@@ -698,6 +698,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
 
+    /**
+     * The element threw its resource away and is starting over.
+     *
+     * This fires for BOTH causes of an in-place re-initialisation, and the
+     * second one never reaches React at all: the source-attach effect
+     * re-pointing the element (a changed token), and the browser dropping a
+     * backgrounded tab's media on its own. Keying the restore on the effect
+     * alone left that second case broken — a production probe that called
+     * `load()` on the live element still came back at 00:00.
+     *
+     * Bumping here is safe when the effect ALSO ran: it already stashed the
+     * carry-over, and `Math.max` keeps the larger of the two.
+     */
+    const handleEmptied = () => {
+      if (attachedKey.current !== positionKey) return; // a different video
+      carriedPosition.current = Math.max(
+        carriedPosition.current ?? 0,
+        livePosition.current,
+      );
+      attachmentId.current += 1;
+    };
+
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => {
       setIsPlaying(false);
@@ -746,6 +768,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
 
+    video.addEventListener('emptied', handleEmptied);
     video.addEventListener('progress', updateBuffered);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('durationchange', handleDurationChange);
@@ -763,6 +786,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // navigation, close). Flush before the listeners come off, otherwise the
       // last up-to-a-second of progress is lost exactly when it is needed.
       savePosition(viewerId, positionKey, video.currentTime, video.duration);
+      video.removeEventListener('emptied', handleEmptied);
       video.removeEventListener('progress', updateBuffered);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('durationchange', handleDurationChange);
