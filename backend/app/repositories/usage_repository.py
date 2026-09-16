@@ -198,7 +198,12 @@ async def summarize(
 
 
 async def issue_totals(issue_id: Any) -> dict[str, Any]:
-    """Per-issue AI spend, summed from agent_runs by the issue_id index."""
+    """Per-issue AI spend, summed from agent_runs by the issue_id index.
+
+    Root runs only（A2）—— 与 ``agent_runs_repository.spent_cents_for_issue`` 和
+    ``issue_rollup.compute_rollup`` 同一条谓词。子 run 的花费通过父行的树总额
+    上滚，这里再加一次就是双计。
+    """
     from sqlalchemy import func, select
 
     from app.db.session import read_scope
@@ -225,7 +230,14 @@ async def issue_totals(issue_id: Any) -> dict[str, Any]:
                             "cost_cents"
                         ),
                         func.count().label("run_count"),
-                    ).where(AgentRuns.issue_id == _coerce_bigint(issue_id))
+                    ).where(
+                        AgentRuns.issue_id == _coerce_bigint(issue_id),
+                        # A2：只算 root run。子 run 的花费已滚进父行的 cost_cents
+                        # （_finish 的树总额），再加一遍就是双计 —— 而预算门禁
+                        # （spent_cents_for_issue）与 issue_rollup 一直是 root-only，
+                        # 于是同一个议题两个面读出两个数。
+                        AgentRuns.parent_run_id.is_(None),
+                    )
                 )
             )
             .mappings()

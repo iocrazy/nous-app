@@ -176,3 +176,54 @@ def test_valid_group_by_set():
     assert usage_repository.VALID_GROUP_BY == frozenset(
         {"agent", "model", "module", "project", "attribution"}
     )
+
+
+# ── A2：议题合计只算 root run ────────────────────────────────────────
+
+_EMPTY_TOTALS = {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "cost_cents": Decimal("0"),
+    "run_count": 0,
+}
+
+
+@pytest.mark.asyncio
+async def test_issue_totals_filters_to_root_runs(monkeypatch):
+    session = _RecordingSession(_FakeResult(_EMPTY_TOTALS))
+    _install(monkeypatch, session)
+    await usage_repository.issue_totals(900000000000001)
+    sql, binds = session.calls[0]
+    assert "parent_run_id IS NULL" in sql
+    assert 900000000000001 in binds.values()
+
+
+@pytest.mark.asyncio
+async def test_issue_totals_and_the_budget_gate_use_the_same_predicate(monkeypatch):
+    """两处「这个议题花了多少」必须同一条谓词。比的是编译出的 SQL 片段，不是
+    各自的注释 —— 注释不会在漂移时报错。"""
+    from app.repositories import agent_runs_repository as gate_module
+
+    session = _RecordingSession(_FakeResult(_EMPTY_TOTALS))
+    _install(monkeypatch, session)
+    await usage_repository.issue_totals(1)
+    totals_sql = session.calls[0][0]
+
+    class _Scalar:
+        def scalar_one(self):
+            return 0
+
+    gate_session = _RecordingSession(_Scalar())
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield gate_session
+
+    # agent_runs_repository 在 import 时就把 read_scope 绑成了模块属性，
+    # 只 patch app.db.session 碰不到它 —— 那样它会去连真库。
+    monkeypatch.setattr(gate_module, "read_scope", fake_read_scope)
+    await gate_module.AgentRunsRepository().spent_cents_for_issue(issue_id=1)
+
+    assert "parent_run_id IS NULL" in totals_sql
+    assert "parent_run_id IS NULL" in gate_session.calls[0][0]
