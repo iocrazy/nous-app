@@ -392,3 +392,37 @@ async def test_orphan_rows_are_counted_and_not_touched(monkeypatch):
     assert stats.orphans == 12
     # 孤儿不算进 scanned —— 它们从来没被扫过。
     assert stats.scanned == 0
+
+
+async def test_a_census_that_cannot_run_says_unknown_and_lets_the_batch_proceed(
+    monkeypatch,
+):
+    """孤儿普查是个**装饰性**的数，它坏掉不该否决一次能干活的回填 —— 那正是
+    Important 那条修的同一类错（一个环节的失败带走整批）。
+
+    但它也不能退化成 ``0``：「没有孤儿」和「数不出来」是相反的结论，而
+    ``orphans=0`` 会被读成前者。所以是三态 —— ``None`` 表示数不出来，汇总里印
+    ``unknown``。同 CLAUDE.md「探针够不着目标 ≠ 目标是坏的」。
+    """
+
+    async def boom():
+        raise RuntimeError("the census query could not run")
+
+    monkeypatch.setattr(bf, "_orphan_output_count", boom)
+    _rebuild_returns(monkeypatch, dict(SHOT))
+    repo = _Repo(accepts=True)
+
+    async def fake_outputs(limit=None):
+        return [_row("script_shot")]
+
+    async def fake_runs(limit=None):
+        return []
+
+    monkeypatch.setattr(bf, "_empty_output_rows", fake_outputs)
+    monkeypatch.setattr(bf, "_empty_run_rows", fake_runs)
+    monkeypatch.setattr(bf, "get_search_docs_repository", lambda: repo)
+
+    stats = await bf.backfill_search_docs_bodies()
+    assert stats.orphans is None  # 数不出来，不是 0
+    assert stats.filled == 1  # 而这一行照样补上了
+    assert stats.failed == 0  # 普查的失败不该算成某一行的失败

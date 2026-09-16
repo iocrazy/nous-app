@@ -71,7 +71,8 @@ async def _run(dry_run: bool, limit: int | None) -> None:
         stats.unavailable,
         stats.raced,
         stats.failed,
-        stats.orphans,
+        # 三态：None 是「数不出来」，与「没有孤儿」是相反的结论。
+        "unknown" if stats.orphans is None else stats.orphans,
     )
 
 

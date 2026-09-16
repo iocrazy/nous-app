@@ -104,7 +104,11 @@ class BackfillStats:
     #: ``search_docs`` 里有、``run_deliverables`` 里没有的产出行。**不处理**，只
     #: 报数 —— 两条候选集查询都是内连接，这些行根本进不来，所以少了这个数，
     #: 一次「全部补完」的汇总和一次「还漏着 N 条」的汇总长得一模一样。
-    orphans: int = 0
+    #:
+    #: ⚠️ **三态。** ``None`` 是「数不出来」，不是 0 —— 「没有孤儿」和「普查自己
+    #: 没跑起来」是相反的结论，而 ``0`` 会被读成前者（同 CLAUDE.md「探针够不着
+    #: 目标 ≠ 目标是坏的」）。
+    orphans: Optional[int] = None
 
     def plus(self, **delta: int) -> "BackfillStats":
         """加法返回新对象（不可变纪律）。"""
@@ -114,7 +118,9 @@ class BackfillStats:
             unavailable=self.unavailable + delta.get("unavailable", 0),
             raced=self.raced + delta.get("raced", 0),
             failed=self.failed + delta.get("failed", 0),
-            orphans=self.orphans + delta.get("orphans", 0),
+            # orphans 不参与增量：它是一次性的普查结果，由构造时写死。相加会把
+            # 「数不出来」(None) 悄悄变成一个数字。
+            orphans=self.orphans,
         )
 
 
@@ -238,7 +244,7 @@ async def _empty_run_rows(limit: Optional[int] = None) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-async def _orphan_output_count() -> int:
+async def _orphan_output_count() -> Optional[int]:
     """``search_docs`` 里有、``run_deliverables`` 里没有的产出行数。
 
     两条候选集查询都是**内连接**，所以这些行根本进不来 —— 既不会被补上，也不会
@@ -248,29 +254,29 @@ async def _orphan_output_count() -> int:
 
     **只报数，不处理。** 该修什么取决于是哪种成因，那是另一张票要查的；在这里
     顺手删或顺手补，都是在一个不知道成因的地方做破坏性决定。
+
+    ⚠️ 这个函数**只管查**，出错照抛。「普查坏了不该弄死整批」那条策略归调用方
+    （``backfill_search_docs_bodies`` 开头那个 try）一处所有 —— 两层都兜一遍的话，
+    读者要同时想明白两处才能回答「它到底会不会抛」，而其中一处永远不会被执行到。
     """
-    async with read_scope() as session:
-        return int(
-            (
-                await session.execute(
-                    select(func.count())
-                    .select_from(SearchDocs)
-                    .where(SearchDocs.entity_kind == "output")
-                    .where(
-                        ~select(RunDeliverables.id)
-                        .where(
-                            and_(
-                                RunDeliverables.kind == SearchDocs.kind,
-                                RunDeliverables.ref_id == SearchDocs.ref_id,
-                                RunDeliverables.version == SearchDocs.version,
-                            )
-                        )
-                        .exists()
-                    )
+    stmt = (
+        select(func.count())
+        .select_from(SearchDocs)
+        .where(SearchDocs.entity_kind == "output")
+        .where(
+            ~select(RunDeliverables.id)
+            .where(
+                and_(
+                    RunDeliverables.kind == SearchDocs.kind,
+                    RunDeliverables.ref_id == SearchDocs.ref_id,
+                    RunDeliverables.version == SearchDocs.version,
                 )
-            ).scalar()
-            or 0
+            )
+            .exists()
         )
+    )
+    async with read_scope() as session:
+        return int((await session.execute(stmt)).scalar() or 0)
 
 
 async def _write(
@@ -332,7 +338,18 @@ async def backfill_search_docs_bodies(
     然要把整张表读回内存），给分批跑和先小量试水用；``None`` 就是不限。
     """
     async with system_request_scope("backfill search_docs bodies (3c)"):
-        stats = BackfillStats(orphans=await _orphan_output_count())
+        # 孤儿普查是个**装饰性**的数。它坏掉不该否决一次能干活的回填（同
+        # ``_guarded`` 那条纪律），但也不能退化成 0 —— 「没有孤儿」和「数不出来」
+        # 是相反的结论，而汇总里印 0 会被读成前者。所以是三态，``None`` 印
+        # ``unknown``。
+        try:
+            orphans: Optional[int] = await _orphan_output_count()
+        except Exception as exc:  # noqa: BLE001 — 见上
+            logger.opt(exception=True).error(
+                f"[search] backfill could not count orphan projection rows: {exc!r}"
+            )
+            orphans = None
+        stats = BackfillStats(orphans=orphans)
         for row in await _empty_output_rows(limit):
             stats = stats.plus(scanned=1)
             stats = stats.plus(
@@ -365,7 +382,7 @@ async def backfill_search_docs_bodies(
         stats.unavailable,
         stats.raced,
         stats.failed,
-        stats.orphans,
+        "unknown" if stats.orphans is None else stats.orphans,
     )
     return stats
 
