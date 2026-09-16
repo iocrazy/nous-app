@@ -66,6 +66,7 @@ from sqlalchemy import update as sa_update
 from app.db.session import read_scope, write_scope
 from app.models import Issues
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 
 def needs_input_predicate():
@@ -302,6 +303,29 @@ class IssueRepository:
             )
             return row.first() is not None
 
+    def _q_predicate(self, q: Optional[str]):
+        """``identifier ILIKE OR title ILIKE OR description ILIKE``，或 None。
+
+        转义在这里做（拼模式者负责转义），``ESCAPE`` 由 ``.ilike(escape=…)``
+        声明——Postgres 的 LIKE 没有默认转义符，只做 Python 侧等于没做。
+        两者分工：``escape_like`` 是机制（用户搜一个 ``%`` 要匹配 ``%``
+        本身，而不是匹配一切），``escape=`` 是把那个转义符显式钉死，不依赖
+        服务器默认。
+        """
+        term = (q or "").strip()
+        if not term:
+            return None
+        pattern = f"%{escape_like(term)}%"
+        return or_(
+            Issues.identifier.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+            Issues.title.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+            Issues.description.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+        )
+
+    def _q_predicate_stmt(self, q: Optional[str]):
+        """测试用：把谓词包成一条可编译的 SELECT。"""
+        return select(Issues.id).where(self._q_predicate(q))
+
     async def list_for_user(
         self,
         user_id: str,
@@ -312,6 +336,7 @@ class IssueRepository:
         include_hidden: bool = False,
         limit: int = 50,
         offset: int = 0,
+        q: Optional[str] = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """List issues visible to user_id. Returns (items, total).
 
@@ -321,6 +346,16 @@ class IssueRepository:
         client's team_id param is only ever an AND-filter on top, never an
         authorization input, so passing another team's id yields nothing
         beyond rows already visible (own/assigned).
+
+        ``q`` 是**过滤**，和 ``team_id`` 同一性质：它叠在
+        ``visibility_predicate`` 之上，是**另一个** ``.where()``，永不放宽
+        可见性——搜不到的东西搜了也还是搜不到。走 mig 166 的三个 trgm GIN
+        （identifier / title / description），本参数是那三个索引的第一个
+        消费方。空串与纯空白当作「没搜」：一个 ``%%`` 谓词会让 GIN 失效并
+        退化成全表扫。
+
+        ``total`` 因此是「匹配且可见」的条数，而不是「可见」的条数——UI 据它
+        显示「N of M issues」，而不是静默截断到 ``limit``。
         """
         # Defensive: validate user_id is a real UUID before it reaches the WHERE
         # bind. A malformed value (or one from an untrusted source in the future)
@@ -337,6 +372,9 @@ class IssueRepository:
                 base = base.where(Issues.team_id == team_id)
             if not include_hidden:
                 base = base.where(Issues.hidden_at.is_(None))
+            predicate = self._q_predicate(q)
+            if predicate is not None:
+                base = base.where(predicate)
 
             # Total count (count="exact" parity) over the SAME predicate set.
             from sqlalchemy import func
@@ -521,6 +559,31 @@ class IssueRepository:
                 )
             ).first()
         return (row[0], row[1]) if row else (None, None)
+
+    async def map_link_coordinates(
+        self, issue_ids: Iterable[Any]
+    ) -> dict[str, tuple[Optional[str], Optional[int]]]:
+        """``{issue id (str) → (identifier, team_id)}``——深链要的那两样。
+
+        不复用 ``map_identifiers``：那个只给 identifier，而
+        ``issue_deep_link`` 两个都要，缺 team 就只能吐 ``None``。改它会让既有
+        三个调用方多拖一列，所以这里是**另一条**查询而不是一次加宽。
+
+        一条 ``IN``，缺席的 id 直接不在返回里——调用方据此渲染不可点的行，
+        而不是拼出一条指向不存在议题的 URL。
+        """
+        ids = [int(i) for i in issue_ids if i is not None]
+        if not ids:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Issues.id, Issues.identifier, Issues.team_id).where(
+                        Issues.id.in_(ids)
+                    )
+                )
+            ).all()
+        return {str(r[0]): (r[1], r[2]) for r in rows}
 
     async def list_in_progress_without_live_run(self) -> list[dict[str, Any]]:
         """MH-1 reconciliation candidates: ``in_progress`` issues whose

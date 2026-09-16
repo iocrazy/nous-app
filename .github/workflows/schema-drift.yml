@@ -170,6 +170,13 @@ on:
       # ESCAPE）。所以 repository 与投影写方改动也要能触发本 job。
       - 'backend/app/repositories/search_docs_repository.py'
       - 'backend/app/services/search/**'
+      # 上面两个文件各自证明一层；这个证明**两层合起来拦得住人**：
+      # /api/v1/search 是跨团队端点，它唯一的安全断言（别 team 的人搜同一个词
+      # 拿三组全空）在单测里是桩的。两道门各有一条专属用例，实测各自删掉会让
+      # 不同的那一条转红。issue 可见性的实现也在它的射程内。
+      - 'backend/tests/db/test_unified_search_visibility_integration.py'
+      - 'backend/app/services/issues/issue_visibility.py'
+      - 'backend/app/repositories/issue_repository.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -183,7 +190,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-six, so it has to re-run
+      # to it changes what "green" means for all twenty-eight, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -756,3 +763,24 @@ jobs:
           # uuid = character varying）、ILIKE 的 ESCAPE '\' 要真的让一个字面 %
           # 匹配它自己而不是匹配全表（CLAUDE.md「ILIKE 模式的转义责任要跟着模式走」）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_repository_integration.py -v
+
+      - name: Assert unified_search's two visibility gates on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步证明 repository 的语句服务器接受；这一步证明**两道门合起来
+          # 拦得住人**。/api/v1/search 是跨团队端点，它唯一的安全断言是「别
+          # team 的成员搜同一个词，三组全空」——而服务层单测里 visible_issue_ids
+          # 是桩的，那套断言只证明「我们在调这道门」，不证明「这道门拦得住」。
+          #
+          # 两道门各有一条专属用例，职责分界处刻意分开：
+          #   * SQL 那道（team_id ∈ 我的 team OR owner_user_id = 我）——别 team
+          #     的 bob 搜同一个词拿三组全空。
+          #   * Python 那道（visible_issue_ids）——一行 team_id 指着 bob 的 team
+          #     （SQL 放行）而 issue_id 指着别 team 的议题（必须拦下）。投影的
+          #     坐标列没有外键，这个形状是真的会出现的。
+          # 实测两次突变各杀各的那一条（见 task-14 报告）。少了后者，把
+          # visible_issue_ids 整个删掉前一条照样绿——那正是这类用例最常见的假绿。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_unified_search_visibility_integration.py -v
