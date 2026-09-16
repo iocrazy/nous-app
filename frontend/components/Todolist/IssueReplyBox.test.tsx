@@ -1217,6 +1217,13 @@ describe('IssueReplyBox — the Assets tab', () => {
 describe('IssueReplyBox — 把议题编号转交下去', () => {
   const ISSUE = '727145299382534000';
 
+  // 清掉上一条留下的快照。不清的话，一次根本没渲染出来的失败会读到上一条的值
+  // ——断言看着是过的，而它描述的是另一次渲染。
+  beforeEach(() => {
+    pickerProps.last = null;
+    outputsTabOptions.last = null;
+  });
+
   it('交给 staged chip 那条带子，chip 才知道哪个来源算「别处」', () => {
     render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} issueKey="MH-96" />);
     expect(screen.getByTestId('attachment-picker-probe').getAttribute('data-current-issue-key')).toBe('MH-96');
