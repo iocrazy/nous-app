@@ -4,6 +4,7 @@ import { UserProfile, UserSettings, AISettings as AISettingsType } from '../type
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
 import { createMediaSession, deleteMediaSession, fetchMediaToken } from '../services/mediaAuthService';
 import { installAuthRecovery } from '../services/authRecovery';
+import { clearUser as clearUserPlaybackPositions } from '../utils/playbackResume';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -260,6 +261,13 @@ export function AuthProvider({
   const handleLogout = async () => {
     // Clear media session cookie before signing out
     await deleteMediaSession();
+
+    // Drop this account's remembered playback positions. They are namespaced
+    // per user so the next person on this machine could never READ them, but
+    // leaving them behind still parks a 30-day record of what this user was
+    // part-way through on a possibly shared computer. Captured before
+    // setCurrentUserId(null) — afterwards there is no namespace to clear.
+    clearUserPlaybackPositions(currentUserId);
 
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {

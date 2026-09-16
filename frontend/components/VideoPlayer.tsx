@@ -8,6 +8,7 @@ import {
   loadPosition,
   clearPosition,
 } from '../utils/playbackResume';
+import { useOptionalAuth } from '../contexts/AuthContext';
 
 interface HlsLevel {
   height: number;
@@ -148,6 +149,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const effectiveFps = fps || 30;
   const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
   const positionKey = resumeKeyFor(resumeKey, src);
+  // `useOptionalAuth`, not `useAuth`: this component is rendered in isolation
+  // by its own tests and by the cover grabber, neither of which mounts the
+  // provider. A missing provider means "signed out", which the store already
+  // has a namespace for.
+  const viewerId = useOptionalAuth()?.currentUserId ?? null;
 
   // Frame stepping
   const stepFrame = useCallback((direction: 1 | -1, count: number = 1) => {
@@ -416,7 +422,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const now = Date.now();
       if (now - lastSavedAt.current >= POSITION_SAVE_INTERVAL_MS) {
         lastSavedAt.current = now;
-        savePosition(positionKey, t, video.duration);
+        savePosition(viewerId, positionKey, t, video.duration);
       }
     };
 
@@ -449,7 +455,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // second time would undo them.
       if (resumedFor.current !== positionKey) {
         resumedFor.current = positionKey;
-        const saved = loadPosition(positionKey, video.duration);
+        const saved = loadPosition(viewerId, positionKey, video.duration);
         if (saved !== null) {
           video.currentTime = saved;
           setCurrentTime(saved);
@@ -464,12 +470,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // Pausing is the strongest signal that this position matters; don't wait
       // for the throttle window.
       lastSavedAt.current = Date.now();
-      savePosition(positionKey, video.currentTime, video.duration);
+      savePosition(viewerId, positionKey, video.currentTime, video.duration);
     };
     const handleEnded = () => {
       setIsPlaying(false);
       // Finished — the next open starts clean rather than at the old midpoint.
-      clearPosition(positionKey);
+      clearPosition(viewerId, positionKey);
     };
     const handleWaiting = () => setIsLoading(true);
     const handleCanPlay = () => {
@@ -518,7 +524,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // The tab can go away without a pause event (deploy-triggered reload,
       // navigation, close). Flush before the listeners come off, otherwise the
       // last up-to-a-second of progress is lost exactly when it is needed.
-      savePosition(positionKey, video.currentTime, video.duration);
+      savePosition(viewerId, positionKey, video.currentTime, video.duration);
       video.removeEventListener('progress', updateBuffered);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('durationchange', handleDurationChange);
@@ -535,7 +541,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // re-running this effect on every volume tick would thrash the listeners,
     // so they are deliberately not dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerRef, onTimeUpdate, onDurationChange, positionKey]);
+  }, [playerRef, onTimeUpdate, onDurationChange, positionKey, viewerId]);
 
   // A reload during playback is the whole reason this component remembers
   // anything: the service worker updates in the background and a stale chunk
@@ -546,7 +552,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const flush = () => {
       const video = playerRef.current;
       if (!video) return;
-      savePosition(positionKey, video.currentTime, video.duration);
+      savePosition(viewerId, positionKey, video.currentTime, video.duration);
     };
     const onHidden = () => {
       if (document.visibilityState === 'hidden') flush();
@@ -557,7 +563,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onHidden);
     };
-  }, [playerRef, positionKey]);
+  }, [playerRef, positionKey, viewerId]);
 
   // Any popup being open pins the control bar. Fading the bar out from under
   // an open menu takes the menu with it, which reads as the click having done

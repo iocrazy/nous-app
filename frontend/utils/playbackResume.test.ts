@@ -4,12 +4,18 @@ import {
   savePosition,
   loadPosition,
   clearPosition,
+  clearUser,
+  scopedKey,
+  ANONYMOUS_USER,
   prune,
   MAX_AGE_MS,
   MAX_ENTRIES,
   MIN_RESUME_SECONDS,
   END_MARGIN_SECONDS,
 } from './playbackResume';
+
+const U = 'user-alice';
+const V = 'user-bob';
 
 beforeEach(() => {
   localStorage.clear();
@@ -33,46 +39,46 @@ describe('resumeKeyFor', () => {
 
 describe('savePosition / loadPosition', () => {
   it('round-trips a mid-video position', () => {
-    savePosition('k', 90, 600);
-    expect(loadPosition('k')).toBe(90);
+    savePosition(U, 'k', 90, 600);
+    expect(loadPosition(U, 'k')).toBe(90);
   });
 
   it('does not remember the first few seconds', () => {
-    savePosition('k', MIN_RESUME_SECONDS - 1, 600);
-    expect(loadPosition('k')).toBeNull();
+    savePosition(U, 'k', MIN_RESUME_SECONDS - 1, 600);
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('does not remember a position inside the end margin', () => {
-    savePosition('k', 600 - (END_MARGIN_SECONDS - 1), 600);
-    expect(loadPosition('k')).toBeNull();
+    savePosition(U, 'k', 600 - (END_MARGIN_SECONDS - 1), 600);
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('watching to the end CLEARS an earlier position', () => {
-    savePosition('k', 300, 600);
-    expect(loadPosition('k')).toBe(300);
-    savePosition('k', 599, 600); // played through
-    expect(loadPosition('k')).toBeNull();
+    savePosition(U, 'k', 300, 600);
+    expect(loadPosition(U, 'k')).toBe(300);
+    savePosition(U, 'k', 599, 600); // played through
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('re-checks the end margin against the live duration', () => {
     // Stored when the player thought the clip was 600s; it is really 95s, so
     // 90s is now inside the end margin and must not resume.
-    savePosition('k', 90, 600);
-    expect(loadPosition('k', 95)).toBeNull();
-    expect(loadPosition('k', 600)).toBe(90);
+    savePosition(U, 'k', 90, 600);
+    expect(loadPosition(U, 'k', 95)).toBeNull();
+    expect(loadPosition(U, 'k', 600)).toBe(90);
   });
 
   it('clearPosition removes only its own key', () => {
-    savePosition('a', 90, 600);
-    savePosition('b', 90, 600);
-    clearPosition('a');
-    expect(loadPosition('a')).toBeNull();
-    expect(loadPosition('b')).toBe(90);
+    savePosition(U, 'a', 90, 600);
+    savePosition(U, 'b', 90, 600);
+    clearPosition(U, 'a');
+    expect(loadPosition(U, 'a')).toBeNull();
+    expect(loadPosition(U, 'b')).toBe(90);
   });
 
   it('returns null for unknown keys and for an empty key', () => {
-    expect(loadPosition('nope')).toBeNull();
-    expect(loadPosition('')).toBeNull();
+    expect(loadPosition(U, 'nope')).toBeNull();
+    expect(loadPosition(U, '')).toBeNull();
   });
 });
 
@@ -84,7 +90,7 @@ describe('storage failures degrade to "no memory"', () => {
       throw new DOMException('blocked');
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(loadPosition('k')).toBeNull();
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('a quota error on setItem does not propagate', () => {
@@ -92,18 +98,18 @@ describe('storage failures degrade to "no memory"', () => {
       throw new DOMException('QuotaExceededError');
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(() => savePosition('k', 90, 600)).not.toThrow();
+    expect(() => savePosition(U, 'k', 90, 600)).not.toThrow();
   });
 
   it('corrupt JSON reads as empty instead of crashing the player', () => {
     localStorage.setItem('mediahub_playback_positions_v1', '{not json');
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(loadPosition('k')).toBeNull();
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('a non-object payload reads as empty', () => {
     localStorage.setItem('mediahub_playback_positions_v1', '[1,2,3]');
-    expect(loadPosition('k')).toBeNull();
+    expect(loadPosition(U, 'k')).toBeNull();
   });
 });
 
@@ -139,5 +145,71 @@ describe('prune', () => {
       now,
     );
     expect(Object.keys(out)).toEqual(['good']);
+  });
+});
+
+
+describe('per-user scoping', () => {
+  it('two accounts on one browser do not see each other\'s position', () => {
+    // The real shape: a TEAM resource, so both accounts legitimately open the
+    // very same id. Without the namespace Bob would resume where Alice left.
+    savePosition(U, 'resource:777', 300, 600);
+    expect(loadPosition(V, 'resource:777', 600)).toBeNull();
+    expect(loadPosition(U, 'resource:777', 600)).toBe(300);
+  });
+
+  it('one account overwriting does not touch the other', () => {
+    savePosition(U, 'resource:777', 300, 600);
+    savePosition(V, 'resource:777', 120, 600);
+    expect(loadPosition(U, 'resource:777', 600)).toBe(300);
+    expect(loadPosition(V, 'resource:777', 600)).toBe(120);
+  });
+
+  it('clearPosition stays inside its own namespace', () => {
+    savePosition(U, 'resource:777', 300, 600);
+    savePosition(V, 'resource:777', 120, 600);
+    clearPosition(V, 'resource:777');
+    expect(loadPosition(U, 'resource:777', 600)).toBe(300);
+    expect(loadPosition(V, 'resource:777', 600)).toBeNull();
+  });
+
+  it('signed-out viewing gets its own namespace, not a shared one', () => {
+    savePosition(null, 'resource:777', 300, 600);
+    expect(loadPosition(U, 'resource:777', 600)).toBeNull();
+    expect(loadPosition(null, 'resource:777', 600)).toBe(300);
+    // null / undefined / blank all mean the same viewer
+    expect(loadPosition(undefined, 'resource:777', 600)).toBe(300);
+    expect(scopedKey('  ', 'x')).toBe(scopedKey(null, 'x'));
+    expect(scopedKey(null, 'x')).toBe(`${ANONYMOUS_USER}::x`);
+  });
+});
+
+describe('clearUser', () => {
+  it('drops only the signing-out account\'s entries', () => {
+    savePosition(U, 'a', 300, 600);
+    savePosition(U, 'b', 300, 600);
+    savePosition(V, 'a', 120, 600);
+
+    clearUser(U);
+
+    expect(loadPosition(U, 'a', 600)).toBeNull();
+    expect(loadPosition(U, 'b', 600)).toBeNull();
+    expect(loadPosition(V, 'a', 600)).toBe(120);
+  });
+
+  it('is a no-op when the account has nothing stored', () => {
+    savePosition(V, 'a', 120, 600);
+    const before = localStorage.getItem('mediahub_playback_positions_v1');
+    clearUser(U);
+    expect(localStorage.getItem('mediahub_playback_positions_v1')).toBe(before);
+  });
+
+  it('a user id that is a prefix of another does not take its entries', () => {
+    // 'user-1' must not sweep 'user-10' — the separator is what prevents it.
+    savePosition('user-1', 'a', 300, 600);
+    savePosition('user-10', 'a', 120, 600);
+    clearUser('user-1');
+    expect(loadPosition('user-1', 'a', 600)).toBeNull();
+    expect(loadPosition('user-10', 'a', 600)).toBe(120);
   });
 });
