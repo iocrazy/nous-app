@@ -208,6 +208,7 @@ _REAL_CONSUME_KWARGS = {
 def _fake_points(result):
     ps = MagicMock()
     ps.check_and_consume = AsyncMock(return_value=result)
+    ps.ensure_team_quota = AsyncMock(return_value={"team_id": "42"})
     return ps
 
 
@@ -268,6 +269,39 @@ async def test_the_charge_lands_as_the_row_shape_the_readers_query():
     # reference_type ← action_type：必须是字面量 agent_run，不跟 trigger 走。
     assert kwargs["action_type"] == "agent_run"
     assert kwargs["reference_id"] == "900000000000007"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_team_gets_provisioned_before_the_debit():
+    """team_quotas 行不是注册时建的 —— mig 239 明确把它留给
+    PointsService.ensure_team_quota，而八个 router 调用方每一个都先调它。
+    这条路径不调，就意味着「第一次付费动作恰好是 agent run」的团队永远拿
+    `Team quota not found`（rpc_consume_team_points, mig 120）而扣不到分 ——
+    等于本 Task 要修的那个缺陷换了个机制继续存在。"""
+    ps = _fake_points(
+        {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+    )
+    await _reconcile(ps)
+    ps.ensure_team_quota.assert_awaited_once()
+    # 顺序要紧：先建配额行再扣，反过来第一次必然扣空。
+    assert ps.mock_calls.index(
+        next(c for c in ps.mock_calls if c[0] == "ensure_team_quota")
+    ) < ps.mock_calls.index(
+        next(c for c in ps.mock_calls if c[0] == "check_and_consume")
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_kill_switch_provisions_nothing_either():
+    """急停时不该顺手给团队开配额 + 发欢迎积分 —— 关掉的是整条计费路径。"""
+    ps = _fake_points(
+        {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+    )
+    with patch.object(tb.settings, "AGENT_POINTS_CHARGE_ENABLED", False):
+        await _reconcile(ps)
+    ps.ensure_team_quota.assert_not_awaited()
 
 
 @pytest.mark.unit

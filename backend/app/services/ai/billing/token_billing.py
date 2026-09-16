@@ -316,6 +316,12 @@ async def reconcile_run(
         from app.services.billing.points_service import PointsService
 
         ps = PointsService()
+        # team_quotas 行**不是**注册时建的 —— mig 239 的注释明确把它留给
+        # ensure_team_quota，而八个 router 调用方每一个都先调它。这条路径不调，
+        # 「第一次付费动作恰好是 agent run」的团队就永远拿 rpc_consume_team_points
+        # 的 `Team quota not found`（mig 120）而扣不到分：本 Task 要修的缺陷换个
+        # 机制继续存在。放在急停判断之后 —— 关掉计费时不该顺手发欢迎积分。
+        await ps.ensure_team_quota(str(team_id), user_id=str(user_id))
         # 真签名见 points_service.py::check_and_consume。此前这里传 points= /
         # action= / metadata= —— 三个不存在的关键字，外加缺了必填的 user_id /
         # action_type，于是每一次 completed + cost>0 的 run 都 TypeError 并被下面
