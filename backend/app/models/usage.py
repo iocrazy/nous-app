@@ -122,8 +122,8 @@ class AiUsageHourly(Base):
         Integer, nullable=False, server_default=text("0")
     )
     # 472 (3c §3.2): 加法累加器 —— record_usage 的 upsert 走 `col + EXCLUDED.col`，
-    # 所以 NOT NULL DEFAULT 0 是必需的，不是洁癖。event_count 不动：它是「有
-    # token 的完成」数，语义不同。
+    # 所以 NOT NULL DEFAULT 0 是必需的，不是洁癖。event_count 不跟着 run_count
+    # 走：它数的是有 token 的完成，与 run_count 语义不同。
     run_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

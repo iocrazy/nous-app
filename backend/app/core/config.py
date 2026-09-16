@@ -94,6 +94,15 @@ class Settings(BaseSettings):
         "= flip back to false.",
     )
 
+    AGENT_POINTS_CHARGE_ENABLED: bool = Field(
+        default=True,
+        description="Agent run 结束后是否真扣团队积分（3c A3）。这条链从上线起就"
+        "因为四个关键字不匹配而每轮 TypeError，被吞成 WARNING，所以修好之后它会"
+        "**真的**动用户余额 —— 需要一个不改代码就能拉闸的开关。关闭时 "
+        "ai_usage_logs 照写（审计不断），只跳过 PointsService.check_and_consume，"
+        "ReconcileResult.note = 'charging disabled'。",
+    )
+
     # ============================================
     # Feature flags — optional capabilities (default off; flip via .env)
     # ============================================

@@ -24,6 +24,7 @@ Used by:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -31,6 +32,8 @@ from typing import List, Optional
 from uuid import UUID
 
 from loguru import logger
+
+from app.core.config import settings
 
 
 @dataclass(frozen=True)
@@ -229,6 +232,27 @@ async def reconcile_run(
     (user_id, session_id, agent_id, model, created_at-bucket) — but
     the safer way is for the caller (RunRecorder._finish) to invoke
     this exactly once per run. Repeated calls would double-charge.
+
+    ``cost_points`` 是这个 run 的**自身**花费（own + media），不是树总额 ——
+    父行再按树总额扣一遍就是对同一笔钱收两次（3c A3，与 ai_usage_hourly 的
+    A1 同口径）。
+
+    这条口径成立的前提是**子 run 自己也扣得到**，而它一度不成立：
+    ``subagent_task_service`` 与 ``agent_worker`` 两个派发站点都硬编码
+    ``team_id=None``，子 run 在下面的 ``if not team_id`` 早退，于是委派烧掉的
+    钱两边都不收。评审轮 1 已让两处继承父 run 的 team（``team_of_run``），所以
+    现在是父子各扣各的。**仍然不扣的主要是顶层 workforce 派发** —— 它没有父
+    run 可继承，team 为空，按设计不计费。另有两种同样落到 team 为空：父 run
+    自己就没有 team（个人 scope 的对话派出去的活）；``team_of_run`` 查库失败
+    降级 None（宁可少收一次，也不让一次读失败把派发弄挂）。
+
+    Stated Limitation（BYOK 重复计费，3c A3）：``agent_runs`` / ``generated_media``
+    都没有 run 级 BYOK 标记，``RunRecorder`` 也没有对应 kwarg，所以调用方一律
+    传 ``byo_key=False``。影响面有限 —— BYOK 的 LLM 模型通常不在
+    ``ai_model_prices`` 里（own_cents 为 0，天然不进扣费分支）；真正受影响的只
+    有管理员配了 ``per_call_cents`` 的 BYOK 图片模型，它们会被按平台价扣一次。
+    闭合它要加列 + 改 RunRecorder 构造签名，另立票；现阶段的兜底是
+    ``settings.AGENT_POINTS_CHARGE_ENABLED``。
     """
     total_tokens = prompt_tokens + completion_tokens
 
@@ -282,30 +306,88 @@ async def reconcile_run(
             note="no team_id or zero cost — skipping points consume",
         )
 
+    if not settings.AGENT_POINTS_CHARGE_ENABLED:
+        # 急停：审计行上面第 1 步已经写了，这里只是不动余额。一条 INFO 而不是
+        # 静默跳过 —— 「余额没动」必须能在日志里跟「扣失败」区分开。
+        logger.info(
+            f"[token_billing] points charging disabled by kill switch: "
+            f"team_id={team_id} run_id={run_id} points={cost_points}"
+        )
+        return ReconcileResult(
+            charged=False,
+            charged_points=0.0,
+            byo_key=False,
+            usage_logged=usage_logged,
+            note="charging disabled",
+        )
+
     try:
         from app.services.billing.points_service import PointsService
 
         ps = PointsService()
-        # PointsService rounds + writes to point_consumption_log internally.
-        ok = await ps.check_and_consume(
+        # team_quotas 行**不是**注册时建的 —— mig 239 的注释明确把它留给
+        # ensure_team_quota，而八个 router 调用方每一个都先调它。这条路径不调，
+        # 「第一次付费动作恰好是 agent run」的团队就永远拿 rpc_consume_team_points
+        # 的 `Team quota not found`（mig 120）而扣不到分：本 Task 要修的缺陷换个
+        # 机制继续存在。放在急停判断之后 —— 关掉计费时不该顺手发欢迎积分。
+        #
+        # 自己一个 try：与扣分共用时，开配额抖一下就把扣分一起吞掉，日志还写
+        # "points consume failed" —— 而扣分其实从未尝试。往下走永远更安全：
+        # 真缺行时 RPC 自己会回 Team quota not found，语义一点不丢。
+        try:
+            await ps.ensure_team_quota(str(team_id), user_id=str(user_id))
+        except Exception as exc:  # noqa: BLE001 — 开配额失败不该拦住扣分尝试
+            logger.warning(
+                f"[token_billing] quota provisioning failed (charging anyway): "
+                f"team_id={team_id} run_id={run_id} error={exc}"
+            )
+
+        # 真签名见 points_service.py::check_and_consume。此前这里传 points= /
+        # action= / metadata= —— 三个不存在的关键字，外加缺了必填的 user_id /
+        # action_type，于是每一次 completed + cost>0 的 run 都 TypeError 并被下面
+        # 的 except 吞成 WARNING：ai_usage_logs 有记录、余额一分没动，整整一个
+        # 上线周期。
+        #
+        # action_type 是**字面量** "agent_run" 而不是 ``action``（= RunRecorder
+        # 的 trigger）：PointsService 把它原样写进 point_transactions.reference_type，
+        # 而效率账按 reference_type='agent_run' + reference_id=<run_id> 反查扣分。
+        # 跟着 trigger 走会让那张表按触发方式碎成若干值，读方一条都查不到。
+        #
+        # override_cost 是整数积分，向上取整：0.3 分的 run 扣 1 分而不是 0 ——
+        # 向下取整会让一整类小额 run 白跑。
+        res = await ps.check_and_consume(
             team_id=str(team_id),
-            points=Decimal(str(cost_points)),
-            action=action,
-            metadata={
-                "run_id": str(run_id),
-                "model": model,
-                "tokens": total_tokens,
-            },
+            user_id=str(user_id),
+            action_type="agent_run",
+            reference_id=str(run_id),
+            override_cost=int(math.ceil(cost_points)),
+            description=f"{model} · {total_tokens} tokens",
         )
+        # 返回 Dict[str, Any]（success / points_cost / balance_after / reason），
+        # 不是 bool。余额不足与「RPC 不可用」都走 success=False 而**不 raise** ——
+        # 旧代码 `charged=bool(ok)` 对任何非空 dict 恒 True，把这两种拒绝都记成了
+        # 一次成功扣费。
+        ok = bool(res.get("success"))
+        if not ok:
+            logger.warning(
+                f"[token_billing] points consume denied: team_id={team_id} "
+                f"run_id={run_id} points={cost_points} "
+                f"reason={res.get('reason')!r}"
+            )
         return ReconcileResult(
-            charged=bool(ok),
-            charged_points=cost_points if ok else 0.0,
+            charged=ok,
+            # 实际从余额扣走的整数（ceil 之后），不是 ceil 之前的 float ——
+            # 一个叫 charged_points 的字段在计费结构里报别的数就是在骗人。
+            charged_points=float(res.get("points_cost") or 0.0) if ok else 0.0,
             byo_key=False,
             usage_logged=usage_logged,
-            note=None if ok else "PointsService.check_and_consume returned False",
+            note=None if ok else (res.get("reason") or "points consume denied"),
         )
     except Exception as exc:
-        logger.warning(f"[token_billing] points consume failed: {exc}")
+        logger.warning(
+            f"[token_billing] points consume failed: team_id={team_id} "
+            f"run_id={run_id} points={cost_points} error={exc}"
+        )
         return ReconcileResult(
             charged=False,
             charged_points=0.0,

@@ -552,13 +552,22 @@ class PointsService:
             logger.debug(f"Team quota already exists for team {team_id}")
             return existing
 
-        # Create a new quota record
+        # Create a new quota record. ``_if_absent`` because the read above and
+        # this write are not one transaction: two callers can both find no row.
+        # ``created`` is what decides the bonus — granting it on "the row
+        # exists now" would write two 500-point gifts for one team.
         initial_balance = FREE_WELCOME_POINTS if grant_free_points else 0
-        quota = await self.repo.create_team_quota(
+        quota, created = await self.repo.create_team_quota_if_absent(
             team_id=team_id,
             points_balance=initial_balance,
             storage_limit_bytes=DEFAULT_STORAGE_LIMIT_BYTES,
         )
+        if not created:
+            logger.info(
+                f"Team quota for team {team_id} was created concurrently; "
+                f"returning it without a second welcome bonus"
+            )
+            return quota
 
         logger.info(
             f"Created team quota for team {team_id} "
