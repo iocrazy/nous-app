@@ -14,8 +14,10 @@ from app.schemas.search import (
     SemanticSearchRequest,
     TextSearchRequest,
 )
+from app.schemas.unified_search import UnifiedSearchResponse
 from app.services.library.like_escape import escape_like
 from app.services.library.search_service import SearchService
+from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 
 router = APIRouter(prefix="/search", tags=["Search"])
 
@@ -544,3 +546,81 @@ async def quick_search(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed.",
         )
+
+
+# ---------------------------------------------------------------------------
+# Unified search across issues / runs / outputs (harness 三期 3c §2.3)
+#
+# 挂在**同一个** router 上而不是新开一个：``/search`` 这个前缀已经是它的，
+# 而本端点占的是裸路径（``GET /api/v1/search``），与上面五条子路径
+# （``/semantic`` ``/hybrid`` ``/text`` ``/similar/{id}`` ``/quick``）不相交。
+# 另起一个同前缀的 router 只会让「谁拥有 /search」变成两个答案。
+#
+# 上面那些是**资源库**检索（parsed_media / 语义向量）；这一条是**工作**检索
+# （议题 / run / 产出）。两者共享前缀但不共享任何数据源、响应形状或可见性
+# 规则——所以响应模型也分在两个模块里，见 ``schemas/unified_search.py``。
+#
+# **没有模块门。** ``/outputs`` 骑 ``todolist`` 的门是因为它只服务议题详情页的
+# 血缘面板；检索是跨模块的入口（⌘K），对着没开某个模块的人关掉整个搜索框，
+# 等于让他搜不到自己本来就能看见的东西。可见性由 ``unified_search`` 的两道门
+# 负责，那才是这个端点的边界。
+#
+# **拒绝只有一种形状：typed 400。** 越权不在这里拒绝——它在服务层化成
+# 空组 + 200（跨团队端点上，「不许你看」和「不存在」必须同一个答案）。
+# ---------------------------------------------------------------------------
+
+#: 一个字的查询在 trgm 上退化成全表匹配，而它几乎一定是「还在打字」。
+MIN_QUERY_CHARS = 2
+
+
+def _reject_search(code: str, message: str) -> HTTPException:
+    # detail 必须是 dict：生产的 ErrorResponse 外壳只让 dict 落到 details，
+    # 字符串会塌成 http_400 + "400 Bad Request"（CLAUDE.md 2026-09-09）。
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": code, "message": message},
+    )
+
+
+@router.get("", response_model=UnifiedSearchResponse)
+async def unified_search_endpoint(
+    auth: AuthDep,
+    q: str = Query(..., max_length=200),
+    kinds: Optional[str] = Query(None),
+    team_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
+    issue_id: Optional[int] = Query(None),
+    limit_per_group: int = Query(10, ge=1, le=50),
+) -> UnifiedSearchResponse:
+    """三组命中 + 每组总数 + 服务端墙钟。
+
+    ``limit_per_group`` 的上限在签名里：分组裁剪在 Python 层做，SQL 要按它的
+    三倍取，所以一个没上限的值会让数据库替调用方的笔误买单。
+    """
+    term = q.strip()
+    if len(term) < MIN_QUERY_CHARS:
+        raise _reject_search(
+            "query_too_short", f"a search needs at least {MIN_QUERY_CHARS} characters"
+        )
+    asked = {k.strip() for k in (kinds or "").split(",") if k.strip()}
+    # ``kinds`` 缺席、空串、或只有逗号 —— 三者都是「没挑」，给全部三组。
+    # 只有「挑了，但挑的全不认得」才是拒绝。
+    if not asked:
+        wanted = set(ALL_SEARCH_KINDS)
+    else:
+        # 认得的留下，认不得的丢掉——新版本前端多送一个 kind 不该让整次搜索
+        # 失败。全都认不得才是拒绝：那时调用方要的东西一件没给。
+        wanted = asked & ALL_SEARCH_KINDS
+        if not wanted:
+            raise _reject_search(
+                "unknown_kinds", f"none of {sorted(asked)} is a searchable kind"
+            )
+    return await unified_search(
+        auth=auth,
+        q=term,
+        kinds=wanted,
+        team_id=team_id,
+        project_id=project_id,
+        issue_id=issue_id,
+        limit_per_group=limit_per_group,
+    )
