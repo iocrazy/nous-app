@@ -691,6 +691,11 @@ class AgentRunner:
             # Per-iteration tool_call accumulation. Provider sends each
             # tool_call as deltas across multiple chunks; we stitch them.
             tool_call_buf: dict[int, dict] = {}
+            # 3c §4.1：本步已发出的正文（过滤后，与用户逐字相同）。只在这一步真调了
+            # 工具时用得上——没调工具的那一步，文本调用方自己已收全。声明留在
+            # per-iteration 块里（每轮重置），提到循环外会让第二步的叙述带上第一步的
+            # 文本。
+            step_text: list[str] = []
             final_finish: Optional[str] = None
             final_usage: Optional[dict] = None
 
@@ -711,6 +716,8 @@ class AgentRunner:
 
                     # Forward filtered text delta + tool_call deltas to caller.
                     emit_text = reason_filter.feed(chunk.delta_text)
+                    if emit_text:
+                        step_text.append(emit_text)
                     if emit_text or chunk.tool_call_delta:
                         yield StreamChunk(
                             delta_text=emit_text,
@@ -784,6 +791,19 @@ class AgentRunner:
                     tool_call_trace=tool_call_trace,
                 )
                 return
+
+            # 3c §4.1：与非流式同一条事件。累的是**过滤后**的文本，所以 transcript
+            # 里读到的与气泡里读到的逐字相同（reason_filter 吃掉的 <think> 不该上
+            # 时间线）。
+            narration = "".join(step_text).strip()
+            if narration:
+                await emit_event(
+                    recorder,
+                    "assistant",
+                    {"content": narration, "partial": True, "step": iteration},
+                    turn=1,
+                    step=iteration,
+                )
 
             # Append assistant tool-use message
             assistant_msg = {
@@ -1938,6 +1958,19 @@ class AgentRunner:
             # reply would 400 the next API call (orphaned tool_use).
             messages.append(msg)
             assistant_msg_index = len(messages) - 1
+            # 3c §4.1：这一步模型先说的话。在这之前 ``assistant`` 只在「这一步没有
+            # 工具调用」时写（上面的 ``if not tool_calls:`` 分支），所以「先交代
+            # 现状、再动手」的文本从没进过 transcript。``partial`` 把它与最终回答
+            # 分开，折叠器按这个键分流。
+            narration = strip_reasoning(msg.get("content") or "")
+            if narration:
+                await emit_event(
+                    recorder,
+                    "assistant",
+                    {"content": narration, "partial": True, "step": iteration},
+                    turn=1,
+                    step=iteration,
+                )
 
             # Resolve each tool call (with hook chain bracketing).
             for call in tool_calls:
