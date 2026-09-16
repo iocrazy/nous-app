@@ -205,3 +205,57 @@ async def test_an_unusable_run_id_still_gets_a_frame_out(monkeypatch):
             "outputs": [],
         }
     ]
+
+
+async def test_a_failed_points_read_empties_only_that_field(monkeypatch):
+    """积分读 raise 时，rollup 其余字段照常，只有 ``charged_points`` 空掉。
+
+    仓库层现在一律 raise（`/ai-library/runs/costs` 靠它答 503，而不是把一个真花了钱
+    的 run 显示成免费）。降级的责任落在这里，因为这个端点是被轮询的驾驶舱：一个字段
+    读不到，不该让整块进度、子议题、收件箱计数跟着一起消失。
+
+    注意 ``asyncio.gather`` 的默认行为正好相反——任何一个协程抛出，整个 gather 抛出。
+    所以这条不是「顺带成立」，是必须写出来的分支。
+    """
+    import app.repositories.agent_run_inbox_repository as inbox_mod
+    import app.repositories.agent_runs_repository as runs_mod
+    import app.repositories.issue_repository as issue_mod
+    import app.repositories.points_repository as points_mod
+    import app.services.issues.issue_rollup as rollup
+
+    class _Runs:
+        async def list_for_issue(self, **_kw):
+            return [
+                {"id": 776, "status": "completed", "started_at": None, "model": "m"}
+            ]
+
+        async def last_transcript_seq(self, run_id):
+            return 42
+
+        async def efficiency_for_issue(self, _issue_id):
+            return {"tool_calls": 7}
+
+    class _Inbox:
+        async def pending_count(self, **_kw):
+            return 3
+
+    class _BrokenPoints:
+        async def charged_points_for_references(self, **_kw):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
+    monkeypatch.setattr(inbox_mod, "get_agent_run_inbox_repository", lambda: _Inbox())
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _BrokenPoints())
+    monkeypatch.setattr(
+        issue_mod.issue_repository, "list_children", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(rollup, "resolve_origin", AsyncMock(return_value={}))
+
+    out = await rollup.load_rollup(dict(ISSUE, ai_session_id=None))
+
+    # 其余字段照常 —— 效率账与它同在一个 gather 里，必须活下来。
+    assert out["inbox_pending"] == 3
+    assert out["efficiency"]["tool_calls"] == 7
+    assert out["runs"] and out["runs"][0]["id"] == "776"
+    # 而积分字段空掉：None 读作「不知道扣没扣」，不是 0（那会说成免费）。
+    assert out["runs"][0]["charged_points"] is None

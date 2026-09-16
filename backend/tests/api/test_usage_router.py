@@ -169,3 +169,75 @@ async def test_issue_usage_success_for_creator(app, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["issue_id"] == "555" and body["total_tokens"] == 70
+
+
+class _TeamOk:
+    async def get_team_by_id(self, team_id, user_id):
+        return {"id": team_id}
+
+
+async def test_summary_carries_the_efficiency_counters(monkeypatch):
+    """小时表的五个计数列必须一路到 wire——UI 的六枚 tile 全靠它们。"""
+    counters = {
+        "run_count": 5,
+        "failed_runs": 1,
+        "tool_calls": 20,
+        "tool_errors": 2,
+        "deliverables": 8,
+    }
+
+    async def _summarize(**kw):
+        return {
+            "total": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+                "cached_input_tokens": 0,
+                "cost_cents": 40.0,
+                "event_count": 3,
+                **counters,
+            },
+            "groups": [
+                {
+                    "grp": "doubao",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "total_tokens": 12,
+                    "cost_cents": 40.0,
+                    "event_count": 3,
+                    **counters,
+                }
+            ],
+            "daily": [
+                {
+                    "day": "2026-09-15",
+                    "grp": "doubao",
+                    "total_tokens": 12,
+                    "cost_cents": 40.0,
+                    **counters,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(ur.usage_repository, "summarize", _summarize)
+    monkeypatch.setattr(ur, "get_team_repository", lambda: _TeamOk())
+    out = await ur.usage_summary(_AuthStub(), team_id="1", group_by="model")
+    assert (out.total.run_count, out.total.tool_errors) == (5, 2)
+    assert out.total.cost_per_deliverable_cents == 5.0
+    assert out.groups[0].deliverables == 8
+    assert out.daily[0].run_count == 5
+
+
+async def test_a_window_with_no_outputs_has_a_null_ratio(monkeypatch):
+    async def _summarize(**kw):
+        return {
+            "total": {"cost_cents": 40.0, "deliverables": 0},
+            "groups": [],
+            "daily": [],
+        }
+
+    monkeypatch.setattr(ur.usage_repository, "summarize", _summarize)
+    monkeypatch.setattr(ur, "get_team_repository", lambda: _TeamOk())
+    assert (
+        await ur.usage_summary(_AuthStub(), team_id="1", group_by="model")
+    ).total.cost_per_deliverable_cents is None

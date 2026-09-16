@@ -14,6 +14,13 @@ class UsageTotals(BaseModel):
     cached_input_tokens: int = 0
     cost_cents: float = 0.0
     event_count: int = 0
+    run_count: int = 0
+    failed_runs: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    deliverables: int = 0
+    #: 0 件产出 → None（不知道单价），不是 0.0。
+    cost_per_deliverable_cents: Optional[float] = None
 
 
 class UsageGroupRow(BaseModel):
@@ -25,6 +32,13 @@ class UsageGroupRow(BaseModel):
     total_tokens: int = 0
     cost_cents: float = 0.0
     event_count: int = 0
+    run_count: int = 0
+    failed_runs: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    deliverables: int = 0
+    #: 0 件产出 → None（不知道单价），不是 0.0。
+    cost_per_deliverable_cents: Optional[float] = None
 
 
 class UsageDailyRow(BaseModel):
@@ -34,6 +48,11 @@ class UsageDailyRow(BaseModel):
     key: Optional[str] = None
     total_tokens: int = 0
     cost_cents: float = 0.0
+    run_count: int = 0
+    failed_runs: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    deliverables: int = 0
 
 
 class UsageSummaryResponse(BaseModel):

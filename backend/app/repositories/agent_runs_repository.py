@@ -987,6 +987,117 @@ class AgentRunsRepository(AsyncpgRepository):
             return []
 
     # ------------------------------------------------------------------
+    # Efficiency read face (3c §3.3)
+    # ------------------------------------------------------------------
+
+    async def efficiency_groups(
+        self,
+        *,
+        frm: datetime,
+        to: datetime,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        group_by: str = "model",
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """按 model 或 agent 分组的效率原料 + 全窗口的 turn_end 分布。
+
+        三个 scope 参数至少一个非空由调用方保证（user 锁调用者，team/project 过成员
+        门）。这里**不兜底**——一个没有任何 where 的跨团队全表聚合，是这条链上最贵也
+        最危险的查询。返回原始计数而不是比率：分母语义（0 次调用 vs 0 件产出）在路由
+        层统一处理一次，两处各算一遍必然漂移。读失败一律 raise（路由转 503）——空结果
+        会被读成「这段时间没花钱」。
+        """
+        key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
+        scope = [AgentRuns.created_at >= frm, AgentRuns.created_at < to]
+        if user_id is not None:
+            scope.append(AgentRuns.user_id == user_id)
+        if team_id is not None:
+            scope.append(AgentRuns.team_id == int(team_id))
+        if project_id is not None:
+            scope.append(AgentRuns.project_id == int(project_id))
+        # A run only has a duration once BOTH endpoints are stamped; the FILTER
+        # keeps half-stamped rows out of the average's denominator instead of
+        # letting them read as "instant".
+        timed = and_(AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None))
+        try:
+            rows_stmt = (
+                select(
+                    key_col.label("key"),
+                    func.count().label("run_count"),
+                    func.sum(
+                        case(
+                            (AgentRuns.status.in_(("failed", "heartbeat_lost")), 1),
+                            else_=0,
+                        )
+                    ).label("failed_runs"),
+                    func.count().filter(timed).label("timed_runs"),
+                    func.coalesce(
+                        func.sum(
+                            func.extract(
+                                "epoch", AgentRuns.ended_at - AgentRuns.started_at
+                            )
+                        ).filter(timed),
+                        0,
+                    ).label("total_seconds"),
+                    func.coalesce(func.sum(AgentRuns.tool_calls), 0).label(
+                        "tool_calls"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.tool_errors), 0).label(
+                        "tool_errors"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
+                        "deliverables"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
+                        "cost_cents"
+                    ),
+                )
+                .where(*scope)
+                .group_by(key_col)
+            )
+            reasons_stmt = (
+                select(AgentRuns.turn_end_reason, func.count())
+                .where(*scope)
+                .where(AgentRuns.turn_end_reason.isnot(None))
+                .group_by(AgentRuns.turn_end_reason)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(rows_stmt)).mappings().all()
+                reasons = (await session.execute(reasons_stmt)).all()
+        except Exception as e:
+            logger.error(f"[agent_runs] efficiency_groups failed: {e}")
+            raise
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["key"] = "" if d["key"] is None else str(d["key"])
+            d["total_ms"] = int(float(d.pop("total_seconds") or 0.0) * 1000)
+            out.append(d)
+        return out, {str(k): int(v) for k, v in reasons}
+
+    async def cost_rows_for_ids(self, ids: List[int]) -> List[Dict[str, Any]]:
+        """这批 run 的花费与归属列。可见性判定在路由层——仓库不认识调用者。"""
+        if not ids:
+            return []
+        stmt = select(
+            AgentRuns.id,
+            AgentRuns.user_id,
+            AgentRuns.issue_id,
+            AgentRuns.cost_cents,
+            AgentRuns.model,
+            AgentRuns.status,
+            AgentRuns.prompt_tokens,
+            AgentRuns.completion_tokens,
+        ).where(AgentRuns.id.in_([int(i) for i in ids]))
+        try:
+            async with read_scope() as session:
+                return [dict(r) for r in (await session.execute(stmt)).mappings().all()]
+        except Exception as e:
+            logger.error(f"[agent_runs] cost_rows_for_ids failed: {e}")
+            raise
+
+    # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------
 

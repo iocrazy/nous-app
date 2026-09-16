@@ -796,8 +796,15 @@ class PointsRepository:
             # 扣了多少。abs() 会把一个本不该出现的正数悄悄读成扣分，掩盖数据异常。
             return {str(ref): -float(amount or 0) for ref, amount in rows}
         except Exception as e:
+            # RAISE, never ``{}``. The two readers want opposite things from a
+            # failure and only one of them can be served by a default: the cost
+            # bubble (/ai-library/runs/costs) must say 503 rather than render a
+            # billed run as free, while the issue rollup degrades this one field
+            # and keeps the rest. So the failure travels, and each consumer
+            # decides — ``issue_rollup.load_rollup`` catches this and falls back
+            # to {} itself.
             logger.error(f"Failed to read charged points for {reference_type}: {e}")
-            return {}
+            raise
 
     async def get_transactions(
         self,

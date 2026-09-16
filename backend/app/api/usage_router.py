@@ -24,26 +24,14 @@ from app.schemas.usage import (
     UsageTotals,
 )
 
+# Shared with ai_library_router's efficiency endpoint — one parser so the two
+# windows cannot drift apart. Aliased to the historical private name so every
+# call site stays put.
+from app.utils.time_window import parse_window_dt as _parse_dt
+
 router = APIRouter(prefix="/usage", tags=["Usage"])
 
 _MAX_RANGE_DAYS = 366
-
-
-def _parse_dt(value: Optional[str], *, default: datetime.datetime) -> datetime.datetime:
-    """Parse a 'YYYY-MM-DD' or full-ISO string into a UTC-aware datetime.
-    Blank/invalid → default."""
-    if not value:
-        return default
-    try:
-        parsed = datetime.datetime.fromisoformat(value)
-    except ValueError:
-        try:
-            parsed = datetime.datetime.strptime(value, "%Y-%m-%d")
-        except ValueError:
-            return default
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-    return parsed
 
 
 def _num(value: Any) -> float:
@@ -56,6 +44,13 @@ def _int(value: Any) -> int:
     if value is None:
         return 0
     return int(value)
+
+
+def _per_output(cost: Any, delivered: Any) -> Optional[float]:
+    """每件产出多少分。0 件产出 → None（不知道单价），绝不是 0.0——「这段时间没做出
+    东西」和「做东西不要钱」是两回事，后者会让一张全是失败运行的账单看起来免费。"""
+    n = _int(delivered)
+    return round(_num(cost) / n, 4) if n > 0 else None
 
 
 @router.get("/summary", response_model=UsageSummaryResponse)
@@ -116,6 +111,14 @@ async def usage_summary(
             cached_input_tokens=_int(total.get("cached_input_tokens")),
             cost_cents=_num(total.get("cost_cents")),
             event_count=_int(total.get("event_count")),
+            run_count=_int(total.get("run_count")),
+            failed_runs=_int(total.get("failed_runs")),
+            tool_calls=_int(total.get("tool_calls")),
+            tool_errors=_int(total.get("tool_errors")),
+            deliverables=_int(total.get("deliverables")),
+            cost_per_deliverable_cents=_per_output(
+                total.get("cost_cents"), total.get("deliverables")
+            ),
         ),
         groups=[
             UsageGroupRow(
@@ -125,6 +128,14 @@ async def usage_summary(
                 total_tokens=_int(r.get("total_tokens")),
                 cost_cents=_num(r.get("cost_cents")),
                 event_count=_int(r.get("event_count")),
+                run_count=_int(r.get("run_count")),
+                failed_runs=_int(r.get("failed_runs")),
+                tool_calls=_int(r.get("tool_calls")),
+                tool_errors=_int(r.get("tool_errors")),
+                deliverables=_int(r.get("deliverables")),
+                cost_per_deliverable_cents=_per_output(
+                    r.get("cost_cents"), r.get("deliverables")
+                ),
             )
             for r in data["groups"]
         ],
@@ -134,6 +145,11 @@ async def usage_summary(
                 key=(str(r["grp"]) if r.get("grp") is not None else None),
                 total_tokens=_int(r.get("total_tokens")),
                 cost_cents=_num(r.get("cost_cents")),
+                run_count=_int(r.get("run_count")),
+                failed_runs=_int(r.get("failed_runs")),
+                tool_calls=_int(r.get("tool_calls")),
+                tool_errors=_int(r.get("tool_errors")),
+                deliverables=_int(r.get("deliverables")),
             )
             for r in data["daily"]
         ],
