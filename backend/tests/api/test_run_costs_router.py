@@ -125,3 +125,19 @@ async def test_the_literal_path_actually_reaches_this_endpoint(monkeypatch):
         resp = await c.get("/api/v1/ai-library/runs/costs?ids=1,2,3")
     assert resp.status_code == 200
     assert sorted(resp.json()["items"]) == ["1", "2"]
+
+
+async def test_a_billing_read_failure_is_a_typed_503_not_a_free_run(monkeypatch):
+    """积分读挂了就整条 503。降级成「没扣过」会把一批真花了钱的 run 显示成免费——
+    与「空结果不是否定结论」同族。"""
+    _stub(monkeypatch, {"77"})
+
+    class _Broken:
+        async def charged_points_for_references(self, *, reference_type, reference_ids):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(R, "get_points_repository", lambda: _Broken())
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids="1")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "run_costs_unavailable"

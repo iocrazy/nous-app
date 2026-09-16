@@ -2376,9 +2376,17 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
         for r in rows
         if str(r.get("user_id")) == me or str(r.get("issue_id")) in visible
     ]
-    charged = await get_points_repository().charged_points_for_references(
-        reference_type="agent_run", reference_ids=[str(r["id"]) for r in allowed]
-    )
+    try:
+        charged = await get_points_repository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=[str(r["id"]) for r in allowed]
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 不降级成「没扣过」——那等于告诉用户这些 run 是免费的。整条 503，让调用方
+        # 知道账目这会儿读不到。
+        logger.error(f"[runs/costs] charged points read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
     return {
         "items": {
             str(r["id"]): {
