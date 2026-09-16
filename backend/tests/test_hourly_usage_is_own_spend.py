@@ -15,6 +15,10 @@ import pytest
 
 from app.services.ai.runner import run_recorder as rr
 
+# 在 fixture 打桩之前绑住真身：event_count 的语义只在 record_usage 内部成立，
+# 光看 _finish 传了什么是证不出来的。
+from app.services.ai_usage import record_usage as _real_record_usage
+
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
@@ -51,25 +55,31 @@ def _recorder(*, views, prompt=10, completion=20):
 
 @pytest.fixture
 def captured(monkeypatch):
-    """拦下 record_usage 与 agent_runs 的 UPDATE，两边都记下来。"""
-    calls: dict[str, list] = {"usage": [], "update": []}
+    """拦下 record_usage、agent_runs 的 UPDATE，以及小时表自己的 upsert。"""
+    calls: dict[str, list] = {"usage": [], "update": [], "hourly": []}
 
     import app.db.session as db_session
     import app.services.ai_usage as ai_usage
 
-    @asynccontextmanager
-    async def _write_scope():
-        class _S:
-            async def execute(self, stmt):
-                calls["update"].append(stmt)
+    def _scope_into(sink: list):
+        @asynccontextmanager
+        async def _cm():
+            class _S:
+                async def execute(self, stmt):
+                    sink.append(stmt)
 
-        yield _S()
+            yield _S()
+
+        return _cm
 
     async def _record(**kwargs):
         calls["usage"].append(kwargs)
 
-    monkeypatch.setattr(db_session, "write_scope", _write_scope)
+    monkeypatch.setattr(db_session, "write_scope", _scope_into(calls["update"]))
     monkeypatch.setattr(ai_usage, "record_usage", _record)
+    # ai_usage 在模块顶层 `from app.db.session import write_scope`，所以上面那次
+    # 打桩够不着它，必须单独按住。
+    monkeypatch.setattr(ai_usage, "write_scope", _scope_into(calls["hourly"]))
     monkeypatch.setattr(
         "app.services.ai.billing.token_billing.reconcile_run", AsyncMock()
     )
@@ -77,8 +87,15 @@ def captured(monkeypatch):
 
 
 def _values(stmt) -> dict:
-    """UPDATE 的 values 是 BindParameter，取出里面的字面量再比。"""
+    """语句的 values 是 BindParameter，取出里面的字面量再比。"""
     return {k.name: getattr(v, "value", v) for k, v in stmt._values.items()}
+
+
+def _run_row_updates(calls: dict[str, list]) -> list:
+    """只要打在 agent_runs 上的那些 —— Task 13 的检索投影也走 write_scope。"""
+    return [
+        s for s in calls["update"] if getattr(s.table, "name", None) == "agent_runs"
+    ]
 
 
 async def test_the_children_own_rows_sum_to_the_root_column(captured):
@@ -96,7 +113,7 @@ async def test_the_children_own_rows_sum_to_the_root_column(captured):
         },
     ):
         await _recorder(views=views)._finish(status="completed")
-    root = _values(captured["update"][-1])["cost_cents"]
+    root = _values(_run_row_updates(captured)[-1])["cost_cents"]
     assert root == 22.0, "列仍是树总额（预算门禁靠它）"
     assert captured["usage"][-1]["cost_cents"] == 15.0
     assert sum(c["cost_cents"] for c in captured["usage"]) == root
@@ -137,3 +154,24 @@ async def test_a_media_only_run_still_reaches_the_hourly_table(captured):
     await rec._finish(status="completed")
     assert captured["usage"], "media-only run 也要进小时表"
     assert captured["usage"][0]["cost_cents"] == 6.0
+
+
+async def test_a_zero_token_failed_run_is_counted_but_is_not_an_event(captured):
+    """预检即拒、provider 认证失败、预算门禁停机 —— 这三类零 token 零花费，旧守门
+    把它们整行丢掉，于是 failed_runs 从第一天起偏低，而那正是效率账最该看见的
+    一类。它必须进表；但它不是一次 LLM 事件，所以 event_count 不动。"""
+    await _recorder(views={"cost": {}}, prompt=0, completion=0)._finish(
+        status="failed", error_code="provider_auth"
+    )
+    assert captured["usage"], "零 token 零花费的失败 run 也要进小时表"
+    kw = captured["usage"][0]
+    assert (kw["run_count"], kw["failed_runs"]) == (1, 1)
+    assert kw["cost_cents"] == 0.0
+
+    # 同一份 kwargs 喂进真的 record_usage：event_count 的语义在它内部，
+    # 光看 _finish 传了什么证不出来。
+    await _real_record_usage(**kw)
+    assert captured["hourly"], "upsert 没发出去，下面的断言会假绿"
+    vals = _values(captured["hourly"][-1])
+    assert vals["event_count"] == 0, "零 token 不是一次「有 token 的完成」"
+    assert (vals["run_count"], vals["failed_runs"]) == (1, 1)

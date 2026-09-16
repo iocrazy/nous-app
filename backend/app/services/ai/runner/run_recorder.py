@@ -833,8 +833,9 @@ class RunRecorder:
             float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
         )
         media_cents = float((folded or {}).get("media_cents") or 0.0)
-        # A1：小时表与积分账都收**自身**花费（own + media）。列里的 cost_cents
-        # 仍是树总额（review I3：父 run 完成时花费不能倒退），两个数各有其用。
+        # A1：小时表收**自身**花费（own + media；积分账待 Task 4）。列里的
+        # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
+        # 两个数各有其用。
         own_media_cents = round((own_cents or 0.0) + media_cents, 4)
         if own_cents is not None or children_cents or media_cents:
             cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
@@ -945,35 +946,37 @@ class RunRecorder:
         # parent that also carried its children's spend would double-count the
         # moment anything sums across runs — and the table has no
         # parent_run_id dimension to subtract it back out afterwards.
+        #
+        # 无条件写：`_finish` 只在终态被调（completed / failed / cancelled），
+        # 而**每一个**终态 run 都是效率账的一行样本，cost 与 token 可以是 0。
+        # 预检即拒、provider 认证失败、预算门禁停机 —— 这三类恰恰零 token 零
+        # 花费，也恰恰是 `failed_runs` 最该看见的那一类；任何以「烧了东西没有」
+        # 为条件的守门都会把它们整行丢掉，让失败率从第一天起偏低。
         eff_counts = self._efficiency_counts()
-        # token > 0 **或** 有媒体花费：只生了图、零 token 的 run 也是一次 run，
-        # 旧守门把它整行丢掉，run_count 从第一天起就偏低。预检即拒的 run 仍然
-        # 被挡在外面（零 token 零花费），不会造出空 bucket。
-        if (self._prompt_tokens + self._completion_tokens) > 0 or own_media_cents > 0:
-            try:
-                from app.services.ai_usage import record_usage
+        try:
+            from app.services.ai_usage import record_usage
 
-                await record_usage(
-                    module=self.trigger,
-                    attribution=effective_attribution,
-                    prompt_tokens=self._prompt_tokens,
-                    completion_tokens=self._completion_tokens,
-                    cached_input_tokens=self._cached_input_tokens,
-                    team_id=self.team_id,
-                    project_id=self.project_id,
-                    agent_id=self.agent_id,
-                    model=self.model,
-                    cost_cents=own_media_cents,
-                    run_count=1,
-                    # 「非 completed」而不是「status == failed」：cancelled 同样
-                    # 是一次没走到头的 run，成功率的分子只该数真的成功的那些。
-                    failed_runs=int(status != "completed"),
-                    tool_calls=int(eff_counts["tool_calls"] or 0),
-                    tool_errors=int(eff_counts["tool_errors"] or 0),
-                    deliverables=int(eff_counts["deliverables"] or 0),
-                )
-            except Exception as exc:  # noqa: BLE001 — defence in depth
-                logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
+            await record_usage(
+                module=self.trigger,
+                attribution=effective_attribution,
+                prompt_tokens=self._prompt_tokens,
+                completion_tokens=self._completion_tokens,
+                cached_input_tokens=self._cached_input_tokens,
+                team_id=self.team_id,
+                project_id=self.project_id,
+                agent_id=self.agent_id,
+                model=self.model,
+                cost_cents=own_media_cents,
+                run_count=1,
+                # 「非 completed」而不是「status == failed」：cancelled 同样
+                # 是一次没走到头的 run，成功率的分子只该数真的成功的那些。
+                failed_runs=int(status != "completed"),
+                tool_calls=eff_counts["tool_calls"],
+                tool_errors=eff_counts["tool_errors"],
+                deliverables=eff_counts["deliverables"],
+            )
+        except Exception as exc:  # noqa: BLE001 — defence in depth
+            logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
 
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be

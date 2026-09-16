@@ -143,7 +143,11 @@ async def record_usage(
                 "completion_tokens": int(completion_tokens or 0),
                 "cached_input_tokens": int(cached_input_tokens or 0),
                 "cost_cents": cost,
-                "event_count": 1,
+                # 「有 token 的完成」数（见 docstring）。零 token 的终态 run
+                # 照样进表并让 run_count +1，但它不是一次 LLM 事件。
+                "event_count": int(
+                    (int(prompt_tokens or 0) + int(completion_tokens or 0)) > 0
+                ),
                 "run_count": int(run_count or 0),
                 "failed_runs": int(failed_runs or 0),
                 "tool_calls": int(tool_calls or 0),
