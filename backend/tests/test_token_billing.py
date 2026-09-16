@@ -191,39 +191,142 @@ async def test_reconcile_zero_cost_skips_points():
     assert "zero cost" in (result.note or "")
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_reconcile_platform_run_calls_points_service():
-    """Non-BYO + team + cost > 0 → calls PointsService.check_and_consume."""
-    fake_ps = MagicMock()
-    fake_ps.check_and_consume = AsyncMock(return_value=True)
+# ``check_and_consume`` 的真签名（points_service.py）。集合断言而非逐个 in：
+# 此前这里传的是 points= / action= / metadata= 三个**不存在**的关键字，外加缺了
+# 必填的 user_id / action_type —— 每一次 completed + cost>0 的 run 都 TypeError，
+# 被 reconcile_run 的 except 吞成 WARNING，积分一分没扣。精确匹配才能挡住再漂。
+_REAL_CONSUME_KWARGS = {
+    "team_id",
+    "user_id",
+    "action_type",
+    "reference_id",
+    "override_cost",
+    "description",
+}
 
+
+def _fake_points(result):
+    ps = MagicMock()
+    ps.check_and_consume = AsyncMock(return_value=result)
+    return ps
+
+
+async def _reconcile(ps, **over):
+    kwargs = dict(
+        run_id="900000000000007",
+        user_id=uuid4(),
+        team_id=42,
+        project_id=None,
+        session_id=None,
+        agent_id=uuid4(),
+        model="nous_qwen-max",
+        prompt_tokens=10,
+        completion_tokens=20,
+        cost_points=2.5,
+        byo_key=False,
+    )
+    kwargs.update(over)
     with (
         patch("app.db.session.write_scope", new=_write_scope(ok=True)),
-        patch(
-            "app.services.billing.points_service.PointsService", return_value=fake_ps
-        ),
+        patch("app.services.billing.points_service.PointsService", return_value=ps),
     ):
-        result = await tb.reconcile_run(
-            run_id=uuid4(),
-            user_id=uuid4(),
-            team_id=42,
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="nous_qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=2.5,
-            byo_key=False,
-        )
-    assert result.charged is True
-    assert result.charged_points == 2.5
-    fake_ps.check_and_consume.assert_awaited_once()
-    # Must include team_id + run metadata
-    _, kwargs = fake_ps.check_and_consume.call_args
-    assert kwargs["team_id"] == "42"
-    assert "run_id" in kwargs["metadata"]
+        return await tb.reconcile_run(**kwargs)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reconcile_calls_the_real_signature_exactly():
+    """四个关键字全不匹配、两个必填缺失，每轮 TypeError 被吞成 WARNING ——
+    参数集合**精确**匹配，多一个少一个都红，防再次静默漂移。"""
+    ps = _fake_points(
+        {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+    )
+    result = await _reconcile(ps)
+    ps.check_and_consume.assert_awaited_once()
+    _, kwargs = ps.check_and_consume.call_args
+    assert set(kwargs) == _REAL_CONSUME_KWARGS
+    assert kwargs["team_id"] == "42" and kwargs["action_type"] == "agent_run"
+    assert kwargs["reference_id"] == "900000000000007"
+    assert kwargs["override_cost"] == 3  # ceil(2.5)
+    assert "nous_qwen-max" in kwargs["description"]
+    assert "30 tokens" in kwargs["description"]
+    assert result.charged is True and result.charged_points == 2.5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_charge_lands_as_the_row_shape_the_readers_query():
+    """效率账（Task 9/10）按 reference_type='agent_run' + reference_id=<run_id>
+    读 point_transactions，`charged_points = -SUM(amount)`。PointsService 把
+    ``reference_type`` 原样写成 ``action_type``、``amount`` 写成负数，所以这两个
+    关键字就是那张表的形状契约 —— 换成 self.trigger 之类的动态值，读方立刻查空。"""
+    ps = _fake_points(
+        {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+    )
+    await _reconcile(ps, action="chat")
+    kwargs = ps.check_and_consume.call_args[1]
+    # reference_type ← action_type：必须是字面量 agent_run，不跟 trigger 走。
+    assert kwargs["action_type"] == "agent_run"
+    assert kwargs["reference_id"] == "900000000000007"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_non_empty_dict_with_success_false_is_not_a_charge():
+    """旧代码 `charged=bool(ok)` 对非空 dict 恒 True —— 余额不足被记成扣过。"""
+    ps = _fake_points(
+        {
+            "success": False,
+            "points_cost": 3,
+            "balance_after": 0,
+            "reason": "Insufficient balance",
+        }
+    )
+    result = await _reconcile(ps)
+    assert result.charged is False and result.charged_points == 0.0
+    assert "Insufficient balance" in (result.note or "")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_rpc_unavailable_shape_is_also_not_a_charge():
+    """RPC 不可用时返回 dict（不 raise）—— 必须与「扣成功」分开，否则一次服务
+    降级会被记成一次收费。"""
+    ps = _fake_points(
+        {
+            "success": False,
+            "points_cost": 3,
+            "balance_after": None,
+            "reason": "Points service temporarily unavailable.",
+        }
+    )
+    result = await _reconcile(ps)
+    assert result.charged is False
+    assert "temporarily unavailable" in (result.note or "")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_kill_switch_skips_the_charge_but_still_logs_usage():
+    ps = _fake_points(
+        {"success": True, "points_cost": 3, "balance_after": 97, "reason": None}
+    )
+    with patch.object(tb.settings, "AGENT_POINTS_CHARGE_ENABLED", False):
+        result = await _reconcile(ps)
+    ps.check_and_consume.assert_not_awaited()
+    assert result.charged is False and result.usage_logged is True
+    assert result.note == "charging disabled"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fractional_cost_rounds_up_never_to_zero():
+    """0.3 分的 run 扣 1 分 —— 向下取整会让一整类小额 run 白跑。"""
+    ps = _fake_points(
+        {"success": True, "points_cost": 1, "balance_after": 99, "reason": None}
+    )
+    await _reconcile(ps, cost_points=0.3)
+    assert ps.check_and_consume.call_args[1]["override_cost"] == 1
 
 
 @pytest.mark.unit

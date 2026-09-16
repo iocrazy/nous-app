@@ -981,7 +981,7 @@ class RunRecorder:
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
         # able to roll back a finished agent_runs row.
-        if status == "completed" and cost_cents is not None and cost_cents > 0:
+        if status == "completed" and own_media_cents > 0:
             try:
                 from app.services.ai.billing.token_billing import reconcile_run
 
@@ -999,7 +999,13 @@ class RunRecorder:
                     model=self.model or "?",
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
-                    cost_points=float(cost_cents),
+                    # A3：按**自身**花费扣，不按树总额 —— 子 run 自己也会走到这里
+                    # 扣它那份，父行再扣一遍就是对同一笔钱收两次。
+                    cost_points=own_media_cents,
+                    # ⚠️ 3c A3 Stated Limitation：agent_runs 没有 run 级 BYOK 标记，
+                    # 所以管理员配了 per_call_cents 的 BYOK 图片模型会被按平台价扣
+                    # 一次。闭合它要加列 + 改构造签名，另立票；现阶段的兜底是
+                    # AGENT_POINTS_CHARGE_ENABLED。
                     byo_key=False,  # platform-model run; BYO-key runs
                     # set this true via a future RunRecorder kwarg or
                     # by inspecting the model string against the user's

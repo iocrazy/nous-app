@@ -119,6 +119,39 @@ async def test_the_children_own_rows_sum_to_the_root_column(captured):
     assert sum(c["cost_cents"] for c in captured["usage"]) == root
 
 
+async def test_the_points_charge_is_the_runs_own_spend_not_the_tree(
+    captured, monkeypatch
+):
+    """A3：父 run 的 cost_cents 列是树总额（22），但积分只能扣它自己那 15 ——
+    每个子 run 自己也会走到这条线扣它那份，父行再扣一遍就是对同一笔钱收两次。
+    小时表（A1）与积分账（A3）读的必须是同一个口径。"""
+    charged = AsyncMock()
+    monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
+    await _recorder(
+        views={
+            "cost": {
+                "own_cents": 10.0,
+                "by_child": {"c1": 3.0, "c2": 4.0},
+                "media_cents": 5.0,
+            }
+        }
+    )._finish(status="completed")
+    assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 22.0
+    assert charged.await_args.kwargs["cost_points"] == 15.0
+
+
+async def test_a_run_that_spent_nothing_itself_is_not_charged(captured, monkeypatch):
+    """自身零花费、只有子 run 烧了钱 —— 守门按树总额开会让这个父 run 替子 run
+    再付一次；按自身花费开则根本不进扣费分支。"""
+    charged = AsyncMock()
+    monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
+    await _recorder(
+        views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}}
+    )._finish(status="completed")
+    assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 3.0
+    charged.assert_not_awaited()
+
+
 async def test_the_counters_default_to_zero_then_follow_the_fold(captured):
     """efficiency fold（Part B Task 8）还没合时写 0 而不是炸；合了之后跟它走。"""
     await _recorder(views={"cost": {"own_cents": 1.0}})._finish(status="completed")
