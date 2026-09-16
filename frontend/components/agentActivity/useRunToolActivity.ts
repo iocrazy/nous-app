@@ -2,8 +2,16 @@
  * Fetch one run's tool calls from ``agent_run_transcript_events``.
  *
  * Used by the collaboration timeline, which — unlike the chat panel — has only
- * an ``agent_run_id`` and no in-hand trace. The panel must NOT use this hook:
- * it would render every call a second time (see toolActivity.ts's docstring).
+ * an ``agent_run_id`` and no in-hand trace.
+ *
+ * **What the chat panel may and may not take from it.** ``activities`` is off
+ * limits there: the panel already renders every call from its own in-hand
+ * trace, so a second source draws each one twice (see toolActivity.ts's
+ * docstring). ``nodes`` is exempt — it is the FOLDED trajectory, and the panel
+ * reads it only for "which step is live / which tool is still open", never to
+ * render lines. ``AIChatPanel.tsx``'s ``ChatRunStatus`` is that one use; a new
+ * caller in the panel has to meet the same condition (reads ``nodes``, renders
+ * no per-call rows) or it is the double-draw all over again.
  *
  * A finished run's transcript is immutable, so it is fetched once and cached
  * process-wide; a timeline with twenty runs in it would otherwise refetch on

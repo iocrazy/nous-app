@@ -35,7 +35,7 @@ const events = [
 
 describe('TrajectoryRenderer', () => {
   it('registers a renderer for every folded node kind', () => {
-    expect(registeredTrajectoryNodeKinds()).toEqual(['budget', 'denied', 'error', 'inbox', 'schedule', 'step', 'turn_end', 'user']);
+    expect(registeredTrajectoryNodeKinds()).toEqual(['budget', 'denied', 'error', 'inbox', 'narration', 'schedule', 'step', 'turn_end', 'user']);
   });
 
   it('shows only the live step expanded; a finished step is one summary row until clicked', () => {
@@ -55,6 +55,51 @@ describe('TrajectoryRenderer', () => {
     fireEvent.click(step1.querySelector('button')!);
     expect(step1.querySelectorAll('[data-testid="traj-line-tool"]')).toHaveLength(2);
     expect(screen.getAllByTestId('traj-step')).toHaveLength(1);
+  });
+
+  it('draws a partial assistant as a narration body ABOVE the step it belongs to (3c §4.1)', () => {
+    seq = 0;
+    render(
+      <TrajectoryRenderer
+        events={[
+          ev('step_start', { turn: 1, step: 1, model: 'm' }, 1),
+          ev('assistant', { content: 'Now I will check the shots.', partial: true, step: 1 }, 1),
+          ev('tool_call', { tool: 'ListShots', args: {}, iteration: 1, result: { ok: true } }, 1),
+        ]}
+        isRunning
+      />,
+    );
+    const narration = screen.getByTestId('traj-narration');
+    expect(narration.textContent).toContain('Now I will check the shots.');
+    // 叙述先于动作：DOM 顺序就是阅读顺序。
+    const step = screen.getByTestId('traj-step-live');
+    expect(narration.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 那一步的工具行读的是动作动词，不是工具名。
+    expect(step.textContent).toContain('Listed shots');
+    expect(step.textContent).not.toContain('ListShots');
+  });
+
+  it('a tool that failed only via the top-level error_code still reads as failed, with its duration', () => {
+    seq = 0;
+    render(
+      <TrajectoryRenderer
+        events={[
+          ev('step_start', { turn: 1, step: 1, model: 'm' }, 1),
+          ev('tool_call', {
+            tool: 'UpdateShot',
+            args: { shot_id: '42' },
+            iteration: 1,
+            result: { outcome: 'denied' },
+            error_code: 'denied',
+            duration_ms: 1200,
+          }, 1),
+        ]}
+        isRunning
+      />,
+    );
+    const line = screen.getByTestId('traj-line-tool');
+    expect(line.textContent).toContain('Edited shot 42 failed');
+    expect(line.textContent).toContain('1.2s');
   });
 
   it('renders nothing for an empty transcript', () => {

@@ -207,7 +207,9 @@ describe('collaboration timeline — one trajectory per run', () => {
     fireEvent.click(step.querySelector('button')!);
     const line = step.querySelector('[data-testid="traj-line-tool"]')!;
     expect(line.tagName).toBe('DIV');
-    expect(line.textContent).toContain('CreateShot');
+    // 3c §4.1 起这一行读的是动作动词，不是工具名（`CreateShot` → "Added shot"）。
+    // 本例断言的是「纯文本、没有可跳转的链接」，标签换词不改这个结论。
+    expect(line.textContent).toContain('Added shot');
     expect(line.querySelector('a')).toBeNull();
   });
 

@@ -634,3 +634,122 @@ describe('foldEvents — 迟到的 step_end 回到自己那一步 (C8)', () => {
     expect(step.live).toBe(false);
   });
 });
+
+describe('foldEvents — 阶段性叙述（3c §4.1）', () => {
+  it('partial 的 assistant 成为独立正文节点，排在它所属 step 节点之前', () => {
+    seq = 0;
+    const nodes = foldEvents([
+      ev('user', { content: 'go' }, { turn: 1 }),
+      ev('step_start', { turn: 1, step: 1, model: 'm' }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Here is where things stand.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ListShots', args: { scene_id: 7 }, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+      ev('step_end', { turn: 1, step: 1, duration_ms: 800 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'All done.' }, { turn: 1, step: 1 }),
+    ], { isRunning: false });
+    // 叙述在动作之前，与模型输出顺序一致。
+    expect(nodes.map((n) => n.kind)).toEqual(['user', 'narration', 'step']);
+    const narration = nodes[1];
+    if (narration.kind !== 'narration') throw new Error();
+    expect(narration.text).toBe('Here is where things stand.');
+    expect(narration.step).toBe(1);
+    expect(narration.key).toBe('narration:3');
+    // 最终回答（无 partial）仍是 step 里的一行 output——现状不变。
+    const step = nodes[2];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines.filter((l) => l.type === 'output')).toHaveLength(1);
+    expect(step.summary.outputs).toBe(1);
+  });
+
+  it('同一步两段叙述各成一个节点，都排在 step 之前', () => {
+    seq = 0;
+    expect(foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'First.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Second.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'Skill', args: {}, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+    ], { isRunning: false }).map((n) => n.kind)).toEqual(['narration', 'narration', 'step']);
+  });
+
+  it('空正文的 partial 事件不画节点', () => {
+    seq = 0;
+    expect(foldEvents([ev('assistant', { content: '   ', partial: true, step: 1 })], { isRunning: false })
+      .filter((n) => n.kind === 'narration')).toHaveLength(0);
+  });
+
+  it('叙述不会把还没开始的 step 提前开出来', () => {
+    seq = 0;
+    // 坐标齐全但 step_start 还没到：只画叙述，不造 step。
+    expect(foldEvents([ev('assistant', { content: 'Thinking out loud.', partial: true, step: 2 }, { turn: 1, step: 2 })], { isRunning: true })
+      .map((n) => n.kind)).toEqual(['narration']);
+  });
+
+  it('tool 行把 args 带进 detail —— 动作动词要拿它拼对象', () => {
+    seq = 0;
+    const step = foldEvents([ev('tool_call', { tool: 'UpdateShot', args: { shot_id: '42' }, iteration: 1, result: { ok: true } })], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].detail?.args).toEqual({ shot_id: '42' });
+  });
+});
+
+describe('foldEvents — tool 行的失败与耗时（3c Task 20 修复轮）', () => {
+  it('顶层 error_code 就是失败，哪怕 result 里没有 ok:false', () => {
+    seq = 0;
+    // 后端 `tool_error_code` 有三条来源（error_code / 非 ok 的 outcome / 有 error 键），
+    // 后两条都不带 `ok:false`——只认 ok 会把失败的动作读成成功。
+    const step = foldEvents([
+      ev('tool_call', {
+        tool: 'UpdateShot',
+        args: { shot_id: '42' },
+        iteration: 1,
+        result: { error_code: 'invalid_args' },
+        error_code: 'invalid_args',
+      }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(false);
+  });
+
+  it('outcome=denied 这类只在顶层 error_code 上现形的失败同样算失败', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('tool_call', { tool: 'RunCommand', args: {}, iteration: 1, result: { outcome: 'denied' }, error_code: 'denied' }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(false);
+  });
+
+  it('error_code 为 null 的调用仍是成功', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('tool_call', { tool: 'ListShots', args: {}, iteration: 1, result: { ok: true }, error_code: null, duration_ms: 800 }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(true);
+  });
+
+  it('tool 行读 payload 的 duration_ms；缺席才是 null —— 「还没回来」靠它判', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ListShots', args: {}, iteration: 1, result: { ok: true }, duration_ms: 800 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'GenerateImage', args: {}, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+    ], { isRunning: true })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines.map((l) => l.durationMs)).toEqual([800, null]);
+    // 「正在跑的那个工具」= 最后一条还没有耗时的行（AIChatPanel 的 openTool 判据）。
+    const open = [...step.lines].reverse().find((l) => l.type === 'tool' && l.durationMs === null);
+    expect(open?.detail?.tool).toBe('GenerateImage');
+  });
+});
+
+describe('foldEvents — 叙述缺坐标时的降级（3c Task 20 修复轮）', () => {
+  it('没有 step 坐标的叙述追加到末尾，落在 step 之后 —— 已知降级，不静默', () => {
+    seq = 0;
+    // Task 19 的契约保证 partial 行带 turn/step 坐标列；万一缺席（老行、别的写方），
+    // 找不到该插哪里，就按到达顺序追加——位置不对好过插错步。
+    expect(foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'No coordinates on me.', partial: true }),
+    ], { isRunning: false }).map((n) => n.kind)).toEqual(['step', 'narration']);
+  });
+});

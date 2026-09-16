@@ -5745,6 +5745,7 @@
     "elapsed": "实际 {{s}}",
     "you": "你",
     "step": "第 {{n}} 步",
+    "running": "正在运行 {{tool}}…",
     "live": "进行中",
     "tools": "{{count}} 个工具",
     "retries": "重试 ×{{count}}",
