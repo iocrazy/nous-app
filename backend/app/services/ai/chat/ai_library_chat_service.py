@@ -1440,6 +1440,17 @@ class AILibraryChatService:
         # 只给月度」正是这个后果），而 idx_agent_runs_billing 是
         # WHERE team_id IS NOT NULL 的 partial 索引 —— NULL 的 run 对任何按团队的
         # 效率账等于不存在。只在真缺时查一次议题，不给正常路径加往返。
+        #
+        # ⚠️ 这不只是记账字段 —— 两处行为会跟着变，方向都已核过：
+        # ① project 兜底会把原本 unbound 的 scope 变成 bound（AgentRunScope
+        #    .is_bound() 以 project_id is not None 为准），screenwriting 工具
+        #    因此从「一律 scope_unbound 拒绝」变成可解析该 project 下的对象。
+        #    安全性不靠这里的取值：scope_for_run 在每次解析时用
+        #    _user_can_read_project 重校验该 run 的 user 能否读这个 project，
+        #    读不到就整个 scope 返回 None（继续 fail-closed）。
+        # ② team_id 非空会激活 scope_resolver 的 team_mismatch 拒绝分支
+        #    （该分支的守卫正是 scope.team_id is not None）—— 方向是收紧，
+        #    原先 NULL 的 run 反而跳过了这一层跨团队检查。
         _issue_row = None
         if issue_id and not session.get("team_id"):
             from app.repositories.issue_repository import get_issue_repository
