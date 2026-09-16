@@ -1550,6 +1550,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="w-full h-full relative">
               <VideoPlayer
                 src={fileUrl}
+                resumeKey={`resource:${resource.id}`}
                 originalSrc={originalFileUrl || undefined}
                 mimeType={resource.mime_type || undefined}
                 authToken={authToken || undefined}

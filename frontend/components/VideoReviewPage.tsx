@@ -343,6 +343,9 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               {videoSrc ? (
                 <>
                   <VideoPlayer
+                    /* No explicit resumeKey: `videoSrc` is already
+                       `/media/{resource_id}` with no query, so the player's
+                       path fallback IS the stable identity here. */
                     src={videoSrc}
                     mimeType={videoMime}
                     fps={videoFps}
