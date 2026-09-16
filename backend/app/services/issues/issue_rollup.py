@@ -10,6 +10,7 @@ trusting the decoration produced. Priority:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 from typing import Any, Optional
 
@@ -220,11 +221,14 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
-    efficiency = await get_agent_runs_repository().efficiency_for_issue(issue_id)
+    # 效率账与积分账互不依赖，串行只是白等一个往返 —— 这个端点是被轮询的。
     # ``agent_run`` 是 A3 票定的 reference_type。runs 已是 root-only，就是 UI 要显示
     # 的那几行，不必为子 run 多查。
-    charged = await get_points_repository().charged_points_for_references(
-        reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
+    efficiency, charged = await asyncio.gather(
+        get_agent_runs_repository().efficiency_for_issue(issue_id),
+        get_points_repository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=[str(r["id"]) for r in runs]
+        ),
     )
     current = _current_run(runs)
     last_seq = (

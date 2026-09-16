@@ -318,23 +318,52 @@ describe('CockpitBlockView — efficiency cells (3c §3.3)', () => {
   // 少了它整块 view 读成 null、Outputs 格根本不渲染。照真实 wire 形状写。
   const VIEW = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, context: null, blocked: null, children: { total: 0, done: 0, running: 0, async_pending: 0, last: null }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
 
-  function withEfficiency(eff: Partial<IssueProgress['efficiency']>): IssueBlockContext {
+  function withEfficiency(
+    eff: Partial<IssueProgress['efficiency']>,
+    runOutputs: Record<string, unknown> | null = { total: 4, revised: 1, last: null, seen: [] },
+  ): IssueBlockContext {
     const base = ctx('running');
     const r = base.rollup as IssueProgress;
     return { ...base, rollup: { ...r, efficiency: { ...r.efficiency, ...eff },
       current_run: r.current_run
-        ? { ...r.current_run, view: { ...VIEW, outputs: { total: 4, revised: 1, last: null, seen: [] } } }
+        ? { ...r.current_run, view: runOutputs ? { ...VIEW, outputs: runOutputs } : { ...VIEW } }
         : null } };
   }
 
-  it('shows cost per output next to the outputs count', () => {
+  it('prices each output in its own cell, labelled as the whole-issue figure', () => {
     render(<CockpitBlockView ctx={withEfficiency({ deliverables: 4, cost_per_deliverable_cents: 5 })} />);
-    expect(screen.getByTestId('cockpit-outputs')).toHaveTextContent('/ output');
+    const cell = screen.getByTestId('cockpit-cost-per-output');
+    expect(cell).toHaveTextContent('/ output');
+    // 口径写在格子上：计数是全议题所有 run 的，不是当前这条 run 的。
+    expect(cell.getAttribute('title')).toBe('Across all runs of this issue');
   });
 
   it('shows nothing rather than \u00a20.00 when no output has been priced', () => {
     render(<CockpitBlockView ctx={withEfficiency({ deliverables: 0, cost_per_deliverable_cents: null })} />);
-    expect(screen.getByTestId('cockpit-outputs')).not.toHaveTextContent('/ output');
+    expect(screen.queryByTestId('cockpit-cost-per-output')).toBeNull();
+  });
+
+  it('prices outputs off the whole issue even when the live run registered none', () => {
+    // deliverables 是全议题口径；把成本挂在当前 run 的 outputs 上，会让「上一条
+    // run 产出了 3 件、这条刚开始」的常见时刻整格消失。
+    render(<CockpitBlockView ctx={withEfficiency({ deliverables: 3, cost_per_deliverable_cents: 7 }, null)} />);
+    expect(screen.queryByTestId('cockpit-outputs')).toBeNull();
+    expect(screen.getByTestId('cockpit-cost-per-output')).toHaveTextContent('/ output');
+  });
+
+  it('hides both efficiency cells while replaying a frozen step', () => {
+    // 它们是**全议题、当下**的数，跟「as of 某一步」不是同一个时刻 —— 与冻结时
+    // 花费只显示那一步的 spend 同一语义。
+    const frozenView = { ...VIEW, outputs: { total: 4, revised: 1, last: null, seen: [] } } as never;
+    render(
+      <ReplayContext.Provider value={{ runId: 'r1', seq: 30, view: frozenView, cost: null, loading: false, seek: vi.fn(), seekRun: vi.fn() }}>
+        <CockpitBlockView ctx={withEfficiency({ deliverables: 4, cost_per_deliverable_cents: 5, tool_calls: 20, tool_errors: 3 })} />
+      </ReplayContext.Provider>,
+    );
+    expect(screen.queryByTestId('cockpit-cost-per-output')).toBeNull();
+    expect(screen.queryByTestId('cockpit-tool-errors')).toBeNull();
+    // 冻结的是效率账，不是整块面板
+    expect(screen.getByTestId('cockpit-steps')).toBeTruthy();
   });
 
   it('surfaces tool errors as their own cell, and hides it when nothing failed', () => {

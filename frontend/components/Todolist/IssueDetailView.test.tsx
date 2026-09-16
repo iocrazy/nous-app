@@ -202,10 +202,13 @@ function mkProgress(over: Record<string, unknown> = {}) {
       view: { v: 1, phase: 'running', step: { done: 3, total: 7, label: 'Drafting scene 3' }, current: { turn: 1, step: 4, model: 'm' }, retry: null, context: { used_pct: 62, window: 128000 }, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 1, budget: null, revision: 9 },
       cost: { spent_cents: 0.9 },
     },
-    runs: [{ id: '501', status: 'running', started_at: '2026-08-03T00:00:00Z', ended_at: null, model: 'm', error_code: null, cost_cents: 0.9, ended: null, step: null }, { id: '500', status: 'completed', started_at: null, ended_at: null, model: 'm', error_code: null, cost_cents: 0.7, ended: { reason: 'completed' }, step: null }],
+    runs: [{ id: '501', status: 'running', started_at: '2026-08-03T00:00:00Z', ended_at: null, model: 'm', error_code: null, cost_cents: 0.9, ended: null, step: null, charged_points: 1 }, { id: '500', status: 'completed', started_at: null, ended_at: null, model: 'm', error_code: null, cost_cents: 0.7, ended: { reason: 'completed' }, step: null, charged_points: null }],
     sub_issues: { total: 2, done: 1, items: [] },
     inbox_pending: 1,
     budget: { budget_cents: 200, spent_cents: 160, pct: 80, state: 'warn' },
+    // 3c §3.3：后端对每个议题都发这个键（EMPTY_EFFICIENCY 兜底），所以这个
+    // 边界 mock 也必须带上——驾驶舱无条件读它。
+    efficiency: { runs: 2, steps: 9, tool_calls: 12, tool_errors: 0, deliverables: 0, avg_run_ms: null, cost_per_deliverable_cents: null, turn_end_reasons: { completed: 1 } },
     origin: { kind: 'manual', origin_id: null },
     execution_state: { turn: 3 },
     computed_at: '2026-08-03T00:00:01Z',

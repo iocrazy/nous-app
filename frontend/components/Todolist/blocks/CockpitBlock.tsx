@@ -47,15 +47,17 @@ const GRID_COLS: Record<number, string> = {
   6: 'sm:grid-cols-6',
   7: 'sm:grid-cols-7',
   8: 'sm:grid-cols-8',
+  9: 'sm:grid-cols-9',
 };
 
-const Cell: React.FC<React.PropsWithChildren<{ label: string; testId: string; bar?: { pct: number; tone: string } }>> = ({
+const Cell: React.FC<React.PropsWithChildren<{ label: string; testId: string; title?: string; bar?: { pct: number; tone: string } }>> = ({
   label,
   testId,
+  title,
   bar,
   children,
 }) => (
-  <div className="rounded-md border border-ink-800/80 bg-ink-900/40 px-3 py-2 min-w-0" data-testid={testId}>
+  <div className="rounded-md border border-ink-800/80 bg-ink-900/40 px-3 py-2 min-w-0" data-testid={testId} title={title}>
     <div className="text-[10px] uppercase tracking-wider text-ink-500">{label}</div>
     <div className="mt-0.5 text-[15px] text-ink-100 tabular-nums truncate">{children}</div>
     {bar && (
@@ -110,7 +112,14 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   const outputs = outputsState(view);
   const wakeups = wakeupsState(view);
   // 3c §3.3：整个议题的效率账（后端按全体 run 求和）。这里只显示，不重算。
+  // 不加 `eff &&` 守卫：后端对每一个议题都发这个键（EMPTY_EFFICIENCY），没跑过 run
+  // 也是零值而不是缺席，所以类型上它是必填的。加一个永远为真的守卫只会让读代码的人
+  // 以为这个键可能不来。
   const eff = rollup.efficiency;
+  // 冻结回放时两个效率格隐藏：它们是**全议题、当下**的数，跟「as of 某一步」不是
+  // 同一个时刻——与冻结时花费只显示那一步的 spend 同一语义。
+  const showCostPerOutput = !frozen && eff.deliverables > 0 && eff.cost_per_deliverable_cents != null;
+  const showToolErrors = !frozen && eff.tool_errors > 0;
   const budget = rollup.budget;
   // Phase 2a: the parked typed question from the live run view — and ONLY
   // while the issue marker is absent. A parked issue (marker present) draws
@@ -270,10 +279,10 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
           </button>
         </div>
       )}
-      {/* Four fixed cells plus the four conditional ones — the column count
+      {/* Four fixed cells plus the five conditional ones — the column count
           follows what is actually rendered, so a cell never sits alone on a
           half-empty row. */}
-      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (eff && eff.tool_errors > 0 ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0)]}`}>
+      <div className={`grid grid-cols-2 gap-2 ${GRID_COLS[4 + (tools && tools.timed_out > 0 ? 1 : 0) + (showToolErrors ? 1 : 0) + (children ? 1 : 0) + (outputs ? 1 : 0) + (showCostPerOutput ? 1 : 0)]}`}>
         <Cell label={t('issueDetail.steps', 'Steps')} testId="cockpit-steps" bar={step ? { pct: (step.done / Math.max(1, step.total)) * 100, tone: 'bg-agent' } : undefined}>
           {step ? (
             <>
@@ -321,7 +330,7 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
             {tools.last_timed_out && <div className="text-[11px] text-ink-500 truncate">{tools.last_timed_out}</div>}
           </Cell>
         )}
-        {eff && eff.tool_errors > 0 && (
+        {showToolErrors && (
           <Cell label={t('issueDetail.toolErrors', 'Tool errors')} testId="cockpit-tool-errors">
             <span className="text-danger">{t('issueDetail.toolErrorCount', '{{n}} errors', { n: eff.tool_errors })}</span>
             <div className="text-[11px] text-ink-500 truncate">
@@ -349,13 +358,19 @@ export const CockpitBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
                 {t('issueDetail.outputsRevised', '{{n}} revised', { n: outputs.revised })}
               </span>
             )}
-            {eff?.cost_per_deliverable_cents != null && (
-              <span className="text-ink-500 text-[12px]">
-                {' · '}
-                {t('issueDetail.costPerOutput', '{{c}} / output', { c: formatCents(eff.cost_per_deliverable_cents) })}
-              </span>
-            )}
             {outputs.last?.title && <div className="text-[11px] text-ink-500 truncate">{outputs.last.title}</div>}
+          </Cell>
+        )}
+        {/* 单独一格，不挂在 Outputs 格里：`outputs` 是**当前这条 run** 的产出，
+            而 deliverables / 花费是**全议题**的。挂在一起的话，「上一条 run 产出
+            了 3 件、这条刚开始」这个常见时刻整格就消失了。 */}
+        {showCostPerOutput && (
+          <Cell
+            label={t('issueDetail.costPerOutput', 'Cost / output')}
+            testId="cockpit-cost-per-output"
+            title={t('issueDetail.costPerOutputHint', 'Across all runs of this issue')}
+          >
+            {t('issueDetail.costPerOutputValue', '{{c}} / output', { c: formatCents(eff.cost_per_deliverable_cents as number) })}
           </Cell>
         )}
       </div>

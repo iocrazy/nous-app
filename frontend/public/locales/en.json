@@ -5582,7 +5582,9 @@
   "issueDetail": {
     "outputs": "Outputs",
     "outputsRevised": "{{n}} revised",
-    "costPerOutput": "{{c}} / output",
+    "costPerOutput": "Cost / output",
+    "costPerOutputValue": "{{c}} / output",
+    "costPerOutputHint": "Across all runs of this issue",
     "tools": "Tools",
     "toolsTimedOut_one": "{{count}} timed out",
     "toolsTimedOut_other": "{{count}} timed out",

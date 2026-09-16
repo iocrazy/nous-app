@@ -5582,7 +5582,9 @@
   "issueDetail": {
     "outputs": "产出",
     "outputsRevised": "{{n}} 个修订",
-    "costPerOutput": "{{c}} / 件",
+    "costPerOutput": "单件成本",
+    "costPerOutputValue": "{{c}} / 件",
+    "costPerOutputHint": "本议题全部运行合计",
     "tools": "工具",
     "toolsTimedOut_one": "{{count}} 个超时",
     "toolsTimedOut_other": "{{count}} 个超时",
