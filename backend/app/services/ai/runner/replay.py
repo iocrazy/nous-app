@@ -38,6 +38,15 @@ def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
                 out = [{"role": "system", "content": SUMMARY_PREFIX + summary}]
             continue
         if t in ("user", "assistant"):
+            # 3c §4.1: a ``partial`` assistant row is the narration the model
+            # spoke BEFORE calling a tool. It is timeline material, not
+            # cross-turn history — in the real history that step is ONE
+            # message carrying text + tool_use, and replaying the text on its
+            # own would put two assistant messages back to back (Anthropic
+            # rejects adjacent same-role messages). The final answer's row
+            # carries no ``partial`` key and is the one that replays.
+            if t == "assistant" and p.get("partial"):
+                continue
             content = str(p.get("content") or "").strip()
             if content:
                 out.append({"role": t, "content": content})
