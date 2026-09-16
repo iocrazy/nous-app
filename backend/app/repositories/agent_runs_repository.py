@@ -1033,6 +1033,14 @@ class AgentRunsRepository(AsyncpgRepository):
           agent 上会显著不同。
 
         所以 root 谓词写成聚合上的 ``FILTER (WHERE ...)``，不写进 ``WHERE``。
+
+        ⚠️ **两种粒度混在一张分组表里的后果**（3c 终审 I5）：分组键取自每个 run 自己
+        的 model / agent，而钱只从 root 行来。一次委派里父用 A 模型、子用 B 模型时，
+        **整棵树的钱进 A 组，子的产出进 B 组** —— B 组于是拿到 ``cost_cents = 0`` 且
+        ``deliverables > 0``。这不是缺陷而是两种粒度的必然结果（钱按树滚、活按 run
+        数），但它会让「单价」这一列说出谎话，所以路由层在 ``cost == 0 and
+        delivered > 0`` 时回 null 而不是 0.0。顶栏 tile 逐组求和后不受影响，受影响
+        的只有分组表本身。
         """
         key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
         root_only = AgentRuns.parent_run_id.is_(None)

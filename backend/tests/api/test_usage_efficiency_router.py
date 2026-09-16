@@ -67,6 +67,21 @@ async def test_zero_denominators_read_differently(monkeypatch):
     assert g.tool_error_rate == 0.0 and g.cost_per_deliverable_cents is None
 
 
+async def test_a_group_with_output_but_no_cost_reads_as_unknown_not_free(monkeypatch):
+    """3c 终审 I5：``cost_cents`` 带 ``FILTER (parent_run_id IS NULL)``，产出五列不带。
+
+    一次委派里父用 A 模型、子用 B 模型时，整棵树的钱进 A 组、子的产出进 B 组 ——
+    于是 B 组拿到 ``cost_cents=0`` 且 ``deliverables>0``，算出来是 ``¢0.00 /
+    output``，界面在说「这些产出是免费的」。与「0 件产出 → null」同一条纪律：
+    算不出单价就说不知道，别编一个 0 出来。
+    """
+    _stub(monkeypatch, rows=[{**GROUPS[0], "cost_cents": 0.0, "deliverables": 5}])
+    g = (await R.get_usage_efficiency(_Auth(), scope="user")).groups[0]
+    assert g.cost_per_deliverable_cents is None
+    # 产出本身照报 —— 不知道的是单价，不是有没有干活。
+    assert g.deliverables == 5 and g.cost_cents == 0.0
+
+
 async def test_team_scope_404s_for_a_non_member(monkeypatch):
     class _Teams:
         async def get_team_by_id(self, team_id, user_id):

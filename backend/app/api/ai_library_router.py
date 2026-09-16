@@ -3101,9 +3101,17 @@ async def get_usage_efficiency(
                 tool_error_rate=(round(errors / calls, 4) if calls else 0.0),
                 deliverables=delivered,
                 cost_cents=round(cost, 4),
-                # 0 件产出 → null（不知道单价），绝不是 0。
+                # 两条分母纪律，同一个答案：算不出单价就说**不知道**。
+                #   · 0 件产出 → null（没东西可除），绝不是 0；
+                #   · 有产出但这一组一分钱没有 → 也是 null（3c 终审 I5）。后者
+                #     不是假想：``cost_cents`` 带 root FILTER 而产出五列不带，
+                #     所以一次「父用 A 模型、子用 B 模型」的委派会把整棵树的钱
+                #     挂在 A 组、把子的产出挂在 B 组。B 组算出来是 ¢0.00 /
+                #     output —— 界面在说「这些产出是免费的」，而真相是这一组的
+                #     钱记在别人名下。两种情况都由 ``efficiency_groups`` 的
+                #     docstring 详述。
                 cost_per_deliverable_cents=(
-                    round(cost / delivered, 4) if delivered else None
+                    round(cost / delivered, 4) if delivered and cost else None
                 ),
             )
         )
