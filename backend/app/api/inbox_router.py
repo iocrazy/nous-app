@@ -44,6 +44,8 @@ async def list_inbox(
     )
     unread_count = await repo.unread_count(auth.user_id)
     items: list[InboxNotificationResponse] = []
+    bad_kinds: set[str] = set()
+    bad_fields: set[str] = set()
     for row in rows:
         try:
             items.append(InboxNotificationResponse(**row))
@@ -52,10 +54,21 @@ async def list_inbox(
             # kind，库里有 workflow_stage / agent_question 行，于是每一次列表请求
             # 都 ValidationError。容纳并**记 ERROR**（不是 except: pass）——
             # 与「分发器要容纳回调异常」同一条纪律。
-            logger.error(
-                f"[inbox] skipping unparseable row id={row.get('id')} "
-                f"kind={row.get('kind')} err={exc}"
+            #
+            # 只留 kind 与出错字段名：pydantic v2 的 errors() 每条都带 ``input``，
+            # str(exc) 会把它渲染进消息 —— 那是通知正文，属于用户内容，不进日志。
+            bad_kinds.add(str(row.get("kind")))
+            bad_fields.update(
+                ".".join(str(part) for part in err["loc"]) for err in exc.errors()
             )
+    if bad_kinds:
+        # 一次请求一条 ERROR，不是一行一条：一张坏掉的表会按页刷屏，把同一个
+        # 事实重复几十遍，真正该被看见的别的错误就被埋了。
+        logger.error(
+            f"[inbox] dropped {len(rows) - len(items)} unparseable row(s) of "
+            f"{len(rows)} for user={auth.user_id}; "
+            f"kinds={sorted(bad_kinds)} fields={sorted(bad_fields)}"
+        )
     return InboxListResponse(
         notifications=items,
         total=len(items),
