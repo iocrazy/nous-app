@@ -503,6 +503,25 @@ class IssueRepository:
             ).all()
         return {str(r[0]): r[1] for r in rows}
 
+    async def identifier_and_title(
+        self, issue_id: int
+    ) -> tuple[Optional[str], Optional[str]]:
+        """一件议题的 ``(identifier, title)``，给 run 投影的标题用。
+
+        不复用 ``map_identifiers``：那个是批量的且只给 identifier，改成也返回
+        标题会让既有三个调用方多拖一列。议题不存在时两个都是 ``None`` ——
+        run 的标题会退回输入摘要，而不是让整条投影缺席。
+        """
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(Issues.identifier, Issues.title).where(
+                        Issues.id == int(issue_id)
+                    )
+                )
+            ).first()
+        return (row[0], row[1]) if row else (None, None)
+
     async def list_in_progress_without_live_run(self) -> list[dict[str, Any]]:
         """MH-1 reconciliation candidates: ``in_progress`` issues whose
         ``execution_state`` still carries a turn marker while no run is

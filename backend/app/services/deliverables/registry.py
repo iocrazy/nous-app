@@ -74,6 +74,7 @@ async def register_deliverable(
     actor_user_id: Optional[str] = None,
     reverted_from_version: Optional[int] = None,
     ledger_ref: Optional[str] = None,
+    search_text: Optional[str] = None,
     session: Any = None,
 ) -> Optional[DeliverableRow]:
     """登记一次产出。没有 run **也没有** actor 时返回 ``None`` 且什么都不做。
@@ -81,6 +82,11 @@ async def register_deliverable(
     ``actor_user_id`` 是 3b 开的第二条占号路径，且只开给回退：人手改动依然
     不占版本号（见下面 no-op 分支的注释），只有「某个人把某一版写回去」这件
     事才需要在链上留一行——否则回到的那一版在血缘里无从指认。
+
+    ``search_text`` 是这一版的**正文**（进检索投影），与 ``title`` 刻意不同：
+    标题给列表看，正文给搜。缺省 ``None`` 不报错——一个新 kind 的生产者忘了传，
+    结果只是搜不到它的正文，不是这次登记失败。哨兵在
+    ``tests/services/search/test_search_text_wiring.py``。
 
     ``session`` 非空时整条链加入调用方的事务（不自开、不 commit）：回退要把
     「改内容 / 写账本 / 登记版本」放进同一个 postgres 事务，登记落在事务外
@@ -127,6 +133,12 @@ async def register_deliverable(
         ledger_ref=ledger_ref,
         session=session,
     )
+
+    # 投影在行落库之后，失败不连坐（见 projection 模块 docstring）。放在 rid
+    # 分支之前：人手版（回退）同样要能被搜到——它是这条链当前的内容。
+    from app.services.search.projection import project_output_best_effort
+
+    await project_output_best_effort(row, search_text=search_text)
 
     if rid is None:
         # 人手版没有 run，也就没有 transcript 可写。血缘端点读的是行，不是事件。

@@ -911,6 +911,28 @@ class RunRecorder:
                 .values(**updates)
             )
 
+        # 只在终态写一次。放在 UPDATE 之后，投影读到的就是刚落库的那份
+        # status / error_code / output_summary；放在 write_scope 之外，所以
+        # 投影失败不会碰到刚提交的那个事务（best-effort，见 projection 的
+        # 模块 docstring）。
+        from app.services.search.projection import project_run_best_effort
+
+        await project_run_best_effort(
+            {
+                "id": self.run_id,
+                "issue_id": self.issue_id,
+                "team_id": self.team_id,
+                "project_id": self.project_id,
+                "agent_id": self.agent_id,
+                "user_id": self.user_id,
+                "model": self.model,
+                "status": status,
+                "error_code": error_code,
+                "input_summary": self.input_summary,
+                "output_summary": self._output_summary,
+            }
+        )
+
         # W3c: accumulate this turn into the ai_usage_hourly rollup the Usage
         # panel reads. Fire-and-forget (record_usage swallows internally) and
         # only when tokens were actually burned, so we don't create empty
