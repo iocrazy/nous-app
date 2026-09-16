@@ -202,23 +202,24 @@ def test_an_allowlisted_axis_does_not_silence_the_other_axes() -> None:
     """**按轴**豁免：放行一条轴，其余四条照旧转红。
 
     这是 fix round 2 的那条 must。早先豁免按**名字**生效，于是一个索引只要
-    因为任何一条轴进了名单，它在全部五条轴上就都不说话了 ——
-    `idx_inbox_notifications_user_unread` 只该在「部分索引」上被放行，按名字
-    豁免却让它此后丢一列、掉唯一性都悄无声息，「新漂移立刻转红」这句承诺对
-    那九个名字已经不成立。
+    因为任何一条轴进了名单，它在全部五条轴上就都不说话了 —— 只该在「部分索引」
+    上被放行的名字，此后丢一列、掉唯一性都悄无声息，「新漂移立刻转红」这句承诺
+    对那些名字已经不成立。
 
     这里拿一个**真的在名单里**、且**只**豁免了「部分索引」的名字来验：给它
-    造一条列不一致，那条列漂移必须照样报出来。
+    造一条列不一致，那条列漂移必须照样报出来。（样本原本是
+    `idx_inbox_notifications_user_unread`，mig 472 把它的谓词补进 ORM、棘轮随之
+    要求删掉那条豁免，于是改用同形状的 `idx_agent_memory_agent`。）
     """
-    name = "idx_inbox_notifications_user_unread"
+    name = "idx_agent_memory_agent"
     entry = ALLOWED_INDEX_DRIFT[name]
     assert entry["axes"] == frozenset({AXIS_PARTIAL}), entry
 
     declared = [
         DeclaredIndex(
             name=name,
-            table="inbox_notifications",
-            columns=("user_id",),
+            table="agent_memory",
+            columns=("agent_id",),
             expressions=0,
             unique=False,
             partial=False,  # 与库里的部分索引不一致 —— 这条是被豁免的
@@ -227,14 +228,14 @@ def test_an_allowlisted_axis_does_not_silence_the_other_axes() -> None:
     ]
     live = {
         name: {
-            "table": "inbox_notifications",
+            "table": "agent_memory",
             # 库里多一列 —— 这条**没有**被豁免
-            "columns": ("user_id", "created_at"),
+            "columns": ("agent_id", "created_at"),
             "key_count": 2,
             "unique": False,
-            "defn": "CREATE INDEX idx_inbox_notifications_user_unread ON "
-            "public.inbox_notifications USING btree (user_id, created_at) "
-            "WHERE (read_at IS NULL)",
+            "defn": "CREATE INDEX idx_agent_memory_agent ON "
+            "public.agent_memory USING btree (agent_id, created_at) "
+            "WHERE (agent_id IS NOT NULL)",
         }
     }
     raw = {dr.axis for dr in _mismatched(live, declared)}
