@@ -170,6 +170,11 @@ on:
       # ESCAPE）。所以 repository 与投影写方改动也要能触发本 job。
       - 'backend/app/repositories/search_docs_repository.py'
       - 'backend/app/services/search/**'
+      # 存量正文回填（3c 补充票）。它重建正文走的是 deliverables/diff.py 的账本
+      # 折叠 + 两个渲染器（都已在上面列着），写回去走 fill_empty_body —— 而
+      # 「只补空的、不动 updated_at」这两条承诺只有真库能证明。
+      - 'backend/tests/db/test_search_docs_body_backfill_integration.py'
+      - 'backend/scripts/backfill_search_docs_body.py'
       # 上面两个文件各自证明一层；这个证明**两层合起来拦得住人**：
       # /api/v1/search 是跨团队端点，它唯一的安全断言（别 team 的人搜同一个词
       # 拿三组全空）在单测里是桩的。两道门各有一条专属用例，实测各自删掉会让
@@ -196,15 +201,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-nine, so it has to
+      # to it changes what "green" means for all thirty, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the twenty-nine below was counted with this command, not derived
-      # from the twenty-eight it replaced):
+      # (the thirty below was counted with this command, not derived
+      # from the twenty-nine it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -816,3 +821,23 @@ jobs:
           # 两条；GROUP BY 分错组的表现是血缘面板上每一版都显示整条链的引用数。
           # message_id 的外键还要求夹具建一条真消息 —— 这一条也只有真库能拒。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_output_citations_repository_integration.py -v
+
+      - name: Assert the search_docs body backfill against a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 存量正文回填（3c 补充票）。mig 472 的产出回填段没有写 body 那一列，
+          # 所以 3c 之前登记的产出在检索里只有标题搜得到。正文按 kind 各自重建：
+          # 分镜/场次走 deliverables/diff.py 的真账本折叠（jsonb + 三档字段解析，
+          # 全在服务器那边），媒体取 generated_media.prompt。单测把 rebuild_content
+          # 换成了替身，所以整条链在真库上一次都没跑过。
+          # 只有真库能答的四件：两个候选集查询的三列/BIGINT 连接编译得过≠跑得通；
+          # 「永不覆盖」整个挂在 UPDATE 的 body IS NULL OR body='' 谓词上（桩 session
+          # 对任何谓词都点头）；回填不碰 updated_at —— 动了它，几个月前的产出就会
+          # 排到 idx_search_docs_team_updated 的最前面；以及重跑一次必须是 no-op。
+          # 三次突变实测各杀各的：摘谓词只杀竞态那条（候选集用例照样绿，所以两条
+          # 都要有）、顺手 bump updated_at 杀时间戳那条、自己拼一个渲染器杀
+          # 「与实时写方同一串」那条。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_body_backfill_integration.py -v
