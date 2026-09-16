@@ -1,4 +1,9 @@
-"""三期 3a Task 4：``output_ref`` 附件——引用本 issue 的一个产出版本。
+"""三期 3a Task 4 / 3c §2.4：``output_ref`` 附件——引用一个产出版本。
+
+⚠️ **归属在 3c 放宽了。** 3a 的规则是「这一版必须是本 issue 产的」；3c 起是
+「这条链对调用方可见」，尺子是 ``deliverables/visibility.assert_chain_visible``
+（血缘端点与回退端点用的同一把）。所以这里的桩打在**那把尺子**上，而不是
+``lineage_for`` 上——桩在旧位置会让这个文件在一条生产已经不走的路上跑绿。
 
 两条纪律在这个文件里同时受钉：
 
@@ -33,7 +38,8 @@ OTHER_ISSUE_ID = 6
 
 
 def _lineage_row(version: int, *, title: str | None, issue_id: int) -> dict:
-    """``RunDeliverablesRepository.lineage_for`` 的一行（T3 的返回形状）。"""
+    """``RunDeliverablesRepository.lineage_for`` 的一行（T3 的返回形状），也就是
+    ``visible_chain`` 原样交出去的那个形状。"""
     return {
         "id": str(900 + version),
         "run_id": "700",
@@ -43,6 +49,7 @@ def _lineage_row(version: int, *, title: str | None, issue_id: int) -> dict:
         "parent_version": version - 1 if version > 1 else None,
         "title": title,
         "issue_id": str(issue_id),
+        "issue_key": f"MH-{issue_id}",
     }
 
 
@@ -57,8 +64,14 @@ def _att(**over) -> dict:
     return base
 
 
-def _wire(monkeypatch, lineage: list[dict]):
-    """路由 + 登记表：让 post_issue_message 走到附件校验那一步。"""
+def _wire(monkeypatch, lineage: list[dict], *, chain_visible: bool = True):
+    """路由 + 可见性尺子：让 post_issue_message 走到附件校验那一步。
+
+    返回的第三个值是**那把尺子的间谍**：它取代了 3a 时代的 ``repo.lineage_for``
+    间谍，因为解析器现在问的是 ``assert_chain_visible``。空链与
+    ``chain_visible=False`` 都按真实实现那样抛 404 —— 「看不见」与「没登记」
+    在那条路上本来就是同一个回答。
+    """
     importlib.import_module("app.api.issue_messages_router")
     r = sys.modules["app.api.issue_messages_router"]
 
@@ -80,11 +93,16 @@ def _wire(monkeypatch, lineage: list[dict]):
 
     monkeypatch.setattr(_dispatch_mod, "dispatch_issue_reply", dispatch)
 
-    repo = SimpleNamespace(lineage_for=AsyncMock(return_value=lineage))
+    async def _chain(kind, ref_id, auth):
+        if not chain_visible or not lineage:
+            raise HTTPException(status_code=404, detail="not found")
+        return lineage
+
+    chain = AsyncMock(side_effect=_chain)
     import app.services.ai.chat.output_ref_resolver as _resolver_mod
 
-    monkeypatch.setattr(_resolver_mod, "get_run_deliverables_repository", lambda: repo)
-    return r, dispatch, repo
+    monkeypatch.setattr(_resolver_mod, "assert_chain_visible", chain)
+    return r, dispatch, chain
 
 
 def _wire_no_agent(monkeypatch):
@@ -145,11 +163,14 @@ async def test_unknown_version_is_unresolvable(monkeypatch):
     dispatch.assert_not_awaited()
 
 
-async def test_citing_another_issues_output_is_unresolvable(monkeypatch):
-    """行存在，但它的 run 属于别的 issue——同一个 code，消息说得出原因。"""
+async def test_citing_an_invisible_chain_is_unresolvable(monkeypatch):
+    """3c §2.4 换掉的那条用例。旧契约是「别的 issue 的产出被拒」；新契约是
+    「**看不见的链**被拒」——别的 issue 的产出只要看得见就可以引，而看不见的
+    拿同一个 code：分出「存在但你不能引」等于确认那个对象存在。"""
     r, dispatch, _ = _wire(
         monkeypatch,
         lineage=[_lineage_row(2, title="S3 · Shot #1", issue_id=OTHER_ISSUE_ID)],
+        chain_visible=False,
     )
     with pytest.raises(HTTPException) as exc:
         await _post(r, [_att()])
@@ -157,15 +178,28 @@ async def test_citing_another_issues_output_is_unresolvable(monkeypatch):
     dispatch.assert_not_awaited()
 
 
+async def test_citing_another_visible_issues_output_now_resolves(monkeypatch):
+    """放宽的正面那一半：同项目另一件议题的产出可以被引用，附件带上来源
+    ``issue_key``，线程里的引用卡据它显示 chip。"""
+    r, dispatch, _ = _wire(
+        monkeypatch,
+        lineage=[_lineage_row(2, title="S3 · Shot #1", issue_id=OTHER_ISSUE_ID)],
+    )
+    resp = await _post(r, [_att()])
+    assert resp.agent_dispatched is True
+    sent = dispatch.await_args.kwargs["attachments"]
+    assert sent[0]["issue_key"] == f"MH-{OTHER_ISSUE_ID}"
+
+
 async def test_unknown_ref_kind_is_unresolvable_without_touching_the_registry(
     monkeypatch,
 ):
     """四类之外的 kind 是接线错误，不该先花一次查询才发现。"""
-    r, dispatch, repo = _wire(monkeypatch, lineage=[])
+    r, dispatch, chain = _wire(monkeypatch, lineage=[])
     with pytest.raises(HTTPException) as exc:
         await _post(r, [_att(ref_kind="script_chapterr")])
     assert exc.value.detail["code"] == "output_ref_unresolvable"
-    repo.lineage_for.assert_not_awaited()
+    chain.assert_not_awaited()
 
 
 async def test_missing_version_is_unresolvable(monkeypatch):
@@ -195,23 +229,26 @@ async def test_resolvable_output_ref_is_stamped_with_the_registry_title(monkeypa
             "ref_id": "9",
             "version": 2,
             "title": "S3 · Shot #1",
+            # 3c §2.4：来源议题也盖在附件上 —— 引用可以跨议题之后，chip 要说得出
+            # 这一版是在哪件议题上产的。
+            "issue_key": f"MH-{ISSUE_ID}",
         }
     ]
 
 
 async def test_other_attachment_kinds_are_untouched(monkeypatch):
     """``output_ref`` 的校验不许改写别人的附件。"""
-    r, dispatch, repo = _wire(monkeypatch, lineage=[])
+    r, dispatch, chain = _wire(monkeypatch, lineage=[])
     other = {"kind": "resource_ref", "resource_id": "42", "name": "spec.md"}
     resp = await _post(r, [other])
     assert resp.agent_dispatched is True
-    repo.lineage_for.assert_not_awaited()
+    chain.assert_not_awaited()
     sent = dispatch.await_args.kwargs["attachments"]
     assert sent[0]["kind"] == "resource_ref" and sent[0]["resource_id"] == "42"
 
 
 async def test_one_object_cited_twice_costs_one_query(monkeypatch):
-    r, dispatch, repo = _wire(
+    r, dispatch, chain = _wire(
         monkeypatch,
         lineage=[
             _lineage_row(2, title="v2", issue_id=ISSUE_ID),
@@ -219,7 +256,7 @@ async def test_one_object_cited_twice_costs_one_query(monkeypatch):
         ],
     )
     await _post(r, [_att(version=2), _att(version=1)])
-    assert repo.lineage_for.await_count == 1
+    assert chain.await_count == 1
     sent = dispatch.await_args.kwargs["attachments"]
     assert [a["title"] for a in sent] == ["v2", "v1"]
 
@@ -228,13 +265,13 @@ async def test_over_cap_output_refs_are_a_typed_400(monkeypatch):
     """每条引用是一次查询。上限只活在前端选择器里，就是本仓记过的那类缺口。"""
     from app.services.ai.chat.output_ref_resolver import MAX_OUTPUT_REF_ATTACHMENTS
 
-    r, dispatch, repo = _wire(monkeypatch, lineage=[])
+    r, dispatch, chain = _wire(monkeypatch, lineage=[])
     many = [_att(ref_id=str(i)) for i in range(MAX_OUTPUT_REF_ATTACHMENTS + 1)]
     with pytest.raises(HTTPException) as exc:
         await _post(r, many)
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "output_ref_limit_exceeded"
-    repo.lineage_for.assert_not_awaited()
+    chain.assert_not_awaited()
 
 
 # ── 无 agent 的 issue：附件无人可读 → 类型化 409 ─────────────────────────
@@ -305,6 +342,7 @@ async def test_empty_registry_title_is_absence_not_an_empty_string(monkeypatch):
             "ref_kind": "script_shot",
             "ref_id": "9",
             "version": 2,
+            "issue_key": f"MH-{ISSUE_ID}",
         }
     ]
 

@@ -122,6 +122,11 @@ _DISPLAY_ATTACHMENT_KEYS = (
     "ref_id",
     "version",
     "title",
+    # 3c §2.4 — 引用放宽为「链对调用方可见」之后，一条引用可以指向**另一件
+    # 议题**的产出。来源议题的 key 因此也是 chip 的输入：没有它，线程里的
+    # 引用卡说不出「你在 MH-98 上产的那一版」。发帖口盖的（``_stamped``），
+    # 与 ``title`` 同一口径：为空就整个键缺席。
+    "issue_key",
 )
 
 
@@ -679,6 +684,25 @@ class ConversationsAiStore:
             body=body,
             parent_id=None,
         )
+        # 3c §2.2：引用镜像。**写点唯一**——议题评论 / 唤醒注入 / 聊天面板三条
+        # 入口最终都经这一个方法落库，所以反查只在这里物化一次。议题只在真有
+        # 引用时才查，普通消息零额外往返。
+        if any(
+            isinstance(a, dict) and a.get("kind") == "output_ref"
+            for a in (attachments or [])
+        ):
+            from app.repositories.issue_repository import issue_repository
+            from app.services.deliverables.citations import record_output_citations
+
+            issue = await issue_repository.get_by_session(_bigint(session_id))
+            await record_output_citations(
+                None,
+                message_row=row,
+                attachments=attachments,
+                user_id=user_id,
+                issue_id=(issue or {}).get("id"),
+                conversation_id=row.get("conversation_id"),
+            )
         return {
             "id": row["id"],
             "session_id": row.get("conversation_id"),

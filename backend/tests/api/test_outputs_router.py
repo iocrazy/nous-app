@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -106,6 +107,28 @@ class _IssueGate:
         return {i for i in asked if i in self.allowed}
 
 
+class _Citations:
+    """Stub for ``OutputCitationsRepository`` (3c §2.2).
+
+    ``counts`` is the FULL count per version; ``cited`` the rows a caller might
+    be shown. Every call is recorded so "one GROUP BY for the whole chain" is a
+    pinned fact rather than an assumption.
+    """
+
+    def __init__(self, counts=None, cited=None, calls=None):
+        self.counts = counts if counts is not None else {}
+        self.cited = cited if cited is not None else {}
+        self.calls = calls if calls is not None else {"count": 0, "list": []}
+
+    async def counts_for_chain(self, kind, ref_id):
+        self.calls["count"] += 1
+        return dict(self.counts)
+
+    async def list_for_ref(self, kind, ref_id, version):
+        self.calls["list"].append(int(version))
+        return list(self.cited.get(int(version), []))
+
+
 def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None, gate=None):
     app = FastAPI()
     register_exception_handlers(app)
@@ -142,6 +165,9 @@ def _client(monkeypatch, rows=SEEDED, *, visible=True, owner=ME, diff=None, gate
     # （``load_step_shares`` 自己吞异常，于是失败会静默成 {} 而不是报错）。
     # 关心分摊的用例在 ``_client`` 之后自己覆盖它。
     monkeypatch.setattr(mod, "load_step_shares", AsyncMock(return_value={}))
+    # 引用反查默认「这条链一次都没被引用过」：不打桩的话每个用例都会真的去读
+    # ``output_citations``（3c §2.2）。关心引用的用例走 ``lineage_wired``。
+    monkeypatch.setattr(mod, "get_output_citations_repository", lambda: _Citations())
     return TestClient(app)
 
 
@@ -765,3 +791,104 @@ def test_diff_redacts_a_side_whose_issue_the_caller_cannot_see(monkeypatch):
     # 人手那一侧：借到的正是被判过的那件 issue，照常活下来。
     assert passed["to_row"]["issue_id"] == ISSUE_ID
     assert passed["to_row"]["issue_key"] == ISSUE_KEY
+
+
+# ── 引用反查：cited_count / cited_in（3c §2.2） ───────────────────────────
+
+
+_AT = datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc)
+CITING_ISSUE = "96"
+FOREIGN_CITING_ISSUE = "999"
+
+
+class _Auth:
+    user_id = ME
+
+
+@pytest.fixture
+def lineage_wired(monkeypatch):
+    """血缘端点的四个外部面，一次装好。
+
+    直接调端点函数（不经 TestClient）是刻意的：这三条断言的是**发了几次查询**
+    和**裁掉了谁**，而不是错误信封的形状——文件顶部那条纪律管的是拒绝路径。
+    """
+    state = {
+        "rows": SEEDED,
+        #: 全量计数（{version: n}）。
+        "counts": {},
+        #: {version: [引用行]}，``list_for_ref`` 的返回形状。
+        "cited": {},
+        #: None = 每件议题都可见；给一个集合就只有集合里的可见。
+        "visible": None,
+        "keys": {CITING_ISSUE: "MH-96", FOREIGN_CITING_ISSUE: "MH-999"},
+        "count_calls": 0,
+        "list_calls": [],
+    }
+
+    class _Repo:
+        async def counts_for_chain(self, kind, ref_id):
+            state["count_calls"] += 1
+            return dict(state["counts"])
+
+        async def list_for_ref(self, kind, ref_id, version):
+            state["list_calls"].append(int(version))
+            return list(state["cited"].get(int(version), []))
+
+    async def _chain(kind, ref_id, auth):
+        return state["rows"]
+
+    async def _visible(issue_ids, auth):
+        asked = {str(i) for i in issue_ids if i is not None}
+        if state["visible"] is None:
+            return asked
+        return {i for i in asked if i in state["visible"]}
+
+    async def _map(issue_ids):
+        return {
+            str(i): state["keys"][str(i)] for i in issue_ids if str(i) in state["keys"]
+        }
+
+    monkeypatch.setattr(mod, "visible_chain", _chain)
+    monkeypatch.setattr(mod, "get_output_citations_repository", lambda: _Repo())
+    monkeypatch.setattr(mod, "visible_issue_ids", _visible)
+    monkeypatch.setattr(mod, "issue_repository", SimpleNamespace(map_identifiers=_map))
+    monkeypatch.setattr(mod, "load_step_shares", AsyncMock(return_value={}))
+    return state
+
+
+async def test_a_version_reports_its_citation_count_in_full(lineage_wired):
+    # 被引 3 次、你只看得见 1 条，是允许的诚实答案（spec §2.2）。
+    lineage_wired["counts"] = {3: 3}
+    lineage_wired["cited"] = {
+        3: [
+            {
+                "issue_id": CITING_ISSUE,
+                "message_id": "5001",
+                "user_id": ME,
+                "at": _AT,
+            },
+            {
+                "issue_id": FOREIGN_CITING_ISSUE,
+                "message_id": "5002",
+                "user_id": SOMEONE_ELSE,
+                "at": _AT,
+            },
+        ]
+    }
+    lineage_wired["visible"] = {CITING_ISSUE}
+    res = await mod.get_output_lineage("script_shot", "9", _Auth())
+    v3 = next(v for v in res.versions if v.version == 3)
+    assert v3.cited_count == 3
+    assert [c.issue_key for c in v3.cited_in] == ["MH-96"]
+
+
+async def test_an_uncited_version_says_zero_not_null(lineage_wired):
+    res = await mod.get_output_lineage("script_shot", "9", _Auth())
+    assert all(v.cited_count == 0 and v.cited_in == [] for v in res.versions)
+    # 没被引用过的版本一次反查都不发。
+    assert lineage_wired["list_calls"] == []
+
+
+async def test_the_chain_costs_one_count_query_not_one_per_version(lineage_wired):
+    await mod.get_output_lineage("script_shot", "9", _Auth())
+    assert lineage_wired["count_calls"] == 1

@@ -92,11 +92,14 @@ def _reject(status_code: int, code: str, message: str, **extra: Any) -> HTTPExce
 
 
 async def visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
-    """与血缘端点同一把可见性尺子。延迟 import 打断 router ↔ service 的环——
-    ``registry.py`` 的 ``from app.db.session import in_unit_of_work`` 是同一手法。"""
-    from app.api.outputs_router import visible_chain as _chain
+    """与血缘端点同一把可见性尺子。
 
-    return await _chain(kind, ref_id, auth)
+    3c 起这把尺子在服务层有了自己的名字（``deliverables/visibility.py``），因为
+    引用解析成了第三个消费方。这里保留本地名是为了既有的桩点（测试按
+    ``revert.visible_chain`` 打桩），转调过去而不是再抄一次延迟 import。"""
+    from app.services.deliverables.visibility import assert_chain_visible
+
+    return await assert_chain_visible(kind, ref_id, auth)
 
 
 def _chain_identity(rows: List[Dict[str, Any]]) -> _ChainIdentity:

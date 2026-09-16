@@ -384,13 +384,16 @@ async def test_session_path_returns_the_stored_output_ref_attachment():
         "ref_id": "337650953731886",
         "version": 1,
         "title": "MEDIUM",
-        # the read model's other keys are present-and-null, never invented
+        # the read model's other keys are present-and-null, never invented.
+        # ``issue_key`` (3c §2.4) is null on every row written before citations
+        # could cross issues — this row IS one of them.
         "resource_id": None,
         "asset_id": None,
         "loadout_id": None,
         "mime": None,
         "alt_text": None,
         "name": None,
+        "issue_key": None,
     }
 
 

@@ -682,11 +682,19 @@ async def post_issue_message(
     # dispatched, because an unresolvable citation must reach the user as a
     # typed 400 rather than being dropped on the way to the agent (CLAUDE.md
     # 「触发路径必须类型化失败回显」). The resolution also stamps each citation
-    # with the registry row's title, so the thread renders without a second
-    # lookup. The logic lives in the resolver layer beside `resource_ref` and
-    # `asset_ref`; the router only translates the refusal.
+    # with the registry row's title AND its source issue key, so the thread
+    # renders without a second lookup. The logic lives in the resolver layer
+    # beside `resource_ref` and `asset_ref`; the router only translates the
+    # refusal.
+    #
+    # 3c §2.4: `auth` is what decides ownership now. A citation no longer has
+    # to name a version produced on THIS issue — it has to name a chain the
+    # CALLER can see, judged by the one ruler the lineage and revert endpoints
+    # already use. `issue_id` rides along only so the refusal can say where.
     try:
-        _outputs = await resolve_output_refs(attachments_payload, issue_id=issue_id)
+        _outputs = await resolve_output_refs(
+            attachments_payload, issue_id=issue_id, auth=auth
+        )
     except OutputRefRefused as exc:
         # One refusal path for every entry point that can carry a citation —
         # the chat panel's guard raises the same exception and builds the same

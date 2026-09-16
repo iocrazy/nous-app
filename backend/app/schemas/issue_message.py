@@ -59,6 +59,12 @@ class IssueMessageAttachment(BaseModel):
     ref_id: Optional[str] = None
     version: Optional[int] = None
     title: Optional[str] = None
+    # 3c §2.4: the SOURCE issue of the cited version (``MH-98``). A citation may
+    # now point at another issue's output — the chain only has to be visible to
+    # the caller — so the chip needs somewhere to say where the version came
+    # from. ``None`` on every row written before 3c, and on any citation whose
+    # chain answers to no issue.
+    issue_key: Optional[str] = None
 
 
 class IssueMessage(BaseModel):

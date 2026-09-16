@@ -35,6 +35,8 @@ ISSUE_ID = 5
 #: 真实 wire 形状：登记表主键是 Snowflake BIGINT，前端拿到的是 string。
 REF_ID = "337650953731886"
 TITLE = "S3 · Shot #1"
+#: 3c §2.4：来源议题的 key —— 引用可跨议题之后 chip 要说得出它从哪来。
+ISSUE_KEY = "MH-5"
 
 OUTPUT_REF = {
     "kind": "output_ref",
@@ -57,7 +59,8 @@ FILE_ATTACHMENT = {
 
 
 def _lineage_row(version: int = 1, *, title: str | None = TITLE) -> dict:
-    """``RunDeliverablesRepository.lineage_for`` 的一行。"""
+    """``RunDeliverablesRepository.lineage_for`` 的一行，也就是 3c 起
+    ``assert_chain_visible`` 原样交出去的那个形状。"""
     return {
         "id": "901",
         "run_id": "700",
@@ -67,6 +70,7 @@ def _lineage_row(version: int = 1, *, title: str | None = TITLE) -> dict:
         "parent_version": None,
         "title": title,
         "issue_id": str(ISSUE_ID),
+        "issue_key": ISSUE_KEY,
     }
 
 
@@ -95,10 +99,19 @@ def _wire(monkeypatch, *, lineage: list[dict] | None = None, divert_id=None):
 
     monkeypatch.setattr(_dispatch_mod, "dispatch_issue_reply", dispatch)
 
-    repo = SimpleNamespace(lineage_for=AsyncMock(return_value=lineage or []))
+    # 3c §2.4：解析器问的是可见性尺子，不再是登记表。空链按真实实现那样 404
+    # ——「看不见」与「没登记」在那条路上是同一个回答。
+    from fastapi import HTTPException
+
+    async def _chain(kind, ref_id, auth):
+        if not lineage:
+            raise HTTPException(status_code=404, detail="not found")
+        return lineage
+
+    chain = AsyncMock(side_effect=_chain)
     import app.services.ai.chat.output_ref_resolver as _resolver_mod
 
-    monkeypatch.setattr(_resolver_mod, "get_run_deliverables_repository", lambda: repo)
+    monkeypatch.setattr(_resolver_mod, "assert_chain_visible", chain)
 
     # Note 路径的 store。``display_attachments`` 委托给真货——被测的正是「响应
     # 有没有过这个 reducer」，桩掉它就等于把结论先写进 mock 里。
@@ -113,7 +126,7 @@ def _wire(monkeypatch, *, lineage: list[dict] | None = None, divert_id=None):
 
     monkeypatch.setattr(r, "ConversationsAiStore", _Store)
 
-    return SimpleNamespace(r=r, dispatch=dispatch, append=append, repo=repo)
+    return SimpleNamespace(r=r, dispatch=dispatch, append=append, chain=chain)
 
 
 async def _post(w, attachments, *, suppress=None, body="look at this"):
