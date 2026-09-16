@@ -90,7 +90,11 @@ class SearchDocsRepository:
         issue_id: Optional[int],
         limit: int,
     ):
-        # 拼模式者负责转义（CLAUDE.md）。SQL 侧再声明 ESCAPE——只做一侧等于没做。
+        # 拼模式者负责转义（CLAUDE.md「ILIKE 模式的转义责任要跟着模式走」）。
+        # **干活的是 escape_like 这一侧**：拿掉它，用户搜一个 ``%`` 就是一次全表
+        # 匹配（tests/db/..._integration.py 的突变实测钉住了这条）。下面的
+        # ``escape=`` 是把 Postgres 的默认转义符显式钉死 —— 反斜杠本来就是 LIKE
+        # 的默认转义符，所以它是声明不是机制，但显式声明才不依赖服务器默认。
         pattern = f"%{escape_like(q)}%"
         body = func.coalesce(SearchDocs.body, literal(""))
         score = func.greatest(

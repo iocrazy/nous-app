@@ -943,10 +943,20 @@ class AgentRunsRepository(AsyncpgRepository):
                     )
                     .returning(AgentRuns.id)
                 )
-                return [int(r[0]) for r in result.fetchall()]
+                swept = [int(r[0]) for r in result.fetchall()]
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
+
+        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影只
+        # 能由这里跟上（3c Task 13 评审 Important 1）。在 ``write_scope()``
+        # 之外：投影读回的必须是刚提交的那份 status，而它失败绝不该把已经扫
+        # 成功的 id 吞掉——调用方拿这些 id 去补 ``turn_end`` 事件。
+        from app.services.search.projection import project_run_id_best_effort
+
+        for run_id in swept:
+            await project_run_id_best_effort(run_id)
+        return swept
 
     # ------------------------------------------------------------------
     # Aggregate

@@ -78,12 +78,86 @@ async def _run_coords(run_id: Any) -> Optional[dict[str, Any]]:
 
 
 def _run_title(run_row: dict, key: Optional[str], title: Optional[str]) -> str:
+    """run 行的标题，**逐条对齐 mig 472 的回填段**：
+
+    ``COALESCE(NULLIF(i.identifier || ' · ' || i.title, ''),
+               NULLIF(LEFT(r.input_summary, 80), ''), 'run')``
+
+    SQL 的 ``||`` 遇 NULL 整串为 NULL，所以「有 identifier 但没 title」在回填侧
+    退到 ``input_summary``，**不是**退到裸 identifier。这里必须同样退 —— 否则
+    同一条 run 的标题取决于它是被回填写进去的还是新写进去的，而两者在表里长
+    得一模一样，没有任何东西会说出这个分叉。（``issues.title`` 是 NOT NULL，
+    所以这条分支现实中几乎不发生；对齐的代价是零，分叉的代价不是。）
+
+    最后的 ``'run'`` 不能省：``title`` 是 NOT NULL，编不出名字也要写一条，
+    否则这次运行在检索里根本不存在。
+    """
     if key and title:
         return f"{key} · {title}"
-    if key:
-        return key
-    # title 是 NOT NULL：编不出名字也要写一条，否则这次运行在检索里不存在。
     return (run_row.get("input_summary") or "").strip()[:_TITLE_FALLBACK_CHARS] or "run"
+
+
+#: ``project_run_id_best_effort`` 读回一行 run 时要的列。与
+#: ``project_run_best_effort`` 认的 key 一一对应。
+_RUN_PROJECTION_COLUMNS = (
+    "id",
+    "issue_id",
+    "team_id",
+    "project_id",
+    "agent_id",
+    "user_id",
+    "model",
+    "status",
+    "error_code",
+    "input_summary",
+    "output_summary",
+)
+
+
+async def _run_row(run_id: Any) -> Optional[dict[str, Any]]:
+    """一条 run 的投影所需列。没有 user_id 过滤 —— 调用方是系统清扫器，
+    ``AgentRunsRepository.get_by_id`` 的 owner 谓词在那里没有 user 可填，
+    而投影本来就不做可见性判断（见模块 docstring）。"""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+
+    columns = [getattr(AgentRuns, name) for name in _RUN_PROJECTION_COLUMNS]
+    async with read_scope() as session:
+        row = (
+            await session.execute(select(*columns).where(AgentRuns.id == int(run_id)))
+        ).first()
+    if row is None:
+        return None
+    return dict(zip(_RUN_PROJECTION_COLUMNS, row))
+
+
+async def project_run_id_best_effort(run_id: Any) -> None:
+    """按 run id 读回一行再投影。
+
+    给 ``RunRecorder._finish`` **之外**的终态写方用：清扫器把一条 run 判死
+    （``liveness_scanner._mark_dead``）或判丢心跳
+    （``AgentRunsRepository.mark_heartbeat_lost_ids``）时，那条 run 永远不会
+    再经过 ``_finish``。少了这一步，被清扫器终结的 run 在检索里停在它
+    ``running`` 时的样子，或者干脆从不存在 —— 而缺席是静默的。
+
+    **必须在那次终态 UPDATE 提交之后调用**：这里读的是库，读早了会把旧的
+    ``status`` 投进去。失败只记日志，永不 raise。
+    """
+    try:
+        row = await _run_row(run_id)
+    except Exception as exc:  # noqa: BLE001 — 见模块 docstring
+        logger.opt(exception=True).error(
+            f"[search] run {run_id} could not be read back for projection: {exc!r}"
+        )
+        return
+    if row is None:
+        logger.warning(
+            f"[search] run {run_id} was gone by the time it could be projected"
+        )
+        return
+    await project_run_best_effort(row)
 
 
 async def project_run_best_effort(run_row: dict) -> None:
@@ -142,7 +216,9 @@ async def project_output_best_effort(row: Any, *, search_text: Optional[str]) ->
             SearchDoc(
                 entity_kind="output",
                 entity_id=output_entity_id(row.kind, row.ref_id, row.version),
-                title=row.title or f"{row.kind} #{row.ref_id}",
+                # 与 mig 472 回填段的 ``d.kind || ' ' || d.ref_id`` 同形。
+                # 带 ``#`` 会让同一版在回填侧与新写侧长出两个标题。
+                title=row.title or f"{row.kind} {row.ref_id}",
                 body=search_text,
                 kind=row.kind,
                 ref_id=str(row.ref_id),
@@ -168,4 +244,5 @@ __all__ = [
     "output_entity_id",
     "project_output_best_effort",
     "project_run_best_effort",
+    "project_run_id_best_effort",
 ]

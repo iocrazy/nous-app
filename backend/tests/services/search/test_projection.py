@@ -77,6 +77,24 @@ async def test_a_run_without_an_issue_falls_back_to_a_clipped_input_summary(spy)
     assert doc.owner_user_id == ME and doc.error_code == "budget_exhausted"
 
 
+async def test_an_issue_without_a_title_falls_back_like_the_backfill_does(
+    spy, monkeypatch
+):
+    """mig 472 的回填段拼的是 ``i.identifier || ' · ' || i.title``，SQL 的 ``||``
+    遇 NULL 整串为 NULL，所以那一侧退到 ``input_summary`` 而**不是**裸
+    identifier。这里退法不同就会让同一条 run 的标题取决于它是回填写的还是新
+    写的——而两行在表里长得一模一样，没有东西会说出这个分叉。"""
+
+    async def _ident(issue_id):
+        return ("MH-96", None)
+
+    monkeypatch.setattr(mod, "_issue_identity", _ident)
+    await mod.project_run_best_effort(
+        {"id": 917, "issue_id": 96, "user_id": ME, "input_summary": "y" * 200}
+    )
+    assert spy.docs[-1].title == "y" * 80
+
+
 async def test_a_run_with_neither_issue_nor_summary_still_gets_a_title(spy):
     await mod.project_run_best_effort({"id": 915, "issue_id": None, "user_id": ME})
     # title NOT NULL —— 编不出名字也必须写一条，否则这次运行在检索里不存在。
@@ -140,8 +158,10 @@ async def test_a_human_version_owns_itself_and_needs_no_search_text(spy, monkeyp
     doc = spy.docs[-1]
     # 新 kind 的生产者忘传正文只是搜不到正文，不是接线 bug（spec §2.1）；
     # 人手版（回退）没有 run，归属只能由署名人给出。
+    # 标题兜底与 mig 472 回填段同形（``d.kind || ' ' || d.ref_id``）——带个 ``#``
+    # 就会让同一版在回填侧与新写侧长出两个标题。
     assert (
-        doc.body is None and doc.title == "script_scene #7" and doc.owner_user_id == ME
+        doc.body is None and doc.title == "script_scene 7" and doc.owner_user_id == ME
     )
     # 人手版的身份键与 agent 版同一个拼法——它写在同一条链上，第二种拼法会让
     # 回退产生的那一版在检索里变成一个不同的东西。
