@@ -28,6 +28,10 @@ vi.mock('../services/aiLibraryService', () => ({
     streamChatMessage: (...args: unknown[]) => streamChatMessage(...args),
     uploadChatAttachment: vi.fn(),
     getRunEvents: vi.fn(async () => ({ items: [], count: 0 })),
+    // 3c §4.2: the panel asks for every visible run's cost on mount. A
+    // missing method here throws INSIDE the effect (not a rejected
+    // promise), which unmounts the whole panel — hence a real stub.
+    getRunCosts: vi.fn(async () => ({})),
     listCommitments: vi.fn(async () => ({ items: [], count: 0 })),
   },
 }));

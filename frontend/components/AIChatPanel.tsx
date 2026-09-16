@@ -29,6 +29,7 @@ import type {
   ChatToolCall,
   ResourceRefAttachment,
   ResourceSearchResult,
+  RunCost,
 } from '../types';
 import { AgentSelector } from './AgentSelector';
 import { AgentIdentityHeader } from './agentActivity/AgentIdentityHeader';
@@ -277,6 +278,31 @@ export function AIChatPanel({
     }
   }, [sessionsOverlayOpen]);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
+  // ── Per-turn money (3c §4.2) ───────────────────────────────────────────
+  // One batched read for the whole screen, then the `done` frame patches the
+  // turn that just ended. Keyed by run id as a STRING (snowflake BIGINT).
+  const [runCosts, setRunCosts] = useState<Record<string, RunCost>>({});
+  // The run id of the turn currently streaming. SSE hands it over on the
+  // `start` frame — the temp bubble has no `metadata_json`, so without this
+  // the panel has no run to ask about until the turn is already over.
+  const [liveRunId, setLiveRunId] = useState<string | null>(null);
+  // 依赖用**字符串**——依赖数组里放数组会每次渲染都判定「变了」，那就是每渲染
+  // 一次发一个请求。`slice(-50)` 留最近的一屏：更早的气泡滚出视野了。
+  const runIdsKey = useMemo(
+    () => Array.from(new Set(messages.map(chatRunId).filter((x): x is string => !!x)))
+      .slice(-50)
+      .join(','),
+    [messages],
+  );
+  useEffect(() => {
+    if (!runIdsKey) return;
+    let cancelled = false;
+    aiLibraryService
+      .getRunCosts(runIdsKey.split(','))
+      .then((items) => { if (!cancelled) setRunCosts((prev) => ({ ...prev, ...items })); })
+      .catch((err) => console.error('[AIChatPanel] run costs failed', err));
+    return () => { cancelled = true; };
+  }, [runIdsKey]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
   // T6: count of attachments the backend couldn't resolve for the most
   // recently completed turn (from the stream's 'done' event). Ephemeral —
@@ -835,6 +861,10 @@ export function AIChatPanel({
       if (capsule) setContextCapsule(null);
 
       setSending(true);
+      // A new turn starts with no run of its own. Carrying the previous
+      // turn's id over would let the status line draw the OLD run's steps
+      // in the seconds before this turn's `start` frame lands.
+      setLiveRunId(null);
       setAttachmentFailureCount(undefined);
       setAttachmentFailures(undefined);
 
@@ -941,7 +971,14 @@ export function AIChatPanel({
         for await (const evt of aiLibraryService.streamChatMessage(
           activeSessionId, text, opts,
         )) {
-          if (evt.type === 'delta') {
+          if (evt.type === 'start') {
+            // 3c §4.1/§4.2: the backend hands the run id over as soon as the
+            // run row exists — before the first token. That is what makes the
+            // "Step N · 4s" status line possible at all on this path: the temp
+            // bubble carries no `metadata_json`, so there was nothing to read.
+            const rid = typeof evt.data?.run_id === 'string' ? evt.data.run_id : null;
+            if (rid) setLiveRunId(rid);
+          } else if (evt.type === 'delta') {
             const chunk = typeof evt.data?.text === 'string' ? evt.data.text : '';
             if (!chunk) continue;
             const isFirst = streamed === '';
@@ -980,6 +1017,23 @@ export function AIChatPanel({
             if (Array.isArray(failures) && failures.length > 0) {
               setAttachmentFailureCount(failures.length);
               setAttachmentFailures(failures as AttachmentFailure[]);
+            }
+            // 3c §4.2: the turn that just ended already knows what it cost —
+            // paint it now instead of waiting for the next batched read. The
+            // two nulls stay null: «nobody billed this» is not «billed zero».
+            const rid = typeof evt.data?.run_id === 'string' ? evt.data.run_id : null;
+            if (rid && (evt.data.cost_cents != null || evt.data.charged_points != null)) {
+              setRunCosts((prev) => ({
+                ...prev,
+                [rid]: {
+                  cost_cents: (evt.data.cost_cents as number | null) ?? null,
+                  charged_points: (evt.data.charged_points as number | null) ?? null,
+                  model: prev[rid]?.model ?? null,
+                  status: prev[rid]?.status ?? 'completed',
+                  prompt_tokens: prev[rid]?.prompt_tokens ?? 0,
+                  completion_tokens: prev[rid]?.completion_tokens ?? 0,
+                },
+              }));
             }
           }
           // Unknown event types are no-ops (forward-compat per the
@@ -1026,6 +1080,9 @@ export function AIChatPanel({
         }
       } finally {
         setSending(false);
+        // The turn is over; the reloaded history carries the run id on the
+        // message row from here on.
+        setLiveRunId(null);
       }
 
       // Update the session list ordering so this session bubbles to top.
@@ -1434,6 +1491,7 @@ export function AIChatPanel({
                 awaitingInputDisabled={msg.id !== lastAssistantMessageId}
                 onAnswerQuestion={(value, answerTo) => handleSend(value, [], { answerTo })}
                 runId={msg.role === 'assistant' ? chatRunId(msg) : undefined}
+                cost={msg.role === 'assistant' ? (runCosts[chatRunId(msg) ?? ''] ?? null) : null}
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)
@@ -1443,7 +1501,13 @@ export function AIChatPanel({
             ))}
 
             <ChatRunStatus
-              runId={messages.length ? chatRunId(messages[messages.length - 1]) : null}
+              runId={
+                // While a turn streams, the newest bubble is the TEMP one and
+                // carries no run id — `liveRunId` (off the `start` frame) is
+                // the only source. Persisted history keeps using the message.
+                liveRunId
+                ?? (messages.length ? chatRunId(messages[messages.length - 1]) : null)
+              }
               isRunning={sending}
             />
 

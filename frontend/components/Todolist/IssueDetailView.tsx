@@ -46,6 +46,8 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { selectRunCost, selectRunView } from '../TaskCenter/runView';
 import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from './childRunContext';
 import { ReplayContext, type ReplayState } from './replayContext';
+import { RunCostContext } from './runCostContext';
+import type { RunCost } from '../../types';
 import { ForkRunDialog } from './ForkRunDialog';
 import { forkErrorText } from './forkErrors';
 import { replyErrorText } from './outputRefErrors';
@@ -137,6 +139,44 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // server-side from the runs. Polls while live, nudged by agent_runs Realtime.
   const { progress, loaded: progressLoaded, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
   const phase = progress?.phase ?? null;
+
+  // ── Per-run money (3c §4.2) ────────────────────────────────────────────
+  // The rollup carries every run's cost; the `done` frame carries the one that
+  // just ended, seconds before the next poll would. Frame wins until the poll
+  // comes back and overwrites it with the server's own number.
+  const [liveRunCost, setLiveRunCost] = useState<
+    { runId: string; cost_cents: number | null; charged_points: number | null } | null
+  >(null);
+  const runCosts = useMemo(() => {
+    const out: Record<string, RunCost> = {};
+    for (const r of progress?.runs ?? []) {
+      // ⚠️ The rollup's `runs[]` has no token columns, so the issue-side
+      // tooltip's first line is always `0 prompt · 0 completion`. That is a
+      // trade, not a defect: filling it means changing the aggregate SQL
+      // (ticketed in Task 23), and the money line itself is exact.
+      out[String(r.id)] = {
+        cost_cents: r.cost_cents,
+        charged_points: r.charged_points ?? null,
+        model: r.model,
+        status: r.status,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+      };
+    }
+    if (liveRunCost) {
+      const prev = out[liveRunCost.runId];
+      out[liveRunCost.runId] = {
+        ...prev,
+        model: prev?.model ?? null,
+        status: prev?.status ?? 'completed',
+        prompt_tokens: prev?.prompt_tokens ?? 0,
+        completion_tokens: prev?.completion_tokens ?? 0,
+        cost_cents: liveRunCost.cost_cents,
+        charged_points: liveRunCost.charged_points,
+      };
+    }
+    return out;
+  }, [progress?.runs, liveRunCost]);
 
   // ── Replay (harness 2b-1 §1) ───────────────────────────────────────────
   // The scrubber attaches to the issue's newest run: the live one, else the
@@ -413,6 +453,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           // 40-shot canvas into 40 requests. An older backend sends neither
           // key: no objects to forget, seq 0, and the turn is still announced.
           for (const o of event.outputs ?? []) invalidateOutputLineage(o.kind, o.ref_id);
+          // 3c §4.2: the turn's money, straight off the frame — the tail stops
+          // saying "—" without waiting a poll cycle. Both keys are nullable and
+          // a null stays a null: «not charged» is not «charged zero».
+          if (event.run_id) {
+            setLiveRunCost({
+              runId: String(event.run_id),
+              cost_cents: event.cost_cents ?? null,
+              charged_points: event.charged_points ?? null,
+            });
+          }
           notifyTurn(String(issue.id), { runId: event.run_id ?? null, seq: event.seq ?? 0 });
         }
       }
@@ -780,15 +830,17 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                         onBack={() => setChildRun(null)}
                       />
                     )}
-                    <IssueChatThread
-                      messages={messages}
-                      agentsById={agentsById}
-                      selfUserId={selfUserId}
-                      streamingText={streamingText}
-                      teamId={teamId}
-                      aiSessionId={issue.raw.ai_session_id}
-                      issueKey={issue.identifier}
-                    />
+                    <RunCostContext.Provider value={runCosts}>
+                      <IssueChatThread
+                        messages={messages}
+                        agentsById={agentsById}
+                        selfUserId={selfUserId}
+                        streamingText={streamingText}
+                        teamId={teamId}
+                        aiSessionId={issue.raw.ai_session_id}
+                        issueKey={issue.identifier}
+                      />
+                    </RunCostContext.Provider>
                   </TrajectoryIssueKeyContext.Provider>
                   </ReplayContext.Provider>
                 )}

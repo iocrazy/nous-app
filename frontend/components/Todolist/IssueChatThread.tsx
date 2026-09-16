@@ -32,6 +32,8 @@ import { replayTicks } from '../agentActivity/replayTicks';
 import { isReplaying, useReplay } from './replayContext';
 import { forkMarksFor, useRunForks } from '../agentActivity/useRunForks';
 import { forkOrigin, timedOutTools } from '../agentActivity/runHeader';
+import { RunCostTail } from '../agentActivity/RunCostTail';
+import { useRunCost } from './runCostContext';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -293,10 +295,13 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean;
   // after the run ends (the Cockpit's live view is gone by then).
   const origin = useMemo(() => forkOrigin(events), [events]);
   const timedOut = useMemo(() => timedOutTools(events), [events]);
+  // 这一回合花了多少（3c §4.2）。键不在 = 账还没到，此时不画——一个编出来的
+  // `¢0.00` 会把「还不知道」说成「免费」。
+  const cost = useRunCost(runId);
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
-      {(origin || timedOut.count > 0 || fromWakeup) && (
+      {(origin || timedOut.count > 0 || fromWakeup || cost) && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="run-header-chips">
           {origin && (
             <button
@@ -327,6 +332,19 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean;
               title={timedOut.last ?? undefined}
             >
               {t('issueDetail.toolsTimedOut', '{{count}} timed out', { count: timedOut.count })}
+            </span>
+          )}
+          {cost && (
+            <span className="ml-auto">
+              <RunCostTail
+                costCents={cost.cost_cents}
+                chargedPoints={cost.charged_points}
+                model={cost.model}
+                status={cost.status}
+                promptTokens={cost.prompt_tokens}
+                completionTokens={cost.completion_tokens}
+                live={isRunning}
+              />
             </span>
           )}
         </div>

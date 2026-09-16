@@ -356,3 +356,38 @@ describe('AIChatBubble — awaiting_input question card (phase 2a)', () => {
     expect(screen.queryByTestId('bubble-question')).toBeNull();
   });
 });
+
+/**
+ * 3c §4.2：气泡尾部的消耗行。tokens 从正文移进浮层——一行里「钱」比「token 数」
+ * 更是读者要的答案，而老会话（没有 cost）必须原样保留 `N tokens`。
+ */
+describe('AIChatBubble — 消耗行（3c §4.2）', () => {
+  const cost = {
+    cost_cents: 0.82,
+    charged_points: 0.82,
+    model: 'doubao-seed-2-0-lite',
+    status: 'completed',
+    prompt_tokens: 1200,
+    completion_tokens: 340,
+  };
+
+  it('assistant 气泡尾部画消耗行，tokens 从正文移进浮层', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble role="assistant" content="ok" tokens={1540} cost={cost} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('run-cost-tail').textContent).toBe('◇ 0.82 · doubao-seed-2-0-lite');
+    expect(screen.queryByText('1540 tokens')).toBeNull(); // tokens 只在浮层里
+  });
+
+  it('没有 cost 的气泡维持原样显示 tokens——老会话不该突然少一行', () => {
+    render(
+      <MemoryRouter>
+        <MessageBubble role="assistant" content="ok" tokens={1540} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('run-cost-tail')).toBeNull();
+    expect(screen.getByText('1540 tokens')).toBeTruthy();
+  });
+});

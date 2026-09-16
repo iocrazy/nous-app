@@ -5805,6 +5805,12 @@
     "inboxSubagent": "子代理结果 · {{type}}（后台）· {{verdict}} · 已在第 {{n}} 步前读到",
     "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到"
   },
+  "cost": {
+    "tailTokens": "{{p}} 输入 · {{c}} 输出 tokens",
+    "charged": "已扣 ◇ {{n}}",
+    "notCharged": "未扣费（{{why}}）",
+    "notChargedPlain": "未扣费"
+  },
   "fork": {
     "title": "从{{step}}分叉",
     "body": "从这一步起新开一个 run，历史与此处一致。原 run 与原会话原样保留。",
