@@ -48,6 +48,39 @@ export function formatToolErrorRate(
   return `${(((total?.tool_errors ?? 0) / calls) * 100).toFixed(1)}%`;
 }
 
+/**
+ * 用量页当前展示的窗口，ISO 两端（修复轮 1 #2）。
+ *
+ * 复刻 `/usage/daily` 的窗口语义，好让效率读面和日汇总问的是**同一段时间**：
+ * 给了 `month` 就是那个自然月 `[月初, 下月初)`（与后端 `_month_bounds` 同口径，
+ * 上界独占），否则是 `[now - days, now]`。
+ *
+ * 不带窗口去问效率端点会拿到后端默认的 30 天：用户把范围切到 90d 之后，页面上
+ * 四格说的是 90 天、两格说的是 30 天，而屏幕上没有任何东西提示这件事。
+ *
+ * 解析不了的 month 退回 days 预设——宁可问一个能答的窗口，也不要发一个
+ * `invalid_range` 出去。
+ */
+export function usageWindow(
+  opts: { days: number; month?: string },
+  now: Date = new Date(),
+): { from: string; to: string } {
+  const m = opts.month ? /^(\d{4})-(\d{2})$/.exec(opts.month) : null;
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    if (month >= 1 && month <= 12) {
+      return {
+        from: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
+        to: new Date(Date.UTC(year, month, 1)).toISOString(),
+      };
+    }
+  }
+  const to = now;
+  const from = new Date(to.getTime() - opts.days * 24 * 3600 * 1000);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
 /** Compact one-line cost summary for the issue detail strip. */
 export function formatIssueCostLine(totalTokens: number, costCents: number): string {
   const tokens = formatTokens(totalTokens);

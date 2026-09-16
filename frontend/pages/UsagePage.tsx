@@ -58,6 +58,7 @@ import {
 import { useToast } from '../components/Toast';
 import { TurnEndBreakdown } from '../components/usage/TurnEndBreakdown';
 import { PageHeader } from '../components/layout/PageHeader';
+import { usageWindow } from './usagePanelHelpers';
 
 const AGENT_BAR_COLORS = [
   '#6366f1',
@@ -108,25 +109,45 @@ export const UsagePage: React.FC = () => {
   // Bumped by the Refresh button so the runs table reloads with the charts.
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Request generation. Every control on this page (range, grouping, scope,
+  // month) starts a new fetch while the previous one may still be in flight,
+  // and the two land in whatever order the network decides. Without a
+  // generation check the SLOWER response wins — the user clicks 90d, sees 90d
+  // numbers, and then watches them silently revert to the 30d ones while the
+  // range pill still reads 90d. Nothing on screen says which window is being
+  // shown, so the page is simply wrong and looks fine.
+  const reqIdRef = React.useRef(0);
+
   const fetchUsage = useCallback(async (): Promise<void> => {
+    const myReq = ++reqIdRef.current;
+    const isCurrent = (): boolean => reqIdRef.current === myReq;
     setLoading(true);
     setError(null);
     setRefreshKey((k) => k + 1);
     try {
       if (scope === 'user') {
-        const resp = await aiLibraryService.getUsageDaily(
-          days,
-          groupBy,
-          rangeMode === 'month' ? month : undefined,
-        );
+        const monthArg = rangeMode === 'month' ? month : undefined;
+        const resp = await aiLibraryService.getUsageDaily(days, groupBy, monthArg);
+        if (!isCurrent()) return;
         setSummary(resp);
         // 第二个请求：它失败不该把整页打掉，两枚效率格自己退回「—」。
+        // 窗口与 summary 同源——不带窗口就是问后端的默认 30 天，于是上面四格和
+        // 下面两格说的是两个不同的时间段。
+        const window = usageWindow({ days, month: monthArg });
         try {
-          setEfficiency(
-            await usageService.getEfficiency({ scope: 'user', groupBy }),
-          );
+          const eff = await usageService.getEfficiency({
+            scope: 'user',
+            groupBy,
+            from: window.from,
+            to: window.to,
+          });
+          if (!isCurrent()) return;
+          setEfficiency(eff);
           setEfficiencyError(null);
         } catch (effErr) {
+          // 失败分支同样要过代际判断：旧轮的 503 落地把新轮刚画好的分布条抹掉，
+          // 是这类竞态里最难看的一种。
+          if (!isCurrent()) return;
           console.error('[UsagePage] efficiency fetch failed:', effErr);
           setEfficiency(null);
           setEfficiencyError(
@@ -139,15 +160,18 @@ export const UsagePage: React.FC = () => {
           scope,
           teamId != null ? teamId : undefined,
         );
+        if (!isCurrent()) return;
         setData(resp);
       }
     } catch (err) {
+      if (!isCurrent()) return;
       console.error('[UsagePage] usage fetch failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       addToast(`Failed to load usage: ${msg}`, 'error');
     } finally {
-      setLoading(false);
+      // 旧轮收尾不许关掉新轮的 spinner。
+      if (isCurrent()) setLoading(false);
     }
   }, [scope, days, groupBy, month, rangeMode, teamId, addToast]);
 
@@ -271,9 +295,15 @@ export const UsagePage: React.FC = () => {
               {t('aiUsage.turnEndTitle', 'How turns ended')}
             </div>
             {efficiency ? (
-              <TurnEndBreakdown reasons={efficiency.turn_end_reasons} />
-            ) : (
+              <TurnEndBreakdown reasons={efficiency.turn_end_reasons ?? {}} />
+            ) : efficiencyError ? (
               <EfficiencyNotice code={efficiencyError} />
+            ) : (
+              // 「还在加载」和「读失败了」共用一个 testid，等于让任何断言失败态的
+              // 测试在加载态上也通过。
+              <p className="text-xs text-ink-500" data-testid="efficiency-loading">
+                {t('aiUsage.efficiencyLoading', 'Loading efficiency...')}
+              </p>
             )}
           </section>
           <BreakdownTable summary={summary} />
@@ -546,10 +576,15 @@ export const StatTiles: React.FC<{
   // 永远是错的。
   const sum = (f: (g: EfficiencyGroup) => number): number =>
     efficiency ? efficiency.groups.reduce((a, g) => a + f(g), 0) : 0;
-  const runs = sum((g) => g.run_count);
+  // 分母是**结束过的回合**，不是全部 run。后端的 reasons 查询带
+  // `WHERE turn_end_reason IS NOT NULL`，而 mig 472 不回填存量行——拿
+  // `sum(run_count)` 当分母，上线首月这一格会显示个位数，把一个跑得好好的窗口
+  // 报成惨败。分布与分母必须同源。字段整个缺席（旧后端 / 半截响应）也落「—」。
+  const reasons = efficiency?.turn_end_reasons ?? {};
+  const ended = Object.values(reasons).reduce((a, b) => a + (b > 0 ? b : 0), 0);
   const successRate =
-    efficiency && runs > 0
-      ? `${(((efficiency.turn_end_reasons.completed ?? 0) / runs) * 100).toFixed(0)}%`
+    ended > 0
+      ? `${(((reasons.completed ?? 0) / ended) * 100).toFixed(0)}%`
       : '—';
   const delivered = sum((g) => g.deliverables);
   const costPerOutput =
@@ -615,7 +650,7 @@ export const StatTiles: React.FC<{
  * details:{code}}`; rendering that hands the user a request id and calls it an
  * explanation.
  */
-const EfficiencyNotice: React.FC<{ code: string | null }> = ({ code }) => {
+const EfficiencyNotice: React.FC<{ code: string }> = ({ code }) => {
   const { t } = useTranslation();
   const copy = ((): string => {
     switch (code) {
@@ -634,8 +669,6 @@ const EfficiencyNotice: React.FC<{ code: string | null }> = ({ code }) => {
           'aiUsage.efficiencyInvalidRange',
           'That range ends before it starts.',
         );
-      case null:
-        return t('aiUsage.efficiencyLoading', 'Loading efficiency...');
       default:
         return t('aiUsage.efficiencyFailed', 'Efficiency stats could not be loaded.');
     }

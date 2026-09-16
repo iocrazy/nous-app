@@ -78,4 +78,46 @@ describe('StatTiles', () => {
     render(<StatTiles summary={SUMMARY} efficiency={EFFICIENCY} />);
     expect(screen.getByTestId('tile-requests')).toHaveTextContent('10');
   });
+
+  // ─── 修复轮 1 #1：Success 的分母是「结束过的回合」，不是全部 run ──────────
+  // 后端 reasons 查询带 `WHERE turn_end_reason IS NOT NULL`，而 mig 472 不回填存量
+  // 行。拿 sum(run_count) 当分母，上线首月这一格会显示个位数——一个跑得好好的
+  // 窗口被报成惨败。分布与分母必须同源。
+
+  it('divides by the runs that actually ended, not by every run', () => {
+    // 10 个 run，只有 3 个带 turn_end_reason（其余是 mig 472 之前的存量行）。
+    // 2/3 = 67%；拿 run_count 当分母会是 2/10 = 20%。
+    const eff: EfficiencySummary = {
+      ...EFFICIENCY,
+      turn_end_reasons: { completed: 2, error: 1 },
+    };
+    render(<StatTiles summary={SUMMARY} efficiency={eff} />);
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('67%');
+  });
+
+  it('says it does not know when no run has ended yet', () => {
+    // run_count 是 10，但一个 reason 都没有 → 分母是 0。0% 会把「还没有人结束」
+    // 说成「全都失败了」。
+    const eff: EfficiencySummary = { ...EFFICIENCY, turn_end_reasons: {} };
+    render(<StatTiles summary={SUMMARY} efficiency={eff} />);
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('—');
+  });
+
+  it('survives a response that carried no turn_end_reasons field at all', () => {
+    // 旧后端 / 半截响应：字段整个缺席。读它的 `.completed` 会炸，落「—」才对。
+    const eff = { ...EFFICIENCY } as EfficiencySummary;
+    delete (eff as Partial<EfficiencySummary>).turn_end_reasons;
+    render(<StatTiles summary={SUMMARY} efficiency={eff} />);
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('—');
+  });
+
+  it('counts an unknown reason toward the denominator, not toward success', () => {
+    // runner 明天加一个终止理由，这一格不该因此虚高。
+    const eff: EfficiencySummary = {
+      ...EFFICIENCY,
+      turn_end_reasons: { completed: 1, some_new_reason: 1 },
+    };
+    render(<StatTiles summary={SUMMARY} efficiency={eff} />);
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('50%');
+  });
 });

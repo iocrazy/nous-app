@@ -18,18 +18,32 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface KnownReason {
+  /** wire 上的名字（后端 `turn_end_reason` 的值），也是 `data-testid` 的后缀。 */
   key: string;
+  /** 翻译 key 的末段。camelCase，与 wire 的 snake_case **刻意**不同——翻译 key
+   *  的命名风格是我们的，不是后端的（CLAUDE.md 命名风格）。 */
+  i18nKey: string;
   className: string;
   label: string;
 }
 
 /** 值得单独一段的五个。顺序即条上的顺序：好消息在左，坏消息在右。 */
 const KNOWN: KnownReason[] = [
-  { key: 'completed', className: 'bg-ok', label: 'Completed' },
-  { key: 'awaiting_input', className: 'bg-info', label: 'Awaiting input' },
-  { key: 'error', className: 'bg-danger', label: 'Error' },
-  { key: 'interrupted', className: 'bg-warn', label: 'Interrupted' },
-  { key: 'cancelled', className: 'bg-ink-400', label: 'Cancelled' },
+  { key: 'completed', i18nKey: 'completed', className: 'bg-ok', label: 'Completed' },
+  {
+    key: 'awaiting_input',
+    i18nKey: 'awaitingInput',
+    className: 'bg-info',
+    label: 'Awaiting input',
+  },
+  { key: 'error', i18nKey: 'error', className: 'bg-danger', label: 'Error' },
+  {
+    key: 'interrupted',
+    i18nKey: 'interrupted',
+    className: 'bg-warn',
+    label: 'Interrupted',
+  },
+  { key: 'cancelled', i18nKey: 'cancelled', className: 'bg-ink-400', label: 'Cancelled' },
 ];
 
 export const TurnEndBreakdown: React.FC<{ reasons: Record<string, number> }> = ({
@@ -50,20 +64,33 @@ export const TurnEndBreakdown: React.FC<{ reasons: Record<string, number> }> = (
   const other = total - KNOWN.reduce((a, k) => a + (reasons[k.key] || 0), 0);
   const segments = [
     ...KNOWN.map((k) => ({ ...k, count: reasons[k.key] || 0 })),
-    { key: 'other', className: 'bg-ink-600', label: 'Other', count: other },
+    {
+      key: 'other',
+      i18nKey: 'other',
+      className: 'bg-ink-600',
+      label: 'Other',
+      count: other,
+      // 未知 wire 名绝不拼进翻译 key——那会去查一个不存在的条目，界面上直接冒出
+      // `aiUsage.turnEnd.max_iterations` 这种原文。
+    },
     // 没人撞上的理由不画零宽度的一段——那是一条画不出来的线，只会让 hover 乱跳。
   ].filter((s) => s.count > 0);
 
   return (
     <div className="space-y-2">
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-ink-800">
+      {/* 条本身是几个没有文字的 div；读屏念它只会念出一串空元素，而同样的信息
+          下面的图例已经用文字说过一遍了。 */}
+      <div
+        className="flex h-2 w-full overflow-hidden rounded-full bg-ink-800"
+        aria-hidden="true"
+      >
         {segments.map((s) => (
           <div
             key={s.key}
             data-testid={`turn-end-${s.key}`}
             className={s.className}
             style={{ width: `${(s.count / total) * 100}%` }}
-            title={`${t(`aiUsage.turnEnd.${s.key}`, s.label)}: ${s.count}`}
+            title={`${t(`aiUsage.turnEnd.${s.i18nKey}`, s.label)}: ${s.count}`}
           />
         ))}
       </div>
@@ -71,7 +98,7 @@ export const TurnEndBreakdown: React.FC<{ reasons: Record<string, number> }> = (
         {segments.map((s) => (
           <span key={s.key} className="inline-flex items-center gap-1.5">
             <span className={`h-2 w-2 rounded-full ${s.className}`} />
-            {t(`aiUsage.turnEnd.${s.key}`, s.label)} · {s.count}
+            {t(`aiUsage.turnEnd.${s.i18nKey}`, s.label)} · {s.count}
           </span>
         ))}
       </div>

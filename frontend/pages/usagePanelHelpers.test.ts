@@ -6,6 +6,7 @@ import {
   formatIssueCostLine,
   formatTokens,
   formatToolErrorRate,
+  usageWindow,
   groupLabel,
   pivotDaily,
   presetRange,
@@ -142,5 +143,42 @@ describe('formatToolErrorRate', () => {
   it('says it does not know when no tool was ever called', () => {
     expect(formatToolErrorRate({ tool_calls: 0, tool_errors: 0 })).toBe('—');
     expect(formatToolErrorRate(null)).toBe('—');
+  });
+});
+
+// ─── 修复轮 1 #2：效率请求要和 summary 问同一个窗口 ────────────────────────
+// `/usage/daily` 的窗口语义是这个函数要复刻的对象：给了 month 就是那个自然月
+// [月初, 下月初)，否则是 [now - days, now]。两边不同窗，两个数就不是一件事。
+
+describe('usageWindow', () => {
+  const now = new Date('2026-09-16T08:30:00.000Z');
+
+  it('turns a day preset into a closed ISO window ending now', () => {
+    const w = usageWindow({ days: 30 }, now);
+    expect(w.to).toBe('2026-09-16T08:30:00.000Z');
+    expect(w.from).toBe('2026-08-17T08:30:00.000Z');
+  });
+
+  it('honours a 90-day preset rather than clamping to 30', () => {
+    expect(usageWindow({ days: 90 }, now).from).toBe('2026-06-18T08:30:00.000Z');
+  });
+
+  it('turns a calendar month into [month start, next month start)', () => {
+    // 与 `_month_bounds` 同口径：上界是下月初，独占。
+    const w = usageWindow({ days: 30, month: '2026-07' }, now);
+    expect(w.from).toBe('2026-07-01T00:00:00.000Z');
+    expect(w.to).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('rolls December over into the next year', () => {
+    const w = usageWindow({ days: 30, month: '2026-12' }, now);
+    expect(w.to).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('ignores a month string it cannot parse and falls back to the preset', () => {
+    // 宁可问一个能答的窗口，也不要发一个 `invalid_range` 出去。
+    const w = usageWindow({ days: 7, month: 'not-a-month' }, now);
+    expect(w.from).toBe('2026-09-09T08:30:00.000Z');
+    expect(w.to).toBe('2026-09-16T08:30:00.000Z');
   });
 });

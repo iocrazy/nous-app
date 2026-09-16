@@ -4821,7 +4821,7 @@
     "efficiencyFailed": "效率数据加载失败。",
     "turnEnd": {
       "completed": "已完成",
-      "awaiting_input": "等待输入",
+      "awaitingInput": "等待输入",
       "error": "出错",
       "interrupted": "被中断",
       "cancelled": "已取消",

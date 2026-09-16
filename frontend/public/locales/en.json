@@ -4821,7 +4821,7 @@
     "efficiencyFailed": "Efficiency stats could not be loaded.",
     "turnEnd": {
       "completed": "Completed",
-      "awaiting_input": "Awaiting input",
+      "awaitingInput": "Awaiting input",
       "error": "Error",
       "interrupted": "Interrupted",
       "cancelled": "Cancelled",

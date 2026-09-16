@@ -4,8 +4,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TurnEndBreakdown } from './TurnEndBreakdown';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string, f?: string) => f ?? k }) }));
-afterEach(cleanup);
+const askedKeys: string[] = [];
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, f?: string) => {
+      askedKeys.push(k);
+      return f ?? k;
+    },
+  }),
+}));
+afterEach(() => {
+  cleanup();
+  askedKeys.length = 0;
+});
 
 describe('TurnEndBreakdown', () => {
   it('renders one segment per reason sized by its share', () => {
@@ -43,5 +54,32 @@ describe('TurnEndBreakdown', () => {
     expect(screen.queryByTestId('turn-end-error')).toBeNull();
     expect(screen.queryByTestId('turn-end-other')).toBeNull();
     expect(screen.getByTestId('turn-end-completed')).toHaveStyle({ width: '100%' });
+  });
+
+  // ─── 修复轮 1 #4 / #5 ───────────────────────────────────────────────────
+
+  it('hides the bar from assistive tech because the legend already says it', () => {
+    // 条本身是六个没有文字的 div；读屏念它只会念出一串空元素，而同样的信息
+    // 图例已经用文字说过一遍了。
+    const { container } = render(<TurnEndBreakdown reasons={{ completed: 1 }} />);
+    const bar = container.querySelector('[aria-hidden="true"]');
+    expect(bar).not.toBeNull();
+    expect(bar).toContainElement(screen.getByTestId('turn-end-completed'));
+  });
+
+  it('asks for camelCase translation keys even though the wire name is snake_case', () => {
+    // 翻译 key 一律 camelCase（CLAUDE.md 命名风格）。wire 上的 `awaiting_input`
+    // 是后端的名字，不是我们的 key 名——中间要有一张映射表。
+    render(<TurnEndBreakdown reasons={{ completed: 1, awaiting_input: 1 }} />);
+    expect(askedKeys).toContain('aiUsage.turnEnd.awaitingInput');
+    expect(askedKeys).not.toContain('aiUsage.turnEnd.awaiting_input');
+  });
+
+  it('asks for the Other key when the wire sends a reason it has never seen', () => {
+    // 未知 wire 名绝不能直接拼进 key——那会去查一个不存在的翻译，
+    // 界面上冒出 `aiUsage.turnEnd.max_iterations` 这种原文。
+    render(<TurnEndBreakdown reasons={{ max_iterations: 2 }} />);
+    expect(askedKeys).toContain('aiUsage.turnEnd.other');
+    expect(askedKeys.some((k) => k.includes('max_iterations'))).toBe(false);
   });
 });

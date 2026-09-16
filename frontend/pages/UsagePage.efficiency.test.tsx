@@ -6,7 +6,7 @@
  * `{success,error,code:"http_503",details:{code}}`）等于把 request_id 甩给用户。
  */
 import React from 'react';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -106,5 +106,117 @@ describe('UsagePage efficiency wiring', () => {
     expect(getEfficiency).toHaveBeenCalledWith(
       expect.objectContaining({ scope: 'user', groupBy: 'model' }),
     );
+  });
+
+  // ─── 修复轮 1 #2：同窗 ──────────────────────────────────────────────────
+
+  it('asks for efficiency over the window the page is showing', async () => {
+    render(<UsagePage />);
+    await waitFor(() => expect(getEfficiency).toHaveBeenCalled());
+    const arg = getEfficiency.mock.calls[0][0] as { from?: string; to?: string };
+    // 不带窗口就是问后端的默认 30 天——用户把范围切到 90d 之后，上面四格和下面
+    // 两格说的会是两个不同的时间段，而屏幕上没有任何东西提示这件事。
+    expect(arg.from).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(arg.to).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(Date.parse(arg.to!) - Date.parse(arg.from!)).toBe(30 * 24 * 3600 * 1000);
+  });
+
+  it('moves the efficiency window when the range pill moves', async () => {
+    render(<UsagePage />);
+    await waitFor(() => expect(getEfficiency).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('90d'));
+    await waitFor(() => expect(getEfficiency).toHaveBeenCalledTimes(2));
+    const arg = getEfficiency.mock.calls[1][0] as { from: string; to: string };
+    expect(Date.parse(arg.to) - Date.parse(arg.from)).toBe(90 * 24 * 3600 * 1000);
+  });
+
+  it('names a window the server refused as too long', async () => {
+    // 带上窗口之后 range_too_long 才是一条可达的分支——在此之前它是死代码。
+    getEfficiency.mockRejectedValue(
+      new UsageRequestError('range_too_long', 400, 'Bad Request'),
+    );
+    render(<UsagePage />);
+    await waitFor(() =>
+      expect(screen.getByTestId('efficiency-error')).toHaveTextContent(
+        'That range is too long',
+      ),
+    );
+  });
+
+  // ─── 修复轮 1 #6：加载中不是错误 ─────────────────────────────────────────
+
+  it('keeps «loading» out of the error slot', async () => {
+    let release: (v: unknown) => void = () => {};
+    getEfficiency.mockImplementation(() => new Promise((r) => { release = r; }));
+    render(<UsagePage />);
+    await waitFor(() => expect(screen.getByTestId('efficiency-loading')).toBeInTheDocument());
+    // 「还在加载」和「读失败了」放在同一个 testid 下，等于让任何断言失败态的
+    // 测试在加载态上也通过。
+    expect(screen.queryByTestId('efficiency-error')).toBeNull();
+    release(EFFICIENCY);
+    await waitFor(() => expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument());
+  });
+
+  // ─── 修复轮 1 #3：慢的旧响应不许覆盖新的 ─────────────────────────────────
+
+  it('drops a stale response that lands after a newer request', async () => {
+    // 用户从 30d 切到 90d；30d 那一轮慢，落地时 90d 已经在屏幕上了。没有代际
+    // 判断的话，旧数据会把新数据盖掉，而屏幕上的范围药丸还指着 90d。
+    let releaseStale: (v: unknown) => void = () => {};
+    const STALE = { ...SUMMARY, total_requests: 111 };
+    const FRESH = { ...SUMMARY, total_requests: 999 };
+    getUsageDaily.mockImplementationOnce(
+      () => new Promise((r) => { releaseStale = r; }),
+    );
+    getUsageDaily.mockResolvedValue(FRESH);
+    getEfficiency.mockResolvedValue({ ...EFFICIENCY, groups: [] });
+
+    render(<UsagePage />);
+    await waitFor(() => expect(getUsageDaily).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('90d'));
+    await waitFor(() => expect(screen.getByTestId('tile-requests')).toHaveTextContent('999'));
+
+    releaseStale(STALE);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('tile-requests')).toHaveTextContent('999');
+  });
+
+  it('drops a stale efficiency response too', async () => {
+    let releaseStale: (v: unknown) => void = () => {};
+    const FRESH = { ...EFFICIENCY, turn_end_reasons: { completed: 5 } };
+    getEfficiency.mockImplementationOnce(
+      () => new Promise((r) => { releaseStale = r; }),
+    );
+    getEfficiency.mockResolvedValue(FRESH);
+
+    render(<UsagePage />);
+    await waitFor(() => expect(getEfficiency).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('90d'));
+    await waitFor(() => expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument());
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('100%');
+
+    releaseStale({ ...EFFICIENCY, turn_end_reasons: { error: 9 } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('100%');
+  });
+
+  it('drops a stale efficiency FAILURE so it cannot erase fresh numbers', async () => {
+    // 失败分支同样要过代际判断：旧轮的 503 落地把新轮刚画好的分布条抹掉，
+    // 是这类竞态里最难看的一种。
+    let rejectStale: (e: unknown) => void = () => {};
+    getEfficiency.mockImplementationOnce(
+      () => new Promise((_r, rej) => { rejectStale = rej; }),
+    );
+    getEfficiency.mockResolvedValue(EFFICIENCY);
+
+    render(<UsagePage />);
+    await waitFor(() => expect(getEfficiency).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText('90d'));
+    await waitFor(() => expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument());
+
+    rejectStale(new UsageRequestError('efficiency_unavailable', 503, 'nope'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('turn-end-completed')).toBeInTheDocument();
+    expect(screen.queryByTestId('efficiency-error')).toBeNull();
   });
 });
