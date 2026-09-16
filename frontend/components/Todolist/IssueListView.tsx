@@ -137,7 +137,13 @@ interface IssueListViewProps {
    * the box still renders but nothing is fetched — the caller owns the query.
    */
   onSearchChange?: (q: string) => void;
-  /** The query the rows in `issues` were fetched with, '' / undefined if none. */
+  /**
+   * The query the rows in `issues` were fetched with, '' / undefined if none.
+   * Used ONLY to seed the box on mount, so a remount (opening an issue into the
+   * split pane) does not lose the search. It is deliberately NOT a controlled
+   * value: the box stays uncontrolled between mounts, so a late parent update
+   * can never yank characters out from under someone mid-type.
+   */
   serverQuery?: string;
   /** Server-side count of matching-and-visible issues, for "N of M". */
   totalCount?: number | null;

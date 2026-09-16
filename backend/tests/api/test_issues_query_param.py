@@ -14,6 +14,7 @@
 
 import importlib
 import sys
+from typing import Iterator
 
 import pytest
 from fastapi import FastAPI
@@ -48,7 +49,7 @@ def seen(monkeypatch) -> dict:
 
 
 @pytest.fixture
-def client(seen) -> TestClient:
+def client(seen) -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(_mod().router, prefix="/api/v1")
 

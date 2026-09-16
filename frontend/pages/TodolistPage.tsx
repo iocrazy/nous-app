@@ -429,6 +429,28 @@ export function TodolistPage() {
     }, LIVE_REFETCH_DEBOUNCE_MS));
   }, []);
 
+  /**
+   * The whole-page re-fetch the search path uses, on the SAME 800 ms window as
+   * `scheduleLiveRefetch`. The subscription carries every issue change in the
+   * team while a search narrows the page to a handful of rows, so nearly every
+   * event lands in the "not on this page → re-ask the server" branch. Undebounced
+   * that is one 200-row trgm query per event, each flashing the loading state;
+   * debounced, one bulk edit costs one query.
+   */
+  const listRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleListRefetch = useCallback(() => {
+    if (listRefetchTimer.current) clearTimeout(listRefetchTimer.current);
+    listRefetchTimer.current = setTimeout(() => {
+      listRefetchTimer.current = null;
+      const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
+      void refreshIssues(agentMap, projectMap);
+    }, LIVE_REFETCH_DEBOUNCE_MS);
+  }, [refreshIssues]);
+
+  useEffect(() => () => {
+    if (listRefetchTimer.current) clearTimeout(listRefetchTimer.current);
+  }, []);
+
   // Realtime: keep the issues list in sync without a manual refresh.
   // `issues` is in the supabase_realtime publication — subscribe so status
   // changes (agent updates, other users) reflect live in the list instead
@@ -465,9 +487,18 @@ export function TodolistPage() {
           // put an unmatched issue into a result set the SERVER produced —
           // there is no second local filter left to catch it (3c §2.3), and
           // nothing anywhere would report the disagreement. Re-ask the server
-          // instead; if the new row matches, it comes back in the results.
+          // instead (debounced); if the new row matches, it comes back in the
+          // results.
+          //
+          // NOTE the asymmetry: this only covers rows arriving from OUTSIDE the
+          // page. A row already on the page that gets edited into something the
+          // query no longer matches stays put until the next fetch — the client
+          // cannot tell without re-running the server's predicate, and re-asking
+          // on every in-page UPDATE would mean a query per keystroke of someone
+          // else's editing. Dropping it on a guess would be worse: the phrase
+          // may still match a column the page does not carry.
           if (queryRef.current.trim() && !issuesRef.current.some((i) => i.id === raw.id)) {
-            void refreshIssues(agentsById, projectsById);
+            scheduleListRefetch();
             return;
           }
           setIssues((prev) => {
@@ -487,7 +518,7 @@ export function TodolistPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch, refreshIssues]);
+  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch, scheduleListRefetch]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {

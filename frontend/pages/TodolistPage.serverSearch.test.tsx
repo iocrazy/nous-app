@@ -125,6 +125,11 @@ const mount = () =>
 const rows = () => screen.getByTestId('rows').textContent ?? '';
 const total = () => screen.getByTestId('total').textContent ?? '';
 const flush = async () => { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+/** 等过搜索态重拉的 800ms 去抖（真实计时器下）。 */
+const settleRefetch = async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 900)); });
+  await flush();
+};
 
 beforeEach(() => {
   realtimeHandler = null;
@@ -178,10 +183,38 @@ describe('TodolistPage 服务端搜索接线', () => {
       realtimeHandler?.({ eventType: 'INSERT', new: row(9, 'MH-OTHER') });
       await Promise.resolve();
     });
-    await flush();
+    await settleRefetch();
 
     expect(rows()).toBe('MH-RAIN');
     expect(listIssues.mock.calls.length).toBe(before + 1);
+  });
+
+  it('coalesces a burst of realtime inserts into a single re-fetch', async () => {
+    // 订阅收的是整个 team 的变更。搜索态下命中页只有几行，于是绝大多数事件都
+    // 落进「不在页内 → 重拉」这一支；不去抖的话，别人批量改动一次就是几十条
+    // 200 行 trgm 查询外加同样多次 loading 闪烁。
+    vi.useFakeTimers();
+    try {
+      listIssues.mockResolvedValue(page([row(1, 'MH-RAIN')], 1));
+      mount();
+      await flush();
+      act(() => { screen.getByTestId('search-rain').click(); });
+      await flush();
+
+      const before = listIssues.mock.calls.length;
+      await act(async () => {
+        realtimeHandler?.({ eventType: 'INSERT', new: row(9, 'MH-A') });
+        realtimeHandler?.({ eventType: 'INSERT', new: row(10, 'MH-B') });
+        realtimeHandler?.({ eventType: 'INSERT', new: row(11, 'MH-C') });
+        await Promise.resolve();
+      });
+      expect(listIssues.mock.calls.length).toBe(before);
+
+      await act(async () => { vi.advanceTimersByTime(800); await Promise.resolve(); });
+      expect(listIssues.mock.calls.length).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('still prepends a realtime INSERT when nothing is being searched', async () => {
