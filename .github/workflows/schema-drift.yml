@@ -164,6 +164,12 @@ on:
       # 3c mig 472：两张新表 + 两组计数列。trgm opclass 在不在、UNIQUE 拦不拦得住
       # 第二行、五个累加器是不是 NOT NULL DEFAULT 0 —— 只有真库能答。
       - 'backend/tests/db/test_mig_472_integration.py'
+      - 'backend/tests/db/test_search_docs_repository_integration.py'
+      # 上面那个文件读迁移建出来的形状；这个读 SearchDocsRepository 的语句在
+      # 服务器上跑得通不通（similarity / ON CONFLICT / Uuid 双绑定 / ILIKE
+      # ESCAPE）。所以 repository 与投影写方改动也要能触发本 job。
+      - 'backend/app/repositories/search_docs_repository.py'
+      - 'backend/app/services/search/**'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -177,7 +183,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-five, so it has to re-run
+      # to it changes what "green" means for all twenty-six, so it has to re-run
       # them — otherwise the guard could be weakened by a PR this job ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
@@ -718,3 +724,19 @@ jobs:
           # 累加器**是否真是 NOT NULL DEFAULT 0（可空的话 col + EXCLUDED.col 会把
           # 一整个小时桶算成 NULL），以及两张新表有没有给 anon/authenticated 开策略。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_mig_472_integration.py -v
+
+      - name: Assert the search_docs repository's statements on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步读的是 472 建出来的形状；这一步读 SearchDocsRepository 自己的
+          # 语句。它的单测全是 stmt.compile() 字符串断言 —— 编译得过不等于服务器
+          # 接受：func.similarity() 要 pg_trgm 真的装着（没装时那些断言照样绿）、
+          # on_conflict_do_update 要 search_docs_entity_key 真存在且列对得上（投影
+          # 「绝不长出第二行」全挂在它身上）、owner_user_id 与 team_members.user_id
+          # 两个 Uuid 列要接受同一个绑定值（绑错是 operator does not exist:
+          # uuid = character varying）、ILIKE 的 ESCAPE '\' 要真的让一个字面 %
+          # 匹配它自己而不是匹配全表（CLAUDE.md「ILIKE 模式的转义责任要跟着模式走」）。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_repository_integration.py -v

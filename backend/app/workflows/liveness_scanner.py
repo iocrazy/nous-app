@@ -240,7 +240,7 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
 
     try:
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 update(AgentRuns)
                 .where(
                     AgentRuns.id == run_id,
@@ -255,8 +255,22 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
                     error_message=f"Marked dead by liveness scanner: {reason}",
                 )
             )
+            killed = bool(result.rowcount)
     except Exception as exc:
         logger.warning(f"[liveness-scanner] mark dead {run_id} failed: {exc}")
+        return
+
+    if killed:
+        # 这条 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影只能由
+        # 这里跟上（3c Task 13 评审 Important 1）。**只在 CAS 真的命中时**投
+        # —— 没命中意味着别人已经把它收工了，再投一次会用清扫器视角覆盖掉那个
+        # 真正的终态。
+        #
+        # 在 ``write_scope()`` 之外：投影要读回刚提交的那一行，而且它失败绝不
+        # 该连坐这次已经成立的终态写入（见 projection 模块 docstring）。
+        from app.services.search.projection import project_run_id_best_effort
+
+        await project_run_id_best_effort(run_id)
 
 
 @DBOS.scheduled("*/30 * * * * *")  # every 30s (6-field cron)

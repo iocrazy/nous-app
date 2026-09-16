@@ -69,6 +69,7 @@ from app.services.ai.scope.script_selection import (
     resolve_selection,
     selection_from_run_context,
 )
+from app.services.deliverables.diff import render_elements, render_shot
 from app.services.deliverables.registry import register_deliverable_best_effort
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,7 @@ async def _register_write(
     ref_id: Any,
     title: Optional[str],
     ledger_ref: Optional[str] = None,
+    search_text: Optional[str] = None,
 ) -> None:
     """3a：把一次已经**提交**的写入登记成这个 run 的产出。
 
@@ -278,6 +280,10 @@ async def _register_write(
         # 这一版在账本上的位置。差这一步，``ledger_ref`` 就永远是 NULL，而
         # 所有读侧测试照样绿（它们自己造账本）——写侧接线必须自己被钉住。
         ledger_ref=ledger_ref,
+        # 这一版的正文，进检索投影。渲染器就是 diff 两侧用的那一对，所以
+        # 「搜到的文本」与「diff 里看到的文本」按构造相同——第二个渲染器
+        # 意味着两者迟早分叉。
+        search_text=search_text,
         turn=run_context.get("turn"),
         step=run_context.get("step"),
         # 这一轮的活 recorder。少了它，登记口退回 ``for_run`` 另开一个
@@ -389,6 +395,7 @@ class ScreenwritingTools:
             ref_id=shot.get("shot_id"),
             title=_shot_deliverable_title(shot),
             ledger_ref=ref,
+            search_text=render_shot(shot),
         )
         return {"ok": True, "scene_id": str(scene.id), "shot": shot}
 
@@ -604,6 +611,7 @@ class ScreenwritingTools:
                 ref_id=updated.get("shot_id"),
                 title=_shot_deliverable_title(updated),
                 ledger_ref=ref,
+                search_text=render_shot(updated),
             )
         if updated is None:
             return {
@@ -818,6 +826,7 @@ class ScreenwritingTools:
             # 场次的账本位置就是新的 op_seq 水位——``content_version`` 按构造
             # 即 ``MAX(op_seq)``（``services/script/version_service.py`` 顶部）。
             ledger_ref=str(outcome.content_version),
+            search_text=render_elements(list(outcome.elements)),
         )
         return {
             "ok": True,

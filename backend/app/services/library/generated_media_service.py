@@ -416,6 +416,9 @@ async def register_generated_media(
             kind="generated_media",
             ref_id=str(out["id"]),
             title=_first_line(origin.prompt),
+            # 标题取首行、正文取全文——两者刻意不是同一个值：列表要短，搜索
+            # 要能命中提示词第二段里的那个词。
+            search_text=origin.prompt,
             model=origin.model,
             # 媒体类是登记时就精确的价（血缘里 ``cost_kind=exact``）：调用方
             # 自己知道就用它的，否则取目录每次调用价。无价即 None，UI 显 '—'

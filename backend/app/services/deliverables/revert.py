@@ -40,7 +40,12 @@ from app.models import ScriptOps, ScriptShotOps, ScriptShots
 from app.repositories.run_deliverables_repository import (
     get_run_deliverables_repository,
 )
-from app.services.deliverables.diff import _SHOT_FIELDS, rebuild_content
+from app.services.deliverables.diff import (
+    _SHOT_FIELDS,
+    rebuild_content,
+    render_elements,
+    render_shot,
+)
 from app.services.deliverables.lineage_view import version_of
 from app.services.deliverables.registry import register_deliverable
 from app.services.script.version_service import inverse_between, replay_to
@@ -243,6 +248,9 @@ async def revert_output(
             return await _revert_scene(
                 ref_id=str(ref_id),
                 to_row=by_version[to_version],
+                # 回退之后这一场的内容就是它（逆操作批就是照它算的）。传进去
+                # 只为渲染检索正文，不参与任何写入决策。
+                target=target,
                 head=head,
                 chain=chain,
                 to_version=to_version,
@@ -353,6 +361,7 @@ async def _revert_shot(
             uid=uid,
             ledger_ref=kept_ref,
             reverted_from=None,
+            search_text=render_shot(current),
             session=session,
         )
     ledger_ref = await _write_shot_fields(
@@ -365,13 +374,14 @@ async def _revert_shot(
         uid=uid,
         ledger_ref=ledger_ref,
         reverted_from=to_version,
+        search_text=render_shot(target),
         session=session,
     )
     return RevertResult(version=version, kept_version=kept)
 
 
 async def _revert_scene(
-    *, ref_id, to_row, head, chain, to_version, uid, session
+    *, ref_id, to_row, target, head, chain, to_version, uid, session
 ) -> RevertResult:
     """逆操作批，与 undo 服务同机制（``run_undo_service.py:190``）——不造 replace-all op。
 
@@ -411,7 +421,8 @@ async def _revert_scene(
     # 就会让 ``head`` 少一笔，于是这里判定「有未登记的编辑」并**多登记一版**。
     # 后果是良性的（多留一版历史，没有内容被销毁，方向与「永不销毁内容」一致），
     # 但那一版是假的。这类链会随着每次回退自己补上 ``ledger_ref`` 而消失。
-    if replay_to(ledger, current_seq) != head:
+    current_elements = replay_to(ledger, current_seq)
+    if current_elements != head:
         kept = await _register(
             kind="script_scene",
             ref_id=ref_id,
@@ -419,6 +430,7 @@ async def _revert_scene(
             uid=uid,
             ledger_ref=str(current_seq),
             reverted_from=None,
+            search_text=render_elements(current_elements),
             session=session,
         )
 
@@ -448,6 +460,7 @@ async def _revert_scene(
             uid=uid,
             ledger_ref=str(current_seq + 1),
             reverted_from=to_version,
+            search_text=render_elements(target),
             session=session,
         ),
         kept_version=kept,
@@ -455,7 +468,7 @@ async def _revert_scene(
 
 
 async def _register(
-    *, kind, ref_id, chain, uid, ledger_ref, reverted_from, session
+    *, kind, ref_id, chain, uid, ledger_ref, reverted_from, search_text, session
 ) -> Dict[str, Any]:
     row = await register_deliverable(
         run_id=None,
@@ -465,6 +478,10 @@ async def _register(
         actor_user_id=uid,
         reverted_from_version=reverted_from,
         ledger_ref=ledger_ref,
+        # 这一版的内容回退已经算出来了（保留版 = 当前内容，回退版 = 目标内容），
+        # 所以正文不用再重建一次。缺了它，人手版在检索里只有标题——而链上所有
+        # 标题都一样（``chain.title``），等于搜不到。
+        search_text=search_text,
         session=session,
     )
     if row is None:

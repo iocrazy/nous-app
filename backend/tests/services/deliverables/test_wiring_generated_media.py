@@ -91,6 +91,9 @@ async def test_agent_generation_registers_one_deliverable(register_spy, insert_s
             kind="generated_media",
             ref_id="4242",
             title="A cafe at dusk",
+            # 3c：标题是首行，检索正文是**整段**提示词。两者相等就说明正文
+            # 那一侧接错了线——搜第二行的词会搜不到。
+            search_text="A cafe at dusk\nsecond line",
             model="gpt-image-2.5",
             cost_cents=0.12,
             turn=1,
