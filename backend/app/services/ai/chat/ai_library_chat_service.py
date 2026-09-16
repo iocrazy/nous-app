@@ -1436,6 +1436,21 @@ class AILibraryChatService:
             conversation_id=int(session_id) if _is_conv_store else None,
         )
 
+        # A6：议题派发链的 session 常常不带 team_id（UsagePage 自认「团队 scope
+        # 只给月度」正是这个后果），而 idx_agent_runs_billing 是
+        # WHERE team_id IS NOT NULL 的 partial 索引 —— NULL 的 run 对任何按团队的
+        # 效率账等于不存在。只在真缺时查一次议题，不给正常路径加往返。
+        _issue_row = None
+        if issue_id and not session.get("team_id"):
+            from app.repositories.issue_repository import get_issue_repository
+
+            try:
+                _issue_row = await get_issue_repository().get_by_id(int(issue_id))
+            except Exception as exc:  # noqa: BLE001 — 兜底失败不该挡住回合
+                logger.warning(f"[chat] issue scope fallback failed: {exc}")
+        _team_id = session.get("team_id") or (_issue_row or {}).get("team_id")
+        _project_id = _dispatch_scope.project_id or (_issue_row or {}).get("project_id")
+
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -1443,8 +1458,9 @@ class AILibraryChatService:
                 trigger=trigger,
                 session_id=None if _is_conv_store else session_id,
                 conversation_id=int(session_id) if _is_conv_store else None,
-                team_id=session.get("team_id"),
-                **_dispatch_scope.as_recorder_kwargs(),
+                team_id=_team_id,
+                project_id=_project_id,
+                episode_id=_dispatch_scope.episode_id,
                 model=model or None,
                 provider=provider,
                 input_summary=content,
