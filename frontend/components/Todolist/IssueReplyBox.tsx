@@ -114,6 +114,11 @@ interface IssueReplyBoxProps {
    *  issue behind them — the "Later" affordance is then hidden rather than
    *  posting a wake-up at nothing (harness 2b-2 §5-2). */
   issueId?: string;
+  /** The project this issue belongs to. With it, the `@` picker's Outputs tab
+   *  searches the whole project once the reader types (3c §2.4); without it
+   *  the tab stays on this issue's own outputs — a search scoped to nothing
+   *  would be a search scoped to everything. */
+  projectId?: string | null;
   /** A wake-up was armed; the page re-reads its schedules panel. */
   onScheduled?: () => void;
 }
@@ -146,6 +151,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   onNoteBoundaryChange,
   teamId,
   issueId,
+  projectId,
   onScheduled,
 }) => {
   const { t } = useTranslation();
@@ -604,6 +610,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     pickerOpen: mentionOpen,
     issueId: issueId ?? null,
     query: mentionQuery,
+    projectId: projectId ?? null,
     onSelect: handleMentionOutputSelect,
   });
   useEffect(() => {

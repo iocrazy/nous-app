@@ -41,8 +41,9 @@ vi.mock('react-i18next', () => {
 });
 
 const CITED: OutputCitation[] = [
-  { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
-  { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+  // `issueKey` 为 null = 这一版是本议题产出的；跨议题的引用才带它（3c §2.4）。
+  { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM', issueKey: null },
+  { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1', issueKey: 'MH-98' },
 ];
 
 const step = (citations?: OutputCitation[]): StepNode => ({
@@ -89,7 +90,16 @@ describe('OutputCitations', () => {
     expect(chips[0].textContent).toBe('@MEDIUM v2');
     expect(chips[0].getAttribute('data-ref')).toBe('337650953731886');
     expect(chips[0].getAttribute('data-version')).toBe('2');
-    expect(chips[1].textContent).toBe('@S3 · Shot #1 v1');
+    expect(chips[1].textContent).toContain('@S3 · Shot #1 v1');
+  });
+
+  it('says which issue a cited version came from, and only when it is another one', () => {
+    render(<OutputCitations node={step(CITED)} />);
+    // 第一条没有来源议题（本议题产出的）→ 不画；第二条有 → 画。整片都画的话，
+    // 唯一真的来自别处的那一条就不再显眼了。
+    const marks = screen.getAllByTestId('output-citation-issue');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('MH-98');
   });
 
   it('falls back to the coordinates when the citation kept no title', () => {

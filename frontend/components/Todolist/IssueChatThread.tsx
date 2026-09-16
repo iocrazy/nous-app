@@ -81,6 +81,12 @@ interface IssueChatThreadProps {
    * "Open conversation" affordance is conditional on it.
    */
   aiSessionId?: string | null;
+  /** The identifier of the issue being read (`MH-96`). A posted citation now
+   *  carries the issue its version was PRODUCED on, and the chip says so only
+   *  when the two differ — naming the issue in front of the reader would be
+   *  noise on every row. Absent means "do not compare", so every source issue
+   *  is drawn: that is the honest answer when we do not know where we are. */
+  issueKey?: string | null;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 22 }) => (
@@ -493,7 +499,7 @@ const RunGroupCard: React.FC<{
   );
 };
 
-const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string }> = ({ msg, agentsById, selfUserId }) => {
+const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string; issueKey?: string | null }> = ({ msg, agentsById, selfUserId, issueKey }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const displayName = agent?.name ?? (isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'Anonymous');
@@ -522,7 +528,7 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
             {msg.body}
           </div>
         )}
-        <CitationChips msg={msg} />
+        <CitationChips msg={msg} issueKey={issueKey} />
       </div>
     </div>
   );
@@ -536,7 +542,10 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
  * as the composer's — one chip, one reading of `@<title> v<n>` — minus the X:
  * a sent comment is a record, not a draft.
  */
-const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
+const CitationChips: React.FC<{ msg: IssueMessage; issueKey?: string | null }> = ({
+  msg,
+  issueKey,
+}) => {
   const cites = (msg.attachments ?? []).filter((a) => a.kind === 'output_ref');
   if (cites.length === 0) return null;
   return (
@@ -551,6 +560,11 @@ const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
           refId={c.ref_id}
           version={c.version}
           title={c.title}
+          // Only when it came from somewhere else. `issue_key` is on the row
+          // whatever the source, so the comparison — not the presence of the
+          // field — is what makes the chip mean "look, this is from another
+          // issue".
+          sourceIssueKey={c.issue_key && c.issue_key !== issueKey ? c.issue_key : null}
         />
       ))}
     </div>
@@ -647,7 +661,7 @@ function buildTimeline(messages: IssueMessage[]): RenderRow[] {
   return rows;
 }
 
-export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText, teamId, aiSessionId }) => {
+export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText, teamId, aiSessionId, issueKey }) => {
   const hasStreaming = typeof streamingText === 'string' && streamingText.length > 0;
   // A2: the folded run card is the timeline's handle on the agent's own
   // conversation — without both halves of the route there is nothing to link to.
@@ -679,7 +693,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;
         if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} fromWakeup={!!m.agent_run_id && wakeupRuns.has(String(m.agent_run_id))} />;
         if (m.meta?.deliverable_upload) return <DeliverableFiledEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
-        return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
+        return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} issueKey={issueKey} />;
       })}
       {hasStreaming && <StreamingBubble text={streamingText as string} />}
     </div>

@@ -24,6 +24,15 @@ export interface OutputChipBodyProps {
   /** Registry title snapshot; null rows fall back to kind + id. */
   title: string | null;
   /**
+   * The issue the cited version was produced on, when that is NOT the issue
+   * being read (3c §2.4). The caller decides, not this component: a chip
+   * naming the issue you are already looking at is noise on every row, and
+   * the comparison needs a "current issue" this component has no business
+   * knowing about. Omitted on the composer, where a draft citation is always
+   * about to be posted to the issue in front of you.
+   */
+  sourceIssueKey?: string | null;
+  /**
    * Un-stage this draft citation. OMITTED in the thread (3a Task 8b): a
    * posted comment is a record, so an X on it would either do nothing or
    * edit history. Without the handler the button is not rendered at all —
@@ -48,6 +57,7 @@ export const OutputChipBody: React.FC<OutputChipBodyProps> = ({
   refId,
   version,
   title,
+  sourceIssueKey = null,
   onRemove,
 }) => {
   const { t } = useTranslation();
@@ -69,6 +79,14 @@ export const OutputChipBody: React.FC<OutputChipBodyProps> = ({
       <span className="shrink-0 tabular-nums text-info">
         {t('outputs.version', 'v{{n}}', { n: version })}
       </span>
+      {sourceIssueKey && (
+        <span
+          data-testid="output-chip-issue"
+          className="shrink-0 rounded border border-ink-700 px-1 text-[10px] text-ink-400"
+        >
+          {sourceIssueKey}
+        </span>
+      )}
       {onRemove && (
         <button
           type="button"

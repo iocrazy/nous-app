@@ -68,6 +68,8 @@ const v = (version: number, parent: number | null): OutputLineage['versions'][nu
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
   cost_cents: 0.42, created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+  cited_count: 0, cited_in: [],
 });
 
 // `as_of_seq` is a Snowflake id and therefore a STRING on the wire — a number
@@ -92,6 +94,30 @@ beforeEach(() => {
 });
 
 describe('OutputDiffDialog', () => {
+  /**
+   * 版本链上的「被引 ×n」（harness 三期 3c §2.2）。
+   *
+   * 显示的是 `cited_count`（全量）而不是 `cited_in.length`（只是你看得见的那几
+   * 条）。两者不同是允许且正确的 —— 一条引用发生在一件议题上，而议题可见性会挡
+   * 掉其中一些。把列表长度当计数显示，等于对读者说「只被引了 1 次」，而真相是
+   * 「被引 3 次，其中 2 次发生在你看不到的地方」。
+   */
+  it('版本 chip 上显示被引次数，用的是全量计数而不是可见列表的长度', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [{ issue_id: '5', issue_key: 'MH-91', message_id: 'm1', user_id: 'u1', at: '2026-09-15T00:00:00Z' }] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff-versions');
+    const marks = await screen.findAllByTestId('output-version-cited');
+    // 从没被引用过的那一版不画 —— 「零次」是答案，但它不值一个 chip。
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toContain('3');
+  });
+
   it('opens on the latest change and colours what moved', async () => {
     render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
     await screen.findByTestId('output-diff');

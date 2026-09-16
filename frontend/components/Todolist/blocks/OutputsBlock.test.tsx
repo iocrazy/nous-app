@@ -42,7 +42,9 @@ const version = (version: number, parent: number | null, over: Partial<OutputVer
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   actor_user_id: null, reverted_from_version: null, cost_kind: 'allocated',
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
-  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z', ...over,
+  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+  cited_count: 0, cited_in: [], ...over,
 });
 
 const shot: OutputObject = { kind: 'script_shot', ref_id: '9', title: 'Shot #1 v3', latest_version: 3, versions: [version(3, 2), version(2, 1), version(1, null)] };

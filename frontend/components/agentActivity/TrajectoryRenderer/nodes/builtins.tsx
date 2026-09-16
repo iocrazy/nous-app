@@ -395,6 +395,15 @@ export const OutputCitations: React.FC<{ node: StepNode }> = ({ node }) => {
             title: c.title ?? `${c.kind.replace(/_/g, ' ')} #${c.refId}`,
             n: c.version,
           })}
+          {/* Where the cited version came from. Drawn only when the citation
+              carries one, which the backend fills in only for a version this
+              issue did not produce — a chip naming the issue you are reading
+              would be noise on every row. */}
+          {c.issueKey && (
+            <span data-testid="output-citation-issue" className="ml-1 text-ink-500">
+              {c.issueKey}
+            </span>
+          )}
         </span>
       ))}
     </div>

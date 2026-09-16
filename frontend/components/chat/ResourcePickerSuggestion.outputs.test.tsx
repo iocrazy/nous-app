@@ -41,6 +41,8 @@ const row = (over: Partial<OutputMentionRow> = {}): OutputMentionRow => ({
   ref_id: '727145299382534999',
   version: 3,
   title: 'S3 · Shot #1',
+  // 本议题读来的行不带来源议题（3c §2.4）——chip 只画在真从别处搜来的那些上。
+  issue_key: null,
   latest: true,
   startsOlderGroup: false,
   ...over,

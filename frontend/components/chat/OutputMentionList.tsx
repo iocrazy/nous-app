@@ -169,7 +169,20 @@ export const OutputMentionList = forwardRef<OutputMentionListHandle, OutputMenti
                         blank line — the registry allows a null title. */}
                     {row.title ?? `${kindWord} #${row.ref_id}`}
                   </span>
-                  <span className="block text-[10px] text-ink-500">{kindWord}</span>
+                  <span className="block text-[10px] text-ink-500">
+                    {kindWord}
+                    {/* 只有跨议题搜来的行才带它（本议题的行是 null）——一个指着
+                        你正看着的议题的 chip 什么也没说，而画在每一行上会让唯一
+                        真的来自别处的那一行不再显眼。 */}
+                    {row.issue_key && (
+                      <span
+                        data-testid="output-picker-issue"
+                        className="ml-1.5 rounded border border-ink-700 px-1 text-ink-400"
+                      >
+                        {row.issue_key}
+                      </span>
+                    )}
+                  </span>
                 </span>
                 <span className="shrink-0 rounded border border-info-line px-1 text-[11px] text-info tabular-nums">
                   {t('outputs.version', 'v{{n}}', { n: row.version })}

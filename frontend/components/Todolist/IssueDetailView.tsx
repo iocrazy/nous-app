@@ -776,6 +776,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                       streamingText={streamingText}
                       teamId={teamId}
                       aiSessionId={issue.raw.ai_session_id}
+                      issueKey={issue.identifier}
                     />
                   </ReplayContext.Provider>
                 )}
@@ -830,6 +831,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           }
           teamId={teamId}
           issueId={String(issue.id)}
+          // `raw.project_id` 而不是 `project?.id`：`project` 是给显示用的引用，
+          // 议题挂在项目上但项目名没解析出来时它是空的，而作用域要的是那一列本
+          // 身。少了它检索会静默退回本议题，而不是报错。
+          projectId={issue.raw.project_id == null ? null : String(issue.raw.project_id)}
           onScheduled={() => setSchedulesRefresh((n) => n + 1)}
         />
         </div>

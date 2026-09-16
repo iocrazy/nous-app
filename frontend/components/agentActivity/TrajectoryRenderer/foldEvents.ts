@@ -124,6 +124,14 @@ export interface OutputCitation {
   refId: string;
   version: number;
   title: string | null;
+  /** The issue the cited version was PRODUCED on (3c §2.4). A citation may now
+   *  point at another issue's output — the chain only has to be visible to the
+   *  caller — so the chip needs somewhere to say where it came from.
+   *
+   *  `null` on every citation recorded before 3c and on any chain that answers
+   *  to no issue. Absent is not "the same issue": the two look identical on
+   *  screen only because a chip naming the issue you are on is not drawn. */
+  issueKey: string | null;
 }
 
 export interface UserNode {
@@ -283,7 +291,16 @@ const citationsFrom = (v: unknown): OutputCitation[] => {
     const refId = str(item.ref_id);
     const version = num(item.version);
     if (!kind || !refId || version === null) continue;
-    out.push({ key: `${kind}:${refId}:${version}`, kind, refId, version, title: str(item.title) });
+    out.push({
+      key: `${kind}:${refId}:${version}`,
+      kind,
+      refId,
+      version,
+      title: str(item.title),
+      // `citations_for_transcript` omits the key rather than sending null when
+      // there is none, so absent and empty are the same answer here.
+      issueKey: str(item.issue_key),
+    });
   }
   return out;
 };

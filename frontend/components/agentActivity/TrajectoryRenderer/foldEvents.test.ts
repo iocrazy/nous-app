@@ -510,9 +510,12 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
   const ev = (seq: number, event_type: string, payload: Record<string, unknown>, step?: number): AgentRunEvent =>
     ({ seq, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
 
+  // `citations_for_transcript` OMITS `issue_key` rather than sending null when
+  // there is none, so the first entry is what a same-issue citation looks like
+  // on the wire and the second is what a cross-issue one looks like (3c §2.4).
   const CITED = [
     { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM' },
-    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' },
+    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1', issue_key: 'MH-98' },
   ];
 
   it('hangs this turn’s citations on the step that consumed them', () => {
@@ -524,8 +527,10 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
     const step = nodes.find((n) => n.kind === 'step');
     if (!step || step.kind !== 'step') throw new Error('no step node');
     expect(step.citations).toEqual([
-      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
-      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+      // 没有 issue_key 的条目读成 null —— 「键缺席」和「值为空」在这条链上是同
+      // 一个答案，而不是两种。
+      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM', issueKey: null },
+      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1', issueKey: 'MH-98' },
     ]);
   });
 

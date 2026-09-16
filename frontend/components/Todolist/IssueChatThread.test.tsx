@@ -210,3 +210,79 @@ describe('IssueChatThread — 交付物卡', () => {
     expect(row.className).not.toMatch(/emerald/);
   });
 });
+
+/**
+ * 已发出的引用卡上的来源议题 chip（harness 三期 3c §2.4）。
+ *
+ * Task 16 把引用归属从「必须是本议题产出」放宽成「链对你可见」，于是一条评论
+ * 里的引用可能指着**别的**议题的产出。后端因此在附件行上带回 `issue_key`。
+ * 前端整整没读过同族字段的先例就在 CLAUDE.md 里（`attachment_failures`），所以
+ * 这两条钉的是「读了」以及「只在真的来自别处时才说」。
+ */
+describe('IssueChatThread — 引用卡的来源议题', () => {
+  const _cite = (issueKey?: string | null) =>
+    ({
+      id: 'm-cite',
+      issue_id: 1,
+      kind: 'comment',
+      author_user_id: 'u1',
+      author_agent_id: null,
+      body: 'tighten this',
+      created_at: '2026-09-15T12:00:00Z',
+      meta: {},
+      attachments: [
+        {
+          kind: 'output_ref',
+          ref_kind: 'script_shot',
+          ref_id: '727145299382534999',
+          version: 2,
+          title: 'S3 · Shot #1',
+          ...(issueKey === undefined ? {} : { issue_key: issueKey }),
+        },
+      ],
+    }) as const;
+
+  it('标出来自另一件议题的引用', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <IssueChatThread
+          messages={[_cite('MH-98') as never]}
+          agentsById={{}}
+          selfUserId="u1"
+          issueKey="MH-96"
+        />
+      </MemoryRouter>,
+    );
+    const mark = container.querySelector('[data-testid="output-chip-issue"]');
+    expect(mark?.textContent).toBe('MH-98');
+  });
+
+  it('本议题自己的产出不画 chip —— 指着你正看着的那件议题什么也没说', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <IssueChatThread
+          messages={[_cite('MH-96') as never]}
+          agentsById={{}}
+          selfUserId="u1"
+          issueKey="MH-96"
+        />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('[data-testid="output-chip-issue"]')).toBeNull();
+  });
+
+  it('3c 之前写下的引用没有这个字段，照旧渲染', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <IssueChatThread
+          messages={[_cite(undefined) as never]}
+          agentsById={{}}
+          selfUserId="u1"
+          issueKey="MH-96"
+        />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('[data-testid="comment-citations"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="output-chip-issue"]')).toBeNull();
+  });
+});

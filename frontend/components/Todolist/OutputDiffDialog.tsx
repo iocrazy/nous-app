@@ -455,6 +455,13 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 }`}
               >
                 {t('outputs.version', 'v{{n}}', { n: v.version })}
+                {/* 被引次数是**全量**的，`cited_in` 只列你看得见的那几条——所以
+                    这里显示的是计数，不是列表长度。详见 `OutputVersion`。 */}
+                {v.cited_count > 0 && (
+                  <span data-testid="output-version-cited" className="ml-1 text-ink-500">
+                    {t('outputs.citedTimes', 'Cited ×{{n}}', { n: v.cited_count })}
+                  </span>
+                )}
               </button>
             ))}
           </div>

@@ -280,6 +280,9 @@ const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVers
     title: 'S3 · Shot #1',
     model: null, cost_cents: null,
     created_at: '2026-09-10T00:00:00Z',
+    // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+    cited_count: 0,
+    cited_in: [],
     ...over,
   };
   // Derived AFTER the override, so a caller that moves the coordinates gets a
