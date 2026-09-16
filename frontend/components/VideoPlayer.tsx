@@ -7,7 +7,17 @@ import {
   savePosition,
   loadPosition,
   clearPosition,
+  getEntry,
+  markSynced,
+  adoptRemote,
+  reconcile,
+  isResumable,
 } from '../utils/playbackResume';
+import {
+  fetchRemotePosition,
+  pushRemotePosition,
+  deleteRemotePosition,
+} from '../services/playbackSyncService';
 import { useOptionalAuth } from '../contexts/AuthContext';
 
 interface HlsLevel {
@@ -44,6 +54,19 @@ const VOLUME_PREF_KEY = 'mediahub_volume_pref';
 /** How often a playing video writes its position. Once a second is plenty —
  * `timeupdate` fires ~4x that, and this is a localStorage write. */
 const POSITION_SAVE_INTERVAL_MS = 1000;
+
+/** How often that position goes to the SERVER while playing.
+ *
+ * Two orders of magnitude rarer than the local write, and deliberately so: the
+ * local store exists precisely so the cross-device layer does not have to keep
+ * up with a per-second signal. Fifteen seconds is the most a viewer can lose
+ * by killing the tab in a way that skips `pagehide`; every ordinary exit
+ * (pause, end, navigate, close) flushes immediately. */
+const REMOTE_SYNC_INTERVAL_MS = 15_000;
+
+/** A remote position closer than this to where we already are is not worth a
+ * seek — the jump would be visible and would gain the viewer nothing. */
+const MIN_SEEK_DELTA_SECONDS = 2;
 
 /** Shared chrome for every popup in the control bar, so speed / volume /
  * quality cannot drift apart visually. */
@@ -118,6 +141,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedAt = useRef(0);
+  const lastPushedAt = useRef(0);
   /** The media identity the current element has already been seeked for.
    * Quality switches re-attach HLS and re-fire `loadedmetadata`; without this
    * the restore would fight the switch's own position preservation. */
@@ -154,6 +178,70 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // provider. A missing provider means "signed out", which the store already
   // has a namespace for.
   const viewerId = useOptionalAuth()?.currentUserId ?? null;
+
+  /**
+   * Reconcile this device against the server when the media opens.
+   *
+   * Order matters. An unsynced local entry is pushed FIRST, because
+   * `reconcile` cannot tell "written offline a minute ago" from "stale since
+   * last week" and resolves that ambiguity in the server's favour — pushing
+   * first removes the ambiguity instead of losing to it.
+   *
+   * Only ever seeks FORWARD-or-back to a position the viewer has actually
+   * reached; `isResumable` re-checks the floor and end-margin against THIS
+   * device's duration, because a server value has never been through them.
+   */
+  const syncOnOpen = useCallback(
+    async (video: HTMLVideoElement) => {
+      if (!viewerId) return;
+      const duration = video.duration;
+      if (!Number.isFinite(duration) || duration <= 0) return;
+
+      const local = getEntry(viewerId, positionKey);
+      if (local && !local.sv) {
+        const sv = await pushRemotePosition(positionKey, local.t, local.d);
+        if (sv) markSynced(viewerId, positionKey, sv);
+      }
+
+      const remote = await fetchRemotePosition(positionKey);
+      const decision = reconcile(getEntry(viewerId, positionKey), remote);
+      if (decision.source !== 'remote' || !decision.serverUpdatedAt) return;
+      if (!isResumable(decision.seconds, duration)) return;
+
+      const seconds = decision.seconds as number;
+      adoptRemote(viewerId, positionKey, seconds, duration, decision.serverUpdatedAt);
+
+      // Two reasons not to move the playhead, even though the value is worth
+      // storing either way:
+      //   - the viewer already pressed play on THIS device while the request
+      //     was in flight; yanking them mid-sentence is worse than being two
+      //     minutes behind another device;
+      //   - we are already essentially there, so the seek would be a visible
+      //     jump that gains nothing.
+      if (!video.paused) return;
+      if (Math.abs(video.currentTime - seconds) <= MIN_SEEK_DELTA_SECONDS) return;
+
+      video.currentTime = seconds;
+      setCurrentTime(seconds);
+      onTimeUpdate(seconds);
+    },
+    [viewerId, positionKey, onTimeUpdate],
+  );
+
+  /**
+   * Push the current position to the server and record that it is ours.
+   *
+   * Signed-out viewing (a share link) stays local-only: there is no account to
+   * sync to, and the server would have nowhere to put it.
+   */
+  const pushPosition = useCallback(
+    async (t: number, d: number, opts: { keepalive?: boolean } = {}) => {
+      if (!viewerId) return;
+      const sv = await pushRemotePosition(positionKey, t, d, opts);
+      if (sv) markSynced(viewerId, positionKey, sv);
+    },
+    [viewerId, positionKey],
+  );
 
   // Frame stepping
   const stepFrame = useCallback((direction: 1 | -1, count: number = 1) => {
@@ -424,6 +512,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         lastSavedAt.current = now;
         savePosition(viewerId, positionKey, t, video.duration);
       }
+      if (now - lastPushedAt.current >= REMOTE_SYNC_INTERVAL_MS) {
+        lastPushedAt.current = now;
+        void pushPosition(t, video.duration);
+      }
     };
 
     const handleDurationChange = () => {
@@ -455,12 +547,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // second time would undo them.
       if (resumedFor.current !== positionKey) {
         resumedFor.current = positionKey;
+
+        // Local first, applied synchronously: it is already here, and a
+        // viewer should not watch the first seconds twice while a request
+        // flies. The server answer arrives below and corrects it if another
+        // device is further along.
         const saved = loadPosition(viewerId, positionKey, video.duration);
         if (saved !== null) {
           video.currentTime = saved;
           setCurrentTime(saved);
           onTimeUpdate(saved);
         }
+
+        if (viewerId) void syncOnOpen(video);
       }
     };
 
@@ -468,14 +567,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handlePause = () => {
       setIsPlaying(false);
       // Pausing is the strongest signal that this position matters; don't wait
-      // for the throttle window.
+      // for either throttle window.
       lastSavedAt.current = Date.now();
+      lastPushedAt.current = Date.now();
       savePosition(viewerId, positionKey, video.currentTime, video.duration);
+      void pushPosition(video.currentTime, video.duration);
     };
     const handleEnded = () => {
       setIsPlaying(false);
-      // Finished — the next open starts clean rather than at the old midpoint.
+      // Finished — the next open starts clean rather than at the old midpoint,
+      // on THIS device and on every other one.
       clearPosition(viewerId, positionKey);
+      if (viewerId) void deleteRemotePosition(positionKey);
     };
     const handleWaiting = () => setIsLoading(true);
     const handleCanPlay = () => {
@@ -541,7 +644,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // re-running this effect on every volume tick would thrash the listeners,
     // so they are deliberately not dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerRef, onTimeUpdate, onDurationChange, positionKey, viewerId]);
+  }, [playerRef, onTimeUpdate, onDurationChange, positionKey, viewerId, pushPosition, syncOnOpen]);
 
   // A reload during playback is the whole reason this component remembers
   // anything: the service worker updates in the background and a stale chunk
@@ -553,6 +656,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const video = playerRef.current;
       if (!video) return;
       savePosition(viewerId, positionKey, video.currentTime, video.duration);
+      // `keepalive` so the request outlives the document. A plain fetch is
+      // cancelled when the page goes away — which is precisely the moment this
+      // position is worth the most.
+      void pushPosition(video.currentTime, video.duration, { keepalive: true });
     };
     const onHidden = () => {
       if (document.visibilityState === 'hidden') flush();
@@ -563,7 +670,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onHidden);
     };
-  }, [playerRef, positionKey, viewerId]);
+  }, [playerRef, positionKey, viewerId, pushPosition]);
 
   // Any popup being open pins the control bar. Fading the bar out from under
   // an open menu takes the menu with it, which reads as the click having done

@@ -168,6 +168,7 @@ from app.models.pipelines import (  # noqa: F401
     IssuePipelines,
     IssuePipelineSteps,
 )
+from app.models.playback import PlaybackPositions  # noqa: F401
 from app.models.project_library import (  # noqa: F401
     ProjectStageHistory,
     ProjectStageNodeDeps,
@@ -462,6 +463,8 @@ __all__ = [
     # ideation topic pool (mig 382)
     "Topics",
     # users
+    # playback (mig 473)
+    "PlaybackPositions",
     "UserCookies",
     "UserMcpServers",
     "UserCredits",

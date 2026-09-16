@@ -426,6 +426,22 @@ jobs:
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
 
+      - name: Exercise the playback-position repository against the built schema (mig 473)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place PlaybackPositionsRepository's ORM statements execute.
+          # Its unit tests stub the session, so nothing else proves that
+          # ON CONFLICT finds the (user_id, media_key) unique index rather than
+          # appending a row per heartbeat, that updated_at actually MOVES on the
+          # UPDATE arm (that timestamp is how the client tells its own write
+          # from another device's — a frozen one breaks sync silently), or that
+          # the UserScoped choke point really filters by user_id. That last one
+          # is viewing history: a missing filter is the whole risk.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_playback_positions_integration.py -v
+
       - name: Exercise the account name — unique, editable (mig 470)
         working-directory: backend
         env:

@@ -25,11 +25,11 @@
  *   is both wrong and a small leak of who watched how much. `scopedKey` is the
  *   only way a key is built; callers never touch the store directly.
  *
- * What this deliberately does NOT do: sync across devices. Everything here is
- * local to one browser profile, so a phone and a laptop each keep their own
- * place. Making them agree needs a server-side store, which is a different
- * change (a table, an endpoint, a write budget for a per-second signal) — not
- * something to smuggle in behind a localStorage helper.
+ * This layer stays LOCAL. Cross-device agreement is the second layer
+ * (`services/playbackSyncService.ts` + mig 473); the two meet in `reconcile`
+ * below. Local-first is not a stopgap: it answers instantly, works offline,
+ * and is what lets a deploy-triggered reload resume before any request
+ * completes.
  */
 
 const STORE_KEY = 'mediahub_playback_positions_v1';
@@ -59,6 +59,16 @@ export interface PlaybackPosition {
   d: number;
   /** Epoch ms of the last write, for pruning. */
   ts: number;
+  /**
+   * The server `updated_at` this device last saw for this key — the value
+   * returned by its own successful push, or read back from the server.
+   *
+   * It is compared for EQUALITY, never ordered. That is the point: two
+   * devices' wall clocks cannot order anything, but "the server's current
+   * timestamp is still the one my last write produced" is a fact either
+   * device can check. Absent = never synced.
+   */
+  sv?: string;
 }
 
 type Store = Record<string, PlaybackPosition>;
@@ -148,7 +158,11 @@ export function savePosition(
     return;
   }
   const store = prune(readStore());
-  store[scopedKey(userId, key)] = { t, d, ts: Date.now() };
+  const sk = scopedKey(userId, key);
+  // Carry `sv` forward: a local tick is not a sync event, and dropping it here
+  // would make every subsequent reconcile think another device had written.
+  const sv = store[sk]?.sv;
+  store[sk] = { t, d, ts: Date.now(), ...(sv ? { sv } : {}) };
   writeStore(prune(store));
 }
 
@@ -190,4 +204,119 @@ export function clearUser(userId: string | null | undefined): void {
   );
   if (Object.keys(kept).length === Object.keys(store).length) return;
   writeStore(kept);
+}
+
+
+/** The raw stored entry for `key`, or null. For the sync layer. */
+export function getEntry(
+  userId: string | null | undefined,
+  key: string,
+): PlaybackPosition | null {
+  if (!key) return null;
+  return readStore()[scopedKey(userId, key)] ?? null;
+}
+
+/**
+ * Record that the server now holds this device's value, stamped
+ * `serverUpdatedAt`.
+ *
+ * Called after a successful push and after adopting a server value. A no-op
+ * when there is no local entry — there is nothing to mark, and inventing one
+ * here would resurrect a position the user just played past.
+ */
+export function markSynced(
+  userId: string | null | undefined,
+  key: string,
+  serverUpdatedAt: string,
+): void {
+  if (!key || !serverUpdatedAt) return;
+  const store = readStore();
+  const sk = scopedKey(userId, key);
+  const entry = store[sk];
+  if (!entry) return;
+  store[sk] = { ...entry, sv: serverUpdatedAt };
+  writeStore(store);
+}
+
+/** Store a value that came FROM the server, already marked as synced. */
+export function adoptRemote(
+  userId: string | null | undefined,
+  key: string,
+  t: number,
+  d: number,
+  serverUpdatedAt: string,
+): void {
+  if (!key || !Number.isFinite(t) || !(d > 0)) return;
+  const store = prune(readStore());
+  store[scopedKey(userId, key)] = { t, d, ts: Date.now(), sv: serverUpdatedAt };
+  writeStore(prune(store));
+}
+
+export interface RemoteEntry {
+  position_seconds: number;
+  duration_seconds: number;
+  updated_at: string;
+}
+
+export type ResumeSource = 'local' | 'remote' | 'none';
+
+export interface ResumeDecision {
+  source: ResumeSource;
+  seconds: number | null;
+  /** Present when `source` is 'remote' — the value to stamp as synced. */
+  serverUpdatedAt?: string;
+}
+
+/**
+ * Decide which of the two stores to resume from.
+ *
+ * The rule compares SERVER timestamps to SERVER timestamps, never one device's
+ * clock to another's:
+ *
+ * | local | remote | `local.sv === remote.updated_at` | winner |
+ * |-------|--------|----------------------------------|--------|
+ * | no    | no     | —                                | none   |
+ * | yes   | no     | —                                | local  |
+ * | no    | yes    | —                                | remote |
+ * | yes   | yes    | yes — nobody wrote after my last sync | local |
+ * | yes   | yes    | no  — someone did, or I never synced  | remote |
+ *
+ * The last row is the honest tie-break, not a proof: a local entry that never
+ * reached the server (written offline) is indistinguishable from a stale one,
+ * so the shared value wins. The caller narrows that window by pushing an
+ * unsynced local entry BEFORE reconciling.
+ */
+export function reconcile(
+  local: PlaybackPosition | null,
+  remote: RemoteEntry | null,
+): ResumeDecision {
+  if (!local && !remote) return { source: 'none', seconds: null };
+  if (local && !remote) return { source: 'local', seconds: local.t };
+  if (!local && remote) {
+    return {
+      source: 'remote',
+      seconds: remote.position_seconds,
+      serverUpdatedAt: remote.updated_at,
+    };
+  }
+  const l = local as PlaybackPosition;
+  const r = remote as RemoteEntry;
+  if (l.sv && l.sv === r.updated_at) return { source: 'local', seconds: l.t };
+  return {
+    source: 'remote',
+    seconds: r.position_seconds,
+    serverUpdatedAt: r.updated_at,
+  };
+}
+
+/**
+ * Is `seconds` worth resuming to, given `duration`?
+ *
+ * The same floor/ceiling `savePosition` applies, exported because a value
+ * arriving from the SERVER has never been through it — a device with a
+ * different idea of the duration could otherwise drop the viewer past the end.
+ */
+export function isResumable(seconds: number | null, duration: number): boolean {
+  if (seconds === null || !Number.isFinite(seconds) || !(duration > 0)) return false;
+  return seconds >= MIN_RESUME_SECONDS && seconds <= duration - END_MARGIN_SECONDS;
 }
