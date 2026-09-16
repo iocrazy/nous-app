@@ -5745,6 +5745,7 @@
     "elapsed": "elapsed {{s}}",
     "you": "You",
     "step": "Step {{n}}",
+    "running": "Running {{tool}}…",
     "live": "In progress",
     "tools": "{{count}} tools",
     "retries": "retry ×{{count}}",

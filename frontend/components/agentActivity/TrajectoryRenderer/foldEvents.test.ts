@@ -634,3 +634,59 @@ describe('foldEvents — 迟到的 step_end 回到自己那一步 (C8)', () => {
     expect(step.live).toBe(false);
   });
 });
+
+describe('foldEvents — 阶段性叙述（3c §4.1）', () => {
+  it('partial 的 assistant 成为独立正文节点，排在它所属 step 节点之前', () => {
+    seq = 0;
+    const nodes = foldEvents([
+      ev('user', { content: 'go' }, { turn: 1 }),
+      ev('step_start', { turn: 1, step: 1, model: 'm' }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Here is where things stand.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ListShots', args: { scene_id: 7 }, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+      ev('step_end', { turn: 1, step: 1, duration_ms: 800 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'All done.' }, { turn: 1, step: 1 }),
+    ], { isRunning: false });
+    // 叙述在动作之前，与模型输出顺序一致。
+    expect(nodes.map((n) => n.kind)).toEqual(['user', 'narration', 'step']);
+    const narration = nodes[1];
+    if (narration.kind !== 'narration') throw new Error();
+    expect(narration.text).toBe('Here is where things stand.');
+    expect(narration.step).toBe(1);
+    expect(narration.key).toBe('narration:3');
+    // 最终回答（无 partial）仍是 step 里的一行 output——现状不变。
+    const step = nodes[2];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines.filter((l) => l.type === 'output')).toHaveLength(1);
+    expect(step.summary.outputs).toBe(1);
+  });
+
+  it('同一步两段叙述各成一个节点，都排在 step 之前', () => {
+    seq = 0;
+    expect(foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'First.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Second.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'Skill', args: {}, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+    ], { isRunning: false }).map((n) => n.kind)).toEqual(['narration', 'narration', 'step']);
+  });
+
+  it('空正文的 partial 事件不画节点', () => {
+    seq = 0;
+    expect(foldEvents([ev('assistant', { content: '   ', partial: true, step: 1 })], { isRunning: false })
+      .filter((n) => n.kind === 'narration')).toHaveLength(0);
+  });
+
+  it('叙述不会把还没开始的 step 提前开出来', () => {
+    seq = 0;
+    // 坐标齐全但 step_start 还没到：只画叙述，不造 step。
+    expect(foldEvents([ev('assistant', { content: 'Thinking out loud.', partial: true, step: 2 }, { turn: 1, step: 2 })], { isRunning: true })
+      .map((n) => n.kind)).toEqual(['narration']);
+  });
+
+  it('tool 行把 args 带进 detail —— 动作动词要拿它拼对象', () => {
+    seq = 0;
+    const step = foldEvents([ev('tool_call', { tool: 'UpdateShot', args: { shot_id: '42' }, iteration: 1, result: { ok: true } })], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].detail?.args).toEqual({ shot_id: '42' });
+  });
+});

@@ -45,6 +45,10 @@ import { MessageBubble } from './chat/AIChatBubble';
 import { questionFromChatMetadata, type TypedQuestion } from './Todolist/questionTypes';
 import { ChatTrajectoryView } from './chat/ChatTrajectoryView';
 import { chatRunId } from './chat/chatMessageMeta';
+import { RunStatusLine } from './agentActivity/RunStatusLine';
+import { useRunToolActivity } from './agentActivity/useRunToolActivity';
+import { liveStep } from './agentActivity/TrajectoryRenderer/foldEvents';
+import { useElapsedSeconds } from '../hooks/useElapsedSeconds';
 import { deliverSteer, InboxTargetEndedError } from '../services/agentInboxService';
 import { TypingIndicator } from './chat/TypingIndicator';
 import {
@@ -214,6 +218,31 @@ export function buildScriptContext(
     cross_scene: Boolean(capsule.crossScene),
   };
 }
+
+/**
+ * 面板最后一条气泡下的运行中状态行（3c §4.1）。只读 `useRunToolActivity` 的 `nodes`——
+ * 该 hook 的头注释禁止面板消费 `activities`（会把每次调用画两遍）；`nodes` 是折叠结果，
+ * 不进气泡。回合结束时传 `runId=null`：这一行本来就不画，拉一次只是白费请求。
+ *
+ * ⚠️ 已知缺口：聊天的 SSE 只在 `done` 帧里回 `run_id`，所以一个**正在跑**的回合在本面板
+ * 里还没有 run id（临时气泡的 `metadata_json` 是空的）。`current` 因此为 null，这一行在
+ * 流式聊天路径上暂时不显示——不是坏，是没有可读的源。等 run id 在流开始时就下发，这里
+ * 不用改。计时用的是**当前步**的 `startedAt`（`useElapsedSeconds` 要一个起点），所以读数
+ * 是「这一步跑了多久」，与「Step N · Running X…」同一个口径。
+ */
+const ChatRunStatus: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
+  const { nodes } = useRunToolActivity(isRunning ? runId : null, isRunning);
+  const live = isRunning ? liveStep(nodes) : null;
+  const elapsed = useElapsedSeconds(live?.startedAt ?? null, { enabled: isRunning });
+  if (!live) return null;
+  const openTool = [...live.lines].reverse().find((l) => l.type === 'tool' && l.durationMs === null);
+  return (
+    <RunStatusLine
+      current={{ step: live.step, tool: (openTool?.detail?.tool as string | undefined) ?? null }}
+      elapsedMs={elapsed * 1000}
+    />
+  );
+};
 
 export function AIChatPanel({
   projectId,
@@ -1412,6 +1441,11 @@ export function AIChatPanel({
                 }
               />
             ))}
+
+            <ChatRunStatus
+              runId={messages.length ? chatRunId(messages[messages.length - 1]) : null}
+              isRunning={sending}
+            />
 
             <AttachmentFailureBanner
               count={attachmentFailureCount}

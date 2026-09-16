@@ -26,6 +26,7 @@ import type {
   TurnEndNode,
   UserNode,
 } from '../foldEvents';
+import { actionLabel } from './actionVerbs';
 import { registerTrajectoryNode, type NodeProps } from './registry';
 import { useTrajectoryRunId } from '../trajectoryRunContext';
 import { formatOutputCost, outputCostTitle } from '../../outputCost';
@@ -76,7 +77,8 @@ export const UserNodeView: React.FC<NodeProps<UserNode>> = ({ node }) => {
 function lineLabel(line: StepLine, t: (k: string, o?: Record<string, unknown>) => string): string {
   switch (line.type) {
     case 'tool':
-      return line.label;
+      // 3c §4.1：工具名 → 动作动词 + 对象。`detail.args` 由 foldEvents 带上来。
+      return actionLabel(line.label, line.detail?.args, line.ok);
     case 'retry':
       return t('trajectory.retries', { count: line.count, attempt: line.label });
     case 'compaction':

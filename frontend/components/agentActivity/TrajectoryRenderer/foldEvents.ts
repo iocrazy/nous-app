@@ -204,8 +204,22 @@ export interface ErrorNode {
   text: string;
 }
 
+/**
+ * 一段阶段性叙述（3c §4.1）：模型在这一步动手**之前**说的话。不是 step 里的一行，
+ * 而是 step 之间的一段正文。最终回答（无 `partial`）不走这里，仍折进它的 step。
+ */
+export interface NarrationNode {
+  kind: 'narration';
+  key: string;
+  text: string;
+  /** 它属于哪一步；坐标缺席的老行是 null。 */
+  step: number | null;
+  at: string | null;
+}
+
 export type TrajectoryNode =
   | UserNode
+  | NarrationNode
   | StepNode
   | InboxNode
   | ScheduleNode
@@ -370,6 +384,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
   };
 
   /**
+   * Where that step SITS — the same lookup `stepAt` does, one level down. A
+   * narration has to be spliced in *before* its step (3c §4.1), and that
+   * needs the position, not the node.
+   */
+  const stepIndexAt = (turn: number, step: number): number => {
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const n = nodes[i];
+      if (n.kind === 'step' && n.turn === turn && n.step === step) return i;
+    }
+    return -1;
+  };
+
+  /**
    * An existing step at these coordinates, wherever it sits in the list.
    * A deliverable registered through DBOS can land after a LATER step has
    * already started (the storyboard render finishes long after the turn that
@@ -377,11 +404,8 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
    * whichever step happens to be last, and not to a phantom new one.
    */
   const stepAt = (turn: number, step: number): StepNode | null => {
-    for (let i = nodes.length - 1; i >= 0; i -= 1) {
-      const n = nodes[i];
-      if (n.kind === 'step' && n.turn === turn && n.step === step) return n;
-    }
-    return null;
+    const i = stepIndexAt(turn, step);
+    return i < 0 ? null : (nodes[i] as StepNode);
   };
 
   /**
@@ -478,6 +502,9 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
           durationMs: null,
           detail: {
             tool,
+            // 动作动词要拿它拼「对象」（3c §4.1）。真 wire 上 `_truncate_payload`
+            // 会把嵌套字典字符串化，所以走 `obj()` 而不是直接读。
+            args: obj(p.args),
             iteration: num(p.iteration),
             timedOut,
             timeoutS: timedOut ? num(result?.timeout_s) : null,
@@ -537,6 +564,29 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       }
 
       case 'assistant': {
+        // 3c §4.1：带 `partial` 的是阶段性叙述——模型在这一步动手**之前**说的话。
+        // 它不是 step 里的一行，而是一个独立正文节点，插在它所属 step 节点**之前**：
+        // `step_start` 先于这条事件到达，step 节点早已在列表里，只能按坐标插队。
+        // 光靠 `push` 会把叙述排到动作后面，读起来就成了事后解释。
+        if (p.partial === true) {
+          const text = str(p.content);
+          if (text) {
+            const step = num(ev.step) ?? num(p.step);
+            const narration: NarrationNode = {
+              kind: 'narration',
+              key: `narration:${ev.seq}`,
+              text,
+              step,
+              at: ev.created_at ?? null,
+            };
+            const at = step === null ? -1 : stepIndexAt(num(ev.turn) ?? num(p.turn) ?? 1, step);
+            if (at < 0) nodes.push(narration);
+            else nodes.splice(at, 0, narration);
+          }
+          // 必须在这里返回：落到下面会既画节点又 `ensureStep`，一段叙述就把还没
+          // 开始的 step 提前开了出来。
+          break;
+        }
         const node = ensureStep(ev, null);
         const content = str(p.content) ?? '';
         node.summary.outputs += 1;
