@@ -12,7 +12,7 @@ import { renderHook } from '@testing-library/react';
 const { registerSW } = vi.hoisted(() => ({ registerSW: vi.fn() }));
 vi.mock('virtual:pwa-register', () => ({ registerSW }));
 
-import { shouldRegisterServiceWorker, usePWA } from './usePWA';
+import { isMediaActive, shouldRegisterServiceWorker, usePWA } from './usePWA';
 
 describe('shouldRegisterServiceWorker', () => {
   it.each([
@@ -98,5 +98,125 @@ describe('vite.config workbox: navigations are network-only, precache is tiny', 
     for (const pattern of patterns) {
       expect(pattern).not.toMatch(/index\.html|assets|\bjs\b|\bcss\b|\*\.html|\{[^}]*html/);
     }
+  });
+});
+
+
+/**
+ * Swapping the service worker underneath a streaming media element is how a
+ * tab switch turned into a visible flash: segment requests go through the
+ * worker (measured on production — `workerStart > 0` on every HLS segment),
+ * and `skipWaiting` + `clientsClaim` hands an open page to a new build the
+ * moment our own polling discovers one. So the polling stands down while the
+ * user is watching something.
+ */
+describe('isMediaActive', () => {
+  const docWith = (media: Array<Partial<HTMLMediaElement>>): Document =>
+    ({ querySelectorAll: () => media as unknown as HTMLMediaElement[] }) as unknown as Document;
+
+  it('is false with no media on the page', () => {
+    expect(isMediaActive(docWith([]))).toBe(false);
+  });
+
+  it('is true while something is playing', () => {
+    expect(isMediaActive(docWith([{ paused: false, currentTime: 0 }]))).toBe(true);
+  });
+
+  it('is true when paused part-way through — the reported state', () => {
+    expect(isMediaActive(docWith([{ paused: true, currentTime: 313 }]))).toBe(true);
+  });
+
+  it('is false for an untouched player sitting at zero', () => {
+    expect(isMediaActive(docWith([{ paused: true, currentTime: 0 }]))).toBe(false);
+  });
+
+  it('one active element among several is enough', () => {
+    expect(
+      isMediaActive(
+        docWith([
+          { paused: true, currentTime: 0 },
+          { paused: false, currentTime: 12 },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it('a broken query does not stop updates forever', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bad = {
+      querySelectorAll: () => {
+        throw new Error('detached document');
+      },
+    } as unknown as Document;
+    expect(isMediaActive(bad)).toBe(false);
+  });
+});
+
+describe('usePWA update polling', () => {
+  const originalPath = window.location.pathname;
+
+  beforeEach(() => registerSW.mockReset());
+  afterEach(() => {
+    document.body.innerHTML = '';
+    window.history.replaceState(null, '', originalPath);
+    vi.restoreAllMocks();
+  });
+
+  /** Drive the `onRegisteredSW` callback the hook hands to registerSW. */
+  const registerAndGetHandlers = () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    registerSW.mockImplementation((opts?: { onRegisteredSW?: (u: string, r: unknown) => void }) => {
+      // Optional throughout: other tests in this file drive registerSW with
+      // their own shapes, and a shared mock must not explode on theirs.
+      opts?.onRegisteredSW?.('/sw.js', { update });
+    });
+    window.history.replaceState(null, '', '/');
+    const { unmount } = renderHook(() => usePWA());
+    return { update, unmount };
+  };
+
+  it('checks for an update on registration when nothing is playing', () => {
+    const { update, unmount } = registerAndGetHandlers();
+    expect(update).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('does NOT check while a video is part-way through', () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'currentTime', { value: 313, configurable: true });
+    document.body.appendChild(video);
+
+    const { update, unmount } = registerAndGetHandlers();
+
+    expect(update).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('does NOT check when the tab becomes visible again mid-video', () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'currentTime', { value: 313, configurable: true });
+    document.body.appendChild(video);
+
+    const { update, unmount } = registerAndGetHandlers();
+    update.mockClear();
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(update).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('resumes checking once the media is gone', () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'currentTime', { value: 313, configurable: true });
+    document.body.appendChild(video);
+
+    const { update, unmount } = registerAndGetHandlers();
+    expect(update).not.toHaveBeenCalled();
+
+    video.remove();
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(update).toHaveBeenCalledTimes(1);
+    unmount();
   });
 });
