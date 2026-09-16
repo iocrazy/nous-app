@@ -74,3 +74,43 @@ def test_the_last_turn_end_with_a_reason_wins():
         ]
     )
     assert views["efficiency"]["turn_end_reason"] == "interrupted"
+
+
+def test_a_main_fold_that_says_nothing_leaks_nothing(monkeypatch):
+    """契约：主 fold 返回 None = 「这次没什么好说的」，它在此之前对副本做的任何
+    改动都不算数。计数道并行之后这条差点破掉 —— 只要任一计数道返回非 None，
+    整个副本（含主 fold 的半截改动）就会被交出去。"""
+    from app.services.ai.runner import run_projection as rp
+
+    def _leaky_main(views, payload):
+        views["view"]["phase"] = "leaked"
+        return None
+
+    def _counting(views, payload):
+        views["efficiency"] = {**views["efficiency"], "tool_calls": 99}
+        return views
+
+    monkeypatch.setitem(rp._REGISTRY, "tool_call", _leaky_main)
+    monkeypatch.setitem(rp._COUNTERS, "tool_call", _counting)
+
+    out = rp.apply(rp.empty_views(), "tool_call", {"tool": "X"}, seq=1)
+
+    assert out["efficiency"]["tool_calls"] == 99, "计数道的结果必须留下"
+    assert out["view"]["phase"] == "running", "主 fold 的半截改动泄漏了"
+
+
+def test_registering_two_counters_for_the_same_slot_is_refused():
+    """与 ``register`` 对齐：重复注册是笔误，不是叠加。"""
+    from app.services.ai.runner import run_projection as rp
+
+    def _fold(views, payload):
+        return None
+
+    try:
+        rp.register_counter("__probe_dup__")(_fold)
+        with pytest.raises(ValueError, match="__probe_dup__"):
+            rp.register_counter("__probe_dup__")(_fold)
+    finally:
+        # 注册表是模块级的：不清掉，``registered_types()`` 会多出一个类型，
+        # 而 test_fold_fork.py 拿它比对 ORM CHECK 白名单。
+        rp._COUNTERS.pop("__probe_dup__", None)

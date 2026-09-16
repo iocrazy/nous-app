@@ -157,3 +157,31 @@ async def test_a_run_that_already_ended_is_not_restamped(monkeypatch):
     monkeypatch.setattr(it, "_stamp_turn_end_reason", _probe)
     assert await it.close_interrupted_run(777) is False
     assert "stamp" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_stamp_still_counts_the_run_as_closed(monkeypatch, caplog):
+    """事件已经 append 上去了 —— 补列失败不该让 sweeper 把这一条判成没关成，
+    否则下一轮会再 append 一条 turn_end（幂等守卫读的是事件，不是列）。
+    但它也绝不能静默：一条 ERROR 是「这一列现在空着」唯一的线索。"""
+    import app.services.ai.runner.interrupted_turn as it
+
+    captured: dict = {}
+
+    async def _boom(run_id, reason):
+        raise RuntimeError("column write refused")
+
+    monkeypatch.setattr(it, "_last_seq_and_has_turn_end", _fake_state(7, False))
+    monkeypatch.setattr(it, "_writer_factory", _fake_writer(captured))
+    monkeypatch.setattr(it, "_stamp_turn_end_reason", _boom)
+
+    logged: list[str] = []
+    handle = it.logger.add(lambda m: logged.append(str(m)), level="ERROR")
+    try:
+        assert await it.close_interrupted_run(777, detail="heartbeat_lost") is True
+    finally:
+        it.logger.remove(handle)
+
+    assert captured["event"][0] == "turn_end"
+    assert any("column write refused" in line for line in logged), logged

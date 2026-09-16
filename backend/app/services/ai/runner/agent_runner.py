@@ -885,6 +885,7 @@ class AgentRunner:
                 loop_guard.observe(tool_name, args_repr)
                 inc_metric("loop_guard_observed")
 
+                # 3c §3.2：``duration_ms`` 的窗口从这里开始，到派发返回为止。
                 _tool_t0 = _time.monotonic()
                 if tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
@@ -990,6 +991,11 @@ class AgentRunner:
                             tool_name, self.delegate_tool.execute(args)
                         )
 
+                # 窗口在此闭合。下面的图片提升 / 裁剪、tool message 的 json.dumps、
+                # trace append 都是 harness 的开销，算进去等于把我们自己的裁剪成本
+                # 记到工具头上，「哪个工具慢」那个读面就会指错人。
+                _tool_ms = int((_time.monotonic() - _tool_t0) * 1000)
+
                 # Image promotion: vision models only see images in user
                 # messages — lift image blocks out of the tool result and
                 # strip the base64 from everything persisted (tool msg,
@@ -1054,7 +1060,7 @@ class AgentRunner:
                     args=args,
                     result=result,
                     iteration=iteration,
-                    duration_ms=int((_time.monotonic() - _tool_t0) * 1000),
+                    duration_ms=_tool_ms,
                     error_code=tool_error_code(result),
                 )
 
@@ -1994,7 +2000,6 @@ class AgentRunner:
                         args = pre_result.modified_args
 
                 # ── Tool dispatch ──────────────────────────────────────────
-                _tool_t0 = _time.monotonic()
                 # Phase L (L1): cache check — only for idempotent skills.
                 cache_key: Optional[str] = None
                 cached_result: Optional[dict] = None
@@ -2004,6 +2009,10 @@ class AgentRunner:
                         cache_key = ToolResultCache.key(tool_name, args)
                         cached_result = tool_cache.get(cache_key)
 
+                # 3c §3.2：``duration_ms`` 的窗口从这里开始，到派发返回为止 ——
+                # 缓存查找在窗口之外（它是 harness 的活），所以一次命中量出来接近
+                # 0，正确地说出「这次工具没跑」。
+                _tool_t0 = _time.monotonic()
                 if cached_result is not None:
                     result = cached_result
                     from app.agent_framework._metrics_helper import inc_metric
@@ -2133,6 +2142,9 @@ class AgentRunner:
                             tool_name, self.delegate_tool.execute(args)
                         )
 
+                # 窗口在此闭合 —— 与 stream_turn 同一口径，图片提升与 trace 在外。
+                _tool_ms = int((_time.monotonic() - _tool_t0) * 1000)
+
                 # Image promotion (mirrors stream_turn): strip base64 BEFORE
                 # the trace/recorder capture the result; the pixels ride only
                 # in the injected user-message image part below.
@@ -2171,7 +2183,7 @@ class AgentRunner:
                     args=args,
                     result=result,
                     iteration=iteration,
-                    duration_ms=int((_time.monotonic() - _tool_t0) * 1000),
+                    duration_ms=_tool_ms,
                     error_code=tool_error_code(result),
                 )
 

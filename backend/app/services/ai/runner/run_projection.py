@@ -23,14 +23,17 @@ from typing import Any, Callable
 
 Views = dict[str, Any]
 # A fold receives a deep copy it may mutate and returns it — or ``None`` for
-# "nothing to say", which makes ``apply`` hand back the ORIGINAL object.
+# "nothing to say", in which case whatever it did to that copy is DISCARDED
+# (``apply`` rolls the copy back to its pre-fold state). With nothing else to
+# say either, callers get the ORIGINAL object back, unchanged by identity.
 Fold = Callable[[Views, dict[str, Any]], Views | None]
 
 _REGISTRY: dict[str, Fold] = {}
-# 计数道：与主 fold 并列，同一事件可以有多个。主 fold 负责「这个族的整值视图」，一
-# 族只许一个（``register`` 对重复 raise）；计数只是在同一批事件上加法，没有整值语
-# 义，所以允许多个并存且**不**替换主 fold。
-_COUNTERS: dict[str, list[Fold]] = {}
+# 计数道：与主 fold **并列**的第二条道，同一事件两条都跑。分开是因为主 fold 负责
+# 「这个族的整值视图」而一族只许一个（``register`` 对重复 raise），计数只是在同一批
+# 事件上加法、没有整值语义，塞不进那一个名额。每个事件类型同样只许一条计数道 ——
+# 重复注册是笔误不是叠加，所以 ``register_counter`` 也 raise。
+_COUNTERS: dict[str, Fold] = {}
 
 VIEW_VERSION = 1
 
@@ -150,7 +153,9 @@ def register_counter(event_type: str) -> Callable[[Fold], Fold]:
     """注册一个计数道折叠。主 fold 之后运行，拿到同一个可变副本。"""
 
     def deco(fn: Fold) -> Fold:
-        _COUNTERS.setdefault(event_type, []).append(fn)
+        if event_type in _COUNTERS:
+            raise ValueError(f"counter already registered for {event_type!r}")
+        _COUNTERS[event_type] = fn
         return fn
 
     return deco
@@ -168,18 +173,25 @@ def apply(
     主 fold 与计数道都跑：主 fold 说「没什么好说的」（返回 None）时计数道仍要计——
     一次没超时的 ``tool_call`` 对 ``view.tools`` 无话可说，对工作量却是实打实的一
     次。两道都没改动才返回原对象（dsh「同一引用 = 零下游工作」）。
+
+    ⚠️ 主 fold 返回 None 时**回滚**它在副本上做过的改动。在计数道出现之前这是免
+    费的（副本直接被丢掉）；现在副本会活下去交给计数道，不回滚就等于把一个说了
+    「不算数」的 fold 的半截改动偷渡出去。快照只在真有计数道时才拍。
     """
     fold = _REGISTRY.get(event_type)
-    counters = _COUNTERS.get(event_type) or ()
-    if fold is None and not counters:
+    counter = _COUNTERS.get(event_type)
+    if fold is None and counter is None:
         return views
     nxt = copy.deepcopy(views)
     changed = False
     if fold is not None:
+        before = copy.deepcopy(nxt) if counter is not None else None
         folded = fold(nxt, payload or {})
         if folded is not None:
             nxt, changed = folded, True
-    for counter in counters:
+        elif before is not None:
+            nxt = before
+    if counter is not None:
         counted = counter(nxt, payload or {})
         if counted is not None:
             nxt, changed = counted, True

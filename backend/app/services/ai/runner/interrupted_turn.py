@@ -74,7 +74,17 @@ async def close_interrupted_run(run_id: int, *, detail: Optional[str] = None) ->
         payload["detail"] = detail
     await writer.append(TURN_END_EVENT_TYPE, payload, turn=1)
     # 3c §3.2：事件与列一起补，否则崩溃的 run 那一列永远空着。
-    await _stamp_turn_end_reason(int(run_id), TurnEndReason.INTERRUPTED.value)
+    #
+    # 补列失败**不**回退返回值：事件已经落在 transcript 上了，而幂等守卫读的正是
+    # 事件（``_last_seq_and_has_turn_end``），报 False 只会让下一轮 sweeper 再
+    # append 一条。容纳并记录 —— 那条 ERROR 是「这一列现在空着」唯一的线索，下一
+    # 次 stamp 仍会被 ``IS NULL`` 守卫放行，所以缺口是可自愈的。
+    try:
+        await _stamp_turn_end_reason(int(run_id), TurnEndReason.INTERRUPTED.value)
+    except Exception as err:  # noqa: BLE001 — 见上：容纳并记录，不是静默吞
+        logger.error(
+            f"[interrupted_turn] turn_end_reason not stamped (run={run_id}): {err}"
+        )
     return True
 
 
