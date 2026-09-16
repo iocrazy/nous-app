@@ -73,8 +73,12 @@ function renderPlayer(authToken?: string) {
   return { ref, rerenderWithToken, ...utils };
 }
 
-/** What the browser does to the element when the source is re-attached. */
+/** What the browser does to the element when the source is re-attached.
+ *  `emptied` first: that is the element announcing it threw its resource
+ *  away, and it is the only signal available when the browser does this on
+ *  its own rather than because React re-pointed the source. */
 function reinitialise(video: HTMLVideoElement) {
+  video.dispatchEvent(new Event('emptied'));
   video.currentTime = 0;
   video.dispatchEvent(new Event('loadedmetadata'));
 }
@@ -185,5 +189,51 @@ describe('in-place re-initialisation', () => {
     });
 
     expect(video.currentTime).toBe(0);
+  });
+});
+
+describe('the element re-initialising itself, with React none the wiser', () => {
+  it('restores after a bare load() — no prop changed, no effect re-ran', () => {
+    // A production probe caught this: the first version of the fix keyed the
+    // restore on the source-attach effect, so an element that reset on its own
+    // (a backgrounded tab losing its media, `load()`) still came back at 00:00.
+    savePosition(null, SRC, 313, 598);
+
+    const { ref } = renderPlayer('token-1');
+    const video = ref.current!;
+    stubDuration(video, 598);
+
+    act(() => {
+      video.dispatchEvent(new Event('loadedmetadata'));
+      video.currentTime = 420;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+
+    act(() => {
+      reinitialise(video);
+    });
+
+    expect(video.currentTime).toBeCloseTo(420, 3);
+  });
+
+  it('still does not re-seek when only metadata fires again', () => {
+    // No `emptied` — the element did not throw anything away, so this is the
+    // quality-switch shape and must be left alone.
+    savePosition(null, SRC, 313, 598);
+
+    const { ref } = renderPlayer('token-1');
+    const video = ref.current!;
+    stubDuration(video, 598);
+
+    act(() => {
+      video.dispatchEvent(new Event('loadedmetadata'));
+    });
+
+    act(() => {
+      video.currentTime = 500;
+      video.dispatchEvent(new Event('loadedmetadata'));
+    });
+
+    expect(video.currentTime).toBeCloseTo(500, 3);
   });
 });
