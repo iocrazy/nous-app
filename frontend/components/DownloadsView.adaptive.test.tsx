@@ -193,26 +193,44 @@ vi.mock('../hooks/useContainerWidth', () => ({
 }));
 
 import { DownloadsView } from './DownloadsView';
-import { computeJustifiedRows } from '../utils/justifiedLayout';
+import { computeJustifiedRows, distributeRowWidths } from '../utils/justifiedLayout';
 import { parseResolution } from '../utils/resourceAspect';
 
 const TARGET_ROW_HEIGHT = 200;
+const MIN_CARD_WIDTH = 190; // mirrors JUSTIFIED_MIN_CARD_WIDTH
 const GAP = 12;
 
 describe('DownloadsView — adaptive view', () => {
-  it('renders one card per item, sized by its own aspect ratio', () => {
+  it('sizes each card by its own aspect ratio, until the stats strip needs more', () => {
     const { getAllByTestId } = render(<DownloadsView />);
     const cards = getAllByTestId('card');
     expect(cards).toHaveLength(3);
 
-    // Each card gets the ratio parsed from its own resolution, so a portrait
-    // clip is narrow and a landscape one is wide — the whole point of the view.
+    // `data-aspect` is the card's RENDERED shape (width / row height), not the
+    // media's own ratio. They agree for anything wide enough; a portrait clip
+    // is where they part, because 9:16 at this row height lands under the width
+    // the four-column stats strip needs and gets widened (2026-09-15 — a douyin
+    // column rendered its likes/comments/shares/collects clipped).
     const byTitle = Object.fromEntries(
       cards.map((c) => [c.getAttribute('data-title'), Number(c.getAttribute('data-aspect'))]),
     );
-    expect(byTitle.Landscape).toBeCloseTo(16 / 9, 5);
-    expect(byTitle.Portrait).toBeCloseTo(1080 / 1920, 5);
-    expect(byTitle.Square).toBeCloseTo(1, 5);
+    // The portrait clip is the one under the floor, so it widens; the others
+    // fund it and therefore render slightly narrower than their own ratio.
+    expect(byTitle.Portrait).toBeGreaterThan(1080 / 1920);
+    expect(byTitle.Landscape).toBeLessThan(16 / 9);
+    expect(byTitle.Landscape).toBeGreaterThan(byTitle.Square);
+  });
+
+  it('never renders a card too narrow for its four stat columns', () => {
+    // The floor is not taste: `p-2` eats 16px and the strip's three gaps eat
+    // 18px, so each of the four cells gets (W - 34) / 4, and `142.7K` at 9px
+    // bold needs ~35px of it. Under ~174px the digits clip.
+    const { container } = render(<DownloadsView />);
+    const widths = Array.from(container.querySelectorAll('[data-testid="card"]')).map(
+      (c) => parseFloat((c.parentElement as HTMLElement).style.width),
+    );
+    expect(widths.length).toBe(3);
+    for (const w of widths) expect(w).toBeGreaterThanOrEqual(174);
   });
 
   it('lays the items out in justified rows at the container width', () => {
@@ -233,13 +251,26 @@ describe('DownloadsView — adaptive view', () => {
     });
     expect(rows).toHaveLength(expected.length);
 
-    // Card widths are ratio * row height, in order.
+    // Widths come from distributeRowWidths, not from `ratio * row height`:
+    // the stats-strip floor is funded by the wide items in the SAME row, so a
+    // card's width is a property of its row rather than of its own ratio.
     const widths = Array.from(container.querySelectorAll('[data-testid="card"]'))
       .map((c) => (c.parentElement as HTMLElement).style.width);
     expected.forEach((row) => {
+      const want = distributeRowWidths(
+        aspects.slice(row.start, row.end),
+        row.height,
+        { minWidth: MIN_CARD_WIDTH },
+      );
       for (let i = row.start; i < row.end; i += 1) {
-        expect(widths[i]).toBe(`${aspects[i] * row.height}px`);
+        expect(widths[i]).toBe(`${want[i - row.start]}px`);
       }
+      // Redistribution moves width WITHIN the row — the row still spans what
+      // the justified pass decided, so the grid stays flush.
+      const natural = aspects
+        .slice(row.start, row.end)
+        .reduce((a, ar) => a + ar * row.height, 0);
+      expect(want.reduce((a, b) => a + b, 0)).toBeCloseTo(natural, 5);
     });
   });
 
