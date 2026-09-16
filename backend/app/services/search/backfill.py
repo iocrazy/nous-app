@@ -244,7 +244,7 @@ async def _empty_run_rows(limit: Optional[int] = None) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-async def _orphan_output_count() -> Optional[int]:
+async def _orphan_output_count() -> int:
     """``search_docs`` 里有、``run_deliverables`` 里没有的产出行数。
 
     两条候选集查询都是**内连接**，所以这些行根本进不来 —— 既不会被补上，也不会
