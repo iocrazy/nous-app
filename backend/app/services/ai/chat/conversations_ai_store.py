@@ -122,6 +122,11 @@ _DISPLAY_ATTACHMENT_KEYS = (
     "ref_id",
     "version",
     "title",
+    # 3c §2.4 — 引用放宽为「链对调用方可见」之后，一条引用可以指向**另一件
+    # 议题**的产出。来源议题的 key 因此也是 chip 的输入：没有它，线程里的
+    # 引用卡说不出「你在 MH-98 上产的那一版」。发帖口盖的（``_stamped``），
+    # 与 ``title`` 同一口径：为空就整个键缺席。
+    "issue_key",
 )
 
 
@@ -679,6 +684,40 @@ class ConversationsAiStore:
             body=body,
             parent_id=None,
         )
+        # 3c §2.2：引用镜像。**写点唯一**——议题评论 / 唤醒注入 / 聊天面板三条
+        # 入口最终都经这一个方法落库，所以反查只在这里物化一次。议题只在真有
+        # 引用时才查，普通消息零额外往返。
+        if any(
+            isinstance(a, dict) and a.get("kind") == "output_ref"
+            for a in (attachments or [])
+        ):
+            from app.repositories.issue_repository import issue_repository
+            from app.services.deliverables.citations import record_output_citations
+
+            # ⚠️ **查库在 try 内**，触发判断（纯内存，不会抛）留在外面。
+            # 这条消息此刻**已经落库并提交了** —— ``send_message`` 自开自提交。
+            # 一次失败的议题反查穿出这个方法，注释路径会把它翻成 500
+            # 「failed to save note」（``issue_messages_router`` 的 except 分支），
+            # 于是一条**已经保存的**注释被报成没保存。镜像失败的正确表现是
+            # 「消息发出去了，反查没建上」，与 ``record_output_citations`` 自己
+            # 那层 try 同一口径 —— 投影不许否决内容。
+            try:
+                issue = await issue_repository.get_by_session(_bigint(session_id))
+            except Exception as exc:  # noqa: BLE001 — 见上
+                logger.opt(exception=True).error(
+                    f"[citations] issue lookup FAILED for message {row.get('id')} "
+                    f"(conversation {session_id}): {exc!r} — the message posted, "
+                    "the back-reference did not"
+                )
+            else:
+                await record_output_citations(
+                    None,
+                    message_row=row,
+                    attachments=attachments,
+                    user_id=user_id,
+                    issue_id=(issue or {}).get("id"),
+                    conversation_id=row.get("conversation_id"),
+                )
         return {
             "id": row["id"],
             "session_id": row.get("conversation_id"),
