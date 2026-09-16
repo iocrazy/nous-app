@@ -4836,6 +4836,9 @@
       "completed": "已完成",
       "awaitingInput": "等待输入",
       "error": "出错",
+      "dead": "进程已死",
+      "heartbeatLost": "心跳丢失",
+      "stranded": "重启中断",
       "interrupted": "被中断",
       "cancelled": "已取消",
       "other": "其他"
@@ -5807,7 +5810,7 @@
   },
   "cost": {
     "tailTokens": "{{p}} 输入 · {{c}} 输出 tokens",
-    "charged": "已扣 ◇ {{n}}",
+    "charged": "已扣 ◇ {{n}}（含子 agent）",
     "notCharged": "未扣费（{{why}}）",
     "notChargedPlain": "未扣费"
   },

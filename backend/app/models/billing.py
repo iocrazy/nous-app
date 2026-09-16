@@ -204,6 +204,11 @@ class PointTransactions(Base):
         Index(
             "idx_point_transactions_agent_run_consume",
             "reference_id",
+            # ⚠️ 谓词里的 'agent_run' 是 ``app.services.billing.agent_run_reference
+            # .AGENT_RUN_REFERENCE_TYPE`` 的第五份拷贝 —— SQL 字符串没法 import，
+            # 所以这里只能靠交叉引用 + 一条断言（tests/services/billing/
+            # test_agent_run_reference.py）钉住两者逐字一致。与 mig 474 同样必须
+            # 逐字一致：谓词对不上，planner 就悄悄改走顺扫，没有任何东西会说出来。
             postgresql_where=text("type = 'consume' AND reference_type = 'agent_run'"),
         ),
         {"schema": "public"},

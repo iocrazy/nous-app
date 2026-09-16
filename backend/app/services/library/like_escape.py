@@ -9,9 +9,13 @@ column, transcript bodies included. ``_`` behaves the same way for one
 character. Both are ordinary characters in a search box and must match
 themselves.
 
-Postgres has no default LIKE escape character, so the pattern has to be used
-with an explicit ``ESCAPE '\\'`` for these to mean anything. The RPC declares
-that on every ILIKE it applies.
+The backslash IS Postgres' default ``LIKE`` / ``ILIKE`` escape character, so
+this function is the *mechanism*: it is what makes a typed ``%`` match a literal
+``%``. The explicit ``ESCAPE '\\'`` the RPC writes on every ILIKE is a
+*declaration* — it pins that default down rather than depending on server
+configuration, and saves the next reader a trip to the manual. Both belong
+there, but a missing ``ESCAPE`` is not the same as escaping being switched off
+(``ESCAPE ''`` would be that).
 """
 
 from __future__ import annotations

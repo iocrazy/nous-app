@@ -33,9 +33,18 @@ describe('mergeRunCosts', () => {
       charged_points: 0.5,
       model: 'doubao-seed-2-0-lite',
       status: 'completed',
-      prompt_tokens: 0,
-      completion_tokens: 0,
     });
+  });
+
+  it('token 两列一个都不填 —— rollup 没这两列，编 0 会说成「这次一个 token 都没烧」', () => {
+    // 终审 I3：此前硬填 0，而 `RunCostTail` 的判据是 `!== undefined`，于是浮层
+    // 第一行恒为 `0 prompt · 0 completion tokens`。`undefined` 才走得到它自己
+    // 那条「不知道就整行省掉」的分支 —— 与同一个组件「两个都没有读作 —，不是
+    // ¢0.00」是同一条纪律。
+    const out = mergeRunCosts([run()], null);
+    expect(out['701'].prompt_tokens).toBeUndefined();
+    expect(out['701'].completion_tokens).toBeUndefined();
+    expect('prompt_tokens' in out['701']).toBe(false);
   });
 
   it('帧带了新数字就用帧的——它比下一次轮询早几秒', () => {
@@ -67,8 +76,6 @@ describe('mergeRunCosts', () => {
       charged_points: null,
       model: null,
       status: 'completed',
-      prompt_tokens: 0,
-      completion_tokens: 0,
     });
     expect(out['701'].cost_cents).toBe(0.82); // 别的 run 不受影响
   });

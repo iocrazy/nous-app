@@ -4836,6 +4836,9 @@
       "completed": "Completed",
       "awaitingInput": "Awaiting input",
       "error": "Error",
+      "dead": "Process died",
+      "heartbeatLost": "Heartbeat lost",
+      "stranded": "Stranded",
       "interrupted": "Interrupted",
       "cancelled": "Cancelled",
       "other": "Other"
@@ -5807,7 +5810,7 @@
   },
   "cost": {
     "tailTokens": "{{p}} prompt · {{c}} completion tokens",
-    "charged": "Charged ◇ {{n}}",
+    "charged": "Charged ◇ {{n}} (incl. sub-agents)",
     "notCharged": "Not charged ({{why}})",
     "notChargedPlain": "Not charged"
   },

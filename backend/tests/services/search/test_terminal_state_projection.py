@@ -14,6 +14,7 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -34,12 +35,26 @@ class _RepoSpy:
         self.docs.append(doc)
 
 
-class _Result:
-    """够 `_mark_dead` 读 rowcount、够心跳清扫读 RETURNING 的最小结果对象。"""
+class _Row:
+    """终态 UPDATE ``RETURNING`` 回的行。
 
-    def __init__(self, *, rowcount: int = 1, rows: tuple = ()) -> None:
-        self.rowcount = rowcount
+    3c 终审 I4 之后两个写方都 ``RETURNING`` 出小时表要的维度（team / project /
+    agent / model / trigger），并且**以有没有返回行**判断自己是不是真的抢到了
+    这次终态 —— 所以这个桩比原来的 ``rowcount`` 多带几个字段。
+    """
+
+    def __init__(self, run_id=None):
+        self.id = RUN_ID if run_id is None else run_id
+        self.team_id, self.project_id, self.agent_id = 7, None, None
+        self.model, self.trigger, self.attribution = "doubao", "chat", "direct_human"
+
+
+class _Result:
+    """够两个终态写方读 ``RETURNING`` 的最小结果对象。"""
+
+    def __init__(self, *, rows: tuple = (_Row(),)) -> None:
         self._rows = rows
+        self.rowcount = len(rows)
 
     def fetchall(self):
         return self._rows
@@ -60,6 +75,13 @@ def _scope_for(session: _Session):
         yield session
 
     return _scope
+
+
+@pytest.fixture(autouse=True)
+def no_usage_rollup(monkeypatch):
+    """小时表那一行是另一件事（见 test_crash_terminal_reasons），这里只看投影。
+    不桩掉它会让每条用例去够一个真数据库。"""
+    monkeypatch.setattr("app.services.ai_usage.record_usage", AsyncMock())
 
 
 @pytest.fixture
@@ -98,7 +120,7 @@ def run_row(monkeypatch):
 async def test_a_run_the_scanner_kills_reaches_search_docs(spy, run_row, monkeypatch):
     from app.workflows import liveness_scanner
 
-    session = _Session(_Result(rowcount=1))
+    session = _Session(_Result())
     monkeypatch.setattr("app.db.session.write_scope", _scope_for(session))
 
     await liveness_scanner._mark_dead(RUN_ID, "stuck", reason="no_heartbeat")
@@ -119,7 +141,7 @@ async def test_a_cas_that_matched_nothing_projects_nothing(spy, run_row, monkeyp
     from app.workflows import liveness_scanner
 
     monkeypatch.setattr(
-        "app.db.session.write_scope", _scope_for(_Session(_Result(rowcount=0)))
+        "app.db.session.write_scope", _scope_for(_Session(_Result(rows=())))
     )
     await liveness_scanner._mark_dead(RUN_ID, "stuck", reason="no_heartbeat")
     assert spy.docs == [] and run_row == []
@@ -129,7 +151,7 @@ async def test_a_failing_projection_does_not_undo_the_kill(run_row, monkeypatch)
     from app.workflows import liveness_scanner
 
     monkeypatch.setattr(mod, "get_search_docs_repository", lambda: _RepoSpy(boom=True))
-    session = _Session(_Result(rowcount=1))
+    session = _Session(_Result())
     monkeypatch.setattr("app.db.session.write_scope", _scope_for(session))
 
     await liveness_scanner._mark_dead(RUN_ID, "stuck", reason="no_heartbeat")
@@ -141,7 +163,7 @@ async def test_a_failing_projection_does_not_undo_the_kill(run_row, monkeypatch)
 async def test_every_heartbeat_lost_run_reaches_search_docs(spy, run_row, monkeypatch):
     from app.repositories import agent_runs_repository as repo_mod
 
-    session = _Session(_Result(rows=((RUN_ID,),)))
+    session = _Session(_Result(rows=(_Row(),)))
     monkeypatch.setattr(repo_mod, "write_scope", _scope_for(session))
 
     ids = await repo_mod.AgentRunsRepository().mark_heartbeat_lost_ids(
@@ -160,7 +182,7 @@ async def test_a_failing_projection_still_reports_the_swept_ids(run_row, monkeyp
 
     monkeypatch.setattr(mod, "get_search_docs_repository", lambda: _RepoSpy(boom=True))
     monkeypatch.setattr(
-        repo_mod, "write_scope", _scope_for(_Session(_Result(rows=((RUN_ID,),))))
+        repo_mod, "write_scope", _scope_for(_Session(_Result(rows=(_Row(),))))
     )
 
     ids = await repo_mod.AgentRunsRepository().mark_heartbeat_lost_ids(

@@ -43,6 +43,13 @@ class TurnEndReason(str, Enum):
     )
     PAUSED = "paused"  # target-level pause (phase 2)
     AWAITING_INPUT = "awaiting_input"  # parked on a typed question (phase 2a)
+    # ── 崩溃类（3c 终审 I4）：这三个**不由分类器产生**，也不出现在 transcript 的
+    # ``turn_end`` 事件里。写它们的是三个不经过 ``RunRecorder._finish`` 的终态写方
+    # （liveness 扫描器、心跳清扫器、启动对账），各自在自己那条 UPDATE 里直接写列。
+    # 收在这里是为了让这一列的词表只有一个家 —— 分布条上多出来的三段就是它们。
+    DEAD = "dead"  # liveness scanner judged the process gone
+    HEARTBEAT_LOST = "heartbeat_lost"  # no heartbeat for >2 minutes
+    STRANDED = "stranded"  # backend restarted while the run was in flight
 
 
 # ``StepContext.stop(reason)`` literals → the turn-end word. One table, and

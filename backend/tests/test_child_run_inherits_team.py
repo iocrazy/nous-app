@@ -159,7 +159,7 @@ async def test_a_subagent_child_with_no_resolvable_team_stays_none(monkeypatch):
     assert wired.recorders[0].kwargs["team_id"] is None
 
 
-async def _drive_workforce_task(*, parent_run_id, team_of_run_result):
+async def _drive_workforce_task(*, parent_run_id, team_of_run_result, issue_id=None):
     """跑真的 run_one_task，回传 RunRecorder 实际收到的关键字。
 
     形状照抄 tests/test_agent_worker.py 的 patch 组，只把 RunRecorder 换成会
@@ -174,7 +174,12 @@ async def _drive_workforce_task(*, parent_run_id, team_of_run_result):
     )
 
     agent_id, user_id = uuid4(), uuid4()
-    full = _task(agent_id=agent_id, user_id=user_id, parent_run_id=parent_run_id)
+    full = _task(
+        agent_id=agent_id,
+        user_id=user_id,
+        parent_run_id=parent_run_id,
+        issue_id=issue_id,
+    )
 
     workforce = MagicMock()
     workforce.INBOX_TABLE = "agent_inbox"
@@ -253,3 +258,35 @@ async def test_a_top_level_workforce_dispatch_has_no_team_to_inherit():
     一个用户可能属于多个团队，猜错比不记更糟。"""
     seen = await _drive_workforce_task(parent_run_id=None, team_of_run_result=None)
     assert seen["team_id"] is None
+
+
+# ──────────────── workforce 派发的 run 必须戳 issue_id ────────────────
+# 3c 终审 I1：这一行缺席时，委派出去的活与钱在议题维度整个消失 —— 驾驶舱效率
+# 两格、`¢/output` 的分母、`/usage/issues/{id}` 的 token 三列、search_docs 的
+# 深链，四个读面全以 `issue_id` 为连接键。同一个函数上面几行才刚把
+# `payload_issue_id(payload)` 交给 build_agent_runner_stack（子孙有议题），
+# 自己这一行却没有。
+
+
+async def test_a_workforce_run_stamps_the_issue_it_was_dispatched_for():
+    """派发时 payload 上有议题，run 行上就必须有 —— 否则这次委派的活在议题
+    维度不存在，而它的钱又通过 root 的树总额算了进去，单价系统性偏高。"""
+    seen = await _drive_workforce_task(
+        parent_run_id=uuid4(), team_of_run_result=_TEAM, issue_id=960100000000000007
+    )
+    assert seen["issue_id"] == 960100000000000007
+
+
+async def test_a_string_issue_id_on_the_payload_lands_as_an_int():
+    """Snowflake id 过 JSON 可能是字符串。列是 BIGINT，走同一个 payload 解析
+    规则（``payload_issue_id``），不在这里另写一条。"""
+    seen = await _drive_workforce_task(
+        parent_run_id=uuid4(), team_of_run_result=_TEAM, issue_id="960100000000000007"
+    )
+    assert seen["issue_id"] == 960100000000000007
+
+
+async def test_a_dispatch_with_no_issue_stays_none():
+    """没有议题的派发（顶层 workforce、CLI）保持 None —— 不猜，也不回落。"""
+    seen = await _drive_workforce_task(parent_run_id=None, team_of_run_result=None)
+    assert seen["issue_id"] is None

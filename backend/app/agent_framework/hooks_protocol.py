@@ -1,9 +1,11 @@
 """Generic hook protocol — replaces the current per-feature wiring.
 
-Wave 5c (C3). Today services/hooks/ holds three concrete classes
-(BudgetGuard, CostAuditor, MemoryHarvester) each with their own ad-hoc
-integration call site. Adding a new hook means hunting down where to
-plug it in. Removing one means cleaning up scattered references.
+Wave 5c (C3). When this was written services/hooks/ held three concrete
+classes (BudgetGuard, CostAuditor, MemoryHarvester) each with their own
+ad-hoc integration call site. Adding a new hook means hunting down where
+to plug it in. Removing one means cleaning up scattered references.
+(CostAuditor has since been retired — 3c §3.2 — and this comment is the
+proof of that second sentence.)
 
 This module defines a uniform Protocol + Registry so:
   - hooks register themselves declaratively (events they care about)
@@ -12,10 +14,10 @@ This module defines a uniform Protocol + Registry so:
     .abort_run / .mutate_payload(new)
   - new hooks just implement Hook + register; no runner changes
 
-The existing concrete hooks (BudgetGuard, CostAuditor, MemoryHarvester)
-keep working — they're not migrated by this commit. New hooks should
-use the new protocol; migration of existing ones is deferred to keep
-this change reviewable.
+The existing concrete hooks (BudgetGuard and MemoryHarvester today;
+CostAuditor was retired in 3c §3.2) keep working — they're not migrated
+by this commit. New hooks should use the new protocol; migration of
+existing ones is deferred to keep this change reviewable.
 """
 
 from __future__ import annotations

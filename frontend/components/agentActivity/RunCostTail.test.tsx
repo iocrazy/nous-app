@@ -50,7 +50,7 @@ describe('RunCostTail', () => {
 
   it('hover 浮层三行：tokens · ¢ · 扣没扣', () => {
     render(<RunCostTail {...base} chargedPoints={0.82} promptTokens={1200} completionTokens={340} />);
-    expect(title()).toBe('1200 prompt · 340 completion tokens\n¢0.82\nCharged ◇ 0.82');
+    expect(title()).toBe('1200 prompt · 340 completion tokens\n¢0.82\nCharged ◇ 0.82 (incl. sub-agents)');
   });
 
   it('没扣的浮层说清为什么——一句 not charged 不说原因等于没说', () => {

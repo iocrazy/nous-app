@@ -2,14 +2,21 @@
  * 一次窗口里回合都是怎么结束的（3c §6 稿三）。
  *
  * `turn_end_reasons` 是一张开放的表——runner 每加一个终止理由，这里就会多一个键。
- * 十个理由里只有五个值得一眼分辨，其余归 Other：一条分成十段的条读不出任何东西。
+ * 十几个理由里只有八个值得一眼分辨，其余归 Other：一条分成十几段的条读不出任何东西。
  *
  * 配色全用语义色 token（K1 全站配色重映射之后色相名不再表示状态）：
  *   completed → ok        一个跑完的回合
  *   awaiting_input → info **在等人**，不是失败——这是 Success tile 改口径的同一裁定
  *   error → danger        真的坏了
+ *   dead → danger         进程没了（liveness 扫描器判死）——和 error 同级的坏消息
+ *   heartbeat_lost → warn 心跳断了：常常是网络或卡死，不一定是崩溃
+ *   stranded → warn       后端重启时它正在飞——运维事件，不是这个 agent 的错
  *   interrupted → warn    被腰斩
  *   cancelled / Other → ink（muted）  用户自己叫停、或不值得单独一段的理由
+ *
+ * 后三者是 3c 终审 I4 补上的：在此之前那三类终态连 `turn_end_reason` 都不写，
+ * 于是**进程死掉、心跳丢失、重启被斩这三类根本不进成功率的分母**——曲线只在
+ * 「跑完了但结局不是 completed」之间比较。归进 Other 等于把它们又藏起来一次。
  *
  * 零完成回合时说「还没有」，不画一条空条：空条与「全是 completed 的条」在视觉上
  * 是两件完全不同的事，长得一样就是在骗人。
@@ -27,7 +34,7 @@ interface KnownReason {
   label: string;
 }
 
-/** 值得单独一段的五个。顺序即条上的顺序：好消息在左，坏消息在右。 */
+/** 值得单独一段的八个。顺序即条上的顺序：好消息在左，坏消息在右。 */
 const KNOWN: KnownReason[] = [
   { key: 'completed', i18nKey: 'completed', className: 'bg-ok', label: 'Completed' },
   {
@@ -37,6 +44,14 @@ const KNOWN: KnownReason[] = [
     label: 'Awaiting input',
   },
   { key: 'error', i18nKey: 'error', className: 'bg-danger', label: 'Error' },
+  { key: 'dead', i18nKey: 'dead', className: 'bg-danger', label: 'Process died' },
+  {
+    key: 'heartbeat_lost',
+    i18nKey: 'heartbeatLost',
+    className: 'bg-warn',
+    label: 'Heartbeat lost',
+  },
+  { key: 'stranded', i18nKey: 'stranded', className: 'bg-warn', label: 'Stranded' },
   {
     key: 'interrupted',
     i18nKey: 'interrupted',
@@ -60,7 +75,7 @@ export const TurnEndBreakdown: React.FC<{ reasons: Record<string, number> }> = (
     );
   }
 
-  // 已知五段之外剩下的一切（paused / max_iterations / 明天才加的那个）。
+  // 已知八段之外剩下的一切（paused / max_iterations / 明天才加的那个）。
   const other = total - KNOWN.reduce((a, k) => a + (reasons[k.key] || 0), 0);
   const segments = [
     ...KNOWN.map((k) => ({ ...k, count: reasons[k.key] || 0 })),

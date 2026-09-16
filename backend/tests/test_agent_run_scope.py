@@ -301,11 +301,42 @@ BACKEND_APP = Path(__file__).resolve().parent.parent / "app"
 #      cannot see what a merged dict variable's keys are without evaluating
 #      the dict literal itself, which is a step too far for a lint-shaped
 #      test — this is belt-and-suspenders, not the sole defense there).
+#
+# Step 2 counts parentheses instead of pattern-matching the closing one. The
+# regex it replaced (`\.values\((.*?)\)\s*\)`) stopped at the first `)` that
+# happened to be followed by another `)`, which is NOT where `.values(` ends
+# whenever a clause follows it — a `.returning(AgentRuns.team_id, ...)` on the
+# next line got swallowed into "what .values() sets" and reported as a write
+# (3c 终审 I4 added exactly that shape: those columns are READ out of the
+# terminal UPDATE to build one telemetry row). Reading a scope column is fine
+# and always was; only writing it breaks the invariant. Balanced counting says
+# precisely where the clause ends, so the guard gets stricter here, not looser.
 _ORM_UPDATE_WINDOW_RE = re.compile(
     r"(?:sa_update|update)\(AgentRuns\)(?P<body>.*?)(?=\n\s{0,8}(?:async )?def |\Z)",
     re.DOTALL,
 )
-_VALUES_CLAUSE_RE = re.compile(r"\.values\((?P<vals>.*?)\)\s*\)", re.DOTALL)
+_VALUES_OPEN = ".values("
+
+
+def _values_clause(body: str) -> str | None:
+    """The text strictly inside the window's first ``.values( ... )``."""
+    start = body.find(_VALUES_OPEN)
+    if start < 0:
+        return None
+    i = start + len(_VALUES_OPEN)
+    depth = 1
+    while i < len(body):
+        if body[i] == "(":
+            depth += 1
+        elif body[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return body[start + len(_VALUES_OPEN) : i]
+        i += 1
+    # Unbalanced source should never reach here; treat the rest as the clause
+    # rather than silently reporting "nothing is set".
+    return body[start + len(_VALUES_OPEN) :]
+
 
 # Raw-SQL style (liveness_scanner.py / liveness/reconcile.py): capture the SET
 # clause up to WHERE — these are single simple UPDATE...SET...WHERE
@@ -332,10 +363,10 @@ def test_no_write_path_anywhere_touches_scope_columns():
         except (OSError, UnicodeDecodeError):
             continue
         for window_match in _ORM_UPDATE_WINDOW_RE.finditer(source):
-            values_match = _VALUES_CLAUSE_RE.search(window_match.group("body"))
-            if values_match is None:
+            values = _values_clause(window_match.group("body"))
+            if values is None:
                 continue
-            for col in _offending_columns(values_match.group("vals")):
+            for col in _offending_columns(values):
                 offenders.append((rel, col))
         for match in _RAW_UPDATE_RE.finditer(source):
             for col in _offending_columns(match.group("body")):
@@ -347,6 +378,25 @@ def test_no_write_path_anywhere_touches_scope_columns():
         "intentional, the scope-binding design in agent_run_scope.py must be "
         "revisited, not just this test loosened."
     )
+
+
+def test_the_values_extractor_stops_where_the_clause_stops():
+    """正向：``.values()`` 之后的 ``.returning()`` 不算「设置了这些列」。
+
+    此前那个正则会把下一行的 ``.returning(AgentRuns.team_id, ...)`` 吞进来，
+    于是一次**读**被报成写。读 scope 列从来都是允许的。
+    """
+    body = (
+        "\n    .values(status='failed', turn_end_reason='dead')"
+        "\n    .returning(AgentRuns.id, AgentRuns.team_id, AgentRuns.project_id)"
+    )
+    assert _offending_columns(_values_clause(body) or "") == []
+
+
+def test_the_values_extractor_still_catches_a_real_write():
+    """反向对照：真写进 ``.values()`` 照样被抓，嵌套括号也不逃。"""
+    body = "\n    .values(project_id=int(x), status='failed')\n    .returning(AgentRuns.id)"
+    assert _offending_columns(_values_clause(body) or "") == ["project_id"]
 
 
 def test_run_recorder_only_sets_scope_columns_at_construction_time():

@@ -1148,6 +1148,14 @@ describe('IssueDetailView — done 帧不该把 rollup 已知的花费抹掉', (
     expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
   });
 
+  it('议题侧的浮层不说 token —— rollup 没这两列，说 0 就是在编', async () => {
+    // 终审 I3：`mergeRunCosts` 曾把两列硬填 0，而 `RunCostTail` 的判据是
+    // `!== undefined`，于是这里恒显示 `0 prompt · 0 completion tokens`。
+    // 契约偏离 #14 的裁定原文是「议题侧 hover 只给 ¢ 与积分」，不是「给 0」。
+    await renderWithRun();
+    expect(screen.getByTestId('run-cost-tail').getAttribute('title')).not.toContain('prompt');
+  });
+
   it('帧只带得动花费时，积分留 rollup 的 —— 逐字段，不是整行替换', async () => {
     const { fire } = await renderWithRun();
     fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: null });

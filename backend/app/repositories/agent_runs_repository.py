@@ -41,6 +41,7 @@ from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import AgentRuns
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.ai.runner.turn_end import TurnEndReason
 
 # agent_runs DB-column-name → mapped-attribute-name. Built once from the mapper.
 # For agent_runs every name == key (no reserved-name remap), but we resolve via
@@ -861,6 +862,13 @@ class AgentRunsRepository(AsyncpgRepository):
         真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
         ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
 
+        ⚠️ 「全体」的准确口径是**带着这个 ``issue_id`` 的全部 run**，不是「这棵树的
+        全部 run」——这里的 WHERE 只认这一列，树结构（``root_run_id``）根本没进查询。
+        两者相等的前提是每个派发站点都在 INSERT 时戳上议题；3c 终审 I1 抓到
+        ``workforce/agent_worker`` 漏了这一戳，于是委派出去的活整个不计，而
+        ``compute_rollup`` 的 ``¢/output`` 分子（root 的树总额，含子的钱）照算不误，
+        单价系统性偏高。**加新的派发站点时，issue_id 与 team_id 一样是必戳项。**
+
         ``avg_run_ms`` 的分母只数两端时间戳都有的 run；一个都没有 → None（不知道，
         不是 0 毫秒）。读失败返回 {}：驾驶舱少两个格子，不该把整个议题页拖垮。
         """
@@ -1025,6 +1033,14 @@ class AgentRunsRepository(AsyncpgRepository):
           agent 上会显著不同。
 
         所以 root 谓词写成聚合上的 ``FILTER (WHERE ...)``，不写进 ``WHERE``。
+
+        ⚠️ **两种粒度混在一张分组表里的后果**（3c 终审 I5）：分组键取自每个 run 自己
+        的 model / agent，而钱只从 root 行来。一次委派里父用 A 模型、子用 B 模型时，
+        **整棵树的钱进 A 组，子的产出进 B 组** —— B 组于是拿到 ``cost_cents = 0`` 且
+        ``deliverables > 0``。这不是缺陷而是两种粒度的必然结果（钱按树滚、活按 run
+        数），但它会让「单价」这一列说出谎话，所以路由层在 ``cost == 0 and
+        delivered > 0`` 时回 null 而不是 0.0。顶栏 tile 逐组求和后不受影响，受影响
+        的只有分组表本身。
         """
         key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
         root_only = AgentRuns.parent_run_id.is_(None)
@@ -1119,6 +1135,44 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] cost_rows_for_ids failed: {e}")
             raise
 
+    async def run_ids_in_trees(self, root_ids: List[int]) -> Dict[str, List[str]]:
+        """每个 root run id → 以它为根的整棵树的全部 run id（含它自己），都是字符串。
+
+        扣费是**逐 run** 发生的（``token_billing`` 对每条 run 各 ceil 一次，见那里的
+        注释），所以「这次回合扣了多少」的答案分散在整棵树上。3c 终审 I2：两个消耗行
+        宿主此前只问 root 自己那一条流水，真栈一次回合 6 条、余额 −6，界面显示 ◇ 1.00。
+
+        ``root_run_id`` 在子 run 上指向根、在 root 行上是 NULL（``_attach_to_parent_run``
+        是唯一写方），所以一条 ``root_run_id IN (:roots) OR id IN (:roots)`` 就取全。
+
+        每个问到的 id **至少映射到它自己**，即使它的行读不回来 —— 一次读空不该把一个
+        真扣过钱的 run 显示成免费。⚠️ 问一个**中间**节点只会拿回它自己：它的孙子
+        ``root_run_id`` 指向真正的根而不是它。两个宿主问的都是 root，这是已知边界。
+
+        读失败一律 raise：降级成「只有 root」等于把 I2 那个低报又悄悄装回去。三个消费方
+        各自已经有 catch。
+        """
+        roots = [int(r) for r in root_ids if r is not None]
+        if not roots:
+            return {}
+        out: Dict[str, set[str]] = {str(r): {str(r)} for r in roots}
+        stmt = select(AgentRuns.id, AgentRuns.root_run_id).where(
+            or_(AgentRuns.root_run_id.in_(roots), AgentRuns.id.in_(roots))
+        )
+        try:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).all()
+        except Exception as e:
+            logger.error(f"[agent_runs] run_ids_in_trees failed: {e}")
+            raise
+        for run_id, root_run_id in rows:
+            # root 行自己的 ``root_run_id`` 是 NULL；一个被问到的中间节点的
+            # ``root_run_id`` 指向一个**没被问到**的根，那种行归到它自己名下。
+            key = str(root_run_id) if str(root_run_id) in out else str(run_id)
+            if key in out:
+                out[key].add(str(run_id))
+        return {k: sorted(v) for k, v in out.items()}
+
     # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------
@@ -1134,7 +1188,15 @@ class AgentRunsRepository(AsyncpgRepository):
         each transcript with ``turn_end{reason:interrupted}`` (mig 453 spine:
         the event log is replay-complete only if a crashed run still gets its
         terminal event). SET-based, idempotent; committed via write_scope.
-        Datetimes bound as ``datetime`` objects, never isoformat strings."""
+        Datetimes bound as ``datetime`` objects, never isoformat strings.
+
+        ⚠️ 这条 UPDATE 同批写 ``turn_end_reason='heartbeat_lost'``（3c 终审 I4），
+        而它**先于**调用方的 ``close_interrupted_runs``，后者的补写带
+        ``turn_end_reason IS NULL`` 守卫。所以列上是 ``heartbeat_lost``，而
+        transcript 事件仍是 ``turn_end{reason:interrupted, detail:heartbeat_lost}``。
+        两者不冲突，是两个粒度：事件说「这一轮被腰斩」，列多说了一句「因为心跳
+        没了」—— 分布条要的正是后者，否则崩溃类失败与普通中断混成一段。
+        """
         try:
             async with write_scope() as session:
                 result = await session.execute(
@@ -1146,22 +1208,37 @@ class AgentRunsRepository(AsyncpgRepository):
                         ended_at=datetime.now(timezone.utc),
                         error_code="heartbeat_lost",
                         error_message="No heartbeat for >2 minutes",
+                        turn_end_reason=TurnEndReason.HEARTBEAT_LOST.value,
                     )
-                    .returning(AgentRuns.id)
+                    # 维度随行返回：小时表那一行要 team / project / agent /
+                    # model / trigger，全在这张表上（3c 终审 I4）。
+                    .returning(
+                        AgentRuns.id,
+                        AgentRuns.team_id,
+                        AgentRuns.project_id,
+                        AgentRuns.agent_id,
+                        AgentRuns.model,
+                        AgentRuns.trigger,
+                        AgentRuns.attribution,
+                    )
                 )
-                swept = [int(r[0]) for r in result.fetchall()]
+                rows = result.fetchall()
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
 
-        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影只
-        # 能由这里跟上（3c Task 13 评审 Important 1）。在 ``write_scope()``
-        # 之外：投影读回的必须是刚提交的那份 status，而它失败绝不该把已经扫
-        # 成功的 id 吞掉——调用方拿这些 id 去补 ``turn_end`` 事件。
+        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影与
+        # ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审
+        # Important 1 / 终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是
+        # 刚提交的那份 status，而这两件事失败都绝不该把已经扫成功的 id 吞掉——
+        # 调用方拿这些 id 去补 ``turn_end`` 事件。
+        from app.services.liveness.crash_rollup import record_crash_terminal_runs
         from app.services.search.projection import project_run_id_best_effort
 
+        swept = [int(r.id) for r in rows]
         for run_id in swept:
             await project_run_id_best_effort(run_id)
+        await record_crash_terminal_runs(rows)
         return swept
 
     # ------------------------------------------------------------------
