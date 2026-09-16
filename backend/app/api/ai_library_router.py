@@ -2386,7 +2386,17 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
             status_code=503, detail={"code": "run_costs_unavailable"}
         ) from exc
     me = str(auth.user_id)
-    visible = await visible_issue_ids({r.get("issue_id") for r in rows}, auth)
+    try:
+        visible = await visible_issue_ids({r.get("issue_id") for r in rows}, auth)
+    except Exception as exc:  # noqa: BLE001
+        # Degrading to "nothing is visible" would hand back a short batch that
+        # reads as a permission answer — "those runs are not yours" — when the
+        # truth is that we could not find out. Same wire code as the other two
+        # arms: one endpoint, one unavailable; the log line says which read.
+        logger.error(f"[runs/costs] visibility read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
     allowed = [
         r
         for r in rows

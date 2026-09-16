@@ -252,3 +252,19 @@ async def test_the_response_echoes_the_grouping_it_used(monkeypatch, grouping):
     _stub(monkeypatch)
     out = await R.get_usage_efficiency(_Auth(), scope="user", group_by=grouping)
     assert out.group_by == grouping
+
+
+async def test_a_reversed_window_is_a_typed_400(monkeypatch):
+    """The other half of the shared ``window_error`` contract. ``range_too_long``
+    already has a case; without this one, deleting the ``invalid_range`` arm or
+    renaming its code goes unnoticed."""
+
+    def _must_not_run():
+        raise AssertionError("the window was rejected too late")
+
+    monkeypatch.setattr(R, "get_agent_runs_repository", _must_not_run)
+    with pytest.raises(HTTPException) as e:
+        await R.get_usage_efficiency(
+            _Auth(), scope="user", frm="2026-09-15", to="2026-09-01"
+        )
+    assert e.value.status_code == 400 and e.value.detail["code"] == "invalid_range"

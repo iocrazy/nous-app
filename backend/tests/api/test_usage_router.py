@@ -261,3 +261,38 @@ async def test_a_read_failure_is_a_typed_503_not_a_zeroed_dashboard(monkeypatch)
         await ur.usage_summary(_AuthStub(), team_id="1", group_by="model")
     assert e.value.status_code == 503
     assert e.value.detail["code"] == "usage_summary_unavailable"
+
+
+@pytest.mark.parametrize(
+    "frm,to,fragment",
+    [
+        # Reversed window: the caller asked for nothing, and an empty answer
+        # would look like a quiet month rather than a bad request.
+        ("2026-09-15", "2026-09-01", "must be before"),
+        # Past the shared cap. This is the branch that keeps a full scan of
+        # ai_usage_hourly off the connection.
+        ("2020-01-01", "2026-01-01", "range exceeds"),
+    ],
+)
+async def test_an_unusable_window_is_refused_before_any_read(
+    monkeypatch, frm, to, fragment
+):
+    """Both rejection branches, through the real endpoint function.
+
+    They are string comparisons against ``window_error``'s codes, so deleting a
+    branch or misspelling a code is silent — nothing else in the suite reads
+    them. The stub summarize raises to prove the refusal happens BEFORE the
+    read, not after it.
+    """
+
+    async def _must_not_run(**kw):
+        raise AssertionError("the window was rejected too late")
+
+    monkeypatch.setattr(ur.usage_repository, "summarize", _must_not_run)
+    monkeypatch.setattr(ur, "get_team_repository", lambda: _TeamOk())
+    with pytest.raises(ur.HTTPException) as e:
+        await ur.usage_summary(
+            _AuthStub(), team_id="1", group_by="model", frm=frm, to=to
+        )
+    assert e.value.status_code == 400
+    assert fragment in str(e.value.detail)

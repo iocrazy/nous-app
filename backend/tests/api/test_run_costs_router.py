@@ -195,3 +195,20 @@ async def test_a_run_read_failure_is_a_typed_503_too(monkeypatch):
         await R.get_run_costs(_Auth(), ids="1,2")
     assert e.value.status_code == 503
     assert e.value.detail["code"] == "run_costs_unavailable"
+
+
+async def test_a_visibility_read_failure_is_a_typed_503_not_an_empty_batch(monkeypatch):
+    """The third arm. If the issue-visibility read fails, every row whose claim
+    to visibility runs through an issue silently drops out — the caller gets a
+    short batch that looks like "those runs are not yours", which is a claim
+    about permissions rather than an outage."""
+    _stub(monkeypatch, {"77"})
+
+    async def _boom(issue_ids, auth):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(R, "visible_issue_ids", _boom)
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids="1,2")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "run_costs_unavailable"
