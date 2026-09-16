@@ -34,6 +34,7 @@ import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
 import { nextLocalSeq, notifyTurn } from './issueTurnSignal';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
+import { fmtWhen } from '../../utils/fmtWhen';
 
 export interface OutputDiffDialogProps {
   kind: string;
@@ -50,15 +51,6 @@ export interface OutputDiffDialogProps {
 }
 
 type T = (key: string, fallback: string, vars?: Record<string, unknown>) => string;
-
-/** A citation's timestamp, in the reader's locale. Falls back to the raw
- *  string rather than printing "Invalid Date" — the value came from the
- *  server and saying it plainly beats inventing a wrong one. */
-function formatCitedAt(at: string): string {
-  const d = new Date(at);
-  return Number.isNaN(d.getTime()) ? at : d.toLocaleString();
-}
-
 
 /** Why a version cannot be shown — the backend's own three reasons. */
 function unavailableText(reason: string | null, t: T): string {
@@ -525,7 +517,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                   {c.issue_key ?? t('outputs.citedInNoIssue', 'An issue with no key')}
                 </span>
                 <span className="text-ink-500">{c.user_id}</span>
-                <span className="text-ink-600 tabular-nums">{formatCitedAt(c.at)}</span>
+                <span className="text-ink-600 tabular-nums">{fmtWhen(c.at)}</span>
               </div>
             ))}
             {citedVersion.cited_count > citedVersion.cited_in.length && (

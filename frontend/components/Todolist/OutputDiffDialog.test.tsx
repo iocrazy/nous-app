@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChildRunContext, type ChildRunState } from './childRunContext';
 import { diffWords } from './outputDiff';
+import { fmtWhen } from '../../utils/fmtWhen';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
@@ -140,6 +141,10 @@ describe('OutputDiffDialog', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain('MH-91');
     expect(rows[0].textContent).toContain('u1');
+    // 时间走 `fmtWhen` —— 读者拿它和自己的表比，不是拿它和 UTC 比。原样吐 ISO
+    // 串（末尾那个 Z）是把服务端的内部表示当成给人看的东西。
+    expect(rows[0].textContent).not.toContain('2026-09-15T03:04:05Z');
+    expect(rows[0].textContent).toContain(fmtWhen('2026-09-15T03:04:05Z'));
     // 计数 3、列表 2 —— 差额必须说出来。不说的话读者会把「2」当成全部，而那
     // 正是可见性裁剪想避免的误导。
     expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('1');

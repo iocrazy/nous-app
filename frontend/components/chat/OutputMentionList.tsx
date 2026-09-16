@@ -42,6 +42,13 @@ export interface OutputMentionListProps {
   /** One readable line. Null when the read succeeded — an empty shelf and a
    *  failed read are different answers. */
   error: string | null;
+  /** The issue the composer belongs to, so a row's source can be called
+   *  "another one" (3c §2.4). The `@` search is scoped to the PROJECT, so this
+   *  issue's own outputs are in the results carrying their own key — testing
+   *  `row.issue_key` for presence would label every row with the issue already
+   *  on screen. `null` means "do not compare", and every source is then drawn:
+   *  the honest answer when we do not know where we are. */
+  currentIssueKey?: string | null;
   onPick: (row: OutputMentionRow) => void;
 }
 
@@ -61,7 +68,7 @@ export const KIND_LABEL: Record<DeliverableKind, [string, string]> = {
 };
 
 export const OutputMentionList = forwardRef<OutputMentionListHandle, OutputMentionListProps>(
-  function OutputMentionList({ active, rows, loading, error, onPick }, ref) {
+  function OutputMentionList({ active, rows, loading, error, currentIssueKey = null, onPick }, ref) {
     const { t } = useTranslation();
     const [index, setIndex] = useState(0);
     const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -171,10 +178,10 @@ export const OutputMentionList = forwardRef<OutputMentionListHandle, OutputMenti
                   </span>
                   <span className="block text-[10px] text-ink-500">
                     {kindWord}
-                    {/* 只有跨议题搜来的行才带它（本议题的行是 null）——一个指着
-                        你正看着的议题的 chip 什么也没说，而画在每一行上会让唯一
-                        真的来自别处的那一行不再显眼。 */}
-                    {row.issue_key && (
+                    {/* 画的是「来自别处」，所以判的是**不同**而不是有没有。检索
+                        按项目作用域，本议题自己的产出必然也在结果里并带着自己的
+                        编号；判有无会让每一行都挂上你正看着的那件议题。 */}
+                    {row.issue_key && row.issue_key !== currentIssueKey && (
                       <span
                         data-testid="output-picker-issue"
                         className="ml-1.5 rounded border border-ink-700 px-1 text-ink-400"

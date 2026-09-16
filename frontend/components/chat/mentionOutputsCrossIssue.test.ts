@@ -249,3 +249,40 @@ describe('@ 页签：查询太短、清空与在途取消', () => {
     await waitFor(() => expect(result.current.outputs.loading).toBe(false));
   });
 });
+
+/**
+ * 行带的是**事实**，比较是显示方的事（3c Task 17 修复轮 2）。
+ *
+ * `@` 的检索按**项目**作用域，所以本议题自己的产出必然也在结果里，而后端对每
+ * 条命中都填 `issue_key`。于是「行只在来自别处时才带来源」这句话从一开始就是
+ * 错的 —— 无条件抄下来是对的，判「不同」要发生在画它的地方。
+ */
+describe('搜来的行无条件记下产出在哪', () => {
+  it('tab 把当前议题编号交给列表 —— 比较发生在画的地方', () => {
+    // 行记录事实、列表判不同，这条链只有在 tab 真的把编号传下去时才成立。
+    // 不传的后果是静默的：每一行都挂上读者正看着的那件议题，而所有关于「行」
+    // 的断言照样全绿。
+    const { result } = renderHook(
+      (p: Parameters<typeof useMentionOutputsTab>[0]) => useMentionOutputsTab(p),
+      { initialProps: { pickerOpen: true, issueId: 42, query: '', issueKey: 'MH-96', onSelect: vi.fn() } },
+    );
+    expect(result.current.outputs.currentIssueKey).toBe('MH-96');
+  });
+
+  it('没有议题编号时交出 null —— 不比较，全标', () => {
+    const { result } = renderHook(
+      (p: Parameters<typeof useMentionOutputsTab>[0]) => useMentionOutputsTab(p),
+      { initialProps: { pickerOpen: true, issueId: 42, query: '', onSelect: vi.fn() } },
+    );
+    expect(result.current.outputs.currentIssueKey).toBeNull();
+  });
+
+  it('本议题的命中也带 issue_key —— 检索按项目作用域，它必然在结果里', () => {
+    const rows = searchHitsToMentionRows([
+      { ...hit({ kind: 'script_shot', ref_id: '9', version: 4 }), issue_key: 'MH-96' },
+    ]);
+    // 在这一层丢掉它，画的人就再也无从知道这一版产自哪里 —— 「和当前议题相同」
+    // 与「后端没说」会长得一模一样。
+    expect(rows[0].issue_key).toBe('MH-96');
+  });
+});

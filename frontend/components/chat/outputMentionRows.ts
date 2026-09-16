@@ -32,11 +32,17 @@ export interface OutputMentionRow {
   version: number;
   /** The registry's title for this version, or the object's, or null. */
   title: string | null;
-  /** The issue this version was produced on, when the row came from a search
-   *  that crossed issues (3c §2.4). `null` on every row read from THIS issue's
-   *  own outputs — a chip naming the issue you are already looking at says
-   *  nothing, and drawing it on every row would make the one row that came
-   *  from somewhere else stop standing out. */
+  /** The issue this version was produced on (3c §2.4) — a FACT about the
+   *  version, recorded whatever it is.
+   *
+   *  It is NOT "set only when the row came from elsewhere": the `@` search is
+   *  scoped to the PROJECT, so this issue's own outputs are necessarily in the
+   *  results and the backend stamps a source onto every hit. Deciding whether
+   *  to SAY it belongs to whoever draws the row, which is the only layer that
+   *  knows which issue the reader is on.
+   *
+   *  `null` on rows read from this issue's own outputs endpoint, which answers
+   *  about one issue and so has nothing to add. */
   issue_key: string | null;
   /** This is the object's newest registered version. */
   latest: boolean;
@@ -102,8 +108,8 @@ export function toMentionRows(objects: OutputObject[], query: string): OutputMen
         // treated as absent so the row renders its kind word instead of a
         // blank line.
         title: v.title || obj.title || null,
-        // This path reads ONE issue's outputs, so every row came from the issue
-        // the composer is on. See the field's own note.
+        // This path reads ONE issue's outputs — the endpoint answers about the
+        // issue the composer is on, so there is no source to add.
         issue_key: null,
         latest: idx === 0,
         startsOlderGroup: false,

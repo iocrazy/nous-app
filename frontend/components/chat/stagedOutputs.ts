@@ -31,8 +31,11 @@ export interface StagedOutputRef {
   ref_id: string;
   version: number;
   title: string | null;
-  /** The issue this version was produced on, when the row came from a search
-   *  that crossed issues (3c §2.4); `null` for this issue's own outputs.
+  /** The issue this version was produced on (3c §2.4) — a FACT about the
+   *  version, carried whatever it is, NOT a flag for "came from elsewhere".
+   *  The `@` search is scoped to the project, so this issue's own outputs are
+   *  in the results with their own key; whether to SAY it is decided where the
+   *  chip is drawn, against the issue the composer belongs to.
    *
    *  Staged rather than dropped because the chip is the SAME citation the
    *  picker showed and the thread will show: losing the source here makes one

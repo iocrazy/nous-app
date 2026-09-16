@@ -46,6 +46,10 @@ export interface UseMentionOutputsTabOptions {
   issueId: number | string | null;
   /** The live `@` query, already stripped of the `@`. */
   query: string;
+  /** 这件议题的编号（`MH-96`）。行只在来源与它**不同**时才标注来源 —— 检索按
+   *  项目作用域，本议题自己的产出必然也在结果里并带着自己的编号，判有无会让每
+   *  一行都挂上读者正看着的那件议题。null = 不比较，全标。 */
+  issueKey?: string | null;
   /** 这件议题属于哪个项目。有查询时检索按它作用域（3c §2.4）。
    *
    *  `null` 不是「不限」——它是「没有可用的范围」，于是整条路退回本议题。一次
@@ -74,6 +78,7 @@ export function useMentionOutputsTab({
   pickerOpen,
   issueId,
   query,
+  issueKey = null,
   projectId = null,
   onSelect,
 }: UseMentionOutputsTabOptions): MentionOutputsTab {
@@ -304,10 +309,11 @@ export function useMentionOutputsTab({
       rows,
       loading,
       error,
+      currentIssueKey: issueKey,
       onSelect,
       listRef,
     }),
-    [active, rows, loading, error, onSelect],
+    [active, rows, loading, error, issueKey, onSelect],
   );
 
   return { outputs, deactivate, handleKey, reset };

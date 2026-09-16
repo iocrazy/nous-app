@@ -92,6 +92,9 @@ export interface OutputsTabProps {
    *  different answers and the body says which. */
   error: string | null;
   onSelect: (row: OutputMentionRow) => void;
+  /** The issue this composer belongs to — a row names its source issue only
+   *  when that is a different one (3c §2.4). */
+  currentIssueKey?: string | null;
   /** Handle for the parent's ↑↓/Enter routing. */
   listRef?: React.Ref<OutputMentionListHandle>;
 }
@@ -291,6 +294,7 @@ export function ResourcePickerSuggestion({
           rows={outputs.rows}
           loading={outputs.loading}
           error={outputs.error}
+          currentIssueKey={outputs.currentIssueKey}
           onPick={outputs.onSelect}
         />
       )}

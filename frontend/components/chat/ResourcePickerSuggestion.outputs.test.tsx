@@ -237,3 +237,31 @@ describe('OutputMentionList — the handle the host routes keys into', () => {
     expect(onPick).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 来源议题 chip 的判定（3c Task 17 修复轮 2）。
+ *
+ * `@` 的检索按**项目**作用域，所以本议题自己的产出必然也在结果里，而后端对每条
+ * 命中都填 `issue_key`。行无条件记下它（那是事实），这里判「不同」才画 —— 与
+ * 线程里已发出的引用卡、轨迹里的引用条同一条规则。
+ */
+describe('Outputs 行的来源议题', () => {
+  const crossIssue = row({ key: 'script_shot:9:4', version: 4, issue_key: 'MH-98' });
+  const sameIssue = row({ key: 'script_shot:8:1', version: 1, issue_key: 'MH-96' });
+
+  it('只标注来自别的议题的那一行', () => {
+    renderPicker({
+      outputs: makeOutputs({ active: true, rows: [sameIssue, crossIssue], currentIssueKey: 'MH-96' }),
+    });
+    const marks = screen.getAllByTestId('output-picker-issue');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('MH-98');
+  });
+
+  it('不知道自己在哪件议题上时全标 —— 那时「来自别处」无从判断', () => {
+    renderPicker({
+      outputs: makeOutputs({ active: true, rows: [sameIssue, crossIssue], currentIssueKey: null }),
+    });
+    expect(screen.getAllByTestId('output-picker-issue')).toHaveLength(2);
+  });
+});
