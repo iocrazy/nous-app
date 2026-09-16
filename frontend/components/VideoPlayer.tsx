@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
+import { Play, Pause, Volume1, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 import ErrorPage from './ErrorPage';
+import {
+  resumeKeyFor,
+  savePosition,
+  loadPosition,
+  clearPosition,
+} from '../utils/playbackResume';
 
 interface HlsLevel {
   height: number;
@@ -21,9 +27,61 @@ interface VideoPlayerProps {
   playerRef: React.RefObject<HTMLVideoElement | null>;
   onToggleShortcuts?: () => void;
   commentMarkers?: Array<{ time: number; color?: string }>;
+  /**
+   * Stable identity for remembering where playback got to. Pass the resource /
+   * media id — NOT the URL: `src` carries a rotating `?token=` and changes path
+   * between the HLS playlist and the original file, so two spellings of the
+   * same video would each get their own position. Omitted, the player falls
+   * back to the URL path (see `resumeKeyFor`).
+   */
+  resumeKey?: string;
 }
 
 const QUALITY_PREF_KEY = 'mediahub_quality_pref';
+const VOLUME_PREF_KEY = 'mediahub_volume_pref';
+
+/** How often a playing video writes its position. Once a second is plenty —
+ * `timeupdate` fires ~4x that, and this is a localStorage write. */
+const POSITION_SAVE_INTERVAL_MS = 1000;
+
+/** Shared chrome for every popup in the control bar, so speed / volume /
+ * quality cannot drift apart visually. */
+const MENU_SURFACE =
+  'bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl';
+
+const menuItemClass = (active: boolean): string =>
+  `w-full px-3 py-1.5 text-xs text-right font-mono transition-colors ${
+    active
+      ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
+      : 'text-ink-300 hover:bg-ink-800 hover:text-white'
+  }`;
+
+/** A control-bar button. One place so icon and text buttons line up. */
+const BAR_BUTTON =
+  'px-2 py-1 rounded text-ink-300 hover:text-white hover:bg-white/10 transition-colors';
+
+const readStoredVolume = (): { volume: number; muted: boolean } => {
+  try {
+    const raw = localStorage.getItem(VOLUME_PREF_KEY);
+    if (!raw) return { volume: 1, muted: false };
+    const parsed = JSON.parse(raw) as { volume?: number; muted?: boolean };
+    const v = typeof parsed.volume === 'number' && parsed.volume >= 0 && parsed.volume <= 1
+      ? parsed.volume
+      : 1;
+    return { volume: v, muted: parsed.muted === true };
+  } catch (err) {
+    console.error('[VideoPlayer] volume pref read failed', err);
+    return { volume: 1, muted: false };
+  }
+};
+
+const writeStoredVolume = (volume: number, muted: boolean): void => {
+  try {
+    localStorage.setItem(VOLUME_PREF_KEY, JSON.stringify({ volume, muted }));
+  } catch (err) {
+    console.error('[VideoPlayer] volume pref write failed', err);
+  }
+};
 
 const formatTime = (seconds: number): string => {
   if (!isFinite(seconds) || isNaN(seconds)) return '00:00';
@@ -52,16 +110,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   playerRef,
   onToggleShortcuts,
   commentMarkers,
+  resumeKey,
 }) => {
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedAt = useRef(0);
+  /** The media identity the current element has already been seeked for.
+   * Quality switches re-attach HLS and re-fire `loadedmetadata`; without this
+   * the restore would fight the switch's own position preservation. */
+  const resumedFor = useRef<string | null>(null);
+  /** Consecutive fatal HLS errors we have tried to recover from. */
+  const hlsRecoveryAttempts = useRef(0);
 
+  const storedVolume = useRef(readStoredVolume());
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
+  const [buffered, setBuffered] = useState(0);
+  const [volume, setVolume] = useState(storedVolume.current.volume);
+  const [isMuted, setIsMuted] = useState(storedVolume.current.muted);
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showControls, setShowControls] = useState(true);
@@ -77,6 +147,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const effectiveFps = fps || 30;
   const isHls = new URL(src, window.location.origin).pathname.endsWith('.m3u8');
+  const positionKey = resumeKeyFor(resumeKey, src);
 
   // Frame stepping
   const stepFrame = useCallback((direction: 1 | -1, count: number = 1) => {
@@ -211,6 +282,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setHlsLevels([]);
     setCurrentHlsLevel(-1);
     setIsAutoQuality(true);
+    setBuffered(0);
+    hlsRecoveryAttempts.current = 0;
 
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
@@ -252,9 +325,47 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setCurrentHlsLevel(data.level);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
+        if (!data.fatal) return;
+        // A fatal hls.js error is NOT necessarily the end of playback, and
+        // treating it as one is what made a deploy look like a dead player:
+        // `registerType: 'autoUpdate'` swaps the service worker mid-session
+        // (skipWaiting + clientsClaim), and segment requests in flight through
+        // the retiring worker fail. Before this, the handler only hid the
+        // spinner — hls.js stops loading on a fatal error, so the video sat
+        // frozen until the user reloaded the page.
+        //
+        // The two recoverable classes have documented recoveries. Bounded,
+        // because retrying a genuinely broken stream forever is a spinner that
+        // never resolves and a request loop nobody asked for.
+        const MAX_RECOVERY_ATTEMPTS = 3;
+        if (hlsRecoveryAttempts.current >= MAX_RECOVERY_ATTEMPTS) {
           setIsLoading(false);
+          setLoadError('Playback failed after several recovery attempts');
+          hls.destroy();
+          return;
         }
+        hlsRecoveryAttempts.current += 1;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          console.error('[VideoPlayer] fatal HLS network error, restarting load', data.details);
+          setIsLoading(true);
+          hls.startLoad();
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          console.error('[VideoPlayer] fatal HLS media error, recovering', data.details);
+          setIsLoading(true);
+          hls.recoverMediaError();
+          return;
+        }
+        console.error('[VideoPlayer] unrecoverable HLS error', data.type, data.details);
+        setIsLoading(false);
+        setLoadError('Video failed to load');
+        hls.destroy();
+      });
+      // Any successfully loaded fragment means the stream is healthy again, so
+      // an earlier blip must not count against a later, unrelated one.
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        hlsRecoveryAttempts.current = 0;
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari)
@@ -276,10 +387,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const video = playerRef.current;
     if (!video) return;
 
+    const updateBuffered = () => {
+      try {
+        const ranges = video.buffered;
+        if (!ranges || ranges.length === 0) return;
+        const t = video.currentTime;
+        // The range that contains the playhead — not `end(length-1)`, which
+        // after a seek reports a far-away island as if it were continuous
+        // buffer and paints a full bar over an empty one.
+        for (let i = 0; i < ranges.length; i++) {
+          if (ranges.start(i) <= t && t <= ranges.end(i)) {
+            setBuffered(ranges.end(i));
+            return;
+          }
+        }
+        setBuffered(t);
+      } catch (err) {
+        // `buffered` throws on a detached element in some browsers.
+        console.error('[VideoPlayer] buffered read failed', err);
+      }
+    };
+
     const handleTimeUpdate = () => {
       const t = video.currentTime;
       setCurrentTime(t);
       onTimeUpdate(t);
+      updateBuffered();
+      const now = Date.now();
+      if (now - lastSavedAt.current >= POSITION_SAVE_INTERVAL_MS) {
+        lastSavedAt.current = now;
+        savePosition(positionKey, t, video.duration);
+      }
     };
 
     const handleDurationChange = () => {
@@ -299,13 +437,45 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setDuration(video.duration);
         onDurationChange(video.duration);
       }
+
+      // Apply the remembered volume to the element. State already carries it
+      // (it seeds from storage), but the element is new on every source
+      // attach and defaults to 1.0 / unmuted.
+      video.volume = volume;
+      video.muted = isMuted;
+
+      // Resume — once per media. A quality switch re-attaches HLS and fires
+      // this again, and those paths restore their own position; seeking a
+      // second time would undo them.
+      if (resumedFor.current !== positionKey) {
+        resumedFor.current = positionKey;
+        const saved = loadPosition(positionKey, video.duration);
+        if (saved !== null) {
+          video.currentTime = saved;
+          setCurrentTime(saved);
+          onTimeUpdate(saved);
+        }
+      }
     };
 
     const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => setIsPlaying(false);
+    const handlePause = () => {
+      setIsPlaying(false);
+      // Pausing is the strongest signal that this position matters; don't wait
+      // for the throttle window.
+      lastSavedAt.current = Date.now();
+      savePosition(positionKey, video.currentTime, video.duration);
+    };
+    const handleEnded = () => {
+      setIsPlaying(false);
+      // Finished — the next open starts clean rather than at the old midpoint.
+      clearPosition(positionKey);
+    };
     const handleWaiting = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
+    const handleCanPlay = () => {
+      setIsLoading(false);
+      updateBuffered();
+    };
     const handleError = () => {
       setIsLoading(false);
       // Check if error is auth-related via HEAD request
@@ -332,6 +502,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
 
+    video.addEventListener('progress', updateBuffered);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('durationchange', handleDurationChange);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -344,6 +515,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     video.addEventListener('resize', handleResize);
 
     return () => {
+      // The tab can go away without a pause event (deploy-triggered reload,
+      // navigation, close). Flush before the listeners come off, otherwise the
+      // last up-to-a-second of progress is lost exactly when it is needed.
+      savePosition(positionKey, video.currentTime, video.duration);
+      video.removeEventListener('progress', updateBuffered);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('durationchange', handleDurationChange);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -355,7 +531,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('error', handleError);
       video.removeEventListener('resize', handleResize);
     };
-  }, [playerRef, onTimeUpdate, onDurationChange]);
+    // `volume` / `isMuted` are read only to seed a freshly attached element;
+    // re-running this effect on every volume tick would thrash the listeners,
+    // so they are deliberately not dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerRef, onTimeUpdate, onDurationChange, positionKey]);
+
+  // A reload during playback is the whole reason this component remembers
+  // anything: the service worker updates in the background and a stale chunk
+  // can force `staleChunkReload`. `pagehide` fires in cases `beforeunload`
+  // does not (notably iOS Safari), and `visibilitychange` covers a tab put in
+  // the background and then discarded.
+  useEffect(() => {
+    const flush = () => {
+      const video = playerRef.current;
+      if (!video) return;
+      savePosition(positionKey, video.currentTime, video.duration);
+    };
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [playerRef, positionKey]);
+
+  // Any popup being open pins the control bar. Fading the bar out from under
+  // an open menu takes the menu with it, which reads as the click having done
+  // nothing.
+  const anyMenuOpen = showSpeedMenu || showQualityMenu || showVolumeSlider;
 
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
@@ -363,15 +570,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (hideControlsTimer.current) {
       clearTimeout(hideControlsTimer.current);
     }
-    if (isPlaying) {
+    if (isPlaying && !anyMenuOpen) {
       hideControlsTimer.current = setTimeout(() => {
         setShowControls(false);
       }, 3000);
     }
-  }, [isPlaying]);
+  }, [isPlaying, anyMenuOpen]);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying || anyMenuOpen) {
       setShowControls(true);
       if (hideControlsTimer.current) {
         clearTimeout(hideControlsTimer.current);
@@ -384,7 +591,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         clearTimeout(hideControlsTimer.current);
       }
     };
-  }, [isPlaying, resetHideTimer]);
+  }, [isPlaying, anyMenuOpen, resetHideTimer]);
 
   const togglePlayPause = useCallback(() => {
     const video = playerRef.current;
@@ -414,15 +621,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const vol = parseFloat(e.target.value);
       video.volume = vol;
       setVolume(vol);
-      if (vol === 0) {
-        setIsMuted(true);
-        video.muted = true;
-      } else if (isMuted) {
-        setIsMuted(false);
-        video.muted = false;
-      }
+      const nextMuted = vol === 0;
+      video.muted = nextMuted;
+      setIsMuted(nextMuted);
+      writeStoredVolume(vol, nextMuted);
     },
-    [playerRef, isMuted],
+    [playerRef],
   );
 
   const toggleMute = useCallback(() => {
@@ -431,7 +635,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const newMuted = !isMuted;
     video.muted = newMuted;
     setIsMuted(newMuted);
-  }, [playerRef, isMuted]);
+    writeStoredVolume(volume, newMuted);
+  }, [playerRef, isMuted, volume]);
+
+  // Hover-to-reveal, with a grace period: the slider sits above the button and
+  // the pointer crosses the seam between them. Closing on the first mouseleave
+  // would make the control impossible to actually reach.
+  const openVolume = useCallback(() => {
+    if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
+    setShowVolumeSlider(true);
+  }, []);
+  const closeVolumeSoon = useCallback(() => {
+    if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
+    volumeCloseTimer.current = setTimeout(() => setShowVolumeSlider(false), 260);
+  }, []);
+  useEffect(
+    () => () => {
+      if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
+    },
+    [],
+  );
 
   const handleFullscreen = useCallback(() => {
     const video = playerRef.current;
@@ -527,6 +750,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [playerRef, stepFrame, seekRelative, togglePlayPause, handleFullscreen, toggleMute, changeSpeed, playbackRate, onToggleShortcuts]);
 
   const seekProgress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bufferedProgress = duration > 0 ? Math.min(100, (buffered / duration) * 100) : 0;
   const frameNumber = Math.floor((currentTime || 0) * effectiveFps);
 
   if (authError) {
@@ -539,7 +763,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       className="relative w-full h-full bg-black rounded-lg overflow-hidden group"
       onMouseMove={resetHideTimer}
       onMouseLeave={() => {
-        if (isPlaying) setShowControls(false);
+        if (isPlaying && !anyMenuOpen) setShowControls(false);
       }}
     >
       {/* Video element */}
@@ -581,8 +805,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             value={currentTime}
             onChange={handleSeek}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            aria-label="Seek"
           />
-          <div className="w-full h-1 group-hover/seek:h-1.5 bg-ink-700 rounded-full transition-all relative">
+          <div className="w-full h-1 group-hover/seek:h-1.5 bg-ink-700 rounded-full transition-all relative overflow-visible">
+            {/* Buffered ahead of the playhead. Without it a stall looks like a
+                dead player; with it the viewer can see loading happening. */}
+            <div
+              className="absolute inset-y-0 left-0 bg-ink-500 rounded-full transition-all pointer-events-none"
+              style={{ width: `${bufferedProgress}%` }}
+            />
             <div
               className="h-full bg-white rounded-full transition-all relative"
               style={{ width: `${seekProgress}%` }}
@@ -603,13 +834,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
 
-        {/* Bottom controls row */}
-        <div className="flex items-center gap-1.5">
-          {/* Frame step backward - only when paused */}
+        {/* Bottom controls row.
+            Transport on the left, every adjustment on the right — the layout
+            every video site converged on, and the reason the speed menu used
+            to open over the middle of the frame. */}
+        <div className="flex items-center gap-1">
+          {/* ── Left: transport ── */}
           {!isPlaying && (
             <button
               onClick={() => stepFrame(-1)}
-              className="p-1.5 text-ink-400 hover:text-white transition-colors"
+              className={`${BAR_BUTTON} py-1.5`}
               aria-label="Previous Frame"
               title="Previous Frame (,)"
             >
@@ -617,48 +851,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </button>
           )}
 
-          {/* Play / Pause */}
           <button
             onClick={togglePlayPause}
-            className="p-1.5 text-white hover:text-ink-300 transition-colors"
+            className="px-2 py-1.5 rounded text-white hover:bg-white/10 transition-colors"
             aria-label={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
           >
             {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
           </button>
 
-          {/* Frame step forward - only when paused */}
           {!isPlaying && (
             <button
               onClick={() => stepFrame(1)}
-              className="p-1.5 text-ink-400 hover:text-white transition-colors"
+              className={`${BAR_BUTTON} py-1.5`}
               aria-label="Next Frame"
               title="Next Frame (.)"
             >
               <SkipForward size={14} />
             </button>
           )}
-
-          {/* Volume */}
-          <div className="flex items-center gap-1 group/vol">
-            <button
-              onClick={toggleMute}
-              className="p-1.5 text-white hover:text-ink-300 transition-colors"
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-            </button>
-            <div className="w-0 group-hover/vol:w-20 overflow-hidden transition-all duration-200">
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-20 h-1 accent-white cursor-pointer"
-              />
-            </div>
-          </div>
 
           {/* Time display with frame number */}
           <span className="text-xs font-mono text-ink-300 select-none ml-1">
@@ -676,39 +887,92 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </span>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Speed control */}
+          {/* ── Right: adjustments ── */}
+
+          {/* Speed */}
           <div className="relative">
             {showSpeedMenu && (
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setShowSpeedMenu(false)}
-              />
+              <div className="fixed inset-0 z-10" onClick={() => setShowSpeedMenu(false)} />
             )}
             <button
-              onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-              className="px-2 py-1 text-xs font-mono text-ink-300 hover:text-white hover:bg-white/10 rounded transition-colors"
-              title="Playback Speed"
+              onClick={() => {
+                setShowQualityMenu(false);
+                setShowSpeedMenu((v) => !v);
+              }}
+              className={`${BAR_BUTTON} text-xs font-mono ${showSpeedMenu ? 'text-white bg-white/10' : ''}`}
+              title="Playback Speed ([ / ] / \\)"
+              aria-haspopup="menu"
+              aria-expanded={showSpeedMenu}
             >
               {playbackRate === 1 ? '1.0x' : `${playbackRate}x`}
             </button>
             {showSpeedMenu && (
-              <div className="absolute bottom-full right-0 mb-2 bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl py-1 min-w-[80px] z-20">
-                {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((rate) => (
+              <div className={`absolute bottom-full right-0 mb-2 py-1 min-w-[84px] z-20 ${MENU_SURFACE}`} role="menu">
+                {/* Fastest at the top, like every speed menu users already know. */}
+                {[3, 2, 1.5, 1.25, 1, 0.75, 0.5, 0.25].map((rate) => (
                   <button
                     key={rate}
                     onClick={() => changeSpeed(rate)}
-                    className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                      playbackRate === rate
-                        ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
-                        : 'text-ink-300 hover:bg-ink-800 hover:text-white'
-                    }`}
+                    className={menuItemClass(playbackRate === rate)}
+                    role="menuitemradio"
+                    aria-checked={playbackRate === rate}
                   >
-                    {rate}x
+                    {rate === 1 ? '1.0x' : `${rate}x`}
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Volume — hover reveals a vertical slider above the button, click mutes */}
+          <div
+            className="relative flex items-center"
+            onMouseEnter={openVolume}
+            onMouseLeave={closeVolumeSoon}
+          >
+            <button
+              onClick={toggleMute}
+              onFocus={openVolume}
+              className={`${BAR_BUTTON} py-1.5 ${showVolumeSlider ? 'text-white bg-white/10' : ''}`}
+              aria-label={isMuted ? 'Unmute' : 'Mute'}
+              title={`${isMuted ? 'Unmute' : 'Mute'} (m)`}
+            >
+              {isMuted || volume === 0 ? (
+                <VolumeX size={16} />
+              ) : volume < 0.5 ? (
+                <Volume1 size={16} />
+              ) : (
+                <Volume2 size={16} />
+              )}
+            </button>
+            {showVolumeSlider && (
+              /* pb-2 lives on the wrapper, not as a margin, so the hover area
+                 is continuous from the button to the slider — a gap here makes
+                 the popup unreachable with the mouse. */
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-20">
+                <div className={`flex flex-col items-center gap-2 px-2 py-3 ${MENU_SURFACE}`}>
+                  <span className="text-[11px] font-mono text-ink-300 tabular-nums select-none">
+                    {Math.round((isMuted ? 0 : volume) * 100)}
+                  </span>
+                  <div className="relative h-24 w-6">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={isMuted ? 0 : volume}
+                      onChange={handleVolumeChange}
+                      /* Rotated rather than `writing-mode: vertical-*`: the
+                         rotation renders identically everywhere, the
+                         writing-mode form is still uneven across browsers. */
+                      className="absolute left-1/2 top-1/2 w-24 h-1 -translate-x-1/2 -translate-y-1/2 -rotate-90 accent-white cursor-pointer"
+                      aria-label="Volume"
+                      aria-orientation="vertical"
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -717,38 +981,40 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {(hlsLevels.length > 1 || (hlsLevels.length > 0 && originalSrc)) ? (
             <div className="relative">
               {showQualityMenu && (
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={() => setShowQualityMenu(false)}
-                />
+                <div className="fixed inset-0 z-10" onClick={() => setShowQualityMenu(false)} />
               )}
               <button
-                onClick={() => setShowQualityMenu(!showQualityMenu)}
-                className="px-2 py-1 text-xs font-mono text-ink-300 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+                onClick={() => {
+                  setShowSpeedMenu(false);
+                  setShowQualityMenu((v) => !v);
+                }}
+                className={`${BAR_BUTTON} text-xs font-mono ${showQualityMenu ? 'text-white bg-white/10' : ''}`}
                 title="Quality"
+                aria-haspopup="menu"
+                aria-expanded={showQualityMenu}
               >
                 {isOriginalMode
                   ? 'Original'
                   : isAutoQuality
                     ? `Auto${currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
-                        ? ` (${hlsLevels[currentHlsLevel].height}p · ${Math.round(hlsLevels[currentHlsLevel].bitrate / 1000)}k)`
+                        ? ` (${hlsLevels[currentHlsLevel].height}p)`
                         : ''}`
                     : currentHlsLevel >= 0 && hlsLevels[currentHlsLevel]
                       ? `${hlsLevels[currentHlsLevel].height}p`
                       : 'Auto'}
               </button>
               {showQualityMenu && (
-                <div className="absolute bottom-full right-0 mb-2 bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl py-1 min-w-[100px] z-20">
-                  <button
-                    onClick={() => changeQuality(-1)}
-                    className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                      isAutoQuality && !isOriginalMode
-                        ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
-                        : 'text-ink-300 hover:bg-ink-800 hover:text-white'
-                    }`}
-                  >
-                    Auto
-                  </button>
+                <div className={`absolute bottom-full right-0 mb-2 py-1 min-w-[104px] z-20 ${MENU_SURFACE}`} role="menu">
+                  {originalSrc && (
+                    <button
+                      onClick={switchToOriginal}
+                      className={menuItemClass(isOriginalMode)}
+                      role="menuitemradio"
+                      aria-checked={isOriginalMode}
+                    >
+                      Original
+                    </button>
+                  )}
                   {hlsLevels
                     .map((level, idx) => ({ level, idx }))
                     .filter(({ level }) => level.name !== 'Original')
@@ -757,27 +1023,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <button
                         key={idx}
                         onClick={() => changeQuality(idx)}
-                        className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                          !isAutoQuality && !isOriginalMode && currentHlsLevel === idx
-                            ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
-                            : 'text-ink-300 hover:bg-ink-800 hover:text-white'
-                        }`}
+                        className={menuItemClass(!isAutoQuality && !isOriginalMode && currentHlsLevel === idx)}
+                        role="menuitemradio"
+                        aria-checked={!isAutoQuality && !isOriginalMode && currentHlsLevel === idx}
                       >
                         {level.height}p
                       </button>
                     ))}
-                  {originalSrc && (
-                    <button
-                      onClick={switchToOriginal}
-                      className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
-                        isOriginalMode
-                          ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
-                          : 'text-ink-300 hover:bg-ink-800 hover:text-white'
-                      }`}
-                    >
-                      Original
-                    </button>
-                  )}
+                  <button
+                    onClick={() => changeQuality(-1)}
+                    className={menuItemClass(isAutoQuality && !isOriginalMode)}
+                    role="menuitemradio"
+                    aria-checked={isAutoQuality && !isOriginalMode}
+                  >
+                    Auto
+                  </button>
                 </div>
               )}
             </div>
@@ -791,7 +1051,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {onToggleShortcuts && (
             <button
               onClick={onToggleShortcuts}
-              className="p-1.5 text-ink-400 hover:text-white transition-colors"
+              className={`${BAR_BUTTON} py-1.5`}
               aria-label="Keyboard Shortcuts"
               title="Keyboard Shortcuts (?)"
             >
@@ -802,8 +1062,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           {/* Fullscreen */}
           <button
             onClick={handleFullscreen}
-            className="p-1.5 text-white hover:text-ink-300 transition-colors"
+            className="px-2 py-1.5 rounded text-white hover:bg-white/10 transition-colors"
             aria-label="Fullscreen"
+            title="Fullscreen (f)"
           >
             <Maximize size={16} />
           </button>
