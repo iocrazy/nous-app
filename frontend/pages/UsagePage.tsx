@@ -133,13 +133,15 @@ export const UsagePage: React.FC = () => {
         // 第二个请求：它失败不该把整页打掉，两枚效率格自己退回「—」。
         // 窗口与 summary 同源——不带窗口就是问后端的默认 30 天，于是上面四格和
         // 下面两格说的是两个不同的时间段。
-        const window = usageWindow({ days, month: monthArg });
+        // 不叫 `window`：那会在这个作用域里遮掉全局的 `window`，下一个在这里写
+        // `window.localStorage` 的人会拿到一个 `{from, to}`。
+        const win = usageWindow({ days, month: monthArg });
         try {
           const eff = await usageService.getEfficiency({
             scope: 'user',
             groupBy,
-            from: window.from,
-            to: window.to,
+            from: win.from,
+            to: win.to,
           });
           if (!isCurrent()) return;
           setEfficiency(eff);
