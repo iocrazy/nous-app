@@ -68,6 +68,11 @@ const REMOTE_SYNC_INTERVAL_MS = 15_000;
  * seek — the jump would be visible and would gain the viewer nothing. */
 const MIN_SEEK_DELTA_SECONDS = 2;
 
+/** Below this, a push carries no information the server does not already have.
+ * Generous enough to absorb the float noise of a paused element reporting its
+ * own position, far below anything a viewer would notice losing. */
+const PUSH_EPSILON_SECONDS = 0.5;
+
 /** Shared chrome for every popup in the control bar, so speed / volume /
  * quality cannot drift apart visually. */
 const MENU_SURFACE =
@@ -158,6 +163,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
    * device's real progress. The trade is not close.
    */
   const syncSettled = useRef(false);
+  /**
+   * The position the SERVER is known to hold, as far as this player can tell:
+   * seeded from the open-time reconcile, then updated by each successful push.
+   *
+   * It exists to stop this device RE-ASSERTING a position it never changed.
+   * Observed on production: reload fires both the `pagehide` flush and the
+   * unmount flush, each pushing the same untouched position — so simply
+   * reopening a video overwrote the newer position another device had written
+   * while this tab sat paused. A push that carries no new information cannot
+   * be worth destroying someone else's.
+   *
+   * `null` = the server is not known to hold anything, so any push is news.
+   */
+  const serverHoldsPosition = useRef<number | null>(null);
   /** The media identity the current element has already been seeked for.
    * Quality switches re-attach HLS and re-fire `loadedmetadata`; without this
    * the restore would fight the switch's own position preservation. */
@@ -225,9 +244,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           // this is the one push that must happen before it opens.
           const sv = await pushRemotePosition(positionKey, local.t, local.d);
           if (sv) markSynced(viewerId, positionKey, sv);
+          // Not seeded here: the fetch below reads back whatever actually
+          // landed, which is the authority.
+
         }
 
         const remote = await fetchRemotePosition(positionKey);
+        // Seed BEFORE acting on the decision: whatever the server answered is
+        // what it holds, whether or not we go on to adopt it. If it holds
+        // nothing, every later push is news.
+        serverHoldsPosition.current = remote ? remote.position_seconds : null;
+
         const decision = reconcile(getEntry(viewerId, positionKey), remote);
         if (decision.source !== 'remote' || !decision.serverUpdatedAt) return;
         if (!isResumable(decision.seconds, duration)) return;
@@ -271,8 +298,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     async (t: number, d: number, opts: { keepalive?: boolean } = {}) => {
       if (!viewerId) return;
       if (!syncSettled.current) return; // see `syncSettled`
+      // Nothing new to say — and saying it anyway overwrites whatever another
+      // device wrote in the meantime. See `serverHoldsPosition`.
+      if (
+        serverHoldsPosition.current !== null &&
+        Math.abs(t - serverHoldsPosition.current) < PUSH_EPSILON_SECONDS
+      ) {
+        return;
+      }
       const sv = await pushRemotePosition(positionKey, t, d, opts);
-      if (sv) markSynced(viewerId, positionKey, sv);
+      if (sv) {
+        serverHoldsPosition.current = Math.min(t, d);
+        markSynced(viewerId, positionKey, sv);
+      }
     },
     [viewerId, positionKey],
   );
@@ -413,6 +451,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setBuffered(0);
     hlsRecoveryAttempts.current = 0;
     syncSettled.current = false;
+    serverHoldsPosition.current = null;
 
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
