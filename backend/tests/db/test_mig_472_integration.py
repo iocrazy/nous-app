@@ -77,23 +77,100 @@ async def test_one_entity_gets_exactly_one_row_and_a_third_kind_is_refused(pg):
 
 
 @_skip
-async def test_the_same_version_cannot_be_cited_twice_by_one_message(pg):
-    ref, msg, user = (
-        f"mig472-{uuid.uuid4().hex[:12]}",
-        472_000_000_000_001,
+async def test_deleting_the_run_takes_its_projection_with_it(pg):
+    """投影是镜像，不是独立事实。run 删了而 search_docs 行还在 = 搜索结果里一个
+    指向不存在行的幽灵 —— 点进去 404，而没有任何探针会说出来。这条只有真库能
+    答：外键与 ON DELETE 是服务器的行为，文本测试读的是我们写了什么。
+
+    顺带也是「回填 INSERT 不会违约」的正向对照：run_id 来自 agent_runs 本身。
+    """
+    agent_id = await pg.fetchval(
+        "INSERT INTO public.ai_agents (name) VALUES ($1) RETURNING id",
+        f"mig472-agent-{uuid.uuid4().hex[:8]}",
+    )
+    run_id = await pg.fetchval(
+        "INSERT INTO public.agent_runs (agent_id, user_id, status, trigger)"
+        " VALUES ($1, $2, 'completed', 'test') RETURNING id",
+        agent_id,
         uuid.uuid4(),
     )
-    ins = (
-        "INSERT INTO public.output_citations (kind, ref_id, version, message_id,"
-        " cited_by_user_id) VALUES ('script_shot', $1, 2, $2, $3)"
-    )
-    row_id = await pg.fetchval(ins + " RETURNING id", ref, msg, user)
     try:
+        doc_id = await pg.fetchval(
+            "INSERT INTO public.search_docs (entity_kind, entity_id, title, run_id)"
+            " VALUES ('run', $1, 'MH-1 · demo', $2) RETURNING id",
+            str(run_id),
+            run_id,
+        )
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM public.search_docs WHERE id=$1", doc_id
+            )
+            == 1
+        )
+        await pg.execute("DELETE FROM public.agent_runs WHERE id=$1", run_id)
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM public.search_docs WHERE id=$1", doc_id
+            )
+            == 0
+        ), "run 没了，讲它的那条投影还在 —— 外键或 ON DELETE CASCADE 丢了"
+    finally:
+        await pg.execute("DELETE FROM public.agent_runs WHERE id=$1", run_id)
+        await pg.execute("DELETE FROM public.ai_agents WHERE id=$1", agent_id)
+
+
+@_skip
+async def test_the_same_version_cannot_be_cited_twice_by_one_message(pg):
+    """顺带证明 message_id 的外键是真的：这条引用必须挂在一条**存在的**消息上，
+    而那条消息删掉时引用要跟着走（镜像不留幽灵）。"""
+    # auth.users → team → conversation → message：每一层的外键都是真的，同
+    # test_revert_output_integration.py 的做法。
+    user = await pg.fetchval("INSERT INTO auth.users DEFAULT VALUES RETURNING id")
+    team_id = await pg.fetchval(
+        "INSERT INTO public.teams (name, owner_id, invite_code, kind)"
+        " VALUES ($1, $2, $3, 'personal') RETURNING id",
+        f"mig472-team-{uuid.uuid4().hex[:8]}",
+        user,
+        f"M472{uuid.uuid4().hex[:8].upper()}",
+    )
+    try:
+        conv_id = await pg.fetchval(
+            "INSERT INTO public.conversations (type, scope_id, created_by)"
+            " VALUES ('direct_agent', $1, $2) RETURNING id",
+            team_id,
+            user,
+        )
+        msg = await pg.fetchval(
+            "INSERT INTO public.messages (conversation_id, seq, sender_id)"
+            " VALUES ($1, 1, $2) RETURNING id",
+            conv_id,
+            user,
+        )
+        ref = f"mig472-{uuid.uuid4().hex[:12]}"
+        ins = (
+            "INSERT INTO public.output_citations (kind, ref_id, version, message_id,"
+            " cited_by_user_id) VALUES ('script_shot', $1, 2, $2, $3)"
+        )
+        cite_id = await pg.fetchval(ins + " RETURNING id", ref, msg, user)
+
         with pytest.raises(asyncpg.exceptions.UniqueViolationError) as err:
             await pg.execute(ins, ref, msg, user)
         assert "output_citations_message_ref_key" in str(err.value)
+
+        with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError) as fk:
+            await pg.execute(ins, ref, 472_000_000_000_001, user)
+        assert "output_citations_message_id_fkey" in str(fk.value)
+
+        await pg.execute("DELETE FROM public.conversations WHERE id=$1", conv_id)
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM public.output_citations WHERE id=$1", cite_id
+            )
+            == 0
+        ), "消息没了，指着它的引用还在 —— CASCADE 丢了"
     finally:
-        await pg.execute("DELETE FROM public.output_citations WHERE id=$1", row_id)
+        await pg.execute("DELETE FROM public.teams WHERE id=$1", team_id)
+        await pg.execute("DELETE FROM auth.users WHERE id=$1", user)
 
 
 @_skip

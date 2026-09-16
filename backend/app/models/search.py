@@ -15,6 +15,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -41,6 +42,20 @@ class SearchDocs(Base):
     __table_args__ = (
         CheckConstraint(
             "entity_kind IN ('run','output')", name="search_docs_entity_kind_check"
+        ),
+        # 镜像随真相消失：run 没了，讲它的那条投影不该留着当搜索结果里的幽灵；
+        # 议题删了只是这次运行不再挂在任何议题上，运行本身发生过。
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["public.agent_runs.id"],
+            ondelete="CASCADE",
+            name="search_docs_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["issue_id"],
+            ["public.issues.id"],
+            ondelete="SET NULL",
+            name="search_docs_issue_id_fkey",
         ),
         PrimaryKeyConstraint("id", name="search_docs_pkey"),
         UniqueConstraint("entity_kind", "entity_id", name="search_docs_entity_key"),
@@ -102,6 +117,19 @@ class OutputCitations(Base):
 
     __tablename__ = "output_citations"
     __table_args__ = (
+        # 同 SearchDocs：引用是镜像，消息删了这条引用就不该还在反查里出现。
+        ForeignKeyConstraint(
+            ["message_id"],
+            ["public.messages.id"],
+            ondelete="CASCADE",
+            name="output_citations_message_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["issue_id"],
+            ["public.issues.id"],
+            ondelete="SET NULL",
+            name="output_citations_issue_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="output_citations_pkey"),
         UniqueConstraint(
             "message_id",

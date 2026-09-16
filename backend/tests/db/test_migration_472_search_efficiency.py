@@ -33,8 +33,9 @@ def _add_column_stmt(table: str) -> str:
     `... tool_calls INTEGER NOT NULL DEFAULT 0` 会让 agent_runs 的否定断言也
     命中），所以必须按语句切。
     """
-    start = _SQ.index(f"ALTER TABLE public.{table}\n ADD COLUMN")
-    return _SQ[start : _SQ.index(";", start)]
+    m = re.search(rf"ALTER TABLE public\.{table}\s+ADD COLUMN", _SQ)
+    assert m is not None, table
+    return _SQ[m.start() : _SQ.index(";", m.start())]
 
 
 def test_both_tables_and_every_index_are_idempotent():
@@ -70,6 +71,23 @@ def test_the_two_counter_families_have_opposite_nullability():
     for col in RUN_COLS:
         assert f"ADD COLUMN IF NOT EXISTS {col} INTEGER NOT NULL" not in runs, col
         assert f"ADD COLUMN IF NOT EXISTS {col} TEXT NOT NULL" not in runs, col
+
+
+def test_both_mirrors_are_wired_to_the_truth_they_mirror():
+    """投影与引用都是镜像，不是独立事实 —— 被投影的 run / 被引用的 message 删掉
+    之后它们必须一起消失，否则搜索结果里长出指向不存在行的幽灵，而没有任何探针
+    会说出来。议题走 SET NULL：议题删了不代表那次运行没发生过。"""
+    for conname, on_delete in (
+        ("search_docs_run_id_fkey", "CASCADE"),
+        ("search_docs_issue_id_fkey", "SET NULL"),
+        ("output_citations_message_id_fkey", "CASCADE"),
+        ("output_citations_issue_id_fkey", "SET NULL"),
+    ):
+        assert f"ADD CONSTRAINT {conname}" in _SQ, conname
+        after = _SQ[_SQ.index(f"ADD CONSTRAINT {conname}") :]
+        assert f"ON DELETE {on_delete}" in after[: after.index(";")], conname
+        # 幂等：建表那句的 IF NOT EXISTS 只看表在不在，看不见表里少了什么约束。
+        assert f"WHERE conname = '{conname}'" in _SQ, conname
 
 
 def test_the_team_backfill_runs_first_and_only_on_finished_runs():
@@ -125,6 +143,17 @@ def test_the_orm_mirrors_both_new_tables_and_every_index():
     assert opts["idx_search_docs_body_trgm"]["where"] is not None
     assert opts["idx_search_docs_project"]["where"] is not None
     assert opts["idx_search_docs_issue"].get("where") is None
+    # trgm 索引的**访问方法与 opclass** 也在 C1 的对账面上：名字与列都对而
+    # using/ops 丢了，声明的就是一棵 btree —— 它对 `%词%` 完全无用，而按名字
+    # 看一切正常。
+    for ix_name, col in (
+        ("idx_search_docs_title_trgm", "title"),
+        ("idx_search_docs_body_trgm", "body"),
+    ):
+        assert opts[ix_name]["using"] == "gin", ix_name
+        assert opts[ix_name]["ops"] == {col: "gin_trgm_ops"}, ix_name
+    for ix_name in ("idx_search_docs_team_updated", "idx_search_docs_issue"):
+        assert not opts[ix_name].get("using"), ix_name
 
 
 def test_the_orm_mirrors_the_new_agent_run_and_hourly_columns():

@@ -6,7 +6,12 @@
 -- 产出正文散在 script_shots 六列 / script_ops 元素数组 / generated_media.prompt
 -- 三处，只有投影表能把它们收成一个可索引的面。
 -- 为什么 output_citations 是镜像：引用落在 messages.body jsonb，零索引。画布侧
--- 同类反查（canvas_asset_refs）用的就是物化镜像表，这里沿用同一形状。
+-- 同类反查（canvas_asset_refs）用的就是物化镜像表，这里沿用同一形状 ——
+-- **包括它的删除语义**：镜像不是独立事实，它必须随真相一起消失。所以两张表都
+-- 带外键，指着被投影/被引用的那一行：run 与 message 走 CASCADE（真相没了，讲它
+-- 的那条投影/引用也不该留着当搜索结果里的幽灵），issue 走 SET NULL（议题删了不
+-- 代表那次运行没发生过，只是它不再挂在任何议题上）。没有外键的镜像表会静默长出
+-- 指向不存在行的残留，而且没有任何探针会说出来。
 BEGIN;
 
 -- ── 1. 检索投影表 ───────────────────────────────────────────────────
@@ -22,6 +27,29 @@ CREATE TABLE IF NOT EXISTS public.search_docs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT search_docs_entity_key UNIQUE (entity_kind, entity_id)
 );
+-- 外键分开加（不写进 CREATE TABLE），这样整份重跑时 IF NOT EXISTS 跳过建表之后
+-- 这一段仍然会补上缺的约束 —— 建表那句的 IF NOT EXISTS 只看表在不在，看不见表
+-- 里少了什么。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'search_docs_run_id_fkey'
+    ) THEN
+        ALTER TABLE public.search_docs
+            ADD CONSTRAINT search_docs_run_id_fkey
+            FOREIGN KEY (run_id) REFERENCES public.agent_runs(id)
+            ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'search_docs_issue_id_fkey'
+    ) THEN
+        ALTER TABLE public.search_docs
+            ADD CONSTRAINT search_docs_issue_id_fkey
+            FOREIGN KEY (issue_id) REFERENCES public.issues(id)
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_search_docs_title_trgm ON public.search_docs USING gin (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_search_docs_body_trgm ON public.search_docs USING gin (body gin_trgm_ops) WHERE body IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_search_docs_team_updated ON public.search_docs (team_id, updated_at DESC);
@@ -42,6 +70,26 @@ CREATE TABLE IF NOT EXISTS public.output_citations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT output_citations_message_ref_key UNIQUE (message_id, kind, ref_id, version)
 );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'output_citations_message_id_fkey'
+    ) THEN
+        ALTER TABLE public.output_citations
+            ADD CONSTRAINT output_citations_message_id_fkey
+            FOREIGN KEY (message_id) REFERENCES public.messages(id)
+            ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'output_citations_issue_id_fkey'
+    ) THEN
+        ALTER TABLE public.output_citations
+            ADD CONSTRAINT output_citations_issue_id_fkey
+            FOREIGN KEY (issue_id) REFERENCES public.issues(id)
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_output_citations_ref ON public.output_citations (kind, ref_id, version);
 CREATE INDEX IF NOT EXISTS idx_output_citations_issue ON public.output_citations (issue_id);
 
