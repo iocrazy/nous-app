@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid as _uuid
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import func, literal, or_, select
+from sqlalchemy import func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import get_sessionmaker, in_unit_of_work, read_scope, write_scope
@@ -57,7 +57,8 @@ def _clip(body: Optional[str]) -> Optional[str]:
 
 
 class SearchDocsRepository:
-    """投影表的唯一访问口。``upsert`` 写、``search`` 读，别的都不该有。"""
+    """投影表的唯一访问口。``upsert`` 写全行、``search`` 读，
+    ``fill_empty_body`` 只补存量行的空正文 —— 三个方法，别的都不该有。"""
 
     def _values(self, doc: SearchDoc) -> dict[str, Any]:
         out = {f: getattr(doc, f) for f in SearchDoc.__dataclass_fields__}
@@ -149,6 +150,44 @@ class SearchDocsRepository:
             return
         async with write_scope() as session:
             await session.execute(stmt)
+
+    async def fill_empty_body(
+        self, *, entity_kind: str, entity_id: str, body: str
+    ) -> bool:
+        """给一条**正文为空**的存量行补上正文。回报真表示这次确实写了。
+
+        **为什么不是 ``upsert``**，两条，缺一条都不足以另开一个方法：
+
+        1. ``upsert`` 写的是整行，调用方得先把十五个坐标重新算一遍 —— 而回填
+           手里只有正文，其余每一列 mig 472 都已经写对了。拿一个半空的
+           ``SearchDoc`` 去 upsert，等于用回填的无知覆盖掉回填不该碰的列。
+        2. ``upsert`` 的 ``set_`` 里钉着 ``updated_at=func.now()``，这对它是对的
+           （投影被重投就是有新事实）。对回填是错的：``idx_search_docs_team_updated``
+           是 ``(team_id, updated_at DESC)``，把几个月前的产出统统盖上今天的时间
+           戳，就是让它们在「最近」里排到最前面。**回填不是一次新事件**，同
+           CLAUDE.md 那条「修复不该伪装成用户编辑」。所以这里不碰 ``updated_at``。
+
+        ⚠️ **「只补空的」这条谓词必须在 SQL 里。** 调用方读回一批空行、逐条重建
+        正文、再写回去，这中间实时写方完全可能投过同一行 —— 它写的是**现在**的
+        内容，比按账本重建出来的那一版更该留下。谓词放在 Python 侧只能把窗口
+        缩小，放在 ``WHERE`` 里才是关掉它：那一行不再是空的，UPDATE 就命中 0 行，
+        调用方据此记一笔 ``raced`` 而不是覆盖。
+
+        正文照样过 ``_clip`` —— 回填写进去的和实时写方写进去的必须服从同一个字节
+        上限，否则同一列上会并存两种长度口径。
+        """
+        stmt = (
+            update(SearchDocs)
+            .where(
+                SearchDocs.entity_kind == entity_kind,
+                SearchDocs.entity_id == str(entity_id),
+                or_(SearchDocs.body.is_(None), SearchDocs.body == ""),
+            )
+            .values(body=_clip(body))
+        )
+        async with write_scope() as session:
+            result = await session.execute(stmt)
+        return bool(result.rowcount)
 
     async def search(
         self,
