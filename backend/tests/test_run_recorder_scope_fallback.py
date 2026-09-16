@@ -146,21 +146,13 @@ def test_the_conversation_module_still_has_no_notion_of_an_issue():
     assert not re.search(r"\bissue", src, re.IGNORECASE)
 
 
-def test_the_subagent_dispatch_site_still_binds_a_team():
-    """字面 None 是这条不变量唯一栽过的形状，所以钉的就是「不是 None」。
-    值本身走哪条路（父 recorder 快路径 / team_of_run 读库）由
-    tests/test_child_run_inherits_team.py 的行为断言负责。"""
-    kwargs = _recorder_kwargs(SUB)
-    assert kwargs["team_id"] == "child_team_id"
-
-
-def test_the_workforce_dispatch_site_still_binds_a_team():
-    kwargs = _recorder_kwargs(WORKER)
-    assert kwargs["team_id"] == "child_team_id"
-
-
 def test_no_dispatch_site_hardcodes_a_null_team():
-    """四个站点一起扫。新加派发站点时这条会漏 —— 它守的是既有四处不退化，
+    """字面 None 是这条不变量唯一栽过的形状，所以钉的就是「不是 None」——
+    不钉具体变量名：那样改个名字就假阳性，而重命名从来不是这条不变量的
+    失效方式。值本身走哪条路（父 recorder 快路径 / team_of_run 读库）由
+    tests/test_child_run_inherits_team.py 的行为断言负责。
+
+    四个站点一起扫。新加派发站点时这条会漏 —— 它守的是既有四处不退化，
     不是「所有站点都对」，后者只有 grep 全仓 RunRecorder 才做得到。"""
     for path in (CHAT, CONV, SUB, WORKER):
         assert _recorder_kwargs(path)["team_id"] != "None", path.name

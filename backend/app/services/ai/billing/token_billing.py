@@ -241,8 +241,10 @@ async def reconcile_run(
     ``subagent_task_service`` 与 ``agent_worker`` 两个派发站点都硬编码
     ``team_id=None``，子 run 在下面的 ``if not team_id`` 早退，于是委派烧掉的
     钱两边都不收。评审轮 1 已让两处继承父 run 的 team（``team_of_run``），所以
-    现在是父子各扣各的。**仍然不扣的只有顶层 workforce 派发** —— 它没有父 run
-    可继承，team 为空，按设计不计费。
+    现在是父子各扣各的。**仍然不扣的主要是顶层 workforce 派发** —— 它没有父
+    run 可继承，team 为空，按设计不计费。另有两种同样落到 team 为空：父 run
+    自己就没有 team（个人 scope 的对话派出去的活）；``team_of_run`` 查库失败
+    降级 None（宁可少收一次，也不让一次读失败把派发弄挂）。
 
     Stated Limitation（BYOK 重复计费，3c A3）：``agent_runs`` / ``generated_media``
     都没有 run 级 BYOK 标记，``RunRecorder`` 也没有对应 kwarg，所以调用方一律
