@@ -183,10 +183,19 @@ export function TodolistPage() {
     }
   }, [isPersonalWorkspace, effectiveTeamId, addToast]);
 
+  /**
+   * Bumped by every list request, same guard as `selectedReqRef` below. Typing
+   * makes these overlap by design (one per debounced word), and the network is
+   * free to deliver them out of order — without the check, the slower earlier
+   * word lands last and the list shows rows and a total that belong to a query
+   * the user already replaced. Nothing errors; the two just disagree.
+   */
+  const issuesReqRef = useRef(0);
   const refreshIssues = useCallback(async (
     agentMap: Record<string, AgentRef>,
     projectMap: ProjectNameMap,
   ) => {
+    const seq = ++issuesReqRef.current;
     setIssuesLoading(true);
     setIssuesError(null);
     try {
@@ -197,12 +206,19 @@ export function TodolistPage() {
         ...(q ? { q } : {}),
       };
       const resp = await listIssues(filters);
+      if (seq !== issuesReqRef.current) return;
       setIssues(resp.items.map((r) => toUiIssue(r, agentMap, projectMap)));
       setIssuesTotal(resp.total);
     } catch (err) {
+      if (seq !== issuesReqRef.current) return;
       setIssuesError(err instanceof Error ? err.message : 'Failed to load issues');
+      // Not a number we still believe: keeping the previous total would put a
+      // stale M next to an N that failed to load.
+      setIssuesTotal(null);
     } finally {
-      setIssuesLoading(false);
+      // A superseded request must not clear the flag — a newer one is still
+      // in flight and the list is genuinely still loading.
+      if (seq === issuesReqRef.current) setIssuesLoading(false);
     }
   }, [teamIdNum]);
 
@@ -445,6 +461,15 @@ export function TodolistPage() {
           if (shouldRefetchOnRealtime(issuesRef.current.find((i) => i.id === raw.id), raw)) {
             scheduleLiveRefetch(raw.id);
           }
+          // A row we don't hold yet, while a search is on: prepending it would
+          // put an unmatched issue into a result set the SERVER produced —
+          // there is no second local filter left to catch it (3c §2.3), and
+          // nothing anywhere would report the disagreement. Re-ask the server
+          // instead; if the new row matches, it comes back in the results.
+          if (queryRef.current.trim() && !issuesRef.current.some((i) => i.id === raw.id)) {
+            void refreshIssues(agentsById, projectsById);
+            return;
+          }
           setIssues((prev) => {
             const idx = prev.findIndex((i) => i.id === raw.id);
             // INSERT: nothing to merge onto.
@@ -462,13 +487,19 @@ export function TodolistPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch]);
+  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch, refreshIssues]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {
       const created = await createIssue(payload);
-      const ui = toUiIssue(created, agentsById, projectsById);
-      setIssues((prev) => [ui, ...prev]);
+      // Same rule as the Realtime INSERT above: under an active search the
+      // server owns which rows belong in the list, so re-ask instead of
+      // prepending a row it never matched.
+      if (queryRef.current.trim()) {
+        void refreshIssues(agentsById, projectsById);
+      } else {
+        setIssues((prev) => [toUiIssue(created, agentsById, projectsById), ...prev]);
+      }
       setNewIssueOpen(false);
       // The one deep-link builder (B7); `…OrLegacy` because this navigate has
       // to go somewhere. The page IS `/team/:teamId/todolist`, so the

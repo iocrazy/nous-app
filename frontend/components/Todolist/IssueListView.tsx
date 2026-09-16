@@ -461,7 +461,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   // Sub-issue done/total per parent, aggregated from the FULL unfiltered list so
   // display filters never undercount a parent's children (see issueFlow.ts).
   const subtaskCounts = useMemo(() => computeSubtaskCounts(issues), [issues]);
-  const [search, setSearch] = useState('');
+  // Seeded from `serverQuery`, not '': opening an issue remounts this
+  // component (split pane), and a box that came back empty would fire the
+  // debounce with '' and silently drop the user's search 250 ms later.
+  const [search, setSearch] = useState(serverQuery ?? '');
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -787,18 +790,27 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search issues…"
+            maxLength={200}
             className="w-full pl-7 pr-8 py-1.5 text-[13px] bg-ink-900/80 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
           />
           <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
             <Kbd>/</Kbd>
           </span>
         </div>
-        {/* While searching, the page length alone would only ever say `limit`.
-            `totalCount` is the server's matching-and-visible count. */}
+        {/* N is this page as the server returned it (`scopedIssues`), NOT
+            `filtered` — the phase chips and the filter popover are display-only
+            narrowing the server never heard about, and letting them move N
+            while M stays server-side would put two different questions on
+            either side of the "of". M is the server's matching-and-visible
+            total, which the page length alone could only ever report as
+            `limit`. Caveat in the `my` / `agent` scopes: `scopedIssues` is a
+            client-side projection of the team list, so N is projected and M is
+            still the team-wide server count. Plural agrees with M, hence
+            `count: total` — "1 of 37 issues", "1 of 1 issue". */}
         <span data-testid="issue-list-count" className="shrink-0 text-[12px] text-ink-500 tabular-nums">
           {serverQuery
-            ? t('issues.countOfTotal', '{{n}} of {{total}} issues', { n: filtered.length, total: totalCount ?? filtered.length })
-            : t('issues.count', '{{n}} issues', { n: filtered.length })}
+            ? t('issues.countOfTotal', { n: scopedIssues.length, count: totalCount ?? scopedIssues.length })
+            : t('issues.count', { count: scopedIssues.length })}
         </span>
         <span
           data-testid="creates-in-badge"

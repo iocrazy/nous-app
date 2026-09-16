@@ -5644,8 +5644,10 @@
   },
   "issues": {
     "refreshFailed": "刷新这条议题失败，你看到的可能不是最新状态",
-    "count": "{{n}} 件议题",
-    "countOfTotal": "{{n}} / {{total}} 件议题",
+    "count_one": "{{count}} 件议题",
+    "count_other": "{{count}} 件议题",
+    "countOfTotal_one": "{{n}} / {{count}} 件议题",
+    "countOfTotal_other": "{{n}} / {{count}} 件议题",
     "pageTitle": "待办事项",
     "needsReplyChip": "等你回复",
     "waitingOnYou": "等我的",
