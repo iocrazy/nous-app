@@ -428,3 +428,79 @@ async def test_a_chapter_is_counted_unavailable_not_failed(orm_dsn, pg, fx):
     assert await _body_of(pg, doc_id) is None
     assert stats.unavailable >= 1
     assert stats.failed == 0
+
+
+# ── 修复轮 1 ─────────────────────────────────────────────────────────────
+
+
+@_skip
+async def test_an_oversized_body_is_clipped_to_the_same_cap_as_the_live_writer(
+    orm_dsn, pg, fx
+):
+    """回填写进去的正文必须服从和实时写方同一个字节上限。
+
+    ``fill_empty_body`` 复用 ``_clip``（``upsert`` 用的那一个），所以两条路写出的
+    长度口径是同一个。不复用的话，同一列上会并存两种长度 —— 而 ``body`` 没有长度
+    约束，库不会拒绝，所以没有任何东西会说出这件事。
+
+    实测：把 ``.values(body=_clip(body))`` 改成 ``.values(body=body)``，本条转红。
+    """
+    from app.services.search.types import BODY_MAX_BYTES
+
+    prompt = "lantern " * 2000  # 16000 字节，远超上限
+    assert len(prompt.encode("utf-8")) > BODY_MAX_BYTES
+    media_id = await _media(pg, fx, prompt=prompt)
+    await _deliverable(pg, fx, kind="generated_media", ref_id=str(media_id))
+    doc_id = await _output_doc(pg, fx, kind="generated_media", ref_id=str(media_id))
+
+    await _run_backfill()
+    stored = await _body_of(pg, doc_id)
+    assert len(stored.encode("utf-8")) <= BODY_MAX_BYTES
+    assert prompt.startswith(stored)
+    # 不是「截了就行」——要真的截在上限上，而不是被某个更小的值砍掉。
+    assert len(stored.encode("utf-8")) == BODY_MAX_BYTES
+
+
+@_skip
+async def test_orphan_output_rows_are_counted_on_a_real_server(orm_dsn, pg, fx):
+    """孤儿计数那条 ``NOT EXISTS`` 关联子查询在服务器上真的跑得通。
+
+    它把 ``search_docs`` 的三列（TEXT / TEXT / INTEGER）关联回 ``run_deliverables``
+    的同名三列 —— 单测里这个函数整个是替身，所以这条语句在别处一次都没被执行过，
+    而一个写错的关联在 ORM 里照样编译得过。
+
+    同时钉住语义：孤儿**不进 scanned**（它们从来没被扫过），也不会被补上。
+    """
+    doc_id = await _output_doc(pg, fx, kind="script_shot", ref_id=str(fx["shot_id"]))
+    # 刻意不建 run_deliverables 行 —— 这就是一条孤儿。
+
+    stats = await _run_backfill()
+    assert stats.orphans >= 1
+    assert await _body_of(pg, doc_id) is None
+
+
+@_skip
+async def test_the_limit_really_reaches_the_query(orm_dsn, pg, fx):
+    """``--limit`` 落在 SQL 的 ``LIMIT`` 上，不是在 Python 侧截列表。
+
+    两条候选集行在库里，``limit=1`` 之后只能有一条被处理 —— 而在 Python 侧截断
+    同样能让这条断言过，所以这里额外要求**另一条仍是空的**：真 LIMIT 与假 LIMIT
+    在这一点上没有区别，但真 LIMIT 是唯一不把整张表读回内存的那个，理由写在
+    ``backfill_search_docs_bodies`` 的 docstring 里。
+
+    ⚠️ 本条假设跑的时候库里没有**别的**可补候选行（``LIMIT`` 按 id 升序取，别人的
+    行排在前面就会把这两条都挤掉）。schema-drift 那一步只跑本文件、库是每次新建
+    的，文件内每个夹具又都在 ``finally`` 里拆干净，所以这个假设成立。手动对一个
+    脏库跑本文件时它可能假红 —— 那是环境不干净，不是缺陷。
+    """
+    m1 = await _media(pg, fx, prompt="first prompt")
+    m2 = await _media(pg, fx, prompt="second prompt")
+    for mid in (m1, m2):
+        await _deliverable(pg, fx, kind="generated_media", ref_id=str(mid))
+    d1 = await _output_doc(pg, fx, kind="generated_media", ref_id=str(m1))
+    d2 = await _output_doc(pg, fx, kind="generated_media", ref_id=str(m2))
+
+    stats = await _run_backfill(limit=1)
+    assert stats.filled == 1
+    filled = [b for b in (await _body_of(pg, d1), await _body_of(pg, d2)) if b]
+    assert len(filled) == 1

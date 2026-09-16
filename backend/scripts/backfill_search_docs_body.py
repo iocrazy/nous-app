@@ -22,14 +22,26 @@ Local::
     cd backend && uv run python scripts/backfill_search_docs_body.py --dry-run
     cd backend && uv run python scripts/backfill_search_docs_body.py
 
-Production (stdin must be fed with ``-i`` or the heredoc vanishes silently and
-you get exit 1 with no output — CLAUDE.md's docker-exec note)::
+Production — run THIS FILE, not a heredoc that re-implements it. ``backend/`` is
+copied to ``/app`` (``COPY backend/ .``) and ``.dockerignore`` does not exclude
+``scripts/``, so the script is at ``/app/scripts/`` in the image (verified on the
+live ``nous-backend``)::
 
-    docker exec -i -w /app nous-backend /app/.venv/bin/python - <<'PY'
-    import asyncio
-    from app.services.search.backfill import backfill_search_docs_bodies
-    print(asyncio.run(backfill_search_docs_bodies(dry_run=True)))
-    PY
+    docker exec -w /app nous-backend /app/.venv/bin/python \
+        scripts/backfill_search_docs_body.py --dry-run
+    docker exec -w /app nous-backend /app/.venv/bin/python \
+        scripts/backfill_search_docs_body.py
+
+A heredoc would be a second copy of the entry point — it can drift from this one
+(different args, a stale call signature) and nothing would catch it. Running the
+file means the thing tested in CI is the thing that runs in production.
+
+⚠️ No ``-i`` needed here precisely BECAUSE there is no stdin: the ``-i`` rule in
+CLAUDE.md applies to ``docker exec ... python -`` fed by a heredoc, where the
+heredoc vanishes silently without it and you get exit 1 with no output.
+
+``--limit N`` caps BOTH candidate queries (useful to try a handful first). The
+run is idempotent either way — a row that got a body is no longer a candidate.
 """
 
 from __future__ import annotations
@@ -42,21 +54,24 @@ from loguru import logger
 from app.services.search.backfill import backfill_search_docs_bodies
 
 
-async def _run(dry_run: bool) -> None:
-    stats = await backfill_search_docs_bodies(dry_run=dry_run)
+async def _run(dry_run: bool, limit: int | None) -> None:
+    stats = await backfill_search_docs_bodies(dry_run=dry_run, limit=limit)
     # ⚠️ Say what each number counts, and keep them apart. "filled=0" alone is
     # ambiguous between "nothing was empty" and "every row failed to rebuild" —
     # two opposite facts. scanned / unavailable / failed are what tell them apart.
     logger.info(
         "backfill {}: {} empty rows scanned, {} filled, {} had no "
         "reconstructible body (chapters and deleted refs — not failures), "
-        "{} were filled by the live writer first, {} errored",
+        "{} were filled by the live writer first, {} errored; "
+        "{} projection rows have no run_deliverables row at all (NOT touched, "
+        "and NOT part of the scanned count — investigate separately)",
         "dry run (nothing written)" if dry_run else "done",
         stats.scanned,
         stats.filled,
         stats.unavailable,
         stats.raced,
         stats.failed,
+        stats.orphans,
     )
 
 
@@ -67,7 +82,14 @@ def main() -> None:
         action="store_true",
         help="read and rebuild for real, write nothing",
     )
-    asyncio.run(_run(parser.parse_args().dry_run))
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="cap each candidate query (default: no cap)",
+    )
+    args = parser.parse_args()
+    asyncio.run(_run(args.dry_run, args.limit))
 
 
 if __name__ == "__main__":

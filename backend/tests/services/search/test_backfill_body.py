@@ -131,7 +131,7 @@ async def test_a_shot_whose_fields_are_all_blank_is_unavailable_not_filled(monke
     （``fill_empty_body`` 的谓词和 partial 索引都按「空」处理），但把它记成
     ``filled`` 会让「这批到底补上了没有」这个问题答错。"""
     _rebuild_returns(monkeypatch, {k: None for k in SHOT})
-    assert await bf.output_body(_row("script_shot")) == (None, bf.EMPTY)
+    assert await bf.output_body(_row("script_shot")) == (None, bf.RENDERED_EMPTY)
 
 
 async def test_media_takes_the_whole_prompt_column_the_registry_hands_over():
@@ -165,15 +165,19 @@ class _Repo:
         return self.accepts
 
 
-def _drive(monkeypatch, *, outputs, runs, repo):
-    async def fake_outputs():
+def _drive(monkeypatch, *, outputs, runs, repo, orphans=0):
+    async def fake_outputs(limit=None):
         return outputs
 
-    async def fake_runs():
+    async def fake_runs(limit=None):
         return runs
+
+    async def fake_orphans():
+        return orphans
 
     monkeypatch.setattr(bf, "_empty_output_rows", fake_outputs)
     monkeypatch.setattr(bf, "_empty_run_rows", fake_runs)
+    monkeypatch.setattr(bf, "_orphan_output_count", fake_orphans)
     monkeypatch.setattr(bf, "get_search_docs_repository", lambda: repo)
 
 
@@ -271,3 +275,120 @@ async def test_a_run_row_carries_the_output_summary_verbatim(monkeypatch):
     )
     await bf.backfill_search_docs_bodies()
     assert repo.calls == [("run", "42", summary)]
+
+
+# ── 修复轮 1：写入异常必须逐行隔离 ───────────────────────────────────────
+
+
+class _ExplodingRepo:
+    """写入口抛异常的替身 —— 一次瞬时 DB 错误（连接断了、死锁被选中当牺牲品）
+    在生产上就长这样。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def fill_empty_body(self, *, entity_kind, entity_id, body):
+        self.calls += 1
+        raise RuntimeError("the connection went away mid-batch")
+
+
+async def test_a_write_that_explodes_is_counted_not_propagated(monkeypatch):
+    """**写入**抛异常和**重建**抛异常必须同样被隔离。
+
+    修复轮 1 之前 ``_write`` 在 try 之外：一次瞬时 DB 错误会直接抛出整个函数，
+    于是 ①这一行之后的每一行都没被处理 ②汇总日志那句根本不执行 ③``failed``
+    这个计数器承诺的「一行炸不该带走整批」当场落空 —— 而运维看到的是一条
+    traceback，不是「还剩多少没补」。
+    """
+    _rebuild_returns(monkeypatch, dict(SHOT))
+    repo = _ExplodingRepo()
+    _drive(
+        monkeypatch,
+        outputs=[
+            _row("script_shot", ref_id="a", entity_id="script_shot:a:1"),
+            _row("script_shot", ref_id="b", entity_id="script_shot:b:1"),
+        ],
+        runs=[],
+        repo=repo,
+    )
+    stats = await bf.backfill_search_docs_bodies()
+    # 两行都被尝试过 —— 第一行炸了之后第二行照样处理。
+    assert repo.calls == 2
+    assert (stats.scanned, stats.filled, stats.failed) == (2, 0, 2)
+
+
+async def test_the_run_arm_is_isolated_too(monkeypatch):
+    """run 臂整段原本裸跑，一个 try 都没有。两臂共用同一条承诺。"""
+    repo = _ExplodingRepo()
+    _drive(
+        monkeypatch,
+        outputs=[],
+        runs=[
+            {"entity_id": "1", "output_summary": "one"},
+            {"entity_id": "2", "output_summary": "two"},
+        ],
+        repo=repo,
+    )
+    stats = await bf.backfill_search_docs_bodies()
+    assert repo.calls == 2
+    assert (stats.scanned, stats.failed) == (2, 2)
+
+
+# ── 修复轮 1：原因码不再借用 diff.py 的 ─────────────────────────────────
+
+
+async def test_an_empty_render_has_its_own_reason_code(monkeypatch):
+    """「重建成功但渲染出来是空的」是回填自己的结局，不是 diff 的
+    ``NO_SNAPSHOT``（那条是「这一版之前没有账本」）。借用它会让日志里两件不同的
+    事长成同一个词，而排查时那正是要区分的。"""
+    assert bf.RENDERED_EMPTY != NO_SNAPSHOT
+    _rebuild_returns(monkeypatch, {k: None for k in SHOT})
+    assert await bf.output_body(_row("script_shot")) == (None, bf.RENDERED_EMPTY)
+
+
+async def test_the_module_does_not_re_export_diffs_reason_codes():
+    """``__all__`` 只导出本模块自己的东西。把 diff 的常量转口出去，读者会以为
+    它们归这里管，改 diff 时就不会想到这边。"""
+    for borrowed in ("NO_LEDGER", "NOT_FOUND", "NO_SNAPSHOT"):
+        assert borrowed not in bf.__all__
+
+
+# ── 修复轮 1：--limit 与孤儿计数 ─────────────────────────────────────────
+
+
+async def test_the_limit_reaches_both_candidate_queries(monkeypatch):
+    """``--limit`` 要真的落到两条查询上（分批跑、先小量试水都靠它）。在 Python
+    侧截断列表是另一回事 —— 那仍然把整张表读回内存。"""
+    seen: dict[str, object] = {}
+
+    async def fake_outputs(limit=None):
+        seen["outputs"] = limit
+        return []
+
+    async def fake_runs(limit=None):
+        seen["runs"] = limit
+        return []
+
+    monkeypatch.setattr(bf, "_empty_output_rows", fake_outputs)
+    monkeypatch.setattr(bf, "_empty_run_rows", fake_runs)
+    monkeypatch.setattr(bf, "_orphan_output_count", _zero)
+    monkeypatch.setattr(bf, "get_search_docs_repository", lambda: _Repo())
+    await bf.backfill_search_docs_bodies(limit=7)
+    assert seen == {"outputs": 7, "runs": 7}
+
+
+async def _zero():
+    return 0
+
+
+async def test_orphan_rows_are_counted_and_not_touched(monkeypatch):
+    """两条候选集查询都是**内连接**，所以「``search_docs`` 有、
+    ``run_deliverables`` 没有」的产出行根本不在候选集里 —— 它们既不会被补上，也
+    不会出现在任何计数里，于是一次「全部补完」的汇总和一次「漏了 12 条」的汇总
+    长得一模一样。单独数一次、单独报，不处理（那是另一张票该查的数据问题）。"""
+
+    _drive(monkeypatch, outputs=[], runs=[], repo=_Repo(), orphans=12)
+    stats = await bf.backfill_search_docs_bodies()
+    assert stats.orphans == 12
+    # 孤儿不算进 scanned —— 它们从来没被扫过。
+    assert stats.scanned == 0

@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from loguru import logger
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.db.scope import system_request_scope
 from app.db.session import read_scope
@@ -70,16 +70,21 @@ from app.models.search import SearchDocs
 from app.repositories.search_docs_repository import get_search_docs_repository
 from app.services.deliverables.diff import (
     NO_LEDGER,
-    NO_SNAPSHOT,
     NOT_FOUND,
     rebuild_content,
     render_elements,
     render_shot,
 )
 
-#: 重建出来是一串空白时用的原因码。写一个空 body 与不写没有区别（``fill_empty_body``
-#: 的谓词和 partial 索引都按「空」处理），但把它记成 ``filled`` 会让统计说谎。
-EMPTY = NO_SNAPSHOT
+#: 重建成功、但渲染出来是一串空白。写一个空 body 与不写没有区别
+#: （``fill_empty_body`` 的谓词和 partial 索引都按「空」处理），但把它记成
+#: ``filled`` 会让统计说谎。
+#:
+#: ⚠️ **这是回填自己的原因码，不是 diff 的 ``NO_SNAPSHOT``。** 那条说的是「这一版
+#: 之前没有账本」，这条说的是「账本齐全、折出来的六个字段全是空的」—— 两件事，
+#: 排查时要区分的正是它们。曾经写成 ``EMPTY = NO_SNAPSHOT``，于是日志里两种结局
+#: 长成同一个词。
+RENDERED_EMPTY = "rendered_empty"
 
 
 @dataclass(frozen=True)
@@ -94,8 +99,12 @@ class BackfillStats:
     unavailable: int = 0
     #: 重建出了正文、但写回去时那一行已经不空了（实时写方抢先）。
     raced: int = 0
-    #: 这一行在处理过程中抛了异常。真缺陷，逐条记 ERROR。
+    #: 这一行在处理过程中抛了异常（重建**或**写入）。真缺陷，逐条记 ERROR。
     failed: int = 0
+    #: ``search_docs`` 里有、``run_deliverables`` 里没有的产出行。**不处理**，只
+    #: 报数 —— 两条候选集查询都是内连接，这些行根本进不来，所以少了这个数，
+    #: 一次「全部补完」的汇总和一次「还漏着 N 条」的汇总长得一模一样。
+    orphans: int = 0
 
     def plus(self, **delta: int) -> "BackfillStats":
         """加法返回新对象（不可变纪律）。"""
@@ -105,6 +114,7 @@ class BackfillStats:
             unavailable=self.unavailable + delta.get("unavailable", 0),
             raced=self.raced + delta.get("raced", 0),
             failed=self.failed + delta.get("failed", 0),
+            orphans=self.orphans + delta.get("orphans", 0),
         )
 
 
@@ -130,7 +140,7 @@ async def _media_prompt(ref_id: str) -> tuple[Optional[str], Optional[str]]:
         return None, NOT_FOUND
     if row is None:
         return None, NOT_FOUND
-    return (row[0] or None), (None if row[0] else EMPTY)
+    return (row[0] or None), (None if row[0] else RENDERED_EMPTY)
 
 
 async def output_body(row: Mapping[str, Any]) -> tuple[Optional[str], Optional[str]]:
@@ -154,12 +164,12 @@ async def output_body(row: Mapping[str, Any]) -> tuple[Optional[str], Optional[s
         text = (
             render_shot(content) if kind == "script_shot" else render_elements(content)
         )
-        return (text, None) if text.strip() else (None, EMPTY)
+        return (text, None) if text.strip() else (None, RENDERED_EMPTY)
     # script_chapter 落在这里：没有账本，谁都重建不出来。
     return None, NO_LEDGER
 
 
-async def _empty_output_rows() -> list[dict[str, Any]]:
+async def _empty_output_rows(limit: Optional[int] = None) -> list[dict[str, Any]]:
     """正文为空的产出行 + 它们重建所需的账本坐标。
 
     按 ``kind`` / ``ref_id`` / ``version`` **三列**连回 ``run_deliverables``，不是
@@ -190,6 +200,7 @@ async def _empty_output_rows() -> list[dict[str, Any]]:
                     .where(SearchDocs.entity_kind == "output")
                     .where(or_(SearchDocs.body.is_(None), SearchDocs.body == ""))
                     .order_by(SearchDocs.id)
+                    .limit(limit)
                 )
             )
             .mappings()
@@ -198,7 +209,7 @@ async def _empty_output_rows() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-async def _empty_run_rows() -> list[dict[str, Any]]:
+async def _empty_run_rows(limit: Optional[int] = None) -> list[dict[str, Any]]:
     """正文为空、而 ``output_summary`` 有值的 run 行。
 
     mig 472 的 run 段**已经**写过 ``r.output_summary``，所以今天这个查询在生产上
@@ -218,6 +229,7 @@ async def _empty_run_rows() -> list[dict[str, Any]]:
                     .where(AgentRuns.output_summary.isnot(None))
                     .where(AgentRuns.output_summary != "")
                     .order_by(SearchDocs.id)
+                    .limit(limit)
                 )
             )
             .mappings()
@@ -226,84 +238,142 @@ async def _empty_run_rows() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def _orphan_output_count() -> int:
+    """``search_docs`` 里有、``run_deliverables`` 里没有的产出行数。
+
+    两条候选集查询都是**内连接**，所以这些行根本进不来 —— 既不会被补上，也不会
+    出现在任何计数里。少了这个数，一次「全部补完」的汇总和一次「还漏着 N 条」的
+    汇总长得一模一样，而后者是个真的数据问题（投影写过、登记行后来被删了，或者
+    反过来投影的坐标写错了）。
+
+    **只报数，不处理。** 该修什么取决于是哪种成因，那是另一张票要查的；在这里
+    顺手删或顺手补，都是在一个不知道成因的地方做破坏性决定。
+    """
+    async with read_scope() as session:
+        return int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(SearchDocs)
+                    .where(SearchDocs.entity_kind == "output")
+                    .where(
+                        ~select(RunDeliverables.id)
+                        .where(
+                            and_(
+                                RunDeliverables.kind == SearchDocs.kind,
+                                RunDeliverables.ref_id == SearchDocs.ref_id,
+                                RunDeliverables.version == SearchDocs.version,
+                            )
+                        )
+                        .exists()
+                    )
+                )
+            ).scalar()
+            or 0
+        )
+
+
 async def _write(
-    stats: BackfillStats, *, entity_kind: str, entity_id: str, body: str, dry_run: bool
-) -> BackfillStats:
+    *, entity_kind: str, entity_id: str, body: str, dry_run: bool
+) -> dict[str, int]:
+    """写一行，回报一个计数增量。**不接 stats** —— 调用方要把这一步和重建那一步
+    包进同一个 try，回报增量比回报一个新 stats 更容易做到那件事。"""
     if dry_run:
-        return stats.plus(filled=1)
+        return {"filled": 1}
     wrote = await get_search_docs_repository().fill_empty_body(
         entity_kind=entity_kind, entity_id=entity_id, body=body
     )
     if wrote:
-        return stats.plus(filled=1)
+        return {"filled": 1}
     # 谓词拦下来了：读回来到写回去之间实时写方投过这一行。它写的是现在的内容，
     # 该留下的就是它 —— 这是正常结局，不是失败。
     logger.info(
         f"[search] backfill skipped {entity_kind}/{entity_id}: "
         "the live writer filled it first"
     )
-    return stats.plus(raced=1)
+    return {"raced": 1}
 
 
-async def backfill_search_docs_bodies(*, dry_run: bool = False) -> BackfillStats:
+async def _one_output(row: Mapping[str, Any], *, dry_run: bool) -> dict[str, int]:
+    """一行产出：重建 + 写入。异常由调用方的 ``_guarded`` 收口。"""
+    entity_id = str(row["entity_id"])
+    body, reason = await output_body(row)
+    if body is None:
+        logger.info(f"[search] backfill has no body for output {entity_id}: {reason}")
+        return {"unavailable": 1}
+    return await _write(
+        entity_kind="output", entity_id=entity_id, body=body, dry_run=dry_run
+    )
+
+
+async def _guarded(what: str, coro) -> dict[str, int]:
+    """一行的全部工作跑在这里面，**重建和写入都算**。
+
+    ⚠️ 修复轮 1 修的就是这个边界。原先 try 只包住重建，``_write`` 在它外面、run
+    臂更是整段裸跑 —— 于是一次瞬时 DB 错误（连接断了、死锁被选中当牺牲品）会直接
+    抛出整个函数：这一行之后的每一行都不再处理，末尾那句汇总日志根本不执行，而
+    ``failed`` 这个计数器承诺的「一行炸不该带走整批」当场落空。运维看到的是一条
+    traceback，不是「还剩多少没补」。
+    """
+    try:
+        return await coro
+    except Exception as exc:  # noqa: BLE001 — 见 docstring
+        logger.opt(exception=True).error(f"[search] backfill failed on {what}: {exc!r}")
+        return {"failed": 1}
+
+
+async def backfill_search_docs_bodies(
+    *, dry_run: bool = False, limit: Optional[int] = None
+) -> BackfillStats:
     """把每一条正文为空的投影行补上正文。幂等：补过的行第二次不会再进候选集。
 
     ``dry_run`` 只跳过写，读与重建照跑 —— 预演要跑的是真路径，否则它预演的是
-    另一个程序。
+    另一个程序。``limit`` 落到**两条候选集查询**上（不是在 Python 侧截列表，那仍
+    然要把整张表读回内存），给分批跑和先小量试水用；``None`` 就是不限。
     """
     async with system_request_scope("backfill search_docs bodies (3c)"):
-        stats = BackfillStats()
-        for row in await _empty_output_rows():
+        stats = BackfillStats(orphans=await _orphan_output_count())
+        for row in await _empty_output_rows(limit):
             stats = stats.plus(scanned=1)
-            entity_id = str(row["entity_id"])
-            try:
-                body, reason = await output_body(row)
-            except Exception as exc:  # noqa: BLE001 — 一行炸不该带走整批
-                logger.opt(exception=True).error(
-                    f"[search] backfill failed on output {entity_id}: {exc!r}"
+            stats = stats.plus(
+                **await _guarded(
+                    f"output {row['entity_id']}", _one_output(row, dry_run=dry_run)
                 )
-                stats = stats.plus(failed=1)
-                continue
-            if body is None:
-                logger.info(
-                    f"[search] backfill has no body for output {entity_id}: {reason}"
-                )
-                stats = stats.plus(unavailable=1)
-                continue
-            stats = await _write(
-                stats,
-                entity_kind="output",
-                entity_id=entity_id,
-                body=body,
-                dry_run=dry_run,
             )
 
-        for row in await _empty_run_rows():
+        for row in await _empty_run_rows(limit):
             stats = stats.plus(scanned=1)
-            stats = await _write(
-                stats,
-                entity_kind="run",
-                entity_id=str(row["entity_id"]),
-                body=str(row["output_summary"]),
-                dry_run=dry_run,
+            entity_id = str(row["entity_id"])
+            stats = stats.plus(
+                **await _guarded(
+                    f"run {entity_id}",
+                    _write(
+                        entity_kind="run",
+                        entity_id=entity_id,
+                        body=str(row["output_summary"]),
+                        dry_run=dry_run,
+                    ),
+                )
             )
 
     logger.info(
-        "[search] backfill {}: scanned={} filled={} unavailable={} raced={} failed={}",
+        "[search] backfill {}: scanned={} filled={} unavailable={} raced={} "
+        "failed={} orphans={}",
         "dry run" if dry_run else "done",
         stats.scanned,
         stats.filled,
         stats.unavailable,
         stats.raced,
         stats.failed,
+        stats.orphans,
     )
     return stats
 
 
+#: ⚠️ 只导出本模块自己的东西。``NO_LEDGER`` / ``NOT_FOUND`` / ``NO_SNAPSHOT`` 归
+#: ``deliverables.diff`` 管，从这里转口出去会让读者以为改它们要来这边看。
 __all__ = [
-    "EMPTY",
-    "NOT_FOUND",
-    "NO_LEDGER",
+    "RENDERED_EMPTY",
     "BackfillStats",
     "backfill_search_docs_bodies",
     "output_body",
