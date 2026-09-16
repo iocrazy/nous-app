@@ -37,7 +37,9 @@ import {
 } from '../services/usageService';
 import {
   formatCentsAsUsd,
+  formatCostPerOutput,
   formatTokens,
+  formatToolErrorRate,
   groupLabel,
   pivotDaily,
   presetRange,
@@ -296,11 +298,15 @@ export function TeamAiUsagePage() {
       </div>
 
       {/* Totals */}
-      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* 两枚效率格（3c §3.3）跟着同一个 totals 走——Task 10 已让小时表带上这五列，
+          所以不再发第二个请求。 */}
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-6 gap-3">
         <Stat label="Total cost" value={formatCentsAsUsd(total?.cost_cents || 0)} />
         <Stat label="Total tokens" value={formatTokens(total?.total_tokens || 0)} />
         <Stat label="Prompt" value={formatTokens(total?.prompt_tokens || 0)} />
         <Stat label="Completion" value={formatTokens(total?.completion_tokens || 0)} />
+        <Stat label="Cost / output" value={formatCostPerOutput(total)} />
+        <Stat label="Tool errors" value={formatToolErrorRate(total)} />
       </div>
 
       {/* Chart */}

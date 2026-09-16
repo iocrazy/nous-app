@@ -21,6 +21,33 @@ export function formatCentsAsUsd(cents: number): string {
   return `$${dollars.toFixed(2)}`;
 }
 
+/**
+ * 每件产出的花费（3c §3.3）。比率由**服务端**算一次：0 件产出时后端发的是
+ * `null`（不知道单价），不是 0.0 —— 渲成 `¢0.00` 等于宣布产出是免费的。所以这里
+ * 只负责把 null 说成「—」，绝不自己拿 cost/deliverables 再除一次。
+ */
+export function formatCostPerOutput(
+  total: { cost_per_deliverable_cents: number | null } | null | undefined,
+): string {
+  const cents = total?.cost_per_deliverable_cents;
+  return cents == null ? '—' : `¢${cents.toFixed(2)}`;
+}
+
+/**
+ * 工具调用的错误率（3c §3.3）。
+ *
+ * 分母为 0 时**不是** 0.0%：一次工具都没调过的窗口没有错误率，说成 0.0% 会被读成
+ * 「工具很稳」。反过来，调过 40 次、0 次出错是一条确定的好消息，必须是 0.0% 而不
+ * 是「—」。这两句话是同一个格子里的两种真相。
+ */
+export function formatToolErrorRate(
+  total: { tool_calls: number; tool_errors: number } | null | undefined,
+): string {
+  const calls = total?.tool_calls ?? 0;
+  if (calls <= 0) return '—';
+  return `${(((total?.tool_errors ?? 0) / calls) * 100).toFixed(1)}%`;
+}
+
 /** Compact one-line cost summary for the issue detail strip. */
 export function formatIssueCostLine(totalTokens: number, costCents: number): string {
   const tokens = formatTokens(totalTokens);

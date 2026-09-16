@@ -31,10 +31,12 @@ import {
 } from 'recharts';
 import {
   AlertCircle,
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   DollarSign,
   ListChecks,
+  Package,
   RefreshCw,
   Zap,
 } from 'lucide-react';
@@ -47,7 +49,14 @@ import type {
   UsageScope,
 } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
+import {
+  usageService,
+  UsageRequestError,
+  type EfficiencyGroup,
+  type EfficiencySummary,
+} from '../services/usageService';
 import { useToast } from '../components/Toast';
+import { TurnEndBreakdown } from '../components/usage/TurnEndBreakdown';
 import { PageHeader } from '../components/layout/PageHeader';
 
 const AGENT_BAR_COLORS = [
@@ -78,6 +87,11 @@ export const UsagePage: React.FC = () => {
   const [rangeMode, setRangeMode] = useState<'presets' | 'month'>('presets');
   const [groupBy, setGroupBy] = useState<UsageGroupBy>('model');
   const [summary, setSummary] = useState<UsageDailySummary | null>(null);
+  // Efficiency is a SECOND request against a second table. It is allowed to
+  // fail on its own: the daily rollup already on screen stays true either way,
+  // so its failure narrows to two tiles and one typed sentence.
+  const [efficiency, setEfficiency] = useState<EfficiencySummary | null>(null);
+  const [efficiencyError, setEfficiencyError] = useState<string | null>(null);
   // Team scope keeps the legacy monthly rollup (runs mostly carry no
   // team_id, so a range/daily view would mislead there).
   const [month, setMonth] = useState<string>(() => formatMonth(new Date()));
@@ -106,6 +120,19 @@ export const UsagePage: React.FC = () => {
           rangeMode === 'month' ? month : undefined,
         );
         setSummary(resp);
+        // 第二个请求：它失败不该把整页打掉，两枚效率格自己退回「—」。
+        try {
+          setEfficiency(
+            await usageService.getEfficiency({ scope: 'user', groupBy }),
+          );
+          setEfficiencyError(null);
+        } catch (effErr) {
+          console.error('[UsagePage] efficiency fetch failed:', effErr);
+          setEfficiency(null);
+          setEfficiencyError(
+            effErr instanceof UsageRequestError ? effErr.code : 'unknown',
+          );
+        }
       } else {
         const resp = await aiLibraryService.getUsage(
           month,
@@ -233,12 +260,22 @@ export const UsagePage: React.FC = () => {
 
       {scope === 'user' && summary && (
         <>
-          <StatTiles summary={summary} />
+          <StatTiles summary={summary} efficiency={efficiency} />
           <HeroChart
             summary={summary}
             groupBy={groupBy}
             onGroupByChange={setGroupBy}
           />
+          <section className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+            <div className="mb-3 text-xs text-ink-500">
+              {t('aiUsage.turnEndTitle', 'How turns ended')}
+            </div>
+            {efficiency ? (
+              <TurnEndBreakdown reasons={efficiency.turn_end_reasons} />
+            ) : (
+              <EfficiencyNotice code={efficiencyError} />
+            )}
+          </section>
           <BreakdownTable summary={summary} />
           <RecentRunsTable
             refreshKey={refreshKey}
@@ -379,8 +416,9 @@ const SummaryCard: React.FC<{
   tint: string;
   label: string;
   value: string;
-}> = ({ icon, tint, label, value }) => (
-  <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-4">
+  testId?: string;
+}> = ({ icon, tint, label, value, testId }) => (
+  <div className="rounded-xl border border-ink-800 bg-ink-900/60 p-4" data-testid={testId}>
     <div className="flex items-center gap-3">
       <div className={`rounded-lg p-2 ${tint}`}>{icon}</div>
       <div className="min-w-0 flex-1">
@@ -486,18 +524,45 @@ const PerAgentTable: React.FC<{ perAgent: UsagePerAgent[] }> = ({ perAgent }) =>
 
 // ─── User-scope dashboard (range-driven, OpenAI-console style) ─────────────
 
-const StatTiles: React.FC<{ summary: UsageDailySummary }> = ({ summary }) => {
+/**
+ * The six-tile header (3c §3.3 / §6 稿三).
+ *
+ * `success` reads the TURN-END MIX, not run status. `awaiting_input` is a turn
+ * that is waiting on a person; counting it as a failure tells the user that
+ * asking them a question made things worse (recon C12).
+ *
+ * The efficiency request is the second one on this page, so `efficiency` is
+ * legitimately null for a beat — and while it is, these tiles say «—». Not
+ * 100%: «I don't know yet» and «everything succeeded» are not the same news.
+ * Same rule for each ratio's denominator: 0 tool calls has no error rate,
+ * while 40 calls and 0 errors is a real 0.0%.
+ */
+export const StatTiles: React.FC<{
+  summary: UsageDailySummary;
+  efficiency: EfficiencySummary | null;
+}> = ({ summary, efficiency }) => {
   const { t } = useTranslation();
+  // 按 model / agent 分组时一个窗口常有好几行，逐行求和——只读第一行对多模型用户
+  // 永远是错的。
+  const sum = (f: (g: EfficiencyGroup) => number): number =>
+    efficiency ? efficiency.groups.reduce((a, g) => a + f(g), 0) : 0;
+  const runs = sum((g) => g.run_count);
   const successRate =
-    summary.total_requests > 0
-      ? `${(
-          ((summary.total_requests - summary.total_failed) /
-            summary.total_requests) *
-          100
-        ).toFixed(0)}%`
+    efficiency && runs > 0
+      ? `${(((efficiency.turn_end_reasons.completed ?? 0) / runs) * 100).toFixed(0)}%`
+      : '—';
+  const delivered = sum((g) => g.deliverables);
+  const costPerOutput =
+    efficiency && delivered > 0
+      ? `¢${(sum((g) => g.cost_cents) / delivered).toFixed(2)}`
+      : '—';
+  const calls = sum((g) => g.tool_calls);
+  const toolErrorRate =
+    efficiency && calls > 0
+      ? `${((sum((g) => g.tool_errors) / calls) * 100).toFixed(1)}%`
       : '—';
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
       <SummaryCard
         icon={<DollarSign size={18} />}
         tint="text-warn bg-amber-500/10"
@@ -511,18 +576,74 @@ const StatTiles: React.FC<{ summary: UsageDailySummary }> = ({ summary }) => {
         value={formatTokens(summary.total_tokens)}
       />
       <SummaryCard
+        testId="tile-requests"
         icon={<ListChecks size={18} />}
         tint="text-[var(--accent-text)] bg-[var(--accent-soft)]"
         label={t('aiUsage.statRequests', 'Requests')}
         value={summary.total_requests.toLocaleString()}
       />
       <SummaryCard
+        testId="tile-success"
         icon={<AlertCircle size={18} />}
-        tint="text-sky-300 bg-sky-500/10"
+        tint="text-info bg-info-soft"
         label={t('aiUsage.statSuccess', 'Success rate')}
         value={successRate}
       />
+      <SummaryCard
+        testId="tile-cost-per-output"
+        icon={<Package size={18} />}
+        tint="text-ok bg-ok-soft"
+        label={t('aiUsage.statCostPerOutput', 'Cost / output')}
+        value={costPerOutput}
+      />
+      <SummaryCard
+        testId="tile-tool-errors"
+        icon={<AlertTriangle size={18} />}
+        tint="text-danger bg-danger-soft"
+        label={t('aiUsage.statToolErrors', 'Tool error rate')}
+        value={toolErrorRate}
+      />
     </div>
+  );
+};
+
+/**
+ * What to say when the efficiency read did not come back.
+ *
+ * One sentence chosen from the code the route typed — never the envelope. A
+ * production refusal is `{success, error, code:"http_503", request_id,
+ * details:{code}}`; rendering that hands the user a request id and calls it an
+ * explanation.
+ */
+const EfficiencyNotice: React.FC<{ code: string | null }> = ({ code }) => {
+  const { t } = useTranslation();
+  const copy = ((): string => {
+    switch (code) {
+      case 'efficiency_unavailable':
+        return t(
+          'aiUsage.efficiencyUnavailable',
+          'Efficiency stats are unavailable right now. Usage totals above are unaffected.',
+        );
+      case 'range_too_long':
+        return t(
+          'aiUsage.efficiencyRangeTooLong',
+          'That range is too long for efficiency stats. Pick a window of 366 days or less.',
+        );
+      case 'invalid_range':
+        return t(
+          'aiUsage.efficiencyInvalidRange',
+          'That range ends before it starts.',
+        );
+      case null:
+        return t('aiUsage.efficiencyLoading', 'Loading efficiency...');
+      default:
+        return t('aiUsage.efficiencyFailed', 'Efficiency stats could not be loaded.');
+    }
+  })();
+  return (
+    <p className="text-xs text-ink-500" data-testid="efficiency-error">
+      {copy}
+    </p>
   );
 };
 
