@@ -108,10 +108,14 @@ def _wire(monkeypatch, *, lineage: list[dict] | None = None, divert_id=None):
             raise HTTPException(status_code=404, detail="not found")
         return lineage
 
+    async def _visible(issue_ids, auth):
+        return {str(i) for i in issue_ids if i is not None}
+
     chain = AsyncMock(side_effect=_chain)
     import app.services.ai.chat.output_ref_resolver as _resolver_mod
 
     monkeypatch.setattr(_resolver_mod, "assert_chain_visible", chain)
+    monkeypatch.setattr(_resolver_mod, "visible_issue_ids", _visible)
 
     # Note 路径的 store。``display_attachments`` 委托给真货——被测的正是「响应
     # 有没有过这个 reducer」，桩掉它就等于把结论先写进 mock 里。

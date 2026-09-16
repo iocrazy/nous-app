@@ -177,6 +177,12 @@ on:
       - 'backend/tests/db/test_unified_search_visibility_integration.py'
       - 'backend/app/services/issues/issue_visibility.py'
       - 'backend/app/repositories/issue_repository.py'
+      # 同样的道理，引用反查那一侧（3c Task 16）：ON CONFLICT DO NOTHING 要
+      # output_citations_message_ref_key 真存在，ORDER BY 的决胜键要真的定住同一
+      # 事务里的两条，GROUP BY 要真按版本分组。
+      - 'backend/tests/db/test_output_citations_repository_integration.py'
+      - 'backend/app/repositories/output_citations_repository.py'
+      - 'backend/app/services/deliverables/citations.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -190,12 +196,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-eight, so it has to re-run
-      # them — otherwise the guard could be weakened by a PR this job ignores.
+      # to it changes what "green" means for all twenty-nine, so it has to
+      # re-run them — otherwise the guard could be weakened by a PR this job
+      # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
-      # the previous number instead of counting). Recount, do not increment:
+      # the previous number instead of counting). Recount, do not increment
+      # (the twenty-nine below was counted with this command, not derived
+      # from the twenty-eight it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -784,3 +793,17 @@ jobs:
           # 实测两次突变各杀各的那一条（见 task-14 报告）。少了后者，把
           # visible_issue_ids 整个删掉前一条照样绿——那正是这类用例最常见的假绿。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_unified_search_visibility_integration.py -v
+
+      - name: Assert the output_citations repository's statements on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 引用反查镜像的三条语句（3c Task 16）。同上，单测全是 stmt.compile()
+          # 字符串断言：ON CONFLICT DO NOTHING 的「重投不翻倍」全挂在
+          # output_citations_message_ref_key 上（索引丢了，第二次会安静地插进重复
+          # 行、计数翻倍）；ORDER BY 的决胜键要真的定住同一事务里时间戳完全相等的
+          # 两条；GROUP BY 分错组的表现是血缘面板上每一版都显示整条链的引用数。
+          # message_id 的外键还要求夹具建一条真消息 —— 这一条也只有真库能拒。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_output_citations_repository_integration.py -v

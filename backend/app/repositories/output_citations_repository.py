@@ -63,7 +63,12 @@ class OutputCitationsRepository:
 
     def _list_stmt(self, kind: str, ref_id: str, version: int):
         """一**版**的引用，新的在前。三个坐标都钉住——少 ``version`` 一个，
-        血缘面板上每一版都会显示整条链的引用。"""
+        血缘面板上每一版都会显示整条链的引用。
+
+        ``id DESC`` 是**决胜键不是装饰**：``created_at`` 默认 ``now()``，也就是
+        事务开始时刻，所以同一个事务里落的两条引用时间戳**完全相等**，只按时间
+        排的话它们的先后由服务器随便定，两次请求可以给出两种顺序。
+        """
         return (
             select(
                 OutputCitations.issue_id,
@@ -74,7 +79,7 @@ class OutputCitationsRepository:
             .where(OutputCitations.kind == str(kind))
             .where(OutputCitations.ref_id == str(ref_id))
             .where(OutputCitations.version == int(version))
-            .order_by(OutputCitations.created_at.desc())
+            .order_by(OutputCitations.created_at.desc(), OutputCitations.id.desc())
         )
 
     async def list_for_ref(

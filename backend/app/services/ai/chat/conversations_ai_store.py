@@ -694,15 +694,30 @@ class ConversationsAiStore:
             from app.repositories.issue_repository import issue_repository
             from app.services.deliverables.citations import record_output_citations
 
-            issue = await issue_repository.get_by_session(_bigint(session_id))
-            await record_output_citations(
-                None,
-                message_row=row,
-                attachments=attachments,
-                user_id=user_id,
-                issue_id=(issue or {}).get("id"),
-                conversation_id=row.get("conversation_id"),
-            )
+            # ⚠️ **查库在 try 内**，触发判断（纯内存，不会抛）留在外面。
+            # 这条消息此刻**已经落库并提交了** —— ``send_message`` 自开自提交。
+            # 一次失败的议题反查穿出这个方法，注释路径会把它翻成 500
+            # 「failed to save note」（``issue_messages_router`` 的 except 分支），
+            # 于是一条**已经保存的**注释被报成没保存。镜像失败的正确表现是
+            # 「消息发出去了，反查没建上」，与 ``record_output_citations`` 自己
+            # 那层 try 同一口径 —— 投影不许否决内容。
+            try:
+                issue = await issue_repository.get_by_session(_bigint(session_id))
+            except Exception as exc:  # noqa: BLE001 — 见上
+                logger.opt(exception=True).error(
+                    f"[citations] issue lookup FAILED for message {row.get('id')} "
+                    f"(conversation {session_id}): {exc!r} — the message posted, "
+                    "the back-reference did not"
+                )
+            else:
+                await record_output_citations(
+                    None,
+                    message_row=row,
+                    attachments=attachments,
+                    user_id=user_id,
+                    issue_id=(issue or {}).get("id"),
+                    conversation_id=row.get("conversation_id"),
+                )
         return {
             "id": row["id"],
             "session_id": row.get("conversation_id"),

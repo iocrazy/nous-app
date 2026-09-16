@@ -98,10 +98,17 @@ def _wire(monkeypatch, lineage: list[dict], *, chain_visible: bool = True):
             raise HTTPException(status_code=404, detail="not found")
         return lineage
 
+    async def _visible(issue_ids, auth):
+        # 修复轮 1：被引版自己的议题要过一次可见性判定才敢当 issue_key 用。
+        # 这里全放行 —— 挑哪一行、判不过怎么退回，由
+        # ``test_output_ref_chain_visible.py`` 钉住。
+        return {str(i) for i in issue_ids if i is not None}
+
     chain = AsyncMock(side_effect=_chain)
     import app.services.ai.chat.output_ref_resolver as _resolver_mod
 
     monkeypatch.setattr(_resolver_mod, "assert_chain_visible", chain)
+    monkeypatch.setattr(_resolver_mod, "visible_issue_ids", _visible)
     return r, dispatch, chain
 
 
@@ -361,3 +368,15 @@ async def test_a_padded_registry_title_is_stamped_trimmed(monkeypatch):
     resp = await _post(r, [_att()])
     assert resp.agent_dispatched is True
     assert dispatch.await_args.kwargs["attachments"][0]["title"] == "S3 · Shot #1"
+
+
+async def test_the_router_hands_the_callers_auth_to_the_resolver(monkeypatch):
+    """3c §2.4 的归属判据**是 auth**。路由不传（或传 None），解析器就会拿一个
+    不属于任何人的身份去问可见性 —— 而所有既有用例的桩都放行，于是那种漂移在
+    单测里完全看不出来。可见性是 per-user 的事实，所以问的是谁必须可断言。"""
+    r, _dispatch, chain = _wire(
+        monkeypatch, lineage=[_lineage_row(2, title="v2", issue_id=ISSUE_ID)]
+    )
+    await _post(r, [_att()])
+    chain.assert_awaited_once()
+    assert chain.await_args.args[2] is AUTH

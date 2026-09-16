@@ -38,6 +38,7 @@ from loguru import logger
 
 from app.services.deliverables.kinds import ALL_KINDS
 from app.services.deliverables.visibility import assert_chain_visible
+from app.services.issues.issue_visibility import visible_issue_ids
 
 #: 附件 wire 形状的 ``kind``。前端 composer 的引用 chip 按它写（T6 契约）。
 ATTACHMENT_KIND = "output_ref"
@@ -204,37 +205,63 @@ def _coordinates(att: dict) -> Tuple[str, str, int]:
     return ref_kind, ref_id, version
 
 
-def _verified(coord: Tuple[str, str, int], chain: Sequence[dict]) -> ChatOutputRef:
-    """版本链里挑出被引的那一版，并盖上这条链的来源议题。
+def _row_of(coord: Tuple[str, str, int], chain: Sequence[dict]) -> Optional[dict]:
+    """被引的那一版在链上的行，没有就是 ``None``。
+
+    两个调用方共用（收集来源议题、构造 ``ChatOutputRef``）—— 挑版本的规则只写
+    一遍，不然「问谁的议题」和「盖谁的标题」会挑到两行。
+    """
+    version = coord[2]
+    return next((r for r in chain if int(r.get("version") or 0) == version), None)
+
+
+def _verified(
+    coord: Tuple[str, str, int], chain: Sequence[dict], *, visible_issues: set
+) -> ChatOutputRef:
+    """版本链里挑出被引的那一版，并盖上它的来源议题。
 
     **归属已经在装载这条链时判完了**（``assert_chain_visible`` 要么给出链，
     要么 404），所以这里不再比 issue —— 比一次等于第二把尺子，而两把尺子迟早
     分叉（3c §2.4）。剩下的唯一问题是「链上有没有这一版」，答案是 no 时用同一个
     ``UNRESOLVABLE``：分出一个「存在但你不能引」的 code 等于确认那个对象存在。
 
-    ``issue_key`` 取自 ``newest_with_a_run(chain)`` —— 血缘端点、diff、回退响应
-    补人手版归属时问的是同一行。人手版（``run_id IS NULL``）自己答不出归属，
-    所以不能逐行读 ``row['issue_key']``。
+    ``issue_key`` 的口径，按顺序：
+
+    1. **被引那一版自己的议题**，前提是调用方看得见它。一条链可以跨议题——v1
+       产于 MH-42、最新版产于 MH-98——而 chip 要说的是「你在 **MH-42** 上产的
+       那一版」。无条件用链级归属会把 v1 标成 MH-98，也就是把来源说错。
+    2. 判不过就退回**链级归属**（``newest_with_a_run``，血缘端点 / diff / 回退
+       响应补人手版归属时问的同一行）。两种情况会走到这里：被引版所属议题对调用
+       方不可见（``issue_key`` 是可路由的，直接透出去就是跨团队边界一行一行地
+       漏，同 ``redact_foreign_issue_links``），以及人手版（``run_id IS NULL``）
+       ——它自己答不出归属。
+    3. 链级也答不出（整条链没有带 run 的版本）就是 ``None``：缺席说的是「不知道
+       来源」，不是一个编出来的议题。
+
+    ``visible_issues`` 是**批量算好的**字符串 id 集合（见 ``resolve_output_refs``）：
+    一条评论最多 8 条引用，逐条问可见性会让它发 8 次往返。
     """
     # 延迟 import 打断 service ↔ router 的环（同 ``revert._chain_identity``）。
     from app.api.outputs_router import newest_with_a_run
 
     ref_kind, ref_id, version = coord
-    row = next(
-        (r for r in chain if int(r.get("version") or 0) == version),
-        None,
-    )
+    row = _row_of(coord, chain)
     if row is None:
         raise OutputRefRefused(
             UNRESOLVABLE, f"{ref_kind}/{ref_id} has no version {version}"
         )
-    owner = newest_with_a_run(list(chain)) or {}
+    own_id = row.get("issue_id")
+    if own_id is not None and str(own_id) in visible_issues:
+        issue_key = _clean_title(row.get("issue_key"))
+    else:
+        chain_owner = newest_with_a_run(list(chain)) or {}
+        issue_key = _clean_title(chain_owner.get("issue_key"))
     return ChatOutputRef(
         ref_kind=ref_kind,
         ref_id=ref_id,
         version=version,
         title=_clean_title(row.get("title")),
-        issue_key=_clean_title(owner.get("issue_key")),
+        issue_key=issue_key,
     )
 
 
@@ -306,7 +333,20 @@ async def resolve_output_refs(
                 UNRESOLVABLE, f"{ref_kind}/{ref_id} cannot be cited here"
             ) from None
 
-    refs = tuple(_verified(coord, chains[(coord[0], coord[1])]) for coord in coords)
+    # 被引各版**自己**的议题，一次批量问可见性（上限 8 条引用，逐条问就是 8 次
+    # 往返）。判不过的那几条会在 ``_verified`` 里退回链级归属。
+    candidates = {
+        str(row["issue_id"])
+        for coord in coords
+        if (row := _row_of(coord, chains[(coord[0], coord[1])])) is not None
+        and row.get("issue_id") is not None
+    }
+    visible = await visible_issue_ids(candidates, auth) if candidates else set()
+
+    refs = tuple(
+        _verified(coord, chains[(coord[0], coord[1])], visible_issues=visible)
+        for coord in coords
+    )
 
     stamped = list(items)
     for (idx, _mapping), ref in zip(cited, refs):

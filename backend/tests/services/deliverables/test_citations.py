@@ -154,3 +154,42 @@ async def test_an_ordinary_message_costs_no_extra_round_trip(monkeypatch):
     assert seen["sessions"] == [] and seen["calls"] == []
     seen = await _append(monkeypatch, None)
     assert seen["sessions"] == [] and seen["calls"] == []
+
+
+async def test_a_failing_issue_lookup_never_unposts_the_message(monkeypatch, caplog):
+    """议题反查在写点的 try **内**（修复轮 1）。
+
+    消息此刻已经落库并提交了（``send_message`` 自开自提交）。这次读失败穿出
+    ``append_user_message``，注释路径会把它翻成 500「failed to save note」，
+    把一条**已经保存的**注释报成没保存。镜像失败的正确表现是「消息发出去了，
+    反查没建上」。
+    """
+    from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+
+    async def _send_message(**kw):
+        return {"id": 5001, "conversation_id": 700, "seq": 1, "created_at": None}
+
+    async def _boom(session_id):
+        raise RuntimeError("connection reset by peer")
+
+    recorded = []
+
+    import app.repositories.conversation_repository as _conv
+    import app.repositories.issue_repository as _issues
+
+    monkeypatch.setattr(
+        _conv,
+        "get_conversation_repository",
+        lambda: type("R", (), {"send_message": staticmethod(_send_message)})(),
+    )
+    monkeypatch.setattr(_issues.issue_repository, "get_by_session", _boom)
+    monkeypatch.setattr(
+        mod, "record_output_citations", lambda *a, **k: recorded.append(k)
+    )
+
+    out = await ConversationsAiStore().append_user_message(
+        session_id=700, user_id=ME, content="look at this", attachments=[dict(REF)]
+    )
+    assert out["id"] == 5001 and out["role"] == "user"
+    assert recorded == []  # 反查没建上——但消息保住了
+    assert any("issue lookup FAILED" in r.message for r in caplog.records)

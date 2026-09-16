@@ -224,18 +224,21 @@ async def get_output_lineage(
     # 让二十版的链发二十次往返，而这个问题一次就答得完。逐版的明细只在真被引过
     # 时才去取（``n`` 为 0 的版本一次往返都不发）。
     counts = await get_output_citations_repository().counts_for_chain(kind, str(ref_id))
-    versions = [
-        {
-            **item,
-            "cited_count": counts.get(int(item["version"]), 0),
-            "cited_in": (
-                await _cited_in(kind, ref_id, int(item["version"]), auth)
-                if counts.get(int(item["version"]), 0)
-                else []
-            ),
-        }
-        for item in versions
-    ]
+    cited: List[Dict[str, Any]] = []
+    for item in versions:
+        n = counts.get(int(item["version"]), 0)
+        cited.append(
+            {
+                **item,
+                "cited_count": n,
+                "cited_in": (
+                    await _cited_in(kind, ref_id, int(item["version"]), auth)
+                    if n
+                    else []
+                ),
+            }
+        )
+    versions = cited
     # 水位用**一把尺子**：这条链上最大的登记行 id。Snowflake 跨 run、跨人手版
     # 都单调，而 transcript ``seq`` 是每个 run 内部的小整数、人手版压根没有——
     # 两者混在一个字段里，回退场景（agent → 人手 → agent）会给出一个会**变小**
