@@ -231,6 +231,16 @@ export function buildScriptContext(
  * 不用改。计时用的是**当前步**的 `startedAt`（`useElapsedSeconds` 要一个起点），所以读数
  * 是「这一步跑了多久」，与「Step N · Running X…」同一个口径。
  */
+/**
+ * 一次问账最多问最近多少条气泡（3c §4.2）。
+ *
+ * ⚠️ 与 `aiLibraryService` 的 `RUN_COSTS_BATCH` 数值相同、**含义无关**，所以刻意不
+ * 共用一个常量：那个是后端每次请求的 id 上限（超了就分批，是传输细节），这个是
+ * 「一屏往回看多远」的产品判断。哪天后端把批量上限提到 200，这里也不该跟着变——
+ * 它回答的是另一个问题。
+ */
+const RUN_COST_SCREEN_CAP = 50;
+
 const ChatRunStatus: React.FC<{ runId: string | null; isRunning: boolean }> = ({ runId, isRunning }) => {
   const { nodes } = useRunToolActivity(isRunning ? runId : null, isRunning);
   const live = isRunning ? liveStep(nodes) : null;
@@ -287,10 +297,10 @@ export function AIChatPanel({
   // the panel has no run to ask about until the turn is already over.
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
   // 依赖用**字符串**——依赖数组里放数组会每次渲染都判定「变了」，那就是每渲染
-  // 一次发一个请求。`slice(-50)` 留最近的一屏：更早的气泡滚出视野了。
+  // 一次发一个请求。`RUN_COST_SCREEN_CAP` 留最近的一屏：更早的气泡滚出视野了。
   const runIdsKey = useMemo(
     () => Array.from(new Set(messages.map(chatRunId).filter((x): x is string => !!x)))
-      .slice(-50)
+      .slice(-RUN_COST_SCREEN_CAP)
       .join(','),
     [messages],
   );

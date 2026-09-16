@@ -68,10 +68,21 @@ async def test_done_frame_carries_cost_and_points(monkeypatch):
     assert published[-1]["charged_points"] == 0.82
 
 
-async def test_done_frame_still_goes_out_when_the_cost_read_fails(monkeypatch):
-    """一次遥测失败绝不该让状态帧发不出去（同 ``_last_transcript_seq`` 的规矩）。"""
+async def test_done_frame_still_goes_out_when_both_reads_fail(monkeypatch):
+    """一次遥测失败绝不该让状态帧发不出去（同 ``_last_transcript_seq`` 的规矩）。
+
+    两个读**都**炸才两个键都是 null —— 只炸一个的情形由下面两条正交用例覆盖。
+    """
     published: list[dict] = []
+
+    class _BrokenPoints:
+        async def charged_points_for_references(self, **_kw):
+            raise RuntimeError("connection reset")
+
+    import app.repositories.points_repository as points_mod
+
     ics = _patch(monkeypatch, _Boom(), published)
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _BrokenPoints())
 
     await ics.publish_status(5, "done", run_id=77)
 
@@ -109,3 +120,42 @@ async def test_a_run_nobody_billed_reports_cost_without_points(monkeypatch):
 
     assert published[-1]["cost_cents"] == 0.82
     assert published[-1]["charged_points"] is None
+
+
+async def test_a_failed_points_read_keeps_the_cost_that_was_already_read(monkeypatch):
+    """两个读是**正交**的：run 行读到了，积分行炸了，帧就该报出花费 + 「不知道扣没扣」。
+
+    共用一个 ``try`` 会把已经读到的 ``cost_cents`` 一起丢掉 —— 一次积分故障把一个
+    真花了钱的 run 画成「完全没有账」。口径同 ``issue_rollup._charged``：谁失败只
+    空掉谁。
+    """
+    published: list[dict] = []
+
+    class _BrokenPoints:
+        async def charged_points_for_references(self, **_kw):
+            raise RuntimeError("connection reset")
+
+    import app.repositories.points_repository as points_mod
+
+    ics = _patch(monkeypatch, _Repo(), published)
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _BrokenPoints())
+
+    await ics.publish_status(5, "done", run_id=77)
+
+    assert published[-1]["cost_cents"] == 0.82
+    assert published[-1]["charged_points"] is None
+
+
+async def test_a_failed_run_row_read_still_reports_the_points(monkeypatch):
+    """反向同理：积分账是另一张表，run 行读不到不该把它一起拖下水。"""
+    published: list[dict] = []
+    ics = _patch(monkeypatch, _Boom(), published)
+
+    import app.repositories.points_repository as points_mod
+
+    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _Points())
+
+    await ics.publish_status(5, "done", run_id=77)
+
+    assert published[-1]["cost_cents"] is None
+    assert published[-1]["charged_points"] == 0.82

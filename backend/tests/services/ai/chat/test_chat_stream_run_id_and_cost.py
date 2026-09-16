@@ -46,7 +46,7 @@ async def test_the_stream_opens_with_the_run_id_before_any_text(monkeypatch):
         await chunk_callback("the whole answer in one lump")
         return _answer(run_id="701")
 
-    monkeypatch.setattr(svc_mod, "_run_cost", lambda _rid: _none_cost())
+    monkeypatch.setattr(svc_mod, "run_cost_for_frame", lambda _rid: _none_cost())
     events = await _drain(_svc(_chat))
 
     assert events[0] == {"type": "start", "data": {"run_id": "701"}}
@@ -63,7 +63,7 @@ async def test_a_turn_that_never_reports_a_run_id_still_streams(monkeypatch):
         await chunk_callback("hi")
         return _answer(run_id=None)
 
-    monkeypatch.setattr(svc_mod, "_run_cost", lambda _rid: _none_cost())
+    monkeypatch.setattr(svc_mod, "run_cost_for_frame", lambda _rid: _none_cost())
     events = await _drain(_svc(_chat))
 
     assert [e["type"] for e in events] == ["delta", "done"]
@@ -81,7 +81,7 @@ async def test_done_frame_carries_the_cost_and_points(monkeypatch):
         seen.append(run_id)
         return {"cost_cents": 0.82, "charged_points": 0.5}
 
-    monkeypatch.setattr(svc_mod, "_run_cost", _cost)
+    monkeypatch.setattr(svc_mod, "run_cost_for_frame", _cost)
     events = await _drain(_svc(_chat))
 
     assert seen == ["701"]
@@ -90,7 +90,7 @@ async def test_done_frame_carries_the_cost_and_points(monkeypatch):
 
 
 async def test_done_frame_keeps_the_two_keys_when_the_money_read_fails(monkeypatch):
-    """真的走 ``_run_cost``（不是桩），仓库炸掉时两个键仍在、值是 null。
+    """真的走 ``run_cost_for_frame``（不是桩），仓库炸掉时两个键仍在、值是 null。
     键消失才是坏的：消费方 ``?? 0`` 一下就把一次读失败说成了免费。"""
     import app.repositories.agent_runs_repository as runs_mod
 

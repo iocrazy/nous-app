@@ -43,7 +43,7 @@ async def test_done_frame_carries_the_run_and_its_last_seq(monkeypatch):
     monkeypatch.setattr(st, "_publish", _sink(published))
     monkeypatch.setattr(st, "_last_transcript_seq", _last_seq)
     monkeypatch.setattr(st, "_run_output_keys", _keys)
-    monkeypatch.setattr(st, "_run_cost", _cost)
+    monkeypatch.setattr(st, "run_cost_for_frame", _cost)
 
     await st.publish_status(1, "done", run_id="777")
 
@@ -204,7 +204,7 @@ async def test_an_unusable_run_id_still_gets_a_frame_out(monkeypatch):
     monkeypatch.setattr(st, "_last_transcript_seq", _boom)
     monkeypatch.setattr(st, "_run_output_keys", _boom)
     # 3c §4.2 的第三次读同样要被那道守卫挡住，不是「反正它自己 try 住了」。
-    monkeypatch.setattr(st, "_run_cost", _boom)
+    monkeypatch.setattr(st, "run_cost_for_frame", _boom)
 
     await st.publish_status(1, "done", run_id="abc")
 

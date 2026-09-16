@@ -7,6 +7,18 @@
 时序才是重点：回调必须在**任何正文**之前落地。生产的 ``chunk_callback`` 回合走
 ``stream_turn`` 的缓冲回退分支，整段正文一次交付；run id 要是等到那时候才出来，
 状态行整场回合都不画——而「有回调」这件事照样是绿的。
+
+⚠️ **为什么这里不需要真的 ``_NoStreamAdapter``**（``tests/runner/test_turn_end_reasons.py``
+那套）：那条纪律针对的是**穿过 ``stream_turn`` 的返回值**——给 ``run_turn`` 结果加的
+新标志必须证明它穿得过缓冲回退那层重包。本 Task 的两个新字段都不走那条路：
+
+* ``run_id`` 在 ``RunRecorder`` 一进 context 时就发了，**早于**任何 runner 调用，
+  所以 adapter 有没有 ``stream`` 与它无关；
+* ``cost_cents`` / ``charged_points`` 是回合**结束后**去库里读的，不经 runner。
+
+所以这里用一个「单终止 chunk 吐完全部正文」的 runner 复刻缓冲回退的**交付形状**
+（那才是能证伪时序的东西），而不是去复刻它的内部分支。真跑那条分支的覆盖在
+``test_turn_end_reasons.py``，本 Task 未改动它。
 """
 
 from unittest.mock import patch

@@ -1062,3 +1062,97 @@ describe('IssueDetailView — 交给回复框的议题坐标', () => {
     expect(replyBoxProps.last?.projectId).toBe('7');
   });
 });
+
+/**
+ * 3c Task 21 修复轮 1 —— `done` 帧是 rollup 的**补充**，不是替代。
+ *
+ * 帧上那两个数各自都可能是 null：`run_cost_for_frame` 读失败是 null，这条 run 没人
+ * 收费也是 null。写进去就会盖掉 rollup 明明有的数字，而 `liveRunCost` 一直留在
+ * state 里 —— 每一轮轮询回来的新值都被再抹一次，屏幕上那个 `—` 永远不会自己好。
+ *
+ * 断言落在**真的画出来的那一行**上，不是 state：这条链坏掉时 `mergeRunCosts` 自己
+ * 的用例照样全绿（那一层压根收不到这一帧）。
+ */
+describe('IssueDetailView — done 帧不该把 rollup 已知的花费抹掉', () => {
+  const AGENT_RUN_MSG = {
+    id: 'm1',
+    issue_id: 1,
+    kind: 'agent_run',
+    author_user_id: null,
+    author_agent_id: 'a1',
+    body: 'done',
+    meta: {},
+    duration_seconds: 12,
+    agent_run_id: '501',
+    from_status: null,
+    to_status: null,
+    created_at: '2026-08-03T00:00:10Z',
+  };
+
+  async function renderWithRun() {
+    let onEvent!: (e: Record<string, unknown>) => void;
+    progressState.value = mkProgress();
+    // 线程里有一条 run 501 的行，且它的轨迹非空 —— 两者齐了才画得出消耗行。
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [AGENT_RUN_MSG],
+      total: 1,
+    });
+    runActivity.events = [
+      { seq: 1, event_type: 'user', turn: 1, step: null, created_at: '', payload: { content: 'go' } },
+    ];
+    openIssueChatSocket.mockImplementation((_id: unknown, cb: unknown) => {
+      onEvent = cb as (e: Record<string, unknown>) => void;
+      return Promise.resolve({ close: vi.fn(), readyState: 1 } as unknown as WebSocket);
+    });
+    renderDetail(mkIssue());
+    await waitFor(() => expect(screen.getByTestId('run-cost-tail')).toBeTruthy());
+    return { fire: (e: Record<string, unknown>) => act(() => onEvent(e)) };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rollup 的花费先画出来（前置条件）', async () => {
+    await renderWithRun();
+    // 501 在 fixture 里是 cost_cents 0.9 / charged_points 1。
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('两个都是 null 的帧什么也不改 —— 读不到不等于没有', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: null, charged_points: null });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('老后端那种连键都没有的帧同样什么也不改', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [] });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('帧真带了新数字就用帧的 —— 它比下一次轮询早几秒', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: 2.5 });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+  });
+
+  it('后一帧空手而来时，不该把前一帧刚报的数字退回 rollup 的旧值', async () => {
+    // 这条钉的是**写入侧那道守卫**，逐字段合并挡不住它：第一帧写进了 2.50，
+    // 第二帧两个都是 null；没有守卫的话 `liveRunCost` 被换成一个空覆盖，逐字段
+    // 回落到 rollup 的 1.00 —— 屏幕上的数字倒退一步，而下一次轮询才可能修好。
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: 2.5 });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 10, outputs: [], cost_cents: null, charged_points: null });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+  });
+
+  it('帧只带得动花费时，积分留 rollup 的 —— 逐字段，不是整行替换', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: null });
+    // 积分优先显示，所以看到的仍是 rollup 的 1.00 —— 正是「没被抹掉」。
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+    expect(screen.getByTestId('run-cost-tail').getAttribute('title')).toContain('¢2.50');
+  });
+});

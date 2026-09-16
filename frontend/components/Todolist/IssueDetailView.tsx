@@ -47,7 +47,7 @@ import { selectRunCost, selectRunView } from '../TaskCenter/runView';
 import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from './childRunContext';
 import { ReplayContext, type ReplayState } from './replayContext';
 import { RunCostContext } from './runCostContext';
-import type { RunCost } from '../../types';
+import { mergeRunCosts, type LiveRunCost } from './mergeRunCosts';
 import { ForkRunDialog } from './ForkRunDialog';
 import { forkErrorText } from './forkErrors';
 import { replyErrorText } from './outputRefErrors';
@@ -142,41 +142,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
 
   // ── Per-run money (3c §4.2) ────────────────────────────────────────────
   // The rollup carries every run's cost; the `done` frame carries the one that
-  // just ended, seconds before the next poll would. Frame wins until the poll
-  // comes back and overwrites it with the server's own number.
-  const [liveRunCost, setLiveRunCost] = useState<
-    { runId: string; cost_cents: number | null; charged_points: number | null } | null
-  >(null);
-  const runCosts = useMemo(() => {
-    const out: Record<string, RunCost> = {};
-    for (const r of progress?.runs ?? []) {
-      // ⚠️ The rollup's `runs[]` has no token columns, so the issue-side
-      // tooltip's first line is always `0 prompt · 0 completion`. That is a
-      // trade, not a defect: filling it means changing the aggregate SQL
-      // (ticketed in Task 23), and the money line itself is exact.
-      out[String(r.id)] = {
-        cost_cents: r.cost_cents,
-        charged_points: r.charged_points ?? null,
-        model: r.model,
-        status: r.status,
-        prompt_tokens: 0,
-        completion_tokens: 0,
-      };
-    }
-    if (liveRunCost) {
-      const prev = out[liveRunCost.runId];
-      out[liveRunCost.runId] = {
-        ...prev,
-        model: prev?.model ?? null,
-        status: prev?.status ?? 'completed',
-        prompt_tokens: prev?.prompt_tokens ?? 0,
-        completion_tokens: prev?.completion_tokens ?? 0,
-        cost_cents: liveRunCost.cost_cents,
-        charged_points: liveRunCost.charged_points,
-      };
-    }
-    return out;
-  }, [progress?.runs, liveRunCost]);
+  // just ended, seconds before the next poll would. The frame SUPPLEMENTS the
+  // rollup field by field — see `mergeRunCosts` for why a null must never
+  // overwrite a number the poll already knows.
+  const [liveRunCost, setLiveRunCost] = useState<LiveRunCost | null>(null);
+  const runCosts = useMemo(
+    () => mergeRunCosts(progress?.runs, liveRunCost),
+    [progress?.runs, liveRunCost],
+  );
 
   // ── Replay (harness 2b-1 §1) ───────────────────────────────────────────
   // The scrubber attaches to the issue's newest run: the live one, else the
@@ -454,9 +427,18 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           // key: no objects to forget, seq 0, and the turn is still announced.
           for (const o of event.outputs ?? []) invalidateOutputLineage(o.kind, o.ref_id);
           // 3c §4.2: the turn's money, straight off the frame — the tail stops
-          // saying "—" without waiting a poll cycle. Both keys are nullable and
-          // a null stays a null: «not charged» is not «charged zero».
-          if (event.run_id) {
+          // saying "—" without waiting a poll cycle.
+          //
+          // A frame with NEITHER number is not written at all (same guard as
+          // the chat panel's `done` branch). An older backend sends no such
+          // keys, and `_run_cost` reports a failed read as two nulls; storing
+          // that would park an empty override on top of a rollup that has the
+          // real figures — and it never lifts, so every later poll gets wiped
+          // too. Nothing to say is said by staying quiet.
+          if (
+            event.run_id
+            && (event.cost_cents != null || event.charged_points != null)
+          ) {
             setLiveRunCost({
               runId: String(event.run_id),
               cost_cents: event.cost_cents ?? null,

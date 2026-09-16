@@ -39,6 +39,11 @@ vi.mock('../services/aiLibraryService', () => ({
     deleteChatSession: vi.fn(async () => undefined),
     streamChatMessage: (...args: unknown[]) => streamChatMessage(...args),
     uploadChatAttachment: vi.fn(),
+    // 3c §4.2：面板挂载就问一次这屏所有 run 的账。这里缺了它不会当场红——
+    // 本文件的 fixture 没有带 `metadata_json.run_id` 的气泡，effect 直接早返回。
+    // 但谁加一条带 run_id 的 fixture，这个 effect 就会**同步**抛（不是 rejected
+    // promise），整块面板卸载，而失败信息与那条 fixture 毫无关系。补上是几行的事。
+    getRunCosts: vi.fn(async () => ({})),
   },
 }));
 

@@ -73,7 +73,7 @@ from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: 
 
 # 3c §4.2：SSE 的 done 帧与 WS 的 done 帧报同一个数，所以共用同一个取数函数
 # （run 行 + 积分行）。第二条读路径迟早会和这条说出不同的钱。
-from app.services.issues.issue_chat_stream import _run_cost
+from app.services.issues.issue_chat_stream import run_cost_for_frame
 
 # How many `asset_ref` attachments one turn may resolve.
 #
@@ -390,7 +390,7 @@ class AILibraryChatService:
                 "attachment_failures": result.get("attachment_failures", []),
                 # 3c §4.2：刚结束的这一轮，气泡不必再发一次 /runs/costs。
                 # 与 WS done 帧同形、同一个取数方法：两个键恒定存在，读不到为 null。
-                **(await _run_cost(result.get("run_id"))),
+                **(await run_cost_for_frame(result.get("run_id"))),
             },
         }
 
