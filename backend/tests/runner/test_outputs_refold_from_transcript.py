@@ -213,3 +213,31 @@ async def test_a_transcript_without_deliverables_never_wipes_a_folded_outputs(
     await writer.refold_external_slices()
 
     assert writer.views["view"]["outputs"]["total"] == 1
+
+
+async def test_the_refold_lifts_the_efficiency_count_with_the_outputs_slice(
+    monkeypatch,
+):
+    """3c §3.2：run 行的 ``deliverables`` 列与 ``view.outputs.total`` 必须说同一个
+    数。登记口常走 ``for_run`` writer，活 recorder 根本没折过那件产出——只抬
+    outputs 而不抬计数，就是「面板 2 件、run 行 1 件」，与 3b 「只抬计数不抬钱」
+    是同一个缺陷的镜像。"""
+    db = _FakeDb()
+    _wire(monkeypatch, db)
+
+    rec = rr.RunRecorder(agent_id=None, user_id=None, trigger="t")
+    rec.run_id = "7"
+    await rec.record_event("deliverable", dict(DELIVERABLE), turn=1, step=1)
+
+    external = await rr.event_writer_for_run(7)
+    await external.append(
+        "deliverable",
+        {**DELIVERABLE, "ref_id": "337650953731999", "title": "WIDE"},
+        turn=1,
+        step=1,
+    )
+
+    await rec._writer().refold_external_slices()
+
+    assert rec._writer().views["view"]["outputs"]["total"] == 2
+    assert rec._efficiency_counts()["deliverables"] == 2

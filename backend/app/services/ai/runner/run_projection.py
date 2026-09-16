@@ -23,10 +23,17 @@ from typing import Any, Callable
 
 Views = dict[str, Any]
 # A fold receives a deep copy it may mutate and returns it — or ``None`` for
-# "nothing to say", which makes ``apply`` hand back the ORIGINAL object.
+# "nothing to say", in which case whatever it did to that copy is DISCARDED
+# (``apply`` rolls the copy back to its pre-fold state). With nothing else to
+# say either, callers get the ORIGINAL object back, unchanged by identity.
 Fold = Callable[[Views, dict[str, Any]], Views | None]
 
 _REGISTRY: dict[str, Fold] = {}
+# 计数道：与主 fold **并列**的第二条道，同一事件两条都跑。分开是因为主 fold 负责
+# 「这个族的整值视图」而一族只许一个（``register`` 对重复 raise），计数只是在同一批
+# 事件上加法、没有整值语义，塞不进那一个名额。每个事件类型同样只许一条计数道 ——
+# 重复注册是笔误不是叠加，所以 ``register_counter`` 也 raise。
+_COUNTERS: dict[str, Fold] = {}
 
 VIEW_VERSION = 1
 
@@ -86,6 +93,16 @@ def empty_views() -> Views:
             # 第三个分量，不混进 own_cents——那是 LLM 每步的钱，来源不同。
             "media_cents": 0.0,
         },
+        # 3c §3.2：与 ``cost`` 并列的计数道。花费回答「花了多少钱」，这里回答「干了
+        # 多少活」——两者分母不同（花费是树总额、计数是自身量），合进一个字典必然
+        # 有人取错分母。``_finish`` 把这五个值落进 agent_runs 同名列。
+        "efficiency": {
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reason": None,
+        },
     }
 
 
@@ -132,19 +149,53 @@ def register(event_type: str) -> Callable[[Fold], Fold]:
     return deco
 
 
+def register_counter(event_type: str) -> Callable[[Fold], Fold]:
+    """注册一个计数道折叠。主 fold 之后运行，拿到同一个可变副本。"""
+
+    def deco(fn: Fold) -> Fold:
+        if event_type in _COUNTERS:
+            raise ValueError(f"counter already registered for {event_type!r}")
+        _COUNTERS[event_type] = fn
+        return fn
+
+    return deco
+
+
 def registered_types() -> tuple[str, ...]:
-    return tuple(sorted(_REGISTRY))
+    return tuple(sorted(set(_REGISTRY) | set(_COUNTERS)))
 
 
 def apply(
     views: Views, event_type: str, payload: dict[str, Any], *, seq: int | None = None
 ) -> Views:
-    """Pure: ``views`` is never mutated. Unknown event → same object."""
+    """Pure: ``views`` is never mutated. Unknown event → same object.
+
+    主 fold 与计数道都跑：主 fold 说「没什么好说的」（返回 None）时计数道仍要计——
+    一次没超时的 ``tool_call`` 对 ``view.tools`` 无话可说，对工作量却是实打实的一
+    次。两道都没改动才返回原对象（dsh「同一引用 = 零下游工作」）。
+
+    ⚠️ 主 fold 返回 None 时**回滚**它在副本上做过的改动。在计数道出现之前这是免
+    费的（副本直接被丢掉）；现在副本会活下去交给计数道，不回滚就等于把一个说了
+    「不算数」的 fold 的半截改动偷渡出去。快照只在真有计数道时才拍。
+    """
     fold = _REGISTRY.get(event_type)
-    if fold is None:
+    counter = _COUNTERS.get(event_type)
+    if fold is None and counter is None:
         return views
-    nxt = fold(copy.deepcopy(views), payload or {})
-    if nxt is None:
+    nxt = copy.deepcopy(views)
+    changed = False
+    if fold is not None:
+        before = copy.deepcopy(nxt) if counter is not None else None
+        folded = fold(nxt, payload or {})
+        if folded is not None:
+            nxt, changed = folded, True
+        elif before is not None:
+            nxt = before
+    if counter is not None:
+        counted = counter(nxt, payload or {})
+        if counted is not None:
+            nxt, changed = counted, True
+    if not changed:
         return views
     if seq is not None:
         nxt["view"]["revision"] = seq
@@ -169,6 +220,7 @@ from app.services.ai.runner.folds import (  # noqa: E402,F401
     compaction,
     context,
     deliverables,
+    efficiency,
     fork,
     inbox,
     question,
@@ -187,6 +239,7 @@ __all__ = [
     "empty_views",
     "recompute_spent",
     "register",
+    "register_counter",
     "registered_types",
     "replay",
 ]

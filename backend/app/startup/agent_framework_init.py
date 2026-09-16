@@ -82,14 +82,9 @@ def _install_hook_registry(app: FastAPI) -> None:
     """
     try:
         from app.agent_framework import HookRegistry, wrap_legacy_post
-        from app.services.infra.hooks.cost_auditor import CostAuditorHook
         from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
 
         hook_registry = HookRegistry()
-        try:
-            hook_registry.register(wrap_legacy_post(CostAuditorHook()))
-        except Exception as cae:
-            logger.warning(f"hook register CostAuditor failed: {cae}")
         try:
             hook_registry.register(wrap_legacy_post(MemoryHarvesterHook()))
         except Exception as mhe:

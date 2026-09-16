@@ -8,9 +8,11 @@ memory recall pre-fetched).
 Design notes:
 - HookRegistry is per-chat-turn (NOT shared singleton) so concurrent users
   on the same uvicorn worker can never poison each other's hook state.
-  Adversarial-review #8 hardened CostAuditor itself against pollution
-  even with a shared singleton, but per-turn instantiation is belt +
-  suspenders.
+  每个工具调用一行审计的 CostAuditor 已于 3c §3.2 摘除——它写的
+  agent_run_events 零个读方，delta 还靠进程内 LRU 算（多 worker 下必然
+  偏大）。同样的原料现在走 tool_call 事件的 duration_ms / error_code，
+  折进 agent_runs 的五列。表本身不动（DROP 走单独迁移，等一个发布周期
+  确认无人读）。
 - Memory recall (Graphiti graph facts + Honcho user context) happens
   BEFORE prompt composition so it flows into ComposerInput. Recall failure
   degrades to "no memories this turn" — never breaks the chat.
@@ -46,7 +48,6 @@ from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.infra.hooks import HookRegistry
 from app.services.infra.hooks.budget_guard import BudgetGuardHook
-from app.services.infra.hooks.cost_auditor import CostAuditorHook
 from app.services.infra.hooks.memory_harvester import MemoryHarvesterHook
 from app.services.workforce.delegate_tool import DelegateToolService
 
@@ -138,7 +139,7 @@ async def build_agent_runner_stack(
 
     Steps:
       1. Recall memory (Graphiti graph facts + Honcho user context)
-      2. Build per-turn HookRegistry with BudgetGuard + CostAuditor + MemoryHarvester
+      2. Build per-turn HookRegistry with BudgetGuard + MemoryHarvester
       3. Wrap adapter in LLMFallbackChain (retry + fallback semantics)
       4. Construct AgentRunner with hooks + Delegate tool
     """
@@ -257,12 +258,6 @@ async def build_agent_runner_stack(
         name="high_risk_capability_gate",
         priority=26,
         fail_closed=True,
-    )
-
-    registry.register_post(
-        CostAuditorHook(),
-        name="cost_auditor",
-        priority=70,
     )
 
     # MemoryHarvester wired with a dispatch closure that routes through
