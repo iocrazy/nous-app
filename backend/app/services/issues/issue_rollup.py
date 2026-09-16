@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+from app.services.billing.run_tree_points import charged_points_for_run_trees
 from app.services.issues.origin_resolvers import resolve_origin
 
 TERMINAL_ISSUE = frozenset({"done", "cancelled", "closed"})
@@ -211,7 +211,6 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
     )
     from app.repositories.agent_runs_repository import get_agent_runs_repository
     from app.repositories.issue_repository import issue_repository
-    from app.repositories.points_repository import get_points_repository
 
     issue_id = int(issue["id"])
     session_id = issue.get("ai_session_id")
@@ -226,10 +225,14 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
     origin = await resolve_origin(issue)
 
     # 效率账与积分账互不依赖，串行只是白等一个往返 —— 这个端点是被轮询的。
-    # ``agent_run`` 是 A3 票定的 reference_type。runs 已是 root-only，就是 UI 要显示
-    # 的那几行，不必为子 run 多查。
     async def _charged() -> dict[str, float]:
         """积分账读失败只空掉这一个字段，不带走整个 rollup。
+
+        ``runs`` 是 root-only（``list_for_issue`` 明写 ``parent_run_id IS NULL``），
+        而扣费是**逐 run** 发生的，所以问的是「以这些 root 为根的整棵树各扣了多少」
+        ——3c 终审 I2：此前只取 root 自己那一条流水，真栈一次回合 6 条、余额 −6，
+        界面显示 ◇ 1.00。取数与气泡、``done`` 帧共用
+        ``charged_points_for_run_trees``，三处必须是同一个数。
 
         仓库层一律 raise —— 另一个读方 ``/ai-library/runs/costs`` 要靠它答 503，
         而不是把一个真花了钱的 run 显示成免费。降级的责任因此落在各消费方；这里是
@@ -239,10 +242,7 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         用 ``return_exceptions=True`` 则会连带吞掉效率账那条的失败，那不是想要的。
         """
         try:
-            return await get_points_repository().charged_points_for_references(
-                reference_type=AGENT_RUN_REFERENCE_TYPE,
-                reference_ids=[str(r["id"]) for r in runs],
-            )
+            return await charged_points_for_run_trees([r["id"] for r in runs])
         except Exception as e:  # noqa: BLE001
             logger.error(
                 f"[issue_rollup] charged points read failed for {issue_id}: {e}"

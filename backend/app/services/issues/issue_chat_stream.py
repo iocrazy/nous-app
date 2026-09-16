@@ -10,7 +10,7 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+from app.services.billing.run_tree_points import charged_points_for_run_trees
 
 
 async def _get_redis():
@@ -86,14 +86,16 @@ async def _cost_cents_for(rid: int) -> Optional[float]:
 
 
 async def _charged_points_for(rid: int) -> Optional[float]:
-    """这条 run 真扣掉的积分。没扣过的 id 不出现在返回里 —— ``.get`` 的 None 正是
-    「没人收费」，与读失败的 None 在这一层合并（帧上两者都只说「不知道」）。"""
-    try:
-        from app.repositories.points_repository import get_points_repository
+    """这次回合真扣掉的积分 —— **以这条 run 为根的整棵树**的合计（3c 终审 I2）。
 
-        charged = await get_points_repository().charged_points_for_references(
-            reference_type=AGENT_RUN_REFERENCE_TYPE, reference_ids=[str(rid)]
-        )
+    扣费逐 run 发生，而帧上这个数回答的是「这次回合扣了我多少」。``run_id`` 在这条
+    路径上恒是 root（帧由 root 的 recorder 发）。取数与议题 rollup、``/runs/costs``
+    共用 ``charged_points_for_run_trees``，否则同一次回合在三处会说出三个数。
+
+    整棵树一分钱没扣过时 ``.get`` 回 None，正是「没人收费」，与读失败的 None 在这一
+    层合并（帧上两者都只说「不知道」）。"""
+    try:
+        charged = await charged_points_for_run_trees([rid])
         return charged.get(str(rid))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[issue_chat_stream] points read failed (run={rid}): {e}")
@@ -105,6 +107,11 @@ async def run_cost_for_frame(run_id: Any) -> dict[str, Optional[float]]:
 
     两个键**恒定存在**，``null`` 说的是「不知道」—— 缺席会被读成 0，而 0 在钱上是
     另一个答案（「这次免费」）。
+
+    ⚠️ 两个键的口径**不同**，这是有意的：``cost_cents`` 取 root 行那一列（它本身
+    已经是树总额，``_finish`` 把 own + children + media 加起来），``charged_points``
+    则要自己把整棵树的 consume 流水加起来（扣费逐 run 发生，积分账里没有「树」这个
+    概念）。两者都回答「这次回合」，只是一个已经滚好、一个要现滚。
 
     **两个读各自 catch，绝不共用一个 try**：它们打的是两张表、答的是两个正交的问题
     （花了多少 / 收了多少）。共用一个 ``try`` 时，积分读抛出会把**已经读到的**

@@ -1126,6 +1126,44 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] cost_rows_for_ids failed: {e}")
             raise
 
+    async def run_ids_in_trees(self, root_ids: List[int]) -> Dict[str, List[str]]:
+        """每个 root run id → 以它为根的整棵树的全部 run id（含它自己），都是字符串。
+
+        扣费是**逐 run** 发生的（``token_billing`` 对每条 run 各 ceil 一次，见那里的
+        注释），所以「这次回合扣了多少」的答案分散在整棵树上。3c 终审 I2：两个消耗行
+        宿主此前只问 root 自己那一条流水，真栈一次回合 6 条、余额 −6，界面显示 ◇ 1.00。
+
+        ``root_run_id`` 在子 run 上指向根、在 root 行上是 NULL（``_attach_to_parent_run``
+        是唯一写方），所以一条 ``root_run_id IN (:roots) OR id IN (:roots)`` 就取全。
+
+        每个问到的 id **至少映射到它自己**，即使它的行读不回来 —— 一次读空不该把一个
+        真扣过钱的 run 显示成免费。⚠️ 问一个**中间**节点只会拿回它自己：它的孙子
+        ``root_run_id`` 指向真正的根而不是它。两个宿主问的都是 root，这是已知边界。
+
+        读失败一律 raise：降级成「只有 root」等于把 I2 那个低报又悄悄装回去。三个消费方
+        各自已经有 catch。
+        """
+        roots = [int(r) for r in root_ids if r is not None]
+        if not roots:
+            return {}
+        out: Dict[str, set[str]] = {str(r): {str(r)} for r in roots}
+        stmt = select(AgentRuns.id, AgentRuns.root_run_id).where(
+            or_(AgentRuns.root_run_id.in_(roots), AgentRuns.id.in_(roots))
+        )
+        try:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).all()
+        except Exception as e:
+            logger.error(f"[agent_runs] run_ids_in_trees failed: {e}")
+            raise
+        for run_id, root_run_id in rows:
+            # root 行自己的 ``root_run_id`` 是 NULL；一个被问到的中间节点的
+            # ``root_run_id`` 指向一个**没被问到**的根，那种行归到它自己名下。
+            key = str(root_run_id) if str(root_run_id) in out else str(run_id)
+            if key in out:
+                out[key].add(str(run_id))
+        return {k: sorted(v) for k, v in out.items()}
+
     # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------

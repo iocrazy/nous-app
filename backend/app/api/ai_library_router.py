@@ -48,7 +48,6 @@ from app.repositories.agent_workforce_repository import (
     tt_row_to_task_shape,
 )
 from app.repositories.issue_repository import get_issue_repository
-from app.repositories.points_repository import get_points_repository
 from app.repositories.projects_repository import get_projects_repository
 from app.repositories.skill_repository import (
     SkillRepository,
@@ -95,7 +94,7 @@ from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.permissions.high_risk_caps import high_risk_caps
 from app.services.ai.runner.seed_loader import SeedLoader
-from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+from app.services.billing.run_tree_points import charged_points_for_run_trees
 from app.services.issues.issue_visibility import visible_issue_ids
 from app.services.modules.gate import require_module
 from app.utils.time_window import parse_window_dt, window_error
@@ -2364,6 +2363,10 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
     """一次拿一屏气泡的花费（3c §4.2）。可见性复用 ``visible_issue_ids``（与血缘同一
     把尺）；**看不见的 id 是键省略**，不是 404。
 
+    ``charged_points`` 是**以该 run 为根的整棵树**扣掉的积分合计（含委派出去的子
+    agent），不是 root 自己那一条流水 —— 扣费逐 run 发生，而气泡回答的是「这次回合
+    扣了我多少」（3c 终审 I2）。``cost_cents`` 取 root 行那一列，它本身就是树总额。
+
     NOTE: 必须注册在 ``/runs/{run_id}`` 之前（同 ``/runs/live``）——否则 ``costs``
     会被当成一个 run_id 吃掉，端点永远拿不到请求，而单测直接调函数看不出来。"""
     # Deduplicate BEFORE the cap: the limit is on distinct runs, not on commas.
@@ -2404,10 +2407,10 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
         if str(r.get("user_id")) == me or str(r.get("issue_id")) in visible
     ]
     try:
-        charged = await get_points_repository().charged_points_for_references(
-            reference_type=AGENT_RUN_REFERENCE_TYPE,
-            reference_ids=[str(r["id"]) for r in allowed],
-        )
+        # 整棵树的合计，不是 root 自己那一条流水（3c 终审 I2）：扣费逐 run 发生，
+        # 而气泡上这个数回答的是「这次回合扣了我多少」。调用方（AIChatPanel）问的
+        # 是 root id。取数与议题 rollup、``done`` 帧共用同一个函数。
+        charged = await charged_points_for_run_trees([r["id"] for r in allowed])
     except Exception as exc:  # noqa: BLE001
         # 不降级成「没扣过」——那等于告诉用户这些 run 是免费的。整条 503，让调用方
         # 知道账目这会儿读不到。

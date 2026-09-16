@@ -11,6 +11,7 @@ from fastapi import HTTPException
 # module (and its patchable factory names) via importlib — same as the sibling
 # run-router tests.
 R = importlib.import_module("app.api.ai_library_router")
+TREE = importlib.import_module("app.services.billing.run_tree_points")
 
 pytestmark = pytest.mark.unit
 ME = "11111111-1111-1111-1111-111111111111"
@@ -53,20 +54,31 @@ class _Auth:
     user_id = ME
 
 
+#: run 1 委派出去一条子 run（11）。扣费逐 run 发生，气泡要显示的是整棵树的合计
+#: ——3c 终审 I2。这里让**真的** ``charged_points_for_run_trees`` 跑起来，只桩它
+#: 底下那两个仓库，所以钉的是整条链而不是一次转发。
+TREES = {"1": ["1", "11"], "2": ["2"], "3": ["3"]}
+CHARGED = {"1": 13.0, "11": 4.0}
+
+
 def _stub(monkeypatch, visible):
     class _Repo:
         async def cost_rows_for_ids(self, ids):
             return [r for r in ROWS if r["id"] in ids]
 
+        async def run_ids_in_trees(self, root_ids):
+            return {k: v for k, v in TREES.items() if int(k) in root_ids}
+
     class _Points:
         async def charged_points_for_references(self, *, reference_type, reference_ids):
-            return {"1": 13.0}
+            return {k: v for k, v in CHARGED.items() if k in reference_ids}
 
     async def _visible(issue_ids, auth):
         return visible
 
     monkeypatch.setattr(R, "get_agent_runs_repository", lambda: _Repo())
-    monkeypatch.setattr(R, "get_points_repository", lambda: _Points())
+    monkeypatch.setattr(TREE, "get_agent_runs_repository", lambda: _Repo())
+    monkeypatch.setattr(TREE, "get_points_repository", lambda: _Points())
     monkeypatch.setattr(R, "visible_issue_ids", _visible)
 
 
@@ -76,7 +88,9 @@ async def test_owner_and_visible_issue_rows_come_back(monkeypatch):
     assert sorted(out["items"]) == ["1", "2"]
     assert out["items"]["1"] == {
         "cost_cents": 12.5,
-        "charged_points": 13.0,
+        # 13.0（root 自己）+ 4.0（委派出去那条子 run）—— 气泡回答的是「这次回合
+        # 扣了我多少」，而扣费是逐 run 发生的（3c 终审 I2）。
+        "charged_points": 17.0,
         "model": "doubao",
         "status": "completed",
         "prompt_tokens": 900,
@@ -136,7 +150,23 @@ async def test_a_billing_read_failure_is_a_typed_503_not_a_free_run(monkeypatch)
         async def charged_points_for_references(self, *, reference_type, reference_ids):
             raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(R, "get_points_repository", lambda: _Broken())
+    monkeypatch.setattr(TREE, "get_points_repository", lambda: _Broken())
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids="1")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "run_costs_unavailable"
+
+
+async def test_the_tree_read_failing_is_the_same_typed_503(monkeypatch):
+    """树结构读不到时**不能**退回「只算 root」——那是一个静默的低报，正是 I2 本身。
+    整条 503，与积分读失败同码。"""
+    _stub(monkeypatch, {"77"})
+
+    class _BrokenTree:
+        async def run_ids_in_trees(self, root_ids):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(TREE, "get_agent_runs_repository", lambda: _BrokenTree())
     with pytest.raises(HTTPException) as e:
         await R.get_run_costs(_Auth(), ids="1")
     assert e.value.status_code == 503

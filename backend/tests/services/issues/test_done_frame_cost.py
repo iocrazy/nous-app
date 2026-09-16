@@ -15,8 +15,16 @@ async def _async(v):
 
 class _Points:
     async def charged_points_for_references(self, *, reference_type, reference_ids):
-        assert reference_type == "agent_run" and reference_ids == ["77"]
-        return {"77": 0.82}
+        # 整棵树，不是 root 那一行（3c 终审 I2）：77 委派出去一条子 run 78，
+        # 两条各有自己的 consume 流水，帧上的数是它们的合计。
+        assert reference_type == "agent_run" and sorted(reference_ids) == ["77", "78"]
+        return {"77": 0.62, "78": 0.20}
+
+
+class _Trees:
+    async def run_ids_in_trees(self, root_ids):
+        assert root_ids == [77]
+        return {"77": ["77", "78"]}
 
 
 class _Repo:
@@ -43,7 +51,7 @@ class _Boom:
 
 def _patch(monkeypatch, repo, published):
     import app.repositories.agent_runs_repository as runs_mod
-    import app.repositories.points_repository as points_mod
+    import app.services.billing.run_tree_points as tree_mod
     from app.services.issues import issue_chat_stream as ics
 
     async def _fake_publish(issue_id, payload):
@@ -54,7 +62,10 @@ def _patch(monkeypatch, repo, published):
     monkeypatch.setattr(ics, "_run_output_keys", lambda rid: _async([]))
     if repo is not None:
         monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: repo)
-        monkeypatch.setattr(points_mod, "get_points_repository", lambda: _Points())
+        # 积分那一侧现在走 ``charged_points_for_run_trees``，它在自己的模块里持有
+        # 两个仓库工厂 —— 桩要打在那里，不是 ``app.repositories.*`` 的模块级名字上。
+        monkeypatch.setattr(tree_mod, "get_agent_runs_repository", lambda: _Trees())
+        monkeypatch.setattr(tree_mod, "get_points_repository", lambda: _Points())
     return ics
 
 
@@ -65,6 +76,7 @@ async def test_done_frame_carries_cost_and_points(monkeypatch):
     await ics.publish_status(5, "done", run_id=77)
 
     assert published[-1]["cost_cents"] == 0.82
+    # 0.62（root）+ 0.20（委派出去那条）—— 帧上的数回答的是「这次回合扣了多少」。
     assert published[-1]["charged_points"] == 0.82
 
 
@@ -79,10 +91,10 @@ async def test_done_frame_still_goes_out_when_both_reads_fail(monkeypatch):
         async def charged_points_for_references(self, **_kw):
             raise RuntimeError("connection reset")
 
-    import app.repositories.points_repository as points_mod
+    import app.services.billing.run_tree_points as tree_mod
 
     ics = _patch(monkeypatch, _Boom(), published)
-    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _BrokenPoints())
+    monkeypatch.setattr(tree_mod, "get_points_repository", lambda: _BrokenPoints())
 
     await ics.publish_status(5, "done", run_id=77)
 
@@ -111,10 +123,10 @@ async def test_a_run_nobody_billed_reports_cost_without_points(monkeypatch):
         async def charged_points_for_references(self, **_kw):
             return {}
 
-    import app.repositories.points_repository as points_mod
+    import app.services.billing.run_tree_points as tree_mod
 
     ics = _patch(monkeypatch, _Repo(), published)
-    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _NoCharge())
+    monkeypatch.setattr(tree_mod, "get_points_repository", lambda: _NoCharge())
 
     await ics.publish_status(5, "done", run_id=77)
 
@@ -135,10 +147,10 @@ async def test_a_failed_points_read_keeps_the_cost_that_was_already_read(monkeyp
         async def charged_points_for_references(self, **_kw):
             raise RuntimeError("connection reset")
 
-    import app.repositories.points_repository as points_mod
+    import app.services.billing.run_tree_points as tree_mod
 
     ics = _patch(monkeypatch, _Repo(), published)
-    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _BrokenPoints())
+    monkeypatch.setattr(tree_mod, "get_points_repository", lambda: _BrokenPoints())
 
     await ics.publish_status(5, "done", run_id=77)
 
@@ -151,9 +163,9 @@ async def test_a_failed_run_row_read_still_reports_the_points(monkeypatch):
     published: list[dict] = []
     ics = _patch(monkeypatch, _Boom(), published)
 
-    import app.repositories.points_repository as points_mod
+    import app.services.billing.run_tree_points as tree_mod
 
-    monkeypatch.setattr(points_mod, "get_points_repository", lambda: _Points())
+    monkeypatch.setattr(tree_mod, "get_points_repository", lambda: _Points())
 
     await ics.publish_status(5, "done", run_id=77)
 

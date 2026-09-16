@@ -5807,7 +5807,7 @@
   },
   "cost": {
     "tailTokens": "{{p}} 输入 · {{c}} 输出 tokens",
-    "charged": "已扣 ◇ {{n}}",
+    "charged": "已扣 ◇ {{n}}（含子 agent）",
     "notCharged": "未扣费（{{why}}）",
     "notChargedPlain": "未扣费"
   },
