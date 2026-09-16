@@ -1082,7 +1082,8 @@ class AgentRunner:
                 )
 
                 # ── PostToolUse chain (mirrors run_turn) ────────────────────
-                # Fires CostAuditor + MemoryHarvester side-effects, which the
+                # Fires the registered PostToolUse hooks (MemoryHarvester
+                # today; CostAuditor was retired in 3c §3.2), which the
                 # streaming path previously skipped entirely.
                 post_result = await self._run_post_hooks(
                     composed=composed,

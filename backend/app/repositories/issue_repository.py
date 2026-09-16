@@ -307,10 +307,10 @@ class IssueRepository:
         """``identifier ILIKE OR title ILIKE OR description ILIKE``，或 None。
 
         转义在这里做（拼模式者负责转义），``ESCAPE`` 由 ``.ilike(escape=…)``
-        声明——Postgres 的 LIKE 没有默认转义符，只做 Python 侧等于没做。
-        两者分工：``escape_like`` 是机制（用户搜一个 ``%`` 要匹配 ``%``
-        本身，而不是匹配一切），``escape=`` 是把那个转义符显式钉死，不依赖
-        服务器默认。
+        声明。反斜杠**本来就是** Postgres LIKE / ILIKE 的默认转义符，所以两者
+        分工是：``escape_like`` 是机制（用户搜一个 ``%`` 要匹配 ``%`` 本身，
+        而不是匹配一切），``escape=`` 是把那个默认显式钉死、不依赖服务器配置。
+        都要有 —— 但缺了 ``ESCAPE`` 不等于转义失效（``ESCAPE ''`` 才是关掉它）。
         """
         term = (q or "").strip()
         if not term:

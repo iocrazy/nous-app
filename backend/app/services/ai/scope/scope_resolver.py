@@ -378,7 +378,8 @@ async def _audit(
       - Semantically: its own migration comment already designates it for
         "Hook outcomes (which hooks fired, what they decided)" — a scope
         resolution decision is exactly a hook-shaped outcome
-        (``CostAuditorHook`` already writes to this same table).
+        (``CostAuditorHook`` used to write to this same table; it was
+        retired in 3c §3.2, but the table's purpose is unchanged).
       - Mechanically: its PK is ``gen_random_uuid()`` (no per-run sequence
         counter to collide with). ``agent_run_transcript_events`` uses a
         UNIQUE(run_id, seq) tracked by ``RunRecorder``'s in-memory
@@ -429,7 +430,7 @@ async def audit_resolution(
         return
     if rid == 0:
         # Sentinel run_id used in test paths without a real RunRecorder
-        # (mirrors CostAuditorHook's convention).
+        # (the convention came from CostAuditorHook, retired in 3c §3.2).
         return
 
     payload = {

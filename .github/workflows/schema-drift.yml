@@ -260,6 +260,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 上面 paths 那条注释里的数词已经错过四次，每次靠的都是「请重数」这句话。
+      # 三行把它变成门禁：grep 数实际有多少个真库 step，从注释里抽那个英文数词，
+      # 不等就红。放在最前面 —— 它不需要数据库，一秒钟给答案。
+      - name: The step count in the comment must match the steps that exist
+        run: |
+          have=$(grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml)
+          said=$(grep -oE 'what "green" means for all [a-z-]+' .github/workflows/schema-drift.yml | head -1 | awk '{print $NF}')
+          python3 -c 'import sys; o="zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(); t={"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90}; v=lambda w:sum(o.index(p) if p in o else t.get(p,-10**6) for p in w.split("-")); s,h=sys.argv[1],int(sys.argv[2]); sys.exit(0 if v(s)==h else "::error::schema-drift.yml says \"{}\" ({}) real-database steps but there are {}. Recount, do not increment.".format(s,v(s),h))' "$said" "$have"
+
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"

@@ -194,7 +194,9 @@ migration 274 的 `rpc_user_media_text_search` / `rpc_user_owned_platform_ids` �
 
 ### ILIKE 模式的转义责任要跟着模式走
 
-`rpc_user_media_text_search` 收的是拼好的模式（`%foo%`）而不是裸词，所以**谁拼模式谁负责转义**。长期没人负责：用户搜一个 `%` 就是一次全表匹配，`_` 同理。Postgres 的 LIKE 没有默认转义符，**光在 Python 侧转义是无效的**，SQL 侧每个 ILIKE 都得写 `ESCAPE '\\'` 才算数。两边配套见 `app/services/library/like_escape.py` 与 migration 463。
+`rpc_user_media_text_search` 收的是拼好的模式（`%foo%`）而不是裸词，所以**谁拼模式谁负责转义**。长期没人负责：用户搜一个 `%` 就是一次全表匹配，`_` 同理。
+
+反斜杠是 Postgres `LIKE` / `ILIKE` 的**默认**转义符，所以 Python 侧的 `escape_like` 就是让 `%` `_` 匹配它们自己的那个机制。SQL 侧显式写 `ESCAPE '\'` 是把这个默认**钉死**，不依赖服务器配置（也让读语句的人不必去查默认是什么）——两者一个是机制、一个是声明，都要有，但缺了 `ESCAPE` 不等于转义失效。两边配套见 `app/services/library/like_escape.py` 与 migration 463。
 
 ### 绝不把宿主环境和可预测路径交给不可信输出
 

@@ -1,11 +1,11 @@
 """Bridge adapter — wrap existing services/hooks/* into the new Hook protocol.
 
 Wave F (F9). The codebase already has a Hook framework at
-``app.services.hooks`` (BudgetGuard, CostAuditor, MemoryHarvester) with
-its own HookContext/HookResult shape. Wave 5c (C3) added a new uniform
-protocol at ``agent_framework.hooks_protocol``.
+``app.services.hooks`` (BudgetGuard and MemoryHarvester; CostAuditor was
+retired in 3c §3.2) with its own HookContext/HookResult shape. Wave 5c
+(C3) added a new uniform protocol at ``agent_framework.hooks_protocol``.
 
-Rather than rewrite the existing 3 hooks, this bridge wraps them as the
+Rather than rewrite the existing hooks, this bridge wraps them as the
 new Protocol so HookRegistry can manage them alongside new hooks. Lets
 us:
   - Migrate gradually (new hooks use new protocol; existing keep working)
