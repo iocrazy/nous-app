@@ -36,6 +36,7 @@ from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.empty_response import diagnose_empty_response
 from app.services.ai.runner.events import emit as emit_event
+from app.services.ai.runner.narration_events import emit_partial_narration
 from app.services.ai.runner.reasoning import (
     ReasoningStreamFilter,
     model_uses_reasoning,
@@ -792,18 +793,14 @@ class AgentRunner:
                 )
                 return
 
-            # 3c §4.1：与非流式同一条事件。累的是**过滤后**的文本，所以 transcript
-            # 里读到的与气泡里读到的逐字相同（reason_filter 吃掉的 <think> 不该上
-            # 时间线）。
-            narration = "".join(step_text).strip()
-            if narration:
-                await emit_event(
-                    recorder,
-                    "assistant",
-                    {"content": narration, "partial": True, "step": iteration},
-                    turn=1,
-                    step=iteration,
-                )
+            # 3c §4.1：与非流式同一条事件，契约在 emit_partial_narration 的
+            # docstring 里。累的是**过滤后**的文本，所以 transcript 里读到的与气泡
+            # 里读到的逐字相同（reason_filter 吃掉的 <think> 不该上时间线）。
+            # ⚠️ 逐字相同有一个边界：`reason_filter.flush()` 的 tail 不进
+            # step_text。那段只在 <think> 从未闭合（截断）时出现，内容是**没说完的
+            # 思考片段**本身；推给调用方是「有总比空白好」的降级显示，不是模型的
+            # 叙述，不该上时间线。
+            await emit_partial_narration(recorder, "".join(step_text), step=iteration)
 
             # Append assistant tool-use message
             assistant_msg = {
@@ -1927,6 +1924,9 @@ class AgentRunner:
                 # caller (chat + summarize/translate/caption/… services) gets
                 # only the answer; no-op for non-thinking models. raw stays full.
                 content = strip_reasoning(msg.get("content") or "")
+                # 3c §4.1：这是最终回答那条，**刻意不带 ``partial`` 键**（不是
+                # ``partial: False``）——折叠器按键是否存在分流。契约全文见
+                # ``narration_events.emit_partial_narration`` 的 docstring。
                 await emit_event(recorder, "assistant", {"content": content})
                 if recorder is not None and hasattr(recorder, "record_event"):
                     # A turn that ends with neither text nor a tool call
@@ -1960,17 +1960,11 @@ class AgentRunner:
             assistant_msg_index = len(messages) - 1
             # 3c §4.1：这一步模型先说的话。在这之前 ``assistant`` 只在「这一步没有
             # 工具调用」时写（上面的 ``if not tool_calls:`` 分支），所以「先交代
-            # 现状、再动手」的文本从没进过 transcript。``partial`` 把它与最终回答
-            # 分开，折叠器按这个键分流。
-            narration = strip_reasoning(msg.get("content") or "")
-            if narration:
-                await emit_event(
-                    recorder,
-                    "assistant",
-                    {"content": narration, "partial": True, "step": iteration},
-                    turn=1,
-                    step=iteration,
-                )
+            # 现状、再动手」的文本从没进过 transcript。契约（``partial`` 键、坐标
+            # 列、与 tool_call 的先后）在 emit_partial_narration 的 docstring 里。
+            await emit_partial_narration(
+                recorder, strip_reasoning(msg.get("content") or ""), step=iteration
+            )
 
             # Resolve each tool call (with hook chain bracketing).
             for call in tool_calls:

@@ -192,6 +192,63 @@ class _StreamAdapter:
             )
 
 
+STEP_A = "First I check the frames."
+STEP_B = "Now I write the outline."
+
+
+def _tool_call(call_id, skill):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": "Skill", "arguments": '{"skill":"%s"}' % skill},
+    }
+
+
+class _TwoStepStreamAdapter:
+    """两步都带工具调用，各自说一句不同的话。用来钉住 ``step_text`` 每步清零。"""
+
+    def __init__(self):
+        self.rounds = 0
+
+    async def call(self, *a, **k):
+        raise AssertionError("must not fall back to call()")
+
+    async def stream(self, composed, messages, **kw):
+        self.rounds += 1
+        if self.rounds == 1:
+            yield StreamChunk(delta_text=STEP_A)
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {"index": 0, **_tool_call("call_1", "script-outline")}
+                    ]
+                }
+            )
+            yield StreamChunk(
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 10, "completion_tokens": 4},
+            )
+        elif self.rounds == 2:
+            yield StreamChunk(delta_text=STEP_B)
+            yield StreamChunk(
+                tool_call_delta={
+                    "tool_calls": [
+                        {"index": 0, **_tool_call("call_2", "script-expand")}
+                    ]
+                }
+            )
+            yield StreamChunk(
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 12, "completion_tokens": 4},
+            )
+        else:
+            yield StreamChunk(delta_text="Done.")
+            yield StreamChunk(
+                finish_reason="stop",
+                usage={"prompt_tokens": 14, "completion_tokens": 2},
+            )
+
+
 class _NoStreamAdapter:
     """没有 ``stream`` 属性——生产上 chunk_callback 回合走的就是它，stream_turn
     委托 run_turn。"""
@@ -213,9 +270,30 @@ async def test_stream_turn_writes_the_narration_accumulated_from_deltas():
     assert rows[0][0] < rec.of("tool_call")[0][0], rec.events
 
 
+async def test_each_streamed_step_narrates_only_its_own_text():
+    """``step_text`` 在 per-iteration 块里声明，每步清零。把声明提到 ``while`` 外，
+    第二条叙述会带上第一步的文本——只有这个用例会红。"""
+    rec = _Rec()
+    await _drain(_TwoStepStreamAdapter(), rec)
+    rows = _narrations(rec)
+    assert len(rows) == 2, rec.events
+    assert rows[0][1]["content"] == STEP_A
+    assert rows[0][1]["step"] == 1 and rows[0][1]["_step"] == 1
+    # 第二条恰好是 B，不含 A —— 不是 startswith/in，是相等。
+    assert rows[1][1]["content"] == STEP_B, rows[1][1]["content"]
+    assert rows[1][1]["step"] == 2 and rows[1][1]["_step"] == 2
+    # 每条都排在它那一步的 tool_call 之前。
+    tool_seqs = [seq for seq, _p in rec.of("tool_call")]
+    assert len(tool_seqs) == 2, rec.events
+    assert rows[0][0] < tool_seqs[0] < rows[1][0] < tool_seqs[1], rec.events
+
+
 async def test_buffered_fallback_carries_the_narration_through_run_turn():
     rec = _Rec()
     await _drain(_NoStreamAdapter(), rec)
     rows = _narrations(rec)
     assert len(rows) == 1 and rows[0][1]["content"] == NARRATION, rec.events
+    # 与另两条用例对齐：坐标列与 payload 的 step 都要落到位。
+    assert rows[0][1]["step"] == 1
+    assert rows[0][1]["_step"] == 1 and rows[0][1]["_turn"] == 1
     assert rows[0][0] < rec.of("tool_call")[0][0], rec.events
