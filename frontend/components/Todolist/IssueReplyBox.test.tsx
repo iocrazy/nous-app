@@ -301,6 +301,45 @@ const SHOT_OUTPUT: OutputObject = {
 };
 
 const searchAssetsAccessible = vi.fn();
+// The two hand-offs the composer owns: the issue key reaching the staged-chip
+// strip and the `@` tab (3c Task 17 收尾).
+//
+// Both are recording mocks that still render / call the real thing, so nothing
+// else in this file changes behaviour. They exist because the failure is
+// silent: drop either forward and every assertion here stays green while the
+// picker rows and the staged chips label themselves with the issue already on
+// screen — the exact defect 修复轮 2 fixed one layer down.
+const pickerProps: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('../ChatAttachmentPicker', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../ChatAttachmentPicker')>();
+  return {
+    ...mod,
+    ChatAttachmentPicker: (props: React.ComponentProps<typeof mod.ChatAttachmentPicker>) => {
+      pickerProps.last = props as unknown as Record<string, unknown>;
+      return (
+        <div
+          data-testid="attachment-picker-probe"
+          data-current-issue-key={props.currentIssueKey ?? ''}
+        >
+          <mod.ChatAttachmentPicker {...props} />
+        </div>
+      );
+    },
+  };
+});
+
+const outputsTabOptions: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('../chat/useMentionOutputsTab', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../chat/useMentionOutputsTab')>();
+  return {
+    ...mod,
+    useMentionOutputsTab: (opts: Parameters<typeof mod.useMentionOutputsTab>[0]) => {
+      outputsTabOptions.last = opts as unknown as Record<string, unknown>;
+      return mod.useMentionOutputsTab(opts);
+    },
+  };
+});
+
 vi.mock('../../services/assetsService', () => ({
   searchAssetsAccessible: (...args: unknown[]) => searchAssetsAccessible(...args),
   // The staged chip's loadout menu fetches this on open. Never called in
@@ -1165,5 +1204,35 @@ describe('IssueReplyBox — the Assets tab', () => {
     );
     expect(addToast.mock.calls[0][0]).not.toContain('{{');
     expect(addToast.mock.calls[0][0]).not.toContain('attachmentFailureReason');
+  });
+});
+
+/**
+ * 议题坐标从回复框转交出去的两处（3c Task 17 收尾）。
+ *
+ * 用 props 快照钉住，而不是驱动被 mock 的编辑器打出一个查询词：那条路要给
+ * tiptap 的 mock 加改查询词的能力，是一次独立的测试基建改动。快照便宜且足以
+ * 说明问题 —— 断掉时两端消费方的用例照样全绿。
+ */
+describe('IssueReplyBox — 把议题编号转交下去', () => {
+  const ISSUE = '727145299382534000';
+
+  it('交给 staged chip 那条带子，chip 才知道哪个来源算「别处」', () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} issueKey="MH-96" />);
+    expect(screen.getByTestId('attachment-picker-probe').getAttribute('data-current-issue-key')).toBe('MH-96');
+    expect(pickerProps.last?.currentIssueKey).toBe('MH-96');
+  });
+
+  it('交给 @ 页签，选单行才知道哪一行来自别处', () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} issueKey="MH-96" />);
+    expect(outputsTabOptions.last?.issueKey).toBe('MH-96');
+  });
+
+  it('没有议题编号时交出 null，而不是让下游各自猜', () => {
+    // null = 不比较 = 全标。它是一个**答案**（「不知道自己在哪」），所以必须真的
+    // 传下去，不能靠下游的默认值碰巧一致。
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    expect(pickerProps.last?.currentIssueKey).toBeNull();
+    expect(outputsTabOptions.last?.issueKey).toBeNull();
   });
 });
