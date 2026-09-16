@@ -78,3 +78,24 @@ def test_charged_points_land_on_the_matching_run_only():
         ("1", 21.0),
         ("2", None),
     ]
+
+
+def test_charged_points_of_zero_is_not_the_same_as_never_charged():
+    """扣了 0 是一个真值，必须原样透出——被 ``or`` / falsy 判断吞成 None 的话，
+    「这次真的一分没扣」就跟「压根没走积分链」混成一句话了。"""
+    out = compute_rollup(
+        ISSUE, [_run(1, 0.0)], [], 0, {"kind": "manual"}, charged_points={"1": 0.0}
+    )
+    assert out["runs"][0]["charged_points"] == 0.0
+
+
+def test_the_empty_shape_is_not_shared_between_issues():
+    """``EMPTY_EFFICIENCY`` 里的 ``turn_end_reasons`` 是个 dict。浅拷贝会把模块
+    常量本身交给调用方，谁改一下就污染了全进程后续每一个议题。"""
+    from app.services.issues.issue_rollup import EMPTY_EFFICIENCY
+
+    a = compute_rollup(ISSUE, [], [], 0, {"kind": "manual"})
+    b = compute_rollup(ISSUE, [], [], 0, {"kind": "manual"})
+    a["efficiency"]["turn_end_reasons"]["completed"] = 1
+    assert b["efficiency"]["turn_end_reasons"] == {}
+    assert EMPTY_EFFICIENCY["turn_end_reasons"] == {}

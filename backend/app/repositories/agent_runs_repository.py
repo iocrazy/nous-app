@@ -883,12 +883,17 @@ class AgentRunsRepository(AsyncpgRepository):
                         "deliverables"
                     ),
                     func.count().filter(timed).label("timed_runs"),
+                    # FILTER 挂在 ``sum`` 上，不是挂在 ``extract`` 上——Postgres
+                    # 的 FILTER 只对聚合函数合法，挂错位置 SQLAlchemy 在建语句时
+                    # 就 AttributeError，而那一抛正好落进下面的 except，整个效率账
+                    # 会永远静默返回 {}。``test_efficiency_sql_compiles_and_folds``
+                    # 钉住这个形状。
                     func.coalesce(
                         func.sum(
                             func.extract(
                                 "epoch", AgentRuns.ended_at - AgentRuns.started_at
-                            ).filter(timed)
-                        ),
+                            )
+                        ).filter(timed),
                         0,
                     ).label("total_seconds"),
                 )

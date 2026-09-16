@@ -125,6 +125,9 @@ def compute_rollup(
     # 成 root-only 的计数会漏掉子 agent 干的活，换成全体求和的花费会把子 agent 的钱
     # 数两遍。
     eff = {**EMPTY_EFFICIENCY, **(efficiency or {})}
+    # 浅拷贝只复制顶层：没带 turn_end_reasons 的调用方会拿到 EMPTY_EFFICIENCY 里
+    # 那一个 dict 本身，谁改一下就污染了之后每一个议题。重新包一层。
+    eff["turn_end_reasons"] = dict(eff.get("turn_end_reasons") or {})
     delivered = int(eff.get("deliverables") or 0)
     eff["cost_per_deliverable_cents"] = (
         round(spent / delivered, 4) if delivered > 0 else None
