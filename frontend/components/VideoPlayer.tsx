@@ -142,6 +142,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedAt = useRef(0);
   const lastPushedAt = useRef(0);
+  /**
+   * Has this media's open-time reconcile finished?
+   *
+   * Until it has, this device does not know whether another one is further
+   * along, so ANY push from here is a blind last-writer-wins that can clobber
+   * a newer position. Observed on production before this gate existed: the
+   * periodic push fires on the first `timeupdate` after mount (its throttle
+   * window starts satisfied), and the resume seek itself produces that
+   * `timeupdate` — so opening a video on device A overwrote the position
+   * device B had just written, every time.
+   *
+   * Losing a push inside this window costs a few seconds that localStorage
+   * still holds and the next open will send. Clobbering costs another
+   * device's real progress. The trade is not close.
+   */
+  const syncSettled = useRef(false);
   /** The media identity the current element has already been seeked for.
    * Quality switches re-attach HLS and re-fire `loadedmetadata`; without this
    * the restore would fight the switch's own position preservation. */
@@ -195,35 +211,52 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     async (video: HTMLVideoElement) => {
       if (!viewerId) return;
       const duration = video.duration;
-      if (!Number.isFinite(duration) || duration <= 0) return;
-
-      const local = getEntry(viewerId, positionKey);
-      if (local && !local.sv) {
-        const sv = await pushRemotePosition(positionKey, local.t, local.d);
-        if (sv) markSynced(viewerId, positionKey, sv);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        // Nothing to reconcile against and nothing worth pushing either, so
+        // opening the gate here costs nothing and avoids wedging it shut.
+        syncSettled.current = true;
+        return;
       }
 
-      const remote = await fetchRemotePosition(positionKey);
-      const decision = reconcile(getEntry(viewerId, positionKey), remote);
-      if (decision.source !== 'remote' || !decision.serverUpdatedAt) return;
-      if (!isResumable(decision.seconds, duration)) return;
+      try {
+        const local = getEntry(viewerId, positionKey);
+        if (local && !local.sv) {
+          // Bypasses `pushPosition` deliberately: the gate is still shut, and
+          // this is the one push that must happen before it opens.
+          const sv = await pushRemotePosition(positionKey, local.t, local.d);
+          if (sv) markSynced(viewerId, positionKey, sv);
+        }
 
-      const seconds = decision.seconds as number;
-      adoptRemote(viewerId, positionKey, seconds, duration, decision.serverUpdatedAt);
+        const remote = await fetchRemotePosition(positionKey);
+        const decision = reconcile(getEntry(viewerId, positionKey), remote);
+        if (decision.source !== 'remote' || !decision.serverUpdatedAt) return;
+        if (!isResumable(decision.seconds, duration)) return;
 
-      // Two reasons not to move the playhead, even though the value is worth
-      // storing either way:
-      //   - the viewer already pressed play on THIS device while the request
-      //     was in flight; yanking them mid-sentence is worse than being two
-      //     minutes behind another device;
-      //   - we are already essentially there, so the seek would be a visible
-      //     jump that gains nothing.
-      if (!video.paused) return;
-      if (Math.abs(video.currentTime - seconds) <= MIN_SEEK_DELTA_SECONDS) return;
+        const seconds = decision.seconds as number;
+        adoptRemote(viewerId, positionKey, seconds, duration, decision.serverUpdatedAt);
 
-      video.currentTime = seconds;
-      setCurrentTime(seconds);
-      onTimeUpdate(seconds);
+        // Two reasons not to move the playhead, even though the value is worth
+        // storing either way:
+        //   - the viewer already pressed play on THIS device while the request
+        //     was in flight; yanking them mid-sentence is worse than being two
+        //     minutes behind another device;
+        //   - we are already essentially there, so the seek would be a visible
+        //     jump that gains nothing.
+        if (!video.paused) return;
+        if (Math.abs(video.currentTime - seconds) <= MIN_SEEK_DELTA_SECONDS) return;
+
+        video.currentTime = seconds;
+        setCurrentTime(seconds);
+        onTimeUpdate(seconds);
+      } finally {
+        // Open the gate even on failure: a device that could not reach the
+        // server must still record progress locally AND be able to push it
+        // once the network returns, or an offline session never syncs at all.
+        syncSettled.current = true;
+        // Start the periodic window now, so the first push is a full interval
+        // away rather than on the very next `timeupdate`.
+        lastPushedAt.current = Date.now();
+      }
     },
     [viewerId, positionKey, onTimeUpdate],
   );
@@ -237,6 +270,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pushPosition = useCallback(
     async (t: number, d: number, opts: { keepalive?: boolean } = {}) => {
       if (!viewerId) return;
+      if (!syncSettled.current) return; // see `syncSettled`
       const sv = await pushRemotePosition(positionKey, t, d, opts);
       if (sv) markSynced(viewerId, positionKey, sv);
     },
@@ -378,6 +412,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsAutoQuality(true);
     setBuffered(0);
     hlsRecoveryAttempts.current = 0;
+    syncSettled.current = false;
 
     if (isHls && Hls.isSupported()) {
       const hlsConfig: Partial<Hls['config']> = {};
@@ -559,7 +594,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onTimeUpdate(saved);
         }
 
-        if (viewerId) void syncOnOpen(video);
+        if (viewerId) {
+          // The service swallows its own errors, but a caller that lets a
+          // rejection escape `void` would surface as an unhandled rejection
+          // in someone else's console. Log and move on — the `finally` inside
+          // has already opened the gate.
+          syncOnOpen(video).catch((err) =>
+            console.error('[VideoPlayer] open-time sync failed', err),
+          );
+        } else {
+          // Signed out: nothing to reconcile, and `pushPosition` no-ops anyway.
+          syncSettled.current = true;
+        }
       }
     };
 
