@@ -7159,7 +7159,7 @@ spec §7 把「存量产出正文回填」列在明确不做里；Task 22 实测
 ### 五、本轮记的票
 
 以终审报告的「记票合并表」41 条为底（ledger 约 50 条散票去重归并），加终审修复批与第三批
-验收之后新发现的 10 条，共 **51 条**。归属：**已解决** = 本期后续 PR 吃掉；**3d** = 下一期顺手；
+验收之后新发现的 11 条，共 **52 条**。归属：**已解决** = 本期后续 PR 吃掉；**3d** = 下一期顺手；
 **票** = 独立开票；**用户** = 需要产品决策。
 
 | # | 内容 | 位置 | 级别 | 归属 | 状态 |
@@ -7207,7 +7207,7 @@ spec §7 把「存量产出正文回填」列在明确不做里；Task 22 实测
 | K41 | `add_points` 非原子读-改-写；`cost_points` 小数 vs `amount` 整数系统性差；两条按变量名钉的既有守卫 | 既有 | Minor | 票 | 否（既有，本期未加剧） |
 | K42 | **B3：workforce 委派子 run 的花费不进 root 树总额**，`/usage/issues`、驾驶舱 Budget、效率账分子在有委派时少计 | `run_recorder._finish` 折 fold store `by_child` / `usage_repository.issue_totals` | **Important** | **3d 第 0 票（P1）** | 否，见 (d)。真栈实例 `¢0.1115` / `¢3.1952` |
 | K43 | 消耗行 hover 的 `(incl. sub-agents)` 文案无条件，单 run 也这么说（NF1） | `RunCostTail` 文案 | Minor | 3d | 否 |
-| K44 | 崩溃词与 `turn_end` 分类器词表交集为空这件事没有断言钉住（NF3） | `tests/runner/test_turn_end_reasons.py` 一带 | Minor（测试质量） | 票 | 否 |
+| K44 | 崩溃词与 `turn_end` 分类器词表交集为空这件事没有断言钉住（NF3） | `tests/runner/test_turn_end_reasons.py` 一带（⚠️ **位置是推断** —— 终审只记了「缺这条断言」，没指明该断言归哪个文件） | Minor（测试质量） | 票 | 否 |
 | K45 | `_finish` 的 rowcount 幂等守卫不罩 `project_run_best_effort` 投影（NF4）——CAS 没抢到时再投一次会覆盖清扫器刚写的真终态 | `run_recorder.py` | Minor | 票 | 否（`liveness_scanner._mark_dead` 那边已有这道守卫） |
 | K46 | `run_ids_in_trees` 问一个中间节点只回它自己（不递归） | `agent_runs_repository.run_ids_in_trees` | Minor | 3d | 否。现状正确（两个宿主问的都是 root），将来要给子 run 单独画消耗行得换递归 CTE |
 | K47 | 树合计多一次 RTT（先取树、再取流水） | `charged_points_for_run_trees` | Minor（性能） | 3d | 否，与 K39 同一个被整屏重取的端点 |
@@ -7215,6 +7215,7 @@ spec §7 把「存量产出正文回填」列在明确不做里；Task 22 实测
 | K49 | `test_revert_output_integration.py` 的 `fx` 夹具 `finally` 不清 `search_docs`，本地复用库累积孤儿投影行（`run_id` NULL，外键 CASCADE 带不走） | `tests/db/test_revert_output_integration.py` | Minor（测试基建） | 票 | 否。CI 每次新建库所以看不出来，也不会假红；是补充票的孤儿普查第一次让它们现形 |
 | K50 | `agent_run_events` / `provider_monthly_spend` 停写后的 DROP 迁移 | 两张表 | Minor | 票（等一个发布周期） | 否 |
 | K51 | `turn` 仍硬编码 1 | 坐标写入处 | Minor | 票 | 否——改它牵动 3a 的坐标契约，本期**明确不做** |
+| K52 | `app/services/ai/runner/` 没有 README，而 Task 19 起 `replay.py` 会改变模型看到什么，CLAUDE.md「Model Experience 三问」从这一刻起咬住它（D2） | `app/services/ai/runner/` | Minor | 票 | 否——既有缺口（`replay.py` 本来就没 README），但本期是第一次**改变**它喂给模型的内容 |
 
 **已被后续 PR 吃掉、不再需要开票的**：`point_transactions` 缺 partial index（Task 9 带 mig 474）；
 `InboxKind` 四处口径（Task 5 的 `schemas/inbox_kinds.py` 单一来源）；`_finish` 不是唯一终态写方的
@@ -7231,7 +7232,7 @@ spec §7 把「存量产出正文回填」列在明确不做里；Task 22 实测
 - **D2** — `runner/replay.py` 现在会改变模型看到什么（Task 19 让回放跳过 `assistant{partial:true}`
   行，理由正确：真实历史里那一步是**一条**带 text + tool_use 的消息，单独重放文本会造成相邻
   同角色消息、Anthropic 拒绝），但 `app/services/ai/runner/` **没有 README**，CLAUDE.md 的
-  「Model Experience 三问」从这一刻起咬住它。**记票**：给该目录补一份 README，三问覆盖
+  「Model Experience 三问」从这一刻起咬住它。**记票 K52**：给该目录补一份 README，三问覆盖
   `replay.py` + `narration_events.py` 这一对（模型看到的是 `user` / 非 partial `assistant` 两类行；
   叙述行不进历史所以 fork 上下文不随叙述条数增长；fork 是另起一次请求，本模块不承诺前缀复用）。
 - **D3** — `agent_runs_repository.py` 两处 docstring 的口径追不上实现（`efficiency_for_issue` 的
