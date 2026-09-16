@@ -131,6 +131,16 @@ interface IssueListViewProps {
    * and the Group-by-Project header expose a "+ New project" affordance.
    */
   onCreateProject?: (name: string) => Promise<{ id: string; name: string }>;
+  /**
+   * Search moved server-side (3c §2.3). Called with the trimmed box contents
+   * 250 ms after the last keystroke; '' means "stop searching". When absent
+   * the box still renders but nothing is fetched — the caller owns the query.
+   */
+  onSearchChange?: (q: string) => void;
+  /** The query the rows in `issues` were fetched with, '' / undefined if none. */
+  serverQuery?: string;
+  /** Server-side count of matching-and-visible issues, for "N of M". */
+  totalCount?: number | null;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 20 }) => (
@@ -445,7 +455,7 @@ const IssuePipeline: React.FC<{
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject, selectedIssueId = null }) => {
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject, selectedIssueId = null, onSearchChange, serverQuery, totalCount }) => {
   const { t } = useTranslation();
   const { teamId } = useParams<{ teamId: string }>();
   // Sub-issue done/total per parent, aggregated from the FULL unfiltered list so
@@ -530,6 +540,14 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onNewIssue, readOnly]);
+
+  // 服务端搜索（3c §2.3）。250 ms——比资产页签的 200 ms 长，因为这一次击键
+  // 换的是一整页议题，而不是一个弹层的行。
+  useEffect(() => {
+    if (!onSearchChange) return;
+    const id = setTimeout(() => onSearchChange(search.trim()), 250);
+    return () => clearTimeout(id);
+  }, [search, onSearchChange]);
 
   const colScopeKey = teamId ?? 'global';
   const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
@@ -619,15 +637,12 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   }, [refreshApprovals]);
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim();
+    // 文本匹配已经在服务端做完（3c）。这里再筛一次会按前端自己的 haystack
+    // 二次裁剪服务端的命中——用户会看到「搜到了却不显示」，而两处口径的差异
+    // 不会有任何地方报错。
     const byPhase = phaseFilter ? filteredByPanel.filter((i) => issuePhase(i) === phaseFilter) : filteredByPanel;
-    const byWakeup = scheduledOnly ? byPhase.filter(hasWakeup) : byPhase;
-    if (!q) return byWakeup;
-    return byWakeup.filter((i) => {
-      const hay = `${i.identifier} ${i.title} ${i.description ?? ''} ${i.assignee?.name ?? i.assignee_user_label ?? ''}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [filteredByPanel, search, phaseFilter, scheduledOnly]);
+    return scheduledOnly ? byPhase.filter(hasWakeup) : byPhase;
+  }, [filteredByPanel, phaseFilter, scheduledOnly]);
 
   // harness 2b-2 §5-2: how many issues have a wake-up waiting to fire. Same
   // rule as the phase counts — off the scoped list, not the filtered one.
@@ -778,6 +793,13 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             <Kbd>/</Kbd>
           </span>
         </div>
+        {/* While searching, the page length alone would only ever say `limit`.
+            `totalCount` is the server's matching-and-visible count. */}
+        <span data-testid="issue-list-count" className="shrink-0 text-[12px] text-ink-500 tabular-nums">
+          {serverQuery
+            ? t('issues.countOfTotal', '{{n}} of {{total}} issues', { n: filtered.length, total: totalCount ?? filtered.length })
+            : t('issues.count', '{{n}} issues', { n: filtered.length })}
+        </span>
         <span
           data-testid="creates-in-badge"
           className={`hidden sm:inline-flex items-center gap-1.5 px-2 py-1 text-[12px] rounded shrink-0 ${

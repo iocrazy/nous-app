@@ -126,6 +126,13 @@ export interface IssueListFilters {
   include_hidden?: boolean;
   limit?: number;
   offset?: number;
+  /**
+   * Free text over identifier / title / description (trgm, mig 166). A filter
+   * on top of visibility, never a widening of it — `total` comes back as the
+   * count of "matching AND visible", so the UI can say "N of M" instead of
+   * silently truncating at `limit`.
+   */
+  q?: string;
 }
 
 /** One issue parked at `needs_followup` with the agent waiting on a human
@@ -189,6 +196,9 @@ export async function listIssues(
   if (filters.include_hidden) params.set('include_hidden', 'true');
   if (filters.limit !== undefined) params.set('limit', String(filters.limit));
   if (filters.offset !== undefined) params.set('offset', String(filters.offset));
+  // Empty / whitespace-only is "not searching": sending it would make the
+  // server build a `%%` predicate that defeats the trgm indexes.
+  if (filters.q && filters.q.trim()) params.set('q', filters.q.trim());
 
   const url = params.toString() ? `${_base}/?${params}` : `${_base}/`;
   const res = await fetch(url, { headers: await getAuthHeaders() });

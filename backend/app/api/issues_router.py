@@ -158,12 +158,18 @@ async def list_issues(
     include_hidden: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=200),
 ) -> IssueListResponse:
     """List issues visible to the authenticated user.
 
     D6.1 team folding: own OR assignee OR member of the issue's team
     (team_members subquery in the repo). The team_id param is a filter on
     top of that visibility, never an authorization input.
+
+    ``q`` 走 ``identifier / title / description`` 三列的 trgm（mig 166）。它和
+    ``team_id`` 同一性质：是**过滤**，叠在可见性之上，永不放宽它。因此
+    ``total`` 是「匹配且可见」的条数，UI 据它显示「N of M issues」而不是静默
+    截断到 ``limit``。
     """
     items, total = await issue_repository.list_for_user(
         user_id=str(auth.user_id),
@@ -173,6 +179,7 @@ async def list_issues(
         include_hidden=include_hidden,
         limit=limit,
         offset=offset,
+        q=q,
     )
     return IssueListResponse(
         items=[Issue.model_validate(_normalise_uuid_strs(r)) for r in items],

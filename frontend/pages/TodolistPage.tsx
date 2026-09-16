@@ -79,6 +79,18 @@ export function TodolistPage() {
   const [issues, setIssues] = useState<UiIssue[]>([]);
   const [issuesLoading, setIssuesLoading] = useState(true);
   const [issuesError, setIssuesError] = useState<string | null>(null);
+  /**
+   * Server-side search (3c §2.3). `query` is the debounced box contents;
+   * `issuesTotal` is how many issues match it server-side, which is what the
+   * "N of M" count reports — the page itself only ever holds `limit` rows.
+   * The query lives in a ref too so `refreshIssues` can read it without taking
+   * it as a dependency: every caller of that callback (refresh button, post-
+   * create re-read) must keep the active search, and putting it in the deps
+   * would re-run the mount effect and re-fetch agents on every keystroke.
+   */
+  const [query, setQuery] = useState('');
+  const [issuesTotal, setIssuesTotal] = useState<number | null>(null);
+  const queryRef = useRef('');
   // Sub-issue done/total per parent, from the full loaded list — shared by the
   // list rows (recomputed inside IssueListView) and the open detail header.
   const subtaskCounts = useMemo(() => computeSubtaskCounts(issues), [issues]);
@@ -178,9 +190,15 @@ export function TodolistPage() {
     setIssuesLoading(true);
     setIssuesError(null);
     try {
-      const filters = teamIdNum ? { team_id: teamIdNum, limit: 200 } : { limit: 200 };
+      const q = queryRef.current.trim();
+      const filters = {
+        ...(teamIdNum ? { team_id: teamIdNum } : {}),
+        limit: 200,
+        ...(q ? { q } : {}),
+      };
       const resp = await listIssues(filters);
       setIssues(resp.items.map((r) => toUiIssue(r, agentMap, projectMap)));
+      setIssuesTotal(resp.total);
     } catch (err) {
       setIssuesError(err instanceof Error ? err.message : 'Failed to load issues');
     } finally {
@@ -227,6 +245,20 @@ export function TodolistPage() {
   useEffect(() => {
     mapsRef.current = { agentsById, projectsById };
   }, [agentsById, projectsById]);
+
+  // Re-fetch when the debounced query changes (3c §2.3). `fetchedQueryRef`
+  // starts at '' — the same value `query` has on mount and across a team
+  // switch — so those two cases stay with the effect above and never fire a
+  // second, identical request. Clearing the box back to '' IS a change and
+  // does re-fetch, which is how the full list comes back.
+  const fetchedQueryRef = useRef('');
+  useEffect(() => {
+    queryRef.current = query;
+    if (fetchedQueryRef.current === query) return;
+    fetchedQueryRef.current = query;
+    const maps = mapsRef.current;
+    void refreshIssues(maps.agentsById, maps.projectsById);
+  }, [query, refreshIssues]);
 
   // Same reason as `mapsRef`, one step stronger: `t` is a fresh function on
   // every render under i18next, so listing it on `loadSelectedIssue` would
@@ -493,6 +525,9 @@ export function TodolistPage() {
             teamName={teamName ?? undefined}
             onCreateProject={handleCreateProject}
             selectedIssueId={selectedIssue.id}
+            onSearchChange={setQuery}
+            serverQuery={query}
+            totalCount={issuesTotal}
           />
         </div>
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -617,6 +652,9 @@ export function TodolistPage() {
         scope={scope}
         teamName={teamName ?? undefined}
         onCreateProject={handleCreateProject}
+        onSearchChange={setQuery}
+        serverQuery={query}
+        totalCount={issuesTotal}
       />
       {newIssueOpen && (
         <NewIssueDialog
