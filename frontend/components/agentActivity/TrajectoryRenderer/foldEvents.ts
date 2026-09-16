@@ -494,12 +494,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // ({error:"timeout", timed_out:true, timeout_s, elapsed_s}) — a
         // failure with its own badge, never a generic "failed".
         const timedOut = result !== null && result.timed_out === true;
-        const ok = !(result !== null && (result.ok === false || timedOut));
+        // 失败的真来源是**顶层** `error_code`（Task 8）。后端 `tool_error_code` 把三
+        // 种形状归一到它：处理方给的 `error_code`、非 `ok` 的 `outcome`、以及光有
+        // `error` 键——后两种都不带 `ok:false`。只认 `result.ok` 会把 denied、
+        // invalid_args 这类失败读成成功，而动作动词那一行正是靠 `ok` 决定要不要说
+        // "failed"（3c §4.1）。两个判据都要，不是二选一。
+        const ok = !(result !== null && (result.ok === false || timedOut)) && str(p.error_code) === null;
         upsertLine(node, `tool:${ev.seq}`, () => ({
           type: 'tool',
           label: tool,
           ok,
-          durationMs: null,
+          // 这一步花了多久（Task 8 起在 payload 顶层）。缺席保持 null，那正是
+          // 「这次调用还没回来」的判据——`AIChatPanel` 的 `openTool` 读它。
+          durationMs: num(p.duration_ms),
           detail: {
             tool,
             // 动作动词要拿它拼「对象」（3c §4.1）。真 wire 上 `_truncate_payload`
@@ -579,6 +586,9 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
               step,
               at: ev.created_at ?? null,
             };
+            // 坐标齐全由 Task 19 的契约保证。万一缺席（老行、别的写方），没有
+            // 「该插哪里」的依据，就按到达顺序追加到末尾——位置靠后好过插错步。
+            // 这是有意的降级，`foldEvents.test.ts` 有用例钉住它。
             const at = step === null ? -1 : stepIndexAt(num(ev.turn) ?? num(p.turn) ?? 1, step);
             if (at < 0) nodes.push(narration);
             else nodes.splice(at, 0, narration);

@@ -79,6 +79,29 @@ describe('TrajectoryRenderer', () => {
     expect(step.textContent).not.toContain('ListShots');
   });
 
+  it('a tool that failed only via the top-level error_code still reads as failed, with its duration', () => {
+    seq = 0;
+    render(
+      <TrajectoryRenderer
+        events={[
+          ev('step_start', { turn: 1, step: 1, model: 'm' }, 1),
+          ev('tool_call', {
+            tool: 'UpdateShot',
+            args: { shot_id: '42' },
+            iteration: 1,
+            result: { outcome: 'denied' },
+            error_code: 'denied',
+            duration_ms: 1200,
+          }, 1),
+        ]}
+        isRunning
+      />,
+    );
+    const line = screen.getByTestId('traj-line-tool');
+    expect(line.textContent).toContain('Edited shot 42 failed');
+    expect(line.textContent).toContain('1.2s');
+  });
+
   it('renders nothing for an empty transcript', () => {
     const { container } = render(<TrajectoryRenderer events={[]} />);
     expect(container.firstChild).toBeNull();

@@ -24,12 +24,13 @@ const line = () => screen.getByTestId('run-status-line').textContent;
 describe('RunStatusLine', () => {
   it('说清在第几步、在跑什么、跑了多久', () => {
     render(<RunStatusLine current={{ step: 3, tool: 'GenerateImage' }} elapsedMs={4200} />);
-    expect(line()).toBe('Step 3 · Running GenerateImage… · 4.2s');
+    // 整秒：时间源是整秒跳的，小数位只会永远是 .0。
+    expect(line()).toBe('Step 3 · Running GenerateImage… · 4s');
   });
 
   it('还没进工具时只说步号', () => {
     render(<RunStatusLine current={{ step: 1, tool: null }} elapsedMs={800} />);
-    expect(line()).toBe('Step 1 · 0.8s');
+    expect(line()).toBe('Step 1 · 0s');
   });
 
   it('回合结束（current 为 null）什么都不画——留在屏幕上的状态行会读成还在跑', () => {
