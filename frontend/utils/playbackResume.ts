@@ -18,6 +18,18 @@
  *   quota throw at an unrelated call site is a miserable way to find out).
  * - Every accessor swallows storage errors: private windows and blocked site
  *   data must degrade to "no memory", never to a broken player.
+ * - Positions are scoped PER USER, not per browser. localStorage is shared by
+ *   every account that signs in on the machine, and library resources are
+ *   shared by everyone on a team — so without the user prefix, opening a team
+ *   video would drop a colleague at the point THEIR colleague stopped, which
+ *   is both wrong and a small leak of who watched how much. `scopedKey` is the
+ *   only way a key is built; callers never touch the store directly.
+ *
+ * What this deliberately does NOT do: sync across devices. Everything here is
+ * local to one browser profile, so a phone and a laptop each keep their own
+ * place. Making them agree needs a server-side store, which is a different
+ * change (a table, an endpoint, a write budget for a per-second signal) — not
+ * something to smuggle in behind a localStorage helper.
  */
 
 const STORE_KEY = 'mediahub_playback_positions_v1';
@@ -50,6 +62,25 @@ export interface PlaybackPosition {
 }
 
 type Store = Record<string, PlaybackPosition>;
+
+/**
+ * Sentinel for "nobody is signed in". Signed-out viewing (a public share link)
+ * still deserves a resume, but it must not be able to read or write any
+ * signed-in user's positions, so it gets its own namespace like anyone else.
+ */
+export const ANONYMOUS_USER = 'anon';
+
+/**
+ * Namespace a media key to the viewing user.
+ *
+ * Exported so tests can assert the shape directly: everything below routes
+ * through it, and a regression that dropped the prefix would otherwise only
+ * show up as two accounts quietly sharing positions.
+ */
+export function scopedKey(userId: string | null | undefined, key: string): string {
+  const who = userId && userId.trim() ? userId.trim() : ANONYMOUS_USER;
+  return `${who}::${key}`;
+}
 
 function readStore(): Store {
   try {
@@ -100,25 +131,35 @@ export function resumeKeyFor(explicit: string | undefined, src: string): string 
   }
 }
 
-/** Store the position for `key`. A no-op for positions not worth resuming. */
-export function savePosition(key: string, t: number, d: number): void {
+/** Store the position for `key`, under `userId`'s namespace. A no-op for
+ * positions not worth resuming. */
+export function savePosition(
+  userId: string | null | undefined,
+  key: string,
+  t: number,
+  d: number,
+): void {
   if (!key || !Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return;
   if (t < MIN_RESUME_SECONDS || t > d - END_MARGIN_SECONDS) {
     // Too early or effectively finished — and crucially, CLEAR any older
     // position. Without this, watching to the end then reopening would jump
     // back to the stale midpoint.
-    clearPosition(key);
+    clearPosition(userId, key);
     return;
   }
   const store = prune(readStore());
-  store[key] = { t, d, ts: Date.now() };
+  store[scopedKey(userId, key)] = { t, d, ts: Date.now() };
   writeStore(prune(store));
 }
 
-/** The resumable position for `key`, or null. */
-export function loadPosition(key: string, duration?: number): number | null {
+/** The resumable position for `key` under `userId`, or null. */
+export function loadPosition(
+  userId: string | null | undefined,
+  key: string,
+  duration?: number,
+): number | null {
   if (!key) return null;
-  const entry = readStore()[key];
+  const entry = readStore()[scopedKey(userId, key)];
   if (!entry || !Number.isFinite(entry.t)) return null;
   const d = Number.isFinite(duration) && (duration as number) > 0 ? (duration as number) : entry.d;
   if (!Number.isFinite(d) || d <= 0) return null;
@@ -126,10 +167,27 @@ export function loadPosition(key: string, duration?: number): number | null {
   return entry.t;
 }
 
-export function clearPosition(key: string): void {
+export function clearPosition(userId: string | null | undefined, key: string): void {
   if (!key) return;
   const store = readStore();
-  if (!(key in store)) return;
-  delete store[key];
+  const scoped = scopedKey(userId, key);
+  if (!(scoped in store)) return;
+  delete store[scoped];
   writeStore(store);
+}
+
+/**
+ * Drop every position belonging to one user. Called on sign-out: leaving them
+ * behind means the next person on this machine inherits a list of what the
+ * previous one was part-way through, and the entries would sit there for the
+ * full 30 days.
+ */
+export function clearUser(userId: string | null | undefined): void {
+  const prefix = `${scopedKey(userId, '')}`;
+  const store = readStore();
+  const kept = Object.fromEntries(
+    Object.entries(store).filter(([k]) => !k.startsWith(prefix)),
+  );
+  if (Object.keys(kept).length === Object.keys(store).length) return;
+  writeStore(kept);
 }
