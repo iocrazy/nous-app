@@ -407,3 +407,63 @@
 **Status**: pending — LOW
 **Owner**: heygo
 **Created**: 2026-09-11
+
+---
+
+## TODO-SEARCH-003: 混合搜索每次请求重建 EmbeddingService（4 次 system_settings 读 + 新 httpx 连接池）
+
+**What**: `SearchService.__init__` 每个请求 `EmbeddingService()`，首次 `try_embed` 走 `resolve_embedding_config()`（`get_module_governance("embedding")` 四次独立 `read_scope()` 读 + `resolve_platform_model` + `reveal()` 解密），再 `AsyncOpenAI(...)` 新建 httpx 池（TLS 握手）。本 PR 之前搜索路径不碰 embedder，这个开销是休眠的；`_vector_hits` 把它变成每次 hybrid 搜索的固定成本。修法：`resolve_embedding_config` 加进程级短 TTL 缓存（参照 `dbos_orchestrator.py` 的 `_routing_cache`），或进程级 `EmbeddingService` 单例；四个 `_read_raw` 合并成一条 `IN (...)`。
+
+**Why**: 搜索是交互路径，p50 里多一次 TLS + 四次小查询是可感知的；同时 `AsyncOpenAI` 客户端从不 close，FD 随请求量增长（多模态分支用 `async with httpx.AsyncClient` 没这个问题）。
+
+**Pros**: 搜索延迟下降；配置变更仍在 TTL 内生效。
+
+**Cons**: 缓存让 Admin 改 embedding 配置最多晚一个 TTL 生效；测试要有 reset 钩子。
+
+**Context**: 2026-09-15 语义搜索接线 PR 的 performance / adversarial 审查发现。当时未改是因为缓存会影响 `resolve_embedding_config` 的既有测试隔离，需单独处理。
+
+**Depends on**: 无。
+
+**Status**: pending — MEDIUM
+**Owner**: heygo
+**Created**: 2026-09-15
+
+---
+
+## TODO-AI-020: 派发端点在 async handler 里同步调 DBOS.start_workflow，批量循环放大阻塞
+
+**What**: `start_workflow_routed` 的进程内路径最终是 `DBOS.start_workflow(...)`（同步，dbos `_dbos.py` 有 `start_workflow_async` 对应）。每次派发都会阻塞事件循环一次；`batch_asset_ai`、新的 `backfill_embeddings` 把它放进最多 50 / 200 次的循环里。修法：进程内路径改 `await DBOS.start_workflow_async(...)`，或至少 `asyncio.to_thread`。
+
+**Why**: 单次派发可以忍，循环派发时同一 worker 上其它请求全部停顿。
+
+**Pros**: 批量派发不再拖慢同 worker 的所有请求。
+
+**Cons**: 要核对 `start_workflow_async` 与现有 `workflow_id` / queue 参数的兼容性，并让 `tests/api/test_resources_ai_router_dispatch.py` 一类 source-pin 跟着改。
+
+**Context**: 2026-09-15 performance 审查发现；问题早于本 PR 存在于所有派发端点，本 PR 只是把循环次数上限提到 200。
+
+**Depends on**: 无。
+
+**Status**: pending — MEDIUM
+**Owner**: heygo
+**Created**: 2026-09-15
+
+---
+
+## TODO-AI-021: L1 视觉分析（单条与补算）没有积分/配额闸门，且补算的去重不是原子的
+
+**What**: `POST /ai/analyze/resource/{id}` 与 `POST /ai/analyze/backfill-embeddings` 都不走 `points_service.check_and_consume`（summary / transcribe 走），补算一次最多派发 200 个 VLM 任务；in-flight 去重是「先读 task_tracking 再插入」，两次并发请求（双击）会把同一批各派发两遍。修法：① 与 summary 同款积分闸门（派发失败退款）或每用户并发 `ai_extract` 上限 + 429；② `tracker.create(dedup_key=f"ai_extract:{resource_id}")` 让去重落到 DB 约束；③ 补算的 re-embed 循环串行，可用 `asyncio.Semaphore(4)` 并行并把标签查询提成一次批量。
+
+**Why**: 目前是单租户自用，花的是自己的钱，所以本 PR 只做了 `limit ≤ 200` 与读侧去重；多用户或开放注册之前必须补上。
+
+**Pros**: 费用可控、双击不重复扣费。
+
+**Cons**: 积分模型要决定 L1 分析的定价；dedup_key 的语义要和 `_resources_with_active_l1` 对齐。
+
+**Context**: 2026-09-15 security / adversarial 审查发现（PR 语义搜索接线）。同 PR 的 sibling `batch_asset_ai` 上限是 50，这里保留 200 是为了把存量 ~1400 条尽快补完，属产品决定。
+
+**Depends on**: 无。
+
+**Status**: pending — MEDIUM
+**Owner**: heygo
+**Created**: 2026-09-15

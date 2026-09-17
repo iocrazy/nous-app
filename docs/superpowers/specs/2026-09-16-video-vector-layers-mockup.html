@@ -1,0 +1,550 @@
+<title>Shot Search Mockup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --page:#F3F0E9; --island:#FCFBF8; --sub:#F6F4EE; --line:#E5E0D4; --line2:#D6D0C0;
+    --ink:#1C1B18; --ink2:#57544B; --ink3:#8C887B;
+    --accent:#46708E; --accent-soft:#E6EDF3; --accent-line:#B9CBD9;
+    --ok:#1E7A5B; --ok-soft:#E3EFE8; --warn:#A87B2B; --warn-soft:#F5EBD6; --danger:#AD5147; --danger-soft:#F4E1DE; --agent:#7A5E8F; --agent-soft:#ECE6F1;
+    --c1:#46708E; --c2:#A87B2B; --c3:#7A5E8F; --c4:#1E7A5B; --c5:#AD5147; --c6:#8C887B; --c7:#6E8E9E; --c8:#B59A5A;
+    --thumb-a:#3C4A55; --thumb-b:#1F262C;
+  }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --page:#09090b; --island:#18181b; --sub:#1f1f23; --line:#27272a; --line2:#3f3f46; --ink:#fafafa; --ink2:#c9c9cf; --ink3:#a1a1aa;
+    --accent:#7FA3BD; --accent-soft:#1c2a35; --accent-line:#2f4657; --ok:#4D9478; --ok-soft:#14261e; --warn:#C99A4A; --warn-soft:#2b2214; --danger:#D07267; --danger-soft:#2c1917; --agent:#AF9BBF; --agent-soft:#241d2a;
+  }}
+  :root[data-theme="dark"]{
+    --page:#09090b; --island:#18181b; --sub:#1f1f23; --line:#27272a; --line2:#3f3f46; --ink:#fafafa; --ink2:#c9c9cf; --ink3:#a1a1aa;
+    --accent:#7FA3BD; --accent-soft:#1c2a35; --accent-line:#2f4657; --ok:#4D9478; --ok-soft:#14261e; --warn:#C99A4A; --warn-soft:#2b2214; --danger:#D07267; --danger-soft:#2c1917; --agent:#AF9BBF; --agent-soft:#241d2a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;padding-inline:16px;padding-block:16px 48px}
+  .wrap{max-width:1240px;margin:0 auto;display:grid;gap:14px}
+  .switch{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .switch .lbl{font-size:12px;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase;margin-right:6px}
+  .switch button{border:1px solid var(--line2);background:var(--island);color:var(--ink2);padding:6px 12px;border-radius:999px;font:inherit;cursor:pointer}
+  .switch button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  .switch button:focus-visible,.tabbar button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .screen[hidden]{display:none}
+  .island{background:var(--island);border:1px solid var(--line);border-radius:12px}
+  .pad{padding:14px}
+  h1{font-size:17px;margin:0;font-weight:600;text-wrap:balance}
+  h2{font-size:13px;margin:0;font-weight:600}
+  .muted{color:var(--ink3)} .dim{color:var(--ink2)} .num{font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap} .between{justify-content:space-between}
+  .caption{font-size:12px;color:var(--ink3);padding:0 2px}
+
+  /* app shell: slim module rail · content · info island (the real layout) */
+  .shell{display:grid;grid-template-columns:52px 1fr 380px;gap:12px;min-height:640px}
+  @media (max-width:900px){.shell{grid-template-columns:52px 1fr}.shell .aside{grid-column:1/-1}}
+  .rail{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:10px;padding-block:12px}
+  .rail i{width:26px;height:26px;border-radius:7px;background:var(--sub);border:1px solid var(--line)}
+  .rail i.on{background:var(--accent-soft);border-color:var(--accent)}
+  .content{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px}
+  .toolbar .crumbs{font-weight:600}
+  .toolbar .crumbs span{color:var(--ink3);font-weight:400}
+  .tsearch{display:flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--sub);border-radius:8px;padding:4px 8px;min-width:280px}
+  .tsearch input{border:0;background:transparent;font:inherit;color:var(--ink);flex:1;outline:none;min-width:0}
+  .mode{font-size:11px;border:1px solid var(--accent-line);color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 7px}
+  .icon{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--island);display:inline-grid;place-items:center;color:var(--ink2);font-size:13px}
+
+  .strip-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px}
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:var(--island);color:var(--ink2);padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:0}
+  .seg button[aria-selected="true"]{background:var(--accent);color:#fff}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:999px;padding:1px 8px;font-size:12px;color:var(--ink2);background:var(--island)}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ink3)}
+  .chip.ok{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)} .chip.ok .dot{background:var(--ok)}
+  .chip.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)} .chip.warn .dot{background:var(--warn)}
+  .chip.off{border-color:var(--danger);color:var(--danger);background:var(--danger-soft)} .chip.off .dot{background:var(--danger)}
+  .chip.agent{border-color:var(--agent);color:var(--agent);background:var(--agent-soft)}
+  .chip.lay{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;padding:0 12px 12px}
+  .card{background:var(--island);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .cover{aspect-ratio:9/12;max-width:100%;position:relative;background:linear-gradient(160deg,var(--thumb-a),var(--thumb-b))}
+  .cover.p2{background:linear-gradient(160deg,#5C6B4A,#2C3324)} .cover.p3{background:linear-gradient(160deg,#6E5A4A,#2E251E)} .cover.p4{background:linear-gradient(160deg,#4A5C6E,#1E262E)} .cover.p5{background:linear-gradient(160deg,#7A6A50,#332B1F)} .cover.p6{background:linear-gradient(160deg,#5A4A6E,#251E2E)}
+  .cover .dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:1px 5px;border-radius:4px}
+  .cover .hit{position:absolute;left:6px;top:6px;background:rgba(252,251,248,.94);color:var(--ink);font-size:11px;padding:2px 6px;border-radius:5px;display:flex;gap:5px;align-items:center;border:1px solid var(--line2)}
+  .cover .hit b{color:var(--accent)}
+  .cover .pos{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.22)}
+  .cover .pos i{position:absolute;top:0;bottom:0;background:#fff}
+  .cbody{padding:8px 9px;display:grid;gap:3px}
+  .title{font-size:12.5px;font-weight:500;line-height:1.3;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .meta{font-size:11px;color:var(--ink3)}
+
+  /* info island (aside.island-card) */
+  .aside{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+  .tabbar{display:flex;border-bottom:1px solid var(--line);align-items:center}
+  .tabbar button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 12px;font:inherit;font-size:13px;font-weight:500;color:var(--ink3);cursor:pointer;display:flex;gap:6px;align-items:center}
+  .tabbar button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+  .tabbar .sp{flex:1}
+  .tabbar .col{padding:8px;color:var(--ink3);font-size:14px}
+  .abody{padding:12px;display:grid;gap:12px;overflow:auto}
+  .hero{aspect-ratio:16/9;max-width:100%;border-radius:8px;background:linear-gradient(135deg,var(--thumb-a),var(--thumb-b));position:relative;color:#fff}
+  .hero .t{position:absolute;left:10px;bottom:16px;font-size:11px}
+  .hero .bar{position:absolute;left:10px;right:10px;bottom:8px;height:3px;background:rgba(255,255,255,.3);border-radius:2px}
+  .hero .bar i{position:absolute;left:0;top:0;bottom:0;width:49%;background:#fff;border-radius:2px}
+  .hero .mk{position:absolute;bottom:8px;width:2px;height:3px;background:var(--warn)}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:var(--sub);border-radius:8px;padding:8px 10px;display:grid;gap:1px}
+  .stat .v{font-size:18px;font-weight:600;line-height:1.1} .stat .k{font-size:11px;color:var(--ink3)}
+  .ministrip{display:flex;height:22px;border-radius:5px;overflow:hidden;border:1px solid var(--line2)}
+  .ministrip span{display:block;height:100%;border-right:1px solid rgba(0,0,0,.18);cursor:pointer;position:relative}
+  .ministrip span.hit{box-shadow:inset 0 0 0 2px #fff}
+  .ministrip span:hover,.ministrip span:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+  .axis{display:flex;justify-content:space-between;font-size:10px;color:var(--ink3);margin-top:3px}
+  .cl{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-left-width:3px;border-radius:7px;padding:6px 8px}
+  .cl .mini{width:44px;aspect-ratio:16/9;border-radius:4px;background:linear-gradient(135deg,var(--thumb-a),var(--thumb-b));flex:none}
+  .cl .n{font-size:12.5px;font-weight:500} .cl .s{font-size:11px;color:var(--ink3)}
+  .shotlist{display:grid;gap:2px;max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:7px;padding:4px}
+  .shot{display:grid;grid-template-columns:8px 1fr auto;gap:8px;align-items:center;padding:4px 6px;border-radius:5px;font-size:12px;cursor:pointer}
+  .shot i{width:8px;height:8px;border-radius:2px}
+  .shot:hover{background:var(--sub)} .shot.hit{background:var(--accent-soft);color:var(--accent);font-weight:500}
+  .shot .tc{color:var(--ink3)}
+  .tip{position:absolute;transform:translate(-50%,-115%);background:var(--ink);color:var(--page);font-size:11px;padding:3px 7px;border-radius:5px;pointer-events:none;white-space:nowrap}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px} .kv dt{color:var(--ink3)} .kv dd{margin:0}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:6px 12px;font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent-line)}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .note{font-size:12px;color:var(--ink2);background:var(--sub);border-radius:8px;padding:8px 10px}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--ink2)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+
+  /* settings screen */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-weight:500;color:var(--ink3);font-size:11px;letter-spacing:.03em;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line)}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .tablewrap{overflow-x:auto}
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;min-width:110px} .prog i{display:block;height:100%;background:var(--accent)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:760px){.split{grid-template-columns:1fr}}
+  .settings{display:grid;grid-template-columns:200px 1fr;gap:12px} @media (max-width:760px){.settings{grid-template-columns:1fr}}
+  .snav{display:grid;gap:2px;align-content:start;padding:8px}
+  .snav a{padding:6px 10px;border-radius:6px;color:var(--ink2);font-size:13px;text-decoration:none}
+  .snav a.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
+
+  /* My Downloads (real) */
+  .side{background:var(--island);border:1px solid var(--line);border-radius:12px;padding:10px 6px;display:grid;gap:10px;align-content:start;font-size:11px;color:var(--ink3);justify-items:center}
+  .side b{background:var(--sub);border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--ink2);font-weight:500}
+  .side .plus{color:var(--ink3)}
+  .pagehead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px 6px}
+  .pagehead h1{font-size:18px}
+  .fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:4px 14px 10px}
+  .fchip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line2);background:var(--island);border-radius:7px;padding:4px 9px;font-size:12px;color:var(--ink2)}
+  .fchip.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);font-weight:500}
+  .fchip.legs{gap:7px}
+  .fchip .d{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .ficon{width:28px;height:28px;border-radius:7px;border:1px solid var(--line2);background:var(--island);display:inline-grid;place-items:center;color:var(--ink2);font-size:13px}
+  .ficon.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:12px;padding:0 14px 14px}
+  .dcard{background:var(--island);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .dcard.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .dcover{aspect-ratio:16/10;max-width:100%;position:relative;background:linear-gradient(160deg,var(--thumb-a),var(--thumb-b));color:#fff}
+  .dcover.p2{background:linear-gradient(160deg,#5C6B4A,#2C3324)} .dcover.p3{background:linear-gradient(160deg,#6E5A4A,#2E251E)} .dcover.p4{background:linear-gradient(160deg,#4A5C6E,#1E262E)} .dcover.p5{background:linear-gradient(160deg,#7A6A50,#332B1F)} .dcover.p6{background:linear-gradient(160deg,#5A4A6E,#251E2E)}
+  .dcover .pf{position:absolute;left:8px;top:8px;width:20px;height:20px;border-radius:50%;background:#111;display:grid;place-items:center;font-size:10px}
+  .dcover .ty{position:absolute;right:8px;top:8px;width:20px;height:20px;border-radius:5px;background:rgba(0,0,0,.45);display:grid;place-items:center;font-size:10px}
+  .dcover .ttl{position:absolute;left:0;right:0;bottom:0;padding:18px 10px 8px;font-size:12px;line-height:1.3;background:linear-gradient(transparent,rgba(0,0,0,.7));display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .dcover .hitb{position:absolute;right:8px;top:34px;background:rgba(252,251,248,.95);color:var(--ink);font-size:11px;padding:2px 6px;border-radius:5px;border:1px solid var(--line2);display:flex;gap:5px;align-items:center}
+  .dcover .hitb b{color:var(--accent)}
+  .dcover .pos{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.2)}
+  .dcover .pos i{position:absolute;top:0;bottom:0;background:#fff}
+  .dicons{display:flex;gap:8px;padding:8px 10px 4px;color:var(--ink3);font-size:11px}
+  .dstats{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;padding:4px 10px}
+  .dstats span{border-radius:6px;padding:5px 0;text-align:center;font-size:11px;font-weight:500;color:#fff}
+  .dstats .l{background:#8E4A4A} .dstats .c{background:#3F5A78} .dstats .s{background:#3E6B58} .dstats .f{background:#7A6633}
+  .dmeta{display:flex;gap:6px;align-items:center;padding:6px 10px 10px;font-size:11px;color:var(--ink3)}
+  .dmeta i{width:14px;height:14px;border-radius:50%;background:var(--sub);border:1px solid var(--line);display:inline-block}
+  .simbar{height:3px;background:var(--line);margin:0 10px}
+  .simbar i{display:block;height:100%;background:var(--accent)}
+  /* Settings modal (real) */
+  .modalbg{background:rgba(28,27,24,.35);border-radius:12px;padding:28px 40px}
+  .modal{background:var(--island);border-radius:14px;display:grid;grid-template-columns:220px 1fr;overflow:hidden;min-height:560px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .mnav{border-right:1px solid var(--line);padding:16px 10px;display:grid;gap:2px;align-content:start;font-size:13px}
+  .mnav .who{display:flex;gap:8px;align-items:center;padding:4px 8px 14px;border-bottom:1px solid var(--line);margin-bottom:10px}
+  .mnav .av{width:30px;height:30px;border-radius:50%;background:var(--agent);color:#fff;display:grid;place-items:center;font-size:12px}
+  .mnav .g{font-size:10px;color:var(--ink3);letter-spacing:.04em;padding:8px 8px 2px}
+  .mnav a{padding:6px 10px;border-radius:7px;color:var(--ink2);text-decoration:none}
+  .mnav a.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
+  .mnav .ver{margin-top:auto;font-size:10px;color:var(--ink3);padding:14px 8px 0}
+  .mbody{display:grid;gap:12px;padding:18px 22px;align-content:start}
+  .mbody .mh{display:flex;justify-content:space-between;align-items:center}
+  .mbody .mh h1{font-size:17px}
+  .sec{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .sec .sh{display:flex;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .sec .sh .ic{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:13px}
+  .sec .sh h2{font-size:14px} .sec .sh p{margin:0;font-size:11px;color:var(--ink3)}
+  .sec .sb{padding:12px 14px;display:grid;gap:12px}
+  .sec.ghost .sh{border-bottom:0;opacity:.6}
+  .substrip{display:flex;background:var(--sub);border:1px solid var(--line);border-radius:10px;padding:4px;gap:2px}
+  .substrip button{flex:1;border:0;background:transparent;border-radius:7px;padding:7px 10px;font:inherit;font-size:13px;color:var(--ink2);cursor:pointer}
+  .substrip button[aria-selected="true"]{background:var(--island);color:var(--ink);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .smalltabs{display:flex;gap:4px;border-bottom:1px solid var(--line);padding:0 2px}
+  .smalltabs button{border:0;background:transparent;border-bottom:2px solid transparent;padding:6px 8px;font:inherit;font-size:12px;color:var(--ink3);cursor:pointer}
+  .smalltabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+
+  /* push entry points */
+  .entries{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .phone{background:var(--island);border:1px solid var(--line);border-radius:18px;padding:14px;display:grid;gap:10px}
+  .phone .bar{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+  .intentrow{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .intentbtn{border:1px solid var(--line2);background:var(--island);border-radius:9px;padding:9px 4px;text-align:center;font-size:12px;color:var(--ink2)}
+  .intentbtn.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);font-weight:500}
+  .intentbtn.new{border-style:dashed}
+  .tagcloud{display:flex;gap:6px;flex-wrap:wrap}
+  .tagcloud span{border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:11px;color:var(--ink2);background:var(--sub)}
+  .player{aspect-ratio:16/9;max-width:100%;border-radius:10px;background:linear-gradient(135deg,#3C4A55,#1F262C);position:relative;color:#fff}
+  .player .ctl{position:absolute;left:10px;right:10px;bottom:8px;display:flex;gap:10px;align-items:center;font-size:11px;opacity:.9}
+  .player .ctl .nb{margin-left:auto;display:inline-flex;gap:4px;align-items:center;background:rgba(30,122,91,.9);border-radius:6px;padding:3px 7px;font-weight:600;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+  .player .ctl .nb.busy{background:rgba(168,123,43,.9)}
+  .player .bubble{position:absolute;right:10px;bottom:38px;background:var(--island);color:var(--ink);border:1px solid var(--line2);border-radius:10px;padding:8px 10px;font-size:11px;display:grid;gap:6px;min-width:200px}
+  .ic-svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px;flex:none}
+  .intentbtn .ic-svg{display:block;margin:0 auto 4px;width:16px;height:16px}
+  .nbtn{margin-left:auto;display:inline-grid;place-items:center;width:26px;height:22px;border-radius:6px;background:linear-gradient(160deg,#2FA37A,#1E7A5B);box-shadow:0 0 0 2px rgba(255,255,255,.35),0 1px 4px rgba(0,0,0,.4);position:relative}
+  .nbtn .ic-svg{width:14px;height:14px;stroke:#fff;vertical-align:0}
+  .nbtn i{position:absolute;right:-3px;top:-3px;width:7px;height:7px;border-radius:50%;background:#fff;border:1.5px solid #1E7A5B}
+  .nbtn.busy{background:linear-gradient(160deg,#C99A4A,#A87B2B)} .nbtn.busy i{border-color:#A87B2B}
+  @media (prefers-reduced-motion:no-preference){.card{transition:transform .12s}.card:hover{transform:translateY(-1px)}}
+</style>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></symbol>
+  <symbol id="i-clap" viewBox="0 0 24 24"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="1"/><path d="M18.944 12.33a1 1 0 0 0 0-.66 7.5 7.5 0 0 0-13.888 0 1 1 0 0 0 0 .66 7.5 7.5 0 0 0 13.888 0"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+</svg>
+<div class="wrap">
+  <div class="switch" role="tablist" aria-label="Mockup screens">
+    <span class="lbl">Mockup</span>
+    <button role="tab" aria-selected="true" data-s="s1">1 · My Downloads · search hits</button>
+    <button role="tab" aria-selected="false" data-s="s2">2 · Info island · Overview / AI / Shots</button>
+    <button role="tab" aria-selected="false" data-s="s3">3 · Settings → AI → Vectors</button>
+    <button role="tab" aria-selected="false" data-s="s4">4 · Push entry points</button>
+    <span class="muted" style="margin-left:auto;font-size:12px">Real skeletons: My Downloads (DownloadsView) · info island (VideoDetailPanel) · Settings modal → AI</span>
+  </div>
+
+  <!-- ===================== SCREEN 1 ===================== -->
+  <section class="screen" id="s1" aria-label="My Downloads with search hits">
+    <div class="shell" style="grid-template-columns:64px 1fr 380px">
+      <div class="side" aria-hidden="true"><b>1,409</b><span>7 <span class="plus">+</span></span><b>17</b><span>⌄</span><b>26</b><span>⌄</span><span>⌄</span></div>
+
+      <div class="content">
+        <div class="island">
+          <div class="pagehead">
+            <h1>My Downloads</h1>
+            <div class="row" style="gap:8px">
+              <span class="ficon" title="Refresh">↻</span>
+              <div class="tsearch" style="min-width:230px"><span class="muted" aria-hidden="true">⌕</span><input value="手持跟拍" aria-label="Search"><span class="mode">AI</span><span class="muted" style="font-size:12px">✕</span></div>
+              <span class="ficon on" title="Filters">≡</span>
+              <span class="ficon" title="View">▦ ⌄</span>
+            </div>
+          </div>
+          <!-- existing filter row; the three accent chips exist only while an AI search is active -->
+          <div class="fbar" aria-label="Filters">
+            <span class="fchip">🏷 Tags</span><span class="fchip">☆ Rating</span><span class="fchip">▤ Type</span><span class="fchip">◎ Source</span><span class="fchip"><svg class="ic-svg"><use href="#i-sparkles"/></svg> AI</span><span class="fchip">▦ Date</span>
+            <span class="fchip on" title="Only while an AI search is active">Layer · All ⌄</span>
+            <span class="fchip on" title="Similarity replaces Date while an AI search is active">⇅ Sort · Similarity ⌄</span>
+            <span class="fchip legs" title="vector_leg per retrieval leg · hover for outcome codes"><span class="d" style="background:var(--ok)"></span>Text 12<span class="d" style="background:var(--ok)"></span>Semantic 9<span class="d" style="background:var(--ok)"></span>Visual 14<span class="d" style="background:var(--ok)"></span>Camera 7<span class="d" style="background:var(--danger)"></span>Transcript<span class="muted">· rerank on</span></span>
+            <span class="muted num" style="margin-left:auto;font-size:11px">57 hits · best shot per video · 412 ms</span>
+          </div>
+
+          <div class="dgrid">
+            <article class="dcard sel">
+              <div class="dcover"><span class="pf">b</span><span class="ty">▶</span><span class="hitb"><b>3:41</b>Camera · 0.71</span><div class="ttl">六万多！RTX Pro 6000 Max-Q 版开箱&amp;体验</div><div class="pos"><i style="left:49%;width:2%"></i></div></div>
+              <div class="simbar"><i style="width:71%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦</div>
+              <div class="dstats"><span class="l">♥ 140</span><span class="c">💬 44</span><span class="s">↗ 0</span><span class="f">☆ 0</span></div>
+              <div class="dmeta"><i></i>@硬件老王 · 2026-09-14</div>
+            </article>
+            <article class="dcard">
+              <div class="dcover p2"><span class="pf">b</span><span class="ty">▶</span><span class="hitb"><b>2:22</b>Camera · 0.66</span><div class="ttl">海南骑行 vlog · 从三亚到万宁的三天</div><div class="pos"><i style="left:19%;width:1%"></i></div></div>
+              <div class="simbar"><i style="width:66%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦</div>
+              <div class="dstats"><span class="l">♥ 3.1K</span><span class="c">💬 443</span><span class="s">↗ 278</span><span class="f">☆ 927</span></div>
+              <div class="dmeta"><i></i>@RICEDO · 2026-08-30</div>
+            </article>
+            <article class="dcard">
+              <div class="dcover p4"><span class="pf">b</span><span class="ty">▶</span><span class="hitb"><b>7:17</b>Visual · 0.41</span><div class="ttl">解读 EvoMap（Evolver），让 Openclaw 自我进化</div><div class="pos"><i style="left:85%;width:1%"></i></div></div>
+              <div class="simbar"><i style="width:41%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦</div>
+              <div class="dstats"><span class="l">♥ 20</span><span class="c">💬 29</span><span class="s">↗ 0</span><span class="f">☆ 0</span></div>
+              <div class="dmeta"><i></i>@老何说逆向 · 2026-09-10</div>
+            </article>
+            <article class="dcard">
+              <div class="dcover p3"><span class="pf">d</span><span class="ty">▶</span><span class="hitb">Title · 0.40</span><div class="ttl">手持跟拍怎么稳？三个不用稳定器的走位技巧</div></div>
+              <div class="simbar"><i style="width:40%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦ <span style="color:var(--warn);margin-left:auto">shots queued</span></div>
+              <div class="dstats"><span class="l">♥ 18.0K</span><span class="c">💬 256</span><span class="s">↗ 1.4K</span><span class="f">☆ 2.0K</span></div>
+              <div class="dmeta"><i></i>@早+ · 2026-07-02</div>
+            </article>
+            <article class="dcard">
+              <div class="dcover p5"><span class="pf">b</span><span class="ty">▶</span><span class="hitb"><b>4:11</b>Camera · 0.39</span><div class="ttl">借着豆包工作的发布，聊一下豆包飞书整合背后的逻辑</div><div class="pos"><i style="left:60%;width:1%"></i></div></div>
+              <div class="simbar"><i style="width:39%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦</div>
+              <div class="dstats"><span class="l">♥ 923</span><span class="c">💬 47</span><span class="s">↗ 119</span><span class="f">☆ 790</span></div>
+              <div class="dmeta"><i></i>@OOO实验室 · 2026-09-12</div>
+            </article>
+            <article class="dcard">
+              <div class="dcover p6"><span class="pf">d</span><span class="ty">▶</span><span class="hitb"><b>0:48</b>Visual · 0.35</span><div class="ttl">街拍 · 傍晚的海口骑楼老街</div><div class="pos"><i style="left:25%;width:1%"></i></div></div>
+              <div class="simbar"><i style="width:35%"></i></div>
+              <div class="dicons">▮▮ ▤ ▥ ⋈ ✦</div>
+              <div class="dstats"><span class="l">♥ 12.8M</span><span class="c">💬 106.7K</span><span class="s">↗ 1.6M</span><span class="f">☆ 678.1K</span></div>
+              <div class="dmeta"><i></i>@困困包子 · 2026-07-31</div>
+            </article>
+          </div>
+        </div>
+        <div class="caption">Search-only additions are the three accent chips in the existing filter row (Layer · Sort · legs), the hit badge + similarity bar on the card, and the Search hit block in the island. Clear the search and all of them go away. Engine offline: the legs chip shows red dots, badges disappear, text hits stay, no toast.</div>
+      </div>
+
+      <aside class="aside" aria-label="Info island">
+        <div class="tabbar" role="tablist">
+          <button role="tab" aria-selected="true"><svg class="ic-svg"><use href="#i-eye"/></svg> Overview</button>
+          <button role="tab" aria-selected="false"><svg class="ic-svg"><use href="#i-sparkles"/></svg> AI</button>
+          <button role="tab" aria-selected="false"><svg class="ic-svg"><use href="#i-film"/></svg> Shots</button>
+          <span class="sp"></span><span class="col" title="Collapse">»</span>
+        </div>
+        <div class="abody">
+          <div class="hero"><div class="t num">3:41 / 7:25</div><div class="bar"><i></i></div></div>
+          <div><div style="font-weight:600;line-height:1.35">六万多！RTX Pro 6000 Max-Q 版开箱&amp;体验</div><div class="meta">Bilibili · 7:25 · 2026-09-14</div></div>
+          <div class="note" style="border-left:3px solid var(--accent)">
+            <div class="row between"><b>Search hit</b><span class="chip lay"><svg class="ic-svg"><use href="#i-film"/></svg> Camera</span></div>
+            <div class="num">Shot 54 · 3:41–3:48 · 7.7s · rerank 0.71 · vector 0.50</div>
+            <div class="dim">handheld walk, forward tracking</div>
+            <div class="row" style="margin-top:6px"><button class="btn" style="padding:4px 10px">Play from 3:41</button><button class="btn ghost" style="padding:4px 10px">Open Shots</button></div>
+          </div>
+          <div class="row" style="gap:6px"><span class="chip">★★★★☆</span><span class="chip">GPU</span><span class="chip">开箱</span><span class="chip agent">AI: reference</span></div>
+          <div class="muted" style="font-size:12px">Description, tags, notes and the action row stay exactly as they are today.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 2 ===================== -->
+  <section class="screen" id="s2" hidden aria-label="Info island Shots tab">
+    <div class="shell">
+      <div class="rail" aria-hidden="true"><i></i><i></i><i class="on"></i><i></i><i></i></div>
+      <div class="content" style="opacity:.55" aria-hidden="true">
+        <div class="island toolbar"><div class="crumbs">My Library <span>· Personal</span></div><div class="tsearch"><span class="muted">⌕</span><input value="手持跟拍"><span class="mode">AI</span></div></div>
+        <div class="island" style="padding-top:12px"><div class="grid">
+          <article class="card sel"><div class="cover"><span class="hit"><b>3:41</b>Camera · 0.71</span></div><div class="cbody"><div class="title">六万多！RTX Pro 6000 Max-Q 版开箱&amp;体验</div></div></article>
+          <article class="card"><div class="cover p2"></div><div class="cbody"><div class="title">海南骑行 vlog</div></div></article>
+          <article class="card"><div class="cover p4"></div><div class="cbody"><div class="title">解读 EvoMap</div></div></article>
+          <article class="card"><div class="cover p3"></div><div class="cbody"><div class="title">手持跟拍怎么稳</div></div></article>
+        </div></div>
+        <div class="caption">Grid dimmed in the mockup only. The island is the same <code>aside.island-card</code>; classic split-pane renders the same panel beside the player.</div>
+      </div>
+
+      <aside class="aside" aria-label="Info island · Shots">
+        <div class="tabbar" role="tablist">
+          <button role="tab" aria-selected="false"><svg class="ic-svg"><use href="#i-eye"/></svg> Overview</button>
+          <button role="tab" aria-selected="false"><svg class="ic-svg"><use href="#i-sparkles"/></svg> AI</button>
+          <button role="tab" aria-selected="true"><svg class="ic-svg"><use href="#i-film"/></svg> Shots <span class="chip ok" style="padding:0 6px"><span class="dot"></span></span></button>
+          <span class="sp"></span><span class="col" title="Collapse">»</span>
+        </div>
+        <div class="abody">
+          <div class="hero"><div class="t num">3:41 / 7:25</div><div class="bar"><i></i><span class="mk" style="left:49%"></span></div></div>
+          <div class="row between">
+            <div class="muted" style="font-size:12px">indexed 2026-09-16 · space <code>wemm-2b · 2048 · v1</code></div>
+            <button class="btn ghost" style="padding:2px 8px;font-size:12px">Re-index</button>
+          </div>
+          <div class="note" style="border-left:3px solid var(--warn)">
+            <div class="row between"><b>Not indexed yet (variant)</b><span class="chip warn"><span class="dot"></span>on demand</span></div>
+            <div class="dim num">7:25 · ≈ 100 shots · ≈ 200 embeddings · local provider: free</div>
+            <div class="row" style="margin-top:6px"><button class="btn" style="padding:4px 10px">Index this video</button><span class="muted" style="font-size:11px">runs as a Task Center task · you can keep browsing</span></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><span class="v num">100</span><span class="k">Shots</span></div>
+            <div class="stat"><span class="v num">200</span><span class="k">Vectors · frame + clip</span></div>
+            <div class="stat"><span class="v num">4.5s</span><span class="k">Average shot</span></div>
+            <div class="stat"><span class="v num">8</span><span class="k">Clusters</span></div>
+          </div>
+          <div>
+            <div class="row between" style="margin-bottom:4px"><h2>Shot strip</h2><span class="muted" style="font-size:11px">click to seek · outlined = search hit</span></div>
+            <div class="ministrip" id="strip" aria-label="Shots"></div>
+            <div class="axis num"><span>0:00</span><span>3:42</span><span>7:25</span></div>
+            <div class="legend" id="legend" style="margin-top:6px"></div>
+          </div>
+          <div>
+            <div class="row between" style="margin-bottom:6px"><h2>Clusters</h2><span class="muted" style="font-size:11px">no preset labels · names arrive with VLM cards</span></div>
+            <div style="display:grid;gap:6px" id="clusters"></div>
+          </div>
+          <div>
+            <div class="row between" style="margin-bottom:6px"><h2>Shots</h2><span class="muted" style="font-size:11px">Shot 54 is the search hit</span></div>
+            <div class="shotlist" id="shots"></div>
+          </div>
+          <div class="note">
+            <div style="margin-bottom:6px"><b>AI tab</b> · Transcript, Summary and Visual analysis fold into one big tab with small tabs inside, so the bar stays at three:</div>
+            <div class="smalltabs" role="tablist" aria-label="AI sub-tabs"><button role="tab" aria-selected="true">Transcript</button><button role="tab" aria-selected="false">Summary</button><button role="tab" aria-selected="false">Visual</button></div>
+            <div class="muted" style="font-size:11px;margin-top:6px">Each small tab keeps its current body and trigger buttons (Summarize / Trigger Visual Analysis) unchanged. <code>ResourceDetailPage</code>'s inspector gets the same three big tabs, plus shot markers on the player rail.</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 3 ===================== -->
+  <section class="screen" id="s3" hidden aria-label="Settings modal AI">
+    <div class="modalbg">
+      <div class="modal">
+        <nav class="mnav" aria-label="Settings">
+          <div class="who"><span class="av">8</span><div><div style="font-weight:500">8512939</div><div class="muted" style="font-size:11px">8512939@qq.com</div></div></div>
+          <div class="g">ACCOUNT</div><a href="#">Personal</a>
+          <div class="g">APP SETTINGS</div><a href="#">General</a><a href="#">API</a><a href="#">Logs</a><a href="#">Tasks</a><a href="#">Tags</a><a href="#">Workflow templates</a><a href="#" class="on">AI</a><a href="#" style="border:1px dashed var(--accent-line)" title="Moved out of the AI sub-tabs">MCP</a><a href="#">API docs</a><a href="#">Cookies</a>
+          <div class="ver">v0.25.480</div>
+        </nav>
+        <div class="mbody">
+          <div class="mh"><h1>AI</h1><span class="muted" style="font-size:16px">✕</span></div>
+          <div class="substrip" role="tablist" aria-label="AI pages">
+            <button role="tab" aria-selected="false">General</button>
+            <button role="tab" aria-selected="false">Providers</button>
+            <button role="tab" aria-selected="false">Local CLI</button>
+            <button role="tab" aria-selected="false">Memory</button>
+            <button role="tab" aria-selected="true">Vectors</button>
+          </div>
+          <div class="caption">MCP leaves this strip and becomes its own entry in the left nav (dashed). General / Providers / Local CLI / Memory keep their current bodies; model rows still live only under Providers.</div>
+
+          <div class="sec">
+            <div class="sh"><span class="ic"><svg class="ic-svg"><use href="#i-box"/></svg></span><div><h2>Vector Spaces</h2><p>Which model each retrieval layer is embedded with, and how far the backfill has gone.</p></div><button class="btn ghost" style="margin-left:auto;padding:4px 10px">Add space</button></div>
+            <div class="sb">
+              <div class="split">
+                <div class="island pad" style="border-color:var(--accent-line)">
+                  <div class="row between"><h2>Current space</h2><span class="chip ok"><span class="dot"></span>Active</span></div>
+                  <dl class="kv" style="margin:10px 0 0">
+                    <dt>Provider</dt><dd>nous-engine · <code>wemm-embedding-2b</code></dd>
+                    <dt>Protocol</dt><dd><code>openai-embeddings-multimodal</code></dd>
+                    <dt>Capabilities</dt><dd><span class="chip lay">text</span> <span class="chip lay">image</span> <span class="chip lay">video</span> <span class="chip">rerank</span></dd>
+                    <dt>Dimensions</dt><dd class="num">2048 · halfvec · HNSW</dd>
+                    <dt>Instruction</dt><dd><code>en_keyword · v1</code></dd>
+                    <dt>Latency p50</dt><dd class="num">text 21 ms · image 127 ms · clip 480 ms</dd>
+                  </dl>
+                </div>
+                <div class="island pad">
+                  <div class="row between"><h2>Candidate space</h2><span class="chip warn"><span class="dot"></span>Re-embedding · not queried</span></div>
+                  <dl class="kv" style="margin:10px 0 0">
+                    <dt>Provider</dt><dd>Volcengine Ark · <code>doubao-embedding-vision-251215</code></dd>
+                    <dt>Capabilities</dt><dd><span class="chip lay">text</span> <span class="chip lay">image</span> <span class="chip lay">video</span> <span class="chip off">no rerank</span></dd>
+                    <dt>Progress</dt><dd><div class="row"><div class="prog"><i style="width:37%"></i></div><span class="num">478 / 1,285</span></div></dd>
+                    <dt>Cost so far</dt><dd class="num">112k tokens</dd>
+                  </dl>
+                  <div class="row" style="margin-top:10px"><button class="btn ghost">Pause</button><button class="btn ghost" disabled title="Enabled when re-embedding reaches 100%">Switch to this space</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sh"><span class="ic"><svg class="ic-svg"><use href="#i-gear"/></svg></span><div><h2>Indexing policy</h2><p>Shot indexing is a DBOS task per video. Decide who pays for it and when it runs.</p></div></div>
+            <div class="sb">
+              <div class="split">
+                <div class="kv" style="align-content:start">
+                  <dt>Auto-index new videos</dt><dd><span class="seg" role="radiogroup"><button role="radio" aria-selected="false">Off</button><button role="radio" aria-selected="true">Local provider only</button><button role="radio" aria-selected="false">Always</button></span></dd>
+                  <dt>On-demand indexing</dt><dd>Members can index a single video from its Shots tab · <span class="chip ok"><span class="dot"></span>enabled</span></dd>
+                  <dt>Cost estimate shown</dt><dd>local: free · doubao: ≈ 300 tokens per shot (frame + clip)</dd>
+                </div>
+                <div class="note"><b>Task Center</b> · every run is a <code>task_tracking</code> row: <em>Index shots · 六万多！RTX Pro 6000…</em> with progress <span class="num">extract 100% → cut 62 peaks → embed 143/200 → cluster</span>. A global backfill is one parent task that dispatches per-video tasks; skips are typed (<code>no_video_file</code>, <code>provider_no_video</code>, <code>already_indexed</code>).</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sh"><span class="ic"><svg class="ic-svg"><use href="#i-layers"/></svg></span><div><h2>Retrieval layers</h2><p>Coverage per layer in the active space · backfill is manual and typed</p></div></div>
+            <div class="sb">
+              <div class="tablewrap">
+                <table aria-label="Layers">
+                  <thead><tr><th>Layer</th><th>Status</th><th>Coverage</th><th>Source</th><th>Backfill (global)</th></tr></thead>
+                  <tbody>
+                    <tr><td>Semantic</td><td><span class="chip ok"><span class="dot"></span>ok</span></td><td><div class="row"><div class="prog"><i style="width:100%"></i></div><span class="num">1,285 / 1,285</span></div></td><td class="dim">title + description + summary</td><td><button class="btn ghost" style="padding:3px 9px">Dry run</button></td></tr>
+                    <tr><td>Visual · frame</td><td><span class="chip ok"><span class="dot"></span>ok</span></td><td><div class="row"><div class="prog"><i style="width:86%"></i></div><span class="num">1,102 / 1,285</span></div></td><td class="dim">representative frame per shot</td><td><button class="btn ghost" style="padding:3px 9px">Run 20</button></td></tr>
+                    <tr><td>Camera · clip</td><td><span class="chip ok"><span class="dot"></span>ok</span></td><td><div class="row"><div class="prog"><i style="width:86%"></i></div><span class="num">1,102 / 1,285</span></div></td><td class="dim">≤16 frames per shot as video</td><td><button class="btn ghost" style="padding:3px 9px">Run 20</button></td></tr>
+                    <tr><td>Transcript</td><td><span class="chip off"><span class="dot"></span>not built</span></td><td><div class="row"><div class="prog"><i style="width:0%"></i></div><span class="num">0 / 1,285</span></div></td><td class="dim">timecoded segments</td><td><button class="btn ghost" disabled style="padding:3px 9px">Phase 2</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="split">
+                <div class="note"><b>Last backfill</b> · 2026-09-16 03:35 · 20 dispatched · 3 skipped (<code>no_cover_url</code> ×2, <code>analysis_row_missing</code> ×1) · 0 errors. Skips are listed by reason code, never hidden.</div>
+                <div class="note"><b>Failure surface</b> · embedding failures show on the task card as <em>Analysis complete · embedding failed: provider_error</em> and here as a red count per layer. Switching space is manual; queries keep hitting the active space until you press Switch.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 4 ===================== -->
+  <section class="screen" id="s4" hidden aria-label="Push entry points">
+    <div class="entries">
+      <div class="phone">
+        <div class="bar"><span>✕</span><span>app.nous.ink</span><span>▭</span></div>
+        <div style="text-align:center;font-weight:600">Select tags <span class="muted" style="float:right">+</span></div>
+        <div class="tsearch" style="min-width:0"><input placeholder="Search tags…" aria-label="Search tags"></div>
+        <div class="row" style="gap:6px"><span class="muted" style="font-size:12px">Rating</span><span>☆ ☆ ☆ ☆ ☆</span></div>
+        <div class="intentrow" role="group" aria-label="AI processing">
+          <span class="intentbtn"><svg class="ic-svg"><use href="#i-text"/></svg>Transcribe</span><span class="intentbtn"><svg class="ic-svg"><use href="#i-book"/></svg>Summary</span><span class="intentbtn"><svg class="ic-svg"><use href="#i-scan"/></svg>Analyze</span><span class="intentbtn on new"><svg class="ic-svg"><use href="#i-film"/></svg>Shots</span>
+        </div>
+        <div class="muted" style="font-size:11px">Shots is independent of Transcribe (no dependency chain). Cost hint under the row: local provider free · doubao ≈ 300 tokens per shot.</div>
+        <div class="muted" style="font-size:11px">🔥 Frequent</div>
+        <div class="tagcloud"><span>人工智能 216</span><span>APP 121</span><span>样片 111</span><span>提示词 92</span><span>颜值 81</span><span>教程 68</span><span>音乐 61</span><span>Skill 58</span></div>
+        <div class="caption">iOS Shortcut tag page (<code>ShortcutsTagsPage</code>). Same row in the Chrome extension popup's Push tab.</div>
+      </div>
+
+      <div class="phone" style="border-radius:12px">
+        <div class="bar"><span>Chrome extension · Push</span><span class="chip agent">v1.5</span></div>
+        <div class="player">
+          <div class="bubble">
+            <b>Push to nous</b>
+            <div class="intentrow" style="grid-template-columns:repeat(4,1fr)"><span class="intentbtn" style="padding:5px 2px"><svg class="ic-svg"><use href="#i-text"/></svg>Trans.</span><span class="intentbtn" style="padding:5px 2px"><svg class="ic-svg"><use href="#i-book"/></svg>Sum.</span><span class="intentbtn" style="padding:5px 2px"><svg class="ic-svg"><use href="#i-scan"/></svg>Anal.</span><span class="intentbtn on" style="padding:5px 2px"><svg class="ic-svg"><use href="#i-film"/></svg>Shots</span></div>
+            <div class="muted">tags: last used · 人工智能, 教程</div>
+            <button class="btn" style="padding:4px 8px;font-size:11px">Push · index shots</button>
+          </div>
+          <div class="ctl"><span>▶</span><span class="num">00:57 / 08:03</span><span class="nbtn" title="nous · push this video"><svg class="ic-svg"><use href="#i-clap"/></svg><i></i></span><span>4K</span><span>倍速</span><span>字幕</span><span>🔊</span><span>⚙</span></div>
+        </div>
+        <div class="muted" style="font-size:12px">A content-script button in the Bilibili / Douyin player toolbar (like Indexed's green one). One click = the popup's Push with the last-used intents; hover shows the mini panel. While the task runs the button turns <span class="chip warn" style="padding:0 6px"><span class="dot"></span>busy</span>, done turns it green with a link to the Shots tab.</div>
+      </div>
+
+      <div class="phone" style="border-radius:12px">
+        <div class="bar"><span>What the intents orchestrate</span><span class="muted" style="font-size:11px">DBOS · task_tracking</span></div>
+        <div class="kv">
+          <dt>download</dt><dd>always · parent task "Fetch · title"</dd>
+          <dt>transcribe</dt><dd>→ transcript workflow</dd>
+          <dt>summarize / analyze</dt><dd>→ after transcript (existing dependency)</dd>
+          <dt><b>shots</b></dt><dd>→ <code>index_video_shots</code> right after download, <b>parallel</b> to transcript; tag slug <code>shots</code> in the Pipeline group</dd>
+          <dt>policy</dt><dd>if Auto-index = Always / Local-only matches the provider, the shots intent is pre-checked; otherwise it is opt-in per push</dd>
+        </div>
+        <div class="note">Same fields on every entry: <code>POST /media/fetch</code> body gets <code>shots: true</code>; batch fetch and the resource "Send to agent" path pass it through unchanged. Extension <code>intents.js</code>, <code>ShortcutsTagsPage.tsx</code>, <code>aiIntents.ts</code> and <code>media_fetch_helpers.py</code> change together (they already mirror each other).</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  const tabs=document.querySelectorAll('.switch [role=tab]');
+  tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.setAttribute('aria-selected',x===b));document.querySelectorAll('.screen').forEach(s=>s.hidden=(s.id!==b.dataset.s))}));
+  const dur=445,colors=['--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8'];
+  const names=['Talking head A','Desk b-roll','Slides','Talking head B','Unboxing close-up','Street walk','GPU macro','Car interior'];
+  const seq=[];let t=0,i=0,seed=7;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280};
+  while(t<dur&&i<100){const c=(rnd()<0.55)?(rnd()<0.6?0:3):Math.floor(rnd()*8);const len=Math.max(1.5,Math.min(30,(c===0||c===3)?3+rnd()*9:1.5+rnd()*6));seq.push({i:i++,c,start:t,len});t+=len}
+  const total=seq.reduce((a,s)=>a+s.len,0),fmt=s=>Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+  const count=new Array(8).fill(0),sum=new Array(8).fill(0);
+  const strip=document.getElementById('strip'),shots=document.getElementById('shots');
+  seq.forEach(s=>{count[s.c]++;sum[s.c]+=s.len;
+    const el=document.createElement('span');el.style.width=(s.len/total*100)+'%';el.style.background=`var(${colors[s.c]})`;el.tabIndex=0;el.setAttribute('aria-label',`Shot ${s.i+1} ${fmt(s.start)}–${fmt(s.start+s.len)} ${names[s.c]}`);if(s.i===53)el.classList.add('hit');
+    el.addEventListener('mouseenter',()=>{const tip=document.createElement('div');tip.className='tip';tip.id='tip';tip.textContent=`Shot ${s.i+1} · ${fmt(s.start)}–${fmt(s.start+s.len)} · ${names[s.c]}`;document.body.appendChild(tip);const r=el.getBoundingClientRect();tip.style.left=(r.left+r.width/2+window.scrollX)+'px';tip.style.top=(r.top+window.scrollY)+'px'});
+    el.addEventListener('mouseleave',()=>{const tip=document.getElementById('tip');if(tip)tip.remove()});
+    strip.appendChild(el);
+    const li=document.createElement('div');li.className='shot'+(s.i===53?' hit':'');li.innerHTML=`<i style="background:var(${colors[s.c]})"></i><span>Shot ${s.i+1} · ${names[s.c]}</span><span class="tc num">${fmt(s.start)}–${fmt(s.start+s.len)}</span>`;shots.appendChild(li)});
+  const legend=document.getElementById('legend');colors.forEach((c,k)=>{if(!count[k])return;const s=document.createElement('span');s.innerHTML=`<i style="background:var(${c})"></i>${names[k]} <span class="num">${count[k]}</span>`;legend.appendChild(s)});
+  const cl=document.getElementById('clusters');colors.map((c,k)=>({c,k})).filter(x=>count[x.k]).sort((a,b)=>count[b.k]-count[a.k]).slice(0,5).forEach((x,n)=>{const d=document.createElement('div');d.className='cl';d.style.borderLeftColor=`var(${x.c})`;d.innerHTML=`<div class="mini"></div><div><div class="n">Cluster ${String(n+1).padStart(2,'0')} · ${names[x.k]}</div><div class="s num">${count[x.k]} shots · ${fmt(sum[x.k])}</div></div>`;cl.appendChild(d)});
+  const hit=shots.querySelector('.hit');if(hit)hit.scrollIntoView({block:'center'});
+})();
+</script>
