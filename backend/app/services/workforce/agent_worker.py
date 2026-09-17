@@ -496,6 +496,9 @@ async def _run_subagent_task(
         "status": envelope.get("status"),
         "summary": envelope.get("summary") or "",
         "cost_cents": envelope.get("cost_cents") or 0,
+        # 同海拔的 BYOK 分量（整棵子树）。父行拿 by_child - by_child_byok
+        # 减出平台额，所以这一项漏传等于把 BYOK 的钱按平台价收。
+        "byok_cents": envelope.get("byok_cents") or 0,
         "tokens_used": envelope.get("tokens_used") or 0,
     }
 
@@ -593,6 +596,7 @@ async def _run_subagent_task(
                         content["summary"] or envelope.get("error") or ""
                     ),
                     "cost_cents": content["cost_cents"],
+                    "byok_cents": content["byok_cents"],
                     "tokens_used": content["tokens_used"],
                     "duration_ms": int((time.monotonic() - started) * 1000),
                 },

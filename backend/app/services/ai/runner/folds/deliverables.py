@@ -59,6 +59,15 @@ def fold_deliverable(views, payload):
         cost["media_cents"] = round(
             float(cost.get("media_cents") or 0.0) + float(cents), 4
         )
+        # BYOK 道与 ``media_cents`` 共用上面那个 ``seen`` 去重键（本函数在 key
+        # 命中时已经 return），所以重复到达既不多计一件，也不多计任何一条道的钱。
+        # 缺席 ≠ 0：不写这个键说明这次登记根本没带层标记，写 0 会把「没接线」
+        # 伪装成「平台付的」这个结论。
+        byok = payload.get("byok_cents")
+        if isinstance(byok, (int, float)) and not isinstance(byok, bool):
+            cost["media_byok_cents"] = round(
+                float(cost.get("media_byok_cents") or 0.0) + float(byok), 4
+            )
         recompute_spent(cost)
     views["view"]["outputs"] = outputs
     return views

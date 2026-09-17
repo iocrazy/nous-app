@@ -94,8 +94,11 @@ def empty_views() -> Views:
             "media_cents": 0.0,
             # BYOK 道（用户裁定 2）：与 own / by_child / media 三个分量一一平行，
             # 相减得到「平台真付了的那部分」。三条都**不进** spent_cents。
-            # 本 Task 只填第一条，另两条由图片 / 子 agent 那个 Task 补齐。
             "own_byok_cents": 0.0,
+            "media_byok_cents": 0.0,
+            # 与 ``by_child`` 同键、同海拔（每项是那棵子树的 BYOK 合计），
+            # 所以 ``by_child - by_child_byok`` 才是那棵子树的平台额。
+            "by_child_byok": {},
         },
         # 3c §3.2：与 ``cost`` 并列的计数道。花费回答「花了多少钱」，这里回答「干了
         # 多少活」——两者分母不同（花费是树总额、计数是自身量），合进一个字典必然

@@ -96,6 +96,9 @@ async def test_agent_generation_registers_one_deliverable(register_spy, insert_s
             search_text="A cafe at dusk\nsecond line",
             model="gpt-image-2.5",
             cost_cents=0.12,
+            # 平台目录出的图：BYOK 道那个键不出现在事件里。缺席 = 平台付的，
+            # 写 0 会把「这条登记路没接线」伪装成一个结论。
+            byok_cents=None,
             turn=1,
             step=3,
             # 这个调用点没有活 recorder（DBOS 侧回来的出图，父 run 多半已
@@ -204,3 +207,29 @@ async def test_half_an_attribution_means_no_lookup(
         origin=gm.GenerationOrigin(kind="agent_run", run_id="777", model="m"),
     )
     assert price_stub == [] and register_spy[0]["cost_cents"] is None
+
+
+async def test_a_byok_generation_sends_the_same_price_down_the_byok_lane(
+    register_spy, insert_stub, price_stub
+):
+    """用户自己的 key 出的图：``cost_cents`` 照算（血缘里那是真价），同时
+    ``byok_cents`` 带同一个数 —— 折进 ``cost.media_byok_cents`` 后父行才减得出
+    平台额。BYOK 行的 ``actual_provider`` 刻意用协议名，所以目录价照样命中，
+    这正是「BYOK 出的图被按平台价扣分」的确切机理。"""
+    gm = insert_stub
+    await gm.register_generated_media(
+        user_id="u",
+        scope_id=1,
+        source_url="http://x/y.png",
+        mime="image/png",
+        origin=gm.GenerationOrigin(
+            kind="agent_run",
+            run_id="777",
+            model="doubao-seedream-4-0",
+            provider="ark",
+            prompt="A cafe at dusk",
+            byok=True,
+        ),
+    )
+    assert register_spy[0]["cost_cents"] == 12.0
+    assert register_spy[0]["byok_cents"] == 12.0

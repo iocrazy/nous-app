@@ -1000,16 +1000,33 @@ async def resolve_translate_provider_config(
     )
 
 
+async def resolve_script_ai_config(user_id: Optional[str]) -> ResolvedAIConfig:
+    """Resolve the script-generation agent slug + model + user's BYO provider
+    config, **keeping the ``origin``**.
+
+    The tuple form below drops it, and ``script_ai_service`` is the one
+    RunRecorder dispatch that stamps ``team_id`` (so its runs really are
+    charged to a team) — without the origin every BYOK script run was billed
+    at platform rates. New callers on this path use this function; the tuple
+    shim stays for anything that genuinely only wants the four values.
+    """
+    return await resolve_task_ai_config(
+        user_id, "script_generation", DEFAULT_SCRIPT_AGENT_SLUG
+    )
+
+
 async def resolve_script_provider_config(
     user_id: Optional[str],
 ) -> Tuple[str, Dict[str, Any], str, str]:
     """Resolve the script-generation agent slug + model + user's BYO provider
     config. Honors ``task_assignment.script_generation`` (an AI Library agent
     slug), defaulting to the built-in ``script_ai`` agent. Same return shape as
-    the other resolvers: ``(provider_key, provider_config, model, slug)``."""
-    return await resolve_task_provider_config(
-        user_id, "script_generation", DEFAULT_SCRIPT_AGENT_SLUG
-    )
+    the other resolvers: ``(provider_key, provider_config, model, slug)``.
+
+    Origin-dropping shim — see :func:`resolve_script_ai_config`.
+    """
+    cfg = await resolve_script_ai_config(user_id)
+    return cfg.provider_key, cfg.provider_config, cfg.model, cfg.agent_slug
 
 
 async def resolve_caption_provider_config(

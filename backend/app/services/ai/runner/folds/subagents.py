@@ -72,5 +72,14 @@ def fold_done(views, payload):
             **(views["cost"].get("by_child") or {}),
             str(child_run_id): float(cents),
         }
+        # 同样 SET。两条道**同海拔**：都是那棵子树的合计（见发射点
+        # ``_cost_cents_of`` / ``_byok_cents_of`` 的 docstring），父行拿
+        # ``by_child - by_child_byok`` 减出平台额才成立。
+        byok = payload.get("byok_cents")
+        if isinstance(byok, (int, float)) and not isinstance(byok, bool):
+            views["cost"]["by_child_byok"] = {
+                **(views["cost"].get("by_child_byok") or {}),
+                str(child_run_id): float(byok),
+            }
         recompute_spent(views["cost"])
     return views

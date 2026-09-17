@@ -27,9 +27,9 @@ _WIRED = [
 ]
 
 
-def _recorder_kwargs(path: str) -> list[set[str]]:
-    """该文件里每一处 ``RunRecorder(...)`` 的关键字名集合。"""
-    tree = ast.parse((_BACKEND / path).read_text(encoding="utf-8"))
+def _recorder_calls(path: Path) -> list[tuple[int, set[str]]]:
+    """该文件里每一处 ``RunRecorder(...)`` 的 ``(行号, 关键字名集合)``。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     out = []
     for node in ast.walk(tree):
         if (
@@ -37,8 +37,32 @@ def _recorder_kwargs(path: str) -> list[set[str]]:
             and isinstance(node.func, ast.Name)
             and node.func.id == "RunRecorder"
         ):
-            out.append({kw.arg for kw in node.keywords if kw.arg})
+            out.append((node.lineno, {kw.arg for kw in node.keywords if kw.arg}))
     return out
+
+
+def _recorder_kwargs(path: str) -> list[set[str]]:
+    """该文件里每一处 ``RunRecorder(...)`` 的关键字名集合。"""
+    return [kwargs for _lineno, kwargs in _recorder_calls(_BACKEND / path)]
+
+
+def test_every_team_scoped_dispatch_anywhere_in_the_repo_stamps_the_origin():
+    """上面那份清单是**手写**的，所以它只能证明清单里的五处接线了。这一条反过来
+    扫全仓：凡是给 ``RunRecorder`` 传了 ``team_id`` 的调用点，都是会真的扣到某个
+    团队头上的 run，必须同时说出这笔钱花的是谁的 key。
+
+    没有 ``team_id`` 的站点（caption / classify / translate / summarize /
+    visual / topic_scorer / agent_runner 的内部 recorder）不在此列 —— 它们不扣分，
+    强求接线只会产出一堆为了过门禁而填的 ``None``。
+
+    这条规则自己就抓到了 ``script_ai_service`` —— 它带 team_id、在清单之外、
+    从未接过线，而它的 BYOK run 一直在被按平台价扣分。"""
+    offenders = []
+    for path in sorted((_BACKEND / "app").rglob("*.py")):
+        for lineno, kwargs in _recorder_calls(path):
+            if "team_id" in kwargs and "credential_origin" not in kwargs:
+                offenders.append(f"{path.relative_to(_BACKEND)}:{lineno}")
+    assert not offenders, "带 team_id 却没有 credential_origin：" + ", ".join(offenders)
 
 
 @pytest.mark.parametrize("path", _WIRED)
@@ -172,3 +196,125 @@ async def test_a_catalog_miss_on_the_forced_declare_path_reports_the_resolved_or
     )
 
     assert origin == "byok"
+
+
+# ── C：真的跑一遍 build_agent_runner_stack ───────────────────────────────
+
+
+async def test_the_real_stack_builder_hands_the_resolved_origin_to_the_stack(
+    monkeypatch,
+):
+    """上面那条只造了一个 ``AgentRunnerStack``，它证明的是 dataclass 收得住这个
+    字段，**不是** wiring 真的把 ``_chat_cfg.origin`` 填了进去 —— 把
+    ``credential_origin=credential_origin`` 改成 ``None`` 它照样绿。
+
+    这一条跑真的 ``build_agent_runner_stack``，只 mock 记忆召回、凭证解析与
+    fallback 链三个外部边界，其余（hook 注册、Delegate/SubAgent 工具、
+    AgentRunner）都真的构造。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    import app.services.ai.chat.ai_library_chat_wiring as wiring_mod
+    import app.services.ai.llm.fallback_wiring as fallback_mod
+    import app.services.ai.providers.ai_provider_helpers as helpers_mod
+
+    monkeypatch.setattr(
+        wiring_mod, "_safe_recall_graph_facts", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        wiring_mod, "_safe_recall_honcho_context", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        wiring_mod, "_safe_recall_agent_memory", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        helpers_mod,
+        "resolve_chat_config",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                provider_config={"qwen": {"api_key": "k"}}, origin="byok"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        fallback_mod, "build_fallback_llm", AsyncMock(return_value=object())
+    )
+
+    user_id = uuid4()
+    stack = await wiring_mod.build_agent_runner_stack(
+        agent={"id": str(uuid4()), "slug": "script_ai", "model": "qwen-max"},
+        skill_repo=MagicMock(),
+        user_id=user_id,
+        session_id=None,
+        user_query="hi",
+        settings=MagicMock(),
+    )
+
+    assert stack.credential_origin == "byok"
+
+
+# ── A：script_ai 这条链（清单外唯一带 team_id 的站点）────────────────────
+
+
+async def test_the_script_ai_dispatch_stamps_its_resolved_origin(monkeypatch):
+    """``script_ai_service`` 带 ``team_id``（真的会扣分）却从未接过 origin ——
+    它的解析器 ``resolve_script_provider_config`` 是丢 origin 的 tuple shim。
+    这一条钉住：调用方解析出的 origin 一路走到 ``RunRecorder``，且子 run 判据
+    ``parent_run_id`` 显式为 None（这条链永远是树根）。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    import app.services.storyboard.script.script_ai_service as mod
+
+    captured: dict = {}
+
+    class _Rec:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def set_summaries(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(mod, "RunRecorder", _Rec)
+    monkeypatch.setattr(
+        mod,
+        "resolve_dispatch_scope",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                as_recorder_kwargs=lambda: {"project_id": None}
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        mod.ScriptAIService,
+        "_build_composer",
+        lambda self: SimpleNamespace(
+            compose=AsyncMock(
+                return_value=SimpleNamespace(model="qwen-max", agent_id=None)
+            )
+        ),
+    )
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(return_value={"content": "ok"})
+    monkeypatch.setattr(
+        mod.ScriptAIService, "_build_runner", AsyncMock(return_value=runner)
+    )
+
+    svc = mod.ScriptAIService(user_id=None, credential_origin="byok")
+    out = await svc._run_agent(
+        "do it",
+        "content",
+        user_id="11111111-1111-1111-1111-111111111111",
+        team_id=7,
+    )
+
+    assert out == "ok"
+    assert captured["credential_origin"] == "byok"
+    assert captured["parent_run_id"] is None
