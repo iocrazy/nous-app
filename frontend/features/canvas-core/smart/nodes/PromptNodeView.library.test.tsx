@@ -7,7 +7,7 @@
 // panel's Prompts page replaced it, and one library per canvas is the point.
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -143,7 +143,7 @@ describe('PromptNodeView Open Library button', () => {
     expect(getMentionHandle('p1')).toBeNull();
   });
 
-  it('the registered handle reaches the live editor, not a captured null', () => {
+  it('the registered handle reaches the live editor, not a captured null', async () => {
     setNode();
     renderNode(BASE_DATA);
     const handle = getMentionHandle('p1');
@@ -154,7 +154,14 @@ describe('PromptNodeView Open Library button', () => {
       { url: '/api/v1/generated-media/gm-9', alias: 'Harbour', kind: 'image' },
       { consumeMention: false },
     );
-    expect(screen.getByTestId('prompt-body-editor').textContent).toContain('Harbour');
+    // The chip is a React node view, and since tiptap 3.28 React node-view
+    // portals render in a batched microtask after the transaction — so the
+    // alias appears one tick after insertImage returns, not synchronously.
+    // Waiting is about render timing only; the call itself either reached the
+    // live editor or it did not.
+    await waitFor(() =>
+      expect(screen.getByTestId('prompt-body-editor').textContent).toContain('Harbour'),
+    );
   });
 
   it('a handle whose editor has gone THROWS — a silent no-op reads as success', () => {
