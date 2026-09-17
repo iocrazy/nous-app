@@ -271,7 +271,7 @@ async def test_hybrid_search_query_path_uses_basic_fields(monkeypatch) -> None:
     assert resp.search_type == "hybrid"
     assert resp.total == 1
     assert resp.results[0].media_id == 5
-    assert resp.results[0].similarity == 0.5  # text-match score
+    assert resp.results[0].similarity == 1.0  # exact substring hit ranks first
     # CJK spaces stripped -> "%31岁%"; default scope; filters forwarded.
     # Asserted against the shared constant so widening the default set is a
     # one-line change rather than a hunt through hardcoded lists.
@@ -843,3 +843,443 @@ async def test_embedding_search_detects_the_pgcode_spelling_too(
 
     with pytest.raises(EmbeddingSearchUnavailable):
         await AnalysisRepository().search_by_embedding([0.1], user_id="u-1")
+
+
+# ---------------------------------------------------------------------------
+# hybrid_search merges vector recall (2026-09-15)
+#
+# "Smart Search" was labelled "AI + keywords" in the UI but ran the same
+# ILIKE as Quick Search — no vector call anywhere. Now it embeds the query and
+# folds cosine hits in under the text hits. Text hits are exact substring
+# matches and rank first (similarity 1.0); vector-only hits carry their
+# cosine score. The engine being unavailable degrades to text-only with an
+# error log, never to a 500 — hybrid has a valid partial answer.
+# ---------------------------------------------------------------------------
+def _hybrid_svc_with(
+    monkeypatch, *, text_rows, vector_rows, embed=(None, "unconfigured")
+):
+    svc = SearchService()
+
+    async def _fake_text(**kwargs):
+        return text_rows if kwargs.get("fields") != ["analysis"] else []
+
+    async def _fake_try_embed(_text):
+        return embed
+
+    async def _fake_vec(*, embedding, user_id, limit, threshold):
+        return vector_rows
+
+    monkeypatch.setattr(svc, "search_user_media_text", _fake_text)
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _fake_try_embed)
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_hybrid_merges_vector_hits_under_text_hits(monkeypatch) -> None:
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1", "title": "exact"}],
+        vector_rows=[
+            {"media_id": 2, "platform_id": "p2", "title": "near", "similarity": 0.83},
+            {"media_id": 1, "platform_id": "p1", "title": "exact", "similarity": 0.91},
+        ],
+        embed=([0.1, 0.2], None),
+    )
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
+
+    assert [r.media_id for r in resp.results] == [1, 2]
+    assert resp.results[0].similarity == 1.0  # text hit outranks any cosine
+    assert resp.results[1].similarity == 0.83  # vector-only keeps its score
+    assert resp.total == 2
+
+
+@pytest.mark.asyncio
+async def test_hybrid_is_text_only_when_embedder_unconfigured(monkeypatch) -> None:
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1", "title": "exact"}],
+        vector_rows=[{"media_id": 9, "platform_id": "p9", "similarity": 0.9}],
+        embed=(None, "unconfigured"),
+    )
+    resp = await svc.hybrid_search(query="cat", user_id="u-1")
+    assert [r.media_id for r in resp.results] == [1]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_degrades_to_text_when_vector_engine_unavailable(
+    monkeypatch,
+) -> None:
+    from app.repositories.analysis_repository import EmbeddingSearchUnavailable
+
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1", "title": "exact"}],
+        vector_rows=[],
+        embed=([0.1], None),
+    )
+
+    async def _boom(**_kw):
+        raise EmbeddingSearchUnavailable("42883")
+
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _boom)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1")
+    assert [r.media_id for r in resp.results] == [1]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_vector_only_hits_surface_when_text_finds_nothing(
+    monkeypatch,
+) -> None:
+    """The case the whole change exists for: no substring match, but the
+    library has something semantically close."""
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[],
+        vector_rows=[
+            {"media_id": 7, "platform_id": "p7", "title": "猫咖", "similarity": 0.77}
+        ],
+        embed=([0.1], None),
+    )
+    resp = await svc.hybrid_search(query="cat cafe", user_id="u-1")
+    assert [r.media_id for r in resp.results] == [7]
+    assert resp.results[0].similarity == 0.77
+
+
+@pytest.mark.asyncio
+async def test_hybrid_caps_merged_results_at_limit(monkeypatch) -> None:
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": i, "platform_id": f"p{i}"} for i in range(3)],
+        vector_rows=[
+            {"media_id": 10 + i, "platform_id": f"v{i}", "similarity": 0.5}
+            for i in range(5)
+        ],
+        embed=([0.1], None),
+    )
+    resp = await svc.hybrid_search(query="x", user_id="u-1", limit=4)
+    assert len(resp.results) == 4
+    assert [r.media_id for r in resp.results][:3] == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
+# _vector_hits / _merge_text_and_vector in isolation
+# ---------------------------------------------------------------------------
+def _sr(media_id: int, similarity: float):
+    from app.services.library.search_service import SearchResult
+
+    return SearchResult(
+        media_id=media_id,
+        platform_id=f"p{media_id}",
+        title="t",
+        description=None,
+        cover_url=None,
+        similarity=similarity,
+    )
+
+
+@pytest.mark.asyncio
+async def test_vector_hits_skips_the_engine_when_the_query_cannot_be_embedded(
+    monkeypatch,
+) -> None:
+    """A provider failure is logged (reason != unconfigured) and yields no
+    hits — but it must NOT reach the engine with a ``None`` vector."""
+    svc = SearchService()
+    called: List[Any] = []
+
+    async def _fake_try_embed(_text):
+        return None, "provider_error: boom 503"
+
+    async def _fake_vec(**kw):
+        called.append(kw)
+        return [{"media_id": 1}]
+
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _fake_try_embed)
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
+
+    assert await svc._vector_hits("cat", "u-1", limit=5, threshold=0.3) == (
+        [],
+        "embed_failed",
+    )
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_vector_hits_maps_row_defaults_without_raising(monkeypatch) -> None:
+    """Engine rows are raw dicts: the id can arrive as a string (Snowflake
+    BIGINT over the wire), ``similarity`` can be absent or NULL, and
+    ``cover_urls`` is a list whose first element is the cover."""
+    svc = SearchService()
+
+    async def _fake_try_embed(_text):
+        return [0.1], None
+
+    async def _fake_vec(**_kw):
+        return [
+            {"media_id": "42", "cover_urls": ["http://c/1.jpg", "http://c/2.jpg"]},
+            {"media_id": 43, "similarity": None, "cover_urls": []},
+        ]
+
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _fake_try_embed)
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
+
+    hits, outcome = await svc._vector_hits("cat", "u-1", limit=5, threshold=0.3)
+    assert outcome == "ok"
+    assert [h.media_id for h in hits] == [42, 43]
+    assert hits[0].cover_url == "http://c/1.jpg"
+    assert hits[0].similarity == 0.0  # absent -> 0.0, not a KeyError
+    assert hits[1].cover_url is None  # empty list -> None, not IndexError
+    assert hits[1].similarity == 0.0  # NULL -> 0.0
+
+
+def test_merge_dedupes_repeated_text_hits_and_pins_them_to_one() -> None:
+    merged = SearchService._merge_text_and_vector(
+        [_sr(1, 0.5), _sr(1, 0.5), _sr(2, 0.5)], [], limit=10
+    )
+    assert [h.media_id for h in merged] == [1, 2]
+    assert all(h.similarity == 1.0 for h in merged)
+
+
+def test_merge_orders_vector_only_hits_by_descending_cosine() -> None:
+    merged = SearchService._merge_text_and_vector(
+        [_sr(1, 0.5)],
+        [_sr(3, 0.40), _sr(4, 0.90), _sr(1, 0.99), _sr(2, 0.70)],
+        limit=10,
+    )
+    # text hit first regardless of cosine; the duplicate 1 is dropped from
+    # the vector side; the rest sorted high-to-low.
+    assert [h.media_id for h in merged] == [1, 4, 2, 3]
+    assert [h.similarity for h in merged] == [1.0, 0.90, 0.70, 0.40]
+
+
+# ---------------------------------------------------------------------------
+# vector_leg: a degraded hybrid answer must SAY it degraded (2026-09-15)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_hybrid_reports_ok_vector_leg_when_the_leg_ran(monkeypatch) -> None:
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1"}],
+        vector_rows=[{"media_id": 2, "platform_id": "p2", "similarity": 0.7}],
+        embed=([0.1], None),
+    )
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
+    assert resp.vector_leg == "ok"
+    assert [r.media_id for r in resp.results] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_skips_the_vector_leg_under_filters_and_says_so(
+    monkeypatch,
+) -> None:
+    """The vector RPC knows nothing about author/date/tag filters; running it
+    would append rows the caller explicitly excluded."""
+    called: List[Any] = []
+
+    async def _boom(_text):
+        called.append(1)
+        return [0.1], None
+
+    svc = _hybrid_svc_with(
+        monkeypatch, text_rows=[{"id": 1, "platform_id": "p1"}], vector_rows=[]
+    )
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _boom)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", author="alice")
+    assert resp.vector_leg == "skipped_filters"
+    assert called == [], "the embedder must not even be asked"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_skips_the_vector_leg_under_chip_filters(monkeypatch) -> None:
+    """The My Downloads chips (#2351) narrow the text leg inside the RPC; the
+    vector RPC cannot honour them, so an active chip must skip that leg too.
+    ``False`` / ``None`` / ``[]`` chips are "no opinion" and must NOT skip."""
+    from app.schemas.search import LibraryChipFilters
+
+    called: List[Any] = []
+
+    async def _boom(_text):
+        called.append(1)
+        return [0.1], None
+
+    svc = _hybrid_svc_with(
+        monkeypatch, text_rows=[{"id": 1, "platform_id": "p1"}], vector_rows=[]
+    )
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _boom)
+
+    resp = await svc.hybrid_search(
+        query="cat",
+        user_id="u-1",
+        filters=LibraryChipFilters(ai_transcribed=True),
+    )
+    assert resp.vector_leg == "skipped_filters"
+    assert called == [], "the embedder must not even be asked"
+
+    resp = await svc.hybrid_search(
+        query="cat",
+        user_id="u-1",
+        filters=LibraryChipFilters(ai_transcribed=False, tag_ids=[], min_rating=None),
+    )
+    assert resp.vector_leg == "ok", "off chips are not filters"
+    assert called == [1]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_skips_the_vector_leg_when_text_fills_the_page(
+    monkeypatch,
+) -> None:
+    called: List[Any] = []
+
+    async def _boom(_text):
+        called.append(1)
+        return [0.1], None
+
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1"}, {"id": 2, "platform_id": "p2"}],
+        vector_rows=[],
+    )
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _boom)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=2)
+    assert resp.vector_leg == "skipped_full_page"
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_asks_the_engine_for_a_full_page(
+    monkeypatch,
+) -> None:
+    seen: List[int] = []
+
+    async def _fake_vec(*, embedding, user_id, limit, threshold):
+        seen.append(limit)
+        return []
+
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1"}, {"id": 2, "platform_id": "p2"}],
+        vector_rows=[],
+        embed=([0.1], None),
+    )
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=5)
+    # A full page, not ``limit - text``: overlapping neighbours are dropped in
+    # the merge, so a right-sized ask would underfill the page.
+    assert seen == [5]
+    assert resp.vector_leg == "ok"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_goes_text_only_when_the_embedder_is_slow(monkeypatch) -> None:
+    """An interactive search must not wait the batch budget on the embedder."""
+    import asyncio
+
+    from app.services.library import search_service as ss
+
+    async def _slow(_text):
+        await asyncio.sleep(0.2)
+        return [0.1], None
+
+    monkeypatch.setattr(ss, "HYBRID_EMBED_TIMEOUT_S", 0.01)
+    svc = _hybrid_svc_with(
+        monkeypatch, text_rows=[{"id": 1, "platform_id": "p1"}], vector_rows=[]
+    )
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _slow)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
+    assert resp.vector_leg == "timeout"
+    assert [r.media_id for r in resp.results] == [1]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_reports_unavailable_engine_as_its_own_outcome(
+    monkeypatch,
+) -> None:
+    from app.repositories.analysis_repository import EmbeddingSearchUnavailable
+
+    async def _missing(**_kw):
+        raise EmbeddingSearchUnavailable("42883")
+
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1"}],
+        vector_rows=[],
+        embed=([0.1], None),
+    )
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _missing)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
+    assert resp.vector_leg == "unavailable"
+
+
+def test_merge_does_not_mutate_the_callers_text_hits() -> None:
+    a = _sr(1, 0.5)
+    out = SearchService._merge_text_and_vector([a], [], limit=10)
+    assert out[0].similarity == 1.0
+    assert a.similarity == 0.5, "inputs stay untouched; the pin is on a copy"
+
+
+def test_merge_dedupes_a_media_returned_twice_by_the_engine() -> None:
+    """One row per analysis row: the same media can arrive twice; keep its
+    best score only, and never emit a duplicate card."""
+    out = SearchService._merge_text_and_vector(
+        [], [_sr(2, 0.4), _sr(2, 0.9), _sr(3, 0.6)], limit=10
+    )
+    assert [(h.media_id, h.similarity) for h in out] == [(2, 0.9), (3, 0.6)]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_never_500s_when_the_vector_leg_blows_up(monkeypatch) -> None:
+    """The engine call raising anything (a bad bind, a driver error) must
+    degrade to text-only with its own outcome — the text half is the answer."""
+
+    async def _boom(**_kw):
+        raise RuntimeError('syntax error at or near ":"')
+
+    svc = _hybrid_svc_with(
+        monkeypatch,
+        text_rows=[{"id": 1, "platform_id": "p1"}],
+        vector_rows=[],
+        embed=([0.1], None),
+    )
+    monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _boom)
+    resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
+    assert resp.vector_leg == "error"
+    assert [r.media_id for r in resp.results] == [1]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_embeds_the_query_with_the_retrieval_instruction(
+    monkeypatch,
+) -> None:
+    """Queries carry the task instruction, documents do not: measured on the
+    real library this lifted keyword recall@10 from 0.43 to 0.71 (doubao)
+    and 0.22 to 0.65 (qwen3-embedding-8b)."""
+    from app.services.library.search_service import QUERY_INSTRUCTION
+
+    seen: List[str] = []
+
+    async def _spy(text_):
+        seen.append(text_)
+        return [0.1], None
+
+    svc = _hybrid_svc_with(monkeypatch, text_rows=[], vector_rows=[])
+    monkeypatch.setattr(svc.embedding_service, "try_embed", _spy)
+    await svc.hybrid_search(query="  comfyui ", user_id="u-1", limit=10)
+    assert seen == [QUERY_INSTRUCTION + "comfyui"]
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_embeds_the_query_with_the_same_instruction(
+    monkeypatch,
+) -> None:
+    from app.services.library.search_service import QUERY_INSTRUCTION
+
+    seen: List[str] = []
+
+    async def _spy(text_):
+        seen.append(text_)
+        return None
+
+    svc = SearchService()
+    monkeypatch.setattr(svc.embedding_service, "generate_embedding", _spy)
+    await svc.semantic_search(query="comfyui", user_id="u-1")
+    assert seen == [QUERY_INSTRUCTION + "comfyui"]

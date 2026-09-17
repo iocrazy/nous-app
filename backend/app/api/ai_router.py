@@ -12,7 +12,7 @@ Supports both platform_id-based (legacy) and resource_id-based triggers.
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
@@ -1026,22 +1026,7 @@ async def trigger_visual_analysis_by_resource(
     )
 
     # Dedup: skip if a run is already in flight for this resource.
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
-    from app.models import TaskTracking
-
-    async with read_scope() as session:
-        _active = (
-            await session.execute(
-                select(TaskTracking.dbos_workflow_id)
-                .where(TaskTracking.resource_id == resource_id)
-                .where(TaskTracking.task_type == "ai_extract")
-                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
-                .limit(1)
-            )
-        ).first()
-    if _active:
+    if await _resources_with_active_l1([str(resource_id)]):
         return {
             "message": "Visual analysis already in progress",
             "resource_id": resource_id,
@@ -1055,61 +1040,290 @@ async def trigger_visual_analysis_by_resource(
             detail="No cover image to analyze for this resource",
         )
 
-    _orphan_task_id: str | None = None
     try:
-        import uuid as _uuid
-
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.services.infra.unified_task_manager import get_task_manager
-        from app.workflows.analyze_l1 import analyze_l1_workflow
-
-        tracker = get_task_manager()
-        wf_id = str(_uuid.uuid4())
-        _orphan_task_id = await tracker.create(
+        await _dispatch_l1_analysis(
             user_id=auth.user_id,
-            task_type="ai_extract",
-            title=f"Analyze {_task_display_name(platform_id, resource, media)}",
-            subtitle="L1 cover analysis",
-            media_id=platform_id,
-            resource_id=resource_id,
-            dbos_workflow_id=wf_id,
+            resource_id=str(resource_id),
+            platform_id=platform_id,
+            media_pk=int(media["id"]),
+            cover_url=cover_url,
+            title=(media or {}).get("title") or "",
+            description=(media or {}).get("description") or "",
+            display_name=_task_display_name(platform_id, resource, media),
         )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to queue visual analysis: {str(e)}"
+        )
+    return {
+        "message": "Visual analysis queued",
+        "resource_id": resource_id,
+        "platform_id": platform_id,
+    }
 
+
+async def _resources_with_active_l1(resource_ids: list[str]) -> set[str]:
+    """Subset of ``resource_ids`` that already have an ``ai_extract`` run in
+    flight, by ANY user. Shared by the single trigger and the backfill so
+    neither can double-dispatch a resource whose vector simply hasn't landed
+    yet.
+
+    Deliberately not owner-filtered: ``idx_task_tracking_active_per_resource_type``
+    is unique on (resource_id, task_type) regardless of who started the
+    run, so a teammate's in-flight task on a shared resource must be seen
+    here or ``tracker.create`` collides with it and the "already in
+    progress" answer becomes a 500. Callers gate access BEFORE calling
+    (``_resolve_resource_to_platform_id`` / the owner-scoped candidate
+    query), so this cannot be reached with ids the caller may not see."""
+    if not resource_ids:
+        return set()
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+    from app.services.ai.resource_ai_status import ACTIVE_TASK_STATUSES
+
+    async with read_scope() as session:
+        rows = (
+            await session.execute(
+                select(TaskTracking.resource_id)
+                .where(TaskTracking.resource_id.in_(resource_ids))
+                .where(TaskTracking.task_type == "ai_extract")
+                .where(TaskTracking.status.in_(ACTIVE_TASK_STATUSES))
+            )
+        ).all()
+    return {str(r[0]) for r in rows if r[0] is not None}
+
+
+async def _dispatch_l1_analysis(
+    *,
+    user_id: str,
+    resource_id: str,
+    platform_id: str,
+    media_pk: int,
+    cover_url: str,
+    title: str,
+    description: str,
+    display_name: str,
+) -> str:
+    """Pre-create the task_tracking row and start ``analyze_l1_workflow``
+    under the SAME workflow id, so Task Center sees the run and the
+    lifecycle trigger can associate them. Returns the workflow id.
+
+    If the start fails after the row exists, the row is marked failed
+    (DISPATCH_ERROR) instead of sitting queued forever; the exception is
+    re-raised so the caller decides how to surface it.
+    """
+    import uuid as _uuid
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.analyze_l1 import analyze_l1_workflow
+
+    tracker = get_task_manager()
+    wf_id = str(_uuid.uuid4())
+    orphan_task_id = await tracker.create(
+        user_id=user_id,
+        task_type="ai_extract",
+        title=f"Analyze {display_name}",
+        subtitle="L1 cover analysis",
+        media_id=platform_id,
+        resource_id=resource_id,
+        dbos_workflow_id=wf_id,
+    )
+    try:
         await start_workflow_routed(
             "ai_extract",
             dbos_workflow_callable=analyze_l1_workflow,
             dbos_workflow_kwargs={
-                "media_id": int(media["id"]),
+                "media_id": media_pk,
                 "cover_url": cover_url,
-                "title": (media or {}).get("title") or "",
-                "description": (media or {}).get("description") or "",
-                "user_id": auth.user_id,
+                "title": title,
+                "description": description,
+                "user_id": user_id,
+                # The row the caller chose. Without it the workflow picks the
+                # user's EARLIEST resource for the media, which need not be
+                # the candidate the backfill selected.
+                # Snowflake ids arrive as strings; anything else (test
+                # doubles, legacy shapes) falls back to the workflow's lookup.
+                "resource_id": int(resource_id) if str(resource_id).isdigit() else None,
             },
             workflow_id=wf_id,
         )
-        _orphan_task_id = None
-        return {
-            "message": "Visual analysis queued",
-            "resource_id": resource_id,
-            "platform_id": platform_id,
-        }
     except Exception as e:
-        if _orphan_task_id:
+        if orphan_task_id:
             try:
-                from app.services.infra.unified_task_manager import get_task_manager
-
-                await get_task_manager().fail(
-                    _orphan_task_id,
+                await tracker.fail(
+                    orphan_task_id,
                     f"Dispatch failed: {str(e)[:180]}",
                     error_code="DISPATCH_ERROR",
                 )
             except Exception as fail_err:
                 logger.error(
-                    f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
+                    f"Failed to mark orphan task {orphan_task_id} failed: {fail_err}"
                 )
+        raise
+    return wf_id
+
+
+# The candidate window is over-fetched so rows already in flight (vector
+# still NULL, but a run is queued) cannot eat a whole batch on a second call
+# minutes later. Sized against ``BackfillEmbeddingsBody.limit``'s ceiling so
+# the headroom survives at the top of the range too.
+_BACKFILL_MAX_LIMIT = 200
+_BACKFILL_OVERFETCH_FACTOR = 3
+_BACKFILL_MAX_SCAN = _BACKFILL_MAX_LIMIT * (_BACKFILL_OVERFETCH_FACTOR + 1)
+
+
+class BackfillEmbeddingsBody(BaseModel):
+    limit: int = Field(default=20, ge=1, le=_BACKFILL_MAX_LIMIT)
+    dry_run: bool = False
+
+
+def _skip(resource_id: int, reason: str) -> dict:
+    return {"resource_id": resource_id, "reason": reason}
+
+
+@router.post("/analyze/backfill-embeddings")
+async def backfill_embeddings(
+    auth: AuthDep, _scope: ScopedRequestDep, body: BackfillEmbeddingsBody | None = None
+):
+    """Backfill ``content_embedding`` for the caller's downloads that lack it.
+
+    Cheapest first: rows that already have a VLM analysis are re-embedded
+    inline (one embedding call each, no Task Center row). Rows with no
+    analysis get a full ``analyze_l1`` dispatch each (VLM + embed). Both are
+    capped by ``limit`` together so a first run of 20 can be inspected
+    before the rest (``total_missing`` in the response) is released.
+    ``dry_run`` only reports, with the same element shapes as a real run.
+
+    Response fields are orthogonal on purpose: ``reembedded`` landed a
+    vector NOW; ``dispatched`` started a workflow whose vector has NOT
+    landed yet; ``skipped`` names batch rows that were attempted or
+    refused, with a stable reason code (never provider text); ``in_flight``
+    counts owner rows a run already covers; ``remaining`` is
+    ``total_missing`` minus only what actually landed.
+    """
+    from app.repositories.tags_repository import get_tags_repository
+    from app.services.ai.providers.embedding_config import resolve_embedding_config
+    from app.services.ai.providers.embedding_service import (
+        EmbeddingService,
+        classify_embed_reason,
+    )
+    from app.services.library.embedding_backfill import (
+        list_candidates,
+        partition,
+        reembed_existing,
+        undispatchable,
+    )
+
+    opts = body or BackfillEmbeddingsBody()
+    # Typed refusal, not a silent no-op: with no embedder every dispatched
+    # analyze_l1 would spend VLM money and still land no vector (the exact
+    # failure this backfill exists to repair).
+    if await resolve_embedding_config() is None:
         raise HTTPException(
-            status_code=500, detail=f"Failed to queue visual analysis: {str(e)}"
+            status_code=409,
+            detail={
+                "code": "embedder_unconfigured",
+                "message": "No embedding model configured (ai_module.embedding); "
+                "set one in Admin → AI Models before backfilling.",
+            },
         )
+    scan = min(opts.limit * _BACKFILL_OVERFETCH_FACTOR, _BACKFILL_MAX_SCAN)
+    fetched, total_missing = await list_candidates(auth.user_id, scan)
+    in_flight = await _resources_with_active_l1([str(c.resource_id) for c in fetched])
+    candidates = [c for c in fetched if str(c.resource_id) not in in_flight]
+    reembed, dispatch = partition(candidates, opts.limit)
+    # The SQL already excludes cover-less rows; if one slips through anyway
+    # it is reported, never silently dropped from every list.
+    skipped: list[dict] = [
+        _skip(c.resource_id, "no_cover_url") for c in undispatchable(candidates)
+    ]
+
+    if opts.dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "reembedded": [c.resource_id for c in reembed],
+            "dispatched": [{"resource_id": c.resource_id} for c in dispatch],
+            "skipped": skipped,
+            "in_flight": len(in_flight),
+            "remaining": total_missing,
+            "total_missing": total_missing,
+        }
+
+    embedder = EmbeddingService()
+    analysis_repo = get_analysis_repository()
+    tags_repo = get_tags_repository()
+
+    reembedded: list[int] = []
+    aborted = False
+    for i, cand in enumerate(reembed):
+        try:
+            ok, reason = await reembed_existing(
+                cand, embedder, analysis_repo, tags_repo
+            )
+        except Exception as e:  # one bad row must not lose the rows before it
+            logger.error(
+                f"backfill: re-embed failed for resource {cand.resource_id}: {e}"
+            )
+            skipped.append(_skip(cand.resource_id, "reembed_error"))
+            continue
+        if ok:
+            reembedded.append(cand.resource_id)
+            continue
+        if reason == "unconfigured":
+            code = "embedder_unconfigured"  # one spelling, same as the 409
+        elif reason == "analysis_row_missing":
+            code = reason
+        else:
+            code = classify_embed_reason(reason) or "provider_error"
+        skipped.append(_skip(cand.resource_id, code))
+        if reason == "unconfigured":
+            # Process-wide, not per-row: every later re-embed AND every
+            # dispatched VLM run would end the same way. Account for the
+            # rows this abort leaves untouched instead of dropping them.
+            aborted = True
+            skipped.extend(
+                _skip(c.resource_id, "embedder_unconfigured") for c in reembed[i + 1 :]
+            )
+            skipped.extend(
+                _skip(c.resource_id, "embedder_unconfigured") for c in dispatch
+            )
+            break
+
+    dispatched: list[dict] = []
+    for cand in [] if aborted else dispatch:
+        try:
+            task_id = await _dispatch_l1_analysis(
+                user_id=auth.user_id,
+                resource_id=str(cand.resource_id),
+                platform_id=cand.platform_id,
+                media_pk=cand.media_id,
+                cover_url=cand.cover_url or "",
+                title=cand.title,
+                description=cand.description,
+                display_name=cand.title or cand.platform_id,
+            )
+        except Exception as e:  # one bad row must not abort the batch
+            logger.error(
+                f"backfill: dispatch failed for resource {cand.resource_id}: {e}"
+            )
+            skipped.append(_skip(cand.resource_id, "dispatch_error"))
+            continue
+        dispatched.append({"resource_id": cand.resource_id, "task_id": task_id})
+
+    return {
+        "success": True,
+        "dry_run": False,
+        "reembedded": reembedded,
+        "dispatched": dispatched,
+        "skipped": skipped,
+        "in_flight": len(in_flight) + len(dispatched),
+        "remaining": max(total_missing - len(reembedded), 0),
+        "total_missing": total_missing,
+    }
 
 
 # ------------------------------------------------------------------

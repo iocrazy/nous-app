@@ -860,7 +860,9 @@ class ResourceAnalysis(Base):
     )
     detected_text: Mapped[str | None] = mapped_column(Text)
     full_text_for_embedding: Mapped[str | None] = mapped_column(Text)
-    content_embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    # 2048 = doubao-embedding-vision; pgvector validates dims at bind time,
+    # so a stale 1536 here raised ValueError on every write (mig 315).
+    content_embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
     analysis_model: Mapped[str | None] = mapped_column(String(50))
     analysis_cost: Mapped[float | None] = mapped_column(
         Numeric(10, 6), server_default=text("0")

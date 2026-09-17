@@ -284,6 +284,7 @@ async def hybrid_search(
             total=response.total,
             query=response.query,
             search_type=response.search_type,
+            vector_leg=response.vector_leg,
         )
 
     except Exception as e:

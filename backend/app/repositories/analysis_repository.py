@@ -131,7 +131,9 @@ class AnalysisRepository:
 
     # ── reads ────────────────────────────────────────────────────────────────
 
-    async def get_analysis(self, resource_id: int) -> Optional[dict]:
+    async def get_analysis(
+        self, resource_id: int, analysis_level: Optional[str] = None
+    ) -> Optional[dict]:
         """Get analysis for a resource.
 
         Mirrors legacy REST ``maybe_single()`` on resource_id.  The composite
@@ -142,14 +144,24 @@ class AnalysisRepository:
         """
         async with read_scope() as session:
             result = await session.execute(
-                select(ResourceAnalysis).where(
-                    ResourceAnalysis.resource_id == resource_id
-                )
+                self._analysis_row_stmt(resource_id, analysis_level)
             )
             row = result.scalars().first()
         if row is None:
             return None
         return self._row_to_dict(row)
+
+    @staticmethod
+    def _analysis_row_stmt(resource_id: int, analysis_level: Optional[str]):
+        """The composite PK is (resource_id, analysis_level). With a level the
+        pick is exact; without one it is deterministic (L1 sorts first) so a
+        read and a later write land on the same row."""
+        stmt = select(ResourceAnalysis).where(
+            ResourceAnalysis.resource_id == resource_id
+        )
+        if analysis_level is not None:
+            return stmt.where(ResourceAnalysis.analysis_level == analysis_level)
+        return stmt.order_by(ResourceAnalysis.analysis_level)
 
     async def get_videos_by_analysis_level(
         self, level: str, limit: int = 100
@@ -212,9 +224,13 @@ class AnalysisRepository:
             async with read_scope() as session:
                 result = await session.execute(
                     text(
+                        # CAST(), never ``:t::type`` — SQLAlchemy's bind
+                        # regex refuses a name followed by ``::``, so the two
+                        # middle arguments were literal text and the call was
+                        # a syntax error the first time a real vector arrived.
                         "SELECT * FROM match_videos_by_embedding("
-                        "CAST(:q AS vector), :t::double precision, :c::int, "
-                        "CAST(:u AS uuid))"
+                        "CAST(:q AS vector), CAST(:t AS double precision), "
+                        "CAST(:c AS int), CAST(:u AS uuid))"
                     ),
                     {"q": embedding_str, "t": threshold, "c": limit, "u": user_id},
                 )
@@ -358,18 +374,21 @@ class AnalysisRepository:
         return await self.create_analysis(resource_id, **kwargs)
 
     async def update_embedding(
-        self, resource_id: int, embedding: List[float], full_text: str
+        self,
+        resource_id: int,
+        embedding: List[float],
+        full_text: str,
+        analysis_level: Optional[str] = None,
     ) -> Optional[dict]:
         """Update the vector embedding for a resource.
 
-        Binds the native ``list[float]`` through the Vector(1536) type
-        handler.
+        Binds the native ``list[float]`` through the Vector(2048) type
+        handler. Pass ``analysis_level`` to pin the row (same pick as
+        ``get_analysis``).
         """
         async with write_scope() as session:
             result = await session.execute(
-                select(ResourceAnalysis).where(
-                    ResourceAnalysis.resource_id == resource_id
-                )
+                self._analysis_row_stmt(resource_id, analysis_level)
             )
             row = result.scalars().first()
             if row is None:

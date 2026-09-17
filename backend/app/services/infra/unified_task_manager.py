@@ -659,15 +659,19 @@ class UnifiedTaskManager:
         subtitle: Optional[str] = None,
         title: Optional[str] = None,
         metadata_patch: Optional[dict] = None,
+        force: bool = False,
     ) -> None:
         """Update progress (0-100). Throttled to 1 write/sec per task.
 
         Does not change phase — only updates progress/speed/subtitle/title.
+        ``force=True`` bypasses the throttle for a terminal write whose
+        subtitle must land (a step write a moment earlier would otherwise
+        silently swallow it).
         """
         now = time.time()
         last = self._last_progress.get(task_id, 0)
         # Skip throttle when title is being updated (important state change)
-        if title is None and now - last < self.THROTTLE_INTERVAL:
+        if title is None and not force and now - last < self.THROTTLE_INTERVAL:
             return
         self._last_progress[task_id] = now
         # Only log at INFO for significant changes (every 10%), DEBUG for the rest
@@ -681,9 +685,11 @@ class UnifiedTaskManager:
         from app.db.session import read_scope, write_scope
         from app.models import TaskTracking
 
+        # No ``status`` here: that column is trigger-owned (Route-C rule 2),
+        # and a forced terminal write used to stamp "processing" over a row
+        # a cancel or the stall sweeper had already moved on.
         updates: Dict[str, Any] = {
             "progress": min(max(progress, 0), 100),
-            "status": "processing",
         }
         if speed is not None:
             updates["speed"] = speed
