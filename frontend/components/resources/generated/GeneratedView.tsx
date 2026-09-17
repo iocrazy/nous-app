@@ -46,7 +46,7 @@ import {
 } from '../mediaKindPlaceholder';
 import { PinLightbox } from '../assets/sheet/PinLightbox';
 import {
-  generatedMediaFileUrl,
+  generatedMediaCoverUrl,
   generatedMediaStreamUrl,
 } from '../../../services/generatedMediaService';
 import { SaveAsAssetDialog } from '../../assets/SaveAsAssetDialog';
@@ -1139,16 +1139,18 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             setLightboxIndex(next);
           }}
           onClose={() => setLightboxIndex(null)}
-          // The FULL file, not `/cover` — a viewer opened to inspect a
-          // generation at full screen must not be showing the thumbnail.
-          // Timed media goes through `/stream`, which is Range-capable and
-          // needs no Bearer header: `/file` is auth-gated, and neither a
-          // `<video src>` nor the audio player's fetch can carry one.
+          // The ORIGINAL, not the preview tier — a viewer opened to inspect a
+          // generation at full screen must not be showing the thumbnail. It
+          // gets there through `/cover?full=1`, NOT `/file`: none of these
+          // elements can carry a Bearer header, and `/file` is auth-gated, so
+          // it answers 401 and the viewer paints a broken image (reported
+          // 2026-09-15). Timed media goes through `/stream`, Range-capable and
+          // equally header-free.
           srcFor={(id) => {
             const kind = itemsById.get(id)?.media_kind;
             return kind === 'video' || kind === 'audio'
               ? generatedMediaStreamUrl(id)
-              : generatedMediaFileUrl(id);
+              : generatedMediaCoverUrl(id, { full: true });
           }}
           kindFor={(id) => lightboxKindFor(itemsById.get(id)?.media_kind)}
           titleFor={(id) => itemsById.get(id)?.title}

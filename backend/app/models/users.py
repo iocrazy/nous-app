@@ -58,7 +58,11 @@ class UserProfiles(Base):
     display_id: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("generate_snowflake_id()")
     )
-    username: Mapped[str | None] = mapped_column(String(255))
+    #: 主账号名。mig 470 起 NOT NULL —— 注册时自动生成（两条路径都调
+    #: ``public.unique_username()``），用户可改，全局唯一且**大小写不敏感**
+    #: （``uniq_user_profiles_username_ci`` 建在 ``lower(username)`` 上；既有的
+    #: ``user_profiles_username_key`` 只管大小写敏感那一维）。
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole | None] = mapped_column(
         Enum(

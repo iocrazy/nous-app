@@ -31,12 +31,20 @@ export type IssueChatEvent =
   // missing `seq` reads as 0 and missing `outputs` as `[]`. That is safe
   // because the signal's watermark is per `(issue, run)` — a frame with no
   // `run_id` lands in the local lane and cannot mask a real run's frames.
+  // `cost_cents` / `charged_points` (3c §4.2) ride EVERY status frame, not just
+  // `done` — one shape to read. Both are nullable and the two nulls say
+  // different things a 0 would lie about: no recorded cost, and **nobody
+  // billed this run** (BYOK, billing off, or the charge never landed).
+  // Optional here for the same reason as the three above: an older backend
+  // omits them, and «absent» must not be read as «free».
   | {
       type: 'status';
       phase: 'running' | 'done' | string;
       run_id?: string | null;
       seq?: number | null;
       outputs?: Array<{ kind: string; ref_id: string }>;
+      cost_cents?: number | null;
+      charged_points?: number | null;
     };
 
 /**

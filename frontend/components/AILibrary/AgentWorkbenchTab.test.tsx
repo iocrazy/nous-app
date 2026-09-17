@@ -68,9 +68,12 @@ const item = (over: Partial<NeedsInputItem> = {}): NeedsInputItem => ({
 });
 
 function renderTab() {
+  // Both team-shaped props, exactly as AgentEditor derives them from one
+  // route param — so the deep link under test is built by B7's builder, not
+  // by the team-less fallback.
   return render(
     <MemoryRouter>
-      <AgentWorkbenchTab agent={agent} slug="script-ai" urlPrefix="/team/8" />
+      <AgentWorkbenchTab agent={agent} slug="script-ai" urlPrefix="/team/8" teamId="8" />
     </MemoryRouter>,
   );
 }

@@ -52,7 +52,7 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
     if (!steerTarget || steerTarget.kind !== 'issue' || pauseState === 'sending') return;
     setPauseState('sending');
     setPauseError(null);
-    const issueId = Number(steerTarget.id);
+    const issueId = String(steerTarget.id);
     try {
       await pauseIssue(issueId);
       setPauseState('paused');

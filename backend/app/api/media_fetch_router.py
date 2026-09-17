@@ -79,12 +79,20 @@ async def fetch_video(
 
             from app.db.session import read_scope
             from app.models import ParsedMedia
+            from app.utils.url_canonical import parsed_media_url_predicate
 
+            # "Has this URL been parsed before?" — same question, and the same
+            # trap, as the L2 dedup probe: exact equality on original_url makes
+            # a re-submit with different tracking parameters read as a first
+            # parse, so the user is charged again for content already in the
+            # system. Match the canonical key too; NULL canonical_url (rows
+            # older than migration 471's backfill) falls back to the legacy
+            # exact match rather than to a miss.
             async with read_scope() as session:
                 _existing = (
                     await session.execute(
                         select(ParsedMedia.id)
-                        .where(ParsedMedia.original_url == url)
+                        .where(parsed_media_url_predicate(url))
                         .limit(1)
                     )
                 ).first()
@@ -342,9 +350,19 @@ async def fetch_media_by_type(
             aweme_id=platform_id,
         )
 
+        already_owned = bool(dispatch_result.get("already_in_library"))
         return {
             "success": True,
-            "message": "Fetch submitted",
+            # Typed outcome, not a silent no-op: when nothing was dispatched
+            # because the user already owns every requested asset, say so —
+            # the caller shows "already in your library" instead of a
+            # "submitted" toast for a task that will never appear.
+            "message": (
+                "You already have this in your library"
+                if already_owned
+                else "Fetch submitted"
+            ),
+            "already_in_library": already_owned,
             "platform_id": platform_id,
             "task_id": dispatch_result.get("unified_task_id")
             or dispatch_result.get("task_id"),

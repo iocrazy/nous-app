@@ -223,9 +223,8 @@ async def list_tags(
         description="If true, only return enabled tags (for Shortcuts/public API)",
     ),
 ):
-    """
-    List all available tags.
-    Returns system tags and user's own tags.
+    """List the caller's tags — their initial set plus anything they made.
+
     Pass enabled_only=true to filter out disabled tags.
     """
     user_id = auth.user_id
@@ -311,10 +310,7 @@ async def create_tag(
     auth: AuthDep,
     tag: TagCreate,
 ):
-    """
-    Create a new user tag.
-    System tags cannot be created via API.
-    """
+    """Create a tag owned by the caller."""
     user_id = auth.user_id
     repo = get_tags_repository()
 
@@ -408,10 +404,13 @@ async def update_tag(
     tag_id: str,
     tag_update: TagUpdate,
 ):
-    """
-    Update a tag.
-    - For user tags: can update name, color, icon, enabled
-    - For system tags: can only update enabled (visibility toggle)
+    """Update a tag you own — name, color, icon, group, enabled, all of it.
+
+    There used to be a second class here: ``type != 'user'`` rows could only
+    toggle ``enabled``, everything else was a 403. Those were the shared
+    "system" tags, and mig 468 forked them into a copy per user — so no row
+    reaches this endpoint that anyone but its owner can touch, and the only
+    check that still means anything is the ownership one below.
     """
     user_id = auth.user_id
     repo = get_tags_repository()
@@ -420,18 +419,6 @@ async def update_tag(
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found"
-        )
-
-    # System tags: only allow toggling 'enabled'
-    if existing["type"] != "user":
-        if tag_update.enabled is not None:
-            updated = await repo.update_tag_admin(
-                tag_id=tag_id, enabled=tag_update.enabled
-            )
-            return updated
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="System tags can only toggle enabled status",
         )
 
     if existing["user_id"] != user_id:
@@ -471,10 +458,9 @@ async def delete_tag(
     auth: AuthDep,
     tag_id: str,
 ):
-    """
-    Delete a user tag.
-    Only user tags can be deleted. System tags cannot be deleted.
-    """
+    """Delete a tag you own. (Every tag is owned by someone since mig 468 —
+    the "system tags cannot be deleted" arm that used to sit here guarded rows
+    that no longer exist.)"""
     user_id = auth.user_id
     repo = get_tags_repository()
 
@@ -482,11 +468,6 @@ async def delete_tag(
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found"
-        )
-
-    if existing["type"] != "user":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete system tags"
         )
 
     deleted = await repo.delete_tag(tag_id, user_id)

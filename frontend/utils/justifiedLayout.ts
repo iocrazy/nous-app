@@ -107,3 +107,77 @@ export function computeJustifiedRows(
 
   return rows;
 }
+
+/**
+ * Per-item widths for one row, with a floor.
+ *
+ * A justified row gives every item the same height, so width is purely
+ * `ar * height` — and a 9:16 video is 2.4x narrower than a 4:3 image. In the
+ * downloads grid each card carries a four-column stats strip under the
+ * thumbnail (likes / comments / shares / collects), and below roughly 174px
+ * those four numbers stop fitting: `142.7K` at 9px bold needs ~33px, the card
+ * spends 16px on padding and 18px on gaps, so a cell only clears it from
+ * `(W - 34) / 4 >= 35`. Narrower than that and the strip renders as squeezed
+ * blocks with the digits clipped — which is what the user reported
+ * (2026-09-15), on exactly the portrait douyin videos.
+ *
+ * Raising the row height instead does not work: to widen a 0.5625 item to
+ * 190px the row has to be ~340px tall, which blows every image in that row up
+ * to 450px. The height is shared; the widths are not. So the floor is applied
+ * HERE, by taking the surplus from the wide items:
+ *
+ *   - items under `minWidth` are pinned to `minWidth`
+ *   - the rest shrink proportionally to absorb exactly what was taken
+ *   - the row's TOTAL width is unchanged, so justification is exact and the
+ *     deliberately-short last row stays short
+ *
+ * The cost is landing on the wide items: they get cropped a little more by the
+ * thumbnail's `object-cover`. That is the right trade — a slightly tighter
+ * crop is invisible, unreadable numbers are not.
+ *
+ * Returns natural widths untouched when nothing is under the floor, and falls
+ * back to an equal split of the same total when the floor cannot be paid for
+ * out of this row (every item narrow, or the wide ones would drop below it).
+ */
+export function distributeRowWidths(
+  aspectRatios: number[],
+  rowHeight: number,
+  { minWidth = 0 }: { minWidth?: number } = {},
+): number[] {
+  const n = aspectRatios.length;
+  if (n === 0) return [];
+
+  const natural = aspectRatios.map((ar) => clampAspectRatio(ar) * rowHeight);
+  if (minWidth <= 0) return natural;
+  if (!natural.some((w) => w < minWidth)) return natural;
+
+  // The row's own total is the budget — NOT the container width. For a full
+  // row the two are identical (that is how computeJustifiedRows derives the
+  // height), but the LAST row deliberately under-fills, and funding the floor
+  // from the container there would stretch the wide items to fill a row that
+  // was never meant to be full.
+  const total = natural.reduce((a, w) => a + w, 0);
+  const equalSplit = () => natural.map(() => total / n);
+
+  // Pin iteratively. Shrinking the wide items to pay for a pinned one can push
+  // a MIDDLING item under the floor in turn — so whoever falls below gets
+  // pinned as well and the scale is recomputed. Without this the fix just
+  // moves the unreadable card somewhere else (observed: a 1:1 card dropping to
+  // 172px while funding a 9:16 one).
+  const pinned = natural.map((w) => w < minWidth);
+  for (;;) {
+    const pinnedCount = pinned.reduce((a, isPinned) => a + (isPinned ? 1 : 0), 0);
+    if (pinnedCount === n) return equalSplit();
+
+    const surplus = natural.reduce((a, w, i) => a + (pinned[i] ? 0 : w), 0);
+    const remaining = total - minWidth * pinnedCount;
+    if (surplus <= 0 || remaining <= 0) return equalSplit();
+
+    const scale = remaining / surplus;
+    const fell = natural.map((w, i) => !pinned[i] && w * scale < minWidth);
+    if (!fell.some(Boolean)) {
+      return natural.map((w, i) => (pinned[i] ? minWidth : w * scale));
+    }
+    for (let i = 0; i < n; i += 1) if (fell[i]) pinned[i] = true;
+  }
+}

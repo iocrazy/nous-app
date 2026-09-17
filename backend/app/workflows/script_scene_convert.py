@@ -77,7 +77,7 @@ async def convert_chapter_to_scenes(
     unparseable body) so persistence never sees garbage.
     """
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
     from app.services.storyboard.script.script_service import ScriptService
@@ -87,14 +87,13 @@ async def convert_chapter_to_scenes(
     if not chapter:
         raise ValueError(f"Chapter not found: {chapter_id}")
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
+    cfg = await resolve_script_ai_config(user_id)
     ai_svc = ScriptAIService(
         user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     scenes = await ai_svc.split_chapter_to_screenplay_scenes(
         title=chapter.get("title", "") or "",

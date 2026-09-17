@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Copy, Check, FileText, Shapes } from 'lucide-react';
 
-import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
+import type { AIChatMessageAttachment, ChatToolCall, RunCost } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ResourceThumb } from './ResourceThumb';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
@@ -15,6 +15,7 @@ import { SubTaskList } from './SubTaskCard';
 import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
 import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
 import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
+import { RunCostTail } from '../agentActivity/RunCostTail';
 import {
   fromChatToolCalls,
   isScreenwritingTool,
@@ -59,6 +60,9 @@ export interface MessageBubbleProps {
   /** The agent_runs id that backed this turn (metadata_json.run_id). Threaded
    *  to TurnWriteSummary so its Undo button knows what to undo. */
   runId?: string | null;
+  /** 这一轮的消耗（3c §4.2）。由面板批量取回后按 run 分发；老会话没有，
+   *  此时尾栏维持原来的 `N tokens`。 */
+  cost?: RunCost | null;
 }
 
 /** Agents emit **markdown**, not HTML. This bubble used to run the text
@@ -341,6 +345,7 @@ export function MessageBubble({
   onAnswerQuestion,
   awaitingInputDisabled = false,
   runId,
+  cost,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
@@ -444,8 +449,22 @@ export function MessageBubble({
         )}
 
         <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-ink-700/50">
-          {tokens !== undefined && (
-            <span className="text-[10px] text-ink-600">{tokens} tokens</span>
+          {/* 3c §4.2：有账就显示钱，token 数退进浮层——读者问的是「这轮花了多少」。
+              没有账（老会话、还没取回来）才留着原来那行 token 数：少一行比换一行
+              更容易被当成 bug。 */}
+          {cost ? (
+            <RunCostTail
+              costCents={cost.cost_cents}
+              chargedPoints={cost.charged_points}
+              model={cost.model}
+              status={cost.status}
+              promptTokens={cost.prompt_tokens}
+              completionTokens={cost.completion_tokens}
+            />
+          ) : (
+            tokens !== undefined && (
+              <span className="text-[10px] text-ink-600">{tokens} tokens</span>
+            )
           )}
           <div className="flex items-center gap-2 ml-auto">
             {onApply && (

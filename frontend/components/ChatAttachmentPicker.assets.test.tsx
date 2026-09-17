@@ -159,3 +159,46 @@ describe('the staged asset chip and its loadout menu', () => {
     expect(onAssetsChange).toHaveBeenCalledWith([]);
   });
 });
+
+/**
+ * staged 引用 chip 的来源议题（3c Task 17 修复轮 2）。
+ *
+ * `@` 的检索按项目作用域，本议题自己的产出必然也在结果里并带着 `issue_key`，
+ * 所以不比较就等于给每一个 staged chip 挂上指着当前议题的标签 —— 而同一条引用
+ * 发出去之后，线程那一侧**会**比较、于是不画。同一条引用在相邻两屏上换身份。
+ */
+describe('staged 引用 chip 的来源议题', () => {
+  const staged = (issueKey: string | null) => ({
+    ref_kind: 'script_shot',
+    ref_id: '727145299382534999',
+    version: 2,
+    title: 'S3 · Shot #1',
+    issue_key: issueKey,
+  });
+
+  const renderOutputs = (issueKey: string | null, currentIssueKey?: string | null) =>
+    render(
+      <ChatAttachmentPicker
+        attachments={[]}
+        onChange={vi.fn()}
+        outputs={[staged(issueKey)]}
+        onOutputsChange={vi.fn()}
+        currentIssueKey={currentIssueKey}
+      />,
+    );
+
+  it('来自别的议题时画出来', () => {
+    const { container } = renderOutputs('MH-98', 'MH-96');
+    expect(container.querySelector('[data-testid="output-chip-issue"]')?.textContent).toBe('MH-98');
+  });
+
+  it('就是当前这件议题时不画', () => {
+    const { container } = renderOutputs('MH-96', 'MH-96');
+    expect(container.querySelector('[data-testid="output-chip-issue"]')).toBeNull();
+  });
+
+  it('不知道自己在哪件议题上时照画 —— 那时「来自别处」无从判断', () => {
+    const { container } = renderOutputs('MH-98', null);
+    expect(container.querySelector('[data-testid="output-chip-issue"]')?.textContent).toBe('MH-98');
+  });
+});

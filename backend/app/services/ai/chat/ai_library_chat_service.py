@@ -71,6 +71,10 @@ from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in test
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
 
+# 3c §4.2：SSE 的 done 帧与 WS 的 done 帧报同一个数，所以共用同一个取数函数
+# （run 行 + 积分行）。第二条读路径迟早会和这条说出不同的钱。
+from app.services.issues.issue_chat_stream import run_cost_for_frame
+
 # How many `asset_ref` attachments one turn may resolve.
 #
 # ASSET REFS ONLY, and the asymmetry is the whole reason the cap exists (final
@@ -283,14 +287,29 @@ class AILibraryChatService:
         delta chunks.
 
         Each ``delta`` event carries (text, offset). ``done`` has usage
-        + run_id + assistant message id + tool_calls trace + total_chars.
+        + run_id + assistant message id + tool_calls trace + total_chars
+        + this turn's money (3c §4.2).
+
+        A ``start`` event goes out first, as soon as the ``agent_runs`` row
+        exists, carrying that run id (3c §4.1). It is a separate event rather
+        than a field on the first delta on purpose: production's
+        ``chunk_callback`` turns take ``stream_turn``'s buffered fallback,
+        which hands the whole answer over in ONE callback at the end of the
+        turn — a run id riding the first delta would therefore arrive after
+        everything it was meant to label.
         """
         import asyncio as _asyncio
 
-        queue: _asyncio.Queue[Optional[str]] = _asyncio.Queue()
+        # The queue carries EVENTS, not bare text: two different things now
+        # travel this lane (the run id and the deltas) and they must keep
+        # their order. A second queue would have to be raced against this one.
+        queue: _asyncio.Queue[Optional[dict]] = _asyncio.Queue()
 
         async def _on_chunk(text: str) -> None:
-            await queue.put(text)
+            await queue.put({"kind": "delta", "text": text})
+
+        async def _on_run_started(run_id: str) -> None:
+            await queue.put({"kind": "start", "run_id": str(run_id)})
 
         # Run chat() in the background; consume queue as deltas arrive.
         chat_task = _asyncio.create_task(
@@ -303,6 +322,7 @@ class AILibraryChatService:
                 attachments=attachments,
                 script_context=script_context,
                 answer_to=answer_to,
+                run_started_callback=_on_run_started,
             ),
             name=f"chat-stream-{session_id}",
         )
@@ -326,11 +346,15 @@ class AILibraryChatService:
                 item = await queue.get()
                 if item is None:
                     break
+                if item["kind"] == "start":
+                    yield {"type": "start", "data": {"run_id": item["run_id"]}}
+                    continue
+                text = item["text"]
                 yield {
                     "type": "delta",
-                    "data": {"text": item, "offset": offset},
+                    "data": {"text": text, "offset": offset},
                 }
-                offset += len(item)
+                offset += len(text)
         except _asyncio.CancelledError:
             chat_task.cancel()
             raise
@@ -364,6 +388,9 @@ class AILibraryChatService:
                 # M2: surface attachment failures so streaming UI can show
                 # "couldn't read X.pdf" — empty list on success.
                 "attachment_failures": result.get("attachment_failures", []),
+                # 3c §4.2：刚结束的这一轮，气泡不必再发一次 /runs/costs。
+                # 与 WS done 帧同形、同一个取数方法：两个键恒定存在，读不到为 null。
+                **(await run_cost_for_frame(result.get("run_id"))),
             },
         }
 
@@ -524,6 +551,7 @@ class AILibraryChatService:
         attachments: Optional[list] = None,
         script_context: Optional[dict] = None,
         answer_to: Optional[str] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -566,6 +594,7 @@ class AILibraryChatService:
             attachments=attachments,
             script_context=script_context,
             answer_to=answer_to,
+            run_started_callback=run_started_callback,
         )
 
     async def run_session_turn(
@@ -585,6 +614,7 @@ class AILibraryChatService:
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -623,6 +653,7 @@ class AILibraryChatService:
                 fork_steer=fork_steer,
                 issue_id=issue_id,
                 message_source=message_source,
+                run_started_callback=run_started_callback,
             )
 
     async def _run_session_turn_inner(
@@ -642,6 +673,7 @@ class AILibraryChatService:
         fork_steer: bool = False,
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
+        run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -1436,6 +1468,32 @@ class AILibraryChatService:
             conversation_id=int(session_id) if _is_conv_store else None,
         )
 
+        # A6：议题派发链的 session 常常不带 team_id（UsagePage 自认「团队 scope
+        # 只给月度」正是这个后果），而 idx_agent_runs_billing 是
+        # WHERE team_id IS NOT NULL 的 partial 索引 —— NULL 的 run 对任何按团队的
+        # 效率账等于不存在。只在真缺时查一次议题，不给正常路径加往返。
+        #
+        # ⚠️ 这不只是记账字段 —— 两处行为会跟着变，方向都已核过：
+        # ① project 兜底会把原本 unbound 的 scope 变成 bound（AgentRunScope
+        #    .is_bound() 以 project_id is not None 为准），screenwriting 工具
+        #    因此从「一律 scope_unbound 拒绝」变成可解析该 project 下的对象。
+        #    安全性不靠这里的取值：scope_for_run 在每次解析时用
+        #    _user_can_read_project 重校验该 run 的 user 能否读这个 project，
+        #    读不到就整个 scope 返回 None（继续 fail-closed）。
+        # ② team_id 非空会激活 scope_resolver 的 team_mismatch 拒绝分支
+        #    （该分支的守卫正是 scope.team_id is not None）—— 方向是收紧，
+        #    原先 NULL 的 run 反而跳过了这一层跨团队检查。
+        _issue_row = None
+        if issue_id and not session.get("team_id"):
+            from app.repositories.issue_repository import get_issue_repository
+
+            try:
+                _issue_row = await get_issue_repository().get_by_id(int(issue_id))
+            except Exception as exc:  # noqa: BLE001 — 兜底失败不该挡住回合
+                logger.warning(f"[chat] issue scope fallback failed: {exc}")
+        _team_id = session.get("team_id") or (_issue_row or {}).get("team_id")
+        _project_id = _dispatch_scope.project_id or (_issue_row or {}).get("project_id")
+
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -1443,12 +1501,16 @@ class AILibraryChatService:
                 trigger=trigger,
                 session_id=None if _is_conv_store else session_id,
                 conversation_id=int(session_id) if _is_conv_store else None,
-                team_id=session.get("team_id"),
-                **_dispatch_scope.as_recorder_kwargs(),
+                team_id=_team_id,
+                project_id=_project_id,
+                episode_id=_dispatch_scope.episode_id,
                 model=model or None,
                 provider=provider,
                 input_summary=content,
                 attribution=attribution,
+                # 用户裁定 2：这条 run 花的是谁的钱。BYOK 的那部分终态不再扣
+                # 平台积分，所以它必须跟着 run 一起落库，不能只活在 wiring 里。
+                credential_origin=stack.credential_origin,
                 metadata={"full_input": content},
                 # phase 2b-2 §4.2: the issue link is written HERE, not by the
                 # post-turn backfill — a run that never returns (crash, cancel,
@@ -1458,6 +1520,23 @@ class AILibraryChatService:
                 fork_of_run_id=int(fork_of[0]) if fork_of else None,
                 fork_at_seq=int(fork_of[1]) if fork_of else None,
             ) as recorder:
+                # 3c §4.1: hand the run id over the moment the row exists —
+                # before compose, before the model, before the first token.
+                # The chat panel's temp bubble carries no ``metadata_json``, so
+                # until this fires there is no run to ask about and the
+                # "Step N · 4s" line cannot render at all. It must NOT be hung
+                # off the first delta: production's chunk_callback turns take
+                # ``stream_turn``'s buffered fallback, which delivers the whole
+                # answer in one lump at the END of the turn.
+                if run_started_callback is not None and recorder.run_id:
+                    try:
+                        await run_started_callback(str(recorder.run_id))
+                    except Exception as cb_exc:  # noqa: BLE001
+                        # A caller-supplied listener that raises loses its
+                        # notification, never the turn (same rule as
+                        # ``chunk_callback`` below, and as the dispatcher
+                        # discipline in CLAUDE.md).
+                        logger.warning(f"[chat] run_started_callback raised: {cb_exc}")
                 if fork_of is not None:
                     # First event of a forked run — before user / step_start —
                     # so replay / the UI see the branch point at seq 1.

@@ -32,7 +32,12 @@ describe('canMerge', () => {
   it('false when target not in selection', () => {
     expect(canMerge(sel, 'zzz')).toBe(false);
   });
-  it('false when a selected tag is not a user tag', () => {
-    expect(canMerge([tag('a', 3), tag('b', 12, 'system')], 'a')).toBe(false);
+  // The "not a user tag" case is gone with mig 468: every tag belongs to
+  // someone, so refusing on `type` would only ever block tags the user owns.
+  // Ownership is enforced where it can actually be trusted — the `merge_tags`
+  // proc rejects any tag whose user_id is not the caller's — not in a
+  // client-side predicate the browser could simply not run.
+  it('true for two of your own tags with the target among them', () => {
+    expect(canMerge([tag('a', 3), tag('b', 12)], 'a')).toBe(true);
   });
 });

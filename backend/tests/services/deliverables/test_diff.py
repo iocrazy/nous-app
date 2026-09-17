@@ -564,3 +564,32 @@ async def test_a_broken_ledger_read_rebuilds_to_nothing_not_an_exception(monkeyp
         None,
         mod.NOT_FOUND,
     )
+
+
+# ── 镜像守卫（C2）────────────────────────────────────────────────────────
+
+
+def test_the_diff_fields_mirror_the_gateway_writable_fields():
+    """``diff.py::_SHOT_FIELDS`` 与网关 ``_WRITABLE_SHOT_FIELDS`` 是同一张表。
+
+    这条在本票之前只是 ``diff.py`` 里的一行注释（"mirrors the gateway's
+    ``_WRITABLE_SHOT_FIELDS``"），**没有任何机器在对账**。漂移的代价是静默的：
+    网关多出一个可写字段而这边没跟进，差异弹层就从此不再打印那个字段，
+    而回退把 ``rebuild_content`` 的结果**直接 UPDATE 进 script_shots**，
+    于是那个字段在每一次回退里被清空 —— 正是 2026-09-14 生产上 ``shot_type``
+    变空那一类。
+
+    ⚠️ 断的是**集合**不是序列，这是刻意的：``_SHOT_FIELDS`` 的顺序是「读起来
+    顺」的顺序（见它自己的注释），与网关那份的顺序没有关系，也不该有。
+    比较两个 import 进来的真对象 —— 不是抄一份字面量，那样两边一起抄错照样绿。
+    """
+    from app.services.ai.scope.scoped_script_gateway import _WRITABLE_SHOT_FIELDS
+
+    assert set(mod._SHOT_FIELDS) == set(_WRITABLE_SHOT_FIELDS), (
+        "差异面板印的字段与 agent 能写的字段已经分家：\n"
+        f"  只在 diff.py   ：{sorted(set(mod._SHOT_FIELDS) - set(_WRITABLE_SHOT_FIELDS))}\n"
+        f"  只在 gateway   ：{sorted(set(_WRITABLE_SHOT_FIELDS) - set(mod._SHOT_FIELDS))}"
+    )
+    # 同一个字段不许在任何一侧出现两次 —— 集合相等会把重复吃掉。
+    assert len(mod._SHOT_FIELDS) == len(set(mod._SHOT_FIELDS))
+    assert len(_WRITABLE_SHOT_FIELDS) == len(set(_WRITABLE_SHOT_FIELDS))

@@ -23,7 +23,7 @@ const json = (status: number, body: unknown) =>
 describe('pauseIssue / resumeIssue — typed control errors', () => {
   it('maps a FastAPI {detail:{code,message}} 409 to IssueControlError.code', async () => {
     fetchMock.mockResolvedValueOnce(json(409, { detail: { code: 'already_paused', message: 'issue is already paused' } }));
-    const err = await pauseIssue(5).catch((e) => e);
+    const err = await pauseIssue('5').catch((e) => e);
     expect(err).toBeInstanceOf(IssueControlError);
     expect(err.code).toBe('already_paused');
     expect(err.status).toBe(409);
@@ -41,7 +41,7 @@ describe('pauseIssue / resumeIssue — typed control errors', () => {
         details: { code: 'already_paused', message: 'issue is already paused' },
       }),
     );
-    const err = await pauseIssue(5).catch((e) => e);
+    const err = await pauseIssue('5').catch((e) => e);
     expect(err).toBeInstanceOf(IssueControlError);
     expect(err.code).toBe('already_paused');
     expect(err.message).toBe('issue is already paused');
@@ -49,14 +49,14 @@ describe('pauseIssue / resumeIssue — typed control errors', () => {
 
   it('an envelope with null details keeps http_<status> and the error text', async () => {
     fetchMock.mockResolvedValueOnce(json(404, { success: false, error: 'Issue not found', code: 'http_404', request_id: 'x', details: null }));
-    const err = await resumeIssue(5).catch((e) => e);
+    const err = await resumeIssue('5').catch((e) => e);
     expect(err.code).toBe('http_404');
     expect(err.message).toBe('Issue not found');
   });
 
   it('maps a plain-string detail to http_<status> with the detail as message', async () => {
     fetchMock.mockResolvedValueOnce(json(404, { detail: 'Issue not found' }));
-    const err = await resumeIssue(5).catch((e) => e);
+    const err = await resumeIssue('5').catch((e) => e);
     expect(err).toBeInstanceOf(IssueControlError);
     expect(err.code).toBe('http_404');
     expect(err.message).toBe('Issue not found');
@@ -64,14 +64,14 @@ describe('pauseIssue / resumeIssue — typed control errors', () => {
 
   it('survives a non-JSON error body', async () => {
     fetchMock.mockResolvedValueOnce(new Response('<html>502</html>', { status: 502, statusText: 'Bad Gateway' }));
-    const err = await pauseIssue(5).catch((e) => e);
+    const err = await pauseIssue('5').catch((e) => e);
     expect(err).toBeInstanceOf(IssueControlError);
     expect(err.code).toBe('http_502');
   });
 
   it('returns the body on success', async () => {
     fetchMock.mockResolvedValueOnce(json(200, { issue_id: '5', dispatched: true, reason: 'dispatched', workflow_id: 'wf', run_id: null }));
-    await expect(resumeIssue(5)).resolves.toMatchObject({ reason: 'dispatched' });
+    await expect(resumeIssue('5')).resolves.toMatchObject({ reason: 'dispatched' });
   });
 });
 

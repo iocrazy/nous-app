@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   taskAgentName,
   taskAwaitingInput,
+  taskRetryCount,
   taskRowActions,
   taskShowsCover,
 } from './taskRowPresentation';
@@ -124,5 +125,36 @@ describe('taskAgentName', () => {
     expect(
       taskAgentName(makeTask({ task_type: 'download', metadata: { agent_name: 'Analyze' } })),
     ).toBeUndefined();
+  });
+});
+
+describe('taskRetryCount — 重试次数，不是任务条数', () => {
+  // 2026-09-15 之前重试是 fork 一个新 workflow，于是「重试了几次」是靠任务中心里
+  // 多出几条 `(recovered)` 行来表达的 —— 而那些行互不关联、也不指向原任务。改成
+  // 原地重试之后，这个角标是唯一还能说出「这是第几次」的东西。
+  const T = (metadata: Record<string, unknown>) =>
+    ({ metadata }) as Pick<UnifiedTask, 'metadata'>;
+
+  it('says nothing about a task nobody has retried', () => {
+    // 「第 1 次尝试」不是信息；每行都挂一个角标 = 没人会看角标。
+    expect(taskRetryCount(T({}))).toBeNull();
+    expect(taskRetryCount(T({ retry_count: 0 }))).toBeNull();
+  });
+
+  it('reports the attempt count the backend recorded', () => {
+    expect(taskRetryCount(T({ retry_count: 4 }))).toBe(4);
+  });
+
+  it('survives a metadata blob that is not what we expect', () => {
+    // metadata 是 jsonb，任何写入方都可能放进别的东西。角标读不出数字就闭嘴，
+    // 而不是渲染一个 NaN 角标。
+    expect(taskRetryCount(T({ retry_count: 'many' }))).toBeNull();
+    expect(taskRetryCount(T({ retry_count: null }))).toBeNull();
+    expect(taskRetryCount(T({ retry_count: -2 }))).toBeNull();
+    expect(taskRetryCount({} as Pick<UnifiedTask, 'metadata'>)).toBeNull();
+  });
+
+  it('accepts the number as a string, because JSONB round-trips vary', () => {
+    expect(taskRetryCount(T({ retry_count: '3' }))).toBe(3);
   });
 });

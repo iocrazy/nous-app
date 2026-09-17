@@ -42,7 +42,7 @@ describe('PausedSection', () => {
     render(<PausedSection />);
     expect(await screen.findByText('Paused with mail')).toBeTruthy();
     fireEvent.click(screen.getByTestId('paused-resume'));
-    await waitFor(() => expect(resumeIssue).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(resumeIssue).toHaveBeenCalledWith('5'));
     await waitFor(() => expect(screen.queryByTestId('paused-row')).toBeNull());
   });
 
@@ -67,7 +67,7 @@ describe('PausedSection', () => {
     listPaused.mockResolvedValueOnce({ items: [], has_more: false }).mockResolvedValueOnce({ items: [ROW], has_more: false });
     render(<PausedSection />);
     await waitFor(() => expect(listPaused).toHaveBeenCalledTimes(1));
-    notifyIssuePauseChanged(5);
+    notifyIssuePauseChanged('5');
     expect(await screen.findByText('Paused with mail')).toBeTruthy();
     expect(listPaused).toHaveBeenCalledTimes(2);
   });

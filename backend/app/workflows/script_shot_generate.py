@@ -99,20 +99,26 @@ def _compose_prompt(shot: dict[str, Any], scene: Optional[dict[str, Any]]) -> st
 
 def _step_output(
     out: Any, *, key: str = "url"
-) -> tuple[str, Optional[str], Optional[str]]:
-    """出图/出视频 step 的返回值 → ``(载荷, provider, model)``。
+) -> tuple[str, Optional[str], Optional[str], bool]:
+    """出图/出视频 step 的返回值 → ``(载荷, provider, model, byok)``。
 
     DBOS 把 step 返回值冻进 checkpoint，所以部署前排队的 workflow 恢复时
     拿回来的仍是旧的裸 ``str``。两种形状都要接：归因是增益，不是继续跑完
     的前提。``key`` 是载荷在字典里的键——出图是 ``url``，出视频是 ``path``
-    （``script_shot_video`` 复用本函数，它的产物永远是本地文件）。"""
+    （``script_shot_video`` 复用本函数，它的产物永远是本地文件）。
+
+    ``byok`` 是「这次用的是用户自己的 provider key」，由
+    ``image_generation_service`` 从 provider 对象上读出来并列注入。缺席一律
+    False —— 冻进 checkpoint 的旧返回值没有它，而把「不知道」读成 True 会
+    免掉平台该收的积分。出视频今天恒 False（视频侧没有 BYOK 目录行）。"""
     if isinstance(out, dict):
         return (
             str(out.get(key) or ""),
             out.get("provider") or None,
             out.get("model") or None,
+            bool(out.get("byok")),
         )
-    return (str(out), None, None)
+    return (str(out), None, None, False)
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
@@ -124,11 +130,11 @@ async def generate_shot_image_step(
 ) -> dict[str, str]:
     """Read the shot + its scene, compose the prompt, and run the image provider.
 
-    Returns ``{"url", "provider", "model"}`` — the produced url/path plus the
-    attribution the adapter resolved (the request's ``model`` is the
-    ``dall-e-3`` sentinel by default, which is not a model name). Raises if the
-    shot is missing or the provider yields no image (so the workflow marks the
-    shot failed)."""
+    Returns ``{"url", "provider", "model", "byok"}`` — the produced url/path,
+    the attribution the adapter resolved (the request's ``model`` is the
+    ``dall-e-3`` sentinel by default, which is not a model name), and whose
+    credentials paid for it. Raises if the shot is missing or the provider
+    yields no image (so the workflow marks the shot failed)."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
     from app.services.ai.media.gen_attribution import resolved_attribution
@@ -162,7 +168,15 @@ async def generate_shot_image_step(
         result or {}, requested_provider=provider, requested_model=model
     )
     logger.info(f"[script_shot_generate][step] shot {shot_id} → {produced}")
-    return {"url": produced, "provider": gen_provider or "", "model": gen_model or ""}
+    return {
+        "url": produced,
+        "provider": gen_provider or "",
+        "model": gen_model or "",
+        # 层标记跟着产出一起走（积分 Task 2）。这是**第二条**挂在 agent run
+        # 上的生图路（另一条是 agent 的 generate_media 工具），两条都得带，
+        # 否则这条路出的 BYOK 图照平台价扣分而所有测试照绿。
+        "byok": bool((result or {}).get("byok")),
+    }
 
 
 async def _resolve_scope_id(scene: Optional[dict[str, Any]], user_id: str) -> int:
@@ -200,6 +214,10 @@ async def persist_generation(
     *,
     resolved_provider: Optional[str] = None,
     resolved_model: Optional[str] = None,
+    # 同样是 keyword-only + 默认值（DBOS 冻结输入兼容）。默认 **False**：
+    # 部署前排队的 workflow 恢复时不带这个键，把「不知道」当成 BYOK 会免掉
+    # 平台该收的积分。
+    byok: bool = False,
 ) -> dict[str, str]:
     """Persist the provider's ephemeral image through the generated-media store.
 
@@ -283,6 +301,9 @@ async def persist_generation(
                     or (None if model == _DEFAULT_MODEL else model),
                     provider=resolved_provider or provider,
                     derivation_kind="shot_generate",
+                    # 用户自己的 key 出的图不收平台积分（用户裁定 2）。
+                    # ``cost_cents`` 照算——血缘里那是真价。
+                    byok=byok,
                     # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
                     # 产出的图永远没有 run 可挂（真栈缺口，spec §1.3）。
                     run_id=run_id,
@@ -370,7 +391,7 @@ async def script_shot_generate_workflow(
     ``user_id`` is optional (frozen DBOS input compat)."""
     try:
         step_out = await generate_shot_image_step(shot_id, model, provider, user_id)
-        provider_url, gen_provider, gen_model = _step_output(step_out)
+        provider_url, gen_provider, gen_model, gen_byok = _step_output(step_out)
         urls = await persist_generation(
             shot_id,
             provider_url,
@@ -382,6 +403,7 @@ async def script_shot_generate_workflow(
             step,
             resolved_provider=gen_provider,
             resolved_model=gen_model,
+            byok=gen_byok,
         )
         await mark_shot_done(shot_id, urls["image_url"], urls["thumbnail_url"])
         return {

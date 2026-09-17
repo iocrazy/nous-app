@@ -31,6 +31,18 @@ export interface StagedOutputRef {
   ref_id: string;
   version: number;
   title: string | null;
+  /** The issue this version was produced on (3c §2.4) — a FACT about the
+   *  version, carried whatever it is, NOT a flag for "came from elsewhere".
+   *  The `@` search is scoped to the project, so this issue's own outputs are
+   *  in the results with their own key; whether to SAY it is decided where the
+   *  chip is drawn, against the issue the composer belongs to.
+   *
+   *  Staged rather than dropped because the chip is the SAME citation the
+   *  picker showed and the thread will show: losing the source here makes one
+   *  reference change identity twice across three adjacent screens, and a
+   *  reader would reasonably read that as "the one I staged is a local one
+   *  now". */
+  issue_key: string | null;
 }
 
 /** The picker's row, reduced to what a citation needs. */
@@ -40,6 +52,7 @@ export function toStagedOutput(row: OutputMentionRow): StagedOutputRef {
     ref_id: row.ref_id,
     version: row.version,
     title: row.title,
+    issue_key: row.issue_key,
   };
 }
 
@@ -47,36 +60,59 @@ const same = (a: StagedOutputRef, kind: string, refId: string, version: number):
   a.ref_kind === kind && a.ref_id === refId && a.version === version;
 
 /**
+ * What one pick did. FOUR outcomes, because the caller acts differently on
+ * each — and two of them used to share an answer (B6).
+ *
+ *   - `staged`    → the row is now in `list`;
+ *   - `duplicate` → it was already there; nothing to say, nothing to add;
+ *   - `limit`     → over the cap, and the caller must SAY so;
+ *   - `unusable`  → the row carries no usable coordinates, so nothing was
+ *                   staged and the caller must SAY so.
+ *
+ * `unusable` used to return the list unchanged — the same answer a duplicate
+ * gives — which made the pick a silent no-op: the picker closed, no chip
+ * appeared, and the writer was told nothing («触发路径必须类型化失败回显»).
+ */
+export type StageOutputOutcome = 'staged' | 'duplicate' | 'limit' | 'unusable';
+
+export interface StageOutputResult {
+  outcome: StageOutputOutcome;
+  /** The list to hold from here — the same array back unless `staged`, so the
+   *  caller can set state unconditionally and React bails on identity. */
+  list: StagedOutputRef[];
+}
+
+/**
  * Append a citation.
  *
- * Three answers, and the caller must tell them apart:
- *   - a NEW list           → staged;
- *   - the SAME list back   → already staged, nothing to say;
- *   - `null`               → over the cap, and the caller must SAY so.
- *
- * Null rather than a silent truncation because the server refuses the whole
- * comment past `MAX_OUTPUT_REF_ATTACHMENTS` — a ninth chip that looked staged
- * would produce a comment the writer believes was sent and that never posts.
- * A duplicate at the cap still returns the list unchanged: nothing would be
- * added, so reporting a limit the writer has not exceeded would be a lie about
- * their own action.
+ * Refusing past `MAX_OUTPUT_REF_ATTACHMENTS` rather than silently truncating,
+ * because the server refuses the whole comment past that cap — a ninth chip
+ * that looked staged would produce a comment the writer believes was sent and
+ * that never posts. A duplicate at the cap is still `duplicate`: nothing would
+ * be added, so reporting a limit the writer has not exceeded would be a lie
+ * about their own action.
  */
 export function stageOutput(
   list: StagedOutputRef[],
   row: StagedOutputRef,
-): StagedOutputRef[] | null {
+): StageOutputResult {
   const next = {
     ref_kind: row.ref_kind,
     ref_id: String(row.ref_id ?? ''),
     version: row.version,
     title: row.title ?? null,
+    issue_key: row.issue_key ?? null,
   };
   // A chip with no id could never resolve; staging it would promise the writer
   // a reference that comes back refused.
-  if (!next.ref_kind || !next.ref_id || !Number.isFinite(next.version)) return list;
-  if (list.some((s) => same(s, next.ref_kind, next.ref_id, next.version))) return list;
-  if (list.length >= MAX_OUTPUT_REF_ATTACHMENTS) return null;
-  return [...list, next];
+  if (!next.ref_kind || !next.ref_id || !Number.isFinite(next.version)) {
+    return { outcome: 'unusable', list };
+  }
+  if (list.some((s) => same(s, next.ref_kind, next.ref_id, next.version))) {
+    return { outcome: 'duplicate', list };
+  }
+  if (list.length >= MAX_OUTPUT_REF_ATTACHMENTS) return { outcome: 'limit', list };
+  return { outcome: 'staged', list: [...list, next] };
 }
 
 /** Drop one staged citation (the chip's × button). Version-scoped: removing
@@ -108,5 +144,9 @@ export function toOutputAttachment(staged: StagedOutputRef): OutputRefAttachment
     ref_id: staged.ref_id,
     version: staged.version,
     title: staged.title,
+    // Overwritten server-side from the registry, exactly like `title`. It
+    // travels so the optimistic row in the thread is not missing a chip the
+    // refetched one has.
+    issue_key: staged.issue_key,
   };
 }

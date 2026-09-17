@@ -10,6 +10,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChildRunContext, type ChildRunState } from './childRunContext';
+import { diffWords } from './outputDiff';
+import { fmtWhen } from '../../utils/fmtWhen';
 import { OutputDiffDialog } from './OutputDiffDialog';
 import type { OutputDiff, OutputLineage } from '../../services/outputsService';
 
@@ -43,6 +45,14 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
 // rather than on a DOM node some other provider owns.
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({ useOptionalToast: () => ({ addToast }) }));
+// Spy-able but REAL by default: every case below goes through the genuine
+// word diff. Only the `omit`-without-counts case overrides it — that shape
+// cannot come out of `diffWords` (it always fills `omitted`), and the point
+// is exactly what the PANEL does when a segment fails to carry its counts.
+vi.mock('./outputDiff', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./outputDiff')>();
+  return { ...mod, diffWords: vi.fn(mod.diffWords) };
+});
 
 // Spied, not stubbed: the real store dedupes by watermark, and asserting
 // through it would be re-asserting the store's own rules.
@@ -59,6 +69,8 @@ const v = (version: number, parent: number | null): OutputLineage['versions'][nu
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
   cost_cents: 0.42, created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+  cited_count: 0, cited_in: [],
 });
 
 // `as_of_seq` is a Snowflake id and therefore a STRING on the wire — a number
@@ -83,6 +95,91 @@ beforeEach(() => {
 });
 
 describe('OutputDiffDialog', () => {
+  /**
+   * 版本链上的「被引 ×n」（harness 三期 3c §2.2）。
+   *
+   * 显示的是 `cited_count`（全量）而不是 `cited_in.length`（只是你看得见的那几
+   * 条）。两者不同是允许且正确的 —— 一条引用发生在一件议题上，而议题可见性会挡
+   * 掉其中一些。把列表长度当计数显示，等于对读者说「只被引了 1 次」，而真相是
+   * 「被引 3 次，其中 2 次发生在你看不到的地方」。
+   */
+  it('版本 chip 上显示被引次数，用的是全量计数而不是可见列表的长度', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [{ issue_id: '5', issue_key: 'MH-91', message_id: 'm1', user_id: 'u1', at: '2026-09-15T00:00:00Z' }] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff-versions');
+    const marks = await screen.findAllByTestId('output-version-cited');
+    // 从没被引用过的那一版不画 —— 「零次」是答案，但它不值一个 chip。
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toContain('3');
+  });
+
+  it('展开被引列表：只列你看得见的那几条，看不见的说出有几条', async () => {
+    const cited = (n: number) => ({
+      issue_id: String(90 + n),
+      issue_key: `MH-9${n}`,
+      message_id: `m${n}`,
+      user_id: `u${n}`,
+      at: '2026-09-15T03:04:05Z',
+    });
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        { ...v(2, 1), cited_count: 3, cited_in: [cited(1), cited(2)] },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const chip = await screen.findByTestId('output-version-cited');
+    fireEvent.click(chip);
+    const rows = await screen.findAllByTestId('output-version-cited-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('MH-91');
+    expect(rows[0].textContent).toContain('u1');
+    // 时间走 `fmtWhen` —— 读者拿它和自己的表比，不是拿它和 UTC 比。原样吐 ISO
+    // 串（末尾那个 Z）是把服务端的内部表示当成给人看的东西。
+    expect(rows[0].textContent).not.toContain('2026-09-15T03:04:05Z');
+    expect(rows[0].textContent).toContain(fmtWhen('2026-09-15T03:04:05Z'));
+    // 计数 3、列表 2 —— 差额必须说出来。不说的话读者会把「2」当成全部，而那
+    // 正是可见性裁剪想避免的误导。
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('1');
+  });
+
+  it('全都看得见时不画那一行 —— 「0 条看不见」不是一句话', async () => {
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [
+        {
+          ...v(2, 1),
+          cited_count: 1,
+          cited_in: [{ issue_id: '90', issue_key: 'MH-90', message_id: 'm', user_id: 'u', at: '2026-09-15T03:04:05Z' }],
+        },
+        v(1, null),
+      ],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(await screen.findAllByTestId('output-version-cited-row')).toHaveLength(1);
+    expect(screen.queryByTestId('output-version-cited-hidden')).toBeNull();
+  });
+
+  it('一条都看不见时只说有几条被挡住', async () => {
+    // 「被引 2 次，你一条都看不到」是一个合法答案，不是一次失败。
+    getOutputLineage.mockResolvedValue({
+      ...lineage,
+      versions: [{ ...v(2, 1), cited_count: 2, cited_in: [] }, v(1, null)],
+    });
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByTestId('output-version-cited'));
+    expect(screen.queryAllByTestId('output-version-cited-row')).toHaveLength(0);
+    expect(screen.getByTestId('output-version-cited-hidden').textContent).toContain('2');
+  });
+
   it('opens on the latest change and colours what moved', async () => {
     render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
     await screen.findByTestId('output-diff');
@@ -94,6 +191,72 @@ describe('OutputDiffDialog', () => {
     expect(to.textContent).toContain('red');
     expect(from.querySelector('[data-diff="del"]')?.textContent).toBe('brown');
     expect(to.querySelector('[data-diff="add"]')?.textContent).toBe('red');
+  });
+
+  it('C9：截断时两侧都画出省略行，「太长」那条提示照旧在', async () => {
+    // 旧行为：改动的中段被静默丢掉，面板只剩一条「只显示前一部分」的提示，
+    // 而文本本身读起来像是改动到那里就结束了。现在两端都在，中间有一条说得出
+    // 丢了多少行的标记 —— 而且**两侧都要有**：只画一侧的话，另一侧仍然是静默截断。
+    const long = (p: string) => Array.from({ length: 6000 }, (_, i) => `${p}${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, long('a')), to: side(2, long('b')),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    for (const pane of ['output-diff-from', 'output-diff-to']) {
+      const marker = screen.getByTestId(pane).querySelector('[data-testid="output-diff-omitted"]');
+      expect(marker).not.toBeNull();
+      expect(marker?.textContent).toMatch(/\d+ lines omitted/);
+    }
+    // 尾部确实回来了 —— 旧实现只留得住头。
+    expect(screen.getByTestId('output-diff-from').textContent).toContain('a5999');
+    expect(screen.getByTestId('output-diff-to').textContent).toContain('b5999');
+  });
+
+  it('C9：一侧什么都没丢时，那一侧不画省略行', async () => {
+    // 两侧在同一个位置被切开，但很少丢掉一样多。短的那一侧可能一行都没丢 ——
+    // 此时画一条「0 lines omitted」等于宣布一次并没有发生在这一侧的切割。
+    const longSide = Array.from({ length: 6000 }, (_, i) => `a${i}`).join('\n');
+    getOutputDiff.mockResolvedValueOnce({
+      kind: 'script_shot', ref_id: '9', content_type: 'text',
+      from: side(1, longSide), to: side(2, 'b0\nb1'),
+    } satisfies OutputDiff);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await screen.findByTestId('output-diff-truncated');
+    // 长的那侧丢了东西 → 有标记；短的那侧一行没丢 → 没有标记。
+    const marks = (pane: string) =>
+      screen.getByTestId(pane).querySelectorAll('[data-testid="output-diff-omitted"]').length;
+    expect(marks('output-diff-from')).toBe(1);
+    expect(marks('output-diff-to')).toBe(0);
+    expect(screen.getByTestId('output-diff-to').textContent).not.toContain('omitted');
+  });
+
+  it('C9：omit 段没带计数时照样画标记 —— 不知道丢了多少 ≠ 什么都没丢', async () => {
+    // `?? 0` 会把「说不出丢了多少」读成「一行都没丢」，于是标记被过滤掉，
+    // 截断重新变成静默的 —— 正是 C9 要消灭的那个形状。这条用一个**没有**
+    // `omitted` 字段的 omit 段钉住：标记必须还在，数字退化成 0 无妨。
+    const frozen = {
+      segments: [
+        { type: 'same', text: 'head ' },
+        { type: 'omit', text: '\n…\n' }, // 刻意不带 omitted
+        { type: 'same', text: ' tail' },
+      ],
+      added: 0,
+      removed: 0,
+      truncated: true,
+      omitted: { from: 0, to: 0 },
+    };
+    vi.mocked(diffWords).mockReturnValueOnce(frozen as unknown as ReturnType<typeof diffWords>);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('output-diff-from').querySelector('[data-testid="output-diff-omitted"]'),
+      ).not.toBeNull(),
+    );
   });
 
   it('says a side could not be reconstructed instead of showing it empty', async () => {
@@ -422,5 +585,31 @@ describe('OutputDiffDialog — a revert announces itself (3b Task 6)', () => {
     });
     await revertOnce({ issue_id: null });
     expect(notifyTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('OutputDiffDialog — B4：坏坐标不许变成坏请求', () => {
+  it('names the version_not_found refusal by its own copy', async () => {
+    // `errorText` 一直有这个分支，但没有任何用例走过它——后端 409/404 的
+    // 真实外壳（`details.code`）由 `outputsService` 解出来，这里断言的是
+    // 「解出来之后说的是哪句话」。
+    const { OutputsError } = await import('../../services/outputsService');
+    getOutputDiff.mockRejectedValueOnce(new OutputsError('version_not_found', 404, '404 Not Found'));
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    const err = await screen.findByTestId('output-diff-error');
+    expect(err.textContent).toContain('not in this object’s chain');
+    expect(screen.queryByTestId('output-diff-from')).toBeNull();
+  });
+
+  it('asks for no diff at all when the chain answers without a usable version', async () => {
+    // 真栈上 `latest_version` 来自 `versions[0]["version"]`，所以缺席只可能
+    // 来自坏响应 / 旧缓存条目——而那时 `to` 变成 `undefined`，既不等于 `null`
+    // 也过得了守卫，于是发出 `?from=undefined&to=undefined`。空答案要说
+    // 「读不出来」，不是发一个注定 422 的请求。
+    getOutputLineage.mockResolvedValueOnce({ kind: 'script_shot', ref_id: '9', versions: [], as_of_seq: '0' } as unknown as OutputLineage);
+    render(<OutputDiffDialog kind="script_shot" refId="9" onClose={vi.fn()} />);
+    await screen.findByTestId('output-diff-error');
+    expect(getOutputDiff).not.toHaveBeenCalled();
+    expect(screen.queryByText('Loading…')).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import { createResourceMentionExtension } from '../chat/ChatInputResourceMention
 import { MAX_ASSET_REF_ATTACHMENTS, MAX_OUTPUT_REF_ATTACHMENTS } from '../chat/attachmentLimits';
 import type { OutputObject, OutputVersion } from '../../services/outputsService';
 import type { ResourceSearchResult } from '../../types';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 // Mock the upload service to avoid hitting the network.
 vi.mock('../../services/aiLibraryService', () => ({
@@ -242,23 +243,54 @@ vi.mock('../../services/outputsService', async (importOriginal) => {
   return { ...actual, listIssueOutputs: (...args: unknown[]) => listIssueOutputs(...args) };
 });
 
-const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => ({
-  id: `7271452993825349${10 + v}`,
-  version: v,
-  parent_version: v > 1 ? v - 1 : null,
-  run_id: '727145299382534100',
-  issue_id: '727145299382534000',
-  issue_key: 'MH-94',
-  actor_user_id: null,
-  reverted_from_version: null,
-  cost_kind: null,
-  deep_link: '/team/331438215859255/todolist/MH-94?step=1&turn=1',
-  seq: null, turn: null, step: v,
-  title: 'S3 · Shot #1',
-  model: null, cost_cents: null,
-  created_at: '2026-09-10T00:00:00Z',
-  ...over,
-});
+const TEAM = '331438215859255';
+
+/**
+ * `deep_link` exactly as `issue_links.issue_deep_link` would build it for the
+ * SAME row (B9). The old fixture hard-coded `?step=1&turn=1` on every version,
+ * which contradicted its own coordinates twice over: the two versions sat on
+ * different steps, and `turn` was null — and the backend appends `&turn=` only
+ * alongside a step it actually has. A fixture that disagrees with itself is a
+ * fixture no consumer can be held to.
+ */
+const deepLinkFor = (step: number | null, turn: number | null): string =>
+  // The production builder itself, not a third spelling of its rule (L2):
+  // `utils/issueLinks.ts` is the frontend mirror of `issue_links.py`, and
+  // `backend/tests/services/issues/test_issue_links_frontend_mirror.py` holds
+  // the two sides to one string. Re-implementing the rule here would be a
+  // THIRD copy, free to drift from both.
+  //
+  // `!` because the arguments are literals: TEAM and the key are always
+  // present, so the builder's refusal branch is unreachable from here.
+  issueDeepLink(TEAM, 'MH-94', { step, turn })!;
+
+const outputVersion = (v: number, over: Partial<OutputVersion> = {}): OutputVersion => {
+  const row: OutputVersion = {
+    id: `7271452993825349${10 + v}`,
+    version: v,
+    parent_version: v > 1 ? v - 1 : null,
+    run_id: '727145299382534100',
+    issue_id: '727145299382534000',
+    issue_key: 'MH-94',
+    actor_user_id: null,
+    reverted_from_version: null,
+    cost_kind: null,
+    deep_link: null,
+    seq: null, turn: null, step: v,
+    title: 'S3 · Shot #1',
+    model: null, cost_cents: null,
+    created_at: '2026-09-10T00:00:00Z',
+    // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+    cited_count: 0,
+    cited_in: [],
+    ...over,
+  };
+  // Derived AFTER the override, so a caller that moves the coordinates gets a
+  // link that still describes them.
+  return over.deep_link !== undefined
+    ? row
+    : { ...row, deep_link: deepLinkFor(row.step, row.turn) };
+};
 
 const SHOT_OUTPUT: OutputObject = {
   kind: 'script_shot',
@@ -269,6 +301,45 @@ const SHOT_OUTPUT: OutputObject = {
 };
 
 const searchAssetsAccessible = vi.fn();
+// The two hand-offs the composer owns: the issue key reaching the staged-chip
+// strip and the `@` tab (3c Task 17 收尾).
+//
+// Both are recording mocks that still render / call the real thing, so nothing
+// else in this file changes behaviour. They exist because the failure is
+// silent: drop either forward and every assertion here stays green while the
+// picker rows and the staged chips label themselves with the issue already on
+// screen — the exact defect 修复轮 2 fixed one layer down.
+const pickerProps: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('../ChatAttachmentPicker', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../ChatAttachmentPicker')>();
+  return {
+    ...mod,
+    ChatAttachmentPicker: (props: React.ComponentProps<typeof mod.ChatAttachmentPicker>) => {
+      pickerProps.last = props as unknown as Record<string, unknown>;
+      return (
+        <div
+          data-testid="attachment-picker-probe"
+          data-current-issue-key={props.currentIssueKey ?? ''}
+        >
+          <mod.ChatAttachmentPicker {...props} />
+        </div>
+      );
+    },
+  };
+});
+
+const outputsTabOptions: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('../chat/useMentionOutputsTab', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../chat/useMentionOutputsTab')>();
+  return {
+    ...mod,
+    useMentionOutputsTab: (opts: Parameters<typeof mod.useMentionOutputsTab>[0]) => {
+      outputsTabOptions.last = opts as unknown as Record<string, unknown>;
+      return mod.useMentionOutputsTab(opts);
+    },
+  };
+});
+
 vi.mock('../../services/assetsService', () => ({
   searchAssetsAccessible: (...args: unknown[]) => searchAssetsAccessible(...args),
   // The staged chip's loadout menu fetches this on open. Never called in
@@ -837,7 +908,9 @@ describe('IssueReplyBox — the Assets tab', () => {
   // was produced ON THIS ISSUE, so a composer with no issue behind it has
   // nothing to check against and the chat panel refuses the kind outright.
 
-  const ISSUE = 727145299382534000;
+  // A string (B3): this Snowflake is past 2^53, so the number literal it
+  // used to be was already a different id than the backend's.
+  const ISSUE = '727145299382534000';
 
   async function openOutputsTab(): Promise<void> {
     await openMentionPicker();
@@ -939,6 +1012,9 @@ describe('IssueReplyBox — the Assets tab', () => {
         ref_id: '727145299382534999',
         version: 2,
         title: 'S3 · Shot #1',
+        // 本议题自己的产出 —— 跨议题搜来的那一条才带编号（3c §2.4）。与
+        // `title` 同一口径：服务端覆盖它，客户端送出去只为乐观渲染。
+        issue_key: null,
       },
     ]);
   });
@@ -1020,6 +1096,30 @@ describe('IssueReplyBox — the Assets tab', () => {
     );
     expect(addToast.mock.calls[0][0]).not.toContain('{{');
     expect(addToast.mock.calls[0][0]).not.toContain('outputs.citationLimit');
+  });
+
+  it('B6: says so when a picked row carries no usable coordinates', async () => {
+    // A response that VIOLATES the documented shape (`version` is a number on
+    // the wire) — which is exactly what this branch is for. Staging nothing
+    // while closing the picker is the silent no-op this repo bans: the writer
+    // sees no chip and is told nothing.
+    listIssueOutputs.mockResolvedValue([
+      {
+        kind: 'script_shot',
+        ref_id: '727145299382534999',
+        title: 'S3 · Shot #1',
+        latest_version: 1,
+        versions: [{ ...outputVersion(1), version: null as unknown as number }],
+      },
+    ]);
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    await citeLatest();
+    expect(screen.queryAllByTestId('staged-output-chip')).toHaveLength(0);
+    // The SENTENCE from `en.json`, not the key.
+    expect(addToast).toHaveBeenCalledWith(
+      'That output is missing its version — it cannot be referenced',
+      'error',
+    );
   });
 
   it('leaves the "@query" alone when the pick was REFUSED by the cap', async () => {
@@ -1104,5 +1204,42 @@ describe('IssueReplyBox — the Assets tab', () => {
     );
     expect(addToast.mock.calls[0][0]).not.toContain('{{');
     expect(addToast.mock.calls[0][0]).not.toContain('attachmentFailureReason');
+  });
+});
+
+/**
+ * 议题坐标从回复框转交出去的两处（3c Task 17 收尾）。
+ *
+ * 用 props 快照钉住，而不是驱动被 mock 的编辑器打出一个查询词：那条路要给
+ * tiptap 的 mock 加改查询词的能力，是一次独立的测试基建改动。快照便宜且足以
+ * 说明问题 —— 断掉时两端消费方的用例照样全绿。
+ */
+describe('IssueReplyBox — 把议题编号转交下去', () => {
+  const ISSUE = '727145299382534000';
+
+  // 清掉上一条留下的快照。不清的话，一次根本没渲染出来的失败会读到上一条的值
+  // ——断言看着是过的，而它描述的是另一次渲染。
+  beforeEach(() => {
+    pickerProps.last = null;
+    outputsTabOptions.last = null;
+  });
+
+  it('交给 staged chip 那条带子，chip 才知道哪个来源算「别处」', () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} issueKey="MH-96" />);
+    expect(screen.getByTestId('attachment-picker-probe').getAttribute('data-current-issue-key')).toBe('MH-96');
+    expect(pickerProps.last?.currentIssueKey).toBe('MH-96');
+  });
+
+  it('交给 @ 页签，选单行才知道哪一行来自别处', () => {
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} issueKey="MH-96" />);
+    expect(outputsTabOptions.last?.issueKey).toBe('MH-96');
+  });
+
+  it('没有议题编号时交出 null，而不是让下游各自猜', () => {
+    // null = 不比较 = 全标。它是一个**答案**（「不知道自己在哪」），所以必须真的
+    // 传下去，不能靠下游的默认值碰巧一致。
+    render(<IssueReplyBox agents={_agents as never} onSubmit={vi.fn()} issueId={ISSUE} />);
+    expect(pickerProps.last?.currentIssueKey).toBeNull();
+    expect(outputsTabOptions.last?.issueKey).toBeNull();
   });
 });

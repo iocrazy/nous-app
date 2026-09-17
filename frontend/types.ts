@@ -485,7 +485,9 @@ export interface Tag {
   name_zh?: string | null;  // Chinese name for bilingual support
   color: string | null;
   icon: string | null;
-  type: 'system' | 'user' | 'time';
+  /** Mig 468 retired 'system': every tag belongs to a user. 'time' is
+   *  still legal in the DB CHECK but has had zero rows for a long time. */
+  type: 'user' | 'time';
   /** Stable automation key (mig 467). Present only on the tags the AI pipeline
    *  and auto-classification key off; absent on ordinary tags. Read-only — the
    *  display name is the user's to change, this is what keeps a rename from
@@ -2250,6 +2252,31 @@ export interface UsageDailySummary {
   daily: UsageDailyRow[];
 }
 
+/**
+ * One run's money line — `GET /api/v1/ai-library/runs/costs` (3c §4.2).
+ *
+ * Mirror of `backend/app/schemas/efficiency.py::RunCostRow`. Three fields are
+ * nullable and each null means something a 0 would lie about:
+ *   `cost_cents`     — no recorded cost, not a free run
+ *   `charged_points` — **nobody billed this run** (BYOK, billing off, or the
+ *                      charge never landed), not «charged zero»
+ *   `status`         — the row never recorded one
+ * Keyed by run id as a STRING everywhere: these are snowflake BIGINTs and JS
+ * loses precision past 2^53.
+ */
+export interface RunCost {
+  cost_cents: number | null;
+  charged_points: number | null;
+  model: string | null;
+  status: string | null;
+  /** 两列**可选**：只有 `/ai-library/runs/costs` 给得出它们，议题 rollup 的
+   *  `runs[]` 没有这两列。缺席必须读作「不知道」—— `RunCostTail` 靠
+   *  `undefined` 把整行浮层省掉，填 0 会把「没这个数」说成「一个 token 都没烧」
+   *  （同该组件「两个都没有读作 —，不是 ¢0.00」那条纪律）。 */
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
 // ─── AI Library chat ────────────────────────────────────────────────────────
 // Mirror of backend/app/schemas/ai_library_chat.py. One session = one agent
 // binding; messages + run telemetry flow through AgentRunner + RunRecorder.
@@ -2545,6 +2572,16 @@ export type OutputRefAttachment = {
   version: number;
   /** Registry title snapshot, or null when the row carries none. */
   title: string | null;
+  /** The issue the cited version was PRODUCED on — `MH-98` (3c §2.4).
+   *
+   *  A citation may now point at another issue's output: the resolver's check
+   *  widened from "produced on THIS issue" to "the chain is visible to you".
+   *  So the chip needs somewhere to say where the version came from.
+   *
+   *  Absent on every row written before 3c and on any chain answering to no
+   *  issue. Like `title`, the value the client sends is the server's to
+   *  overwrite — it is read, never composed here. */
+  issue_key?: string | null;
 };
 
 /** AI processing state of a resource (`resources.transcript_status`

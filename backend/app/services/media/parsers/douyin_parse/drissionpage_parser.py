@@ -6,12 +6,38 @@ from DrissionPage import ChromiumOptions, ChromiumPage
 from loguru import logger
 
 from app.core.utils import SingletonMeta, Utils
+from app.services.media.parsers.douyin_parse.failures import (
+    DouyinFailure,
+    DouyinParseError,
+)
 
 
 class DrissionPageParser(metaclass=SingletonMeta):
     """抖音服务 - 单例模式实现"""
 
     _lock = threading.Lock()
+    #: Serialises the whole fetch, because there is exactly ONE browser tab.
+    #:
+    #: `_lock` above only guards `_initialize`. Everything after it —
+    #: `listen.start()`, `page.get()`, `run_js()`, `refresh()` — drove the
+    #: shared `_page` with no mutual exclusion at all, while the `parse_user`
+    #: DBOS queue happily runs 3 parses per user at once, each in its own
+    #: `asyncio.to_thread` worker. Two concurrent douyin parses would navigate
+    #: the same tab to each other's URL and share one response listener: the
+    #: failure is not a crash but CROSSED DATA — a task finishing with the
+    #: other one's aweme_detail.
+    #:
+    #: It never bit because ABogus answered nearly every parse and this tier
+    #: was a rarely-reached fallback (0 successes in the 14 days to
+    #: 2026-09-15). That changed the day douyin's Argus gate started refusing
+    #: every ABogus request: the browser is now the ONLY tier, so any two links
+    #: pasted together land here at the same time.
+    #:
+    #: Serialising is not a compromise — one tab can only be on one page. The
+    #: timeout keeps a wedged browser from stalling the queue forever; callers
+    #: see a normal "no detail" return and the chain reports it.
+    _fetch_lock = threading.Lock()
+    _FETCH_LOCK_TIMEOUT = 180.0
     _page: Optional[ChromiumPage] = None
 
     def __init__(self):
@@ -265,6 +291,19 @@ class DrissionPageParser(metaclass=SingletonMeta):
 
         # 定义在线程中执行的同步函数
         def _fetch_in_thread():
+            # One browser, one page at a time — see `_fetch_lock`.
+            if not cls._fetch_lock.acquire(timeout=cls._FETCH_LOCK_TIMEOUT):
+                logger.warning(
+                    "[DrissionPage] gave up waiting for the browser "
+                    f"({cls._FETCH_LOCK_TIMEOUT:.0f}s) — another parse still holds it"
+                )
+                return None
+            try:
+                return _fetch_locked()
+            finally:
+                cls._fetch_lock.release()
+
+        def _fetch_locked():
             try:
                 # 获取单例实例
                 instance = cls()
@@ -407,7 +446,14 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     logger.warning(
                         "[DrissionPage] Aborting parse: captcha blocking API calls"
                     )
-                    return None
+                    # Typed, not `return None`: the chain above turns every
+                    # falsy return into the same "all methods failed" sentence,
+                    # and a captcha is the one failure where "try again in a
+                    # few minutes" is real advice (2026-09-15).
+                    raise DouyinParseError(
+                        DouyinFailure.CAPTCHA,
+                        f"captcha via {detection_method}",
+                    )
 
                 # 获取所有网络请求
                 aweme_response = None
@@ -524,6 +570,10 @@ class DrissionPageParser(metaclass=SingletonMeta):
                     logger.error("未能获取到有效的抖音视频数据")
                     return None
 
+            except DouyinParseError:
+                # 类型化失败必须穿过这里。压成 None 就等于把「抖音要求验证」重新
+                # 变成那句谁也看不懂的 "all methods failed"（2026-09-15）。
+                raise
             except Exception as e:
                 logger.error(f"获取抖音视频数据失败: {e}")
                 return None

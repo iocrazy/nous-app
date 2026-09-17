@@ -155,6 +155,48 @@ on:
       # 初始化标签每人一份（mig 468）。改这个测试或 tags 模型都要重跑：
       # 每人一份靠的是 (user_id, slug) 这条 partial unique，只有真库能回答。
       - 'backend/tests/db/test_migration_468_tag_presets_integration.py'
+      # 注册用户名推导（mig 469）。唯一约束 + NOT NULL + 触发器失败连带回滚
+      # auth.users 行 —— 三件都只有真库能回答。
+      - 'backend/tests/db/test_migration_469_signup_username_integration.py'
+      # 主账号名唯一性（mig 470）。函数唯一索引 + NOT NULL + 两条注册路径
+      # 共用的 PL/pgSQL —— 只有真库能回答。
+      - 'backend/tests/db/test_migration_470_username_integration.py'
+      # 3c mig 472：两张新表 + 两组计数列。trgm opclass 在不在、UNIQUE 拦不拦得住
+      # 第二行、五个累加器是不是 NOT NULL DEFAULT 0 —— 只有真库能答。
+      - 'backend/tests/db/test_mig_472_integration.py'
+      # mig 475：关键词搜索必须应用筛选 chip。缺陷与修复都在 SQL 函数里——桩 session
+      # 能证明后端传了 p_ai_transcribed，只有 Postgres 能证明没转录的行真的不回来。
+      # service 的 SQL 串（命名参数 + CAST）也只在这里第一次见到真库，故 service
+      # 改动同样要触发。
+      - 'backend/tests/db/test_migration_475_search_chip_filters_integration.py'
+      - 'backend/app/services/library/search_service.py'
+      - 'backend/tests/db/test_search_docs_repository_integration.py'
+      # 上面那个文件读迁移建出来的形状；这个读 SearchDocsRepository 的语句在
+      # 服务器上跑得通不通（similarity / ON CONFLICT / Uuid 双绑定 / ILIKE
+      # ESCAPE）。所以 repository 与投影写方改动也要能触发本 job。
+      - 'backend/app/repositories/search_docs_repository.py'
+      - 'backend/app/services/search/**'
+      # 存量正文回填（3c 补充票）。它重建正文走的是 deliverables/diff.py 的账本
+      # 折叠 + 两个渲染器（都已在上面列着），写回去走 fill_empty_body —— 而
+      # 「只补空的、不动 updated_at」这两条承诺只有真库能证明。
+      - 'backend/tests/db/test_search_docs_body_backfill_integration.py'
+      - 'backend/scripts/backfill_search_docs_body.py'
+      # 上面两个文件各自证明一层；这个证明**两层合起来拦得住人**：
+      # /api/v1/search 是跨团队端点，它唯一的安全断言（别 team 的人搜同一个词
+      # 拿三组全空）在单测里是桩的。两道门各有一条专属用例，实测各自删掉会让
+      # 不同的那一条转红。issue 可见性的实现也在它的射程内。
+      - 'backend/tests/db/test_unified_search_visibility_integration.py'
+      - 'backend/app/services/issues/issue_visibility.py'
+      - 'backend/app/repositories/issue_repository.py'
+      # 同样的道理，引用反查那一侧（3c Task 16）：ON CONFLICT DO NOTHING 要
+      # output_citations_message_ref_key 真存在，ORDER BY 的决胜键要真的定住同一
+      # 事务里的两条，GROUP BY 要真按版本分组。
+      - 'backend/tests/db/test_output_citations_repository_integration.py'
+      - 'backend/app/repositories/output_citations_repository.py'
+      - 'backend/app/services/deliverables/citations.py'
+      # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
+      # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
+      - 'backend/tests/db/test_orm_indexes_integration.py'
       - 'backend/app/services/assets/**'
       # The canvas→asset mirror is written by CanvasService on save and rebuilt
       # by the backfill; both are exercised by the E2 case below, so a change to
@@ -165,12 +207,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all twenty-one, so it has to re-run
-      # them — otherwise the guard could be weakened by a PR this job ignores.
+      # to it changes what "green" means for all thirty-one, so it has to
+      # re-run them — otherwise the guard could be weakened by a PR this job
+      # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
-      # the previous number instead of counting). Recount, do not increment:
+      # the previous number instead of counting). Recount, do not increment
+      # (the thirty-one below was counted with this command, not derived
+      # from the thirty it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -225,6 +270,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 上面 paths 那条注释里的数词已经错过四次，每次靠的都是「请重数」这句话。
+      # 三行把它变成门禁：grep 数实际有多少个真库 step，从注释里抽那个英文数词，
+      # 不等就红。放在最前面 —— 它不需要数据库，一秒钟给答案。
+      - name: The step count in the comment must match the steps that exist
+        run: |
+          have=$(grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml)
+          said=$(grep -oE 'what "green" means for all [a-z-]+' .github/workflows/schema-drift.yml | head -1 | awk '{print $NF}')
+          python3 -c 'import sys; o="zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(); t={"twenty":20,"thirty":30,"forty":40,"fifty":50,"sixty":60,"seventy":70,"eighty":80,"ninety":90}; v=lambda w:sum(o.index(p) if p in o else t.get(p,-10**6) for p in w.split("-")); s,h=sys.argv[1],int(sys.argv[2]); sys.exit(0 if v(s)==h else "::error::schema-drift.yml says \"{}\" ({}) real-database steps but there are {}. Recount, do not increment.".format(s,v(s),h))' "$said" "$have"
 
       - uses: astral-sh/setup-uv@v4
         with:
@@ -333,6 +387,19 @@ jobs:
           # the ratchet allowlists inside the test itself.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_schema_drift.py -v
 
+      - name: Diff ORM-declared indexes against the built schema (C1)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步比表 / 列 / 可空 / 类型 / 外键 —— 唯独不比索引。于是
+          # `__table_args__` 里的 `Index(...)` 是这套模型里唯一没有任何东西
+          # 对账的声明：指着一个从来没建过的索引，两边都不会有人说话。
+          # 方向是单向的（ORM→库零容忍；库→ORM 只计数打印），理由与已知
+          # 漂移的逐条豁免都写在那个文件顶部。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_orm_indexes_integration.py -v
+
       - name: Assert social_accounts' Realtime/RLS + credential grants (mig 417)
         working-directory: backend
         env:
@@ -400,6 +467,57 @@ jobs:
           # (kind, ref_id, version) — the registry's whole race story — or that
           # the two agent_runs JOINs produce the order Task 3 paginates on.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_deliverables_repository_integration.py -v
+
+      - name: Exercise the playback-position repository against the built schema (mig 473)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place PlaybackPositionsRepository's ORM statements execute.
+          # Its unit tests stub the session, so nothing else proves that
+          # ON CONFLICT finds the (user_id, media_key) unique index rather than
+          # appending a row per heartbeat, that updated_at actually MOVES on the
+          # UPDATE arm (that timestamp is how the client tells its own write
+          # from another device's — a frozen one breaks sync silently), or that
+          # the UserScoped choke point really filters by user_id. That last one
+          # is viewing history: a missing filter is the whole risk.
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_playback_positions_integration.py -v
+
+      - name: Exercise the account name — unique, editable (mig 470)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 主账号名：系统发一个、用户能改、全局唯一。三件里有两件是数据库对象，
+          # 桩 session 回答不了：「唯一且大小写不敏感」是一条 lower(username) 的
+          # 函数唯一索引（既有的 user_profiles_username_key 是大小写敏感的，
+          # iocrazy 与 IOCrazy 能并存 —— 对一个用来认人的名字那是可冒充的）；
+          # 「每个账号都有名字」是 NOT NULL。
+          #
+          # 还有一条只有真跑触发器才看得见：注册的两条路径（handle_new_user 与
+          # 后端的 _bootstrap_user）现在共用 public.unique_username()，而它是
+          # PL/pgSQL。以前两边各写一份，Python 那份是 `... or "user"`，第二个没
+          # 邮箱的人就撞唯一约束、异常被吞、profile 悄悄没建成。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_470_username_integration.py -v
+
+      - name: Exercise the signup username derivation (mig 469)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # handle_new_user 是 auth.users 的 AFTER INSERT 触发器，它抛什么都会把
+          # 用户行一起回滚 —— 失败的不是「资料没建好」，是「注册不了」。两种形状
+          # 会让它抛：没有 email（团队名算出 NULL；生产的手机号与匿名注册都开着）、
+          # 以及 email 本地部分撞车（user_profiles.username 唯一，而那句
+          # ON CONFLICT (id) 盖不住它）。
+          #
+          # 每条都先用**迁移前的函数**跑一遍并断言它失败，所以这些是回归钉，
+          # 不是对当前行为的描述。只有真库能回答：NOT NULL、UNIQUE、以及触发器
+          # 失败会不会连带回滚 auth.users 行。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_469_signup_username_integration.py -v
 
       - name: Exercise the per-user initial tags (mig 468)
         working-directory: backend
@@ -644,3 +762,102 @@ jobs:
           # ORDER BY MIN(seq) puts a not-yet-stamped registration (seq is
           # NULLABLE — the registry back-fills it) last instead of dropping it.
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_run_seq_and_output_keys_integration.py -v
+
+      - name: Assert mig 472's projection tables, trgm indexes & counter defaults
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 472 建的两张表是 3c 检索与引用反查的全部地基。文本测试读迁移写了什么；
+          # 只有服务器能回答：pg_trgm 的 gin_trgm_ops opclass 是否真的可用（没装则
+          # CREATE INDEX 直接报错，而文本测试照样绿）、UNIQUE (entity_kind,
+          # entity_id) 是否真把同一个对象收成一行、ai_usage_hourly 那五个**加法
+          # 累加器**是否真是 NOT NULL DEFAULT 0（可空的话 col + EXCLUDED.col 会把
+          # 一整个小时桶算成 NULL），以及两张新表有没有给 anon/authenticated 开策略。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_mig_472_integration.py -v
+
+      - name: Assert mig 475 keyword search honours the filter chips
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 列表路径早就按 chip 过滤，搜索路径一个 chip 都不传——开搜索即整排 chip
+          # 静默失效（生产实测：勾「已转录」搜 5000，4 条里只有 1 条转录，UI 显示 4）。
+          # 只有服务器能回答：旧签名是否真被 DROP（超集重载并存会让 8 参调用
+          # function is not unique）、重建后的 ACL 是否仍不对 anon/authenticated
+          # 开放（DROP 会连 463 的 REVOKE 一起丢掉）、以及 SearchService 真实的
+          # SQL 串（命名参数 + CAST）是否被 Postgres 接受。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_475_search_chip_filters_integration.py -v
+
+      - name: Assert the search_docs repository's statements on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步读的是 472 建出来的形状；这一步读 SearchDocsRepository 自己的
+          # 语句。它的单测全是 stmt.compile() 字符串断言 —— 编译得过不等于服务器
+          # 接受：func.similarity() 要 pg_trgm 真的装着（没装时那些断言照样绿）、
+          # on_conflict_do_update 要 search_docs_entity_key 真存在且列对得上（投影
+          # 「绝不长出第二行」全挂在它身上）、owner_user_id 与 team_members.user_id
+          # 两个 Uuid 列要接受同一个绑定值（绑错是 operator does not exist:
+          # uuid = character varying）、ILIKE 的 ESCAPE '\' 要真的让一个字面 %
+          # 匹配它自己而不是匹配全表（CLAUDE.md「ILIKE 模式的转义责任要跟着模式走」）。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_repository_integration.py -v
+
+      - name: Assert unified_search's two visibility gates on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 上一步证明 repository 的语句服务器接受；这一步证明**两道门合起来
+          # 拦得住人**。/api/v1/search 是跨团队端点，它唯一的安全断言是「别
+          # team 的成员搜同一个词，三组全空」——而服务层单测里 visible_issue_ids
+          # 是桩的，那套断言只证明「我们在调这道门」，不证明「这道门拦得住」。
+          #
+          # 两道门各有一条专属用例，职责分界处刻意分开：
+          #   * SQL 那道（team_id ∈ 我的 team OR owner_user_id = 我）——别 team
+          #     的 bob 搜同一个词拿三组全空。
+          #   * Python 那道（visible_issue_ids）——一行 team_id 指着 bob 的 team
+          #     （SQL 放行）而 issue_id 指着别 team 的议题（必须拦下）。投影的
+          #     坐标列没有外键，这个形状是真的会出现的。
+          # 实测两次突变各杀各的那一条（见 task-14 报告）。少了后者，把
+          # visible_issue_ids 整个删掉前一条照样绿——那正是这类用例最常见的假绿。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_unified_search_visibility_integration.py -v
+
+      - name: Assert the output_citations repository's statements on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 引用反查镜像的三条语句（3c Task 16）。同上，单测全是 stmt.compile()
+          # 字符串断言：ON CONFLICT DO NOTHING 的「重投不翻倍」全挂在
+          # output_citations_message_ref_key 上（索引丢了，第二次会安静地插进重复
+          # 行、计数翻倍）；ORDER BY 的决胜键要真的定住同一事务里时间戳完全相等的
+          # 两条；GROUP BY 分错组的表现是血缘面板上每一版都显示整条链的引用数。
+          # message_id 的外键还要求夹具建一条真消息 —— 这一条也只有真库能拒。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_output_citations_repository_integration.py -v
+
+      - name: Assert the search_docs body backfill against a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 存量正文回填（3c 补充票）。mig 472 的产出回填段没有写 body 那一列，
+          # 所以 3c 之前登记的产出在检索里只有标题搜得到。正文按 kind 各自重建：
+          # 分镜/场次走 deliverables/diff.py 的真账本折叠（jsonb + 三档字段解析，
+          # 全在服务器那边），媒体取 generated_media.prompt。单测把 rebuild_content
+          # 换成了替身，所以整条链在真库上一次都没跑过。
+          # 只有真库能答的四件：两个候选集查询的三列/BIGINT 连接编译得过≠跑得通；
+          # 「永不覆盖」整个挂在 UPDATE 的 body IS NULL OR body='' 谓词上（桩 session
+          # 对任何谓词都点头）；回填不碰 updated_at —— 动了它，几个月前的产出就会
+          # 排到 idx_search_docs_team_updated 的最前面；以及重跑一次必须是 no-op。
+          # 三次突变实测各杀各的：摘谓词只杀竞态那条（候选集用例照样绿，所以两条
+          # 都要有）、顺手 bump updated_at 杀时间戳那条、自己拼一个渲染器杀
+          # 「与实时写方同一串」那条。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_body_backfill_integration.py -v

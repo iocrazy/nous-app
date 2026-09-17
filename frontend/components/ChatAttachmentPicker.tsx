@@ -67,6 +67,10 @@ interface ChatAttachmentPickerProps {
    *  ownership — nothing else staged here answers to that. */
   outputs?: StagedOutputRef[];
   onOutputsChange?: (next: StagedOutputRef[]) => void;
+  /** The issue this composer belongs to — a staged citation names its source
+   *  issue only when that is a different one (3c §2.4). `null`/absent means
+   *  "do not compare", and every source is drawn. */
+  currentIssueKey?: string | null;
 }
 
 function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
@@ -85,6 +89,7 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   onAssetsChange,
   outputs = [],
   onOutputsChange,
+  currentIssueKey = null,
 }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -231,6 +236,11 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
           refId={o.ref_id}
           version={o.version}
           title={o.title}
+          // 判的是**不同**，不是有没有。`@` 的检索按项目作用域，本议题自己的产
+          // 出必然也在结果里并带着自己的编号；不比较就等于给每个 staged chip 挂
+          // 上指着当前议题的标签，而同一条引用发出去之后线程那侧会比较、于是不
+          // 画 —— 一条引用在相邻两屏上换了身份。
+          sourceIssueKey={o.issue_key && o.issue_key !== currentIssueKey ? o.issue_key : null}
           onRemove={() => removeOutput(o.ref_kind, o.ref_id, o.version)}
         />
       ))}

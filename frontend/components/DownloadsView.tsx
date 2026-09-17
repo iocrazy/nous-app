@@ -19,7 +19,7 @@ import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
 import { loadPanelWidth, savePanelWidth } from './detail/DetailCardKit';
-import { computeJustifiedRows } from '../utils/justifiedLayout';
+import { computeJustifiedRows, distributeRowWidths } from '../utils/justifiedLayout';
 import { aspectRatioOf, needsAspectMeasurement, matchesCurrentAspect } from '../utils/resourceAspect';
 import { useMeasuredAspectRatios } from '../hooks/useMeasuredAspectRatios';
 import { useContainerWidth } from '../hooks/useContainerWidth';
@@ -29,6 +29,22 @@ import { useContainerWidth } from '../hooks/useContainerWidth';
  *  covers, which read as too small at that height. */
 const JUSTIFIED_TARGET_ROW_HEIGHT = 200;
 const JUSTIFIED_GAP = 12;
+/**
+ * Narrowest a download card may render, in px.
+ *
+ * Not a taste number — it is what the four-column stats strip under the
+ * thumbnail needs. The card spends 16px on `p-2` padding and 18px on the
+ * strip's three `gap-1.5` gaps, so each of the four cells gets `(W - 34) / 4`,
+ * and the widest value those cells carry (`142.7K` at 9px bold) needs ~35px.
+ * That puts the hard floor at 174px; 190 leaves the digits room to breathe.
+ *
+ * Portrait video is the case that hits it: 9:16 lays out 2.4x narrower than a
+ * 4:3 image at the same row height, which is how a douyin column ended up with
+ * its likes/comments/shares/collects clipped into unreadable blocks
+ * (2026-09-15). Enforced by `distributeRowWidths`, which funds it from the
+ * wide items in the SAME row rather than by growing the row.
+ */
+const JUSTIFIED_MIN_CARD_WIDTH = 190;
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -54,6 +70,7 @@ import {
   textSearch,
   type SearchField,
 } from '../services/searchService';
+import { toSearchChipFilters } from '../services/searchChipFilters';
 import {
   SearchScopePicker,
   loadSearchScope,
@@ -144,6 +161,20 @@ export const DownloadsView: React.FC = () => {
     () => JSON.stringify(libraryFilterParams),
     [libraryFilterParams],
   );
+  // The same chips, in the shape the search endpoints take. The list and the
+  // search used to disagree here — the list applied every chip server-side
+  // while the search endpoint was never told about them, so activating a
+  // search silently dropped the whole toolbar (see services/searchChipFilters).
+  const searchChipFilters = useMemo(
+    () => toSearchChipFilters(libraryFilterParams),
+    // Keyed on the serialised value: toFilterParams() returns a fresh object
+    // every render, so depending on the object itself would rebuild this (and
+    // re-fire the search below) on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [libraryFilterParamsKey],
+  );
+  const searchChipFiltersRef = useRef(searchChipFilters);
+  searchChipFiltersRef.current = searchChipFilters;
   useEffect(() => {
     setLibraryFilterParams(libraryFilterParams);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,6 +218,8 @@ export const DownloadsView: React.FC = () => {
   // indistinguishable from "no matches" — the grid renders the same empty
   // state either way, asserting the library is empty when it is not.
   const [searchError, setSearchError] = useState(false);
+  /** True when the last search ran in a mode the filter chips cannot reach. */
+  const [chipsIgnoredByMode, setChipsIgnoredByMode] = useState(false);
 
   // ─── Resource data ───────────────────────────────────
   // Need media_ids from the paginated library AND from the active search
@@ -403,9 +436,25 @@ export const DownloadsView: React.FC = () => {
     }),
     [justifiedAspects, justifiedWidth],
   );
+  // Rendered widths per row, with the stats-strip floor applied. Computed once
+  // per layout rather than per card: the redistribution is a property of the
+  // whole row (what one card gains, its neighbours fund), so it cannot be
+  // decided while mapping an individual item.
+  const justifiedRowWidths = useMemo(
+    () =>
+      justifiedRows.map((row) =>
+        distributeRowWidths(
+          justifiedAspects.slice(row.start, row.end),
+          row.height,
+          { minWidth: JUSTIFIED_MIN_CARD_WIDTH },
+        ),
+      ),
+    [justifiedRows, justifiedAspects],
+  );
 
   // ─── Search handlers ──────────────────────────────────
   const handleSearchQueryChange = useCallback((query: string) => {
+    setChipsIgnoredByMode(false);
     setIsSearchActive(false);
     setSearchResults([]);
     setSearchVideoMap({});
@@ -420,12 +469,19 @@ export const DownloadsView: React.FC = () => {
       // — "show me all videos containing 'memory'", not "top 20 semantically
       // similar". ``hybrid`` / ``semantic`` remain available for callers
       // that explicitly want ranking.
+      const chips = searchChipFiltersRef.current;
+      // AI Search ranks by embedding similarity and never touches the SQL the
+      // chips compile into, so it is the one mode they cannot reach. Say so
+      // instead of returning a list that quietly ignores the toolbar — that
+      // silence is the defect this change exists to remove, and reproducing
+      // it in a corner would just make it harder to find next time.
+      setChipsIgnoredByMode(mode === 'semantic' && !!chips);
       const response =
         mode === 'semantic'
           ? await semanticSearch(query, 100)
           : mode === 'hybrid'
-            ? await hybridSearch(query, {}, 100, 0.5, searchScope)
-            : await textSearch(query, 1000, searchScope);
+            ? await hybridSearch(query, {}, 100, 0.5, searchScope, chips)
+            : await textSearch(query, 1000, searchScope, chips);
       setSearchResults(response.results as any);
       // Backend now attaches full ParsedMedia rows in ``videos``. Index them
       // by platform_id so filteredLibrary can render AI-status icons etc.
@@ -450,6 +506,7 @@ export const DownloadsView: React.FC = () => {
   }, [library, searchScope]);
 
   const handleSearchClear = useCallback(() => {
+    setChipsIgnoredByMode(false);
     setSearchError(false);
     setSearchResults([]);
     setSearchVideoMap({});
@@ -483,7 +540,12 @@ export const DownloadsView: React.FC = () => {
       // reads as "your library is gone" on a slow link.
       setIsAISearching(true);
       try {
-        const response = await textSearch(trimmed, 1000, searchScope);
+        const response = await textSearch(
+          trimmed,
+          1000,
+          searchScope,
+          searchChipFiltersRef.current,
+        );
         if (cancelled) return;
         setSearchResults(response.results as any);
         const hydrated: Record<string, Video> = {};
@@ -505,7 +567,11 @@ export const DownloadsView: React.FC = () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchQuery, searchScope]);
+    // ``libraryFilterParamsKey`` is a dependency because the hits on screen
+    // were computed under the old chips: the list refetches itself when a chip
+    // moves, but while a search is active the list IS the search results, so
+    // without re-running this the toolbar would change and the grid would not.
+  }, [searchQuery, searchScope, libraryFilterParamsKey]);
 
   const hasActiveQuery = isSearchActive || searchQuery.trim().length > 0;
 
@@ -1296,6 +1362,21 @@ export const DownloadsView: React.FC = () => {
           </div>
         )}
 
+        {/* Shown ABOVE the result branches, not inside the "has results" one:
+            a mode that ignores the chips matters most when the list looks
+            wrong or comes back empty, which is exactly when that branch is
+            not rendered. */}
+        {chipsIgnoredByMode && (
+          <div className="w-full pb-3 flex justify-center">
+            <span className="text-warn text-xs">
+              {t(
+                'library.aiSearchIgnoresFilters',
+                'AI Search ranks by meaning and does not apply your filters.',
+              )}
+            </span>
+          </div>
+        )}
+
         {isLoadingLibrary && library.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-ink-500">
             <Loading center label={t('common.loading', 'Loading...')} />
@@ -1337,7 +1418,7 @@ export const DownloadsView: React.FC = () => {
           <>
             {libraryViewMode === 'justified' && (
               <div ref={justifiedContainerRef} className="w-full">
-                {justifiedRows.map((row) => (
+                {justifiedRows.map((row, rowIdx) => (
                   <div
                     key={`row-${row.start}`}
                     className="flex items-start"
@@ -1345,10 +1426,17 @@ export const DownloadsView: React.FC = () => {
                   >
                     {filteredLibrary.slice(row.start, row.end).map((item, idx) => {
                       const ar = justifiedAspects[row.start + idx] || 1;
+                      // Rendered width honours the stats-strip floor, so it is
+                      // NOT `ar * row.height` any more. The card's media box
+                      // has to follow it (`object-cover` crops rather than
+                      // letterboxes), or the thumbnail would sit in a box of a
+                      // different shape than the card it fills.
+                      const width =
+                        justifiedRowWidths[rowIdx]?.[idx] ?? ar * row.height;
                       return (
                         <div
                           key={item.platform_id}
-                          style={{ width: ar * row.height, flexShrink: 0 }}
+                          style={{ width, flexShrink: 0 }}
                           onTouchStart={() => startLongPress(item)}
                           onTouchMove={cancelLongPress}
                           onTouchEnd={cancelLongPress}
@@ -1358,7 +1446,7 @@ export const DownloadsView: React.FC = () => {
                             data={item}
                             resourceId={resourceIdMap[item.id]}
                             aiStatus={aiStatusMap[item.id]}
-                            aspectRatio={ar}
+                            aspectRatio={width / row.height}
                             onThumbnailAspect={
                               needsAspectMeasurement(item)
                                 ? (measuredAr) => {

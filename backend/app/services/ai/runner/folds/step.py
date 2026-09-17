@@ -37,5 +37,13 @@ def fold_step_end(views, payload):
         cost["by_model"][model] = round(
             cost["by_model"].get(model, 0.0) + entry["cost_cents"], 4
         )
+        # 与 ``own_cents`` 平行的 BYOK 道（用户裁定 2）。**不进** ``spent_cents``：
+        # 那是「真花了多少」，预算门禁与 UI 读它，BYOK 的钱用户真付了。这条道只
+        # 回答「这里面有多少不该再收平台积分」。
+        byok = payload.get("byok_cents")
+        if isinstance(byok, (int, float)) and not isinstance(byok, bool):
+            cost["own_byok_cents"] = round(
+                float(cost.get("own_byok_cents") or 0.0) + float(byok), 4
+            )
         recompute_spent(cost)
     return views

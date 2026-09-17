@@ -32,6 +32,10 @@ from sqlalchemy import select
 
 from app.core.deps import AuthDep
 from app.db.session import read_scope
+from app.repositories.issue_repository import issue_repository
+from app.repositories.output_citations_repository import (
+    get_output_citations_repository,
+)
 from app.repositories.run_deliverables_repository import (
     get_run_deliverables_repository,
 )
@@ -142,6 +146,34 @@ async def visible_chain(kind: str, ref_id: str, auth) -> List[Dict[str, Any]]:
     return rows
 
 
+async def _cited_in(kind: str, ref_id: Any, version: int, auth) -> List[Dict[str, Any]]:
+    """一版的引用，裁到调用方看得见的那几条（3c §2.2）。
+
+    裁剪用的是血缘端点自己那把批量尺子 ``visible_issue_ids`` —— 一条引用
+    携带的是「谁在哪条消息里引了它」，交给看不见那件议题的人，就是跨团队边界
+    一行一行地漏（同 ``redact_foreign_issue_links`` 挡的那件事）。
+
+    **裁掉而不是抹掉**：留下一条 issue 为空的行仍然交出了 ``message_id`` 与
+    ``user_id``。计数在调用方那边照全量报，所以「被引 3 次、只列 1 条」是这里
+    想要的结果，不是信息丢失。
+    """
+    rows = await get_output_citations_repository().list_for_ref(
+        kind, str(ref_id), int(version)
+    )
+    if not rows:
+        return []
+    visible = await visible_issue_ids({r.get("issue_id") for r in rows}, auth)
+    kept = [
+        r
+        for r in rows
+        if r.get("issue_id") is not None and str(r["issue_id"]) in visible
+    ]
+    if not kept:
+        return []
+    keys = await issue_repository.map_identifiers([int(r["issue_id"]) for r in kept])
+    return [{**r, "issue_key": keys.get(str(r["issue_id"]))} for r in kept]
+
+
 @router.get("/{kind}/{ref_id}", response_model=OutputLineageResponse)
 async def get_output_lineage(
     kind: str, ref_id: str, auth: AuthDep
@@ -188,6 +220,25 @@ async def get_output_lineage(
         ),
         visible_issue_ids=visible,
     )
+    # 3c §2.2：「这一版被谁引用过」。整条链**一次** GROUP BY —— 每版一次查询会
+    # 让二十版的链发二十次往返，而这个问题一次就答得完。逐版的明细只在真被引过
+    # 时才去取（``n`` 为 0 的版本一次往返都不发）。
+    counts = await get_output_citations_repository().counts_for_chain(kind, str(ref_id))
+    cited: List[Dict[str, Any]] = []
+    for item in versions:
+        n = counts.get(int(item["version"]), 0)
+        cited.append(
+            {
+                **item,
+                "cited_count": n,
+                "cited_in": (
+                    await _cited_in(kind, ref_id, int(item["version"]), auth)
+                    if n
+                    else []
+                ),
+            }
+        )
+    versions = cited
     # 水位用**一把尺子**：这条链上最大的登记行 id。Snowflake 跨 run、跨人手版
     # 都单调，而 transcript ``seq`` 是每个 run 内部的小整数、人手版压根没有——
     # 两者混在一个字段里，回退场景（agent → 人手 → agent）会给出一个会**变小**

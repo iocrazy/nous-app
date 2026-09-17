@@ -2,10 +2,8 @@ import React, { createContext, useContext, useReducer, useEffect, useCallback, u
 import { getSupabaseClient, getSupabaseAccessToken } from '../supabaseClient';
 import { useAuth } from './AuthContext';
 import { getAuthHeaders } from '../services/parserService';
-import {
-  cancelWorkflow,
-  restartWorkflow,
-} from '../services/dbosWorkflowService';
+import { retryTaskInPlace } from '../services/taskRetry';
+import { cancelWorkflow } from '../services/dbosWorkflowService';
 import { listNeedsInput, type NeedsInputItem } from '../services/issuesService';
 
 // ─── Types ──────────────────────────────────────────────
@@ -515,21 +513,6 @@ async function apiCancelTask(taskId: string): Promise<void> {
   }
 }
 
-async function apiRetryTask(taskId: string): Promise<void> {
-  // restartWorkflow forks a NEW workflow_id; original row stays in its
-  // terminal state. The new workflow's INSERT comes through task_tracking
-  // Realtime (router pre-creates the row before DBOS dispatch).
-  try {
-    await restartWorkflow(taskId);
-  } catch (e) {
-    console.error(`[TaskManager] restartWorkflow(${taskId}) failed:`, e);
-    await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}/retry`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-    });
-  }
-}
-
 async function apiDeleteTask(taskId: string): Promise<void> {
   await fetch(`${API_BASE}/api/v1/task-manager/tasks/${taskId}`, {
     method: 'DELETE',
@@ -933,7 +916,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const retryTask = useCallback(async (taskId: string) => {
-    await apiRetryTask(taskId);
+    await retryTaskInPlace(taskId);
   }, []);
 
   const deleteTask = useCallback(async (taskId: string) => {

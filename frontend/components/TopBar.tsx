@@ -33,6 +33,7 @@ import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext';
 import { useInbox } from '../contexts/InboxContext';
 import { InboxPanel } from './notifications/InboxPanel';
+import { useCommandPalette } from '../stores/commandPaletteStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -506,6 +507,7 @@ const UserAvatar: React.FC<{
 export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
+  const setPaletteOpen = useCommandPalette((s) => s.setOpen);
   const upload = useUpload();
   const { tasks, totalActive } = useTaskManager();
   const inbox = useInbox();
@@ -590,11 +592,12 @@ export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut, onO
         <LanguageSwitcher />
       </div>
 
-      {/* Search — desktop only (Phase 2+) */}
+      {/* Search — desktop only. ⌘K opens the same panel from anywhere; this
+          button is for the reader who has not learned the shortcut. */}
       <div className="hidden sm:block">
         <IconButton
           title={t('topbar.search')}
-          onClick={() => { /* Cmd+K search — Phase 2+ */ }}
+          onClick={() => setPaletteOpen(true)}
         >
           <Search size={18} />
         </IconButton>

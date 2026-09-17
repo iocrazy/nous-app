@@ -113,7 +113,17 @@ interface IssueReplyBoxProps {
   /** The issue this composer belongs to. Absent on surfaces that have no
    *  issue behind them — the "Later" affordance is then hidden rather than
    *  posting a wake-up at nothing (harness 2b-2 §5-2). */
-  issueId?: number;
+  issueId?: string;
+  /** The identifier of the issue this composer belongs to (`MH-96`). The `@`
+   *  picker and the staged chips name a citation's SOURCE issue only when it
+   *  differs from this one — the project-scoped search returns this issue's own
+   *  outputs too, each carrying its own key. */
+  issueKey?: string | null;
+  /** The project this issue belongs to. With it, the `@` picker's Outputs tab
+   *  searches the whole project once the reader types (3c §2.4); without it
+   *  the tab stays on this issue's own outputs — a search scoped to nothing
+   *  would be a search scoped to everything. */
+  projectId?: string | null;
   /** A wake-up was armed; the page re-reads its schedules panel. */
   onScheduled?: () => void;
 }
@@ -146,6 +156,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   onNoteBoundaryChange,
   teamId,
   issueId,
+  issueKey,
+  projectId,
   onScheduled,
 }) => {
   const { t } = useTranslation();
@@ -548,17 +560,41 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
    */
   const handleMentionOutputSelect = useCallback(
     (row: OutputMentionRow) => {
-      const next = stageOutput(stagedOutputs, toStagedOutput(row));
-      if (next === null) {
-        addToast(
-          t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
-            n: MAX_OUTPUT_REF_ATTACHMENTS,
-          }),
-          'error',
-        );
-        return;
+      const res = stageOutput(stagedOutputs, toStagedOutput(row));
+      // A `switch` rather than two `if`s so the compiler owns the fifth case:
+      // `_exhaustive` stops compiling the day `StageOutputOutcome` grows one,
+      // instead of letting it fall through to the staged path and close the
+      // picker on a pick that did not happen (N1).
+      switch (res.outcome) {
+        case 'limit':
+          addToast(
+            t('outputs.citationLimit', 'A comment can reference at most {{n}} outputs', {
+              n: MAX_OUTPUT_REF_ATTACHMENTS,
+            }),
+            'error',
+          );
+          return;
+        // A row whose coordinates are incomplete stages nothing. Saying so is
+        // the point: the old code returned the list unchanged, which looked
+        // exactly like «already staged» (B6).
+        case 'unusable':
+          addToast(
+            t('outputs.citationUnusable', 'That output is missing its version — it cannot be referenced'),
+            'error',
+          );
+          return;
+        // `duplicate` shares the staged path on purpose: the row IS in the
+        // list, so the picker closing is the right answer and `res.list` is
+        // the same array back (React bails on identity).
+        case 'staged':
+        case 'duplicate':
+          break;
+        default: {
+          const _exhaustive: never = res.outcome;
+          return _exhaustive;
+        }
       }
-      setStagedOutputs(next);
+      setStagedOutputs(res.list);
       dropMentionTrigger();
       closeMentionPicker();
       setMentionQuery('');
@@ -580,6 +616,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     pickerOpen: mentionOpen,
     issueId: issueId ?? null,
     query: mentionQuery,
+    issueKey: issueKey ?? null,
+    projectId: projectId ?? null,
     onSelect: handleMentionOutputSelect,
   });
   useEffect(() => {
@@ -670,6 +708,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
           onAssetsChange={setStagedAssets}
           outputs={stagedOutputs}
           onOutputsChange={setStagedOutputs}
+          currentIssueKey={issueKey ?? null}
           disabled={inputBlocked}
         />
       </div>

@@ -173,18 +173,21 @@ async def test_build_envelope_failed_shape():
 
 
 async def test_envelope_keys_are_stable():
-    """Pin the exact 7 keys. Adding new keys is safe (parent agents
+    """Pin the exact 8 keys. Adding new keys is safe (parent agents
     that don't read them just see extras), but renaming or removing
     is a breaking change for any consumer relying on the schema.
 
     ``cost_cents`` joined in Task 7b: the background path travels only in this
-    envelope, so a cost missing from it reached the parent as a literal 0."""
+    envelope, so a cost missing from it reached the parent as a literal 0.
+    ``byok_cents`` joined for the same reason（积分 Task 2）—— 它说的是同一棵
+    子树里用户自己的 key 付掉的部分，漏传就被按平台价收。"""
     assert set(ENVELOPE_KEYS) == {
         "summary",
         "key_findings",
         "files_created",
         "tokens_used",
         "cost_cents",
+        "byok_cents",
         "sub_run_id",
         "status",
     }
@@ -270,7 +273,13 @@ def _wire_sync_spawn(monkeypatch, *, content="found it"):
         wiring_mod,
         "build_agent_runner_stack",
         AsyncMock(
-            return_value=SimpleNamespace(runner=SimpleNamespace(run_turn=run_turn))
+            return_value=SimpleNamespace(
+                runner=SimpleNamespace(run_turn=run_turn),
+                # 真的 ``AgentRunnerStack`` 永远有这个字段（frozen dataclass，
+                # 默认 None）。桩少一个属性，``_spawn`` 读它就 AttributeError，
+                # 而 spawn 把异常吞成 status=failed —— 桩要照真形状。
+                credential_origin=None,
+            )
         ),
     )
 

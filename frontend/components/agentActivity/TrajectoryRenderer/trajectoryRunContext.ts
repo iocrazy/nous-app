@@ -23,3 +23,29 @@ export const TrajectoryRunContext = createContext<string | null>(null);
 export function useTrajectoryRunId(): string | null {
   return useContext(TrajectoryRunContext);
 }
+
+/**
+ * The issue whose thread is rendering this trajectory — `MH-96`.
+ *
+ * Read by the citations line, which names the SOURCE issue of every version
+ * the turn pointed at. The backend fills that source in for **every**
+ * resolvable citation (`output_ref_resolver._stamped` compares nothing), so
+ * "does it have one" is not the question — "is it a different one" is. Without
+ * an answer to that, every citation carries a label pointing at the issue the
+ * reader is already on, and the one that genuinely came from elsewhere stops
+ * standing out.
+ *
+ * `null` = the surface did not say which issue it is (the chat Trajectory tab
+ * has no issue behind it at all, the Task Center detail does not track one).
+ * Then nothing is compared and every source is drawn — which is the honest
+ * answer: we cannot claim a citation is "from here".
+ *
+ * A context for the same reason the run id is one: `DetachedRunPanel` renders
+ * its own trajectory, and the node that reads this sits several components
+ * below whoever knows the issue.
+ */
+export const TrajectoryIssueKeyContext = createContext<string | null>(null);
+
+export function useTrajectoryIssueKey(): string | null {
+  return useContext(TrajectoryIssueKeyContext);
+}

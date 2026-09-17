@@ -4,6 +4,7 @@ import { UserProfile, UserSettings, AISettings as AISettingsType } from '../type
 import { fetchUserSettings, saveUserSettings, fetchFrontendConfig, saveFrontendConfig } from '../services/dataService';
 import { createMediaSession, deleteMediaSession, fetchMediaToken } from '../services/mediaAuthService';
 import { installAuthRecovery } from '../services/authRecovery';
+import { useClearPlaybackOnSignOut } from '../hooks/useClearPlaybackOnSignOut';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -256,6 +257,8 @@ export function AuthProvider({
     setIsAuthenticated(true);
     setShowAuthModal(false);
   };
+
+  useClearPlaybackOnSignOut(currentUserId);
 
   const handleLogout = async () => {
     // Clear media session cookie before signing out

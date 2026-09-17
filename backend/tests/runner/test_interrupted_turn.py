@@ -104,3 +104,84 @@ def test_interrupted_is_a_known_turn_end_reason():
     assert (
         v["view"]["phase"] == "ended" and v["view"]["ended"]["reason"] == "interrupted"
     )
+
+
+def _fake_state(seq, has_end):
+    async def _impl(run_id):
+        return seq, has_end
+
+    return _impl
+
+
+def _fake_writer(captured):
+    class _W:
+        def __init__(self, run_id, *, seq_start):
+            captured["writer"] = (run_id, seq_start)
+
+        async def append(self, event_type, payload, *, turn=None):
+            captured["event"] = (event_type, payload, turn)
+
+    return lambda run_id, *, seq_start: _W(run_id, seq_start=seq_start)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_closing_an_interrupted_run_also_stamps_the_column(monkeypatch):
+    """崩溃的 run 不会再跑 ``_finish``，那一列不补就永远空着——而空着在读面上是
+    「不知道」，一个被腰斩的回合是知道的。"""
+    import app.services.ai.runner.interrupted_turn as it
+
+    captured: dict = {}
+
+    async def _probe(run_id, reason):
+        captured["stamp"] = (run_id, reason)
+
+    monkeypatch.setattr(it, "_last_seq_and_has_turn_end", _fake_state(7, False))
+    monkeypatch.setattr(it, "_writer_factory", _fake_writer(captured))
+    monkeypatch.setattr(it, "_stamp_turn_end_reason", _probe)
+    assert await it.close_interrupted_run(777, detail="heartbeat_lost") is True
+    assert captured["stamp"] == (777, "interrupted")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_run_that_already_ended_is_not_restamped(monkeypatch):
+    import app.services.ai.runner.interrupted_turn as it
+
+    captured: dict = {}
+
+    async def _probe(run_id, reason):
+        captured["stamp"] = (run_id, reason)
+
+    monkeypatch.setattr(it, "_last_seq_and_has_turn_end", _fake_state(9, True))
+    monkeypatch.setattr(it, "_stamp_turn_end_reason", _probe)
+    assert await it.close_interrupted_run(777) is False
+    assert "stamp" not in captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_stamp_still_counts_the_run_as_closed(monkeypatch, caplog):
+    """事件已经 append 上去了 —— 补列失败不该让 sweeper 把这一条判成没关成，
+    否则下一轮会再 append 一条 turn_end（幂等守卫读的是事件，不是列）。
+    但它也绝不能静默：一条 ERROR 是「这一列现在空着」唯一的线索。"""
+    import app.services.ai.runner.interrupted_turn as it
+
+    captured: dict = {}
+
+    async def _boom(run_id, reason):
+        raise RuntimeError("column write refused")
+
+    monkeypatch.setattr(it, "_last_seq_and_has_turn_end", _fake_state(7, False))
+    monkeypatch.setattr(it, "_writer_factory", _fake_writer(captured))
+    monkeypatch.setattr(it, "_stamp_turn_end_reason", _boom)
+
+    logged: list[str] = []
+    handle = it.logger.add(lambda m: logged.append(str(m)), level="ERROR")
+    try:
+        assert await it.close_interrupted_run(777, detail="heartbeat_lost") is True
+    finally:
+        it.logger.remove(handle)
+
+    assert captured["event"][0] == "turn_end"
+    assert any("column write refused" in line for line in logged), logged

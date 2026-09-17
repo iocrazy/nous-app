@@ -311,7 +311,53 @@ async def dedup_and_dispatch(
             "types_submitted": [],
             "types_skipped": [],
             "types_subscribed": [],
+            "already_in_library": False,
         }
+
+    # ── Already-in-library short circuit ──
+    # The same question is asked again inside download_workflow
+    # (check_global_cache_step), but by then the task_tracking row exists and
+    # the workflow is queued — so Task Center shows a "Download" card for
+    # content the user already owns, which then completes in under a second
+    # with a "(cache hit)" subtitle. Ask it here instead: no task row, no
+    # workflow, no card.
+    #
+    # Deliberately BEFORE the acquire_or_subscribe loop so we don't register
+    # dedup entries for work that is never dispatched.
+    #
+    # The predicate is conservative on purpose (see download_cache): it needs
+    # both the shared bytes on disk AND a version row on this user's
+    # resource. "Cached but not linked to me" still dispatches, because
+    # linking is real work the workflow's cache-hit branch performs.
+    try:
+        from app.services.media.download_cache import already_in_user_library
+
+        if await already_in_user_library(
+            platform_id=platform_id,
+            media_type=media_type,
+            download_video=download_video,
+            download_cover=download_cover,
+            resource_id=resource_id,
+            user_id=user_id,
+        ):
+            logger.info(
+                f"[Download/Precheck] already in library, no task created: "
+                f"platform_id={platform_id} user={user_id} types={list(requested)}"
+            )
+            return {
+                "task_id": None,
+                "types_submitted": [],
+                "types_skipped": list(requested),
+                "types_subscribed": [],
+                "already_in_library": True,
+            }
+    except Exception as e:
+        # WARNING, not DEBUG: a dead short-circuit is invisible at prod INFO
+        # otherwise — the exact failure mode that kept the L2 URL dedup from
+        # firing for months.
+        logger.warning(
+            f"[Download/Precheck] probe failed (non-fatal, dispatching): {e}"
+        )
 
     types_to_download: list[str] = []
     types_subscribed: list[str] = []
@@ -432,6 +478,7 @@ async def dedup_and_dispatch(
         "types_submitted": types_to_download,
         "types_skipped": types_skipped,
         "types_subscribed": types_subscribed,
+        "already_in_library": False,
     }
 
 

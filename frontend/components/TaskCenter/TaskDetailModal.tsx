@@ -79,7 +79,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
           {!result.loading && result.error && (
-            <div className="p-4 text-xs text-red-400">{result.error}</div>
+            <div className="p-4 text-xs text-danger">{result.error}</div>
           )}
           {!result.loading && !result.error && (() => {
             // One body per result kind, from the registry — a new kind is a new
@@ -139,10 +139,22 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const raw = task.error_msg.trim();
   const showRaw = raw.length > 0 && raw !== message;
 
+  // 2026-09-15: the whole block used legacy hue classes diluted with opacity
+  // (`text-red-300/70`, `text-red-300/60`, `bg-red-500/5`) and the user could
+  // not read the reason their parse failed — "红色太浅了". Those hues also lost
+  // their meaning in the K1 palette remap; the semantic `danger` tokens are
+  // the ones that stay legible in both themes (frontend/index.css @theme).
+  // The reason a task failed is the single thing this modal exists to say, so
+  // it is rendered at full strength, not as a whisper.
   return (
-    <div className="px-4 pt-4 text-xs text-red-400">
-      <div data-testid="task-error-message" className="whitespace-pre-wrap break-words">{message}</div>
-      {hint && <p className="mt-0.5 text-red-300/70">{hint}</p>}
+    <div className="px-4 pt-4 text-xs text-danger">
+      <div
+        data-testid="task-error-message"
+        className="whitespace-pre-wrap break-words font-medium"
+      >
+        {message}
+      </div>
+      {hint && <p className="mt-0.5 text-danger">{hint}</p>}
       {/* Not inside the <details> below. This is the failing party's own
           explanation written FOR the user — for a content refusal it names
           what was objected to and hands back a working rewrite — so it is the
@@ -167,10 +179,10 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
           this block exists to undo. */}
       {showRaw && !detail && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
+          <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-danger hover:opacity-80">
             Details
           </summary>
-          <pre className="mt-1 text-[10px] text-red-300/70 whitespace-pre-wrap break-words bg-red-500/5 border border-red-500/15 rounded p-2 max-h-40 overflow-y-auto">
+          <pre className="mt-1 text-[11px] text-danger whitespace-pre-wrap break-words bg-danger-soft border border-danger-line rounded p-2 max-h-40 overflow-y-auto">
             {raw}
           </pre>
         </details>

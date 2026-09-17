@@ -10,9 +10,14 @@ export function pickDefaultTarget(tags: Tag[]): string | null {
   return String(best.id);
 }
 
-/** Merge is allowed only for >=2 user tags with a target chosen from them. */
+/** Merge is allowed for >=2 tags with a target chosen from them.
+ *
+ * There used to be a third condition — every tag had to be `type === 'user'` —
+ * because the initial tags were one shared set nobody was allowed to touch.
+ * Mig 468 gave every user their own copy, so that check now only ever excludes
+ * tags the user does own. Ownership is still enforced where it belongs: the
+ * `merge_tags` proc refuses any tag whose `user_id` is not the caller's. */
 export function canMerge(selected: Tag[], targetId: string | null): boolean {
   if (selected.length < 2 || !targetId) return false;
-  if (!selected.some((t) => String(t.id) === targetId)) return false;
-  return selected.every((t) => t.type === 'user');
+  return selected.some((t) => String(t.id) === targetId);
 }

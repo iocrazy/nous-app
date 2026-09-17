@@ -36,6 +36,7 @@ from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.empty_response import diagnose_empty_response
 from app.services.ai.runner.events import emit as emit_event
+from app.services.ai.runner.narration_events import emit_partial_narration
 from app.services.ai.runner.reasoning import (
     ReasoningStreamFilter,
     model_uses_reasoning,
@@ -48,6 +49,7 @@ from app.services.ai.runner.step_hooks import (
     StepHookChain,
     default_step_hooks,
 )
+from app.services.ai.runner.tool_events import emit_tool_call, tool_error_code
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.ai.tools.ask_user_tool import (
     ASK_USER_TOOL_NAME,
@@ -690,6 +692,11 @@ class AgentRunner:
             # Per-iteration tool_call accumulation. Provider sends each
             # tool_call as deltas across multiple chunks; we stitch them.
             tool_call_buf: dict[int, dict] = {}
+            # 3c §4.1：本步已发出的正文（过滤后，与用户逐字相同）。只在这一步真调了
+            # 工具时用得上——没调工具的那一步，文本调用方自己已收全。声明留在
+            # per-iteration 块里（每轮重置），提到循环外会让第二步的叙述带上第一步的
+            # 文本。
+            step_text: list[str] = []
             final_finish: Optional[str] = None
             final_usage: Optional[dict] = None
 
@@ -710,6 +717,8 @@ class AgentRunner:
 
                     # Forward filtered text delta + tool_call deltas to caller.
                     emit_text = reason_filter.feed(chunk.delta_text)
+                    if emit_text:
+                        step_text.append(emit_text)
                     if emit_text or chunk.tool_call_delta:
                         yield StreamChunk(
                             delta_text=emit_text,
@@ -750,6 +759,9 @@ class AgentRunner:
                                 ),
                             )
                         break
+                # ``served_by_platform`` 不传：流式分块里没有响应体，拿不到
+                # 那个标记。有 ``stream`` 的 adapter 都不是 LLMFallbackChain
+                # （它没有 stream），即一个凭证服务整轮，run 级 origin 精确。
                 await self._step_ended(
                     recorder, composed, iteration, _t0, final_usage, final_finish
                 )
@@ -783,6 +795,15 @@ class AgentRunner:
                     tool_call_trace=tool_call_trace,
                 )
                 return
+
+            # 3c §4.1：与非流式同一条事件，契约在 emit_partial_narration 的
+            # docstring 里。累的是**过滤后**的文本，所以 transcript 里读到的与气泡
+            # 里读到的逐字相同（reason_filter 吃掉的 <think> 不该上时间线）。
+            # ⚠️ 逐字相同有一个边界：`reason_filter.flush()` 的 tail 不进
+            # step_text。那段只在 <think> 从未闭合（截断）时出现，内容是**没说完的
+            # 思考片段**本身；推给调用方是「有总比空白好」的降级显示，不是模型的
+            # 叙述，不该上时间线。
+            await emit_partial_narration(recorder, "".join(step_text), step=iteration)
 
             # Append assistant tool-use message
             assistant_msg = {
@@ -884,6 +905,8 @@ class AgentRunner:
                 loop_guard.observe(tool_name, args_repr)
                 inc_metric("loop_guard_observed")
 
+                # 3c §3.2：``duration_ms`` 的窗口从这里开始，到派发返回为止。
+                _tool_t0 = _time.monotonic()
                 if tool_name == "Skill":
                     if recorder is not None and args.get("skill"):
                         recorder.record_skill(str(args["skill"]))
@@ -988,6 +1011,11 @@ class AgentRunner:
                             tool_name, self.delegate_tool.execute(args)
                         )
 
+                # 窗口在此闭合。下面的图片提升 / 裁剪、tool message 的 json.dumps、
+                # trace append 都是 harness 的开销，算进去等于把我们自己的裁剪成本
+                # 记到工具头上，「哪个工具慢」那个读面就会指错人。
+                _tool_ms = int((_time.monotonic() - _tool_t0) * 1000)
+
                 # Image promotion: vision models only see images in user
                 # messages — lift image blocks out of the tool result and
                 # strip the base64 from everything persisted (tool msg,
@@ -1044,20 +1072,21 @@ class AgentRunner:
                     }
                 )
 
-                # P3 transcript (mig 285): mirror of run_turn's tool event.
-                await emit_event(
+                # P3 transcript (mig 285) — 3c §3.2 起走 tool_events 的唯一发射点；
+                # 耗时只包工具本身（钩子与图片裁剪在此之外）。
+                await emit_tool_call(
                     recorder,
-                    "tool_call",
-                    {
-                        "tool": tool_name,
-                        "args": args,
-                        "result": result,
-                        "iteration": iteration,
-                    },
+                    tool=tool_name,
+                    args=args,
+                    result=result,
+                    iteration=iteration,
+                    duration_ms=_tool_ms,
+                    error_code=tool_error_code(result),
                 )
 
                 # ── PostToolUse chain (mirrors run_turn) ────────────────────
-                # Fires CostAuditor + MemoryHarvester side-effects, which the
+                # Fires the registered PostToolUse hooks (MemoryHarvester
+                # today; CostAuditor was retired in 3c §3.2), which the
                 # streaming path previously skipped entirely.
                 post_result = await self._run_post_hooks(
                     composed=composed,
@@ -1150,7 +1179,15 @@ class AgentRunner:
         return _time.monotonic()
 
     async def _step_ended(
-        self, recorder, composed, step: int, t0: float, usage, finish_reason
+        self,
+        recorder,
+        composed,
+        step: int,
+        t0: float,
+        usage,
+        finish_reason,
+        *,
+        served_by_platform: Optional[bool] = None,
     ) -> None:
         """step_end bracket: usage + cost at this run's rates + duration.
         ``run.cost`` folds from these — the only place per-call cost is born."""
@@ -1184,21 +1221,26 @@ class AgentRunner:
                     recorder.measure_context(prompt, int(window))
             except Exception:  # noqa: BLE001 — a gauge never fails a turn
                 pass
-        await emit_event(
-            recorder,
-            "step_end",
-            {
-                "turn": 1,
-                "step": step,
-                "model": getattr(composed, "model", None),
-                "usage": {"prompt": prompt, "completion": completion, "cached": cached},
-                "cost_cents": cost,
-                "duration_ms": int((_time.monotonic() - t0) * 1000),
-                "finish_reason": finish_reason,
-            },
-            turn=1,
-            step=step,
+        # BYOK 免扣（用户裁定 2）：这一步的钱是不是用户自己的 key 付的，只有
+        # 这里同时知道「花了多少」与「谁的 adapter 服务的」。缺席即平台付 ——
+        # 写一个 0 会让下游分不清「平台付的」和「用户付了 0 分」。
+        from app.services.ai.billing.byok_step import step_byok_cents
+
+        payload = {
+            "turn": 1,
+            "step": step,
+            "model": getattr(composed, "model", None),
+            "usage": {"prompt": prompt, "completion": completion, "cached": cached},
+            "cost_cents": cost,
+            "duration_ms": int((_time.monotonic() - t0) * 1000),
+            "finish_reason": finish_reason,
+        }
+        byok = step_byok_cents(
+            cost, getattr(recorder, "credential_origin", None), served_by_platform
         )
+        if byok is not None:
+            payload["byok_cents"] = byok
+        await emit_event(recorder, "step_end", payload, turn=1, step=step)
 
     async def _dispatch_ask_user(
         self,
@@ -1272,10 +1314,16 @@ class AgentRunner:
             tool_call_trace.append(
                 {"name": name, "args": {}, "result": result, "iteration": iteration}
             )
-            await emit_event(
+            await emit_tool_call(
                 recorder,
-                "tool_call",
-                {"tool": name, "args": {}, "result": result, "iteration": iteration},
+                tool=name,
+                args={},
+                result=result,
+                iteration=iteration,
+                # 没执行过所以没有耗时；``skipped`` 结果自带 ``error`` 键，会被算进
+                # 工具错误——这是想要的：被腰斩的回合里那几个调用确实没成。
+                duration_ms=0,
+                error_code=tool_error_code(result),
             )
 
     @staticmethod
@@ -1870,6 +1918,9 @@ class AgentRunner:
                 _t0,
                 resp.get("usage"),
                 (resp.get("choices") or [{}])[0].get("finish_reason"),
+                # 只有响应体里才有这个标记；不是 LLMFallbackChain 的 adapter
+                # （直连、子 agent 栈）拿到 None，判据自动退到 run 级 origin。
+                served_by_platform=resp.get("_served_by_platform"),
             )
             if recorder is not None:
                 usage = resp.get("usage") or {}
@@ -1893,6 +1944,9 @@ class AgentRunner:
                 # caller (chat + summarize/translate/caption/… services) gets
                 # only the answer; no-op for non-thinking models. raw stays full.
                 content = strip_reasoning(msg.get("content") or "")
+                # 3c §4.1：这是最终回答那条，**刻意不带 ``partial`` 键**（不是
+                # ``partial: False``）——折叠器按键是否存在分流。契约全文见
+                # ``narration_events.emit_partial_narration`` 的 docstring。
                 await emit_event(recorder, "assistant", {"content": content})
                 if recorder is not None and hasattr(recorder, "record_event"):
                     # A turn that ends with neither text nor a tool call
@@ -1924,6 +1978,13 @@ class AgentRunner:
             # reply would 400 the next API call (orphaned tool_use).
             messages.append(msg)
             assistant_msg_index = len(messages) - 1
+            # 3c §4.1：这一步模型先说的话。在这之前 ``assistant`` 只在「这一步没有
+            # 工具调用」时写（上面的 ``if not tool_calls:`` 分支），所以「先交代
+            # 现状、再动手」的文本从没进过 transcript。契约（``partial`` 键、坐标
+            # 列、与 tool_call 的先后）在 emit_partial_narration 的 docstring 里。
+            await emit_partial_narration(
+                recorder, strip_reasoning(msg.get("content") or ""), step=iteration
+            )
 
             # Resolve each tool call (with hook chain bracketing).
             for call in tool_calls:
@@ -1995,6 +2056,10 @@ class AgentRunner:
                         cache_key = ToolResultCache.key(tool_name, args)
                         cached_result = tool_cache.get(cache_key)
 
+                # 3c §3.2：``duration_ms`` 的窗口从这里开始，到派发返回为止 ——
+                # 缓存查找在窗口之外（它是 harness 的活），所以一次命中量出来接近
+                # 0，正确地说出「这次工具没跑」。
+                _tool_t0 = _time.monotonic()
                 if cached_result is not None:
                     result = cached_result
                     from app.agent_framework._metrics_helper import inc_metric
@@ -2124,6 +2189,9 @@ class AgentRunner:
                             tool_name, self.delegate_tool.execute(args)
                         )
 
+                # 窗口在此闭合 —— 与 stream_turn 同一口径，图片提升与 trace 在外。
+                _tool_ms = int((_time.monotonic() - _tool_t0) * 1000)
+
                 # Image promotion (mirrors stream_turn): strip base64 BEFORE
                 # the trace/recorder capture the result; the pixels ride only
                 # in the injected user-message image part below.
@@ -2154,18 +2222,16 @@ class AgentRunner:
                     }
                 )
 
-                # P3 transcript (mig 285): one event per executed tool call
-                # (args + result in one payload — the Nice renderer shows it
-                # as a folded card). record_event truncates long values.
-                await emit_event(
+                # P3 transcript (mig 285) — 3c §3.2：与 stream_turn 同一发射点。
+                # record_event 仍会截断过长的 args/result。
+                await emit_tool_call(
                     recorder,
-                    "tool_call",
-                    {
-                        "tool": tool_name,
-                        "args": args,
-                        "result": result,
-                        "iteration": iteration,
-                    },
+                    tool=tool_name,
+                    args=args,
+                    result=result,
+                    iteration=iteration,
+                    duration_ms=_tool_ms,
+                    error_code=tool_error_code(result),
                 )
 
                 # Wave G (G3): observe for loop detection. Args

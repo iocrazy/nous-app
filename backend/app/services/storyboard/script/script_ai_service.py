@@ -117,6 +117,7 @@ class ScriptAIService:
         agent_slug: Optional[str] = None,
         provider_key: Optional[str] = None,
         provider_config: Optional[dict] = None,
+        credential_origin: Optional[str] = None,
     ) -> None:
         # Retained for backwards compat with legacy smoke tests that
         # inspect ``.model``. The actual model per turn comes from the
@@ -134,6 +135,14 @@ class ScriptAIService:
         self.AGENT_SLUG = agent_slug or AGENT_SLUG
         self._provider_key = provider_key
         self._provider_config = provider_config
+        # Whose credentials serve the turn ("byok" / "platform" / "env" /
+        # "governance"), as resolved by the SAME call that produced
+        # ``provider_config`` — see ``resolve_script_ai_config``. It is not a
+        # credential, it is the answer to "who is paying", and this dispatch
+        # stamps ``team_id``, so the answer decides whether the run is charged.
+        # Re-deriving it here instead of threading it would be a second guess
+        # at a fact the caller already knows.
+        self._credential_origin = credential_origin
 
     # ------------------------------------------------------------------
     # Shared plumbing — composer / runner wiring
@@ -264,6 +273,11 @@ class ScriptAIService:
                     trigger="script_ai",
                     session_id=session_id,
                     team_id=team_id,
+                    credential_origin=self._credential_origin,
+                    # 这条链永远是树根：script AI 不从别的 run 里派生，也不派生
+                    # 子 run。显式写出来，因为 root 一次扣的判据就是这个字段为
+                    # None —— 靠默认值成立的不变量没人会在改动时想起它。
+                    parent_run_id=None,
                     **dispatch_scope.as_recorder_kwargs(),
                     model=model or None,
                     provider=provider,

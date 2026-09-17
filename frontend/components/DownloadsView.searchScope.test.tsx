@@ -210,7 +210,11 @@ vi.mock('../services/unifiedTagService', () => ({
   createTag: vi.fn(),
   addResourceTag: vi.fn(),
 }));
-vi.mock('../services/dataService', () => ({
+// Partial mock: DownloadsView reaches ``mediaTypesToWire`` through
+// services/searchChipFilters, and that mapping must stay REAL — it is the one
+// the list path uses and the search path must not diverge from.
+vi.mock('../services/dataService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/dataService')>()),
   getDownloadUrl: () => '',
   getMusicDownloadUrl: () => '',
 }));
@@ -310,7 +314,14 @@ describe('DownloadsView — search scope wiring', () => {
       vi.advanceTimersByTime(350);
     });
 
-    expect(textSearchMock).toHaveBeenCalledWith('portrait', 1000, ['title']);
+    // Trailing ``undefined`` is the filter-chip argument: no chip is active in
+    // this harness, so none is sent (see DownloadsView.chipFilters.test.tsx).
+    expect(textSearchMock).toHaveBeenCalledWith(
+      'portrait',
+      1000,
+      ['title'],
+      undefined,
+    );
   });
 
   it('forwards the scope on Smart Search (hybrid)', async () => {
@@ -322,8 +333,14 @@ describe('DownloadsView — search scope wiring', () => {
 
     // Hybrid used to hardcode the four basic fields backend-side; the client
     // has to send the scope for the backend fix to be reachable at all.
-    expect(hybridSearchMock).toHaveBeenCalledWith('portrait', {}, 100, 0.5, [
-      'title',
-    ]);
+    // Trailing ``undefined``: the filter-chip argument, empty in this harness.
+    expect(hybridSearchMock).toHaveBeenCalledWith(
+      'portrait',
+      {},
+      100,
+      0.5,
+      ['title'],
+      undefined,
+    );
   });
 });

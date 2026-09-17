@@ -34,6 +34,7 @@ import { useOptionalToast } from '../Toast';
 import { useChildRun } from './childRunContext';
 import { nextLocalSeq, notifyTurn } from './issueTurnSignal';
 import { diffWords, type DiffResult, type DiffSegment } from './outputDiff';
+import { fmtWhen } from '../../utils/fmtWhen';
 
 export interface OutputDiffDialogProps {
   kind: string;
@@ -107,14 +108,36 @@ function revertErrorText(err: unknown, from: number | null, t: T): string {
   }
 }
 
+/** A version number the diff endpoint will actually accept (B4).
+ *
+ *  `from` / `to` are `Query(..., ge=1)` on the backend, and the chain is the
+ *  only source of them. A chain that answers without one leaves `to` as
+ *  `undefined` — which is not `null`, so a plain null-check waves it through
+ *  and the dialog asks for `?from=undefined&to=undefined`. A request that
+ *  cannot succeed is worse than no request: it turns "I could not read the
+ *  chain" into a 422 the reader has to decode. */
+const usableVersion = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 1;
+
 const TONE: Record<DiffSegment['type'], string> = {
   same: '',
   add: 'bg-ok-soft text-ok rounded-sm',
   del: 'bg-danger-soft text-danger rounded-sm line-through',
+  // Neither side's content — it is the panel admitting a cut. Muted and
+  // centred so it reads as a rule across the text, not as one more word.
+  omit: 'block text-center text-[11px] text-ink-500 italic select-none',
 };
 
-/** One pane of the diff: the segments belonging to this side, in order. */
-const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string }> = ({ result, side, testId }) => {
+/** One pane of the diff: the segments belonging to this side, in order.
+ *
+ *  An `omit` segment belongs to NEITHER side, so it survives both filters —
+ *  a truncation drawn on only one pane is a truncation the other pane still
+ *  hides (C9). */
+const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string; t: T }> = ({
+  result,
+  side,
+  testId,
+  t,
+}) => {
   const skip = side === 'from' ? 'add' : 'del';
   return (
     <div
@@ -122,10 +145,29 @@ const Pane: React.FC<{ result: DiffResult; side: 'from' | 'to'; testId: string }
       className="max-h-[52vh] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded border border-ink-800 bg-ink-900/60 p-2 text-[12px] leading-relaxed text-ink-200"
     >
       {result.segments
-        .filter((s) => s.type !== skip)
+        // A side that lost NOTHING draws no marker: the two sides are cut at
+        // the same point but rarely lose the same amount, and "0 lines
+        // omitted" is a rule across the text announcing a cut that, for this
+        // side, did not happen.
+        //
+        // ⚠️ MISSING counts are not zero counts. `?? 0` would have turned an
+        // `omit` segment with no `omitted` at all into "nothing was lost here"
+        // and dropped the marker — silently un-marking a truncation, which is
+        // the exact bug C9 exists to prevent. A segment that cannot say how
+        // much it dropped still says THAT it dropped something.
+        .filter(
+          (s) => s.type !== skip && !(s.type === 'omit' && s.omitted !== undefined && s.omitted[side] === 0),
+        )
         .map((s, i) => (
-          <span key={`${s.type}:${i}`} data-diff={s.type} className={TONE[s.type]}>
-            {s.text}
+          <span
+            key={`${s.type}:${i}`}
+            data-diff={s.type}
+            data-testid={s.type === 'omit' ? 'output-diff-omitted' : undefined}
+            className={TONE[s.type]}
+          >
+            {s.type === 'omit'
+              ? t('outputs.omitted', '… {{n}} lines omitted here …', { n: s.omitted?.[side] ?? 0 })
+              : s.text}
           </span>
         ))}
     </div>
@@ -192,10 +234,18 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   const [versions, setVersions] = useState<OutputVersion[]>([]);
   const [to, setTo] = useState<number | null>(initialTo ?? null);
   const [pinnedFrom, setPinnedFrom] = useState<number | null>(initialFrom ?? null);
+  /** Which version's citation list is unfolded, by version number. One at a
+   *  time: two open lists next to each other read as one list of everything,
+   *  and the counts stop being attributable. */
+  const [citedOpen, setCitedOpen] = useState<number | null>(null);
   const [diff, setDiff] = useState<OutputDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
+  // Looked up rather than held: a revert PREPENDS to `versions`, and a copy of
+  // the row taken when the chip was clicked would keep describing the version
+  // as it was before that write.
+  const citedVersion = citedOpen === null ? null : versions.find((v) => v.version === citedOpen) ?? null;
   // Someone ELSE can move this chain while the dialog is open (an agent run
   // finishing, a revert in another pane). The generation is how that reaches a
   // component that holds no reference to the cache.
@@ -237,8 +287,20 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
     getOutputLineage(kind, refId)
       .then((chain) => {
         if (!live) return;
-        setVersions(chain.versions);
-        setTo((cur) => cur ?? chain.latest_version);
+        // The chain's own answer for "which version do we open on", or
+        // nothing at all — never `undefined` masquerading as a number.
+        const latest = usableVersion(chain.latest_version)
+          ? chain.latest_version
+          : chain.versions?.find((v) => usableVersion(v.version))?.version ?? null;
+        setVersions(chain.versions ?? []);
+        setTo((cur) => (usableVersion(cur) ? cur : latest));
+        if (latest === null && !usableVersion(initialTo)) {
+          // Nothing to compare and nothing to show: say so and stop the
+          // spinner, rather than leaving «Loading…» up for ever.
+          setError(errorText(null, tr));
+          setLoading(false);
+          return;
+        }
         setError(null);
       })
       .catch((err) => {
@@ -315,7 +377,9 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
   };
 
   useEffect(() => {
-    if (to === null || from === null) return;
+    // Both ends must be numbers the endpoint accepts (B4) — `null` is the
+    // "not known yet" case and `undefined` the "chain never said" one.
+    if (!usableVersion(to) || !usableVersion(from)) return;
     let live = true;
     setLoading(true);
     getOutputDiff(kind, refId, from, to)
@@ -380,28 +444,89 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
         {versions.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1" data-testid="output-diff-versions">
             {versions.map((v) => (
-              <button
-                key={v.version}
-                type="button"
-                data-testid={`output-diff-version-${v.version}`}
-                onClick={() => {
-                  setPinnedFrom(null);
-                  setTo(v.version);
-                  // "your edits were kept as v3" answers a question about the
-                  // revert just performed; carried onto another version it
-                  // becomes a claim about the wrong object. Cleared here
-                  // rather than in the diff effect, because `doRevert` moves
-                  // `to` itself and would wipe the note it just earned.
-                  setKept(null);
-                  setConfirming(false);
-                }}
-                className={`rounded border px-1.5 py-0.5 text-[11px] ${
-                  v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
-                }`}
-              >
-                {t('outputs.version', 'v{{n}}', { n: v.version })}
-              </button>
+              // The count is a SECOND control, so it cannot live inside the
+              // version button — a button inside a button is invalid markup and
+              // one click would both switch versions and toggle the list.
+              <span key={v.version} className="inline-flex items-center gap-0.5">
+                <button
+                  type="button"
+                  data-testid={`output-diff-version-${v.version}`}
+                  onClick={() => {
+                    setPinnedFrom(null);
+                    setTo(v.version);
+                    // "your edits were kept as v3" answers a question about the
+                    // revert just performed; carried onto another version it
+                    // becomes a claim about the wrong object. Cleared here
+                    // rather than in the diff effect, because `doRevert` moves
+                    // `to` itself and would wipe the note it just earned.
+                    setKept(null);
+                    setConfirming(false);
+                  }}
+                  className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                    v.version === to ? 'border-info-line bg-info-soft text-info' : 'border-ink-700 text-ink-400 hover:border-ink-500'
+                  }`}
+                >
+                  {t('outputs.version', 'v{{n}}', { n: v.version })}
+                </button>
+                {/* 被引次数是**全量**的，`cited_in` 只列你看得见的那几条——所以
+                    这里显示的是计数，不是列表长度。详见 `OutputVersion`。 */}
+                {v.cited_count > 0 && (
+                  <button
+                    type="button"
+                    data-testid="output-version-cited"
+                    aria-expanded={citedOpen === v.version}
+                    onClick={() => setCitedOpen((cur) => (cur === v.version ? null : v.version))}
+                    className="rounded border border-ink-800 px-1 py-0.5 text-[11px] text-ink-500 hover:border-ink-600 hover:text-ink-300"
+                  >
+                    {t('outputs.citedTimes', 'Cited ×{{n}}', { n: v.cited_count })}
+                  </button>
+                )}
+              </span>
             ))}
+          </div>
+        )}
+
+        {/*
+          Who pointed at this version. The list and the count answer different
+          questions and are allowed to disagree: `cited_count` is the whole
+          truth, `cited_in` is only what THIS caller may see. Showing the list
+          alone would quietly present a filtered view as the total, which is
+          exactly what the visibility trim must not be mistaken for — so the
+          difference gets its own line rather than being smoothed over.
+
+          No "Open" link: the backend sends `CitedIn` no `deep_link`, and this
+          codebase does not let a frontend assemble an issue URL (the reason
+          `OutputVersion.deep_link` exists at all). The key is printed so the
+          reader can find it; the link waits for the backend to hand one over.
+        */}
+        {citedOpen !== null && citedVersion && (
+          <div
+            data-testid="output-version-cited-list"
+            className="mt-2 rounded border border-ink-800 bg-ink-900/40 px-2 py-1.5"
+          >
+            <p className="pb-1 text-[10px] uppercase tracking-wide text-ink-600">
+              {t('outputs.citedInTitle', 'Referenced in')}
+            </p>
+            {citedVersion.cited_in.map((c) => (
+              <div
+                key={c.message_id}
+                data-testid="output-version-cited-row"
+                className="flex flex-wrap items-baseline gap-x-2 py-0.5 text-[11px] text-ink-400"
+              >
+                <span className="text-ink-300">
+                  {c.issue_key ?? t('outputs.citedInNoIssue', 'An issue with no key')}
+                </span>
+                <span className="text-ink-500">{c.user_id}</span>
+                <span className="text-ink-600 tabular-nums">{fmtWhen(c.at)}</span>
+              </div>
+            ))}
+            {citedVersion.cited_count > citedVersion.cited_in.length && (
+              <p data-testid="output-version-cited-hidden" className="pt-0.5 text-[11px] text-ink-600">
+                {t('outputs.citedInHidden', '{{n}} hidden — on issues you cannot see', {
+                  n: citedVersion.cited_count - citedVersion.cited_in.length,
+                })}
+              </p>
+            )}
           </div>
         )}
 
@@ -431,7 +556,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
                 ) : diff.content_type === 'media' ? (
                   <MediaSide side={diff.from} t={tr} />
                 ) : (
-                  text && <Pane result={text} side="from" testId="output-diff-from" />
+                  text && <Pane result={text} side="from" testId="output-diff-from" t={tr} />
                 )}
               </div>
             )}
@@ -448,7 +573,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
               ) : diff.content_type === 'media' ? (
                 <MediaSide side={diff.to} t={tr} />
               ) : (
-                text && <Pane result={text} side="to" testId={single ? 'output-diff-single-text' : 'output-diff-to'} />
+                text && <Pane result={text} side="to" testId={single ? 'output-diff-single-text' : 'output-diff-to'} t={tr} />
               )}
             </div>
           </div>
@@ -456,7 +581,7 @@ export const OutputDiffDialog: React.FC<OutputDiffDialogProps> = ({ kind, refId,
 
         {text?.truncated && (
           <p data-testid="output-diff-truncated" className="mt-2 text-[11px] text-warn">
-            {t('outputs.truncated', 'This text is too long to compare in full — only the first part of the change is shown.')}
+            {t('outputs.truncated', 'This text is too long to compare in full — the middle of the change is left out, marked where it was cut.')}
           </p>
         )}
 

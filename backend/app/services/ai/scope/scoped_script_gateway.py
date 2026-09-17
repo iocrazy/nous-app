@@ -461,6 +461,11 @@ class EditApplied:
     rebased_from: Optional[int]
     observed_version: int
     quoted_base_version: Optional[int] = None
+    #: 写完之后这一场的全部元素。宿主侧字段 —— ``as_dict``（模型看得见的那一
+    #: 面）刻意不含它，同 ``Tool.to_descriptor`` 的白名单投影纪律。产出登记要
+    #: 拿它渲染检索正文：这一版的内容只有刚写完的事务说得准，事后再读一次就
+    #: 可能读到别人的下一次编辑。
+    elements: tuple[dict[str, Any], ...] = ()
 
     @property
     def quoted_base_mismatch(self) -> bool:
@@ -747,6 +752,7 @@ async def apply_element_edit(
         rebased_from=rebased_from,
         observed_version=observation.content_version,
         quoted_base_version=quoted_base_version,
+        elements=tuple(_elements(result.get("elements"))),
     )
 
 

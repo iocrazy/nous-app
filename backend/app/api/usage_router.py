@@ -12,6 +12,7 @@ import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
 
 from app.core.deps import AuthDep
 from app.repositories import usage_repository
@@ -24,26 +25,15 @@ from app.schemas.usage import (
     UsageTotals,
 )
 
+# Shared with ai_library_router's efficiency endpoint — one parser and one cap
+# so the two windows cannot drift apart.
+from app.utils.time_window import MAX_RANGE_DAYS, parse_window_dt, window_error
+
 router = APIRouter(prefix="/usage", tags=["Usage"])
 
-_MAX_RANGE_DAYS = 366
-
-
-def _parse_dt(value: Optional[str], *, default: datetime.datetime) -> datetime.datetime:
-    """Parse a 'YYYY-MM-DD' or full-ISO string into a UTC-aware datetime.
-    Blank/invalid → default."""
-    if not value:
-        return default
-    try:
-        parsed = datetime.datetime.fromisoformat(value)
-    except ValueError:
-        try:
-            parsed = datetime.datetime.strptime(value, "%Y-%m-%d")
-        except ValueError:
-            return default
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-    return parsed
+#: Re-exported under the historical private name; it is the SAME object, so the
+#: two endpoints cannot be capped differently.
+_MAX_RANGE_DAYS = MAX_RANGE_DAYS
 
 
 def _num(value: Any) -> float:
@@ -56,6 +46,13 @@ def _int(value: Any) -> int:
     if value is None:
         return 0
     return int(value)
+
+
+def _per_output(cost: Any, delivered: Any) -> Optional[float]:
+    """每件产出多少分。0 件产出 → None（不知道单价），绝不是 0.0——「这段时间没做出
+    东西」和「做东西不要钱」是两回事，后者会让一张全是失败运行的账单看起来免费。"""
+    n = _int(delivered)
+    return round(_num(cost) / n, 4) if n > 0 else None
 
 
 @router.get("/summary", response_model=UsageSummaryResponse)
@@ -87,22 +84,33 @@ async def usage_summary(
         )
 
     now = datetime.datetime.now(datetime.timezone.utc)
-    to_dt = _parse_dt(to, default=now)
-    frm_dt = _parse_dt(frm, default=to_dt - datetime.timedelta(days=30))
-    if frm_dt >= to_dt:
+    to_dt = parse_window_dt(to, default=now)
+    frm_dt = parse_window_dt(frm, default=to_dt - datetime.timedelta(days=30))
+    problem = window_error(frm_dt, to_dt)
+    if problem == "invalid_range":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="'from' must be before 'to'",
         )
-    if (to_dt - frm_dt).days > _MAX_RANGE_DAYS:
+    if problem == "range_too_long":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"range exceeds {_MAX_RANGE_DAYS} days",
+            detail=f"range exceeds {MAX_RANGE_DAYS} days",
         )
 
-    data = await usage_repository.summarize(
-        team_id=team_id, frm=frm_dt, to=to_dt, group_by=group_by
-    )
+    try:
+        data = await usage_repository.summarize(
+            team_id=team_id, frm=frm_dt, to=to_dt, group_by=group_by
+        )
+    except Exception as exc:  # noqa: BLE001
+        # A failed rollup read must not render as a quiet month. The concrete
+        # case is a 42703 in the window between a migration landing and the
+        # code that reads its new columns: zeros look calm, a 503 does not.
+        logger.error(f"[usage/summary] rollup read failed for team {team_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "usage_summary_unavailable"},
+        ) from exc
     total = data["total"]
     return UsageSummaryResponse(
         team_id=str(team_id),
@@ -116,6 +124,14 @@ async def usage_summary(
             cached_input_tokens=_int(total.get("cached_input_tokens")),
             cost_cents=_num(total.get("cost_cents")),
             event_count=_int(total.get("event_count")),
+            run_count=_int(total.get("run_count")),
+            failed_runs=_int(total.get("failed_runs")),
+            tool_calls=_int(total.get("tool_calls")),
+            tool_errors=_int(total.get("tool_errors")),
+            deliverables=_int(total.get("deliverables")),
+            cost_per_deliverable_cents=_per_output(
+                total.get("cost_cents"), total.get("deliverables")
+            ),
         ),
         groups=[
             UsageGroupRow(
@@ -125,6 +141,14 @@ async def usage_summary(
                 total_tokens=_int(r.get("total_tokens")),
                 cost_cents=_num(r.get("cost_cents")),
                 event_count=_int(r.get("event_count")),
+                run_count=_int(r.get("run_count")),
+                failed_runs=_int(r.get("failed_runs")),
+                tool_calls=_int(r.get("tool_calls")),
+                tool_errors=_int(r.get("tool_errors")),
+                deliverables=_int(r.get("deliverables")),
+                cost_per_deliverable_cents=_per_output(
+                    r.get("cost_cents"), r.get("deliverables")
+                ),
             )
             for r in data["groups"]
         ],
@@ -134,6 +158,11 @@ async def usage_summary(
                 key=(str(r["grp"]) if r.get("grp") is not None else None),
                 total_tokens=_int(r.get("total_tokens")),
                 cost_cents=_num(r.get("cost_cents")),
+                run_count=_int(r.get("run_count")),
+                failed_runs=_int(r.get("failed_runs")),
+                tool_calls=_int(r.get("tool_calls")),
+                tool_errors=_int(r.get("tool_errors")),
+                deliverables=_int(r.get("deliverables")),
             )
             for r in data["daily"]
         ],

@@ -188,7 +188,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import insert, select, text
+from sqlalchemy import func, insert, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -391,22 +391,66 @@ class PointsRepository:
         Returns:
             Created team quota row dict.
         """
+        out, _created = await self.create_team_quota_if_absent(
+            team_id=team_id,
+            points_balance=points_balance,
+            storage_limit_bytes=storage_limit_bytes,
+        )
+        return out
+
+    async def create_team_quota_if_absent(
+        self,
+        team_id: str,
+        points_balance: int = 0,
+        storage_limit_bytes: int = 5368709120,
+    ) -> tuple[Dict[str, Any], bool]:
+        """Same INSERT, but idempotent, and it reports whether it created.
+
+        ``team_id`` is the PRIMARY KEY (``team_quotas_pkey``), so a bare INSERT
+        makes concurrent first-time provisioning a coin flip: one caller wins
+        and the other raises. That was invisible while the only caller was the
+        signup background task; 3c A3 made an agent run provision too, so two
+        concurrent runs for one brand-new team would lose one charge outright.
+
+        ``created`` is the ONLY safe basis for the welcome bonus. Both racers
+        getting a row back is correct; both claiming they created it would
+        write two 500-point gift transactions for the same team.
+        """
         try:
             async with write_scope() as session:
                 result = await session.execute(
-                    insert(TeamQuotas)
+                    pg_insert(TeamQuotas)
                     .values(
                         team_id=int(team_id),
                         points_balance=points_balance,
                         storage_limit_bytes=storage_limit_bytes,
                         storage_used_bytes=0,
                     )
+                    .on_conflict_do_nothing(index_elements=["team_id"])
                     .returning(TeamQuotas)
                 )
                 row = result.scalars().first()
-                out = _team_quota_row(row) if row else {}
-            logger.info(f"Created team quota for team {team_id}")
-            return out
+                if row is not None:
+                    logger.info(f"Created team quota for team {team_id}")
+                    return _team_quota_row(row), True
+
+                # DO NOTHING ⇒ RETURNING is empty. Someone else created it
+                # between our read and our write; hand back THEIR row rather
+                # than {} — add_points does .get() on this result immediately.
+                existing = (
+                    (
+                        await session.execute(
+                            select(TeamQuotas).where(TeamQuotas.team_id == int(team_id))
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+            logger.info(
+                f"Team quota for team {team_id} already existed (a concurrent "
+                f"writer won); no welcome bonus from this caller"
+            )
+            return (_team_quota_row(existing) if existing else {}), False
         except Exception as e:
             logger.error(f"Failed to create team quota for {team_id}: {e}")
             raise
@@ -765,6 +809,45 @@ class PointsRepository:
             return out
         except Exception as e:
             logger.error(f"Failed to create transaction: {e}")
+            raise
+
+    async def charged_points_for_references(
+        self, *, reference_type: str, reference_ids: List[str]
+    ) -> Dict[str, float]:
+        """这些引用各自真扣掉的积分（正数）。
+
+        真相在 ``point_transactions``（``type='consume'``，``amount`` 为负），不在任
+        何效率表里——效率账引用积分账，不复制它。同一引用可能有多行（重试、补扣），
+        所以求和。**没扣过的 id 不出现**：调用方读到 None 才能把「没扣」和「扣了 0」
+        分开。"""
+        wanted = [str(r) for r in reference_ids if r is not None]
+        if not wanted:
+            return {}
+        try:
+            stmt = (
+                select(
+                    PointTransactions.reference_id,
+                    func.sum(PointTransactions.amount).label("amount"),
+                )
+                .where(PointTransactions.type == "consume")
+                .where(PointTransactions.reference_type == reference_type)
+                .where(PointTransactions.reference_id.in_(wanted))
+                .group_by(PointTransactions.reference_id)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).all()
+            # 取负而不是 abs()：``type='consume'`` 的行一律是负数，取负正好还原
+            # 扣了多少。abs() 会把一个本不该出现的正数悄悄读成扣分，掩盖数据异常。
+            return {str(ref): -float(amount or 0) for ref, amount in rows}
+        except Exception as e:
+            # RAISE, never ``{}``. The two readers want opposite things from a
+            # failure and only one of them can be served by a default: the cost
+            # bubble (/ai-library/runs/costs) must say 503 rather than render a
+            # billed run as free, while the issue rollup degrades this one field
+            # and keeps the rest. So the failure travels, and each consumer
+            # decides — ``issue_rollup.load_rollup`` catches this and falls back
+            # to {} itself.
+            logger.error(f"Failed to read charged points for {reference_type}: {e}")
             raise
 
     async def get_transactions(

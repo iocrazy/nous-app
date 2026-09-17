@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Video, FileText, Image, File, Clock, CornerUpLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ProjectFile, ReviewStatus } from '../types';
+import { issueDeepLink } from '../utils/issueLinks';
 
 interface FileCardProps {
   file: ProjectFile;
@@ -62,17 +63,45 @@ const SourceIssueChip: React.FC<{ file: ProjectFile }> = ({ file }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const identifier = file.source_issue_identifier;
   if (!identifier) return null;
-  const to = teamId ? `/team/${teamId}/todolist/${identifier}` : `/todolist/${identifier}`;
+  // One builder, shared with the backend's contract (B7). Outside a team it
+  // refuses — the issue route lives under `/team/:teamId` only, so the old
+  // `/todolist/${identifier}` fallback was a link to nothing. The chip still
+  // says where the file came from; it just stops offering the click.
+  const to = issueDeepLink(teamId, identifier);
+  const label = t('projects.workflow.deliverables.fromIssue', { id: identifier });
+  // Semantic tokens, not emerald: the hue names lost their meaning in the K1
+  // palette remap, and a rewritten line counts as new code (L4).
+  const className =
+    'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-ok-soft text-ok transition-colors';
+  if (!to) {
+    // Still stops the click from reaching the card (the Link did), so the
+    // chip is inert rather than a covert "open this file" button — and the
+    // tooltip says WHY it does not navigate, instead of leaving a dead-looking
+    // control unexplained (L3). Not `outputs.provenanceNoLink` ("the issue
+    // that produced this is not linked"): the chip names the issue right
+    // there, so that sentence would contradict what the reader sees.
+    return (
+      <span
+        onClick={(e) => e.stopPropagation()}
+        data-testid="file-source-issue-chip"
+        className={className}
+        title={t('files.issueLinkNoTeam', 'No team context — open the issue from its board')}
+      >
+        <CornerUpLeft size={10} />
+        {label}
+      </span>
+    );
+  }
   return (
     <Link
       to={to}
       onClick={(e) => e.stopPropagation()}
       data-testid="file-source-issue-chip"
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
-      title={t('projects.workflow.deliverables.fromIssue', { id: identifier })}
+      className={`${className} hover:bg-ok-line`}
+      title={label}
     >
       <CornerUpLeft size={10} />
-      {t('projects.workflow.deliverables.fromIssue', { id: identifier })}
+      {label}
     </Link>
   );
 };

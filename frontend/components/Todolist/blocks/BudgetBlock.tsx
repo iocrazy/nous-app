@@ -41,7 +41,7 @@ export const BudgetBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
     setSaving(true);
     setError(null);
     try {
-      await updateIssue(Number(ctx.issue.id), patch);
+      await updateIssue(String(ctx.issue.id), patch);
       setEditing(false);
       ctx.env.onIssueChanged?.();
     } catch (err) {

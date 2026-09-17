@@ -1323,7 +1323,16 @@ class UnifiedTaskManager:
         the lifecycle trigger never fires for it again and the sweeper
         marks the row lost once more an hour later — the "Retry doesn't
         actually retry" half of the 3-layer observability bug. Callers
-        that re-dispatch MUST pass the id they dispatch with."""
+        that re-dispatch MUST pass the id they dispatch with.
+
+        Re-keying is also why the attempt counter has to live on the row:
+        ``metadata.retry_count`` is bumped here, in the same UPDATE that
+        moves the row to the new workflow. It is the ONLY place a retry is
+        counted, so it cannot drift from what actually happened. The row
+        stays a single task across attempts — which is the whole point:
+        forking a workflow instead (``POST /workflows/{id}/restart``) left
+        the original in its terminal state and produced a brand-new,
+        unrelated ``(recovered)`` row per click (2026-09-15)."""
         from sqlalchemy import select, update
 
         from app.db.pg_coerce import coerce_datetime_strings
@@ -1348,6 +1357,18 @@ class UnifiedTaskManager:
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        # Attempt N of this same task. The previous error is cleared above so
+        # the row reads as queued again; without the count, a user who retried
+        # four times had no way to tell that from a task that never ran — and
+        # the row itself carried no trace of the three earlier attempts.
+        prev_meta = task.get("metadata")
+        meta: Dict[str, Any] = dict(prev_meta) if isinstance(prev_meta, dict) else {}
+        try:
+            attempts = int(meta.get("retry_count") or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        meta["retry_count"] = attempts + 1
+        meta["last_retry_at"] = now_iso
         update_vals: Dict[str, Any] = {
             "phase": TaskPhase.QUEUED.value,
             "status": "pending",
@@ -1357,6 +1378,7 @@ class UnifiedTaskManager:
             "started_at": None,
             "completed_at": None,
             "updated_at": now_iso,
+            "metadata": meta,
         }
         if new_workflow_id:
             update_vals["dbos_workflow_id"] = new_workflow_id
@@ -1369,6 +1391,12 @@ class UnifiedTaskManager:
                 .values(**update_vals)
             )
 
+        # Hand back the post-retry view: same row, new workflow id, bumped
+        # counter. Returning the pre-update snapshot made the response
+        # disagree with the database about which attempt this was.
+        task = {**task, "metadata": meta}
+        if new_workflow_id:
+            task["dbos_workflow_id"] = new_workflow_id
         return task
 
     # ── Dedup key helpers ─────────────────────────────────────────────

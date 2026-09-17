@@ -131,11 +131,14 @@ describe('TagsSettings — create dialog error reporting', () => {
     expect(createTag).not.toHaveBeenCalled();
   });
 
-  it("matches a SYSTEM tag by its Chinese name — the backend does too", async () => {
-    // get_tag_by_name checks `name ILIKE ? OR name_zh = ?` for system/time
-    // tags, so typing the Chinese half of one really does 409.
+  it('matches an initial tag by its Chinese name — the backend does too', async () => {
+    // get_tag_by_name checks `name ILIKE ? OR name_zh = ?` within the caller's
+    // own tags, so typing the Chinese half of one really does 409. These rows
+    // used to be `type: 'system'`; mig 468 made them the user's own, and the
+    // 409 has to survive that — otherwise typing 人工智能 would quietly create
+    // a SECOND tag next to the AI tag the user already has.
     fetchAllTags.mockResolvedValue([
-      { ...collidingTag, id: '9', name: 'AI', name_zh: '人工智能', type: 'system' },
+      { ...collidingTag, id: '9', name: 'AI', name_zh: '人工智能', type: 'user' },
     ]);
     await openCreateDialog();
     typeName('人工智能');
@@ -145,16 +148,28 @@ describe('TagsSettings — create dialog error reporting', () => {
     expect(createTag).not.toHaveBeenCalled();
   });
 
-  it('does NOT block on a USER tag\'s Chinese name — the backend allows it', async () => {
-    // The gate must not out-refuse the server: for user tags the backend
-    // matches on the English name only. Blocking here would tell the user
-    // "already exists" about a create that would have succeeded.
-    createTag.mockResolvedValue({ ...collidingTag, id: '3', name: '简短', name_zh: null });
+  it('blocks on ANY of your tags\' Chinese names — including ones you made', async () => {
+    // The gate mirrors the server, and the server\'s rule changed with mig 468.
+    //
+    // It used to be split by type: name_zh counted for system/time rows, English
+    // only for your own. That split cannot survive the fork — the 42 initial
+    // tags ARE your own rows now, so "English only" would mean typing their
+    // Chinese name creates a duplicate where it used to 409. One rule for every
+    // row is the only coherent answer, and this is the direction that keeps the
+    // behaviour users actually see.
+    //
+    // The cost is this case: a tag you created yourself whose name_zh collides
+    // now blocks too. That is a duplicate the UI would render identically, so
+    // refusing it is not a loss.
+    fetchAllTags.mockResolvedValue([
+      { ...collidingTag, id: '9', name: 'Brief', name_zh: '简短', type: 'user' },
+    ]);
     await openCreateDialog();
     typeName('简短');
 
-    fireEvent.click(screen.getByText('common.create'));
-    await waitFor(() => expect(createTag).toHaveBeenCalled());
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog).toHaveTextContent('简短'));
+    expect(createTag).not.toHaveBeenCalled();
   });
 
   it('lets a genuinely new name through', async () => {

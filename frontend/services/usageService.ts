@@ -12,13 +12,46 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 const base = (): string => `${getApiUrl()}/api/v1`;
 
+/**
+ * A refusal from one of the usage routes, carrying the code the route TYPED.
+ *
+ * Production wraps every `HTTPException` in `ErrorResponse`, so the branchable
+ * code lives under `details.code` and the envelope's own `code` is only ever
+ * `http_<status>` (CLAUDE.md 2026-09-09). `usage_summary_unavailable`,
+ * `efficiency_unavailable`, `range_too_long` and `invalid_range` are the ones
+ * these routes speak; a caller that has to tell them apart cannot do it from
+ * a status line. `message` is for a log, never for the screen — the envelope's
+ * sentence is server copy with a request id attached to it.
+ */
+export class UsageRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'UsageRequestError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 async function handle<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`${resp.status}: ${text}`);
+    // Falls back to `http_<status>` rather than null: a gateway's HTML 502
+    // types nothing, and a caller still needs something to switch on.
+    let code = `http_${resp.status}`;
+    let message = `${resp.status} ${resp.statusText}`;
+    try {
+      const decoded = decodeErrorEnvelope(await resp.json());
+      if (decoded.code) code = decoded.code;
+      if (decoded.message) message = decoded.message;
+    } catch (err) {
+      console.error('[usageService] error body unreadable', err);
+    }
+    throw new UsageRequestError(code, resp.status, message);
   }
   return resp.json() as Promise<T>;
 }
@@ -32,6 +65,13 @@ export interface UsageTotals {
   cached_input_tokens: number;
   cost_cents: number;
   event_count: number;
+  run_count: number;
+  failed_runs: number;
+  tool_calls: number;
+  tool_errors: number;
+  deliverables: number;
+  /** 0 件产出时是 null（不知道单价），绝不是 0。 */
+  cost_per_deliverable_cents: number | null;
 }
 
 export interface UsageGroupRow {
@@ -41,6 +81,13 @@ export interface UsageGroupRow {
   total_tokens: number;
   cost_cents: number;
   event_count: number;
+  run_count: number;
+  failed_runs: number;
+  tool_calls: number;
+  tool_errors: number;
+  deliverables: number;
+  /** 0 件产出时是 null（不知道单价），绝不是 0。 */
+  cost_per_deliverable_cents: number | null;
 }
 
 export interface UsageDailyRow {
@@ -48,6 +95,44 @@ export interface UsageDailyRow {
   key: string | null;
   total_tokens: number;
   cost_cents: number;
+  run_count: number;
+  failed_runs: number;
+  tool_calls: number;
+  tool_errors: number;
+  deliverables: number;
+}
+
+/** 效率读面的分组维度。后端只接这两个（别的是 400 `invalid_group_by`）。 */
+export type EfficiencyGroupBy = 'model' | 'agent';
+
+export type EfficiencyScope = 'user' | 'team' | 'project';
+
+export interface EfficiencyGroup {
+  key: string;
+  label: string;
+  run_count: number;
+  failed_runs: number;
+  /** 没有一个 run 计过时的平均时长是 null，不是 0。 */
+  avg_run_ms: number | null;
+  tool_calls: number;
+  tool_errors: number;
+  /** 服务端算好的比率：没调过工具时是 0（确定没错），分母不由前端再猜一次。 */
+  tool_error_rate: number;
+  deliverables: number;
+  cost_cents: number;
+  /** 0 件产出时是 null（不知道单价），绝不是 0。 */
+  cost_per_deliverable_cents: number | null;
+}
+
+export interface EfficiencySummary {
+  scope: string;
+  /** 回显请求的分组维度——图表不必自己记得问过什么（与 /usage/summary 同契约）。 */
+  group_by: EfficiencyGroupBy;
+  from: string;
+  to: string;
+  groups: EfficiencyGroup[];
+  /** 开放的表：runner 每加一个终止理由就多一个键，消费方必须容纳没见过的键。 */
+  turn_end_reasons: Record<string, number>;
 }
 
 export interface UsageSummary {
@@ -91,6 +176,32 @@ export const usageService = {
       headers: await getAuthHeaders(),
     });
     return handle<UsageSummary>(resp);
+  },
+
+  /**
+   * 一个窗口的运行效率（3c §3.3）：turn_end 分布 + 工具错误率 + 每件产出的花费。
+   *
+   * 与 `/usage/summary` 是两个端点，因为它们读的是两张表——这一路读 `agent_runs`
+   * 的效率五列。窗口 ≤366 天（超出 400 `range_too_long`），`from >= to` 是
+   * `invalid_range`；user 之外的 scope 必须带 `id`。
+   */
+  async getEfficiency(params: {
+    scope: EfficiencyScope;
+    id?: number;
+    from?: string;
+    to?: string;
+    groupBy?: EfficiencyGroupBy;
+  }): Promise<EfficiencySummary> {
+    const qs = new URLSearchParams({ scope: params.scope });
+    if (params.id != null) qs.set('id', String(params.id));
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    qs.set('group_by', params.groupBy || 'model');
+    const resp = await fetch(
+      `${base()}/ai-library/usage/efficiency?${qs.toString()}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<EfficiencySummary>(resp);
   },
 
   async getIssueUsage(issueId: string): Promise<IssueUsage> {

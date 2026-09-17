@@ -952,7 +952,8 @@
     "empty": "暂无内容",
     "searchPlaceholder": "搜索标题、标签、备注...",
     "searchResultsCount": "搜索到 {{count}} 条结果",
-    "searchResultsCountSingular": "搜索到 1 条结果"
+    "searchResultsCountSingular": "搜索到 1 条结果",
+    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。"
   },
   "search": {
     "aiPlaceholder": "AI 搜索... ↵",
@@ -968,7 +969,20 @@
       "tags": "标签",
       "notes": "笔记",
       "name": "名称"
-    }
+    },
+    "palettePlaceholder": "搜索议题、运行与产出",
+    "paletteHint": "输入至少 2 个字符，搜索议题、运行与产出",
+    "paletteSearching": "搜索中…",
+    "paletteEmpty": "没有匹配 “{{q}}” 的结果",
+    "paletteError": "搜索没能执行（{{code}}）",
+    "paletteErrorPlain": "搜索没能执行",
+    "paletteNoPage": "无页面",
+    "paletteFooter": "↑↓ 选择 · ↵ 打开 · esc 关闭",
+    "groupIssues": "议题",
+    "groupRuns": "运行",
+    "groupOutputs": "产出",
+    "groupOf": "共 {{total}} 条，显示 {{shown}} 条",
+    "paletteResults": "搜索结果"
   },
   "dashboard": {
     "title": "数据统计",
@@ -1162,6 +1176,8 @@
     "downloadResult": "下载",
     "tabActive": "进行中",
     "tabHistory": "历史",
+    "retryBadge": "第{{count}}次重试",
+    "retryCount": "已重试 {{count}} 次 —— 同一个任务的新一次尝试",
     "waitingInput": "等你回复",
     "running": "运行",
     "queued": "排队",
@@ -2515,6 +2531,9 @@
       "presentation": "演示",
       "delivery": "交付"
     }
+  },
+  "files": {
+    "issueLinkNoTeam": "当前没有团队上下文——请从议题看板打开"
   },
   "projects": {
     "openByIdFailed": "无法打开该项目 — 项目可能已删除或你已失去访问权限",
@@ -4111,6 +4130,14 @@
       "video": "文生视频模型",
       "speech": "语音模型"
     },
+    "nonChatKindShort": {
+      "embedding": "向量",
+      "rerank": "重排",
+      "image": "文生图",
+      "video": "文生视频",
+      "speech": "语音"
+    },
+    "nonChatKindTagHint": "「{{model}}」看起来是{{kind}}模型。它照常可用于该用途，只是该服务商的对话与文本任务不能用它。",
     "providerDesc": {
       "openai": "云端 GPT 与 Whisper 模型",
       "deepseek": "高性价比云端 AI",
@@ -4309,6 +4336,7 @@
       "modelHealthFailedReasonShort": "自检失败：{{reason}}",
       "modelHealthPassed": "自检通过",
       "modelHealthCheckedAgo": "检查于 {{ago}}",
+      "nonChatModelShort": "非对话模型",
       "usage": {
         "title": "使用方",
         "empty": "暂无模块使用此 Agent — 可在会话中调用它，或将它绑定到工作流。",
@@ -4795,7 +4823,27 @@
     "emptyRange": "该时间范围内无用量。",
     "runsTitleRange": "最近调用明细（最近 {{days}} 天）",
     "rangeMonth": "按月",
-    "runsTitleMonth": "最近调用明细（{{month}}）"
+    "runsTitleMonth": "最近调用明细（{{month}}）",
+    "statCostPerOutput": "每件产出花费",
+    "statToolErrors": "工具错误率",
+    "turnEndTitle": "回合都是怎么结束的",
+    "turnEndEmpty": "还没有结束的运行",
+    "efficiencyLoading": "正在加载效率数据...",
+    "efficiencyUnavailable": "效率数据暂时读不到。上面的用量汇总不受影响。",
+    "efficiencyRangeTooLong": "这个时间范围对效率统计来说太长了，请选 366 天以内的窗口。",
+    "efficiencyInvalidRange": "这个时间范围的结束时间早于开始时间。",
+    "efficiencyFailed": "效率数据加载失败。",
+    "turnEnd": {
+      "completed": "已完成",
+      "awaitingInput": "等待输入",
+      "error": "出错",
+      "dead": "进程已死",
+      "heartbeatLost": "心跳丢失",
+      "stranded": "重启中断",
+      "interrupted": "被中断",
+      "cancelled": "已取消",
+      "other": "其他"
+    }
   },
   "clockDrift": {
     "warning": "设备时间与服务器相差 {{amount}}（{{direction}}）——这会导致登录异常。请在系统设置中开启自动设置日期与时间。",
@@ -5045,7 +5093,8 @@
     "insertCode": "插入代码块",
     "attachFile": "添加附件",
     "insertLink": "插入链接",
-    "backToThisMonth": "回到本月"
+    "backToThisMonth": "回到本月",
+    "deleteConfirmMessage": "删除后无法恢复。"
   },
   "editor": {
     "brand": "Nous Projects",
@@ -5568,9 +5617,15 @@
   "issueDetail": {
     "outputs": "产出",
     "outputsRevised": "{{n}} 个修订",
+    "costPerOutput": "单件成本",
+    "costPerOutputValue": "{{c}} / 件",
+    "costPerOutputHint": "本议题全部运行合计",
     "tools": "工具",
     "toolsTimedOut_one": "{{count}} 个超时",
     "toolsTimedOut_other": "{{count}} 个超时",
+    "toolErrors": "工具出错",
+    "toolErrorCount": "{{n}} 次出错",
+    "toolCallCount": "{{n}} 次调用",
     "openConversation": "展开对话流",
     "progress": "进度",
     "links": "关联",
@@ -5629,6 +5684,11 @@
     "wakesAt": "{{at}} 唤醒"
   },
   "issues": {
+    "refreshFailed": "刷新这条议题失败，你看到的可能不是最新状态",
+    "count_one": "{{count}} 件议题",
+    "count_other": "{{count}} 件议题",
+    "countOfTotal_one": "{{n}} / {{count}} 件议题",
+    "countOfTotal_other": "{{n}} / {{count}} 件议题",
     "pageTitle": "待办事项",
     "needsReplyChip": "等你回复",
     "waitingOnYou": "等我的",
@@ -5730,6 +5790,7 @@
     "elapsed": "实际 {{s}}",
     "you": "你",
     "step": "第 {{n}} 步",
+    "running": "正在运行 {{tool}}…",
     "live": "进行中",
     "tools": "{{count}} 个工具",
     "retries": "重试 ×{{count}}",
@@ -5748,6 +5809,12 @@
     "denied": "已拦截：{{tool}}",
     "inboxSubagent": "子代理结果 · {{type}}（后台）· {{verdict}} · 已在第 {{n}} 步前读到",
     "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到"
+  },
+  "cost": {
+    "tailTokens": "{{p}} 输入 · {{c}} 输出 tokens",
+    "charged": "已扣 ◇ {{n}}（含子 agent）",
+    "notCharged": "未扣费（{{why}}）",
+    "notChargedPlain": "未扣费"
   },
   "fork": {
     "title": "从{{step}}分叉",
@@ -5869,6 +5936,7 @@
     "mentionCount_other": "{{count}} 个产出",
     "citationRemove": "移除这条引用",
     "citationLimit": "一条评论最多引用 {{n}} 个产出",
+    "citationUnusable": "该产出缺少版本号，无法引用",
     "cited_one": "引用 {{count}} 件产出 · 按版本锁定，不随后续修订漂移",
     "cited_other": "引用 {{count}} 件产出 · 按版本锁定，不随后续修订漂移",
     "citedChip": "@{{title}} v{{n}}",
@@ -5907,7 +5975,8 @@
     "revertFailedCode": "回退失败（{{code}}）",
     "cardStep": "第 {{n}} 步",
     "changeCount": "+{{added}} / −{{removed}} 词",
-    "truncated": "文本过长，无法整篇比对——这里只显示改动的前一部分。",
+    "truncated": "文本过长，无法整篇比对——改动的中段被略去了，略去的位置有标记。",
+    "omitted": "…… 此处省略 {{n}} 行 ……",
     "noSnapshot": "这个版本没有留下快照",
     "noLedger": "账本里没有记录这个版本的内容",
     "notFound": "这个版本指向的对象已不存在",
@@ -5922,6 +5991,12 @@
     "kindShot": "分镜",
     "kindScene": "场次",
     "kindChapter": "章节",
-    "kindOther": "产出"
+    "kindOther": "产出",
+    "citedTimes": "被引 ×{{n}}",
+    "mentionSearchError": "无法搜索该项目的产出",
+    "mentionSearchErrorCode": "无法搜索该项目的产出（{{code}}）",
+    "citedInTitle": "被引用于",
+    "citedInNoIssue": "一件没有编号的议题",
+    "citedInHidden": "另有 {{n}} 条在你看不到的议题上"
   }
 }

@@ -11,7 +11,7 @@ guarantees (each a bug if broken):
 3. Stale read → proposal — ``read_version`` behind the scene's current version
    returns ``proposal: true`` with ``base_version`` = the CURRENT version.
 4. Flag-dark — ``FEATURE_COPILOT_OPS`` off → plain 404 (existence hidden).
-5. DB-governed provider config — ``resolve_script_provider_config(user_id)`` is
+5. DB-governed provider config — ``resolve_script_ai_config(user_id)`` is
    awaited and its result threaded into ``ScriptAIService`` (a bare service()
    would fall back to the stale ENV key → 401 on prod).
 
@@ -31,6 +31,7 @@ import pytest
 
 from app.core.deps import AuthContext
 from app.schemas.script import CopilotOpsRequest
+from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -39,12 +40,15 @@ scenes_router = importlib.import_module("app.api.script_scenes_router")
 _USER = "11111111-1111-1111-1111-111111111111"
 _SCENE = "9000000000000000042"
 
-# Sentinel resolver return — (provider_key, provider_config, model, agent_slug).
-_RESOLVED = (
-    "doubao",
-    {"api_key": "k", "base_url": "u", "model": "m"},
-    "m",
-    "script_ai",
+# Sentinel resolver return — the TYPED ``ResolvedAIConfig`` the script path now
+# uses (``resolve_script_ai_config``). The old tuple shim dropped ``origin``,
+# which is what made every BYOK script run bill at platform rates.
+_RESOLVED = ResolvedAIConfig(
+    provider_key="doubao",
+    provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+    model="m",
+    agent_slug="script_ai",
+    origin="byok",
 )
 
 
@@ -77,8 +81,7 @@ def _patch_service(ops_return):
     svc_cls = MagicMock(return_value=instance)
     return (
         patch(
-            "app.services.ai.providers.ai_provider_helpers."
-            "resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             resolver,
         ),
         patch(
@@ -144,6 +147,7 @@ async def test_fresh_returns_ops_with_placeholders_replaced(monkeypatch):
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
     instance.instruction_to_element_ops.assert_awaited_once()
 

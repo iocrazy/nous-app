@@ -75,7 +75,7 @@ from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
-from app.services.ai.scope.scope_binding import resolve_dispatch_scope
+from app.services.ai.scope.scope_binding import resolve_dispatch_scope, team_of_run
 
 logger = logging.getLogger(__name__)
 
@@ -283,16 +283,35 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         # workforce dispatch) leaves both None, i.e. no screenwriting reach.
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
 
+        # 3c A3：团队跟着派发者走，理由同 subagent_task_service。顶层 workforce
+        # 派发没有父 run，继承不到就保持 None —— 回落到 get_team_id_for_user
+        # 语义上不等价（一个用户可能属于多个团队），记到别人头上比不记更糟。
+        child_team_id = await team_of_run(parent_run_id)
+
         async with RunRecorder(
             agent_id=composed.agent_id,
             user_id=user_id,
             trigger="workforce",
             session_id=None,
-            team_id=None,
+            team_id=child_team_id,
+            # 3c 终审 I1：这一行缺席时，委派出去的活与钱在议题维度整个消失。
+            # `issue_id` 从「Runs 树上的一个链接」变成了四个读面的连接键 ——
+            # 驾驶舱效率两格、`¢/output` 的分母、`/usage/issues/{id}` 的 token
+            # 三列、`search_docs` 的深链，全按它连。子孙有议题（上面交给
+            # build_agent_runner_stack 的那个），自己没有，于是这次委派的产出
+            # 不进分母、而它的钱通过 root 的树总额进了分子，单价系统性偏高。
+            # ⚠️ 在 INSERT 时写是唯一合法的时机：`_finish` 那段注释禁止事后
+            # PATCH 的是 project_id / team_id / episode_id 三列，issue_id 不在
+            # 其中（phase 2b-2 §4.2 明确它在 INSERT 时写）。
+            issue_id=payload_issue_id(payload),
             **dispatch_scope.as_recorder_kwargs(),
             model=model or None,
             provider=provider,
             input_summary=user_query,
+            credential_origin=stack.credential_origin,
+            # root 一次扣的判据是「这个字段是不是 None」。metadata 里那份是给人
+            # 看的 jsonb；扣费不该靠一个随时会改结构的 dict 取键。
+            parent_run_id=str(parent_run_id) if parent_run_id else None,
             metadata={
                 "task_id": str(task_id),
                 "parent_run_id": str(parent_run_id) if parent_run_id else None,
@@ -477,6 +496,9 @@ async def _run_subagent_task(
         "status": envelope.get("status"),
         "summary": envelope.get("summary") or "",
         "cost_cents": envelope.get("cost_cents") or 0,
+        # 同海拔的 BYOK 分量（整棵子树）。父行拿 by_child - by_child_byok
+        # 减出平台额，所以这一项漏传等于把 BYOK 的钱按平台价收。
+        "byok_cents": envelope.get("byok_cents") or 0,
         "tokens_used": envelope.get("tokens_used") or 0,
     }
 
@@ -574,6 +596,7 @@ async def _run_subagent_task(
                         content["summary"] or envelope.get("error") or ""
                     ),
                     "cost_cents": content["cost_cents"],
+                    "byok_cents": content["byok_cents"],
                     "tokens_used": content["tokens_used"],
                     "duration_ms": int((time.monotonic() - started) * 1000),
                 },

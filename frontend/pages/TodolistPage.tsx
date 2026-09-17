@@ -65,6 +65,7 @@ const ScopePill: React.FC<{
   </button>
 );
 import { getSupabaseClient } from '../supabaseClient';
+import { issueDeepLinkOrLegacy } from '../utils/issueLinks';
 // useAuth gives currentUserId via context; UserProfile shape doesn't carry id.
 
 export function TodolistPage() {
@@ -78,6 +79,18 @@ export function TodolistPage() {
   const [issues, setIssues] = useState<UiIssue[]>([]);
   const [issuesLoading, setIssuesLoading] = useState(true);
   const [issuesError, setIssuesError] = useState<string | null>(null);
+  /**
+   * Server-side search (3c §2.3). `query` is the debounced box contents;
+   * `issuesTotal` is how many issues match it server-side, which is what the
+   * "N of M" count reports — the page itself only ever holds `limit` rows.
+   * The query lives in a ref too so `refreshIssues` can read it without taking
+   * it as a dependency: every caller of that callback (refresh button, post-
+   * create re-read) must keep the active search, and putting it in the deps
+   * would re-run the mount effect and re-fetch agents on every keystroke.
+   */
+  const [query, setQuery] = useState('');
+  const [issuesTotal, setIssuesTotal] = useState<number | null>(null);
+  const queryRef = useRef('');
   // Sub-issue done/total per parent, from the full loaded list — shared by the
   // list rows (recomputed inside IssueListView) and the open detail header.
   const subtaskCounts = useMemo(() => computeSubtaskCounts(issues), [issues]);
@@ -170,20 +183,42 @@ export function TodolistPage() {
     }
   }, [isPersonalWorkspace, effectiveTeamId, addToast]);
 
+  /**
+   * Bumped by every list request, same guard as `selectedReqRef` below. Typing
+   * makes these overlap by design (one per debounced word), and the network is
+   * free to deliver them out of order — without the check, the slower earlier
+   * word lands last and the list shows rows and a total that belong to a query
+   * the user already replaced. Nothing errors; the two just disagree.
+   */
+  const issuesReqRef = useRef(0);
   const refreshIssues = useCallback(async (
     agentMap: Record<string, AgentRef>,
     projectMap: ProjectNameMap,
   ) => {
+    const seq = ++issuesReqRef.current;
     setIssuesLoading(true);
     setIssuesError(null);
     try {
-      const filters = teamIdNum ? { team_id: teamIdNum, limit: 200 } : { limit: 200 };
+      const q = queryRef.current.trim();
+      const filters = {
+        ...(teamIdNum ? { team_id: teamIdNum } : {}),
+        limit: 200,
+        ...(q ? { q } : {}),
+      };
       const resp = await listIssues(filters);
+      if (seq !== issuesReqRef.current) return;
       setIssues(resp.items.map((r) => toUiIssue(r, agentMap, projectMap)));
+      setIssuesTotal(resp.total);
     } catch (err) {
+      if (seq !== issuesReqRef.current) return;
       setIssuesError(err instanceof Error ? err.message : 'Failed to load issues');
+      // Not a number we still believe: keeping the previous total would put a
+      // stale M next to an N that failed to load.
+      setIssuesTotal(null);
     } finally {
-      setIssuesLoading(false);
+      // A superseded request must not clear the flag — a newer one is still
+      // in flight and the list is genuinely still loading.
+      if (seq === issuesReqRef.current) setIssuesLoading(false);
     }
   }, [teamIdNum]);
 
@@ -226,6 +261,30 @@ export function TodolistPage() {
   useEffect(() => {
     mapsRef.current = { agentsById, projectsById };
   }, [agentsById, projectsById]);
+
+  // Re-fetch when the debounced query changes (3c §2.3). `fetchedQueryRef`
+  // starts at '' — the same value `query` has on mount and across a team
+  // switch — so those two cases stay with the effect above and never fire a
+  // second, identical request. Clearing the box back to '' IS a change and
+  // does re-fetch, which is how the full list comes back.
+  const fetchedQueryRef = useRef('');
+  useEffect(() => {
+    queryRef.current = query;
+    if (fetchedQueryRef.current === query) return;
+    fetchedQueryRef.current = query;
+    const maps = mapsRef.current;
+    void refreshIssues(maps.agentsById, maps.projectsById);
+  }, [query, refreshIssues]);
+
+  // Same reason as `mapsRef`, one step stronger: `t` is a fresh function on
+  // every render under i18next, so listing it on `loadSelectedIssue` would
+  // give that callback a new identity each render and re-run the fetch effect
+  // that depends on it — a reload loop. The copy used is the one at throw
+  // time, which is what we want anyway.
+  const notifyRef = useRef({ addToast, t });
+  useEffect(() => {
+    notifyRef.current = { addToast, t };
+  }, [addToast, t]);
 
   // Bumped by every request and by the effect's teardown, so a response only
   // lands if nothing newer has been asked for since — the single fetch path is
@@ -280,7 +339,18 @@ export function TodolistPage() {
       if (inPlace) {
         // Non-fatal on purpose: the row is already on screen, just a beat
         // stale. Same posture as the live-row refetch below.
+        //
+        // But it is SAID (B8). The trigger for an in-place re-read is a thing
+        // the user just did — Dispatch, above all — so a silent failure shows
+        // them an unchanged row with no way to tell "it did not take" from
+        // "it took and I could not refresh". A toast, not an error page: the
+        // half-typed comment stays where it is.
         console.error('[TodolistPage] selected issue refetch failed', err);
+        const { addToast: toast, t: tr } = notifyRef.current;
+        toast(
+          tr('issues.refreshFailed', 'Could not refresh this issue — what you see may be out of date'),
+          'error',
+        );
         return;
       }
       setSelectedError(err instanceof Error ? err.message : 'Failed to load issue');
@@ -359,6 +429,28 @@ export function TodolistPage() {
     }, LIVE_REFETCH_DEBOUNCE_MS));
   }, []);
 
+  /**
+   * The whole-page re-fetch the search path uses, on the SAME 800 ms window as
+   * `scheduleLiveRefetch`. The subscription carries every issue change in the
+   * team while a search narrows the page to a handful of rows, so nearly every
+   * event lands in the "not on this page → re-ask the server" branch. Undebounced
+   * that is one 200-row trgm query per event, each flashing the loading state;
+   * debounced, one bulk edit costs one query.
+   */
+  const listRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleListRefetch = useCallback(() => {
+    if (listRefetchTimer.current) clearTimeout(listRefetchTimer.current);
+    listRefetchTimer.current = setTimeout(() => {
+      listRefetchTimer.current = null;
+      const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
+      void refreshIssues(agentMap, projectMap);
+    }, LIVE_REFETCH_DEBOUNCE_MS);
+  }, [refreshIssues]);
+
+  useEffect(() => () => {
+    if (listRefetchTimer.current) clearTimeout(listRefetchTimer.current);
+  }, []);
+
   // Realtime: keep the issues list in sync without a manual refresh.
   // `issues` is in the supabase_realtime publication — subscribe so status
   // changes (agent updates, other users) reflect live in the list instead
@@ -391,6 +483,24 @@ export function TodolistPage() {
           if (shouldRefetchOnRealtime(issuesRef.current.find((i) => i.id === raw.id), raw)) {
             scheduleLiveRefetch(raw.id);
           }
+          // A row we don't hold yet, while a search is on: prepending it would
+          // put an unmatched issue into a result set the SERVER produced —
+          // there is no second local filter left to catch it (3c §2.3), and
+          // nothing anywhere would report the disagreement. Re-ask the server
+          // instead (debounced); if the new row matches, it comes back in the
+          // results.
+          //
+          // NOTE the asymmetry: this only covers rows arriving from OUTSIDE the
+          // page. A row already on the page that gets edited into something the
+          // query no longer matches stays put until the next fetch — the client
+          // cannot tell without re-running the server's predicate, and re-asking
+          // on every in-page UPDATE would mean a query per keystroke of someone
+          // else's editing. Dropping it on a guess would be worse: the phrase
+          // may still match a column the page does not carry.
+          if (queryRef.current.trim() && !issuesRef.current.some((i) => i.id === raw.id)) {
+            scheduleListRefetch();
+            return;
+          }
           setIssues((prev) => {
             const idx = prev.findIndex((i) => i.id === raw.id);
             // INSERT: nothing to merge onto.
@@ -408,15 +518,24 @@ export function TodolistPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch]);
+  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch, scheduleListRefetch]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {
       const created = await createIssue(payload);
-      const ui = toUiIssue(created, agentsById, projectsById);
-      setIssues((prev) => [ui, ...prev]);
+      // Same rule as the Realtime INSERT above: under an active search the
+      // server owns which rows belong in the list, so re-ask instead of
+      // prepending a row it never matched.
+      if (queryRef.current.trim()) {
+        void refreshIssues(agentsById, projectsById);
+      } else {
+        setIssues((prev) => [toUiIssue(created, agentsById, projectsById), ...prev]);
+      }
       setNewIssueOpen(false);
-      navigate(`/team/${teamId}/todolist/${created.identifier}`);
+      // The one deep-link builder (B7); `…OrLegacy` because this navigate has
+      // to go somewhere. The page IS `/team/:teamId/todolist`, so the
+      // fallback is unreachable — see the helper.
+      navigate(issueDeepLinkOrLegacy(teamId, created.identifier));
       addToast(`Created ${created.identifier}`, 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Create failed', 'error');
@@ -468,6 +587,9 @@ export function TodolistPage() {
             teamName={teamName ?? undefined}
             onCreateProject={handleCreateProject}
             selectedIssueId={selectedIssue.id}
+            onSearchChange={setQuery}
+            serverQuery={query}
+            totalCount={issuesTotal}
           />
         </div>
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -592,6 +714,9 @@ export function TodolistPage() {
         scope={scope}
         teamName={teamName ?? undefined}
         onCreateProject={handleCreateProject}
+        onSearchChange={setQuery}
+        serverQuery={query}
+        totalCount={issuesTotal}
       />
       {newIssueOpen && (
         <NewIssueDialog

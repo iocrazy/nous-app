@@ -113,7 +113,7 @@ async def test_budget_guard_NOT_registered_when_budget_none():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_post_hooks_include_cost_auditor_and_memory_harvester():
+async def test_post_hooks_include_memory_harvester_and_no_cost_auditor():
     settings = MagicMock()
     stack = await build_agent_runner_stack(
         agent=_agent(),
@@ -125,8 +125,9 @@ async def test_post_hooks_include_cost_auditor_and_memory_harvester():
     )
 
     post_names = [e.name for e in stack.runner.hooks.get_post_hooks()]
-    assert "cost_auditor" in post_names
     assert "memory_harvester" in post_names
+    # 3c §3.2：摘除后不许悄悄回来——它是 agent_run_events 的唯一写方。
+    assert "cost_auditor" not in post_names
 
 
 @pytest.mark.unit

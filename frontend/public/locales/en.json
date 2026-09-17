@@ -952,7 +952,8 @@
     "empty": "No content yet",
     "searchPlaceholder": "Search title, tags, notes...",
     "searchResultsCount": "Found {{count}} matching items",
-    "searchResultsCountSingular": "Found 1 matching item"
+    "searchResultsCountSingular": "Found 1 matching item",
+    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters."
   },
   "search": {
     "aiPlaceholder": "AI search... ↵",
@@ -968,7 +969,20 @@
       "tags": "Tags",
       "notes": "Notes",
       "name": "Name"
-    }
+    },
+    "palettePlaceholder": "Search issues, runs and outputs",
+    "paletteHint": "Type at least 2 characters to search issues, runs and outputs",
+    "paletteSearching": "Searching…",
+    "paletteEmpty": "Nothing matches “{{q}}”",
+    "paletteError": "The search could not run ({{code}})",
+    "paletteErrorPlain": "The search could not run",
+    "paletteNoPage": "no page",
+    "paletteFooter": "↑↓ navigate · ↵ open · esc close",
+    "groupIssues": "Issues",
+    "groupRuns": "Runs",
+    "groupOutputs": "Outputs",
+    "groupOf": "{{shown}} of {{total}}",
+    "paletteResults": "Search results"
   },
   "dashboard": {
     "title": "Analytics",
@@ -1162,6 +1176,8 @@
     "downloadResult": "Download",
     "tabActive": "Active",
     "tabHistory": "History",
+    "retryBadge": "retry {{count}}",
+    "retryCount": "Retried {{count}} time(s) — same task, new attempt",
     "waitingInput": "Waiting for your input",
     "running": "Running",
     "queued": "Queued",
@@ -2515,6 +2531,9 @@
       "presentation": "Presentation",
       "delivery": "Delivery"
     }
+  },
+  "files": {
+    "issueLinkNoTeam": "No team context — open the issue from its board"
   },
   "projects": {
     "openByIdFailed": "Could not open this project — it may have been deleted or you no longer have access",
@@ -4111,6 +4130,14 @@
       "video": "a video-generation model",
       "speech": "a speech model"
     },
+    "nonChatKindShort": {
+      "embedding": "embedding",
+      "rerank": "rerank",
+      "image": "image",
+      "video": "video",
+      "speech": "speech"
+    },
+    "nonChatKindTagHint": "\"{{model}}\" looks like {{kind}}. It stays enabled and usable for that purpose — only this provider’s chat and text tasks cannot run on it.",
     "providerDesc": {
       "openai": "Cloud-hosted GPT & Whisper models",
       "deepseek": "Cost-effective cloud AI",
@@ -4309,6 +4336,7 @@
       "modelHealthFailedReasonShort": "health check failed: {{reason}}",
       "modelHealthPassed": "Health check passed",
       "modelHealthCheckedAgo": "checked {{ago}}",
+      "nonChatModelShort": "not a chat model",
       "usage": {
         "title": "Used By",
         "empty": "No module uses this agent yet — invoke it from chat or bind it to a workflow.",
@@ -4795,7 +4823,27 @@
     "emptyRange": "No usage in this range.",
     "runsTitleRange": "Recent calls (last {{days}} days)",
     "rangeMonth": "Month",
-    "runsTitleMonth": "Recent calls ({{month}})"
+    "runsTitleMonth": "Recent calls ({{month}})",
+    "statCostPerOutput": "Cost / output",
+    "statToolErrors": "Tool error rate",
+    "turnEndTitle": "How turns ended",
+    "turnEndEmpty": "No finished runs yet",
+    "efficiencyLoading": "Loading efficiency...",
+    "efficiencyUnavailable": "Efficiency stats are unavailable right now. Usage totals above are unaffected.",
+    "efficiencyRangeTooLong": "That range is too long for efficiency stats. Pick a window of 366 days or less.",
+    "efficiencyInvalidRange": "That range ends before it starts.",
+    "efficiencyFailed": "Efficiency stats could not be loaded.",
+    "turnEnd": {
+      "completed": "Completed",
+      "awaitingInput": "Awaiting input",
+      "error": "Error",
+      "dead": "Process died",
+      "heartbeatLost": "Heartbeat lost",
+      "stranded": "Stranded",
+      "interrupted": "Interrupted",
+      "cancelled": "Cancelled",
+      "other": "Other"
+    }
   },
   "clockDrift": {
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
@@ -5045,7 +5093,8 @@
     "insertCode": "Insert code block",
     "attachFile": "Attach files",
     "insertLink": "Insert link",
-    "backToThisMonth": "Back to this month"
+    "backToThisMonth": "Back to this month",
+    "deleteConfirmMessage": "This note will be permanently deleted."
   },
   "editor": {
     "brand": "Nous Projects",
@@ -5568,9 +5617,15 @@
   "issueDetail": {
     "outputs": "Outputs",
     "outputsRevised": "{{n}} revised",
+    "costPerOutput": "Cost / output",
+    "costPerOutputValue": "{{c}} / output",
+    "costPerOutputHint": "Across all runs of this issue",
     "tools": "Tools",
     "toolsTimedOut_one": "{{count}} timed out",
     "toolsTimedOut_other": "{{count}} timed out",
+    "toolErrors": "Tool errors",
+    "toolErrorCount": "{{n}} errors",
+    "toolCallCount": "{{n}} calls",
     "openConversation": "Open conversation",
     "progress": "Progress",
     "links": "Links",
@@ -5629,6 +5684,11 @@
     "wakesAt": "Wakes at {{at}}"
   },
   "issues": {
+    "refreshFailed": "Could not refresh this issue — what you see may be out of date",
+    "count_one": "{{count}} issue",
+    "count_other": "{{count}} issues",
+    "countOfTotal_one": "{{n}} of {{count}} issue",
+    "countOfTotal_other": "{{n}} of {{count}} issues",
     "pageTitle": "Issues",
     "needsReplyChip": "Needs your reply",
     "waitingOnYou": "Waiting on you",
@@ -5730,6 +5790,7 @@
     "elapsed": "elapsed {{s}}",
     "you": "You",
     "step": "Step {{n}}",
+    "running": "Running {{tool}}…",
     "live": "In progress",
     "tools": "{{count}} tools",
     "retries": "retry ×{{count}}",
@@ -5748,6 +5809,12 @@
     "denied": "Blocked: {{tool}}",
     "inboxSubagent": "Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}",
     "inboxWakeup": "Wake-up · set by {{who}} · read before step {{n}}"
+  },
+  "cost": {
+    "tailTokens": "{{p}} prompt · {{c}} completion tokens",
+    "charged": "Charged ◇ {{n}} (incl. sub-agents)",
+    "notCharged": "Not charged ({{why}})",
+    "notChargedPlain": "Not charged"
   },
   "fork": {
     "title": "Fork from {{step}}",
@@ -5869,6 +5936,7 @@
     "mentionCount_other": "{{count}} outputs",
     "citationRemove": "Remove This Reference",
     "citationLimit": "A comment can reference at most {{n}} outputs",
+    "citationUnusable": "That output is missing its version — it cannot be referenced",
     "cited_one": "References {{count}} output · pinned to version",
     "cited_other": "References {{count}} outputs · pinned to version",
     "citedChip": "@{{title}} v{{n}}",
@@ -5907,7 +5975,8 @@
     "revertFailedCode": "Revert failed ({{code}})",
     "cardStep": "step {{n}}",
     "changeCount": "+{{added}} / −{{removed}} words",
-    "truncated": "This text is too long to compare in full — only the first part of the change is shown.",
+    "truncated": "This text is too long to compare in full — the middle of the change is left out, marked where it was cut.",
+    "omitted": "… {{n}} lines omitted here …",
     "noSnapshot": "No snapshot was kept for this version",
     "noLedger": "No ledger entry records this version’s content",
     "notFound": "The object this version points at is gone",
@@ -5922,6 +5991,12 @@
     "kindShot": "Shot",
     "kindScene": "Scene",
     "kindChapter": "Chapter",
-    "kindOther": "Output"
+    "kindOther": "Output",
+    "citedTimes": "Cited ×{{n}}",
+    "mentionSearchError": "Could not search this project’s outputs",
+    "mentionSearchErrorCode": "Could not search this project’s outputs ({{code}})",
+    "citedInTitle": "Referenced in",
+    "citedInNoIssue": "An issue with no key",
+    "citedInHidden": "{{n}} hidden — on issues you cannot see"
   }
 }

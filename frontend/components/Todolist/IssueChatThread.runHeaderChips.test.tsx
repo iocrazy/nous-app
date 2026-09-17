@@ -8,6 +8,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RunTrajectory } from './IssueChatThread';
 import { ReplayContext } from './replayContext';
+import { RunCostContext } from './runCostContext';
 
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('react-i18next', () => ({
@@ -84,5 +85,62 @@ describe('RunTrajectory header chips', () => {
     const chip = screen.getByTestId('run-fork-chip') as HTMLButtonElement;
     expect(chip.disabled).toBe(true);
     fireEvent.click(chip);
+  });
+});
+
+/**
+ * 3c §4.2：run 头部的「共消耗」一行。账来自 context（rollup 的 `runs[]` + done 帧），
+ * 不经 `IssueChatThread` → `AgentRunRow` 透传。
+ */
+describe('RunTrajectory 的消耗行', () => {
+  const costs = {
+    r2: {
+      cost_cents: 0.82,
+      charged_points: 0.82,
+      model: 'doubao-seed-2-0-lite',
+      status: 'completed',
+      prompt_tokens: 1200,
+      completion_tokens: 340,
+    },
+  };
+  const mountWithCost = (isRunning = false) => render(
+    <MemoryRouter>
+      <RunCostContext.Provider value={costs}>
+        <ReplayContext.Provider value={replayOf()}>
+          <RunTrajectory runId="r2" isRunning={isRunning} />
+        </ReplayContext.Provider>
+      </RunCostContext.Provider>
+    </MemoryRouter>,
+  );
+  const tail = () => screen.getByTestId('run-cost-tail').textContent;
+
+  it('run 头部带上「共消耗」', () => {
+    EVENTS = [USER];
+    mountWithCost();
+    expect(tail()).toBe('◇ 0.82 · doubao-seed-2-0-lite');
+  });
+
+  it('运行中的 run 加 …', () => {
+    EVENTS = [USER];
+    mountWithCost(true);
+    expect(tail()).toBe('◇ 0.82… · doubao-seed-2-0-lite');
+  });
+
+  it('rollup 还没带这个 run 的账时不画消耗行——空位好过一个编出来的 0', () => {
+    EVENTS = [USER];
+    render(
+      <MemoryRouter>
+        <ReplayContext.Provider value={replayOf()}>
+          <RunTrajectory runId="r9" isRunning={false} />
+        </ReplayContext.Provider>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('run-cost-tail')).toBeNull();
+  });
+
+  it('只有账、没有 fork / 超时 / 唤醒时 chips 条也要画出来——否则消耗行没有落脚处', () => {
+    EVENTS = [USER];
+    mountWithCost();
+    expect(screen.getByTestId('run-header-chips')).toBeTruthy();
   });
 });

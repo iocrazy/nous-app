@@ -39,7 +39,7 @@ from app.schemas.topics import (
     SourceMutationResponse,
 )
 from app.services.ai.providers.ai_provider_helpers import (
-    resolve_script_provider_config,
+    resolve_script_ai_config,
 )
 from app.services.storyboard.script.script_ai_service import ScriptAIService
 from app.services.topics.embedding_service import TopicEmbeddingService
@@ -413,6 +413,7 @@ async def _generate_script_for(
     agent_slug: Optional[str] = None,
     provider_key: Optional[str] = None,
     provider_config: Optional[dict] = None,
+    credential_origin: Optional[str] = None,
 ) -> list:
     """Run the resolved script-generation agent (governed via task_assignment —
     the user picks the agent/model in Settings → AI → Storyboard → Script;
@@ -423,6 +424,7 @@ async def _generate_script_for(
         agent_slug=agent_slug,
         provider_key=provider_key,
         provider_config=provider_config,
+        credential_origin=credential_origin,
     )
     premise = f"Topic: {title}\n\nContext: {summary or ''}"
     return await svc.generate_outline(premise)
@@ -438,15 +440,14 @@ async def generate_script(hotspot_id: str, auth: AuthDep):
     # Resolve the user-assigned script agent (task_assignment.script_generation,
     # default script_ai) + their BYO provider config — governed like every other
     # AI task, not hardcoded.
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(auth.user_id)
-    )
+    cfg = await resolve_script_ai_config(auth.user_id)
     script = await _generate_script_for(
         row.get("title") or "",
         row.get("ai_summary") or row.get("summary") or "",
         auth.user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     return {"success": True, "script": script}

@@ -13,6 +13,12 @@ interface Tag {
   group_name: string | null;
   media_count: number;
   type: string;
+  // GET /api/v1/tags returns this (TagResponse.slug, read-only). It was missing
+  // here while `isPipelineTag` below already keyed on it — so the call was a
+  // TS2559 that nothing caught: the frontend CI job runs vite build + vitest,
+  // and esbuild does not typecheck. Runtime was fine (the field really is on
+  // the wire); the type was simply lying about the shape.
+  slug?: string | null;
 }
 
 interface TagGroup {

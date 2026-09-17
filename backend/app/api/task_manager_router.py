@@ -31,8 +31,27 @@ router = APIRouter(prefix="/task-manager")
 _require_media_parser = require_module("media-parser")
 
 
-async def _peek_task_type(task_id: str, user_id: str) -> Optional[str]:
-    """Read a task's type without mutating it (module gate runs before retry)."""
+# Task types ``retry_task`` below can genuinely re-dispatch.
+#
+# This set is the contract, not documentation: a type that is NOT here is
+# refused with a typed 409 and its row is left alone. Before that gate
+# existed, an unlisted type fell through every ``elif``, and the endpoint
+# still answered ``{"success": true}`` after re-keying the row to a fresh
+# workflow id and flipping it to QUEUED — a workflow nobody ever started.
+# The task then sat queued until a sweeper marked it lost an hour later.
+# That is the exact "Retry doesn't actually retry" failure ``retry_task``'s
+# docstring describes, reintroduced through the back door of a missing
+# branch (2026-09-15: ``parse`` was missing, which is how it was found).
+#
+# Adding a branch below means adding its type here, and vice versa —
+# ``test_every_retryable_type_has_a_dispatch_branch`` fails otherwise.
+RETRYABLE_TASK_TYPES: frozenset[str] = frozenset(
+    {"parse", "download", "transcode", "ai_summary", "extract_audio"}
+)
+
+
+async def _peek_task_row(task_id: str, user_id: str) -> Optional[dict]:
+    """Read the columns retry needs before deciding whether to touch the row."""
     from sqlalchemy import select
 
     from app.db.session import read_scope
@@ -42,7 +61,11 @@ async def _peek_task_type(task_id: str, user_id: str) -> Optional[str]:
         row = (
             (
                 await session.execute(
-                    select(TaskTracking.task_type)
+                    select(
+                        TaskTracking.task_type,
+                        TaskTracking.dedup_key,
+                        TaskTracking.status,
+                    )
                     .where(TaskTracking.dbos_workflow_id == task_id)
                     .where(TaskTracking.user_id == str(user_id))
                     .limit(1)
@@ -51,7 +74,7 @@ async def _peek_task_type(task_id: str, user_id: str) -> Optional[str]:
             .mappings()
             .first()
         )
-    return row.get("task_type") if row else None
+    return dict(row) if row else None
 
 
 @router.get("/tasks")
@@ -323,14 +346,35 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     fires again, and the sweeper re-marks the row lost an hour later."""
     import uuid as _uuid
 
-    # A download retry is a NEW download dispatch, so it obeys the
-    # media-parser switch like /media/fetch and /media/retry/{platform_id}.
-    # Checked BEFORE retry_task(): that call already re-keys the row to a
-    # fresh workflow id and flips it to QUEUED, so raising afterwards would
-    # strand the task pointing at a workflow nothing ever starts — exactly
-    # the "Retry doesn't actually retry" failure this endpoint was built to
-    # fix. Other task types are untouched.
-    if await _peek_task_type(task_id, auth.user_id) == "download":
+    # Everything that could refuse this retry is checked BEFORE retry_task():
+    # that call re-keys the row to a fresh workflow id and flips it to QUEUED,
+    # so raising afterwards would strand the task pointing at a workflow
+    # nothing ever starts — exactly the "Retry doesn't actually retry" failure
+    # this endpoint was built to fix.
+    peek = await _peek_task_row(task_id, auth.user_id)
+    if peek is None:
+        raise HTTPException(404, "Task not found or not in retryable state")
+
+    peek_type = peek.get("task_type") or ""
+
+    # A type with no dispatch branch below cannot be retried in place. Say so
+    # in a typed way and leave the row alone, so the caller can fall back to
+    # forking the workflow instead of being told "success" about a retry that
+    # never happened (CLAUDE.md: silent no-op is not an acceptable result for
+    # a user-triggered path).
+    if peek_type not in RETRYABLE_TASK_TYPES:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "retry_not_supported",
+                "message": f"Task type {peek_type!r} cannot be retried in place.",
+                "task_type": peek_type,
+            },
+        )
+
+    # A parse/download retry is a NEW media-parser dispatch, so it obeys the
+    # module switch like /media/fetch and /media/retry/{platform_id}.
+    if peek_type in ("parse", "download"):
         await _require_media_parser()
 
     new_wf_id = str(_uuid.uuid4())
@@ -345,7 +389,53 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     user_id = auth.user_id
 
     try:
-        if task_type == "transcode" and resource_id:
+        if task_type == "parse":
+            # There was NO parse branch until 2026-09-15 — the same third-layer
+            # hole `extract_audio` had below. A user retrying a failed douyin
+            # parse got a row reset to QUEUED and no workflow, four times over.
+            #
+            # The URL comes from `dedup_key` (`task:parse:<url>`), not `title`:
+            # title is truncated to 50 chars at dispatch
+            # (media_fetch_helpers: f"Parse {url[:50]}"), so re-parsing it
+            # would silently submit a cut-off URL. dedup_key carries it whole.
+            from app.services.infra.dbos_orchestrator import start_workflow_routed
+            from app.services.media.parsers.url_router import URLRouter
+            from app.workflows.parse import parse_workflow
+
+            dedup = peek.get("dedup_key") or ""
+            prefix = "task:parse:"
+            url = dedup[len(prefix) :] if dedup.startswith(prefix) else ""
+            if not url:
+                logger.warning(
+                    f"[TaskRetry] parse task {task_id} has no URL in dedup_key "
+                    f"({dedup!r}) — nothing to re-dispatch"
+                )
+                return {"success": True, "data": task}
+
+            meta = task.get("metadata") or {}
+            await start_workflow_routed(
+                "parse",
+                dbos_workflow_callable=parse_workflow,
+                dbos_workflow_kwargs={
+                    "url": url,
+                    "user_id": user_id,
+                    # Re-detect rather than trusting a stored value: the row
+                    # predates any platform column, and the douyin default is
+                    # the one that can never succeed for a bilibili URL.
+                    "platform": URLRouter.detect_platform(url)[0],
+                    "video_bool": bool(meta.get("video_bool", True)),
+                    "cover_bool": True,
+                    # Keep the retry inside the original pipeline group so the
+                    # flow card still shows one job, not two.
+                    "flow_id": task.get("flow_id"),
+                },
+                workflow_id=new_wf_id,
+            )
+            logger.info(
+                f"[TaskRetry] Re-dispatched parse for task={task_id}, url={url[:60]}"
+            )
+
+        elif task_type == "transcode" and resource_id:
             version_id = (task.get("metadata") or {}).get("version_id")
             if not version_id:
                 # Fallback: look up current version from resource

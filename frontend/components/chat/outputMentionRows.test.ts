@@ -36,6 +36,10 @@ const version = (v: number, over: Record<string, unknown> = {}) => ({
   model: 'qwen-max',
   cost_cents: null,
   created_at: '2026-09-10T00:00:00Z',
+  // 3c §2.2：两个字段由端点合成，一条没被引用过的版本的诚实答案是「零次」
+  // 而不是「不知道」——省掉它们就是在描述一个后端不会发的响应。
+  cited_count: 0,
+  cited_in: [],
   ...over,
 });
 

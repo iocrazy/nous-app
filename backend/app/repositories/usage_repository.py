@@ -64,6 +64,25 @@ _GROUP_KEY_FACTORY: dict[str, Callable[[], Any]] = {
 VALID_GROUP_BY = frozenset(_GROUP_KEY_FACTORY)
 
 
+def _counter_cols():
+    """五个计数列的 SUM。每个 SELECT 各调一次——Label 实例不可跨 SELECT 复用，理由
+    同本模块顶部的 ``_GROUP_KEY_FACTORY``。"""
+    from sqlalchemy import func
+
+    from app.models import AiUsageHourly
+
+    return [
+        func.coalesce(func.sum(getattr(AiUsageHourly, name)), 0).label(name)
+        for name in (
+            "run_count",
+            "failed_runs",
+            "tool_calls",
+            "tool_errors",
+            "deliverables",
+        )
+    ]
+
+
 def _coerce_bigint(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -117,6 +136,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
                             "event_count"
                         ),
+                        *_counter_cols(),
                     ).where(*where_clause)
                 )
             )
@@ -154,6 +174,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
                             "event_count"
                         ),
+                        *_counter_cols(),
                     )
                     .where(*where_clause)
                     .group_by(grp_label)
@@ -180,6 +201,7 @@ async def summarize(
                         func.coalesce(func.sum(AiUsageHourly.cost_cents), 0).label(
                             "cost_cents"
                         ),
+                        *_counter_cols(),
                     )
                     .where(*where_clause)
                     .group_by(day_label, daily_grp_label)
@@ -198,11 +220,30 @@ async def summarize(
 
 
 async def issue_totals(issue_id: Any) -> dict[str, Any]:
-    """Per-issue AI spend, summed from agent_runs by the issue_id index."""
+    """Per-issue AI spend, summed from agent_runs by the issue_id index.
+
+    两条口径，不能共用一条 WHERE（A2）：
+
+    - ``cost_cents`` / ``run_count`` —— **只算 root run**。子 run 的花费已经滚进
+      父行（``run_recorder._finish`` 把 own + children + media 加成树总额），再加
+      一遍就是双计。同一条谓词也用在预算门禁
+      ``agent_runs_repository.spent_cents_for_issue`` 和
+      ``issue_rollup.compute_rollup``（后者经 ``list_for_issue`` 取 root 行），
+      三处必须一致，否则同一个议题在 Usage 面与驾驶舱 Budget 格读出两个数。
+    - ``prompt_tokens`` / ``completion_tokens`` / ``total_tokens`` —— **该议题的
+      全部 run**。token 列不上滚：``add_tokens`` 只累加本 run 自己那几次调用，
+      子 run 是独立行。跟着钱一起按 root 过滤会把子 run 的 token 整个丢掉，而
+      前端 ``StatusBlock`` 把 token 与花费渲染在同一行，那就成了「树总额的钱配
+      根级的 token」。
+
+    所以 root 谓词写成聚合上的 ``FILTER (WHERE ...)``，不写进 WHERE。
+    """
     from sqlalchemy import func, select
 
     from app.db.session import read_scope
     from app.models import AgentRuns
+
+    root_only = AgentRuns.parent_run_id.is_(None)
 
     async with read_scope() as session:
         row = (
@@ -221,10 +262,10 @@ async def issue_totals(issue_id: Any) -> dict[str, Any]:
                             ),
                             0,
                         ).label("total_tokens"),
-                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                            "cost_cents"
-                        ),
-                        func.count().label("run_count"),
+                        func.coalesce(
+                            func.sum(AgentRuns.cost_cents).filter(root_only), 0
+                        ).label("cost_cents"),
+                        func.count().filter(root_only).label("run_count"),
                     ).where(AgentRuns.issue_id == _coerce_bigint(issue_id))
                 )
             )

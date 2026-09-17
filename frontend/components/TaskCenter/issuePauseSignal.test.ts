@@ -8,11 +8,11 @@ describe('issuePauseSignal', () => {
     const offA = subscribeIssuePauseChanged(a);
     const offB = subscribeIssuePauseChanged(b);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    notifyIssuePauseChanged(5);
-    expect(a).toHaveBeenCalledWith(5);
-    expect(b).toHaveBeenCalledWith(5);
+    notifyIssuePauseChanged('5');
+    expect(a).toHaveBeenCalledWith('5');
+    expect(b).toHaveBeenCalledWith('5');
     offA();
-    notifyIssuePauseChanged(6);
+    notifyIssuePauseChanged('6');
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(2);
     offB();

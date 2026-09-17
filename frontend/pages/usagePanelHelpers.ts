@@ -21,6 +21,72 @@ export function formatCentsAsUsd(cents: number): string {
   return `$${dollars.toFixed(2)}`;
 }
 
+/**
+ * 每件产出的花费（3c §3.3）。比率由**服务端**算一次：0 件产出时后端发的是
+ * `null`（不知道单价），不是 0.0 —— 渲成 `¢0.00` 等于宣布产出是免费的。所以这里
+ * 只负责把 null 说成「—」，绝不自己拿 cost/deliverables 再除一次。
+ */
+export function formatCostPerOutput(
+  total: { cost_per_deliverable_cents: number | null } | null | undefined,
+): string {
+  const cents = total?.cost_per_deliverable_cents;
+  return cents == null ? '—' : `¢${cents.toFixed(2)}`;
+}
+
+/**
+ * 工具调用的错误率（3c §3.3）。
+ *
+ * 分母为 0 时**不是** 0.0%：一次工具都没调过的窗口没有错误率，说成 0.0% 会被读成
+ * 「工具很稳」。反过来，调过 40 次、0 次出错是一条确定的好消息，必须是 0.0% 而不
+ * 是「—」。这两句话是同一个格子里的两种真相。
+ */
+export function formatToolErrorRate(
+  total: { tool_calls: number; tool_errors: number } | null | undefined,
+): string {
+  const calls = total?.tool_calls ?? 0;
+  if (calls <= 0) return '—';
+  return `${(((total?.tool_errors ?? 0) / calls) * 100).toFixed(1)}%`;
+}
+
+/**
+ * 用量页当前展示的窗口，ISO 两端（修复轮 1 #2）。
+ *
+ * 复刻 `/usage/daily` 的窗口语义，好让效率读面和日汇总问的是**同一段时间**：
+ * 给了 `month` 就是那个自然月 `[月初, 下月初)`（与后端 `_month_bounds` 同口径，
+ * 上界独占），否则是 `[now - days, now]`。
+ *
+ * 不带窗口去问效率端点会拿到后端默认的 30 天：用户把范围切到 90d 之后，页面上
+ * 四格说的是 90 天、两格说的是 30 天，而屏幕上没有任何东西提示这件事。
+ *
+ * 解析不了的 month 退回 days 预设——宁可问一个能答的窗口，也不要发一个
+ * `invalid_range` 出去。
+ *
+ * ⚠️ 与 `presetRange` **刻意**不同，两者不可合并：这一个服务 `/usage/daily` 与
+ * `/ai-library/usage/efficiency`（个人用量页），days 分支是**滚动时刻**
+ * `[now - days, now]`，复刻后端的 `now - timedelta(days)`；`presetRange` 服务
+ * `/usage/summary`（团队用量页），对齐到 UTC 日界。把它们「统一」成一个，另一张
+ * 页面上的数字会跟着改变，而没有任何测试会告诉你是哪一张。
+ */
+export function usageWindow(
+  opts: { days: number; month?: string },
+  now: Date = new Date(),
+): { from: string; to: string } {
+  const m = opts.month ? /^(\d{4})-(\d{2})$/.exec(opts.month) : null;
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    if (month >= 1 && month <= 12) {
+      return {
+        from: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
+        to: new Date(Date.UTC(year, month, 1)).toISOString(),
+      };
+    }
+  }
+  const to = now;
+  const from = new Date(to.getTime() - opts.days * 24 * 3600 * 1000);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
 /** Compact one-line cost summary for the issue detail strip. */
 export function formatIssueCostLine(totalTokens: number, costCents: number): string {
   const tokens = formatTokens(totalTokens);
@@ -34,6 +100,12 @@ export function formatIssueCostLine(totalTokens: number, costCents: number): str
 /**
  * Resolve a preset to a [from, to) ISO window (UTC). `to` is exclusive: the
  * start of tomorrow, so today's usage is included.
+ *
+ * 服务的是 `/usage/summary`（团队用量页），按 **UTC 日界**对齐——那个端点读的是
+ * 小时 rollup 表，窗口本来就是按天切的。
+ *
+ * ⚠️ 与 `usageWindow` **刻意**不同，两者不可合并：那一个服务个人用量页的两个
+ * 端点，days 分支是滚动时刻而非日界。合并会让其中一张页面的数字改变。
  */
 export function presetRange(
   preset: RangePreset,

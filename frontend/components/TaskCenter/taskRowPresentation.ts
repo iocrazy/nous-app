@@ -86,3 +86,27 @@ export function taskAwaitingInput(task: {
   if (!marker || typeof marker !== 'object' || Array.isArray(marker)) return null;
   return marker as AwaitingInputMarker;
 }
+
+/**
+ * How many times the user has retried THIS task, or null when never.
+ *
+ * Reads `metadata.retry_count`, which the backend bumps inside the same
+ * UPDATE that re-keys the row to the new workflow — so the count and the
+ * attempt it describes cannot drift apart.
+ *
+ * Why the row needs this at all: before 2026-09-15 the retry button forked a
+ * new workflow and the task center grew one detached `(recovered)` row per
+ * click. Retrying in place fixes the duplication, but it also means four
+ * attempts now look exactly like one — the badge is what carries the
+ * difference the extra rows used to (wrongly) convey.
+ *
+ * Returns null rather than 0 for a never-retried task: "attempt 1" is not
+ * information, and a badge on every row is a badge nobody reads.
+ */
+export function taskRetryCount(
+  task: Pick<UnifiedTask, 'metadata'>,
+): number | null {
+  const raw = (task.metadata as Record<string, unknown> | undefined)?.retry_count;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}

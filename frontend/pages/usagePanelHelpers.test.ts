@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatCentsAsUsd,
+  formatCostPerOutput,
   formatIssueCostLine,
   formatTokens,
+  formatToolErrorRate,
+  usageWindow,
   groupLabel,
   pivotDaily,
   presetRange,
 } from './usagePanelHelpers';
+import type { UsageDailyRow } from '../services/usageService';
 
 describe('formatTokens', () => {
   it('formats magnitudes compactly', () => {
@@ -53,13 +57,27 @@ describe('presetRange', () => {
   });
 });
 
+// `UsageDailyRow` 从 Task 10 起带上效率五列（后端恒发，缺省 0），这里补齐只是让
+// 夹具保持真实 wire 形状——pivotDaily 本身不读它们。
+const dailyRow = (over: Partial<UsageDailyRow> & { day: string }): UsageDailyRow => ({
+  key: null,
+  total_tokens: 0,
+  cost_cents: 0,
+  run_count: 0,
+  failed_runs: 0,
+  tool_calls: 0,
+  tool_errors: 0,
+  deliverables: 0,
+  ...over,
+});
+
 describe('pivotDaily', () => {
   it('pivots rows into per-day objects with a column per key, cost→dollars', () => {
     const { rows, keys } = pivotDaily(
       [
-        { day: '2026-07-17', key: 'qwen', total_tokens: 100, cost_cents: 150 },
-        { day: '2026-07-17', key: 'gpt', total_tokens: 50, cost_cents: 50 },
-        { day: '2026-07-18', key: 'qwen', total_tokens: 20, cost_cents: 25 },
+        dailyRow({ day: '2026-07-17', key: 'qwen', total_tokens: 100, cost_cents: 150 }),
+        dailyRow({ day: '2026-07-17', key: 'gpt', total_tokens: 50, cost_cents: 50 }),
+        dailyRow({ day: '2026-07-18', key: 'qwen', total_tokens: 20, cost_cents: 25 }),
       ],
       'cost_cents',
     );
@@ -70,7 +88,7 @@ describe('pivotDaily', () => {
   });
   it('collapses null keys into a stable column', () => {
     const { keys } = pivotDaily(
-      [{ day: '2026-07-18', key: null, total_tokens: 5, cost_cents: 0 }],
+      [dailyRow({ day: '2026-07-18', key: null, total_tokens: 5 })],
       'total_tokens',
     );
     expect(keys).toEqual(['__none__']);
@@ -90,5 +108,77 @@ describe('groupLabel', () => {
   it('passes model/module keys through', () => {
     expect(groupLabel('qwen-max', 'model')).toBe('qwen-max');
     expect(groupLabel(null, 'model')).toBe('None');
+  });
+});
+
+// ─── 3c §3.3: the two efficiency tiles on the team panel ───────────────────
+// 两个格子的全部难点都在分母是 0 的时候：一个是「不知道」，一个是确定的好消息。
+
+describe('formatCostPerOutput', () => {
+  it('prints the server-computed unit price', () => {
+    expect(formatCostPerOutput({ cost_per_deliverable_cents: 5.0625 })).toBe('¢5.06');
+  });
+
+  it('says it does not know when nothing was produced', () => {
+    // 后端 0 件产出发的是 null。渲成 ¢0.00 等于宣布「产出是免费的」。
+    expect(formatCostPerOutput({ cost_per_deliverable_cents: null })).toBe('—');
+    expect(formatCostPerOutput(null)).toBe('—');
+  });
+
+  it('keeps a genuine zero price as zero', () => {
+    expect(formatCostPerOutput({ cost_per_deliverable_cents: 0 })).toBe('¢0.00');
+  });
+});
+
+describe('formatToolErrorRate', () => {
+  it('prints the share of calls that erred', () => {
+    expect(formatToolErrorRate({ tool_calls: 40, tool_errors: 4 })).toBe('10.0%');
+  });
+
+  it('calls a clean window 0.0%, not unknown', () => {
+    // 调过 40 次、0 次出错是一条确定的好消息。
+    expect(formatToolErrorRate({ tool_calls: 40, tool_errors: 0 })).toBe('0.0%');
+  });
+
+  it('says it does not know when no tool was ever called', () => {
+    expect(formatToolErrorRate({ tool_calls: 0, tool_errors: 0 })).toBe('—');
+    expect(formatToolErrorRate(null)).toBe('—');
+  });
+});
+
+// ─── 修复轮 1 #2：效率请求要和 summary 问同一个窗口 ────────────────────────
+// `/usage/daily` 的窗口语义是这个函数要复刻的对象：给了 month 就是那个自然月
+// [月初, 下月初)，否则是 [now - days, now]。两边不同窗，两个数就不是一件事。
+
+describe('usageWindow', () => {
+  const now = new Date('2026-09-16T08:30:00.000Z');
+
+  it('turns a day preset into a closed ISO window ending now', () => {
+    const w = usageWindow({ days: 30 }, now);
+    expect(w.to).toBe('2026-09-16T08:30:00.000Z');
+    expect(w.from).toBe('2026-08-17T08:30:00.000Z');
+  });
+
+  it('honours a 90-day preset rather than clamping to 30', () => {
+    expect(usageWindow({ days: 90 }, now).from).toBe('2026-06-18T08:30:00.000Z');
+  });
+
+  it('turns a calendar month into [month start, next month start)', () => {
+    // 与 `_month_bounds` 同口径：上界是下月初，独占。
+    const w = usageWindow({ days: 30, month: '2026-07' }, now);
+    expect(w.from).toBe('2026-07-01T00:00:00.000Z');
+    expect(w.to).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('rolls December over into the next year', () => {
+    const w = usageWindow({ days: 30, month: '2026-12' }, now);
+    expect(w.to).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('ignores a month string it cannot parse and falls back to the preset', () => {
+    // 宁可问一个能答的窗口，也不要发一个 `invalid_range` 出去。
+    const w = usageWindow({ days: 7, month: 'not-a-month' }, now);
+    expect(w.from).toBe('2026-09-09T08:30:00.000Z');
+    expect(w.to).toBe('2026-09-16T08:30:00.000Z');
   });
 });

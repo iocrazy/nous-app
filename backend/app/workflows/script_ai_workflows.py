@@ -45,18 +45,17 @@ async def script_ai_expand_step(
 ) -> str:
     """Run the LLM chapter-expansion call. Returns sanitized HTML."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
+    cfg = await resolve_script_ai_config(user_id)
     ai_svc = ScriptAIService(
         user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     html = await ai_svc.expand_chapter(title=title, summary=summary, context=context)
     logger.info(f"[script_ai][expand][step] LLM returned {len(html)} chars")
@@ -138,18 +137,17 @@ async def script_ai_branches_step(
 ) -> list[dict[str, Any]]:
     """Run the LLM branching call. Returns a list of branch dicts."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
+    cfg = await resolve_script_ai_config(user_id)
     ai_svc = ScriptAIService(
         user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     branches = await ai_svc.create_branches(
         title=title,

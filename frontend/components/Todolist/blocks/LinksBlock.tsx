@@ -30,7 +30,7 @@ const LinksBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         </RailRow>
       )}
       <PipelineRunStrip
-        issueId={Number(ctx.issue.id)}
+        issueId={String(ctx.issue.id)}
         agentsById={(ctx.env.agentsById ?? {}) as Record<string, AgentRef>}
         refreshKey={ctx.env.refreshKey}
       />

@@ -362,6 +362,32 @@ describe('foldEvents — deliverables (harness 3a §5)', () => {
     expect(steps[1].outputs).toHaveLength(0);
   });
 
+  it('B2: reads coordinates off the payload when the columns are null, like step_start does', () => {
+    // 真实 wire 形状：`registry.register_deliverable` 把 turn/step 同时写进
+    // 载荷和 mig 453 的两个列；**列** 只在 pre-453 的行、以及走 `emit` 的
+    // 位置参数回退的旧 recorder 上是 null——载荷里那份仍在。`step_start`
+    // 早就读 `num(ev.turn) ?? num(p.turn)`，deliverable 必须同形，否则这类
+    // 行会掉到「当前开着的那一步」而不是产它的那一步。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1 }, 1),
+      at(3, 'step_start', { turn: 1, step: 2 }, 2),
+      {
+        seq: 4,
+        event_type: 'deliverable',
+        payload: { kind: 'generated_media', ref_id: '77', version: 1, turn: 1, step: 1 },
+        step: null,
+        turn: null,
+        created_at: '',
+      } as AgentRunEvent,
+    ]);
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].outputs).toHaveLength(1);
+    expect(steps[1].outputs).toHaveLength(0);
+  });
+
   it('ignores a deliverable with no ref_id, no kind, or no version', () => {
     const nodes = foldEvents([
       at(1, 'step_start', { turn: 1, step: 1 }, 1),
@@ -484,9 +510,13 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
   const ev = (seq: number, event_type: string, payload: Record<string, unknown>, step?: number): AgentRunEvent =>
     ({ seq, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
 
+  // ⚠️ **每条可解析的引用都带 `issue_key`** —— `output_ref_resolver._stamped`
+  // 填的是这一版产出在哪，不与任何「当前议题」比较，所以同议题那条照样有。
+  // 第一条是同议题的形状，第二条是跨议题的，两者在 wire 上只差值不差形状。
+  // 键真正缺席的只有一种情况：3c 之前写下的行（最后那条覆盖它）。
   const CITED = [
-    { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM' },
-    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1' },
+    { kind: 'script_shot', ref_id: '337650953731886', version: 2, title: 'MEDIUM', issue_key: 'MH-96' },
+    { kind: 'generated_media', ref_id: '77', version: 1, title: 'S3 · Shot #1', issue_key: 'MH-98' },
   ];
 
   it('hangs this turn’s citations on the step that consumed them', () => {
@@ -498,8 +528,22 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
     const step = nodes.find((n) => n.kind === 'step');
     if (!step || step.kind !== 'step') throw new Error('no step node');
     expect(step.citations).toEqual([
-      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM' },
-      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1' },
+      { key: 'script_shot:337650953731886:2', kind: 'script_shot', refId: '337650953731886', version: 2, title: 'MEDIUM', issueKey: 'MH-96' },
+      { key: 'generated_media:77:1', kind: 'generated_media', refId: '77', version: 1, title: 'S3 · Shot #1', issueKey: 'MH-98' },
+    ]);
+  });
+
+  it('3c 之前写下的行没有这个键，读成 null 而不是丢掉整条', () => {
+    // 「键缺席」和「值为空」在这条链上是同一个答案：那一版确实产出在某处，只是
+    // 当时没记。丢掉整条会让一条老评论看起来什么都没引用过。
+    const nodes = foldEvents([
+      ev(1, 'user', { content: 'revise', referenced_outputs: [{ kind: 'script_shot', ref_id: '9', version: 1 }] }),
+      ev(2, 'step_start', { turn: 1, step: 1 }, 1),
+    ]);
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error('no step node');
+    expect(step.citations).toEqual([
+      { key: 'script_shot:9:1', kind: 'script_shot', refId: '9', version: 1, title: null, issueKey: null },
     ]);
   });
 
@@ -547,5 +591,183 @@ describe('foldEvents — citations (harness 3a T8c 缺陷 4)', () => {
     const step = nodes.find((n) => n.kind === 'step');
     if (!step || step.kind !== 'step') throw new Error('no step node');
     expect(step.citations).toHaveLength(2);
+  });
+});
+
+describe('foldEvents — 迟到的 step_end 回到自己那一步 (C8)', () => {
+  const at = (n: number, event_type: string, payload: Record<string, unknown> = {}, step?: number): AgentRunEvent =>
+    ({ seq: n, event_type, payload, step: step ?? null, turn: 1, created_at: '' }) as AgentRunEvent;
+
+  it('把总结记在自己的步上，而不是当时开着的那一步', () => {
+    // step 1 的收尾在 step 2 已经开始之后才落库（与迟到的 deliverable /
+    // subagent_done 同族的乱序）。`current ?? …` 会把 step 1 的耗时、花费、
+    // 结束原因全记到 step 2 头上 —— 两条都错：step 1 显示不出它花了多久，
+    // step 2 凭空多出一笔不属于它的钱。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1, model: 'm' }, 1),
+      at(2, 'step_start', { turn: 1, step: 2, model: 'm' }, 2),
+      at(3, 'step_end', { turn: 1, step: 1, duration_ms: 1200, cost_cents: 0.3, finish_reason: 'tool_calls' }, 1),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    expect(steps).toHaveLength(2);
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].summary).toMatchObject({ durationMs: 1200, costCents: 0.3, finishReason: 'tool_calls' });
+    expect(steps[1].summary.durationMs).toBeNull();
+    expect(steps[1].summary.costCents).toBeNull();
+  });
+
+  it('迟到的 step_end 不会把当时开着的那一步关掉', () => {
+    // 「一条关于旧步骤的迟到行什么也不结束」—— 与 `ensureStep` 的既有约定
+    // 同一条。关错了步，直播标记会停在一个已经走过去的节点上。
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_start', { turn: 1, step: 2 }, 2),
+      at(3, 'step_end', { turn: 1, step: 1 }, 1),
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    if (steps[1].kind !== 'step') throw new Error();
+    expect(steps[1].live).toBe(true);
+  });
+
+  it('坐标只在载荷里的旧行同样回得去（与 deliverable 的 B2 同形）', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_start', { turn: 1, step: 2 }, 2),
+      { seq: 3, event_type: 'step_end', payload: { turn: 1, step: 1, cost_cents: 0.7 }, step: null, turn: null, created_at: '' } as AgentRunEvent,
+    ], { isRunning: true });
+    const steps = nodes.filter((n) => n.kind === 'step');
+    if (steps[0].kind !== 'step' || steps[1].kind !== 'step') throw new Error();
+    expect(steps[0].summary.costCents).toBe(0.7);
+    expect(steps[1].summary.costCents).toBeNull();
+  });
+
+  it('按时到达的 step_end 照旧结束当前步', () => {
+    const nodes = foldEvents([
+      at(1, 'step_start', { turn: 1, step: 1 }, 1),
+      at(2, 'step_end', { turn: 1, step: 1, duration_ms: 90 }, 1),
+    ], { isRunning: true });
+    const step = nodes.find((n) => n.kind === 'step');
+    if (!step || step.kind !== 'step') throw new Error();
+    expect(step.summary.durationMs).toBe(90);
+    expect(step.live).toBe(false);
+  });
+});
+
+describe('foldEvents — 阶段性叙述（3c §4.1）', () => {
+  it('partial 的 assistant 成为独立正文节点，排在它所属 step 节点之前', () => {
+    seq = 0;
+    const nodes = foldEvents([
+      ev('user', { content: 'go' }, { turn: 1 }),
+      ev('step_start', { turn: 1, step: 1, model: 'm' }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Here is where things stand.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ListShots', args: { scene_id: 7 }, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+      ev('step_end', { turn: 1, step: 1, duration_ms: 800 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'All done.' }, { turn: 1, step: 1 }),
+    ], { isRunning: false });
+    // 叙述在动作之前，与模型输出顺序一致。
+    expect(nodes.map((n) => n.kind)).toEqual(['user', 'narration', 'step']);
+    const narration = nodes[1];
+    if (narration.kind !== 'narration') throw new Error();
+    expect(narration.text).toBe('Here is where things stand.');
+    expect(narration.step).toBe(1);
+    expect(narration.key).toBe('narration:3');
+    // 最终回答（无 partial）仍是 step 里的一行 output——现状不变。
+    const step = nodes[2];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines.filter((l) => l.type === 'output')).toHaveLength(1);
+    expect(step.summary.outputs).toBe(1);
+  });
+
+  it('同一步两段叙述各成一个节点，都排在 step 之前', () => {
+    seq = 0;
+    expect(foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'First.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'Second.', partial: true, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'Skill', args: {}, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+    ], { isRunning: false }).map((n) => n.kind)).toEqual(['narration', 'narration', 'step']);
+  });
+
+  it('空正文的 partial 事件不画节点', () => {
+    seq = 0;
+    expect(foldEvents([ev('assistant', { content: '   ', partial: true, step: 1 })], { isRunning: false })
+      .filter((n) => n.kind === 'narration')).toHaveLength(0);
+  });
+
+  it('叙述不会把还没开始的 step 提前开出来', () => {
+    seq = 0;
+    // 坐标齐全但 step_start 还没到：只画叙述，不造 step。
+    expect(foldEvents([ev('assistant', { content: 'Thinking out loud.', partial: true, step: 2 }, { turn: 1, step: 2 })], { isRunning: true })
+      .map((n) => n.kind)).toEqual(['narration']);
+  });
+
+  it('tool 行把 args 带进 detail —— 动作动词要拿它拼对象', () => {
+    seq = 0;
+    const step = foldEvents([ev('tool_call', { tool: 'UpdateShot', args: { shot_id: '42' }, iteration: 1, result: { ok: true } })], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].detail?.args).toEqual({ shot_id: '42' });
+  });
+});
+
+describe('foldEvents — tool 行的失败与耗时（3c Task 20 修复轮）', () => {
+  it('顶层 error_code 就是失败，哪怕 result 里没有 ok:false', () => {
+    seq = 0;
+    // 后端 `tool_error_code` 有三条来源（error_code / 非 ok 的 outcome / 有 error 键），
+    // 后两条都不带 `ok:false`——只认 ok 会把失败的动作读成成功。
+    const step = foldEvents([
+      ev('tool_call', {
+        tool: 'UpdateShot',
+        args: { shot_id: '42' },
+        iteration: 1,
+        result: { error_code: 'invalid_args' },
+        error_code: 'invalid_args',
+      }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(false);
+  });
+
+  it('outcome=denied 这类只在顶层 error_code 上现形的失败同样算失败', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('tool_call', { tool: 'RunCommand', args: {}, iteration: 1, result: { outcome: 'denied' }, error_code: 'denied' }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(false);
+  });
+
+  it('error_code 为 null 的调用仍是成功', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('tool_call', { tool: 'ListShots', args: {}, iteration: 1, result: { ok: true }, error_code: null, duration_ms: 800 }),
+    ], { isRunning: false })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines[0].ok).toBe(true);
+  });
+
+  it('tool 行读 payload 的 duration_ms；缺席才是 null —— 「还没回来」靠它判', () => {
+    seq = 0;
+    const step = foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'ListShots', args: {}, iteration: 1, result: { ok: true }, duration_ms: 800 }, { turn: 1, step: 1 }),
+      ev('tool_call', { tool: 'GenerateImage', args: {}, iteration: 1, result: { ok: true } }, { turn: 1, step: 1 }),
+    ], { isRunning: true })[0];
+    if (step.kind !== 'step') throw new Error();
+    expect(step.lines.map((l) => l.durationMs)).toEqual([800, null]);
+    // 「正在跑的那个工具」= 最后一条还没有耗时的行（AIChatPanel 的 openTool 判据）。
+    const open = [...step.lines].reverse().find((l) => l.type === 'tool' && l.durationMs === null);
+    expect(open?.detail?.tool).toBe('GenerateImage');
+  });
+});
+
+describe('foldEvents — 叙述缺坐标时的降级（3c Task 20 修复轮）', () => {
+  it('没有 step 坐标的叙述追加到末尾，落在 step 之后 —— 已知降级，不静默', () => {
+    seq = 0;
+    // Task 19 的契约保证 partial 行带 turn/step 坐标列；万一缺席（老行、别的写方），
+    // 找不到该插哪里，就按到达顺序追加——位置不对好过插错步。
+    expect(foldEvents([
+      ev('step_start', { turn: 1, step: 1 }, { turn: 1, step: 1 }),
+      ev('assistant', { content: 'No coordinates on me.', partial: true }),
+    ], { isRunning: false }).map((n) => n.kind)).toEqual(['step', 'narration']);
   });
 });

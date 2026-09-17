@@ -61,7 +61,8 @@ def _coerce_bigint(value: Any) -> Optional[int]:
 
 def _hourly_upsert_stmt(values: dict[str, Any]):
     """ON CONFLICT ON CONSTRAINT ai_usage_hourly_dims_uq DO UPDATE — additive
-    accumulators (tokens/cost/event_count) add EXCLUDED onto the existing row;
+    accumulators (tokens/cost/event_count plus the 3c run/tool/deliverable
+    counts) add EXCLUDED onto the existing row;
     id/created_at are never touched on conflict (server_default handles the
     insert path; the row already has an id on the update path)."""
     stmt = pg_insert(AiUsageHourly).values(**values)
@@ -77,6 +78,11 @@ def _hourly_upsert_stmt(values: dict[str, Any]):
             ),
             "cost_cents": AiUsageHourly.cost_cents + stmt.excluded.cost_cents,
             "event_count": AiUsageHourly.event_count + stmt.excluded.event_count,
+            "run_count": AiUsageHourly.run_count + stmt.excluded.run_count,
+            "failed_runs": AiUsageHourly.failed_runs + stmt.excluded.failed_runs,
+            "tool_calls": AiUsageHourly.tool_calls + stmt.excluded.tool_calls,
+            "tool_errors": AiUsageHourly.tool_errors + stmt.excluded.tool_errors,
+            "deliverables": AiUsageHourly.deliverables + stmt.excluded.deliverables,
             "updated_at": func.now(),
         },
     )
@@ -95,6 +101,11 @@ async def record_usage(
     model: Optional[str] = None,
     cached_input_tokens: int = 0,
     cost_cents: Optional[Any] = None,
+    run_count: int = 0,
+    failed_runs: int = 0,
+    tool_calls: int = 0,
+    tool_errors: int = 0,
+    deliverables: int = 0,
 ) -> None:
     """Accumulate one finished LLM turn into the ai_usage_hourly rollup.
 
@@ -104,6 +115,12 @@ async def record_usage(
     ``cost_cents`` may be None (no pricing configured for the model) — tokens
     are still recorded; the cost accumulator adds 0 in that case, so a team's
     rollup cost is a lower bound whenever some calls were unpriced.
+
+    ``cost_cents`` 是这个 run 的**自身**花费（own + media），不是树总额：每个子
+    run 自己也会写一行，父行再把子的加进来就是双计，而这张表没有 parent_run_id
+    维度，事后剔不掉（3c A1）。五个计数列同理 —— 数的都是自身量，跨 run 求和
+    天然正确。``event_count`` 不跟着 run_count 走：它数的是有 token
+    的完成，与 run_count 语义不同。
     """
     try:
         occurred = occurred_at or datetime.datetime.now(datetime.timezone.utc)
@@ -127,7 +144,16 @@ async def record_usage(
                 "completion_tokens": int(completion_tokens or 0),
                 "cached_input_tokens": int(cached_input_tokens or 0),
                 "cost_cents": cost,
-                "event_count": 1,
+                # 「有 token 的完成」数（见 docstring）。零 token 的终态 run
+                # 照样进表并让 run_count +1，但它不是一次 LLM 事件。
+                "event_count": int(
+                    (int(prompt_tokens or 0) + int(completion_tokens or 0)) > 0
+                ),
+                "run_count": int(run_count or 0),
+                "failed_runs": int(failed_runs or 0),
+                "tool_calls": int(tool_calls or 0),
+                "tool_errors": int(tool_errors or 0),
+                "deliverables": int(deliverables or 0),
             }
         )
         async with write_scope() as session:

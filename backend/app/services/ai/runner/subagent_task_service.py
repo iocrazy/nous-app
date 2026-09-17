@@ -94,6 +94,10 @@ ENVELOPE_KEYS = (
     # (Task 7b defect A). The synchronous path reads the recorder directly and
     # was never affected, which is why it went unnoticed.
     "cost_cents",
+    # 其中用户自己的 key 付掉的那部分。与 ``cost_cents`` 同一个理由进契约：
+    # background 路只走这个信封，漏在这里 = 父行把子树的 BYOK 花费当平台花费
+    # 收一遍，而同步路（直接读 recorder）照样对，所以不会有人发现。
+    "byok_cents",
     "sub_run_id",
     "status",
 )
@@ -152,7 +156,11 @@ def _cost_cents_of(recorder: Any) -> float:
     It falls back to ``compute_cost_cents()`` for a run that emitted no step
     folds (and to a plain ``cost_cents`` attribute for a stand-in that has
     neither). A recorder that cannot answer is reported as 0.0 rather than
-    crashing the emit."""
+    crashing the emit.
+
+    ``_byok_cents_of`` 报的是这同一棵子树里用户自己付掉的那部分，两者**必须
+    同海拔** —— 父行拿 ``by_child - by_child_byok`` 减出平台额。改这里的口径
+    （换分支、换回落）必须同步改那边，否则差额会静默变成多收的积分。"""
     try:
         folded = (getattr(recorder, "views", None) or {}).get("cost") or {}
         spent = float(folded.get("spent_cents") or 0.0)
@@ -162,6 +170,45 @@ def _cost_cents_of(recorder: Any) -> float:
         if callable(compute):
             return float(compute() or 0.0)
         return float(getattr(recorder, "cost_cents", 0.0) or 0.0)
+    except Exception:  # noqa: BLE001 — telemetry never fails a turn
+        return 0.0
+
+
+def _byok_cents_of(recorder: Any) -> float:
+    """那棵子树里由**用户自己的 key** 付掉的部分，供父行 ``cost.by_child_byok``。
+
+    与 ``_cost_cents_of`` **严格同海拔**，两个分支都对齐：
+
+    * 有 step fold 时取三条 BYOK 道之和（own + media + 孙子），对应
+      ``_cost_cents_of`` 取 ``spent_cents``（own + media + 孙子）；
+    * ``spent_cents`` 为 0 而 ``_cost_cents_of`` 回落到 ``compute_cost_cents()``
+      时，这里也回落 —— 此时没有任何 step fold，唯一可用的判据是这条 run 的
+      ``credential_origin``。不回落的后果：一条没有 step fold 的 BYOK 子 run
+      报出「花了 7 分、BYOK 0 分」，父行照平台价收它。
+
+    海拔不一致的代价是静默的：父行拿 ``by_child - by_child_byok`` 减平台额，
+    BYOK 侧少报多少，就多收多少。
+
+    报不出来一律 0.0 —— 遥测永远不该让一次 turn 失败。
+    """
+    try:
+        cost = (getattr(recorder, "views", None) or {}).get("cost") or {}
+        if float(cost.get("spent_cents") or 0.0):
+            children = sum(
+                float(v or 0) for v in (cost.get("by_child_byok") or {}).values()
+            )
+            return round(
+                float(cost.get("own_byok_cents") or 0.0)
+                + float(cost.get("media_byok_cents") or 0.0)
+                + children,
+                4,
+            )
+        # 先归一化再比：MagicMock 造的 recorder 桩会把这个属性变成一个 truthy
+        # 的非字符串对象，只有显式判型才能保证它永远落在「不是 BYOK」这一侧。
+        origin = getattr(recorder, "credential_origin", None)
+        if isinstance(origin, str) and origin == "byok":
+            return _cost_cents_of(recorder)
+        return 0.0
     except Exception:  # noqa: BLE001 — telemetry never fails a turn
         return 0.0
 
@@ -446,7 +493,10 @@ class SubAgentTaskService:
                 PromptComposer,
             )
             from app.services.ai.runner.run_recorder import RunRecorder
-            from app.services.ai.scope.scope_binding import resolve_dispatch_scope
+            from app.services.ai.scope.scope_binding import (
+                resolve_dispatch_scope,
+                team_of_run,
+            )
 
             # _attach_to_parent_run is private to agent_worker; keep an
             # eye on it during workforce refactors. The function writes
@@ -532,6 +582,18 @@ class SubAgentTaskService:
         # Task/Delegate arguments.
         dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
 
+        # 3c A3：子 run 必须继承父的团队。父行改成只付自身花费之后，委派烧掉
+        # 的钱两边都不收（子 run 在 reconcile_run 的 `if not team_id` 早退），
+        # 而且 team_id IS NULL 的行落在 idx_agent_runs_billing(mig 145) 之外,
+        # 对按团队的效率账等于不存在 —— 违反 Task 6/A6 立的不变量。
+        # 先问内存里的父 recorder（它就在手边），没有再按 run 读库。
+        _parent_team = getattr(self.parent_recorder, "team_id", None)
+        child_team_id = (
+            _as_int(_parent_team)
+            if _parent_team is not None
+            else await team_of_run(parent_run_id)
+        )
+
         started = time.monotonic()
         # Set once ``subagent_spawned`` has gone out. The crash path below
         # reads it to decide whether it OWES a matching ``subagent_done``:
@@ -551,7 +613,7 @@ class SubAgentTaskService:
                 user_id=self.caller_user_id,
                 trigger="subagent_task",
                 session_id=self.session_id,
-                team_id=None,
+                team_id=child_team_id,
                 issue_id=self.issue_id,
                 **dispatch_scope.as_recorder_kwargs(),
                 model=model or None,
@@ -562,6 +624,9 @@ class SubAgentTaskService:
                 # hanging off round 1 rather than as an unrelated sibling.
                 fork_of_run_id=int(child_run_id) if child_run_id else None,
                 fork_at_seq=continue_from[1] if continue_from else None,
+                credential_origin=stack.credential_origin,
+                # 同 agent_worker：扣费判据要一个不被 metadata 结构带偏的字段。
+                parent_run_id=str(parent_run_id) if parent_run_id else None,
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,
@@ -633,6 +698,7 @@ class SubAgentTaskService:
                         # the card renders a summary line whichever mode ran.
                         "summary": clip_claimed_text(envelope["summary"]),
                         "cost_cents": _cost_cents_of(recorder),
+                        "byok_cents": _byok_cents_of(recorder),
                         "tokens_used": envelope["tokens_used"],
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     },
@@ -655,6 +721,7 @@ class SubAgentTaskService:
                         # is the only place that reason is ever shown.
                         "summary": clip_claimed_text(error_msg),
                         "cost_cents": _cost_cents_of(announced_recorder),
+                        "byok_cents": _byok_cents_of(announced_recorder),
                         "tokens_used": _tokens_of(announced_recorder),
                         "duration_ms": int((time.monotonic() - started) * 1000),
                     },
@@ -1002,6 +1069,9 @@ class SubAgentTaskService:
             # Same source the synchronous path's ``subagent_done`` uses, so the
             # two forms of the same child cannot name different numbers.
             "cost_cents": _cost_cents_of(recorder) if recorder is not None else 0.0,
+            # 其中由用户自己的 key 付掉的部分（用户裁定 2）。与上一行同海拔
+            # （整棵子树），父行减出平台额靠这个对齐。
+            "byok_cents": _byok_cents_of(recorder) if recorder is not None else 0.0,
             "sub_run_id": str(sub_run_id) if sub_run_id else None,
             "status": status,
             **({"error": error} if error else {}),
@@ -1020,6 +1090,8 @@ class SubAgentTaskService:
             # Nothing ran, so nothing was spent — but the key is present, so a
             # reader never has to tell "no cost" apart from "no field".
             "cost_cents": 0.0,
+            # 同上：键恒在，读方永远不必分辨「没花钱」与「没有这个字段」。
+            "byok_cents": 0.0,
             "sub_run_id": None,
             "status": "failed",
             "error": error_msg,

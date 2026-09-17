@@ -195,6 +195,22 @@ class PointTransactions(Base):
             unique=True,
         ),
         Index("idx_point_transactions_user_id", "user_id"),
+        # mig 474 —— issue.rollup 的 runs[].charged_points 每次轮询都要问一遍
+        # (type='consume', reference_type='agent_run') 的扣分流水。上面三个
+        # reference_* 索引的谓词全指向 order / refund，一个都覆盖不到它。
+        # ⚠️ 必须声明成 partial：C1 门禁（tests/db/test_orm_indexes_integration.py）
+        # 的「部分索引」轴只比有无，声明成全表索引会转红——而它本来的作用是不让
+        # 读模型的人对「这条查询走不走索引」产生一个错误印象。
+        Index(
+            "idx_point_transactions_agent_run_consume",
+            "reference_id",
+            # ⚠️ 谓词里的 'agent_run' 是 ``app.services.billing.agent_run_reference
+            # .AGENT_RUN_REFERENCE_TYPE`` 的第五份拷贝 —— SQL 字符串没法 import，
+            # 所以这里只能靠交叉引用 + 一条断言（tests/services/billing/
+            # test_agent_run_reference.py）钉住两者逐字一致。与 mig 474 同样必须
+            # 逐字一致：谓词对不上，planner 就悄悄改走顺扫，没有任何东西会说出来。
+            postgresql_where=text("type = 'consume' AND reference_type = 'agent_run'"),
+        ),
         {"schema": "public"},
     )
 

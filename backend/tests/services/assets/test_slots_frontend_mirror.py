@@ -30,14 +30,9 @@ from app.services.assets.slots import (
     UNSORTED,
 )
 
-# tests/services/assets/<this file> → tests → backend → repo root
-MIRROR = (
-    Path(__file__).resolve().parents[4]
-    / "frontend"
-    / "components"
-    / "assets"
-    / "assetSlots.ts"
-)
+# tests/services/assets/<this file> → services → tests → backend → repo root
+_ROOT = Path(__file__).resolve().parents[4]
+MIRROR = _ROOT / "frontend" / "components" / "assets" / "assetSlots.ts"
 
 
 def _object_literal(source: str, name: str) -> str:
@@ -76,8 +71,29 @@ def _parse_ts_object(literal: str) -> dict:
 
 @pytest.fixture(scope="module")
 def mirror_source() -> str:
-    if not MIRROR.exists():
-        pytest.skip(f"frontend mirror not checked out: {MIRROR} (backend-only tree)")
+    """The TS mirror, with the three states told apart (B10).
+
+    The depth arithmetic is checked FIRST, against something true of every
+    checkout: this file lives under ``backend/tests/``. Without that anchor a
+    miscounted ``parents[N]`` makes ``MIRROR`` miss, the miss reads as
+    "frontend not checked out", and every case in this file SKIPS into a green
+    run that compared nothing — "not found" quietly becoming "agrees".
+
+    A tree with no ``frontend/`` at all genuinely cannot answer and skips; a
+    tree that HAS one while this file is gone is the drift this test exists to
+    catch, and fails.
+    """
+    assert (_ROOT / "backend" / "tests").is_dir(), (
+        f"_ROOT misresolved to {_ROOT} — the parents[N] index is wrong, so "
+        "the mirror path below would miss and every case would skip into a "
+        "green run that checked nothing"
+    )
+    if not (_ROOT / "frontend").is_dir():
+        pytest.skip(f"backend-only tree: no frontend/ under {_ROOT}")
+    assert MIRROR.exists(), (
+        f"{MIRROR} is missing while the frontend IS checked out — the slot "
+        "table mirror was moved or renamed, and the TS copy is now unguarded"
+    )
     return MIRROR.read_text(encoding="utf-8")
 
 

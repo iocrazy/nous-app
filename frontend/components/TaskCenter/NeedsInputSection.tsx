@@ -17,6 +17,7 @@ import { getIssue, type NeedsInputItem } from '../../services/issuesService';
 import { AgentNotDispatchedError } from '../../services/issueMessageService';
 import { QuestionCard } from '../Todolist/QuestionCard';
 import { questionFromNeedsInputItem } from '../Todolist/questionTypes';
+import { issueDeepLink } from '../../utils/issueLinks';
 
 interface NeedsInputSectionProps {
   items: NeedsInputItem[];
@@ -126,7 +127,10 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
     try {
       const issue = await getIssue(Number(item.issue_id));
       const teamId = item.team_id ?? (issue.team_id != null ? String(issue.team_id) : null);
-      navigate(teamId ? `/team/${teamId}/todolist/${issue.identifier}` : '/todolist');
+      // The one deep-link builder (B7, `utils/issueLinks.ts`). It refuses
+      // without a team, and this card's answer to that is unchanged: fall
+      // back to `/todolist`, the team redirect.
+      navigate(issueDeepLink(teamId, issue.identifier) ?? '/todolist');
     } catch (err) {
       console.error('[NeedsInputSection] failed to resolve issue for deep link:', err);
     }

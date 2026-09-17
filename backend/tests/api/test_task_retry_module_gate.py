@@ -2,7 +2,9 @@
 
 Third dispatch path into download_workflow (after /media/fetch and
 /media/retry/{platform_id}). This router hosts every task type, so the gate is
-inside the endpoint and only for ``task_type == "download"``.
+inside the endpoint and only for the media-parser types (``download`` and, as
+of 2026-09-15, ``parse`` — a parse retry is a new parse dispatch, so the same
+switch has to hold it back).
 
 Direct-function-call pattern (no TestClient fixture in this codebase).
 """
@@ -38,7 +40,17 @@ async def test_download_retry_blocked_when_media_parser_disabled(monkeypatch):
     # APIRouter, not the module.
     tm = importlib.import_module("app.api.task_manager_router")
 
-    monkeypatch.setattr(tm, "_peek_task_type", AsyncMock(return_value="download"))
+    monkeypatch.setattr(
+        tm,
+        "_peek_task_row",
+        AsyncMock(
+            return_value={
+                "task_type": "download",
+                "dedup_key": None,
+                "status": "failed",
+            }
+        ),
+    )
     tracker = MagicMock()
     tracker.retry_task = AsyncMock(return_value={"task_type": "download"})
     monkeypatch.setattr(tm, "get_task_manager", lambda: tracker)
@@ -65,7 +77,17 @@ async def test_non_download_retry_is_not_blocked(monkeypatch):
     # APIRouter, not the module.
     tm = importlib.import_module("app.api.task_manager_router")
 
-    monkeypatch.setattr(tm, "_peek_task_type", AsyncMock(return_value="transcode"))
+    monkeypatch.setattr(
+        tm,
+        "_peek_task_row",
+        AsyncMock(
+            return_value={
+                "task_type": "transcode",
+                "dedup_key": None,
+                "status": "failed",
+            }
+        ),
+    )
     tracker = MagicMock()
     # None => endpoint raises its own 404; reaching that proves the gate let
     # this task type through instead of short-circuiting with 503.
@@ -90,7 +112,17 @@ async def test_download_retry_proceeds_when_media_parser_enabled(monkeypatch):
     # APIRouter, not the module.
     tm = importlib.import_module("app.api.task_manager_router")
 
-    monkeypatch.setattr(tm, "_peek_task_type", AsyncMock(return_value="download"))
+    monkeypatch.setattr(
+        tm,
+        "_peek_task_row",
+        AsyncMock(
+            return_value={
+                "task_type": "download",
+                "dedup_key": None,
+                "status": "failed",
+            }
+        ),
+    )
     tracker = MagicMock()
     tracker.retry_task = AsyncMock(return_value=None)
     monkeypatch.setattr(tm, "get_task_manager", lambda: tracker)

@@ -193,6 +193,28 @@ def _card_row(resource_id: Any, has_prompt: Any, media: Any) -> Dict[str, Any]:
     return card
 
 
+def _stamp_canonical_url(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return ``data`` with ``canonical_url`` derived from ``original_url``.
+
+    Both writers go through here so the dedup key can never be stale relative
+    to the URL it is derived from — and parse DOES rewrite ``original_url`` on
+    every pass (it stores whatever the user submitted this time), so a key
+    stamped once at insert would drift the moment the same video is
+    re-submitted from a different surface.
+
+    Immutable: callers' dicts are not mutated. Writes that don't touch
+    ``original_url`` are returned unchanged, leaving the existing key alone.
+    """
+    if "original_url" not in data:
+        return data
+    from app.utils.url_canonical import canonical_url
+
+    # NULL, never "": an empty key would make every unusable-URL row equal to
+    # every other one, turning the dedup probe into a wildcard.
+    key = canonical_url(str(data["original_url"] or ""))
+    return {**data, "canonical_url": key or None}
+
+
 class MediaRepository(AsyncpgRepository):
     """Media Repository for the ``parsed_media`` table (async, ORM-backed).
 
@@ -248,7 +270,7 @@ class MediaRepository(AsyncpgRepository):
         """INSERT a parsed_media row (committed via write_scope) and
         return the inserted record as a plain dict."""
         try:
-            normalized = _normalize_for_pg(data)
+            normalized = _normalize_for_pg(_stamp_canonical_url(data))
             async with write_scope() as session:
                 result = await session.execute(
                     insert(ParsedMedia)
@@ -307,7 +329,7 @@ class MediaRepository(AsyncpgRepository):
         behaviour — recommend removing in a follow-up once callers are
         confirmed not to depend on the client clock value."""
         try:
-            normalized = _normalize_for_pg(data)
+            normalized = _normalize_for_pg(_stamp_canonical_url(data))
             normalized["updated_at"] = datetime.now(timezone.utc)
 
             async with write_scope() as session:

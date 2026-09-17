@@ -157,6 +157,10 @@ async def test_the_worker_puts_the_cost_on_the_inbox_row_and_on_subagent_done():
                     "sub_run_id": "52",
                     "tokens_used": 1725,
                     "cost_cents": 0.0236,
+                    # 这一次整棵子树的钱是用户自己的 key 付的。background 路
+                    # 没有 recorder 可问，这个数只走信封 —— 漏一跳就等于父行
+                    # 把它当平台花费收一遍。
+                    "byok_cents": 0.0236,
                 }
             ),
         ),
@@ -171,9 +175,11 @@ async def test_the_worker_puts_the_cost_on_the_inbox_row_and_on_subagent_done():
 
     content = inbox.enqueue.await_args.kwargs["content"]
     assert content["cost_cents"] == pytest.approx(0.0236)
+    assert content["byok_cents"] == pytest.approx(0.0236)
     assert content["tokens_used"] == 1725
 
     event_type, payload = writer.append.await_args.args
     assert event_type == "subagent_done"
     assert payload["cost_cents"] == pytest.approx(0.0236)
+    assert payload["byok_cents"] == pytest.approx(0.0236)
     assert payload["tokens_used"] == 1725

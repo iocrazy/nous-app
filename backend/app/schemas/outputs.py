@@ -16,9 +16,33 @@ both — the UI shows ``—`` rather than a fabricated 0.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class CitedIn(BaseModel):
+    """一次引用发生在哪里（3c §2.2）。
+
+    ``cited_in`` 只列**调用方看得见的那几条**：一条引用发生在一件议题上，而
+    议题可见性是 ``visible_issue_ids`` 那把尺子的事。看不见的那几条整条不出现
+    —— 让它们带着空 ``issue_id`` 留下，等于把 ``message_id`` / ``user_id``
+    （谁、在哪条消息里引了它）交出去，而那正是可见性要挡的东西。
+
+    计数不受这次裁剪影响：``OutputVersion.cited_count`` 是**全量**，所以
+    「被引 3 次、你只看得见 1 条」是允许且正确的答案。
+
+    两个字段仍是可空的：``issue_key`` 在一件没有 identifier 的议题上就是空的，
+    而 ``issue_id`` 留出空位是给「引用不挂在任何议题上」那天用的——今天到不了
+    这里（聊天面板的引用一律被拒），所以它不是一个可以依赖的分支。
+    """
+
+    issue_id: Optional[str] = None
+    issue_key: Optional[str] = None
+    message_id: str
+    user_id: str
+    at: datetime
 
 
 class OutputVersion(BaseModel):
@@ -72,6 +96,13 @@ class OutputVersion(BaseModel):
     # ``cost_cents=None`` 同时出现，意思是没有花费可报。
     cost_kind: Optional[Literal["allocated", "exact"]] = None
     created_at: Optional[str] = None
+    #: 这一版被引用过几次，**全量**（3c §2.2）。cited_in 只列调用方看得见的
+    #: 那几条，所以「被引 3 次、你能看 1 条」是允许且正确的答案。
+    #:
+    #: **0 不是 None**：这两个字段由端点合成（不是登记行上的列），一条从没被
+    #: 引用过的版本的诚实答案是「零次」，不是「不知道」。
+    cited_count: int = 0
+    cited_in: List[CitedIn] = []
 
 
 class OutputObject(BaseModel):
@@ -179,6 +210,7 @@ class RevertResponse(BaseModel):
 
 
 __all__ = [
+    "CitedIn",
     "IssueOutputsResponse",
     "OutputDiffMedia",
     "OutputDiffResponse",

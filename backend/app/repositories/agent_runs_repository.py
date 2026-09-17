@@ -35,12 +35,13 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import case, func, or_, select, text, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import AgentRuns
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.ai.runner.turn_end import TurnEndReason
 
 # agent_runs DB-column-name → mapped-attribute-name. Built once from the mapper.
 # For agent_runs every name == key (no reserved-name remap), but we resolve via
@@ -854,6 +855,86 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             raise
 
+    async def efficiency_for_issue(self, issue_id: int) -> Dict[str, Any]:
+        """这个议题上所有 run 的工作量（3c §3.3）。
+
+        **不**加 root 过滤：五个计数是每个 run 的自身量，父行不含子行，全体求和才是
+        真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
+        ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
+
+        ⚠️ 「全体」的准确口径是**带着这个 ``issue_id`` 的全部 run**，不是「这棵树的
+        全部 run」——这里的 WHERE 只认这一列，树结构（``root_run_id``）根本没进查询。
+        两者相等的前提是每个派发站点都在 INSERT 时戳上议题；3c 终审 I1 抓到
+        ``workforce/agent_worker`` 漏了这一戳，于是委派出去的活整个不计，而
+        ``compute_rollup`` 的 ``¢/output`` 分子（root 的树总额，含子的钱）照算不误，
+        单价系统性偏高。**加新的派发站点时，issue_id 与 team_id 一样是必戳项。**
+
+        ``avg_run_ms`` 的分母只数两端时间戳都有的 run；一个都没有 → None（不知道，
+        不是 0 毫秒）。读失败返回 {}：驾驶舱少两个格子，不该把整个议题页拖垮。
+        """
+        try:
+            timed = and_(
+                AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None)
+            )
+            stmt = (
+                select(
+                    AgentRuns.turn_end_reason.label("reason"),
+                    func.count().label("runs"),
+                    func.coalesce(func.sum(AgentRuns.steps), 0).label("steps"),
+                    func.coalesce(func.sum(AgentRuns.tool_calls), 0).label(
+                        "tool_calls"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.tool_errors), 0).label(
+                        "tool_errors"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
+                        "deliverables"
+                    ),
+                    func.count().filter(timed).label("timed_runs"),
+                    # FILTER 挂在 ``sum`` 上，不是挂在 ``extract`` 上——Postgres
+                    # 的 FILTER 只对聚合函数合法，挂错位置 SQLAlchemy 在建语句时
+                    # 就 AttributeError，而那一抛正好落进下面的 except，整个效率账
+                    # 会永远静默返回 {}。``test_efficiency_sql_compiles_and_folds``
+                    # 钉住这个形状。
+                    func.coalesce(
+                        func.sum(
+                            func.extract(
+                                "epoch", AgentRuns.ended_at - AgentRuns.started_at
+                            )
+                        ).filter(timed),
+                        0,
+                    ).label("total_seconds"),
+                )
+                .where(AgentRuns.issue_id == int(issue_id))
+                .group_by(AgentRuns.turn_end_reason)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
+        except Exception as e:
+            logger.error(f"[agent_runs] efficiency_for_issue({issue_id}) failed: {e}")
+            return {}
+        out: Dict[str, Any] = {
+            "runs": 0,
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reasons": {},
+        }
+        timed_runs, total_seconds = 0, 0.0
+        for row in rows:
+            out["runs"] += int(row["runs"])
+            for key in ("steps", "tool_calls", "tool_errors", "deliverables"):
+                out[key] += int(row[key] or 0)
+            timed_runs += int(row["timed_runs"] or 0)
+            total_seconds += float(row["total_seconds"] or 0.0)
+            if row["reason"]:
+                out["turn_end_reasons"][str(row["reason"])] = int(row["runs"])
+        out["avg_run_ms"] = (
+            int(total_seconds * 1000 / timed_runs) if timed_runs else None
+        )
+        return out
+
     async def list_for_issue(
         self,
         *,
@@ -914,6 +995,185 @@ class AgentRunsRepository(AsyncpgRepository):
             return []
 
     # ------------------------------------------------------------------
+    # Efficiency read face (3c §3.3)
+    # ------------------------------------------------------------------
+
+    async def efficiency_groups(
+        self,
+        *,
+        frm: datetime,
+        to: datetime,
+        user_id: Optional[UUID] = None,
+        team_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        group_by: str = "model",
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """按 model 或 agent 分组的效率原料 + 全窗口的 turn_end 分布。
+
+        三个 scope 参数至少一个非空由调用方保证（user 锁调用者，team/project 过成员
+        门）。这里**不兜底**——一个没有任何 where 的跨团队全表聚合，是这条链上最贵也
+        最危险的查询。返回原始计数而不是比率：分母语义（0 次调用 vs 0 件产出）在路由
+        层统一处理一次，两处各算一遍必然漂移。读失败一律 raise（路由转 503）——空结果
+        会被读成「这段时间没花钱」。
+
+        **两种粒度混在一张表里，每一列的口径写死在这里（同 ``issue_totals``）：**
+
+        - ``cost_cents`` —— **只算 root run**。root 行的 ``cost_cents`` 已经是整棵树
+          的总额（``run_recorder._finish`` 把 own + children + media 加起来），子 run
+          自己还有一行，不过滤就是双计。同一条谓词也用在 ``usage_repository
+          .issue_totals`` 与 ``spent_cents_for_issue``；**三处必须一致**，否则同一笔
+          花费在 Usage 面、驾驶舱 Budget 格、效率表上是三个数。
+        - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
+          ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
+          不上滚；按 root 过滤会把子 run 干的活整个丢掉。
+          ⚠️ 所以这个 ``run_count`` 与 ``ai_usage_hourly.run_count`` **不是同一个口径**
+          （小时表按计费事件累加），两处数字对不上是预期的，不是漂移。
+        - ``avg_run_ms`` —— 样本里父子混在一起。一个 root run 的墙钟覆盖它孩子的墙钟，
+          所以这是「一次运行平均多久」而不是「独立工作量平均多久」，两者在有子 run 的
+          agent 上会显著不同。
+
+        所以 root 谓词写成聚合上的 ``FILTER (WHERE ...)``，不写进 ``WHERE``。
+
+        ⚠️ **两种粒度混在一张分组表里的后果**（3c 终审 I5）：分组键取自每个 run 自己
+        的 model / agent，而钱只从 root 行来。一次委派里父用 A 模型、子用 B 模型时，
+        **整棵树的钱进 A 组，子的产出进 B 组** —— B 组于是拿到 ``cost_cents = 0`` 且
+        ``deliverables > 0``。这不是缺陷而是两种粒度的必然结果（钱按树滚、活按 run
+        数），但它会让「单价」这一列说出谎话，所以路由层在 ``cost == 0 and
+        delivered > 0`` 时回 null 而不是 0.0。顶栏 tile 逐组求和后不受影响，受影响
+        的只有分组表本身。
+        """
+        key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
+        root_only = AgentRuns.parent_run_id.is_(None)
+        scope = [AgentRuns.created_at >= frm, AgentRuns.created_at < to]
+        if user_id is not None:
+            scope.append(AgentRuns.user_id == user_id)
+        if team_id is not None:
+            scope.append(AgentRuns.team_id == int(team_id))
+        if project_id is not None:
+            scope.append(AgentRuns.project_id == int(project_id))
+        # A run only has a duration once BOTH endpoints are stamped; the FILTER
+        # keeps half-stamped rows out of the average's denominator instead of
+        # letting them read as "instant".
+        timed = and_(AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None))
+        try:
+            rows_stmt = (
+                select(
+                    key_col.label("key"),
+                    func.count().label("run_count"),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (AgentRuns.status.in_(("failed", "heartbeat_lost")), 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ).label("failed_runs"),
+                    func.count().filter(timed).label("timed_runs"),
+                    func.coalesce(
+                        func.sum(
+                            func.extract(
+                                "epoch", AgentRuns.ended_at - AgentRuns.started_at
+                            )
+                        ).filter(timed),
+                        0,
+                    ).label("total_seconds"),
+                    func.coalesce(func.sum(AgentRuns.tool_calls), 0).label(
+                        "tool_calls"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.tool_errors), 0).label(
+                        "tool_errors"
+                    ),
+                    func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
+                        "deliverables"
+                    ),
+                    func.coalesce(
+                        func.sum(AgentRuns.cost_cents).filter(root_only), 0
+                    ).label("cost_cents"),
+                )
+                .where(*scope)
+                .group_by(key_col)
+            )
+            reasons_stmt = (
+                select(AgentRuns.turn_end_reason, func.count())
+                .where(*scope)
+                .where(AgentRuns.turn_end_reason.isnot(None))
+                .group_by(AgentRuns.turn_end_reason)
+            )
+            async with read_scope() as session:
+                rows = (await session.execute(rows_stmt)).mappings().all()
+                reasons = (await session.execute(reasons_stmt)).all()
+        except Exception as e:
+            logger.error(f"[agent_runs] efficiency_groups failed: {e}")
+            raise
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["key"] = "" if d["key"] is None else str(d["key"])
+            d["total_ms"] = int(float(d.pop("total_seconds") or 0.0) * 1000)
+            out.append(d)
+        return out, {str(k): int(v) for k, v in reasons}
+
+    async def cost_rows_for_ids(self, ids: List[int]) -> List[Dict[str, Any]]:
+        """这批 run 的花费与归属列。可见性判定在路由层——仓库不认识调用者。"""
+        if not ids:
+            return []
+        stmt = select(
+            AgentRuns.id,
+            AgentRuns.user_id,
+            AgentRuns.issue_id,
+            AgentRuns.cost_cents,
+            AgentRuns.model,
+            AgentRuns.status,
+            AgentRuns.prompt_tokens,
+            AgentRuns.completion_tokens,
+        ).where(AgentRuns.id.in_([int(i) for i in ids]))
+        try:
+            async with read_scope() as session:
+                return [dict(r) for r in (await session.execute(stmt)).mappings().all()]
+        except Exception as e:
+            logger.error(f"[agent_runs] cost_rows_for_ids failed: {e}")
+            raise
+
+    async def run_ids_in_trees(self, root_ids: List[int]) -> Dict[str, List[str]]:
+        """每个 root run id → 以它为根的整棵树的全部 run id（含它自己），都是字符串。
+
+        扣费是**逐 run** 发生的（``token_billing`` 对每条 run 各 ceil 一次，见那里的
+        注释），所以「这次回合扣了多少」的答案分散在整棵树上。3c 终审 I2：两个消耗行
+        宿主此前只问 root 自己那一条流水，真栈一次回合 6 条、余额 −6，界面显示 ◇ 1.00。
+
+        ``root_run_id`` 在子 run 上指向根、在 root 行上是 NULL（``_attach_to_parent_run``
+        是唯一写方），所以一条 ``root_run_id IN (:roots) OR id IN (:roots)`` 就取全。
+
+        每个问到的 id **至少映射到它自己**，即使它的行读不回来 —— 一次读空不该把一个
+        真扣过钱的 run 显示成免费。⚠️ 问一个**中间**节点只会拿回它自己：它的孙子
+        ``root_run_id`` 指向真正的根而不是它。两个宿主问的都是 root，这是已知边界。
+
+        读失败一律 raise：降级成「只有 root」等于把 I2 那个低报又悄悄装回去。三个消费方
+        各自已经有 catch。
+        """
+        roots = [int(r) for r in root_ids if r is not None]
+        if not roots:
+            return {}
+        out: Dict[str, set[str]] = {str(r): {str(r)} for r in roots}
+        stmt = select(AgentRuns.id, AgentRuns.root_run_id).where(
+            or_(AgentRuns.root_run_id.in_(roots), AgentRuns.id.in_(roots))
+        )
+        try:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).all()
+        except Exception as e:
+            logger.error(f"[agent_runs] run_ids_in_trees failed: {e}")
+            raise
+        for run_id, root_run_id in rows:
+            # root 行自己的 ``root_run_id`` 是 NULL；一个被问到的中间节点的
+            # ``root_run_id`` 指向一个**没被问到**的根，那种行归到它自己名下。
+            key = str(root_run_id) if str(root_run_id) in out else str(run_id)
+            if key in out:
+                out[key].add(str(run_id))
+        return {k: sorted(v) for k, v in out.items()}
+
+    # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------
 
@@ -928,7 +1188,15 @@ class AgentRunsRepository(AsyncpgRepository):
         each transcript with ``turn_end{reason:interrupted}`` (mig 453 spine:
         the event log is replay-complete only if a crashed run still gets its
         terminal event). SET-based, idempotent; committed via write_scope.
-        Datetimes bound as ``datetime`` objects, never isoformat strings."""
+        Datetimes bound as ``datetime`` objects, never isoformat strings.
+
+        ⚠️ 这条 UPDATE 同批写 ``turn_end_reason='heartbeat_lost'``（3c 终审 I4），
+        而它**先于**调用方的 ``close_interrupted_runs``，后者的补写带
+        ``turn_end_reason IS NULL`` 守卫。所以列上是 ``heartbeat_lost``，而
+        transcript 事件仍是 ``turn_end{reason:interrupted, detail:heartbeat_lost}``。
+        两者不冲突，是两个粒度：事件说「这一轮被腰斩」，列多说了一句「因为心跳
+        没了」—— 分布条要的正是后者，否则崩溃类失败与普通中断混成一段。
+        """
         try:
             async with write_scope() as session:
                 result = await session.execute(
@@ -940,13 +1208,38 @@ class AgentRunsRepository(AsyncpgRepository):
                         ended_at=datetime.now(timezone.utc),
                         error_code="heartbeat_lost",
                         error_message="No heartbeat for >2 minutes",
+                        turn_end_reason=TurnEndReason.HEARTBEAT_LOST.value,
                     )
-                    .returning(AgentRuns.id)
+                    # 维度随行返回：小时表那一行要 team / project / agent /
+                    # model / trigger，全在这张表上（3c 终审 I4）。
+                    .returning(
+                        AgentRuns.id,
+                        AgentRuns.team_id,
+                        AgentRuns.project_id,
+                        AgentRuns.agent_id,
+                        AgentRuns.model,
+                        AgentRuns.trigger,
+                        AgentRuns.attribution,
+                    )
                 )
-                return [int(r[0]) for r in result.fetchall()]
+                rows = result.fetchall()
         except Exception as e:
             logger.error(f"Failed to mark heartbeat_lost: {e}")
             return []
+
+        # 被扫掉的 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影与
+        # ``ai_usage_hourly`` 的那一行都只能由这里跟上（3c Task 13 评审
+        # Important 1 / 终审 I4）。在 ``write_scope()`` 之外：投影读回的必须是
+        # 刚提交的那份 status，而这两件事失败都绝不该把已经扫成功的 id 吞掉——
+        # 调用方拿这些 id 去补 ``turn_end`` 事件。
+        from app.services.liveness.crash_rollup import record_crash_terminal_runs
+        from app.services.search.projection import project_run_id_best_effort
+
+        swept = [int(r.id) for r in rows]
+        for run_id in swept:
+            await project_run_id_best_effort(run_id)
+        await record_crash_terminal_runs(rows)
+        return swept
 
     # ------------------------------------------------------------------
     # Aggregate

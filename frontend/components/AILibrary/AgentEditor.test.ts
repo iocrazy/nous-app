@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getAvailableModels } from './agentEditorModel';
+import { getAvailableModels, nonChatModelNotes } from './agentEditorModel';
 import { LEGACY_TAB_MAP, SUB_TABS, resolveSubTab } from './AgentEditor';
 import type { AISettings } from '../../types';
 
@@ -142,5 +142,63 @@ describe('resolveSubTab', () => {
     expect(resolveSubTab(null)).toBe('workbench');
     expect(resolveSubTab(undefined)).toBe('workbench');
     expect(resolveSubTab('nonsense')).toBe('workbench');
+  });
+});
+
+describe('nonChatModelNotes', () => {
+  const NOTE = 'not a chat model';
+
+  it('marks BYOK models whose id names a non-chat family', () => {
+    const notes = nonChatModelNotes(
+      [
+        {
+          providerKey: 'doubao',
+          providerName: 'Doubao',
+          models: [
+            'doubao-seed-2-0-lite-260428',
+            'doubao-embedding-large-text-250515',
+            'doubao-seedream-5-0-pro-260628',
+          ],
+        },
+      ],
+      NOTE,
+    );
+
+    // The chat model is absent from the map — "unknown" is the default, and
+    // an unmarked option is how this picker says nothing.
+    expect(notes).toEqual({
+      'doubao-embedding-large-text-250515': NOTE,
+      'doubao-seedream-5-0-pro-260628': NOTE,
+    });
+  });
+
+  it('never marks a platform row, because its name is an admin-chosen alias', () => {
+    // `codex-image` is a real catalog row (mig 430) whose actual_model is the
+    // CHAT model gpt-5.4. Running the id heuristic over platform names would
+    // mark it non-chat — the exact false alarm this treatment exists to undo.
+    const notes = nonChatModelNotes(
+      [
+        {
+          providerKey: 'nous',
+          providerName: 'Nous (Platform)',
+          models: ['codex-image', 'mediahub-deepseek-v4-pro'],
+        },
+      ],
+      NOTE,
+    );
+
+    expect(notes).toEqual({});
+  });
+
+  it('marks BYOK and skips platform in the same picker', () => {
+    const notes = nonChatModelNotes(
+      [
+        { providerKey: 'nous', providerName: 'Nous', models: ['codex-image'] },
+        { providerKey: 'doubao', providerName: 'Doubao', models: ['doubao-embedding-x'] },
+      ],
+      NOTE,
+    );
+
+    expect(notes).toEqual({ 'doubao-embedding-x': NOTE });
   });
 });

@@ -26,6 +26,7 @@ pytest-no-full-skip.sh, so a full skip there is RED, not green.
 from __future__ import annotations
 
 import os
+import pathlib
 import uuid
 
 import asyncpg
@@ -43,6 +44,15 @@ _skip = pytest.mark.skipif(
 )
 
 _PIPELINE_SLUGS = {"transcript", "summary", "analyze"}
+
+#: backend/tests/db/ → repo root → the migration under test. Replayed verbatim
+#: by the fork test below; re-deriving its statements here would test a copy.
+_MIGRATION_SQL = (
+    pathlib.Path(__file__).resolve().parents[3]
+    / "supabase"
+    / "migrations"
+    / "468_tag_presets_per_user.sql"
+)
 
 
 @pytest.fixture
@@ -377,4 +387,98 @@ async def test_a_signup_arrives_already_stocked(conn):
     assert owned == preset_count, (
         "a fresh signup came out with %d tags instead of %d — handle_new_user "
         "is not calling seed_initial_tags" % (owned, preset_count)
+    )
+
+
+# ---------------------------------------------------------------------------
+# The fork itself — replayed on a database shaped like production
+# ---------------------------------------------------------------------------
+
+
+@_skip
+async def test_the_fork_runs_on_a_database_that_still_has_the_shared_rows(conn):
+    """The case CI could not see, and production failed on.
+
+    Every other test here runs against the ALREADY-migrated schema, where the
+    42 shared rows are long gone. The fork itself therefore had **no rows to
+    fork** in the drift database, ran over an empty set, and reported success —
+    while in production its first insert died with
+    ``duplicate key value violates unique constraint "uniq_tags_slug"``: the
+    shared row still held ``slug='transcript'`` under mig 467's GLOBAL unique
+    index, which the migration only replaced further down. The fix was to swap
+    the index before forking; this test is what proves it, by putting the
+    database back into its pre-468 shape and replaying the real file.
+
+    "The migration applied cleanly" was true and meant nothing, because the
+    data that makes the hard part reachable was not there. Everything below
+    rolls back with the fixture.
+    """
+    # ── back to the pre-468 world ──────────────────────────────────────────
+    await conn.execute("DELETE FROM tags")
+    await conn.execute("DROP INDEX IF EXISTS uniq_tags_user_slug")
+    await conn.execute(
+        "CREATE UNIQUE INDEX uniq_tags_slug ON public.tags (slug) "
+        "WHERE slug IS NOT NULL"
+    )
+    # 'system' is legal again only for the duration of this transaction; the
+    # migration re-adds the narrowed CHECK when it runs below.
+    await conn.execute("ALTER TABLE public.tags DROP CONSTRAINT tags_type_check")
+    await conn.execute(
+        "INSERT INTO public.tags (name, name_zh, type, color, slug) VALUES "
+        "('Transcript', '转录', 'system', '#6366f1', 'transcript'), "
+        "('Summary', '总结', 'system', '#10b981', 'summary'), "
+        "('Music', '音乐', 'system', '#8b5cf6', 'music'), "
+        # …and one with no slug at all, like the 26 curated rows prod carries.
+        "('Drama', '剧情', 'system', '#8b5cf6', NULL)"
+    )
+    a = await _mk_user(conn, f"fork-a-{uuid.uuid4().hex[:8]}@test.dev")
+    b = await _mk_user(conn, f"fork-b-{uuid.uuid4().hex[:8]}@test.dev")
+
+    # A tagged resource, so the re-point step has something to carry over and
+    # the "refuse to delete what we could not re-point" guard has to pass.
+    shared_music = await conn.fetchval(
+        "SELECT id FROM tags WHERE type = 'system' AND slug = 'music'"
+    )
+    resource = await conn.fetchval(
+        "INSERT INTO public.resources (filename, source_type, creator_id) "
+        "VALUES ('clip.mp4', 'upload', $1) RETURNING id",
+        a,
+    )
+    await conn.execute(
+        "INSERT INTO public.resource_tags (resource_id, tag_id) VALUES ($1, $2)",
+        resource,
+        shared_music,
+    )
+
+    # ── replay the real migration ─────────────────────────────────────────
+    await conn.execute(_MIGRATION_SQL.read_text())
+
+    # ── what the fork must have produced ──────────────────────────────────
+    assert (
+        await conn.fetchval("SELECT count(*) FROM tags WHERE user_id IS NULL") == 0
+    ), "a shared row survived the fork"
+
+    preset_count = await conn.fetchval("SELECT count(*) FROM tag_presets")
+    for user in (a, b):
+        assert (
+            await conn.fetchval("SELECT count(*) FROM tags WHERE user_id = $1", user)
+            == preset_count
+        )
+
+    # A's tagging followed her copy, not the deleted shared row. (`tags` CASCADEs
+    # into `resource_tags`, so a link left behind would simply be gone — which is
+    # precisely the silent data loss the migration's guard refuses to allow.)
+    owner_of_the_link = await conn.fetchval(
+        "SELECT t.user_id FROM resource_tags rt JOIN tags t ON t.id = rt.tag_id "
+        " WHERE rt.resource_id = $1",
+        resource,
+    )
+    assert owner_of_the_link == a
+    assert (
+        await conn.fetchval(
+            "SELECT t.slug FROM resource_tags rt JOIN tags t ON t.id = rt.tag_id "
+            " WHERE rt.resource_id = $1",
+            resource,
+        )
+        == "music"
     )

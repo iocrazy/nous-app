@@ -81,6 +81,21 @@ describe('generatedMediaCoverUrl', () => {
   });
 });
 
+describe('generatedMediaCoverUrl — full tier', () => {
+  it('asks for the original bytes when full is set', () => {
+    // The lightbox opens the ORIGINAL, and it does so through /cover, which
+    // needs no Bearer header — /file is auth-gated and a bare <img> cannot
+    // carry one (it 401s, and the viewer shows a broken image).
+    const url = generatedMediaCoverUrl('5', { full: true });
+    expect(url).toContain('/api/v1/generated-media/5/cover');
+    expect(url).toContain('full=1');
+  });
+
+  it('omits the parameter for the preview tier', () => {
+    expect(generatedMediaCoverUrl('5')).not.toContain('full');
+  });
+});
+
 describe('generatedMediaFileUrl', () => {
   it('returns the auth-gated /file URL for the given id', () => {
     const url = generatedMediaFileUrl('5');

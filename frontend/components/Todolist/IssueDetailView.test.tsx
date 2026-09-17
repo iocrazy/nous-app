@@ -71,6 +71,45 @@ vi.mock('../../services/workflowService', () => ({
   fetchStageBoard: vi.fn(async () => ({ node: { brief: '', status: 'todo' } })),
 }));
 
+// What the page hands the composer. A RECORDING mock: it renders the real
+// component and keeps the props, so the hand-off is pinned without this file
+// having to know anything about how the composer works (3c Task 17 收尾).
+//
+// Worth its own probe because the failure is silent: drop `issueKey` here and
+// every existing assertion in this file and in `IssueReplyBox.test` stays
+// green, while the `@` picker labels every row with the issue already on
+// screen.
+const replyBoxProps: { last: Record<string, unknown> | null } = { last: null };
+vi.mock('./IssueReplyBox', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./IssueReplyBox')>();
+  return {
+    ...mod,
+    IssueReplyBox: (props: React.ComponentProps<typeof mod.IssueReplyBox>) => {
+      replyBoxProps.last = props as unknown as Record<string, unknown>;
+      return <mod.IssueReplyBox {...props} />;
+    },
+  };
+});
+
+// The trajectory's own events. A test can put a turn's citations on screen
+// without a websocket by filling `runActivity.events` (3c Task 17 修复轮 2).
+//
+// Delegates to the real hook when that array is empty: every other test in
+// this file drives the trajectory through the services it already stubs, and
+// a blanket stub would quietly empty their timelines.
+const runActivity: { events: unknown[] } = { events: [] };
+vi.mock('../agentActivity/useRunToolActivity', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../agentActivity/useRunToolActivity')>();
+  return {
+    ...mod,
+    useRunToolActivity: (...args: Parameters<typeof mod.useRunToolActivity>) => {
+      const real = mod.useRunToolActivity(...args);
+      if (runActivity.events.length === 0) return real;
+      return { ...real, events: runActivity.events, loaded: true };
+    },
+  };
+});
+
 // issue.rollup — the cockpit + rail read it; the default is a running issue
 // with one live run so the cockpit has something to draw.
 const progressState: { value: Record<string, unknown> | null } = { value: null };
@@ -202,10 +241,13 @@ function mkProgress(over: Record<string, unknown> = {}) {
       view: { v: 1, phase: 'running', step: { done: 3, total: 7, label: 'Drafting scene 3' }, current: { turn: 1, step: 4, model: 'm' }, retry: null, context: { used_pct: 62, window: 128000 }, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 1, budget: null, revision: 9 },
       cost: { spent_cents: 0.9 },
     },
-    runs: [{ id: '501', status: 'running', started_at: '2026-08-03T00:00:00Z', ended_at: null, model: 'm', error_code: null, cost_cents: 0.9, ended: null, step: null }, { id: '500', status: 'completed', started_at: null, ended_at: null, model: 'm', error_code: null, cost_cents: 0.7, ended: { reason: 'completed' }, step: null }],
+    runs: [{ id: '501', status: 'running', started_at: '2026-08-03T00:00:00Z', ended_at: null, model: 'm', error_code: null, cost_cents: 0.9, ended: null, step: null, charged_points: 1 }, { id: '500', status: 'completed', started_at: null, ended_at: null, model: 'm', error_code: null, cost_cents: 0.7, ended: { reason: 'completed' }, step: null, charged_points: null }],
     sub_issues: { total: 2, done: 1, items: [] },
     inbox_pending: 1,
     budget: { budget_cents: 200, spent_cents: 160, pct: 80, state: 'warn' },
+    // 3c §3.3：后端对每个议题都发这个键（EMPTY_EFFICIENCY 兜底），所以这个
+    // 边界 mock 也必须带上——驾驶舱无条件读它。
+    efficiency: { runs: 2, steps: 9, tool_calls: 12, tool_errors: 0, deliverables: 0, avg_run_ms: null, cost_per_deliverable_cents: null, turn_end_reasons: { completed: 1 } },
     origin: { kind: 'manual', origin_id: null },
     execution_state: { turn: 3 },
     computed_at: '2026-08-03T00:00:01Z',
@@ -276,6 +318,8 @@ describe('IssueDetailView — 右栏进度/关联轨道', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     progressState.value = mkProgress();
+    runActivity.events = [];
+    replyBoxProps.last = null;
   });
 
   it('renders the progress panel with status, run count and assignee', async () => {
@@ -425,7 +469,8 @@ describe('IssueDetailView — cockpit + 区块注册表 (harness P4 T8)', () => 
     });
     fireEvent.change(input, { target: { value: '500' } });
     fireEvent.submit(input.closest('form')!);
-    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(1, { budget_cents: 500 }));
+    // The id as the issue carries it, unconverted (B3).
+    await waitFor(() => expect(updateIssue).toHaveBeenCalledWith('1', { budget_cents: 500 }));
   });
 });
 
@@ -954,5 +999,168 @@ describe('IssueDetailView — WS done frame (3b Task 6)', () => {
     act(() => onEvent({ type: 'status', phase: 'running', run_id: '777', seq: 1, outputs: [] }));
     expect(notifyTurn).not.toHaveBeenCalled();
     expect(invalidateOutputLineage).not.toHaveBeenCalled();
+  });
+});
+
+// ── harness 3c Task 17 修复轮 2：来源议题 chip 的作用域 ─────────────────────
+//
+// `TrajectoryIssueKeyContext` 原先由 `IssueChatThread` 自己提供，而
+// `DetachedRunPanel`（被回放/子运行打开的那块面板）是它的**兄弟**，在 provider
+// 之外。于是那块面板里的每一条引用都拿到 null（「不知道自己在哪」→ 全画），
+// 包括本议题自己产出的 —— 正是「判有无」那个缺陷换了个界面复活。
+//
+// 页面才是知道「这是哪件议题」的那一层，所以 provider 属于页面。
+describe('IssueDetailView — 子运行面板里的引用也知道自己在哪件议题上', () => {
+  it('同议题的引用在 detached 面板里不画来源', async () => {
+    progressState.value = mkProgress();
+    // 777 既不在线程里、也不是当前运行 → 它作为 detached 面板画在线程之上。
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [] });
+    runActivity.events = [
+      { seq: 1, event_type: 'user', turn: 1, step: null, created_at: '', payload: { content: 'revise', referenced_outputs: [
+        // 两条都带来源（后端对每条都填），只有 MH-98 与当前议题不同。
+        { kind: 'script_shot', ref_id: '9', version: 2, title: 'MEDIUM', issue_key: 'NOUS-1' },
+        { kind: 'generated_media', ref_id: '77', version: 1, title: 'Cover', issue_key: 'MH-98' },
+      ] } },
+      { seq: 2, event_type: 'step_start', turn: 1, step: 1, created_at: '', payload: { turn: 1, step: 1, model: 'm' } },
+    ];
+    render(
+      <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1?run=777&seq=4']}>
+        <Routes>
+          <Route path="/team/:teamId/todolist/:identifier" element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByTestId('detached-run-panel')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByTestId('output-citation-chip')).toHaveLength(2));
+    // 两条引用都带来源（后端对每条都填），但只有 MH-98 与当前议题不同。
+    const marks = screen.getAllByTestId('output-citation-issue');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('MH-98');
+  });
+});
+
+/**
+ * 页面交给回复框的那两把钥匙（3c Task 17 收尾）。
+ *
+ * 用**记录型 mock** 钉住，而不是去驱动 `@` 的检索：这条链断掉时，两端消费方
+ * （`OutputMentionList` / `ChatAttachmentPicker`）自己的用例照样全绿，而界面上
+ * 每一行都挂上读者正看着的那件议题 —— 一个没有任何断言会说话的缺陷。
+ */
+describe('IssueDetailView — 交给回复框的议题坐标', () => {
+  it('把议题编号传下去，@ 选单与 staged chip 才有得比较', async () => {
+    render(
+      <MemoryRouter initialEntries={['/team/9/todolist/NOUS-1']}>
+        <Routes>
+          <Route path="/team/:teamId/todolist/:identifier" element={<IssueDetailView issue={mkIssue()} agents={[AGENT]} agentsById={{ a1: AGENT }} selfUserId="u1" onCreateSubIssue={vi.fn()} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(replyBoxProps.last).not.toBeNull());
+    expect(replyBoxProps.last?.issueKey).toBe('NOUS-1');
+    // `project_id` 走 `raw`，不是给显示用的 `project` 引用 —— 后者在项目名没解析
+    // 出来时是空的，而检索要的是那一列本身。
+    expect(replyBoxProps.last?.projectId).toBe('7');
+  });
+});
+
+/**
+ * 3c Task 21 修复轮 1 —— `done` 帧是 rollup 的**补充**，不是替代。
+ *
+ * 帧上那两个数各自都可能是 null：`run_cost_for_frame` 读失败是 null，这条 run 没人
+ * 收费也是 null。写进去就会盖掉 rollup 明明有的数字，而 `liveRunCost` 一直留在
+ * state 里 —— 每一轮轮询回来的新值都被再抹一次，屏幕上那个 `—` 永远不会自己好。
+ *
+ * 断言落在**真的画出来的那一行**上，不是 state：这条链坏掉时 `mergeRunCosts` 自己
+ * 的用例照样全绿（那一层压根收不到这一帧）。
+ */
+describe('IssueDetailView — done 帧不该把 rollup 已知的花费抹掉', () => {
+  const AGENT_RUN_MSG = {
+    id: 'm1',
+    issue_id: 1,
+    kind: 'agent_run',
+    author_user_id: null,
+    author_agent_id: 'a1',
+    body: 'done',
+    meta: {},
+    duration_seconds: 12,
+    agent_run_id: '501',
+    from_status: null,
+    to_status: null,
+    created_at: '2026-08-03T00:00:10Z',
+  };
+
+  async function renderWithRun() {
+    let onEvent!: (e: Record<string, unknown>) => void;
+    progressState.value = mkProgress();
+    // 线程里有一条 run 501 的行，且它的轨迹非空 —— 两者齐了才画得出消耗行。
+    (listIssueMessages as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [AGENT_RUN_MSG],
+      total: 1,
+    });
+    runActivity.events = [
+      { seq: 1, event_type: 'user', turn: 1, step: null, created_at: '', payload: { content: 'go' } },
+    ];
+    openIssueChatSocket.mockImplementation((_id: unknown, cb: unknown) => {
+      onEvent = cb as (e: Record<string, unknown>) => void;
+      return Promise.resolve({ close: vi.fn(), readyState: 1 } as unknown as WebSocket);
+    });
+    renderDetail(mkIssue());
+    await waitFor(() => expect(screen.getByTestId('run-cost-tail')).toBeTruthy());
+    return { fire: (e: Record<string, unknown>) => act(() => onEvent(e)) };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rollup 的花费先画出来（前置条件）', async () => {
+    await renderWithRun();
+    // 501 在 fixture 里是 cost_cents 0.9 / charged_points 1。
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('两个都是 null 的帧什么也不改 —— 读不到不等于没有', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: null, charged_points: null });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('老后端那种连键都没有的帧同样什么也不改', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [] });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+  });
+
+  it('帧真带了新数字就用帧的 —— 它比下一次轮询早几秒', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: 2.5 });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+  });
+
+  it('后一帧空手而来时，不该把前一帧刚报的数字退回 rollup 的旧值', async () => {
+    // 这条钉的是**写入侧那道守卫**，逐字段合并挡不住它：第一帧写进了 2.50，
+    // 第二帧两个都是 null；没有守卫的话 `liveRunCost` 被换成一个空覆盖，逐字段
+    // 回落到 rollup 的 1.00 —— 屏幕上的数字倒退一步，而下一次轮询才可能修好。
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: 2.5 });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 10, outputs: [], cost_cents: null, charged_points: null });
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 2.50');
+  });
+
+  it('议题侧的浮层不说 token —— rollup 没这两列，说 0 就是在编', async () => {
+    // 终审 I3：`mergeRunCosts` 曾把两列硬填 0，而 `RunCostTail` 的判据是
+    // `!== undefined`，于是这里恒显示 `0 prompt · 0 completion tokens`。
+    // 契约偏离 #14 的裁定原文是「议题侧 hover 只给 ¢ 与积分」，不是「给 0」。
+    await renderWithRun();
+    expect(screen.getByTestId('run-cost-tail').getAttribute('title')).not.toContain('prompt');
+  });
+
+  it('帧只带得动花费时，积分留 rollup 的 —— 逐字段，不是整行替换', async () => {
+    const { fire } = await renderWithRun();
+    fire({ type: 'status', phase: 'done', run_id: '501', seq: 9, outputs: [], cost_cents: 2.5, charged_points: null });
+    // 积分优先显示，所以看到的仍是 rollup 的 1.00 —— 正是「没被抹掉」。
+    expect(screen.getByTestId('run-cost-tail').textContent).toContain('◇ 1.00');
+    expect(screen.getByTestId('run-cost-tail').getAttribute('title')).toContain('¢2.50');
   });
 });

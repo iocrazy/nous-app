@@ -57,6 +57,11 @@ from app.services.script.version_service import replay_to
 
 #: The shot fields a diff prints, in a stable order (mirrors the gateway's
 #: ``_WRITABLE_SHOT_FIELDS``; order is the reading order, not the column order).
+#:
+#: ⚠️ 这个镜像**有机器守卫**了（C2）：
+#: ``tests/services/deliverables/test_diff.py::test_the_diff_fields_mirror_the_gateway_writable_fields``
+#: 把两边 import 进来比集合。在那之前它只是这行注释，而漂移是静默的 ——
+#: 网关多一个可写字段而这边没跟进，回退就会把那个字段清空。
 _SHOT_FIELDS: Tuple[str, ...] = (
     "shot_type",
     "camera_angle",

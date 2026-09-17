@@ -239,3 +239,38 @@ describe('useMentionOutputsTab — a finished turn', () => {
     expect(listIssueOutputs).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * B5 — 同一个作曲区换了 issue。
+ *
+ * Todolist 的详情页复用同一棵子树：换一条议题，`issueId` 变而 hook 不卸载。
+ * 一次性守卫 `requested.current` 此前只被「回合结束」和 `reset()` 放下，换
+ * issue 不放——于是 Outputs 页签继续列着上一条议题的产出，而那些坐标在新
+ * 议题上按定义引不了（解析器的整条校验就是「这一版是不是本 issue 产的」）。
+ */
+describe('useMentionOutputsTab — the composer moves to another issue', () => {
+  beforeEach(() => __resetTurnSignals());
+
+  it('re-reads for the new issue instead of keeping the old one’s rows', async () => {
+    const { result, rerender } = setup({ issueId: 42 });
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(1));
+    expect(listIssueOutputs).toHaveBeenLastCalledWith(42);
+
+    rerender({ pickerOpen: true, issueId: 43, query: '', onSelect: vi.fn() });
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledTimes(2));
+    expect(listIssueOutputs).toHaveBeenLastCalledWith(43);
+  });
+
+  it('does not offer the previous issue’s rows while the new read is out', async () => {
+    const { result, rerender } = setup({ issueId: 42 });
+    act(() => result.current.outputs.onActivate());
+    await waitFor(() => expect(result.current.outputs.rows.length).toBeGreaterThan(0));
+
+    let release: (rows: unknown[]) => void = () => {};
+    listIssueOutputs.mockImplementationOnce(() => new Promise((res) => { release = res as (rows: unknown[]) => void; }));
+    rerender({ pickerOpen: true, issueId: 43, query: '', onSelect: vi.fn() });
+    await waitFor(() => expect(result.current.outputs.rows).toHaveLength(0));
+    await act(async () => { release([SHOT]); });
+  });
+});

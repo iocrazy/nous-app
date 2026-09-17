@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
+from app.services.ai.runner.turn_end import TurnEndReason
+
 # Keep the threshold default colocated with the helper that uses it.
 # liveness_scanner.HEARTBEAT_DEAD_SECONDS still exists for the
 # scheduled handler's own use; both read the same env var so they
@@ -35,9 +37,13 @@ async def reconcile_stranded_runs() -> dict[str, int]:
 
     Marks every ``agent_runs`` row with ``status='running'`` and a
     ``heartbeat_at`` older than ``HEARTBEAT_DEAD_SECONDS`` as
-    ``status='failed'`` / ``liveness_state='dead'``. The migration-206
-    bridge trigger then surfaces these as chat messages in any
-    associated issue thread.
+    ``status='failed'`` / ``liveness_state='dead'`` /
+    ``turn_end_reason='stranded'``. The migration-206 bridge trigger then
+    surfaces these as chat messages in any associated issue thread.
+
+    每一行还会补上检索投影与 ``ai_usage_hourly`` 的那一行样本 —— 这些 run 永远
+    不会走到 ``RunRecorder._finish``，不在这里补就是两处都数不到它们（3c 终审
+    I4 / K8）。
     """
     from app.db import engine as db_engine
 
@@ -67,13 +73,37 @@ async def reconcile_stranded_runs() -> dict[str, int]:
                     "Backend restarted while this run was in flight; no "
                     "heartbeat for >2 minutes."
                 ),
+                # 3c 终审 I4：这一列不写，这些 run 在 UsagePage 的 turn_end 分布
+                # 条上根本不存在（那条查询带 ``turn_end_reason IS NOT NULL``）。
+                turn_end_reason=TurnEndReason.STRANDED.value,
+            )
+            # 维度随行返回，供检索投影与小时表那一行使用 —— 这些 run 永远不会
+            # 走到 ``RunRecorder._finish``，两件事都只能由这里跟上。
+            .returning(
+                AgentRuns.id,
+                AgentRuns.team_id,
+                AgentRuns.project_id,
+                AgentRuns.agent_id,
+                AgentRuns.model,
+                AgentRuns.trigger,
+                AgentRuns.attribution,
             )
         )
-        n = result.rowcount
+        rows = result.fetchall()
+    n = len(rows)
     if n > 0:
         logger.warning(
             f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"
         )
+        # ``write_scope()`` 之外：投影要读回刚提交的那些行，而两者失败都不该
+        # 连坐一次已经成立的终态写入（同 ``liveness_scanner._mark_dead``）。
+        # 3c 终审 K8：此前这一处连检索投影都没接。
+        from app.services.liveness.crash_rollup import record_crash_terminal_runs
+        from app.services.search.projection import project_run_id_best_effort
+
+        for row in rows:
+            await project_run_id_best_effort(int(row.id))
+        await record_crash_terminal_runs(rows)
     return {"reconciled": n}
 
 

@@ -13,6 +13,7 @@
 
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { decodeErrorEnvelope } from './errorEnvelope';
 import type {
   AgentCapabilities,
   AgentChatPermissions,
@@ -42,6 +43,7 @@ import type {
   UsageAggregate,
   UsageDailySummary,
   UsageGroupBy,
+  RunCost,
   UsageRunsPage,
   UsageScope,
 } from '../types';
@@ -156,32 +158,57 @@ export class RunForkRejectedError extends Error {
 }
 
 /** Like `handle`, but a non-2xx becomes a RunForkRejectedError carrying the
- *  server's typed code. Production wraps every HTTPException in the
- *  ErrorResponse envelope (`app/core/exceptions.py`):
- *  `{error, code: "http_<status>", request_id, details: <exc.detail | null>}`
- *  — so the typed `{code, message}` lives under `details`; a bare FastAPI
- *  `{detail: …}` (tests, unwrapped routers) is accepted too. Never the raw body. */
+ *  server's typed code, read by the one envelope decoder
+ *  (`services/errorEnvelope.ts`). Never the raw body. */
 async function forkJson<T>(res: Response): Promise<T> {
   if (res.ok) return res.json();
   let code = `http_${res.status}`;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     console.error('[aiLibraryService] fork error body unreadable', err);
   }
   throw new RunForkRejectedError(code, res.status, message);
 }
+
+/**
+ * A refusal from an AI-Library route, carrying the code the route TYPED.
+ *
+ * Same rule as `forkJson`, without the fork-specific name: the branchable code
+ * is `details.code` inside the `ErrorResponse` envelope, never the envelope's
+ * own `http_<status>` (CLAUDE.md 2026-09-09). `run_costs_unavailable` is the
+ * one this file's newest reader speaks.
+ */
+export class AiLibraryRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'AiLibraryRequestError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+async function typedJson<T>(res: Response): Promise<T> {
+  if (res.ok) return res.json() as Promise<T>;
+  let code = `http_${res.status}`;
+  let message = `${res.status} ${res.statusText}`;
+  try {
+    const decoded = decodeErrorEnvelope(await res.json());
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
+  } catch (err) {
+    console.error('[aiLibraryService] error body unreadable', err);
+  }
+  throw new AiLibraryRequestError(code, res.status, message);
+}
+
+/** 后端一批的上限，数的是**去重后**的 id（`/runs/costs` 超出即 400）。 */
+const RUN_COSTS_BATCH = 50;
 
 export const aiLibraryService = {
   // ─── Agents ────────────────────────────────────────────────────────────────
@@ -707,6 +734,36 @@ export const aiLibraryService = {
       headers: await getAuthHeaders(),
     });
     return handle<UsageDailySummary>(resp);
+  },
+
+  /**
+   * 一屏气泡的花费（3c §4.2）。
+   *
+   * **看不见的 run 是键省略**，不是 404——所以调用方必须按「键在不在」读，绝不能把
+   * 缺席补成 0（那等于告诉用户那条 run 是免费的）。
+   *
+   * 去重 + 分批都在这里做：后端的上限数的是去重后的 id，而一屏重绘很容易把同一个
+   * run 送两次；直接 `slice(0, 50)` 则会让第 51 个气泡永远没有价钱**且没有任何人
+   * 报错**。任一批拒绝就整体抛出——半批结果读起来像「剩下的那些是免费的」。
+   */
+  async getRunCosts(ids: string[]): Promise<Record<string, RunCost>> {
+    const wanted = Array.from(new Set(ids.filter(Boolean)));
+    if (wanted.length === 0) return {};
+    const batches: string[][] = [];
+    for (let i = 0; i < wanted.length; i += RUN_COSTS_BATCH) {
+      batches.push(wanted.slice(i, i + RUN_COSTS_BATCH));
+    }
+    const headers = await getAuthHeaders();
+    const pages = await Promise.all(
+      batches.map(async (batch) => {
+        const resp = await fetch(
+          `${base()}/runs/costs?ids=${encodeURIComponent(batch.join(','))}`,
+          { headers },
+        );
+        return (await typedJson<{ items: Record<string, RunCost> }>(resp)).items;
+      }),
+    );
+    return Object.assign({}, ...pages) as Record<string, RunCost>;
   },
 
   // ─── Chat sessions + messages ─────────────────────────────────────────────

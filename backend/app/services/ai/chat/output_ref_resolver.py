@@ -13,10 +13,11 @@
 不成立——用户引用的是一个**具体版本**，解析不了就说明他们指的东西和我们
 理解的不是一回事，让这一轮带着一条错误的引用跑下去比拒绝更糟。
 
-**二、归属查的是 run 的 issue，不是表上的列。**
-``run_deliverables`` 没有 ``issue_id`` 列，``agent_runs.issue_id`` 是唯一真相
-（spec §3）。所以校验走 T3 的 ``lineage_for``——它已经把那一跳 join 做完了，
-在这里重写一遍 join 就是本仓的「同一个问题两处实现」漂移。
+**二、归属是「这条链你看得见」，不是「它属于本议题」。**
+3c §2.4 放宽了这一条：同项目另一件议题的产出可以被引用，因为读者要说的就是
+「你在 MH-B 上产的那一版」。尺子只有一把——``assert_chain_visible``，血缘端点与
+回退端点用的同一个。放宽的是归属，**不是**可见性：看不见的链仍然拿同一个
+``output_ref_unresolvable``。
 
 **三、发帖时把标题抄一份到附件上。**
 线程渲染因此不需要第二次查询；抄的是**那一刻**登记表里的标题，之后对象改名
@@ -35,10 +36,9 @@ from typing import Any, List, Optional, Sequence, Tuple
 from fastapi import HTTPException
 from loguru import logger
 
-from app.repositories.run_deliverables_repository import (
-    get_run_deliverables_repository,
-)
 from app.services.deliverables.kinds import ALL_KINDS
+from app.services.deliverables.visibility import assert_chain_visible
+from app.services.issues.issue_visibility import visible_issue_ids
 
 #: 附件 wire 形状的 ``kind``。前端 composer 的引用 chip 按它写（T6 契约）。
 ATTACHMENT_KIND = "output_ref"
@@ -64,12 +64,39 @@ class ChatOutputRef:
 
     ``title`` 可以是 ``None``——登记表允许标题为空，渲染时整个属性省略而不是
     渲染成空串（``title=""`` 读起来像「标题就是空字符串」）。
+
+    ``issue_key`` 是**这条链**所属议题的人类标识（``MH-98``），3c §2.4 起
+    引用可以跨议题，所以引用卡要说得出来源。与 ``title`` 同一口径：为空就是
+    没有（链上没有带 run 的版本，或那次 run 不答任何议题），键整个省略。
     """
 
     ref_kind: str
     ref_id: str
     version: int
     title: Optional[str] = None
+    issue_key: Optional[str] = None
+
+
+def _clean_title(value: Any) -> Optional[str]:
+    """标题归一：**空的就是没有**（B1）。
+
+    登记表里 ``""``（以及只有空白的串）和 ``NULL`` 说的是同一件事——这一版没
+    被起过名字。留着空串会一路走到 ``<referenced_outputs>`` 渲染成
+    ``title=""``，而那对模型读作「它的标题就是空字符串」，与本模块 docstring
+    和渲染层承诺的「省略」正好相反。
+
+    归一放在**构造 ``ChatOutputRef`` 的每一处**，而不是三个读者各判一次：
+    ``_stamped`` / ``citations_for_transcript`` / 框渲染都只问 ``title is
+    None``，多一个读者就多一次漏判的机会。
+
+    **两侧空白一并去掉**（评审 N2）：``" S3 "`` 与 ``"S3"`` 是同一个标题，而
+    框里渲染成 ``title=" S3 "`` 会让模型把那两个空格读成标题的一部分。既然
+    「全是空白 ⇒ 没有标题」这条判定已经在用 ``strip()``，把去掉的那部分留在
+    值里只会让同一个函数对同一批空白给出两种答案。
+    """
+    if value is None:
+        return None
+    return str(value).strip() or None
 
 
 @dataclass(frozen=True)
@@ -102,7 +129,7 @@ class OutputRefRefused(Exception):
 
 #: 一条引用在附件表里用到的键。非 dict、又没有 ``model_dump`` 的对象按这几个
 #: 键逐个取属性。
-_CITATION_FIELDS = ("kind", "ref_kind", "ref_id", "version", "title")
+_CITATION_FIELDS = ("kind", "ref_kind", "ref_id", "version", "title", "issue_key")
 
 
 def _kind_of(att: Any) -> Optional[str]:
@@ -178,45 +205,72 @@ def _coordinates(att: dict) -> Tuple[str, str, int]:
     return ref_kind, ref_id, version
 
 
-def _verified(
-    coord: Tuple[str, str, int], chain: Sequence[dict], *, issue_id: Any
-) -> ChatOutputRef:
-    """版本链里挑出被引的那一版，并确认它是**本 issue** 产的。
+def _row_of(coord: Tuple[str, str, int], chain: Sequence[dict]) -> Optional[dict]:
+    """被引的那一版在链上的行，没有就是 ``None``。
 
-    引别的 issue 的产出用同一个 code：对客户端而言两者都是「这条引用用不了」，
-    而分出一个「存在但你不能引」的 code 等于确认了那个对象存在。消息正文说得
-    出原因，那是给日志和开发者看的。
+    两个调用方共用（收集来源议题、构造 ``ChatOutputRef``）—— 挑版本的规则只写
+    一遍，不然「问谁的议题」和「盖谁的标题」会挑到两行。
     """
+    version = coord[2]
+    return next((r for r in chain if int(r.get("version") or 0) == version), None)
+
+
+def _verified(
+    coord: Tuple[str, str, int], chain: Sequence[dict], *, visible_issues: set
+) -> ChatOutputRef:
+    """版本链里挑出被引的那一版，并盖上它的来源议题。
+
+    **归属已经在装载这条链时判完了**（``assert_chain_visible`` 要么给出链，
+    要么 404），所以这里不再比 issue —— 比一次等于第二把尺子，而两把尺子迟早
+    分叉（3c §2.4）。剩下的唯一问题是「链上有没有这一版」，答案是 no 时用同一个
+    ``UNRESOLVABLE``：分出一个「存在但你不能引」的 code 等于确认那个对象存在。
+
+    ``issue_key`` 的口径，按顺序：
+
+    1. **被引那一版自己的议题**，前提是调用方看得见它。一条链可以跨议题——v1
+       产于 MH-42、最新版产于 MH-98——而 chip 要说的是「你在 **MH-42** 上产的
+       那一版」。无条件用链级归属会把 v1 标成 MH-98，也就是把来源说错。
+    2. 判不过就退回**链级归属**（``newest_with_a_run``，血缘端点 / diff / 回退
+       响应补人手版归属时问的同一行）。两种情况会走到这里：被引版所属议题对调用
+       方不可见（``issue_key`` 是可路由的，直接透出去就是跨团队边界一行一行地
+       漏，同 ``redact_foreign_issue_links``），以及人手版（``run_id IS NULL``）
+       ——它自己答不出归属。
+    3. 链级也答不出（整条链没有带 run 的版本）就是 ``None``：缺席说的是「不知道
+       来源」，不是一个编出来的议题。
+
+    ``visible_issues`` 是**批量算好的**字符串 id 集合（见 ``resolve_output_refs``）：
+    一条评论最多 8 条引用，逐条问可见性会让它发 8 次往返。
+    """
+    # 延迟 import 打断 service ↔ router 的环（同 ``revert._chain_identity``）。
+    from app.api.outputs_router import newest_with_a_run
+
     ref_kind, ref_id, version = coord
-    row = next(
-        (r for r in chain if int(r.get("version") or 0) == version),
-        None,
-    )
+    row = _row_of(coord, chain)
     if row is None:
         raise OutputRefRefused(
             UNRESOLVABLE, f"{ref_kind}/{ref_id} has no version {version}"
         )
-    row_issue = row.get("issue_id")
-    if row_issue is None or str(row_issue) != str(issue_id):
-        raise OutputRefRefused(
-            UNRESOLVABLE,
-            f"{ref_kind}/{ref_id} v{version} was not produced on this issue",
-        )
-    title = row.get("title")
+    own_id = row.get("issue_id")
+    if own_id is not None and str(own_id) in visible_issues:
+        issue_key = _clean_title(row.get("issue_key"))
+    else:
+        chain_owner = newest_with_a_run(list(chain)) or {}
+        issue_key = _clean_title(chain_owner.get("issue_key"))
     return ChatOutputRef(
         ref_kind=ref_kind,
         ref_id=ref_id,
         version=version,
-        title=str(title) if title is not None else None,
+        title=_clean_title(row.get("title")),
+        issue_key=issue_key,
     )
 
 
 def _stamped(ref: ChatOutputRef) -> dict:
     """存进消息 ``attachments`` 的形状（T6 的 chip 按它渲染）。
 
-    只有这五个键——客户端随附件发来的任何其它字段都不进存储：存下来的东西
-    是我们自己校验过的坐标，不是客户端说了什么。``title`` 为空时**整个键省略**
-    （与渲染层「缺席不是空串」同一口径）。
+    只有这几个键——客户端随附件发来的任何其它字段都不进存储：存下来的东西
+    是我们自己校验过的坐标，不是客户端说了什么。``title`` / ``issue_key`` 为空时
+    **整个键省略**（与渲染层「缺席不是空串」同一口径）。
     """
     out = {
         "kind": ATTACHMENT_KIND,
@@ -226,15 +280,21 @@ def _stamped(ref: ChatOutputRef) -> dict:
     }
     if ref.title is not None:
         out["title"] = ref.title
+    if ref.issue_key is not None:
+        out["issue_key"] = ref.issue_key
     return out
 
 
 async def resolve_output_refs(
-    attachments: Optional[Sequence[Any]], *, issue_id: Any
+    attachments: Optional[Sequence[Any]], *, issue_id: Any, auth: Any
 ) -> OutputRefResolution:
-    """校验本次评论里的每条引用，并把登记表的标题盖上去。
+    """校验本次评论里的每条引用，并把登记表的标题与来源议题盖上去。
 
     任何一条过不了就整体 ``OutputRefRefused``——见模块 docstring 的纪律一。
+
+    ``issue_id`` 留在签名里，但它**不再是归属判据**（3c §2.4）：判据是
+    ``auth`` 那把可见性尺子。它还在是因为拒绝消息与日志要说得出这次引用发生在
+    哪件议题上。
     """
     items = list(attachments or [])
     # 归一只对**引用**做（见 ``_kind_of`` 的第二条警告）；其余条目原样留在
@@ -258,16 +318,33 @@ async def resolve_output_refs(
 
     coords = [_coordinates(mapping) for _idx, mapping in cited]
 
-    repo = get_run_deliverables_repository()
     chains: dict[Tuple[str, str], List[dict]] = {}
     for ref_kind, ref_id, _version in coords:
         key = (ref_kind, ref_id)
-        if key not in chains:
+        if key in chains:
             # 同一对象被引多版只查一次：整条链一次就取回来了。
-            chains[key] = list(await repo.lineage_for(kind=ref_kind, ref_id=ref_id))
+            continue
+        try:
+            chains[key] = list(await assert_chain_visible(ref_kind, ref_id, auth))
+        except HTTPException:
+            # 404（看不见 / 没登记）与「链上没有这一版」是同一个回答：分出一个
+            # 「存在但你不能引」的 code 等于确认那个对象存在。
+            raise OutputRefRefused(
+                UNRESOLVABLE, f"{ref_kind}/{ref_id} cannot be cited here"
+            ) from None
+
+    # 被引各版**自己**的议题，一次批量问可见性（上限 8 条引用，逐条问就是 8 次
+    # 往返）。判不过的那几条会在 ``_verified`` 里退回链级归属。
+    candidates = {
+        str(row["issue_id"])
+        for coord in coords
+        if (row := _row_of(coord, chains[(coord[0], coord[1])])) is not None
+        and row.get("issue_id") is not None
+    }
+    visible = await visible_issue_ids(candidates, auth) if candidates else set()
 
     refs = tuple(
-        _verified(coord, chains[(coord[0], coord[1])], issue_id=issue_id)
+        _verified(coord, chains[(coord[0], coord[1])], visible_issues=visible)
         for coord in coords
     )
 
@@ -282,8 +359,8 @@ def output_refs_from_attachments(
 ) -> List[ChatOutputRef]:
     """本轮附件里的引用，**纯投影，不查库**。
 
-    读的是 ``resolve_output_refs`` 在发帖口盖好的那份坐标，所以这里不重复
-    校验。安全上站得住是因为这个框**只交付坐标**：即使某条路径送进来一条没
+    读的是 ``resolve_output_refs`` 在发帖口盖好的那份坐标（含 3c 的
+    ``issue_key``），所以这里不重复校验。安全上站得住是因为这个框**只交付坐标**：即使某条路径送进来一条没
     校验过的引用，模型拿到的也只是一个 kind/id/version 和一个经
     ``escape_frame_attr`` 转义过的标题——没有内容、没有权限、没有可被伪造的
     结构。登记表校验存在的意义是**让用户被告知**，不是替模型挡内容。
@@ -303,13 +380,17 @@ def output_refs_from_attachments(
                 f"[output_ref] dropping an unvalidated citation from a turn: {exc}"
             )
             continue
-        title = mapping.get("title")
         out.append(
             ChatOutputRef(
                 ref_kind=ref_kind,
                 ref_id=ref_id,
                 version=version,
-                title=str(title) if title is not None else None,
+                title=_clean_title(mapping.get("title")),
+                # 3c §2.4：来源议题也读回来。``citations_for_transcript`` 的
+                # **生产读者是这一条投影**（轮次里），不是发帖口那次解析——
+                # 这里不读，线程「引用 N 件」那一行就永远说不出来源，而发帖口
+                # 的单测照样绿。
+                issue_key=_clean_title(mapping.get("issue_key")),
             )
         )
     return out
@@ -326,14 +407,16 @@ def citations_for_transcript(refs: Sequence[ChatOutputRef]) -> List[dict]:
     里丢精度（本仓 ``bigIntSafeFetch`` 存在的同一个理由）。``version`` 是小
     整数，照旧是 number。
 
-    ``title`` 为空时**键省略**，与 ``_stamped`` 同一口径：缺席说的是「没有标
-    题」，空串说的是「标题就是空的」。
+    ``title`` / ``issue_key`` 为空时**键省略**，与 ``_stamped`` 同一口径：缺席
+    说的是「没有标题」，空串说的是「标题就是空的」。
     """
     out: List[dict] = []
     for ref in refs:
         item = {"kind": ref.ref_kind, "ref_id": str(ref.ref_id), "version": ref.version}
         if ref.title is not None:
             item["title"] = ref.title
+        if ref.issue_key is not None:
+            item["issue_key"] = ref.issue_key
         out.append(item)
     return out
 
@@ -341,8 +424,10 @@ def citations_for_transcript(refs: Sequence[ChatOutputRef]) -> List[dict]:
 def refuse_citations_without_issue(attachments: Optional[Sequence[Any]]) -> None:
     """在**没有 issue 可作用域**的入口上，任何引用一律类型化拒绝。
 
-    3a 里一条引用按定义是 issue 作用域的：``_verified`` 校验的正是「这一版的
-    run 属于本 issue」，而聊天面板那条路根本没有 issue 可比。三种处理方式里：
+    3c §2.4 把归属放宽成「这条链你看得见」之后，这条**仍然拒绝**：放宽的是
+    「哪条链可以被引」，不是「引用可以没有议题」。引用落进 ``output_citations``
+    时带的就是发生它的那件议题（反查的一半靠它），而聊天面板那条路没有议题可
+    记。三种处理方式里：
 
     - **静默丢掉**——本仓明令禁止（「触发路径必须类型化失败回显」）。
     - **照单渲染**——那就是把 ``ref_kind`` / ``ref_id`` / ``version`` / ``title``

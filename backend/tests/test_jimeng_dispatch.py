@@ -170,3 +170,166 @@ async def test_jimeng_adapter_forwards_resolution(monkeypatch):
     provider, model = await resolve_image_provider("jimeng-cli-image")
     await provider.generate("p", model, aspect_ratio="1:1", resolution="2k")
     assert calls[0]["resolution_type"] == "2k"
+
+
+# ------------------------------------------------------- BYOK tier (2026-09-15)
+#
+# The user's own Settings → AI image models join the catalog rows as a SECOND
+# tier (``byok_rows.byok_image_rows``). The contract these cases pin is that
+# the tier ADDS reach without moving anything that already worked: catalog rows
+# keep their order and the jimeng-cli preference, BYOK rows sit behind them, and
+# a call with no user in scope still sees nothing but the catalog.
+
+_SEEDREAM = "doubao-seedream-5-0-pro-260628"
+
+
+def _byok_row(**over):
+    row = _row(
+        name=_SEEDREAM,
+        actual_provider="ark",
+        actual_model=_SEEDREAM,
+        api_key="user-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        sort_order=10_000,
+    )
+    row.update({"owner_user_id": "u1", "source": "byok", "byok_provider": "doubao"})
+    row.update(over)
+    return row
+
+
+def _patch_byok(monkeypatch, rows, calls: list | None = None):
+    import app.services.media.parsers.video_providers.db_registry as reg
+
+    async def fake_byok_image_rows(user_id):
+        if calls is not None:
+            calls.append(user_id)
+        return list(rows)
+
+    monkeypatch.setattr(reg, "byok_image_rows", fake_byok_image_rows)
+
+
+async def test_byok_row_resolves_when_the_catalog_is_empty(monkeypatch):
+    _patch_repo(monkeypatch, [])
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider(user_id="u1")
+    assert isinstance(provider, ArkImageProvider)
+    assert model == _SEEDREAM
+    # _capabilities_for resolves the protocol back from this stamp.
+    assert provider.provider_key == "ark"
+
+
+async def test_catalog_jimeng_still_wins_over_a_byok_row(monkeypatch):
+    """Unspecified calls must behave exactly as before the tier existed."""
+    _patch_repo(monkeypatch, [_row(name="jimeng-cli-image")])
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider(user_id="u1")
+    assert isinstance(provider, _JimengImageAdapter)
+    assert model == "5.0"
+
+
+async def test_an_explicit_byok_model_name_beats_an_unrelated_catalog_row(monkeypatch):
+    _patch_repo(
+        monkeypatch,
+        [
+            _row(
+                name="ark-seedream",
+                actual_provider="ark",
+                actual_model="doubao-seedream",
+                api_key="platform-key",
+                base_url="https://ark.example/api/v3",
+            )
+        ],
+    )
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider(_SEEDREAM, user_id="u1")
+    assert model == _SEEDREAM
+    assert provider._api_key == "user-key"  # the USER's credential, not the admin's
+
+
+async def test_the_provider_key_alone_selects_the_users_first_image_model(monkeypatch):
+    """``provider="doubao"`` is what an agent naturally passes — it names the
+    provider CARD, not an upstream model id, and no catalog row is called that.
+
+    The catalog holds a non-jimeng row here on purpose: with an empty catalog
+    the BYOK row is also ``rows[0]``, so the name match would be doing nothing
+    and deleting ``_explicit_match``'s ``byok_provider`` clause would keep this
+    green. The platform row is what makes the assertion mean something —
+    without the clause, resolution falls through to it.
+    """
+    _patch_repo(
+        monkeypatch,
+        [
+            _row(
+                name="ark-platform",
+                actual_provider="ark",
+                actual_model="plat-model",
+                api_key="platform-key",
+                base_url="https://ark.example/api/v3",
+            )
+        ],
+    )
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider("doubao", user_id="u1")
+    assert isinstance(provider, ArkImageProvider)
+    assert model == _SEEDREAM
+    assert provider._api_key == "user-key"
+
+
+async def test_byok_rows_are_requested_for_the_caller_s_user_only(monkeypatch):
+    """There is no cross-user path: the tier is asked for exactly the user_id
+    resolution received, so another user's row can never enter the pool."""
+    calls: list = []
+    _patch_repo(monkeypatch, [])
+    _patch_byok(monkeypatch, [_byok_row()], calls=calls)
+    await resolve_image_provider(user_id="u1")
+    assert calls == ["u1"]
+
+
+async def test_no_user_in_scope_still_consults_the_tier_which_returns_nothing(
+    monkeypatch,
+):
+    """``byok_image_rows(None)`` is the fail-closed choke point (it does not
+    even read settings), so resolution with no user sees the catalog only —
+    and an empty catalog raises the message naming both tiers."""
+    calls: list = []
+    _patch_repo(monkeypatch, [])
+    _patch_byok(monkeypatch, [], calls=calls)
+    with pytest.raises(RuntimeError, match="no image model configured"):
+        await resolve_image_provider()
+    assert calls == [None]
+
+
+async def test_the_empty_message_names_both_tiers(monkeypatch):
+    _patch_repo(monkeypatch, [_row(is_enabled=False)])
+    _patch_byok(monkeypatch, [])
+    with pytest.raises(RuntimeError, match=r"mediahub_models catalog or user BYOK"):
+        await resolve_image_provider(user_id="u1")
+
+
+async def test_the_catalog_tier_wins_an_unspecified_call(monkeypatch):
+    """Tier order is the compatibility promise of this whole change: a call
+    that names no model must resolve exactly as it did before the BYOK tier
+    existed.
+
+    ``jimeng_first`` ignores list order, so a catalog row that is NOT jimeng is
+    the only shape that can see the difference — with an ark catalog row and an
+    ark BYOK row, ``rows[0]`` is the only thing deciding, and flipping
+    ``[*catalog, *byok]`` to ``[*byok, *catalog]`` silently starts spending the
+    user's own key on calls the admin catalog used to serve.
+    """
+    _patch_repo(
+        monkeypatch,
+        [
+            _row(
+                name="ark-platform",
+                actual_provider="ark",
+                actual_model="plat-model",
+                api_key="platform-key",
+                base_url="https://ark.example/api/v3",
+            )
+        ],
+    )
+    _patch_byok(monkeypatch, [_byok_row()])
+    provider, model = await resolve_image_provider(user_id="u1")
+    assert model == "plat-model"
+    assert provider._api_key == "platform-key"

@@ -309,6 +309,10 @@ class GenerationOrigin:
     # resolve it against a real asset first (see
     # ``canvas_generation._source_asset_id_for``).
     source_asset_id: Optional[int] = None
+    # 这次生成用的是用户自己的 provider key。``cost_cents`` 照算（血缘里那是真价），
+    # 只是不该再收平台积分（用户裁定 2）。缺省 False —— 画布 / DBOS 分镜那些
+    # 调用点不接线也不会误判成 BYOK。
+    byok: bool = False
 
 
 async def register_generated_media(
@@ -416,11 +420,17 @@ async def register_generated_media(
             kind="generated_media",
             ref_id=str(out["id"]),
             title=_first_line(origin.prompt),
+            # 标题取首行、正文取全文——两者刻意不是同一个值：列表要短，搜索
+            # 要能命中提示词第二段里的那个词。
+            search_text=origin.prompt,
             model=origin.model,
             # 媒体类是登记时就精确的价（血缘里 ``cost_kind=exact``）：调用方
             # 自己知道就用它的，否则取目录每次调用价。无价即 None，UI 显 '—'
             # ——不伪造一个数字（3b spec §3.2）。
             cost_cents=cost_cents,
+            # BYOK 时把同一个价钱同时写进 BYOK 道；不是 BYOK 就不写这个键
+            # （缺席 = 平台付的）。⚠️ 不改 ``origin``（调用方的对象，不可变纪律）。
+            byok_cents=cost_cents if origin.byok else None,
             turn=origin.turn,
             step=origin.step,
             recorder=recorder,

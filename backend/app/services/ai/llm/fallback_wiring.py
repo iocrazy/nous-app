@@ -233,6 +233,9 @@ async def build_fallback_llm(
         primary_model=primary_model,
         fallback_models=fallback_models,
         adapter_factory=_adapter_factory,
+        # 这些模型的 adapter 是上面用目录行（admin）凭证预解析的，所以哪怕这条
+        # run 是 BYOK，落到它们身上的那一步也是平台付的钱。
+        platform_models=frozenset(_platform_adapters),
         health_registry=health_registry,
         total_deadline_seconds=llm_total_deadline_s(),
     )

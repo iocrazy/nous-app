@@ -42,7 +42,9 @@ const version = (version: number, parent: number | null, over: Partial<OutputVer
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${version}`,
   actor_user_id: null, reverted_from_version: null, cost_kind: 'allocated',
   seq: version, turn: 1, step: version, title: `Shot #1 v${version}`, model: 'qwen-max',
-  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z', ...over,
+  cost_cents: version === 1 ? null : 0.42, created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+  cited_count: 0, cited_in: [], ...over,
 });
 
 const shot: OutputObject = { kind: 'script_shot', ref_id: '9', title: 'Shot #1 v3', latest_version: 3, versions: [version(3, 2), version(2, 1), version(1, null)] };
@@ -102,8 +104,11 @@ describe('OutputsBlockView', () => {
   });
 
   it('reads the issue id straight from the issue, not from the rollup', async () => {
+    // A numeric id (what `GET /issues/{id}` still serializes) arrives as the
+    // string the endpoint wants — B3 removed the `Number()` round-trip, not
+    // the source of the id.
     render(<OutputsBlockView ctx={ctx()} />);
-    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledWith(ISSUE_ID));
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalledWith(String(ISSUE_ID)));
   });
 });
 
@@ -214,5 +219,42 @@ describe('OutputsBlockView — live refresh', () => {
     act(() => notifyTurn('999999', { runId: 'r1', seq: 7 }));
     await new Promise((r) => setTimeout(r, 0));
     expect(listIssueOutputs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OutputsBlockView — Snowflake discipline (B3)', () => {
+  // `IssueBlockContext.issue` is `Record<string, unknown>` on purpose: the id
+  // reaches a block as whatever its host had. 3a's own wire fields
+  // (`rollup.issue_id`, every `versions[].issue_id`) are STRINGS because a
+  // Snowflake past 2^53 does not survive a JS number — and
+  // `listIssueOutputs` / `useTurnSignal` both take one. `Number()` in the
+  // middle is the one step that can lose a digit.
+  const BIG = '9007199254740993'; // 2^53 + 1 — Number() rounds it to …92
+
+  it('asks for the issue id exactly as it was given, without a Number() round-trip', async () => {
+    render(<OutputsBlockView ctx={{ issue: { id: BIG }, rollup: null, originKind: null, phase: 'running', env: {} } as IssueBlockContext} />);
+    await waitFor(() => expect(listIssueOutputs).toHaveBeenCalled());
+    expect(listIssueOutputs).toHaveBeenCalledWith(BIG);
+  });
+
+  it('still hears the turn signal for that exact id', async () => {
+    render(<OutputsBlockView ctx={{ issue: { id: BIG }, rollup: null, originKind: null, phase: 'running', env: {} } as IssueBlockContext} />);
+    await screen.findAllByTestId('outputs-row');
+    await waitFor(() => expect(__listenerCount(BIG)).toBe(1));
+  });
+});
+
+describe('OutputsBlockView — no id to read (评审 Info)', () => {
+  it('asks for nothing and parks its listener when the host has no issue id', async () => {
+    // A block mounted without an id has nothing to read. `String(undefined)`
+    // would have sent `GET /issues/undefined/outputs` and subscribed under the
+    // key "undefined" — a 404 per mount, and a listener no `notifyTurn` can
+    // ever reach. Same posture as `useMentionOutputsTab`, which parks the
+    // subscription on the empty key.
+    render(<OutputsBlockView ctx={{ issue: {}, rollup: null, originKind: null, phase: null, env: {} } as IssueBlockContext} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listIssueOutputs).not.toHaveBeenCalled();
+    expect(__listenerCount('undefined')).toBe(0);
+    expect(screen.queryByTestId('outputs-block')).toBeNull();
   });
 });

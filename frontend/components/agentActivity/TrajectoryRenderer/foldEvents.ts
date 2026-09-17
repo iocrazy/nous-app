@@ -124,6 +124,14 @@ export interface OutputCitation {
   refId: string;
   version: number;
   title: string | null;
+  /** The issue the cited version was PRODUCED on (3c §2.4). A citation may now
+   *  point at another issue's output — the chain only has to be visible to the
+   *  caller — so the chip needs somewhere to say where it came from.
+   *
+   *  `null` on every citation recorded before 3c and on any chain that answers
+   *  to no issue. Absent is not "the same issue": the two look identical on
+   *  screen only because a chip naming the issue you are on is not drawn. */
+  issueKey: string | null;
 }
 
 export interface UserNode {
@@ -204,8 +212,22 @@ export interface ErrorNode {
   text: string;
 }
 
+/**
+ * 一段阶段性叙述（3c §4.1）：模型在这一步动手**之前**说的话。不是 step 里的一行，
+ * 而是 step 之间的一段正文。最终回答（无 `partial`）不走这里，仍折进它的 step。
+ */
+export interface NarrationNode {
+  kind: 'narration';
+  key: string;
+  text: string;
+  /** 它属于哪一步；坐标缺席的老行是 null。 */
+  step: number | null;
+  at: string | null;
+}
+
 export type TrajectoryNode =
   | UserNode
+  | NarrationNode
   | StepNode
   | InboxNode
   | ScheduleNode
@@ -269,7 +291,16 @@ const citationsFrom = (v: unknown): OutputCitation[] => {
     const refId = str(item.ref_id);
     const version = num(item.version);
     if (!kind || !refId || version === null) continue;
-    out.push({ key: `${kind}:${refId}:${version}`, kind, refId, version, title: str(item.title) });
+    out.push({
+      key: `${kind}:${refId}:${version}`,
+      kind,
+      refId,
+      version,
+      title: str(item.title),
+      // `citations_for_transcript` omits the key rather than sending null when
+      // there is none, so absent and empty are the same answer here.
+      issueKey: str(item.issue_key),
+    });
   }
   return out;
 };
@@ -370,6 +401,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
   };
 
   /**
+   * Where that step SITS — the same lookup `stepAt` does, one level down. A
+   * narration has to be spliced in *before* its step (3c §4.1), and that
+   * needs the position, not the node.
+   */
+  const stepIndexAt = (turn: number, step: number): number => {
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const n = nodes[i];
+      if (n.kind === 'step' && n.turn === turn && n.step === step) return i;
+    }
+    return -1;
+  };
+
+  /**
    * An existing step at these coordinates, wherever it sits in the list.
    * A deliverable registered through DBOS can land after a LATER step has
    * already started (the storyboard render finishes long after the turn that
@@ -377,11 +421,8 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
    * whichever step happens to be last, and not to a phantom new one.
    */
   const stepAt = (turn: number, step: number): StepNode | null => {
-    for (let i = nodes.length - 1; i >= 0; i -= 1) {
-      const n = nodes[i];
-      if (n.kind === 'step' && n.turn === turn && n.step === step) return n;
-    }
-    return null;
+    const i = stepIndexAt(turn, step);
+    return i < 0 ? null : (nodes[i] as StepNode);
   };
 
   /**
@@ -435,13 +476,30 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       }
 
       case 'step_end': {
-        const node = current ?? ensureStep(ev, null);
+        // Its own step FIRST, by coordinate — the same `stepAt` lookup
+        // `deliverable` and `subagent_done` already use (C8). A step_end can
+        // arrive after a LATER step has started (the same out-of-order the
+        // other two branches were fixed for), and `current ?? …` then files
+        // this step's duration, cost and finish reason under whichever step
+        // happens to be open: the step that really ran shows no time at all,
+        // and the one that is running picks up money it never spent.
+        //
+        // Columns first, payload second — the fallback `step_start` and the
+        // `deliverable` branch (B2) both have, for pre-453 rows whose
+        // coordinates live only in the payload.
+        const coord = num(ev.step) ?? num(p.step);
+        const own =
+          coord !== null ? stepAt(num(ev.turn) ?? num(p.turn) ?? 1, coord) : null;
+        const node = own ?? current ?? ensureStep(ev, null);
         node.summary.durationMs = num(p.duration_ms);
         node.summary.costCents = num(p.cost_cents);
         node.summary.finishReason = str(p.finish_reason);
         if (node.summary.costCents !== null) stepCost += node.summary.costCents;
         if (!node.model) node.model = str(p.model);
-        closeCurrent();
+        // A late row about an OLD step ends nothing — same rule `ensureStep`
+        // states for out-of-order events. Closing `current` here would strand
+        // the live marker on a step the run has already walked past.
+        if (node === current) closeCurrent();
         break;
       }
 
@@ -453,14 +511,24 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // ({error:"timeout", timed_out:true, timeout_s, elapsed_s}) — a
         // failure with its own badge, never a generic "failed".
         const timedOut = result !== null && result.timed_out === true;
-        const ok = !(result !== null && (result.ok === false || timedOut));
+        // 失败的真来源是**顶层** `error_code`（Task 8）。后端 `tool_error_code` 把三
+        // 种形状归一到它：处理方给的 `error_code`、非 `ok` 的 `outcome`、以及光有
+        // `error` 键——后两种都不带 `ok:false`。只认 `result.ok` 会把 denied、
+        // invalid_args 这类失败读成成功，而动作动词那一行正是靠 `ok` 决定要不要说
+        // "failed"（3c §4.1）。两个判据都要，不是二选一。
+        const ok = !(result !== null && (result.ok === false || timedOut)) && str(p.error_code) === null;
         upsertLine(node, `tool:${ev.seq}`, () => ({
           type: 'tool',
           label: tool,
           ok,
-          durationMs: null,
+          // 这一步花了多久（Task 8 起在 payload 顶层）。缺席保持 null，那正是
+          // 「这次调用还没回来」的判据——`AIChatPanel` 的 `openTool` 读它。
+          durationMs: num(p.duration_ms),
           detail: {
             tool,
+            // 动作动词要拿它拼「对象」（3c §4.1）。真 wire 上 `_truncate_payload`
+            // 会把嵌套字典字符串化，所以走 `obj()` 而不是直接读。
+            args: obj(p.args),
             iteration: num(p.iteration),
             timedOut,
             timeoutS: timedOut ? num(result?.timeout_s) : null,
@@ -520,6 +588,32 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
       }
 
       case 'assistant': {
+        // 3c §4.1：带 `partial` 的是阶段性叙述——模型在这一步动手**之前**说的话。
+        // 它不是 step 里的一行，而是一个独立正文节点，插在它所属 step 节点**之前**：
+        // `step_start` 先于这条事件到达，step 节点早已在列表里，只能按坐标插队。
+        // 光靠 `push` 会把叙述排到动作后面，读起来就成了事后解释。
+        if (p.partial === true) {
+          const text = str(p.content);
+          if (text) {
+            const step = num(ev.step) ?? num(p.step);
+            const narration: NarrationNode = {
+              kind: 'narration',
+              key: `narration:${ev.seq}`,
+              text,
+              step,
+              at: ev.created_at ?? null,
+            };
+            // 坐标齐全由 Task 19 的契约保证。万一缺席（老行、别的写方），没有
+            // 「该插哪里」的依据，就按到达顺序追加到末尾——位置靠后好过插错步。
+            // 这是有意的降级，`foldEvents.test.ts` 有用例钉住它。
+            const at = step === null ? -1 : stepIndexAt(num(ev.turn) ?? num(p.turn) ?? 1, step);
+            if (at < 0) nodes.push(narration);
+            else nodes.splice(at, 0, narration);
+          }
+          // 必须在这里返回：落到下面会既画节点又 `ensureStep`，一段叙述就把还没
+          // 开始的 step 提前开了出来。
+          break;
+        }
         const node = ensureStep(ev, null);
         const content = str(p.content) ?? '';
         node.summary.outputs += 1;
@@ -628,9 +722,14 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // strand the live marker on an empty phantom node. Only when the run
         // has no step at all does one get made, because the alternative is
         // dropping the card entirely (修复轮 1)。
-        const coord = num(ev.step);
+        // Columns first, payload second — the same fallback `step_start`
+        // has (B2). The registry writes both, but a pre-453 row (and any
+        // recorder that fell back to `emit`'s positional signature) carries
+        // the coordinates ONLY in the payload; without this they land on
+        // whatever step is open instead of the one that produced them.
+        const coord = num(ev.step) ?? num(p.step);
         const node =
-          (coord !== null ? stepAt(num(ev.turn) ?? 1, coord) : null) ??
+          (coord !== null ? stepAt(num(ev.turn) ?? num(p.turn) ?? 1, coord) : null) ??
           current ??
           lastStep() ??
           ensureStep(ev, null);

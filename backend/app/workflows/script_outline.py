@@ -34,18 +34,17 @@ async def generate_outline_chapters(
 ) -> list[dict[str, Any]]:
     """Run the LLM outline call. Returns list of {title, summary} dicts."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
+    cfg = await resolve_script_ai_config(user_id)
     ai_svc = ScriptAIService(
         user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     chapters = await ai_svc.generate_outline(premise, chapter_count, style_guide)
     logger.info(f"[script_outline][step] LLM returned {len(chapters)} chapters")

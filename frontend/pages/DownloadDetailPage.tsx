@@ -439,6 +439,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
     <VideoPlayer
       src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
+      resumeKey={`media:${video.platform_id}`}
       originalSrc={hlsUrl ? getVideoUrl(video, mediaToken ?? undefined) || undefined : undefined}
       authToken={authToken || undefined}
       playerRef={playerRef}

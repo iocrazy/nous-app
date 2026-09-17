@@ -74,8 +74,14 @@ def fetch_and_parse(
     same chain the download-time re-parse uses — the initial-parse /
     re-parse fork (and its dead LightHTTP tier) is gone.
 
-    Returns (aweme_detail, parsed_data, parse_method). Raises
-    RuntimeError on failure."""
+    Returns (aweme_detail, parsed_data, parse_method).
+
+    Raises ``DouyinParseError`` (a ``RuntimeError`` subclass) on failure — its
+    message is the one the user reads on the failed task, so it names what
+    douyin actually did (asked for verification / rejected our signature)
+    instead of the old blanket "All enabled Douyin parse methods failed",
+    which gave fifteen identical retries and no way to tell that retrying was
+    hopeless (2026-09-15)."""
     from app.services.media.parsers.douyin_parse.parse_chain import (
         fetch_douyin_detail,
     )
@@ -91,6 +97,9 @@ def fetch_and_parse(
         )
     )
     if not result:
+        # Defensive: the chain raises a typed DouyinParseError on every failure
+        # path now, so reaching here means it returned a falsy success. Kept as
+        # a real error rather than a silent pass-through.
         raise RuntimeError("All enabled Douyin parse methods failed")
     aweme_detail, parsed_data, parse_method = result
 

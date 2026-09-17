@@ -661,7 +661,24 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     tab container's already supplies the gap before the first
                     scroll, and adding a second one stacked into a visible band
                     above this row. */}
-                <div className={`sticky top-0 z-10 -mx-4 sm:-mx-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:px-6 ${island ? 'bg-island-1' : 'bg-ink-900'}`}>
+                {/* The backdrop is the `island` token. It used to name an
+                    `island-1` that does not exist (the family is `island` and
+                    `island-2`), and Tailwind emits nothing for an undefined
+                    colour — so this row was TRANSPARENT and the segments showed
+                    straight through the controls as they scrolled under them.
+                    utils/designTokenClasses.test.ts now catches that class of
+                    mistake. */}
+                <div className={`sticky top-0 z-10 -mx-4 sm:-mx-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:px-6 ${island ? 'bg-island' : 'bg-ink-900'}`}>
+                  {/* Fade the text out as it slides up under the row, instead of
+                      cutting it off at a hard edge. Hangs below the row
+                      (`top-full`) in the row's own surface colour, so it reads
+                      as the backdrop dissolving rather than a separate band. A
+                      sticky element is positioned, so it anchors this. */}
+                  <div
+                    aria-hidden="true"
+                    data-testid="transcript-toolbar-fade"
+                    className={`pointer-events-none absolute inset-x-0 top-full h-6 bg-gradient-to-b to-transparent ${island ? 'from-island' : 'from-ink-900'}`}
+                  />
                   <div className={`flex items-center gap-3 text-xs ${cText500}`}>
                     <span className="flex items-center gap-1">
                       <Clock size={12} />

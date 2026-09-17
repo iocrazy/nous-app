@@ -10,9 +10,13 @@ trusting the decoration produced. Priority:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 from typing import Any, Optional
 
+from loguru import logger
+
+from app.services.billing.run_tree_points import charged_points_for_run_trees
 from app.services.issues.origin_resolvers import resolve_origin
 
 TERMINAL_ISSUE = frozenset({"done", "cancelled", "closed"})
@@ -76,6 +80,18 @@ def derive_phase(issue: dict[str, Any], runs: list[dict[str, Any]]) -> str:
     return "idle"
 
 
+#: 一个还没跑过 run 的议题也得有完整形状——前端无条件读这八个键。
+EMPTY_EFFICIENCY: dict[str, Any] = {
+    "runs": 0,
+    "steps": 0,
+    "tool_calls": 0,
+    "tool_errors": 0,
+    "deliverables": 0,
+    "avg_run_ms": None,
+    "turn_end_reasons": {},
+}
+
+
 def compute_rollup(
     issue: dict[str, Any],
     runs: list[dict[str, Any]],
@@ -85,6 +101,8 @@ def compute_rollup(
     *,
     now: Optional[dt.datetime] = None,
     last_seq: Optional[int] = None,
+    efficiency: Optional[dict[str, Any]] = None,
+    charged_points: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
     """``runs`` newest first, root runs only."""
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -106,6 +124,19 @@ def compute_rollup(
     if pct is not None:
         state = "over" if pct >= 100 else "warn" if pct >= 80 else "ok"
     done_children = sum(1 for s in sub_issues if s.get("status") in TERMINAL_ISSUE)
+    # 3c §3.3：计数按全体 run 求和（root + children），因为计数是每个 run 的自身量，
+    # 不像 cost_cents 那样父行已含子行。分子 ``spent`` 却是 root-only 的树总额——换
+    # 成 root-only 的计数会漏掉子 agent 干的活，换成全体求和的花费会把子 agent 的钱
+    # 数两遍。
+    eff = {**EMPTY_EFFICIENCY, **(efficiency or {})}
+    # 浅拷贝只复制顶层：没带 turn_end_reasons 的调用方会拿到 EMPTY_EFFICIENCY 里
+    # 那一个 dict 本身，谁改一下就污染了之后每一个议题。重新包一层。
+    eff["turn_end_reasons"] = dict(eff.get("turn_end_reasons") or {})
+    delivered = int(eff.get("deliverables") or 0)
+    eff["cost_per_deliverable_cents"] = (
+        round(spent / delivered, 4) if delivered > 0 else None
+    )
+    points = charged_points or {}
     return {
         "issue_id": str(issue["id"]),
         "status": issue.get("status"),
@@ -137,6 +168,7 @@ def compute_rollup(
                 "cost_cents": _run_cents(r),
                 "ended": _view(r).get("ended"),
                 "step": _view(r).get("step"),
+                "charged_points": points.get(str(r["id"])),
             }
             for r in runs
         ],
@@ -154,6 +186,7 @@ def compute_rollup(
             ],
         },
         "inbox_pending": int(inbox_pending),
+        "efficiency": eff,
         "budget": {
             "budget_cents": budget if isinstance(budget, int) else None,
             "spent_cents": spent,
@@ -190,13 +223,52 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         target_kind="issue", target_id=issue_id
     )
     origin = await resolve_origin(issue)
+
+    # 效率账与积分账互不依赖，串行只是白等一个往返 —— 这个端点是被轮询的。
+    async def _charged() -> dict[str, float]:
+        """积分账读失败只空掉这一个字段，不带走整个 rollup。
+
+        ``runs`` 是 root-only（``list_for_issue`` 明写 ``parent_run_id IS NULL``），
+        而扣费是**逐 run** 发生的，所以问的是「以这些 root 为根的整棵树各扣了多少」
+        ——3c 终审 I2：此前只取 root 自己那一条流水，真栈一次回合 6 条、余额 −6，
+        界面显示 ◇ 1.00。取数与气泡、``done`` 帧共用
+        ``charged_points_for_run_trees``，三处必须是同一个数。
+
+        仓库层一律 raise —— 另一个读方 ``/ai-library/runs/costs`` 要靠它答 503，
+        而不是把一个真花了钱的 run 显示成免费。降级的责任因此落在各消费方；这里是
+        被轮询的驾驶舱，一个字段读不到不该让进度、子议题、收件箱计数一起消失。
+
+        ⚠️ 必须自己 catch：``asyncio.gather`` 默认任何一个协程抛出就整体抛出。
+        用 ``return_exceptions=True`` 则会连带吞掉效率账那条的失败，那不是想要的。
+        """
+        try:
+            return await charged_points_for_run_trees([r["id"] for r in runs])
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"[issue_rollup] charged points read failed for {issue_id}: {e}"
+            )
+            return {}
+
+    efficiency, charged = await asyncio.gather(
+        get_agent_runs_repository().efficiency_for_issue(issue_id),
+        _charged(),
+    )
     current = _current_run(runs)
     last_seq = (
         await get_agent_runs_repository().last_transcript_seq(int(current["id"]))
         if current
         else None
     )
-    return compute_rollup(issue, runs, children, pending, origin, last_seq=last_seq)
+    return compute_rollup(
+        issue,
+        runs,
+        children,
+        pending,
+        origin,
+        last_seq=last_seq,
+        efficiency=efficiency,
+        charged_points=charged,
+    )
 
 
 __all__ = ["compute_rollup", "derive_phase", "load_rollup"]

@@ -123,3 +123,29 @@ def test_no_refs_renders_nothing():
 def test_frame_is_registered_as_owned():
     """没登记的框 = 没有防护。"""
     assert REFERENCED_OUTPUTS_FRAME in OWNED_FRAMES
+
+
+def test_empty_title_omits_the_attribute():
+    """B1：空串与缺席在框里必须长得一样——``title=""`` 是「标题是空的」。
+
+    渲染层自己也守这一条，不只靠上游归一：这个函数的 ``refs`` 类型是
+    ``Any``，将来多一条构造路径时不该由它决定框里出不出 ``title=""``。
+    """
+    for empty in ("", "   "):
+        out = render_referenced_outputs(
+            [ChatOutputRef(ref_kind="script_shot", ref_id="9", version=2, title=empty)]
+        )
+        assert "title=" not in out.split(f"</{REFERENCED_OUTPUTS_FRAME}>")[0]
+
+
+def test_a_padded_title_renders_trimmed():
+    """评审 N2：``" S3 "`` 与 ``"S3"`` 是同一个标题。
+
+    与上一条是同一条归一的两半——``_clean_title`` 用 ``strip()`` 判定「全是
+    空白就是没有标题」，那么剩下的空白也该去掉，否则模型会把 ``title=" S3 "``
+    的两个空格读成标题的一部分。tokenize 断言，不加全文 pin。
+    """
+    out = render_referenced_outputs(
+        [ChatOutputRef(ref_kind="script_shot", ref_id="9", version=2, title=" S3 ")]
+    )
+    assert 'title="S3"' in out

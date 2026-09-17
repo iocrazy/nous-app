@@ -18,7 +18,7 @@ const DeliverablesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
   return (
     <DeliverablesZone
       projectId={String(project.id)}
-      issueId={Number(ctx.issue.id)}
+      issueId={String(ctx.issue.id)}
       isStageMirror={isStageMirror}
       projectName={project.name}
       stageName={stageName}

@@ -7,13 +7,14 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.db.session import read_scope
 from app.repositories.analysis_repository import (
     EmbeddingSearchUnavailable,
     get_analysis_repository,
 )
-from app.schemas.search import DEFAULT_SEARCH_FIELDS
+from app.schemas.search import DEFAULT_SEARCH_FIELDS, LibraryChipFilters
 from app.services.ai.providers.embedding_service import EmbeddingService
 from app.services.library.like_escape import escape_like
 
@@ -81,6 +82,25 @@ QUERY_INSTRUCTION = (
 )
 
 
+def _chip_filters_active(filters: Optional[LibraryChipFilters]) -> bool:
+    """True when any My Downloads chip narrows the query.
+
+    ``None`` and ``False`` both mean "no opinion" (a chip that is off is not a
+    filter for the opposite), and an empty list selects nothing. The vector
+    RPC cannot honour any of these, so an active chip must skip that leg —
+    otherwise the merge re-adds rows the user just filtered out.
+    """
+    if filters is None:
+        return False
+    for value in filters.model_dump().values():
+        if value is None or value is False:
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        return True
+    return False
+
+
 def query_text(query: str) -> str:
     """Text to embed for a SEARCH query (never for a document)."""
     return QUERY_INSTRUCTION + query.strip()
@@ -101,6 +121,18 @@ def _row_to_result(r: Dict[str, Any]) -> SearchResult:
     )
 
 
+class SearchFiltersUnavailable(RuntimeError):
+    """The database does not yet have the filter-aware search function.
+
+    Migration 475 and the backend image deploy on independent triggers, so
+    there is a window where this code is live and the migration is not. The
+    honest answer then is "search is briefly unavailable", not a page of
+    results with the user's filters quietly ignored — that silence is the
+    defect 475 exists to remove, and re-introducing it as a fallback would
+    make the outage invisible instead of brief.
+    """
+
+
 class SearchService:
     """Service for semantic and hybrid video search (async optimized)."""
 
@@ -118,6 +150,7 @@ class SearchService:
         date_to: Optional[str] = None,
         tag_ids: Optional[List[str]] = None,
         limit: int = 1000,
+        filters: Optional[LibraryChipFilters] = None,
     ) -> List[Dict[str, Any]]:
         """Multi-field, user-scoped ILIKE search via the ``rpc_user_media_text_search``
         RPC (migration 274).
@@ -139,28 +172,84 @@ class SearchService:
         # so date strings pass through as-is — no timestamptz coercion. The
         # function returns a single jsonb object ({"rows": [...]}); asyncpg
         # may hand jsonb back as a str, so json.loads defensively.
-        async with read_scope() as session:
-            raw = (
-                await session.execute(
-                    text(
-                        "SELECT public.rpc_user_media_text_search("
-                        "CAST(:p_user_id AS uuid), :p_pattern, "
-                        "CAST(:p_fields AS text[]), :p_author, "
-                        ":p_date_from, :p_date_to, "
-                        "CAST(:p_tag_ids AS text[]), :p_limit)"
-                    ),
-                    {
-                        "p_user_id": str(user_id),
-                        "p_pattern": pattern,
-                        "p_fields": fields,
-                        "p_author": author,
-                        "p_date_from": date_from,
-                        "p_date_to": date_to,
-                        "p_tag_ids": [str(t) for t in tag_ids] if tag_ids else None,
-                        "p_limit": limit,
-                    },
-                )
-            ).scalar()
+        f = filters or LibraryChipFilters()
+        # The chip tag filter and the hybrid API's own ``tag_ids`` land on the
+        # same RPC argument. They never both arrive (no caller sets the hybrid
+        # one), and if one ever did, the chip is the one the user can see.
+        effective_tag_ids = f.tag_ids if f.tag_ids else tag_ids
+        # Named arguments, not positional: 26 of them, and a silently shifted
+        # one would filter by the wrong column rather than fail.
+        sql = text(
+            "SELECT public.rpc_user_media_text_search("
+            "p_user_id => CAST(:p_user_id AS uuid), "
+            "p_pattern => :p_pattern, "
+            "p_fields => CAST(:p_fields AS text[]), "
+            "p_author => :p_author, "
+            "p_date_from => :p_date_from, "
+            "p_date_to => :p_date_to, "
+            "p_tag_ids => CAST(:p_tag_ids AS text[]), "
+            "p_limit => :p_limit, "
+            "p_min_rating => :p_min_rating, "
+            "p_ai_transcribed => :p_ai_transcribed, "
+            "p_ai_summarized => :p_ai_summarized, "
+            "p_ai_analyzed => :p_ai_analyzed, "
+            "p_has_prompt => :p_has_prompt, "
+            "p_created_after => :p_created_after, "
+            "p_created_before => :p_created_before, "
+            "p_duration_min => :p_duration_min, "
+            "p_duration_max => :p_duration_max, "
+            "p_aspect_ratios => CAST(:p_aspect_ratios AS text[]), "
+            "p_platforms => CAST(:p_platforms AS text[]), "
+            "p_media_types => CAST(:p_media_types AS text[]), "
+            "p_has_comments => :p_has_comments, "
+            "p_min_likes => :p_min_likes, "
+            "p_min_comments => :p_min_comments, "
+            "p_min_favorites => :p_min_favorites, "
+            "p_min_shares => :p_min_shares, "
+            "p_social_combine => :p_social_combine)"
+        )
+        params = {
+            "p_user_id": str(user_id),
+            "p_pattern": pattern,
+            "p_fields": fields,
+            "p_author": author,
+            "p_date_from": date_from,
+            "p_date_to": date_to,
+            "p_tag_ids": (
+                [str(t) for t in effective_tag_ids] if effective_tag_ids else None
+            ),
+            "p_limit": limit,
+            "p_min_rating": f.min_rating,
+            "p_ai_transcribed": f.ai_transcribed,
+            "p_ai_summarized": f.ai_summarized,
+            "p_ai_analyzed": f.ai_analyzed,
+            "p_has_prompt": f.ai_has_prompt,
+            "p_created_after": f.created_after,
+            "p_created_before": f.created_before,
+            "p_duration_min": f.duration_min,
+            "p_duration_max": f.duration_max,
+            "p_aspect_ratios": f.aspect_ratios,
+            "p_platforms": f.platforms,
+            "p_media_types": f.media_types,
+            "p_has_comments": f.has_comments,
+            "p_min_likes": f.min_likes,
+            "p_min_comments": f.min_comments,
+            "p_min_favorites": f.min_favorites,
+            "p_min_shares": f.min_shares,
+            "p_social_combine": f.social_combine or "and",
+        }
+        try:
+            async with read_scope() as session:
+                raw = (await session.execute(sql, params)).scalar()
+        except DBAPIError as exc:
+            # 42883 = undefined_function. Only reachable in the deploy window
+            # described on SearchFiltersUnavailable.
+            if getattr(getattr(exc, "orig", None), "sqlstate", None) == "42883":
+                raise SearchFiltersUnavailable(
+                    "rpc_user_media_text_search does not accept filter arguments "
+                    "yet — migration 475 has not been applied to this database."
+                ) from exc
+            raise
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         return payload.get("rows") or []
 
@@ -325,6 +414,7 @@ class SearchService:
         threshold: float = 0.4,
         user_id: Optional[str] = None,
         fields: Optional[List[str]] = None,
+        filters: Optional[LibraryChipFilters] = None,
     ) -> SearchResponse:
         """
         Hybrid search: ILIKE text hits merged with cosine vector hits.
@@ -398,6 +488,10 @@ class SearchService:
                 date_to=date_to,
                 tag_ids=tag_ids,
                 limit=limit,
+                # Smart Search rides the same RPC as keyword search, so the
+                # filter chips reach it for free. Leaving them off here would
+                # have kept exactly half of the reported bug alive.
+                filters=filters,
             )
 
             logger.info(
@@ -447,7 +541,13 @@ class SearchService:
             # so running it under a filtered query would append rows the
             # caller explicitly excluded. Text-only in that case, and say so.
             vector_hits: List[SearchResult] = []
-            if tag_ids or author or date_from or date_to:
+            if (
+                tag_ids
+                or author
+                or date_from
+                or date_to
+                or _chip_filters_active(filters)
+            ):
                 vector_leg = "skipped_filters"
             elif len(text_hits) >= limit:
                 # Vector hits only ever rank BELOW text hits, so when the text

@@ -32,6 +32,8 @@ import { replayTicks } from '../agentActivity/replayTicks';
 import { isReplaying, useReplay } from './replayContext';
 import { forkMarksFor, useRunForks } from '../agentActivity/useRunForks';
 import { forkOrigin, timedOutTools } from '../agentActivity/runHeader';
+import { RunCostTail } from '../agentActivity/RunCostTail';
+import { useRunCost } from './runCostContext';
 
 // `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
 // code) rather than a success green: the whole point of the state is to be
@@ -81,6 +83,17 @@ interface IssueChatThreadProps {
    * "Open conversation" affordance is conditional on it.
    */
   aiSessionId?: string | null;
+  /** The identifier of the issue being read (`MH-96`). A posted citation
+   *  carries the issue its version was PRODUCED on, and the chip says so only
+   *  when the two differ — naming the issue in front of the reader would be
+   *  noise on every row. Absent means "do not compare", so every source issue
+   *  is drawn: that is the honest answer when we do not know where we are.
+   *
+   *  ⚠️ This prop covers the COMMENT chips only. The same comparison inside a
+   *  run's trajectory reads `TrajectoryIssueKeyContext`, which the PAGE
+   *  provides — `DetachedRunPanel` is this component's sibling, so a provider
+   *  here would leave those panels out. */
+  issueKey?: string | null;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 22 }) => (
@@ -282,10 +295,13 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean;
   // after the run ends (the Cockpit's live view is gone by then).
   const origin = useMemo(() => forkOrigin(events), [events]);
   const timedOut = useMemo(() => timedOutTools(events), [events]);
+  // 这一回合花了多少（3c §4.2）。键不在 = 账还没到，此时不画——一个编出来的
+  // `¢0.00` 会把「还不知道」说成「免费」。
+  const cost = useRunCost(runId);
   if (events.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5" data-testid="run-trajectory" data-replay-seq={replaying ? replay?.seq : undefined}>
-      {(origin || timedOut.count > 0 || fromWakeup) && (
+      {(origin || timedOut.count > 0 || fromWakeup || cost) && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="run-header-chips">
           {origin && (
             <button
@@ -316,6 +332,19 @@ export const RunTrajectory: React.FC<{ runId: string | null; isRunning: boolean;
               title={timedOut.last ?? undefined}
             >
               {t('issueDetail.toolsTimedOut', '{{count}} timed out', { count: timedOut.count })}
+            </span>
+          )}
+          {cost && (
+            <span className="ml-auto">
+              <RunCostTail
+                costCents={cost.cost_cents}
+                chargedPoints={cost.charged_points}
+                model={cost.model}
+                status={cost.status}
+                promptTokens={cost.prompt_tokens}
+                completionTokens={cost.completion_tokens}
+                live={isRunning}
+              />
             </span>
           )}
         </div>
@@ -493,7 +522,7 @@ const RunGroupCard: React.FC<{
   );
 };
 
-const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string }> = ({ msg, agentsById, selfUserId }) => {
+const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string; issueKey?: string | null }> = ({ msg, agentsById, selfUserId, issueKey }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
   const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
   const displayName = agent?.name ?? (isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'Anonymous');
@@ -522,7 +551,7 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
             {msg.body}
           </div>
         )}
-        <CitationChips msg={msg} />
+        <CitationChips msg={msg} issueKey={issueKey} />
       </div>
     </div>
   );
@@ -536,7 +565,10 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
  * as the composer's — one chip, one reading of `@<title> v<n>` — minus the X:
  * a sent comment is a record, not a draft.
  */
-const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
+const CitationChips: React.FC<{ msg: IssueMessage; issueKey?: string | null }> = ({
+  msg,
+  issueKey,
+}) => {
   const cites = (msg.attachments ?? []).filter((a) => a.kind === 'output_ref');
   if (cites.length === 0) return null;
   return (
@@ -551,6 +583,11 @@ const CitationChips: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
           refId={c.ref_id}
           version={c.version}
           title={c.title}
+          // Only when it came from somewhere else. `issue_key` is on the row
+          // whatever the source, so the comparison — not the presence of the
+          // field — is what makes the chip mean "look, this is from another
+          // issue".
+          sourceIssueKey={c.issue_key && c.issue_key !== issueKey ? c.issue_key : null}
         />
       ))}
     </div>
@@ -647,7 +684,7 @@ function buildTimeline(messages: IssueMessage[]): RenderRow[] {
   return rows;
 }
 
-export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText, teamId, aiSessionId }) => {
+export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText, teamId, aiSessionId, issueKey }) => {
   const hasStreaming = typeof streamingText === 'string' && streamingText.length > 0;
   // A2: the folded run card is the timeline's handle on the agent's own
   // conversation — without both halves of the route there is nothing to link to.
@@ -679,7 +716,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;
         if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} fromWakeup={!!m.agent_run_id && wakeupRuns.has(String(m.agent_run_id))} />;
         if (m.meta?.deliverable_upload) return <DeliverableFiledEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
-        return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
+        return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} issueKey={issueKey} />;
       })}
       {hasStreaming && <StreamingBubble text={streamingText as string} />}
     </div>

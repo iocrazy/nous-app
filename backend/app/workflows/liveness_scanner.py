@@ -45,6 +45,7 @@ from loguru import logger
 # directly from app.services.liveness.reconcile to avoid pulling this
 # module's @DBOS.scheduled decorator onto their process (gateway
 # leak fix, 2026-05-27).
+from app.services.ai.runner.turn_end import TurnEndReason
 from app.services.liveness.reconcile import (  # noqa: F401
     HEARTBEAT_DEAD_SECONDS,
     reconcile_stranded_runs,
@@ -229,6 +230,15 @@ async def _recover_from_stuck(run_id: Any) -> None:
         logger.warning(f"[liveness-scanner] recover-from-stuck {run_id} failed: {exc}")
 
 
+#: 扫描器判死的两种缘由 → ``agent_runs.turn_end_reason`` 的词（3c 终审 I4）。
+#: 两个词而不是一个：用户从分布条上要区分「进程没了」与「心跳断了」，前者是崩溃、
+#: 后者常常是网络或者卡死。取值收在 ``TurnEndReason``，那一列的词表只有一个家。
+_DEAD_TURN_END: dict[str, str] = {
+    "liveness_dead": TurnEndReason.DEAD.value,
+    "heartbeat_lost": TurnEndReason.HEARTBEAT_LOST.value,
+}
+
+
 async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
     """Mark a run dead + flip status='failed' with the liveness reason.
     The bridge trigger from migration 206 picks this up and emits a
@@ -240,7 +250,7 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
 
     try:
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 update(AgentRuns)
                 .where(
                     AgentRuns.id == run_id,
@@ -253,10 +263,44 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
                     ended_at=datetime.now(timezone.utc),
                     error_code=reason,
                     error_message=f"Marked dead by liveness scanner: {reason}",
+                    # 3c 终审 I4：同一次 UPDATE 写上这一列，否则这条 run 在
+                    # UsagePage 的 turn_end 分布条上根本不存在（那条查询带
+                    # ``turn_end_reason IS NOT NULL``），成功率只在「跑完了但
+                    # 结局不是 completed」之间比较。
+                    turn_end_reason=_DEAD_TURN_END.get(
+                        reason, TurnEndReason.DEAD.value
+                    ),
+                )
+                # 维度随行返回：小时表那一行要 team / project / agent / model /
+                # trigger，全在这张表上，不必为了记一行遥测再回一次库。
+                .returning(
+                    AgentRuns.id,
+                    AgentRuns.team_id,
+                    AgentRuns.project_id,
+                    AgentRuns.agent_id,
+                    AgentRuns.model,
+                    AgentRuns.trigger,
+                    AgentRuns.attribution,
                 )
             )
+            killed_rows = result.fetchall()
     except Exception as exc:
         logger.warning(f"[liveness-scanner] mark dead {run_id} failed: {exc}")
+        return
+
+    if killed_rows:
+        # 这条 run 永远不会再经过 ``RunRecorder._finish``，所以检索投影与小时表
+        # 那一行都只能由这里跟上（3c Task 13 评审 Important 1 / 终审 I4）。
+        # **只在 CAS 真的命中时**做 —— 没命中意味着别人已经把它收工了，再投一次
+        # 会用清扫器视角覆盖掉那个真正的终态，再写一行小时表则是重复计数。
+        #
+        # 在 ``write_scope()`` 之外：投影要读回刚提交的那一行，而且这两件事失败
+        # 都绝不该连坐这次已经成立的终态写入（见 projection 模块 docstring）。
+        from app.services.liveness.crash_rollup import record_crash_terminal_runs
+        from app.services.search.projection import project_run_id_best_effort
+
+        await project_run_id_best_effort(run_id)
+        await record_crash_terminal_runs(killed_rows)
 
 
 @DBOS.scheduled("*/30 * * * * *")  # every 30s (6-field cron)

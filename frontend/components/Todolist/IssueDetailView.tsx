@@ -29,6 +29,7 @@ import { DetachedRunPanel, IssueChatThread } from './IssueChatThread';
 import { focusTrajectoryStep } from './focusTrajectoryStep';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
+import { TrajectoryIssueKeyContext } from '../agentActivity/TrajectoryRenderer/trajectoryRunContext';
 import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { NeedsInputCard } from './NeedsInputCard';
 import { questionFromMarker } from './questionTypes';
@@ -45,6 +46,8 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { selectRunCost, selectRunView } from '../TaskCenter/runView';
 import { ChildRunContext, type ChildRunOrigin, type ChildRunState } from './childRunContext';
 import { ReplayContext, type ReplayState } from './replayContext';
+import { RunCostContext } from './runCostContext';
+import { mergeRunCosts, type LiveRunCost } from './mergeRunCosts';
 import { ForkRunDialog } from './ForkRunDialog';
 import { forkErrorText } from './forkErrors';
 import { replyErrorText } from './outputRefErrors';
@@ -136,6 +139,17 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // server-side from the runs. Polls while live, nudged by agent_runs Realtime.
   const { progress, loaded: progressLoaded, refresh: refreshProgress } = useIssueProgress(issue.id, issue.raw.ai_session_id);
   const phase = progress?.phase ?? null;
+
+  // ── Per-run money (3c §4.2) ────────────────────────────────────────────
+  // The rollup carries every run's cost; the `done` frame carries the one that
+  // just ended, seconds before the next poll would. The frame SUPPLEMENTS the
+  // rollup field by field — see `mergeRunCosts` for why a null must never
+  // overwrite a number the poll already knows.
+  const [liveRunCost, setLiveRunCost] = useState<LiveRunCost | null>(null);
+  const runCosts = useMemo(
+    () => mergeRunCosts(progress?.runs, liveRunCost),
+    [progress?.runs, liveRunCost],
+  );
 
   // ── Replay (harness 2b-1 §1) ───────────────────────────────────────────
   // The scrubber attaches to the issue's newest run: the live one, else the
@@ -412,6 +426,25 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           // 40-shot canvas into 40 requests. An older backend sends neither
           // key: no objects to forget, seq 0, and the turn is still announced.
           for (const o of event.outputs ?? []) invalidateOutputLineage(o.kind, o.ref_id);
+          // 3c §4.2: the turn's money, straight off the frame — the tail stops
+          // saying "—" without waiting a poll cycle.
+          //
+          // A frame with NEITHER number is not written at all (same guard as
+          // the chat panel's `done` branch). An older backend sends no such
+          // keys, and `_run_cost` reports a failed read as two nulls; storing
+          // that would park an empty override on top of a rollup that has the
+          // real figures — and it never lifts, so every later poll gets wiped
+          // too. Nothing to say is said by staying quiet.
+          if (
+            event.run_id
+            && (event.cost_cents != null || event.charged_points != null)
+          ) {
+            setLiveRunCost({
+              runId: String(event.run_id),
+              cost_cents: event.cost_cents ?? null,
+              charged_points: event.charged_points ?? null,
+            });
+          }
           notifyTurn(String(issue.id), { runId: event.run_id ?? null, seq: event.seq ?? 0 });
         }
       }
@@ -761,6 +794,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
                 : (
                   <ReplayContext.Provider value={replay}>
+                  {/* Which issue the reader is on, for every trajectory drawn
+                      below — the citations line names a version's SOURCE issue
+                      only when it is a different one.
+
+                      The page provides it, not the thread: `DetachedRunPanel`
+                      (a replayed fork origin, an opened sub-run) is the
+                      thread's SIBLING, so a provider inside the thread left
+                      those panels comparing against nothing and labelling every
+                      citation, including this issue's own. */}
+                  <TrajectoryIssueKeyContext.Provider value={issue.identifier}>
                     {detachedRunId && <DetachedRunPanel runId={detachedRunId} />}
                     {childRun && (
                       <DetachedRunPanel
@@ -769,14 +812,18 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                         onBack={() => setChildRun(null)}
                       />
                     )}
-                    <IssueChatThread
-                      messages={messages}
-                      agentsById={agentsById}
-                      selfUserId={selfUserId}
-                      streamingText={streamingText}
-                      teamId={teamId}
-                      aiSessionId={issue.raw.ai_session_id}
-                    />
+                    <RunCostContext.Provider value={runCosts}>
+                      <IssueChatThread
+                        messages={messages}
+                        agentsById={agentsById}
+                        selfUserId={selfUserId}
+                        streamingText={streamingText}
+                        teamId={teamId}
+                        aiSessionId={issue.raw.ai_session_id}
+                        issueKey={issue.identifier}
+                      />
+                    </RunCostContext.Provider>
+                  </TrajectoryIssueKeyContext.Provider>
                   </ReplayContext.Provider>
                 )}
               {agentLive && (
@@ -829,7 +876,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               : undefined
           }
           teamId={teamId}
-          issueId={Number(issue.id)}
+          issueId={String(issue.id)}
+          issueKey={issue.identifier}
+          // `raw.project_id` 而不是 `project?.id`：`project` 是给显示用的引用，
+          // 议题挂在项目上但项目名没解析出来时它是空的，而作用域要的是那一列本
+          // 身。少了它检索会静默退回本议题，而不是报错。
+          projectId={issue.raw.project_id == null ? null : String(issue.raw.project_id)}
           onScheduled={() => setSchedulesRefresh((n) => n + 1)}
         />
         </div>

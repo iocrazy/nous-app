@@ -39,7 +39,7 @@ class BudgetGuardHook:
 
     budget_cents: float = DEFAULT_BUDGET_CENTS
     name: str = "budget_guard"
-    priority: int = 20  # Run before CostAuditor (priority 50, post)
+    priority: int = 20  # Earliest pre hook — gate before anything dispatches
     # SCAN/sanitization should be priority < 20 so it filters before
     # we even pay attention to budget.
 

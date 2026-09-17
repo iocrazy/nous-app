@@ -28,6 +28,10 @@ class _FakeRepo:
         self.create_transaction = AsyncMock(return_value={})
         self.get_team_quota = AsyncMock(return_value={"points_balance": 100})
         self.create_team_quota = AsyncMock(return_value={"points_balance": 0})
+        # (row, created) —— created 是欢迎积分该不该发的唯一依据。
+        self.create_team_quota_if_absent = AsyncMock(
+            return_value=({"points_balance": 500}, True)
+        )
 
 
 @pytest.fixture
@@ -212,3 +216,90 @@ async def test_refund_passes_reference_to_repo(service: PointsService) -> None:
     assert call.kwargs["reference_type"] == "ai_transcription"
     assert call.kwargs["reference_id"] == "task-xyz"
     assert call.kwargs["amount"] == 10
+
+
+# ---------------------------------------------------------------------------
+# 落库形状 —— Task 9/10 的效率账直接按这三个字段反查（3c A3 评审轮 1）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_consume_row_keeps_action_type_as_reference_type(
+    service: PointsService,
+) -> None:
+    """``action_type`` 原样落进 ``point_transactions.reference_type``，``amount``
+    为负，``type`` 是 'consume'。
+
+    这一跳此前没有任何测试钉住：token_billing 侧的 row-shape 用例断的是**入参**
+    （kwargs["action_type"] == "agent_run"），所以有人在这里给 reference_type
+    加个前缀、或改成别的列，那边照样全绿，而读方 `WHERE reference_type =
+    'agent_run'` 立刻查空 —— 积分扣了，效率账上一分钱都看不见。"""
+    service.repo.consume_points_atomic = AsyncMock(  # type: ignore[assignment]
+        return_value={"success": True, "balance_after": 97, "reason": None}
+    )
+
+    out = await service.check_and_consume(
+        team_id="42",
+        user_id="u-1",
+        action_type="agent_run",
+        reference_id="900000000000007",
+        override_cost=3,
+        description="nous_qwen-max · 30 tokens",
+    )
+
+    assert out["success"] is True
+    payload = service.repo.create_transaction.await_args.args[0]
+    assert payload["type"] == "consume"
+    assert payload["reference_type"] == "agent_run"  # == action_type，原样
+    assert payload["reference_id"] == "900000000000007"
+    assert payload["amount"] == -3  # 负数：读方按 -SUM(amount) 还原扣了多少
+    assert payload["team_id"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_a_denied_consume_writes_no_transaction(service: PointsService) -> None:
+    """余额不足不该在流水里留下一行 —— 否则 -SUM(amount) 会把没扣成的也算进去。"""
+    service.repo.consume_points_atomic = AsyncMock(  # type: ignore[assignment]
+        return_value={
+            "success": False,
+            "balance_after": 0,
+            "reason": "Insufficient balance",
+        }
+    )
+
+    out = await service.check_and_consume(
+        team_id="42", user_id="u-1", action_type="agent_run", override_cost=3
+    )
+
+    assert out["success"] is False
+    service.repo.create_transaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_losing_the_provisioning_race_grants_no_second_welcome_bonus(
+    service: PointsService,
+) -> None:
+    """并发首次开通时两边都发 500 分，就是凭空多给一个团队一份赠送。
+    ``created=False`` 的那一方只拿行，不写 gift 流水。"""
+    service.repo.get_team_quota = AsyncMock(return_value=None)  # type: ignore[assignment]
+    service.repo.create_team_quota_if_absent = AsyncMock(  # type: ignore[assignment]
+        return_value=({"points_balance": 500}, False)
+    )
+
+    await service.ensure_team_quota("42", user_id="u-1")
+
+    service.repo.create_transaction.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_winning_the_provisioning_race_does_grant_the_bonus(
+    service: PointsService,
+) -> None:
+    service.repo.get_team_quota = AsyncMock(return_value=None)  # type: ignore[assignment]
+
+    await service.ensure_team_quota("42", user_id="u-1")
+
+    payload = service.repo.create_transaction.await_args.args[0]
+    assert payload["type"] == "gift"
+    assert payload["reference_type"] == "welcome_bonus"
+    assert payload["amount"] == 500

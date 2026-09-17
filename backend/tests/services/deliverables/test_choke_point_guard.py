@@ -4,6 +4,7 @@
 运行时断言等不到它。
 """
 
+import ast
 import pathlib
 
 APP = pathlib.Path(__file__).resolve().parents[3] / "app"
@@ -74,16 +75,80 @@ def test_the_registry_is_the_only_writer_of_run_deliverables():
     assert writers == WRITE_SITES, writers
 
 
+#: 会**写**这张表的动词。``select`` / ``where`` / ``join`` 刻意不在其中：
+#: 3a 的三个血缘端点与 Generated 卡的来源行都是这张表的合法读者，按类名扫
+#: 等于把每个新读者判成越权写入（见上一条的 ⚠️）。
+_WRITE_VERBS = frozenset(
+    {"insert", "update", "delete", "add", "add_all", "merge", "bulk_save_objects"}
+)
+
+_MODEL = "RunDeliverables"
+
+
+def _callee_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _names_the_model(node: ast.expr) -> bool:
+    """这个表达式是否把 ``RunDeliverables`` 本身交了出去。
+
+    认三种形状：裸类名 ``RunDeliverables``、构造 ``RunDeliverables(...)``、
+    以及装在 list/tuple 里的（``session.add_all([RunDeliverables(...)])``）。
+    ``RunDeliverables.kind`` 这种**列引用**不算 —— 它出现在每一条读语句里。
+    """
+    if isinstance(node, ast.Name):
+        return node.id == _MODEL
+    if isinstance(node, ast.Call):
+        return _callee_name(node.func) == _MODEL
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return any(_names_the_model(e) for e in node.elts)
+    return False
+
+
+def _orm_write_sites() -> list[str]:
+    """``app/`` 下每一处绕过 repository 直接用 ORM 写这张表的地方。"""
+    offenders: list[str] = []
+    for path in sorted(APP.rglob("*.py")):
+        rel = _rel(path)
+        if rel in WRITE_SITES:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # 构造一个 RunDeliverables 实体 —— 无论接下来交给谁，意图都是写。
+            if _callee_name(node.func) == _MODEL:
+                offenders.append(f"{rel}:{node.lineno} 构造 {_MODEL}(...)")
+                continue
+            verb = _callee_name(node.func)
+            if verb not in _WRITE_VERBS:
+                continue
+            if any(_names_the_model(a) for a in node.args):
+                offenders.append(f"{rel}:{node.lineno} {verb}({_MODEL} …)")
+    return offenders
+
+
 def test_nothing_inserts_run_deliverables_rows_behind_the_repository():
-    """第二条腿：绕开 repository 直接用 ORM 插行同样是第二套版本算法。
+    """第二条腿：绕开 repository 直接用 ORM 写行同样是第二套版本算法。
 
     单扫方法名拦不住 ``insert(RunDeliverables)`` —— 那正是 ``insert_version``
     自己用的写法，复制到别处不会碰到上面那条断言。
+
+    ⚠️ 这里用 ``ast`` 而不是子串（C2）。上一版扫的是字面量
+    ``"insert(RunDeliverables)"``，于是两种最顺手的写法它一个都看不见：
+
+    * ``session.add(RunDeliverables(**values))`` —— 根本不含那个子串；
+    * ``insert(\\n    RunDeliverables\\n)`` —— 被格式化工具换了行。
+
+    （本票落地前已用一个真实的 ``session.add(RunDeliverables(...))`` 探针验过：
+    旧守卫全绿。）现在认的是**调用节点**：写动词 + 把模型类本身交出去，
+    或者干脆构造一个实体 —— 换行、改缩进、换成 ``add_all([...])`` 都躲不掉。
     """
-    offenders = sorted(
-        _rel(p)
-        for p in APP.rglob("*.py")
-        if "insert(RunDeliverables)" in p.read_text(encoding="utf-8")
-        and _rel(p) not in WRITE_SITES
-    )
-    assert offenders == [], f"这些文件绕开 repository 直接插行：{offenders}"
+    offenders = _orm_write_sites()
+    assert (
+        offenders == []
+    ), f"这些地方绕开 repository 直接写 run_deliverables：{offenders}"

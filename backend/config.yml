@@ -96,3 +96,10 @@ HLS_OBJECT_STORE: true
 # verified by the chain test + the real-Postgres integration suite. Set back to
 # false to hide Delegate from the model and fail-close its execute().
 FEATURE_WORKFORCE_DELEGATE: true
+
+# ===========================================
+# Agent 积分计费（3c A3）
+# ===========================================
+# true = run 结束按自身花费（own + media）真扣团队积分；false = 只写
+# ai_usage_logs 审计行，不动余额。急停：改这里或用同名环境变量，不需要改代码。
+AGENT_POINTS_CHARGE_ENABLED: true

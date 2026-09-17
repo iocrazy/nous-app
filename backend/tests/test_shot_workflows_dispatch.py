@@ -7,7 +7,7 @@ production bug if broken:
    dbos_workflow_id=wf_id)`` and ``start_workflow_routed(..., workflow_id=wf_id)``
    with THE SAME uuid, and the flat ``{"success", "task_id"}`` envelope (#1019).
 2. DB-governed provider config (#1025/#1030): the breakdown step resolves
-   ``resolve_script_provider_config(user_id)`` and threads provider_key /
+   ``resolve_script_ai_config(user_id)`` and threads provider_key /
    provider_config into ScriptAIService (never a bare ScriptAIService() → stale
    ENV key → 401 on prod).
 3. Prompt-injection fence: ``scene_to_shots`` wraps the untrusted element text in
@@ -32,6 +32,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.deps import AuthContext
+from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -54,12 +55,15 @@ _USER = "11111111-1111-1111-1111-111111111111"
 _SCENE = "9000000000000000001"
 _SHOT = "9000000000000000002"
 
-# Sentinel resolver return — (provider_key, provider_config, model, agent_slug).
-_RESOLVED = (
-    "doubao",
-    {"api_key": "k", "base_url": "u", "model": "m"},
-    "m",
-    "script_ai",
+# Sentinel resolver return — the TYPED ``ResolvedAIConfig`` the script path now
+# uses (``resolve_script_ai_config``). The old tuple shim dropped ``origin``,
+# which is what made every BYOK script run bill at platform rates.
+_RESOLVED = ResolvedAIConfig(
+    provider_key="doubao",
+    provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+    model="m",
+    agent_slug="script_ai",
+    origin="byok",
 )
 
 
@@ -308,8 +312,7 @@ async def test_breakdown_step_resolves_and_passes_provider_config():
             MagicMock(return_value=scene_repo),
         ),
         patch(
-            "app.services.ai.providers.ai_provider_helpers."
-            "resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers." "resolve_script_ai_config",
             AsyncMock(return_value=_RESOLVED),
         ) as resolver,
         patch(
@@ -326,6 +329,7 @@ async def test_breakdown_step_resolves_and_passes_provider_config():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
     # heading composed from INT + location + time is passed to the service.
     assert instance.scene_to_shots.call_args.kwargs["heading"] == "INT - Office - DAY"

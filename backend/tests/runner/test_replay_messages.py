@@ -98,3 +98,19 @@ def test_is_step_boundary_accepts_step_start_and_turn_end_only():
     assert r.is_step_boundary(evs, 4) is True
     assert r.is_step_boundary(evs, 3) is False
     assert r.is_step_boundary(evs, 99) is False
+
+
+def test_a_partial_narration_is_not_part_of_the_rebuilt_history():
+    """3c §4.1 起，带工具调用的那一步也写 ``assistant``，但带 ``partial: True``。
+    那是时间线可读性用的，**不是** cross-turn history 的一部分——把它重建成消息会
+    在同一回合里造出两条连着的 assistant（Anthropic 拒绝相邻同角色），而真实历史
+    里这一步是「文本 + tool_use」一条消息。回放只收最终回答那条。"""
+    evs = [
+        _ev(1, "user", content="go"),
+        _ev(2, "assistant", content="Now I will list them.", partial=True, step=1),
+        _ev(3, "assistant", content="Done."),
+    ]
+    assert r.messages_from_events(evs) == [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "Done."},
+    ]

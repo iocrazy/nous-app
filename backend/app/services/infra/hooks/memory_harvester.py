@@ -35,7 +35,7 @@ class MemoryHarvesterHook:
     """
 
     name: str = "memory_harvester"
-    priority: int = 80  # Run after CostAuditor so audit row exists first.
+    priority: int = 80  # Last post hook (CostAuditor retired, 3c §3.2).
 
     # Optional injection: a factory that returns a zero-arg callable.
     # Production wiring (ai_library_chat_wiring.py) returns a closure

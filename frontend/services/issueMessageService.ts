@@ -8,6 +8,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -129,6 +130,16 @@ export type IssueMessageAttachment =
       ref_id: string;
       version: number;
       title: string | null;
+      /** The issue the cited version was PRODUCED on — `MH-98` (3c §2.4).
+       *
+       *  A citation may now point at another issue's output: the resolver's
+       *  check widened from "produced on THIS issue" to "the chain is visible
+       *  to you", so the chip needs somewhere to say where it came from.
+       *
+       *  Optional because it is absent on every row written before 3c and on
+       *  any chain answering to no issue. Like `title`, it is the server's to
+       *  fill in — a client never composes one. */
+      issue_key?: string | null;
     };
 
 export interface IssueMessagePostPayload {
@@ -212,28 +223,19 @@ async function _json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     try {
-      const parsed = JSON.parse(text) as {
-        detail?: { code?: unknown; message?: unknown } | string;
-        details?: { code?: unknown; message?: unknown } | string;
-      };
-      // `details` FIRST, and it is the one production sends. Every
-      // HTTPException is wrapped by `app/core/exceptions.py` into
-      // `{success, error, code:"http_<status>", request_id, details}`, where a
-      // dict `detail` is moved verbatim to `details` and the original key is
-      // gone. Reading only `detail` — as this did until 3a Task 6 — keeps every
-      // FastAPI-shaped unit fixture green while turning every real refusal into
-      // "400 Bad Request: {…}" (CLAUDE.md 2026-09-09). `detail` stays as the
-      // fallback for the direct-ASGI paths that never pass a handler.
+      // The one envelope decoder (`services/errorEnvelope.ts`) resolves the
+      // carrier: `details` first, because that is the one production sends —
+      // reading only `detail`, as this did until 3a Task 6, keeps every
+      // FastAPI-shaped unit fixture green while turning every real refusal
+      // into "400 Bad Request: {…}" (CLAUDE.md 2026-09-09).
       //
-      // The envelope's own `code` is deliberately NOT read: it is `http_400` on
-      // every refusal, so treating it as typed would make every failure look
-      // classified while naming nothing.
-      const carrier = parsed?.details ?? parsed?.detail;
-      const code = typeof carrier === 'object' && carrier !== null ? carrier.code : undefined;
-      if (typeof code === 'string' && code) {
-        const rawMessage = (carrier as { message?: unknown }).message;
-        const message = typeof rawMessage === 'string' ? rawMessage : '';
-        throw new IssueAnswerRejectedError(res.status, code, message);
+      // The envelope's own `code` is deliberately NOT read (the decoder keeps
+      // it apart as `envelopeCode`): it is `http_400` on every refusal, so
+      // treating it as typed would make every failure look classified while
+      // naming nothing. Untyped bodies fall through to the generic error.
+      const decoded = decodeErrorEnvelope(JSON.parse(text));
+      if (decoded.code) {
+        throw new IssueAnswerRejectedError(res.status, decoded.code, decoded.typedMessage ?? '');
       }
     } catch (err) {
       if (err instanceof IssueAnswerRejectedError) throw err;

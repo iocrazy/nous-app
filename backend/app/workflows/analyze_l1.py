@@ -282,10 +282,21 @@ async def call_analyze_l1(
             )
 
     if result.category and result.category != "Other":
-        # 打的是**这个资源的主人**自己那份分类标签。初始化标签每人一份之后，
-        # 不说是谁就会把别人的标签挂上来。
+        # 打的是**这个资源的主人**自己那份分类标签。初始化标签每人一份之后
+        # （mig 468），不说是谁就会把别人的标签挂上来。
         owner_id = await tags_repo.get_resource_owner_id(str(resource_id))
-        tag = await tags_repo.get_automation_tag(result.category, owner_id)
+        if not owner_id:
+            # 说出口，别静默跳过：没有主人就没有「他那份标签」，而随便挂一个
+            # 就是跨用户错挂。这条日志是这次没打标的唯一痕迹。
+            logger.warning(
+                f"[analyze_l1] resource {resource_id} has no creator_id — "
+                f"skipping the '{result.category}' auto-tag (no owner, no tag)"
+            )
+        tag = (
+            await tags_repo.get_automation_tag(result.category, owner_id)
+            if owner_id
+            else None
+        )
         if tag:
             await tags_repo.add_tag_to_resource(
                 resource_id=resource_id,

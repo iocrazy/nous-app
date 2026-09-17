@@ -92,6 +92,9 @@ const chain = {
       model: 'gpt-6-astra',
       cost_cents: 12,
       created_at: '2026-09-12T02:00:00Z',
+      // 3c §2.2：端点合成的两个字段，零次是答案不是缺席。
+      cited_count: 0,
+      cited_in: [],
     },
   ],
 };

@@ -19,6 +19,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
+import { decodeErrorEnvelope } from './errorEnvelope';
 
 /**
  * One registered version of one object.
@@ -58,6 +59,33 @@ export interface OutputVersion {
   model: string | null;
   cost_cents: number | null;
   created_at: string | null;
+  /**
+   * 这一版被引用过几次，**全量**（3c §2.2）。
+   *
+   * ⚠️ 与 `cited_in` **不是同一个数**：计数是全量的，列表只列调用方看得见的那
+   * 几条（一次引用发生在一件议题上，而议题可见性会挡住其中一些）。所以「被引 3
+   * 次、你能看 2 条」是允许且正确的答案，UI 必须能同时说出这两件事，不能拿
+   * `cited_in.length` 当计数显示。
+   *
+   * **0 不是 undefined**：两个字段由端点合成（不是登记行上的列），一条从没被引
+   * 用过的版本的诚实答案是「零次」。
+   */
+  cited_count: number;
+  cited_in: CitedIn[];
+}
+
+/** 一次引用发生在哪里（3c §2.2）。看不见的那几条**整条不出现** —— 让它们带着
+ *  空 `issue_id` 留下，等于把 `message_id` / `user_id`（谁、在哪条消息里引了它）
+ *  交出去，而那正是可见性要挡的东西。
+ *
+ *  两个 issue 字段仍是可空的：`issue_key` 在一件没有 identifier 的议题上就是空
+ *  的，`issue_id` 留出空位是给「引用不挂在任何议题上」那天用的。 */
+export interface CitedIn {
+  issue_id: string | null;
+  issue_key: string | null;
+  message_id: string;
+  user_id: string;
+  at: string;
 }
 
 /** Every version of ONE object — the panel's unit is the object, not the row. */
@@ -172,21 +200,13 @@ async function reject(res: Response): Promise<never> {
   let message = `${res.status} ${res.statusText}`;
   let details: Record<string, unknown> | null = null;
   try {
-    const body = (await res.json()) as { detail?: unknown; details?: unknown; error?: unknown };
-    const detail = body?.details ?? body?.detail;
-    if (detail && typeof detail === 'object') {
-      const d = detail as { code?: unknown; message?: unknown };
-      // The WHOLE object, not the two keys we happen to read here: a refusal's
-      // extra facts (`latest_version`, `reason`) are what the caller's copy
-      // names, and this parser must not decide which of them matter.
-      details = detail as Record<string, unknown>;
-      if (typeof d.code === 'string' && d.code) code = d.code;
-      if (typeof d.message === 'string' && d.message) message = d.message;
-    } else if (typeof detail === 'string' && detail) {
-      message = detail;
-    } else if (typeof body?.error === 'string' && body.error) {
-      message = body.error;
-    }
+    const decoded = decodeErrorEnvelope(await res.json());
+    // The WHOLE object, not just the two keys read below: a refusal's extra
+    // facts (`latest_version`, `reason`) are what the caller's copy names,
+    // and neither this function nor the decoder gets to pick which matter.
+    details = decoded.details;
+    if (decoded.code) code = decoded.code;
+    if (decoded.message) message = decoded.message;
   } catch (err) {
     // Not JSON at all (a gateway's HTML) — keep the status line.
     console.error('[outputsService] error body was not JSON', err);

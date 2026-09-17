@@ -40,6 +40,10 @@ const version = (v: number, parent: number | null) => ({
   issue_key: 'MH-91', deep_link: `/team/424242424242/todolist/MH-91?step=${v}`,
   seq: v, turn: 1, step: v, title: `S3 · Shot #1`, model: 'qwen-image', cost_cents: null,
   created_at: '2026-09-10T01:00:00Z',
+  // 3c §2.2：两个字段由端点合成，一条没被引用过的版本的诚实答案是「零次」
+  // 而不是「不知道」——省掉它们就是在描述一个后端不会发的响应。
+  cited_count: 0,
+  cited_in: [],
 });
 const media: OutputObject = { kind: 'generated_media', ref_id: '77', title: 'S3 · Shot #1', latest_version: 1, versions: [version(1, null)] };
 const shot: OutputObject = { kind: 'script_shot', ref_id: '9', title: 'Shot 4', latest_version: 2, versions: [version(2, 1), version(1, null)] };

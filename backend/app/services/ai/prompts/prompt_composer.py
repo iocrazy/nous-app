@@ -943,12 +943,13 @@ def render_available_resources(
 
 #: 我们拥有的框名，登记在 ``OWNED_FRAMES`` 里。
 #:
-#: ⚠️ 下面的渲染把开闭标记**写成字面量**而不是用这个常量拼 f-string，这是
-#: 刻意的：`test_frame_escape_wiring.py` 的登记守卫是**扫源码里的 `</name>`
-#: 字面量**，f-string 拼出来的标记它一个都看不见。`render_available_resources`
-#: 一直是字面量写法，所以一直在守卫覆盖内；`runner/inbox.py` 的
-#: `<inbox_message>` 用 f-string，因此**不在**覆盖内（它已登记，所以今天没
-#: 出问题，但守卫并没有在保护它）。
+#: 下面的渲染把开闭标记写成字面量。这**曾经**是一条硬约束：登记守卫早先扫的
+#: 是源码里的 `</name>` 字面量，f-string 拼出来的标记它一个都看不见（于是
+#: `runner/inbox.py` 的 `<inbox_message>` 长期不在覆盖内 —— 已登记所以无害，
+#: 但守卫并没有在保护它）。**C3 之后不再是了**：
+#: `test_frame_escape_wiring.py` 改成用 `ast` 还原字符串模板，f-string、
+#: `.format()`、`%` 与 `+` 拼接都能看见，名字整段算不出来的还会被单独报出来。
+#: 字面量写法今天纯粹是**读起来更直白**，不再是守卫的前提。
 REFERENCED_OUTPUTS_FRAME = "referenced_outputs"
 
 #: 框后面那一句。没有它，模型只看到三个属性，最可能的读法是「这些内容已经
@@ -983,7 +984,10 @@ def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
     ``title`` is omitted rather than rendered empty when the registry row has
     none — ``title=""`` reads as "its title is the empty string", absence
     reads as "it was never given one" (same rule as ``primary_resource_id``
-    in ``render_available_resources``).
+    in ``render_available_resources``). An empty (or all-whitespace) title is
+    the same absence: upstream normalizes it to ``None``, and this renderer
+    holds the line a second time because ``refs`` is typed ``Any`` — the next
+    construction path should not get to decide whether ``title=""`` appears.
 
     Returns the empty string when the turn cites nothing, so a turn without a
     citation is byte-for-byte what it was before this frame existed.
@@ -998,8 +1002,14 @@ def render_referenced_outputs(refs: Sequence[Any] | None) -> str:
             f'version="{escape_frame_attr(ref.version)}"',
         ]
         title = getattr(ref, "title", None)
-        if title is not None:
-            attrs.append(f'title="{escape_frame_attr(title)}"')
+        # Trimmed, and absent when nothing survives the trim. Upstream
+        # (`_clean_title`) already normalizes both, and this renderer holds the
+        # same line a second time because `refs` is typed `Any` — the next
+        # construction path should not get to decide whether the model sees
+        # `title=""` or two leading spaces inside the value.
+        text = "" if title is None else str(title).strip()
+        if text:
+            attrs.append(f'title="{escape_frame_attr(text)}"')
         lines.append(f"  <output {' '.join(attrs)}/>")
     lines.append("</referenced_outputs>")
     lines.append("")

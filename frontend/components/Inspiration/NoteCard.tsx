@@ -91,7 +91,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
               <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onTogglePin(note))}>
                 {note.pinned ? t('inspiration.unpin', 'Unpin') : t('inspiration.pin', 'Pin')}
               </button>
-              <button className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-line" onClick={() => runMenuAction(() => onDelete(note))}>
+              <button className="block w-full px-3 py-1.5 text-left text-danger hover:bg-line" onClick={() => runMenuAction(() => onDelete(note))}>
                 {t('inspiration.delete', 'Delete')}
               </button>
             </div>

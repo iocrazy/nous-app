@@ -23,7 +23,13 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../services/parserService', () => ({ getAuthHeaders: async () => ({ Authorization: 'Bearer t' }) }));
 vi.mock('../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
-const ISSUE_ID = 347474243723822;
+// A string, like every id on this path since B3 — the popover hands it
+// straight to the service, which owns the one conversion to the wire's
+// JSON number. `ISSUE_ID_WIRE` is what actually goes over HTTP, and it
+// stays a NUMBER: `payload->>'issue_id'` on the backend reads what the
+// producer wrote (CLAUDE.md 边界 mock 必须用真实 JSON 形状).
+const ISSUE_ID = '347474243723822';
+const ISSUE_ID_WIRE = 347474243723822;
 
 const scheduleResponse = {
   id: '4021d6f2-0d4c-4a3a-9f52-9e0c2d5b7a11',
@@ -31,7 +37,7 @@ const scheduleResponse = {
   name: 'Wake issue 347474243723822',
   cron_expr: null,
   task_type: 'issue_wakeup',
-  payload: { issue_id: ISSUE_ID, text: 'check the render', once: true },
+  payload: { issue_id: ISSUE_ID_WIRE, text: 'check the render', once: true },
   lane: 'scheduled',
   enabled: true,
   last_fired_at: null,
@@ -160,7 +166,7 @@ describe('LaterPopover', () => {
     const body = JSON.parse(init.body as string);
     expect(body.task_type).toBe('issue_wakeup');
     expect(typeof body.fire_at).toBe('string');
-    expect(body.payload).toEqual({ issue_id: ISSUE_ID, text: 'check the render', once: true });
+    expect(body.payload).toEqual({ issue_id: ISSUE_ID_WIRE, text: 'check the render', once: true });
     expect(typeof body.payload.issue_id).toBe('number');
     await waitFor(() => expect(onScheduled).toHaveBeenCalled());
   });

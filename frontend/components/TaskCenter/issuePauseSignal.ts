@@ -5,11 +5,11 @@
  * that owns both (ActiveTaskCard sits under FlowTaskList), so a prop chain
  * would thread through four components for one boolean.
  */
-type Listener = (issueId: number) => void;
+type Listener = (issueId: string) => void;
 
 const listeners = new Set<Listener>();
 
-export function notifyIssuePauseChanged(issueId: number): void {
+export function notifyIssuePauseChanged(issueId: string): void {
   for (const l of Array.from(listeners)) {
     try {
       l(issueId);

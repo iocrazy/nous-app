@@ -127,6 +127,19 @@ class RunRecorder:
     fork_of_run_id: Optional[int] = None
     fork_at_seq: Optional[int] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # 这条 run 用的是谁的凭证：``ResolvedAIConfig.origin`` 的四态
+    # ``governance`` / ``platform`` / ``byok`` / ``env``，None = 调用方没说。
+    # **只有 ``byok`` 是用户自己的钱**（``env`` 是 BYOK 形状但没有 api_key，
+    # adapter factory 回落平台凭证）。用途只有一个：终态分桶时把用户自己付的
+    # 那部分从积分里减掉（用户裁定 2）。
+    credential_origin: Optional[str] = None
+    # 派发这条 run 的父 run（``agent_runs.id`` 的字符串形），root 为 None。
+    # ``metadata["parent_run_id"]`` 里也有一份，但那是给人看的 jsonb；扣费判据
+    # （root 一次扣）要一个不会被 metadata 结构变动带偏的字段。
+    # ⚠️ 两个字段都必须是**简单默认值** —— 简单默认值会成为类属性，全仓用
+    # ``RunRecorder.__new__(...)`` 造桩的测试才读得到 None；换成
+    # ``field(default_factory=...)`` 就没有类属性，那些测试会整片 AttributeError。
+    parent_run_id: Optional[str] = None
 
     # Internal state (populated by start / methods; not caller-facing)
     # str form of agent_runs.id (BIGINT Snowflake since mig 232). Not a UUID.
@@ -767,6 +780,21 @@ class RunRecorder:
                 f"(task_id={self.task_id} run_id={self.run_id}): {err}"
             )
 
+    def _efficiency_counts(self) -> dict[str, Any]:
+        """折叠出来的工作量，永远是一个可加的 dict。没有 event writer（预检即拒的
+        run、测试替身）时返回全零——A1 票直接相加，不该先判空。``_finish`` 写列时
+        另判一次「有没有折叠数据」，那里 NULL 与 0 必须分得开。"""
+        empty = {
+            "steps": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+            "deliverables": 0,
+            "turn_end_reason": None,
+        }
+        if self._event_writer is None:
+            return empty
+        return {**empty, **(self._event_writer.views.get("efficiency") or {})}
+
     async def _finish(
         self,
         *,
@@ -818,6 +846,10 @@ class RunRecorder:
             float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
         )
         media_cents = float((folded or {}).get("media_cents") or 0.0)
+        # A1：小时表收**自身**花费（own + media；积分账待 Task 4）。列里的
+        # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
+        # 两个数各有其用。
+        own_media_cents = round((own_cents or 0.0) + media_cents, 4)
         if own_cents is not None or children_cents or media_cents:
             cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
         if folded is not None and own_cents is not None:
@@ -850,6 +882,14 @@ class RunRecorder:
             "skill_slugs_used": self._skill_slugs_used,
             "attribution": effective_attribution,
         }
+        # 3c §3.2：与 cost_cents 同一次 UPDATE。存量行留 NULL——一个没有折叠数据的
+        # run「不知道干了多少活」，写 0 会把它伪装成「什么都没干」。
+        if self._event_writer is not None:
+            eff = self._efficiency_counts()
+            for column in ("steps", "tool_calls", "tool_errors", "deliverables"):
+                updates[column] = int(eff[column])
+            if eff["turn_end_reason"] is not None:
+                updates["turn_end_reason"] = str(eff["turn_end_reason"])
         # Terminal liveness (mig 406). Without this every finished run sat at
         # liveness_state='running' forever — this is the only writer on the
         # ordinary exit path, so nothing else ever closed the column out.
@@ -881,18 +921,69 @@ class RunRecorder:
             updates["error_message"] = error_message
 
         async with write_scope() as session:
-            await session.execute(
+            result = await session.execute(
                 sa_update(AgentRuns)
                 .where(AgentRuns.id == int(self.run_id))
                 .where(AgentRuns.status == "running")  # idempotent guard
                 .values(**updates)
             )
+        # 3c 终审 M2：把上面那道守卫的**结论**读出来。此前 rowcount 没人看，于是
+        # 守卫只护住了这一行 UPDATE，下面的小时表与 ``reconcile_run`` 照跑 ——
+        # 而 ``reconcile_run`` 的 docstring 明写「Repeated calls would
+        # double-charge」并把幂等责任推回调用方。窗口很窄（``_finish`` 跑两次，或
+        # liveness 清扫器先把 status 翻了），但 A3 之后那是真钱。
+        #
+        # ⚠️ **只有明确为 0 才算没抢到**。拿不到这个数（测试桩、不报 rowcount 的
+        # 驱动）读作「别人已经收工了」就是拿「不知道」换一次静默的少扣 —— 与本仓
+        # 「空输出不是否定结论」同一条纪律。
+        closed_by_us = getattr(result, "rowcount", None) != 0
+        if not closed_by_us:
+            logger.warning(
+                f"[RunRecorder] run {self.run_id} was already terminal when "
+                f"_finish ran (status={status}); skipping usage rollup and "
+                f"billing reconcile so neither is counted twice"
+            )
+
+        # 只在终态写一次。放在 UPDATE 之后，投影读到的就是刚落库的那份
+        # status / error_code / output_summary；放在 write_scope 之外，所以
+        # 投影失败不会碰到刚提交的那个事务（best-effort，见 projection 的
+        # 模块 docstring）。
+        from app.services.search.projection import project_run_best_effort
+
+        await project_run_best_effort(
+            {
+                "id": self.run_id,
+                "issue_id": self.issue_id,
+                "team_id": self.team_id,
+                "project_id": self.project_id,
+                "agent_id": self.agent_id,
+                "user_id": self.user_id,
+                "model": self.model,
+                "status": status,
+                "error_code": error_code,
+                "input_summary": self.input_summary,
+                "output_summary": self._output_summary,
+            }
+        )
 
         # W3c: accumulate this turn into the ai_usage_hourly rollup the Usage
-        # panel reads. Fire-and-forget (record_usage swallows internally) and
-        # only when tokens were actually burned, so we don't create empty
-        # rollup buckets for pre-flight rejects. module = the run trigger.
-        if (self._prompt_tokens + self._completion_tokens) > 0:
+        # panel reads. Fire-and-forget (record_usage swallows internally).
+        # module = the run trigger.
+        #
+        # A1: the rollup gets ``own_media_cents``, NOT the tree total above.
+        # Every child run reaches this same line and writes its own row, so a
+        # parent that also carried its children's spend would double-count the
+        # moment anything sums across runs — and the table has no
+        # parent_run_id dimension to subtract it back out afterwards.
+        #
+        # 唯一的条件是 `closed_by_us`（上面那道幂等守卫的结论），**不看烧了多少**：
+        # `_finish` 只在终态被调（completed / failed / cancelled），而每一个终态
+        # run 都是效率账的一行样本，cost 与 token 可以是 0。预检即拒、provider
+        # 认证失败、预算门禁停机 —— 这三类恰恰零 token 零花费，也恰恰是
+        # `failed_runs` 最该看见的那一类；任何以「烧了东西没有」为条件的守门都会
+        # 把它们整行丢掉，让失败率从第一天起偏低。
+        eff_counts = self._efficiency_counts()
+        if closed_by_us:
             try:
                 from app.services.ai_usage import record_usage
 
@@ -906,7 +997,14 @@ class RunRecorder:
                     project_id=self.project_id,
                     agent_id=self.agent_id,
                     model=self.model,
-                    cost_cents=cost_cents,
+                    cost_cents=own_media_cents,
+                    run_count=1,
+                    # 「非 completed」而不是「status == failed」：cancelled 同样
+                    # 是一次没走到头的 run，成功率的分子只该数真的成功的那些。
+                    failed_runs=int(status != "completed"),
+                    tool_calls=eff_counts["tool_calls"],
+                    tool_errors=eff_counts["tool_errors"],
+                    deliverables=eff_counts["deliverables"],
                 )
             except Exception as exc:  # noqa: BLE001 — defence in depth
                 logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
@@ -914,14 +1012,15 @@ class RunRecorder:
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
         # able to roll back a finished agent_runs row.
-        if status == "completed" and cost_cents is not None and cost_cents > 0:
+        if status == "completed" and own_media_cents > 0 and closed_by_us:
             try:
                 from app.services.ai.billing.token_billing import reconcile_run
 
-                # cost_cents is the cents amount; PointsService treats
-                # cost_points as the same scalar (1 cent ≈ 1 point in
-                # the current billing model). If a future change splits
-                # them, this conversion happens here.
+                # own_media_cents is this run's OWN cents (own + media);
+                # PointsService treats cost_points as the same scalar (1 cent
+                # ≈ 1 point in the current billing model), then ceils it to an
+                # integer. If a future change splits the two units, that
+                # conversion belongs here.
                 await reconcile_run(
                     run_id=self.run_id,
                     user_id=self.user_id,
@@ -932,7 +1031,13 @@ class RunRecorder:
                     model=self.model or "?",
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
-                    cost_points=float(cost_cents),
+                    # A3：按**自身**花费扣，不按树总额 —— 子 run 自己也会走到这里
+                    # 扣它那份，父行再扣一遍就是对同一笔钱收两次。
+                    cost_points=own_media_cents,
+                    # ⚠️ 3c A3 Stated Limitation：agent_runs 没有 run 级 BYOK 标记，
+                    # 所以管理员配了 per_call_cents 的 BYOK 图片模型会被按平台价扣
+                    # 一次。闭合它要加列 + 改构造签名，另立票；现阶段的兜底是
+                    # AGENT_POINTS_CHARGE_ENABLED。
                     byo_key=False,  # platform-model run; BYO-key runs
                     # set this true via a future RunRecorder kwarg or
                     # by inspecting the model string against the user's
@@ -1419,6 +1524,11 @@ class RunEventWriter:
 
             self.views["view"]["children"] = scratch["view"]["children"]
             self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            # BYOK 半边跟着本体一起抬：两者是同一次 fold 的产物，读方拿
+            # ``by_child - by_child_byok`` 减出平台额。只抬本体，异步子 agent
+            # 的整棵 BYOK 子树就被当成平台花费收一遍——而异步正是这条重折
+            # 唯一存在的理由（活 recorder 从没折过那条 ``subagent_done``）。
+            self.views["cost"]["by_child_byok"] = scratch["cost"]["by_child_byok"]
             refolded_outputs = scratch["view"].get("outputs")
             if refolded_outputs:
                 # ONLY when the log produced one. A ``deliverable`` whose
@@ -1435,6 +1545,22 @@ class RunEventWriter:
                 # usually writes its event through a ``for_run`` writer, so the
                 # live recorder never folded that money at all.
                 self.views["cost"]["media_cents"] = scratch["cost"]["media_cents"]
+                # 同上，第四个分量。登记口常走 ``for_run`` writer，所以活
+                # recorder 连这笔钱都没折过——本体抬了而 BYOK 没抬，等于
+                # 「这张图是平台付的」，而它恰恰不是。
+                self.views["cost"]["media_byok_cents"] = scratch["cost"][
+                    "media_byok_cents"
+                ]
+                # 同一份折叠的第三个分量（3c §3.2）：``_finish`` 从这里读
+                # ``deliverables`` 列。登记口常走 ``for_run`` writer，所以活
+                # recorder 也没折过这件产出的计数——只抬 outputs 不抬计数，就是
+                # 「面板 2 件、run 行 1 件」，与上面那条钱的理由逐字相同。
+                self.views["efficiency"] = {
+                    **(self.views.get("efficiency") or {}),
+                    "deliverables": int(
+                        (scratch.get("efficiency") or {}).get("deliverables") or 0
+                    ),
+                }
             recompute_spent(self.views["cost"])
         except Exception as err:  # noqa: BLE001 — telemetry never fails a run
             logger.warning(

@@ -157,7 +157,7 @@ describe('ActiveTaskCard — cockpit line + steer (harness P4 T11)', () => {
 });
 
 describe('ActiveTaskCard — target-level pause (phase 2a §2)', () => {
-  const signalled: number[] = [];
+  const signalled: string[] = [];
   let off: () => void = () => {};
   beforeEach(() => {
     signalled.length = 0;
@@ -171,12 +171,12 @@ describe('ActiveTaskCard — target-level pause (phase 2a §2)', () => {
     const btn = container.querySelector('[data-testid="agent-pause"]') as HTMLButtonElement;
     expect(btn).not.toBeNull();
     fireEvent.click(btn);
-    await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith(48));
+    await waitFor(() => expect(pauseIssue).toHaveBeenCalledWith('48'));
     await waitFor(() => expect(btn.getAttribute('data-state')).toBe('paused'));
     expect(btn.disabled).toBe(true);
     // Outcome in words, and the Paused section is told to refetch.
     expect(container.querySelector('[data-testid="agent-pause-state"]')!.textContent).toBe('taskCenter.pauseSent');
-    expect(signalled).toEqual([48]);
+    expect(signalled).toEqual(['48']);
   });
 
   it('marks the button failed when the pause is rejected', async () => {
