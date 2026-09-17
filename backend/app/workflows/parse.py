@@ -9,7 +9,7 @@ steps and rewires the two downstream dispatches through
 
 Pipeline phases:
   1. validate URL (sync, pure)
-  2. fetch + parse via DrissionPage / DouyinFormatter
+  2. fetch + parse via Camoufox / DouyinFormatter
   3. save parsed_media row
   4. auto-tag (best-effort)
   5. dispatch download via start_workflow_routed("download", ...)
@@ -136,7 +136,7 @@ def fetch_and_parse_step(
     platform: str = "douyin",
 ) -> dict[str, Any]:
     """Platform-aware parse step. douyin → unified chain
-    (ABogus → DrissionPage, see douyin_parse.parse_chain) + DouyinFormatter;
+    (ABogus → Camoufox, see douyin_parse.parse_chain) + DouyinFormatter;
     other platforms (bilibili / youtube / …) → yt-dlp metadata +
     YtdlpService schema map.
 
@@ -145,7 +145,7 @@ def fetch_and_parse_step(
     matches the legacy Celery budget.
 
     `parse_method` records which tier actually delivered (abogus /
-    drissionpage / ytdlp / qishui) — patched into task_tracking.metadata
+    camoufox / ytdlp / qishui) — patched into task_tracking.metadata
     so admin Tasks shows the parse channel again."""
     if platform == "qishui":
         from app.services.media.parsers.parse_helpers import fetch_and_parse_qishui

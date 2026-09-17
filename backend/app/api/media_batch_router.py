@@ -116,7 +116,7 @@ async def fetch_videos_batch(
                 errors.append({"url": raw_url, "error": "Cannot extract valid link"})
                 continue
 
-            # Unified douyin chain (ABogus → DrissionPage) — replaces the
+            # Unified douyin chain (ABogus → Camoufox) — replaces the
             # legacy per-user parse_mode branch whose LightHTTP first tier
             # was permanently anti-bot blocked (every batch URL burned a
             # dead HTTP attempt before the browser fallback).
@@ -257,7 +257,7 @@ async def debug_raw_parse(
 ):
     """
     Debug endpoint: return raw aweme_detail JSON from the unified douyin
-    chain (ABogus → DrissionPage). No DB writes, no downloads — just raw
+    chain (ABogus → Camoufox). No DB writes, no downloads — just raw
     parsed data.
     """
     # Boundary: SSRF guard. URLBlockedError -> global handler -> 400.

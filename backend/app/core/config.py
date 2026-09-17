@@ -228,7 +228,7 @@ class Settings(BaseSettings):
         ]
     )
 
-    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 ABogus/DrissionPage
+    # Douyin 专用 UA 池。一次解析任务挑一条，贯穿 ABogus/Camoufox
     # 和 yt-dlp 下载——ABogus 签名绑定 UA，混用会让服务端验签失败。
     DOUYIN_USER_AGENTS: list[str] = Field(
         default_factory=lambda: [
@@ -315,7 +315,7 @@ class Settings(BaseSettings):
         default="",
         description="Local SsrfProxy URL (auto-populated at startup, "
         "e.g. http://127.0.0.1:55001). Subprocess + browser clients "
-        "(yt-dlp, DrissionPage) are configured to route through this. "
+        "(yt-dlp, Camoufox) are configured to route through this. "
         "Empty value means proxy not started — clients run unproxied "
         "(degraded boundary).",
     )

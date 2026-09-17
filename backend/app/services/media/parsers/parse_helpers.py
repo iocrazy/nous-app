@@ -66,7 +66,7 @@ def fetch_and_parse(
     user_agent: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> tuple[dict, dict, str]:
-    """Unified Douyin parse chain: ABogus → DrissionPage (see
+    """Unified Douyin parse chain: ABogus → Camoufox (see
     ``douyin_parse.parse_chain`` for the chain itself + admin toggles).
 
     ABogus authenticates with the user's saved douyin cookie via the

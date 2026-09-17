@@ -117,12 +117,14 @@ ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 # 每次刷一堆警告。显式设成 copy，与 browser/Dockerfile 一致。
 ENV UV_LINK_MODE=copy
 
-# Install Chrome, ffmpeg, Node.js, build tools and dependencies.
-# Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
-# which runs douyin_bdms.js to compute the a_bogus request signature.
+# Install ffmpeg, build tools and dependencies.
+#
+# chromium/chromium-driver were removed 2026-09-16 together with the
+# DrissionPage tier. Nothing in the backend reads CHROME_PATH any more; the
+# browser tier is Camoufox (Firefox) — see the note below the apt block.
 #
 # This is the layer that hurts when the cache misses — several hundred MB of
-# chromium + ffmpeg + fonts. See the APT_MIRROR note at the top.
+# ffmpeg + fonts. See the APT_MIRROR note at the top.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
@@ -131,14 +133,37 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     wget \
     curl \
     gnupg \
-    chromium \
-    chromium-driver \
+    ca-certificates \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     build-essential \
     ffmpeg \
-    nodejs \
     --no-install-recommends
+
+# Node.js 22 LTS — NOT Debian's `nodejs` package.
+#
+# The douyin signing tier runs douyin's own bundled VM bytecode in a Node
+# subprocess and confines it with `--permission --allow-fs-read=<dir>`
+# (see douyin_parse/abogus_parser.py). Measured 2026-09-16:
+#
+#   node 20.19.2 (trixie's `nodejs`) → node: bad option: --permission
+#   node 21.7.3                      → node: bad option: --permission
+#   node 22.23.2                     → OK
+#
+# In Node 20/21 the flag is still spelled `--experimental-permission`. So
+# `apt-get install nodejs` on trixie produces an image where every HTTP
+# douyin parse fails at the signing step. Dropping the flag to make the
+# older runtime work is not an option: it would hand third-party VM
+# bytecode unrestricted filesystem access, which is the whole reason the
+# sandbox is there.
+ARG NODE_MAJOR=22
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y nodejs --no-install-recommends \
+    && node --version \
+    # Fail the BUILD, not a user's parse at 3am, if the runtime regresses.
+    && node --permission --allow-fs-read=/tmp -e "0"
 
 # ── GPU Transcode Support (uncomment as needed) ──
 # NVIDIA: Install CUDA toolkit for h264_nvenc
@@ -146,9 +171,29 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Intel QSV: Install VA-API drivers for h264_qsv
 # RUN apt-get update && apt-get install -y intel-media-va-driver-non-free libmfx1 && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome environment variables
-ENV CHROME_PATH=/usr/bin/chromium
-ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# CHROME_PATH / CHROMEDRIVER_PATH removed 2026-09-16 with the DrissionPage
+# tier. Nothing reads them.
+#
+# TODO(deploy): provision the Camoufox browser in this image.
+#
+# The `camoufox` Python package is installed with the other deps, but the
+# BROWSER is a ~630 MB Firefox build the library downloads at first use via
+# `camoufox fetch` into ~/.cache/camoufox. Until this is resolved the
+# browser fallback tier will fail in-container while the HTTP tier (the
+# primary path, and the one that succeeds today) works normally.
+#
+# Two options, deliberately not chosen here because verifying either needs
+# a real image build + deploy, which this change set did not run:
+#
+#   a) Bake it in:   RUN camoufox fetch  →  image grows ~700 MB, container
+#      starts fast, no runtime network. Needs GITHUB_TOKEN at build time —
+#      `camoufox fetch` pulls from GitHub releases and rate-limits
+#      anonymously, and it EXITS 0 on that failure, so a build without the
+#      token silently produces an image with no browser.
+#
+#   b) Fetch at runtime into a persistent volume — image stays small and
+#      several containers share one copy, at the cost of a slow first start
+#      and a new failure mode at boot.
 
 # ── dreamina (即梦) AIGC CLI ──────────────────────────────────────────────
 # JimengCliProvider drives this binary as a subprocess for image + video

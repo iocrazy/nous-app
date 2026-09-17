@@ -4,13 +4,13 @@
 a_bogus 签名版抖音解析器
 
 链路：share_url → aweme_id → 构造 /aweme/v1/web/aweme/detail/ 完整 URL
-     → node env.js 计算 a_bogus → 拼到 URL 尾部 → httpx GET → aweme_detail
+     → 计算 a_bogus → webSignUrl 补齐 Argus 字段 → httpx GET → aweme_detail
 
 与另一个 parser 的定位区别：
-- `DrissionPageParser`  起 headless Chrome 拦截 API，最稳但最重（Docker 要装 Chrome）
+- `CamoufoxParser`      起 Camoufox(Firefox) 拦截 API，最稳但最重（需下载浏览器）
 - `ABogusDouyinParser`  用 HTTP + Node 子进程签名直达 API，轻量，依赖有效 cookie
 
-Cookie 优先级：Redis 缓存（DrissionPageParser 会写入） > user_cookies 表 > 匿名
+Cookie 优先级：Redis 缓存（CamoufoxParser 会写入） > user_cookies 表 > 匿名
 """
 
 from __future__ import annotations
@@ -22,13 +22,17 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.boundary import safe_async_client
+from app.services.media.parsers.douyin_parse.failures import (
+    DouyinFailure,
+    DouyinParseError,
+)
 
 SignEngine = Literal["python", "node"]
 
@@ -76,6 +80,7 @@ BASE_PARAMS: dict[str, str] = {
 }
 
 _ENV_JS = Path(__file__).with_name("env.js")
+_WEBSIGN_ENV_JS = Path(__file__).with_name("websign_env.js")
 _ID_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"/share/slides/(\d+)"), "slides"),
     (re.compile(r"/share/video/(\d+)"), "video"),
@@ -84,14 +89,38 @@ _ID_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def _cookie_value(cookie_header: str, name: str) -> str:
+    """One cookie's value out of a `k=v; k=v` header, or "" when absent."""
+    m = re.search(rf"(?:^|;\s*){re.escape(name)}=([^;]*)", cookie_header or "")
+    return m.group(1) if m else ""
+
+
+def _redact(text: str, *secrets: str) -> str:
+    """Strip live credentials out of text that is about to be logged.
+
+    The Node signer receives the cookie through its environment, so ANY
+    diagnostic it prints — a stack trace, a dump of `process.env`, an
+    assertion message — can contain the whole session. That text goes
+    straight into our exception, and from there into the log and onto the
+    task row a user can open.
+
+    Short values are left alone deliberately: redacting a two-character
+    cookie would blank out unrelated substrings and make the message
+    useless without protecting anything worth protecting.
+    """
+    for secret in secrets:
+        if secret and len(secret) >= 8:
+            text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 class ABogusDouyinParser:
     """轻量级抖音解析器（HTTP + a_bogus 签名直达 /aweme/v1/web/aweme/detail/）。
 
-    Two signing engines are supported:
-      - "python" (default): pure-Python ABogus from vendored f2 module.
-        ~5ms per call, no subprocess, community-maintained algorithm.
-      - "node": legacy Node subprocess over `env.js` + `douyin_bdms.js`.
-        Kept as a fallback for A/B comparison; requires `node` binary.
+    Two a_bogus engines are supported. Both use the Node webSign runtime for
+    the Argus signature fields required by the detail endpoint.
+      - "python" (default): vendored f2 ABogus implementation.
+      - "node": `env.js` + `douyin_bdms.js` ABogus implementation.
     """
 
     DEFAULT_ENGINE: SignEngine = "python"
@@ -128,9 +157,15 @@ class ABogusDouyinParser:
             fp = cls._extract_verify_fp(cookie)
 
             url = cls._build_detail_url(aweme_id)
-            signed_url = await cls._sign(url, ua, eng, fp)
+            signed_url = await cls._sign(url, ua, eng, fp, cookie)
 
             return await cls._fetch_detail(signed_url, ua, cookie, extra_headers)
+        except DouyinParseError:
+            # A typed failure is the ONE thing this handler must not flatten:
+            # turning it back into None here would undo the whole point of
+            # raising it (CLAUDE.md "catch 静默吞错"). The chain above decides
+            # what to do with it.
+            raise
         except Exception as err:
             logger.error(f"[ABogus] parse failed (engine={eng}): {err}")
             return None
@@ -193,8 +228,10 @@ class ABogusDouyinParser:
         return f"{DETAIL_API}?{urlencode(params)}"
 
     @classmethod
-    async def _sign(cls, url: str, ua: str, engine: SignEngine, fp: str) -> str:
-        """Dispatch to the configured sign engine and append `a_bogus=`."""
+    async def _sign(
+        cls, url: str, ua: str, engine: SignEngine, fp: str, cookie: str
+    ) -> str:
+        """Generate both the business `a_bogus` and Argus web signature."""
         if engine == "python":
             bogus = await asyncio.to_thread(cls._sign_with_python, url, ua, fp)
         elif engine == "node":
@@ -203,7 +240,8 @@ class ABogusDouyinParser:
             raise ValueError(f"unknown sign engine: {engine!r}")
 
         sep = "&" if "?" in url else "?"
-        return f"{url}{sep}a_bogus={bogus}"
+        a_bogus_url = f"{url}{sep}a_bogus={bogus}"
+        return await asyncio.to_thread(cls._sign_with_websign, a_bogus_url, ua, cookie)
 
     @staticmethod
     def _sign_with_python(url: str, ua: str, fp: str) -> str:
@@ -242,6 +280,69 @@ class ABogusDouyinParser:
             raise RuntimeError("node a_bogus empty")
         return bogus
 
+    @classmethod
+    def _sign_with_websign(cls, url: str, ua: str, cookie: str) -> str:
+        uifid = _cookie_value(cookie, "UIFID")
+        if not uifid:
+            raise RuntimeError("UIFID cookie is required for Argus web signing")
+
+        node_bin = shutil.which("node") or "node"
+        completed = subprocess.run(
+            [
+                node_bin,
+                "--permission",
+                f"--allow-fs-read={_WEBSIGN_ENV_JS.parent}",
+                str(_WEBSIGN_ENV_JS),
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=cls.SIGN_TIMEOUT,
+            check=False,
+            **safe_popen_kwargs(
+                env_extra={
+                    "DOUYIN_COOKIE": cookie,
+                    "DOUYIN_UIFID": uifid,
+                    "DOUYIN_UA": ua,
+                }
+            ),
+        )
+        if completed.returncode != 0:
+            # Redact before the text ever becomes an exception: the signer
+            # holds the cookie and UIFID in its environment, so its own
+            # error output is not safe to echo verbatim.
+            detail = _redact(
+                completed.stderr.strip() or completed.stdout.strip(),
+                cookie,
+                uifid,
+                *(part.strip() for part in cookie.split(";")),
+                *(
+                    part.partition("=")[2].strip()
+                    for part in cookie.split(";")
+                    if "=" in part
+                ),
+            )
+            if "bad option: --permission" in detail:
+                # Name the actual cause. Node 20/21 spell this flag
+                # `--experimental-permission`; only Node >= 22 accepts
+                # `--permission` (measured 2026-09-16). Without this branch
+                # the operator sees a generic signing failure and goes
+                # looking at douyin.
+                raise RuntimeError(
+                    "node webSign sign failed: this Node.js does not support "
+                    "--permission (needs Node >= 22; 20 and 21 call it "
+                    "--experimental-permission). Upgrade the runtime — do not "
+                    "drop the flag, it sandboxes third-party VM bytecode."
+                )
+            raise RuntimeError(
+                f"node webSign sign failed (rc={completed.returncode}): {detail}"
+            )
+        signed_url = completed.stdout.strip()
+        query = parse_qs(urlsplit(signed_url).query)
+        if not query.get("x-secsdk-web-signature"):
+            raise RuntimeError("node webSign returned no x-secsdk-web-signature")
+        return signed_url
+
     @staticmethod
     def _extract_verify_fp(cookie: str) -> str:
         """Pull `s_v_web_id` from a cookie string — used as verifyFp / fp.
@@ -262,7 +363,7 @@ class ABogusDouyinParser:
         cls, user_id: str | None, aweme_id: str
     ) -> tuple[str, dict[str, str]]:
         """返回 (cookie_header, extra_headers)。"""
-        # 1) Redis 中 DrissionPageParser 留下的会话 cookie
+        # 1) Redis 中 CamoufoxParser 留下的会话 cookie
         redis_cookie = await cls._cookie_from_redis(aweme_id)
         if redis_cookie:
             logger.debug(f"[ABogus] using Redis-cached cookies for {aweme_id}")
@@ -335,6 +436,11 @@ class ABogusDouyinParser:
         }
         if cookie:
             headers["Cookie"] = cookie
+        # Argus reads the device fingerprint from the request header, while
+        # webSignUrl also binds the same UIFID into its query signature.
+        uifid = _cookie_value(cookie, "UIFID")
+        if uifid:
+            headers.setdefault("uifid", uifid)
 
         async with safe_async_client(timeout=cls.DETAIL_TIMEOUT) as client:
             resp = await client.get(signed_url, headers=headers)
@@ -348,7 +454,17 @@ class ABogusDouyinParser:
             try:
                 data = resp.json()
             except json.JSONDecodeError:
-                logger.warning(f"[ABogus] non-JSON body: {resp.text[:500]}")
+                body = resp.text[:500]
+                logger.warning(f"[ABogus] non-JSON body: {body}")
+                # Douyin's anti-bot plugin answers in plain text when it
+                # rejects the request outright. Distinguishing this from a
+                # generic miss matters: a rejected signature fails identically
+                # on every retry, so telling the user to "try again" would be
+                # a lie (2026-09-15 — `ArgusSecurityPlugin Uifid Not Found`).
+                if "ArgusSecurityPlugin" in body or "Uifid" in body:
+                    raise DouyinParseError(
+                        DouyinFailure.SIGNATURE_REJECTED, body.strip()[:200]
+                    )
                 return None
 
             aweme_detail = data.get("aweme_detail")

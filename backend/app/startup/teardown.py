@@ -2,16 +2,14 @@
 
 Order matters: cancel background tasks → stop heartbeats / pushers /
 listeners → drain DBOS workers → tear down boundary clients (SsrfProxy,
-DrissionPage) → close transport pools (Redis, asyncpg).
+Camoufox) → close transport pools (Redis, asyncpg).
 """
 
 from fastapi import FastAPI
 from loguru import logger
 
 from app.core.redis import close_async_redis
-from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-    DrissionPageParser,
-)
+from app.services.media.parsers.douyin_parse.camoufox_parser import CamoufoxParser
 from app.startup.agent_framework_init import (
     stop_bounds_heartbeat,
     stop_prometheus_pusher,
@@ -42,7 +40,9 @@ async def shutdown_all(app: FastAPI) -> None:
 
     try:
         logger.info("正在关闭抖音分析浏览器...")
-        DrissionPageParser().close()
+        # Async now: Camoufox is driven through Playwright, so releasing the
+        # browser is an await, not a blocking call on a singleton.
+        await CamoufoxParser.close()
         logger.info("抖音分析浏览器已关闭")
     except Exception as e:
         logger.error(f"关闭抖音解析下载服务时出错: {str(e)}")

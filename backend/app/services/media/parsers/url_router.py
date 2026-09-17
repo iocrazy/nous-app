@@ -5,7 +5,7 @@ URL Router Service
 
 Detects source platform from URL and dispatches to the appropriate handler.
 Most platforms use yt-dlp as the primary parser; qishui (Soda Music) uses a
-dedicated 'soda' handler. Douyin uses the unified ABogus / DrissionPage chain
+dedicated 'soda' handler. Douyin uses the unified ABogus / Camoufox chain
 (douyin_parse.parse_chain).
 """
 

@@ -441,7 +441,7 @@ class DownloaderService:
         else:
             headers = dict(headers)  # copy to avoid mutating caller's dict
 
-        # Douyin CDN returns 403 for httpx requests. If DrissionPage cached browser
+        # Douyin CDN returns 403 for httpx requests. If the Camoufox tier cached browser
         # cookies during parse, merge them into the Cookie header.
         # Use the async Redis client here — a blocking sync call stalls the event
         # loop for every concurrent download on this worker.

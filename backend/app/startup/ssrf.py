@@ -1,7 +1,7 @@
 """SsrfProxy startup/teardown (B9-D/E boundary).
 
 Populates `settings.SSRF_PROXY_URL` so downstream subprocess + browser
-clients (yt-dlp, DrissionPage, ffmpeg) read the actual port.
+clients (yt-dlp, Camoufox, ffmpeg) read the actual port.
 """
 
 from fastapi import FastAPI

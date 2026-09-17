@@ -237,7 +237,7 @@ async def fetch_media_by_type(
 
         if platform in ("douyin", "tiktok"):
             try:
-                # Unified chain (ABogus → DrissionPage) — same chain as the
+                # Unified chain (ABogus → Camoufox) — same chain as the
                 # initial parse; tries original_url then bare aweme_id.
                 reparse_result = await reparse_douyin(
                     platform_id,

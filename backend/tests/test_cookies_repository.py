@@ -3,7 +3,7 @@ DECRYPT-ON-READ.
 
 No DB / network — these exercise the pure crypto boundary of
 ``CookiesRepository`` in isolation. The KEY DIFFERENCE vs api_keys: the cookie
-consumers (downloaders: ytdlp_service / abogus_parser / drissionpage_parser /
+consumers (downloaders: ytdlp_service / abogus_parser / camoufox_parser /
 soda cookie_source / media_fetch_helpers) need the REAL plaintext to drive a
 browser / yt-dlp session, so the repo DECRYPTS ON READ and returns plaintext
 dicts exactly as today. Only the at-rest representation changes:

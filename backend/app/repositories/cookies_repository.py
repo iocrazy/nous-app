@@ -12,7 +12,7 @@ cleanup batch 7）：legacy supabase-py 分支已删，运行路径不变。
 encrypt-at-rest project (Task 3) the two LOGIN-SECRET columns ``cookie_text`` /
 ``cookie_file`` are ENCRYPTED AT REST (Fernet, ``gAAAAA`` prefix, via
 ``app.core.secret_box``). Consumers (abogus_parser / ytdlp_service / soda_music
-cookie_source / drissionpage_parser / media_fetch_helpers) REQUIRE the raw
+cookie_source / camoufox_parser / media_fetch_helpers) REQUIRE the raw
 plaintext to drive a browser / yt-dlp session, so — unlike ``api_keys``, which
 never surfaces its secret on reads — this repo DECRYPTS ON READ: every returned
 dict carries the real plaintext, byte-identical to the pre-encryption shape.

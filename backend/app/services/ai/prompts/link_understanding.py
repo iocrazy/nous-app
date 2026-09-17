@@ -27,7 +27,7 @@ Limitations:
     deliberately don't pull in BeautifulSoup / readability — heavy dep
     for marginal quality gain at this scope. Upgrade path documented.
   - No JS rendering. Sites that hydrate client-side won't have body
-    content. Workaround is to use the existing DrissionPage parser
+    content. Workaround is to use the existing Camoufox parser
     (browser-based) for those — different module, different cost.
 """
 

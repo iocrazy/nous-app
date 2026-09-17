@@ -217,11 +217,11 @@ async def test_patch_settings_json_does_not_change_download_path(
     repo = _repo()
     await repo.upsert(test_user_id, {"download_path": "/keepme"})
 
-    await repo.patch_settings_json(test_user_id, {"parse_mode": "drissionpage"})
+    await repo.patch_settings_json(test_user_id, {"parse_mode": "camoufox"})
 
     settings = await repo.get_by_user_id(test_user_id)
     assert settings["download_path"] == "/keepme"
-    assert settings["settings_json"]["parse_mode"] == "drissionpage"
+    assert settings["settings_json"]["parse_mode"] == "camoufox"
 
 
 # ─── jsonb → dict + VALUE-TYPE PARITY ───────────────────────────────────

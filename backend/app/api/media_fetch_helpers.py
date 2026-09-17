@@ -341,7 +341,7 @@ async def handle_media_fetch_dispatch(
 
     Despite the legacy `handle_ytdlp_fetch` name (renamed to this), the
     function is NOT yt-dlp specific. Branch by platform:
-      - douyin → unified ABogus / DrissionPage chain (parse_workflow step)
+      - douyin → unified ABogus / Camoufox chain (parse_workflow step)
       - yt-dlp platforms → yt-dlp
     All branches end on the same DBOS parse_workflow dispatch path.
 
@@ -511,7 +511,7 @@ async def handle_media_fetch_dispatch(
             "tag_ids": effective_tag_ids,
             # Without this, parse_workflow defaults to platform="douyin"
             # and feeds bilibili / youtube URLs into the douyin fallback
-            # chain — which can never succeed (DrissionPage waits on a
+            # chain — which can never succeed (the browser tier waits on a
             # douyin API response that never comes). The router already
             # detected the right platform up at the API edge; just thread
             # it through.

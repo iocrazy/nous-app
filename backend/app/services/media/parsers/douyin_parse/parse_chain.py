@@ -1,6 +1,6 @@
 # backend/app/services/media/parsers/douyin_parse/parse_chain.py
 
-"""Unified Douyin parse chain: ABogus → DrissionPage.
+"""Unified Douyin parse chain: ABogus → Camoufox.
 
 Single source of truth for how a douyin share-URL / aweme_id becomes
 ``(aweme_detail, parsed_data)``. Initial parse (``parse_workflow`` via
@@ -15,9 +15,15 @@ Why no LightHTTP (``IesDouyinParser``) tier (removed 2026-06-10):
   prod — note 7641214325696253220 → media_type=68, image_download_urls=2)
 
 The fork this module kills was a production P1: re-parse ran
-LightHTTP → DrissionPage (no ABogus), always failed, and dropped douyin
+LightHTTP → browser tier (no ABogus), always failed, and dropped douyin
 downloads into the yt-dlp fallback whose format fallthrough grabs
 HEVC → browser shows a black screen with audio only.
+
+Why the browser tier is Camoufox and not DrissionPage (2026-09-16):
+DrissionPage drove Chrome over CDP, and douyin reads the CDP
+instrumentation itself — no amount of fingerprint patching answers that.
+Camoufox is Firefox over Playwright's own protocol, so the signal does not
+exist to be read. See ``camoufox_parser`` for the full trade.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ from loguru import logger
 # key is intentionally gone — the tier no longer exists.
 _METHOD_FLAG_KEYS: dict[str, str] = {
     "douyin_abogus_enabled": "abogus",
-    "douyin_drissionpage_enabled": "drissionpage",
+    "douyin_camoufox_enabled": "camoufox",
 }
 
 
@@ -89,18 +95,23 @@ async def fetch_douyin_detail(
     valid_url: Optional[str] = None,
 ) -> Optional[tuple[dict, dict, str]]:
     """Run the unified chain. Returns ``(aweme_detail, parsed_data, method)``
-    with ``method`` in {"abogus", "drissionpage"}, or ``None`` if every
+    with ``method`` in {"abogus", "camoufox"}, or ``None`` if every
     enabled method fails.
 
     ``url_or_id`` may be a share URL or a bare aweme_id (digits) — ABogus
-    resolves bare IDs directly; DrissionPage needs a URL and will simply
+    resolves bare IDs directly; Camoufox needs a URL and will simply
     fail through on a bare ID.
+
+    ABogus runs first and, when it succeeds, Camoufox is never constructed —
+    no browser process is started. That ordering is the whole point of the
+    tier split: the HTTP path costs milliseconds, the browser path costs
+    seconds and hundreds of MB.
     """
     from app.services.media.parsers.douyin_parse.abogus_parser import (
         ABogusDouyinParser,
     )
-    from app.services.media.parsers.douyin_parse.drissionpage_parser import (
-        DrissionPageParser,
+    from app.services.media.parsers.douyin_parse.camoufox_parser import (
+        CamoufoxParser,
     )
     from app.services.media.parsers.douyin_parse.formatter import DouyinFormatter
     from app.services.media.parsers.douyin_parse.ua_pool import pick_ua
@@ -121,8 +132,8 @@ async def fetch_douyin_detail(
     methods: list[tuple[str, Any]] = []
     if flags.get("abogus", True):
         methods.append(("abogus", ABogusDouyinParser.parse))
-    if flags.get("drissionpage", True):
-        methods.append(("drissionpage", DrissionPageParser.fetch_one_video))
+    if flags.get("camoufox", True):
+        methods.append(("camoufox", CamoufoxParser.fetch_one_video))
     if not methods:
         logger.warning("[DouyinChain] all parse methods disabled in admin settings")
         return None

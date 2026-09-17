@@ -1,5 +1,5 @@
 """SsrfProxy — local HTTP/HTTPS forward proxy that enforces boundary
-on every subprocess + browser client (yt-dlp, DrissionPage, ffmpeg).
+on every subprocess + browser client (yt-dlp, Camoufox, ffmpeg).
 
 The proxy exists so non-Python clients (subprocess, embedded browser)
 get the same SSRF protection that in-process httpx callers get from

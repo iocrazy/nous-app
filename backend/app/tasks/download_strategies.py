@@ -136,7 +136,7 @@ def _do_douyin_download(
                 # yt-dlp is banned for douyin: its format-selector
                 # fallthrough grabs HEVC streams browsers can't decode —
                 # the "black screen, audio only" P1 (2026-06-10). Fresh
-                # URLs from the unified chain (ABogus → DrissionPage) +
+                # URLs from the unified chain (ABogus → Camoufox) +
                 # an httpx retry is the correct recovery.
                 if source_platform in ("douyin", "tiktok"):
                     logger.info(

@@ -770,7 +770,7 @@ async def download_workflow(
     # 2. Strategy dispatch
     try:
         # run_download_step stays sync — it dispatches yt-dlp /
-        # DrissionPage subprocesses with sync Redis tracker. No await.
+        # Browser-tier subprocesses with sync Redis tracker. No await.
         download_result = run_download_step(
             workflow_id=DBOS.workflow_id,
             platform_id=platform_id,

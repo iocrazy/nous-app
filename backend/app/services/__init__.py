@@ -25,15 +25,15 @@ from app.services.infra.supabase_auth_service import (
 from app.services.media.downloader.downloader import DownloaderService
 from app.services.media.parsers.douyin_parse import (
     ABogusDouyinParser,
+    CamoufoxParser,
     DouyinFormatter,
-    DrissionPageParser,
 )
 from app.services.media.parsers.media_service import MediaService
 
 __all__ = [
     "ABogusDouyinParser",
+    "CamoufoxParser",
     "DouyinFormatter",
-    "DrissionPageParser",
     "DownloaderService",
     "MediaService",
     "SupabaseAuthService",

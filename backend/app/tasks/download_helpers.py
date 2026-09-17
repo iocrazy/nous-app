@@ -726,7 +726,7 @@ def reparse_douyin_via_chain(
     user_id: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[dict | None, str]:
-    """Sync bridge over the unified douyin re-parse (ABogus → DrissionPage,
+    """Sync bridge over the unified douyin re-parse (ABogus → Camoufox,
     original_url first then bare aweme_id). Returns (parsed_data, method);
     (None, "") when every attempt fails. Never raises."""
     from app.services.media.parsers.douyin_parse.parse_chain import reparse_douyin
@@ -796,7 +796,7 @@ def ensure_download_urls(
         )
         return media
 
-    # The douyin chain (ABogus / DrissionPage) is douyin-specific. For
+    # The douyin chain (ABogus / Camoufox) is douyin-specific. For
     # yt-dlp platforms (bilibili / youtube / twitter / xhs / ...), calling
     # it just wastes HTTP calls while the outer caller's yt-dlp fallback
     # (download_strategies.py video failure branch) is the
@@ -810,7 +810,7 @@ def ensure_download_urls(
         return media
 
     try:
-        # Unified chain (ABogus → DrissionPage) — the SAME chain the
+        # Unified chain (ABogus → Camoufox) — the SAME chain the
         # initial parse uses, so re-parse can't silently rot again the
         # way the old LightHTTP→BrowserAuto fork did (LightHTTP was
         # permanently anti-bot blocked → every re-parse failed → yt-dlp

@@ -24,11 +24,15 @@ dependencies = [
     "anthropic>=0.40.0",
     "aiosqlite>=0.21.0",
     "alembic>=1.16.2",
-    "drissionpage>=4.1.0.18",
+    "camoufox[geoip]>=0.5.6",
     "faster-whisper>=1.1.0",
     "fastapi>=0.115.12",
     "greenlet>=3.2.3",
-    "httpx>=0.28.1",
+    # [socks] pulls socksio. Without it httpx raises ImportError the moment
+    # SSRF_PROXY_URL is a socks:// endpoint, and the douyin chain reported
+    # that as a generic "parse failed" with the real cause only in the log
+    # (2026-09-16).
+    "httpx[socks]>=0.28.1",
     "loguru>=0.7.3",
     "notion-client>=2.3.0",
     "openai>=1.0.0",
