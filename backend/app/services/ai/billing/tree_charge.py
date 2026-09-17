@@ -50,6 +50,10 @@ Stated Limitations
 * **急停期间收口的树不补扣。** ``AGENT_POINTS_CHARGE_ENABLED`` 为 false 时
   ``reconcile_run`` 只走审计不动余额，而 ``charged_at`` 的戳照盖 —— 恢复后那棵树
   不会再被收口一次。要补扣得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
+* **切换点之前开始的树永远不收口。** ``settings.AGENT_POINTS_TREE_CUTOVER``
+  之前 ``started_at`` 的 root 一律返回 ``pre_cutover`` —— 不扣、也不盖戳
+  （见 :func:`cutover_at` 里 2026-09-17 那次事故的机理）。它们在旧口径下要么
+  已经逐 run 扣过，要么按用户裁定「只向前不追扣」本就不该补。
 * **崩溃类终态必须自己叫收口。** ``liveness_scanner._mark_dead`` /
   ``agent_runs_sweeper`` 的 ``mark_heartbeat_lost_ids`` /
   ``liveness.reconcile.reconcile_stranded_runs`` 写终态时不经 ``_finish``，
@@ -142,6 +146,8 @@ class SettleOutcome:
     #: ``already`` 本机制已收过（CAS 没抢到，或戳已在） /
     #: ``legacy_charged`` **旧口径**下逐 run 扣过、本机制从没收过 /
     #: ``charged`` 本次收口 / ``forced`` 超过宽限期强制收口 / ``unknown`` 读不到行 /
+    #: ``pre_cutover`` root 在切换点之前就开始了，按裁定只向前不追扣 /
+    #: ``cutover_unreadable`` 切换点配置读不出来，拒绝扣任何一笔 /
     #: ``error`` 读写失败 / ``no_run_id`` 没有可查的树。
     reason: str
     charged_points: float = 0.0
@@ -155,6 +161,57 @@ PENDING_CHILDREN_GRACE = timedelta(hours=2)
 #: 已经逐 run 扣过钱，把它们扫进来就是二次扣费。下面还有一道「这棵树从没扣过钱」的
 #: 正查兜底，两道一起才安全。
 FORCED_SETTLE_MAX_AGE = timedelta(days=7)
+
+
+def cutover_at() -> Optional[datetime]:
+    """「树收口一次扣费」上线的那一刻，解析成带时区的 ``datetime``。
+
+    **为什么光有「这棵树扣过钱没有」那道正查不够**（2026-09-17 事故）：本机制上线
+    首轮，清扫器把 43 棵**上线前**的历史树（``ended_at`` 在 09-10~09-15）提名进来
+    并整棵扣了 87 分。那些树结束于 A3（积分链修好）**之前** —— 那时一分钱都没扣过，
+    所以它们在 ``point_transactions`` 里是零行，正查照单放行。
+
+    「有没有扣过钱」回答不了「该不该扣」。用户的裁定是**只向前不追扣**，判据是
+    **时间**：切换点之前开始的回合，无论当时扣没扣、扣了多少，都不再动它。
+
+    读不出来（键缺失 / 空串 / 不是 ISO）返回 ``None``，调用方一律**不扣**。这个方向
+    是刻意的：配置坏掉时少收一笔是隐形且可补的，而多扣一笔要退款、要解释、已经发生
+    过一次。每次都会刷一条 ERROR，不会安静。
+    """
+    from app.core.config import settings
+
+    raw = getattr(settings, "AGENT_POINTS_TREE_CUTOVER", None)
+    if not isinstance(raw, str) or not raw.strip():
+        logger.error(
+            "[tree_charge] AGENT_POINTS_TREE_CUTOVER is unset — refusing to "
+            "charge any tree until it is a valid ISO 8601 instant"
+        )
+        return None
+    text = raw.strip()
+    # ``fromisoformat`` 3.11+ 认 ``Z``，但生产 config 是人手写的，容得下一次手滑。
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        logger.error(
+            "[tree_charge] AGENT_POINTS_TREE_CUTOVER={!r} is not an ISO 8601 "
+            "instant — refusing to charge any tree",
+            raw,
+        )
+        return None
+    # 裸时间当 UTC：切换点是一个绝对时刻，落到本机时区上会随部署机器漂。
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """裸 ``datetime`` 补成 UTC，None 原样透传。"""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _root_row_of(rows, root_id: int):
+    """树里的 root 行。取不到就退回第一行 —— 读到零行的情形调用方已经先挡掉了。"""
+    return next((r for r in rows if int(r.id) == root_id), rows[0])
 
 
 def _async_pending_of(metadata: Optional[Mapping[str, Any]]) -> int:
@@ -283,6 +340,7 @@ async def settle_tree_if_closed(
                         AgentRuns.model,
                         AgentRuns.prompt_tokens,
                         AgentRuns.completion_tokens,
+                        AgentRuns.started_at,
                         AgentRuns.ended_at,
                         AgentRuns.metadata_json,
                     ).where(
@@ -296,6 +354,22 @@ async def settle_tree_if_closed(
             if not rows:
                 # 读到零行 ≠ 这棵树没花钱。什么都不做，等下一次。
                 return SettleOutcome(False, "unknown")
+
+            # 防回溯第一道，也是唯一一道**不看树状态**的：切换点之前开始的回合
+            # 永不收口（用户裁定「只向前不追扣」）。放在 running / pending 之前是
+            # 刻意的 —— 这是个关于这棵树的**永久**结论，与它此刻跑没跑完无关，
+            # 早答早省一次全树聚合，日志里也读得出「这是棵老树」而不是「还在跑」。
+            cutover = cutover_at()
+            if cutover is None:
+                return SettleOutcome(False, "cutover_unreadable")
+            root_started = _as_utc(
+                getattr(_root_row_of(rows, root_id), "started_at", None)
+            )
+            # ``started_at`` 是 NOT NULL + ``server_default now()``，读不出来说明这
+            # 不是一行正常的 run —— 「不知道」往不扣那侧倒（宁少收不重收）。
+            if root_started is None or root_started < cutover:
+                return SettleOutcome(False, "pre_cutover")
+
             if any(str(getattr(r, "status", "")) == _RUNNING for r in rows):
                 return SettleOutcome(False, "deferred")
 
@@ -313,7 +387,7 @@ async def settle_tree_if_closed(
             # （``already``），没戳 = 旧口径逐 run 收过（``legacy_charged``）。
             # 合成一个会让运维读不出「这是上线前的老树」还是「刚才谁抢先了」。
             if await _tree_was_ever_charged(session, [r.id for r in rows]):
-                root_row = next((r for r in rows if int(r.id) == root_id), rows[0])
+                root_row = _root_row_of(rows, root_id)
                 billing = (root_row.metadata_json or {}).get("billing") or {}
                 stamped = bool(billing.get("charged_at"))
                 return SettleOutcome(False, "already" if stamped else "legacy_charged")
@@ -344,7 +418,7 @@ async def settle_tree_if_closed(
         return SettleOutcome(False, "already")
 
     buckets = bucket_tree((r.metadata_json or {}).get("cost") for r in rows)
-    root_row = next((r for r in rows if int(r.id) == root_id), rows[0])
+    root_row = _root_row_of(rows, root_id)
     # 纯 BYOK 树（平台额 0 而真的烧了钱）与零花费树在 note 里必须分得开：
     # 一个是「你自己付了」，一个是「什么都没烧」。
     byo_key = buckets.tree_platform <= 0 and buckets.tree_total > 0
@@ -481,6 +555,7 @@ def _release_stamp_stmt(root_id: int):
 
 __all__ = [
     "PENDING_CHILDREN_GRACE",
+    "cutover_at",
     "legacy_charge_probe_stmt",
     "FORCED_SETTLE_MAX_AGE",
     "RunSpend",

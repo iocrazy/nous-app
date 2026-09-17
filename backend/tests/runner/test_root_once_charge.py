@@ -13,7 +13,7 @@ BYOK 的调用一分不扣。
 """
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -128,6 +128,18 @@ def test_an_empty_row_set_is_zero_but_callers_must_not_read_it_as_free():
 # ── settle_tree_if_closed ───────────────────────────────────────────────
 
 
+def _after_cutover(**delta) -> datetime:
+    """一个**晚于切换点**的时刻。
+
+    刻意从配置里那个切换点推，而不是写 ``now()``：切换点是配置值，用 ``now()`` 就
+    等于让这些用例依赖「跑测试的机器此刻已经过了那一刻」，换台钟慢的机器就集体转红
+    （而且红在 ``pre_cutover`` 上，读起来像业务缺陷）。
+    """
+    base = tree_charge.cutover_at()
+    assert base is not None, "切换点必须能解析，否则本文件的前提就不成立"
+    return base + (timedelta(**delta) if delta else timedelta(seconds=1))
+
+
 class _Row:
     def __init__(self, id, status="completed", cost=None, **kw):
         self.id = id
@@ -137,6 +149,9 @@ class _Row:
         self.model = kw.get("model", "doubao-seed-2-0-lite")
         self.prompt_tokens = kw.get("prompt_tokens", 10)
         self.completion_tokens = kw.get("completion_tokens", 20)
+        # 惰性求值：``_after_cutover()`` 要求切换点可解析，而「切换点坏掉」那条
+        # 用例正好造的是解析不了的配置 —— 提前算默认值会让它红在 fixture 上。
+        self.started_at = kw["started_at"] if "started_at" in kw else _after_cutover()
         self.ended_at = kw.get("ended_at", datetime.now(timezone.utc))
         md: dict[str, Any] = {}
         if cost is not None:
@@ -883,3 +898,106 @@ async def test_the_three_zero_charge_reasons_do_not_collapse_into_one_note():
     assert "deferred" in (deferred.note or "")
     assert "zero cost" in (idle.note or "")
     assert len({byok.note, deferred.note, idle.note}) == 3
+
+
+# ── 切换点：只向前不追扣（2026-09-17 事故） ─────────────────────────────
+
+
+async def test_a_tree_that_started_before_the_cutover_is_never_charged(
+    charged, monkeypatch
+):
+    """上线前开始的回合一律不扣、不盖戳 —— 用户裁定「只向前不追扣」。
+
+    这是 2026-09-17 那次退款事故的直接判据。当时唯一的防回溯是「这棵树在
+    ``point_transactions`` 里扣过钱没有」，而 09-10~09-15 那批树结束于积分链修好
+    之前，一分钱都没扣过 —— 正查照单放行，43 棵树被整棵扣了 87 分。
+    **「有没有扣过钱」回答不了「该不该扣」，时间才是判据。**
+    """
+    sink: list = []
+    _db(
+        monkeypatch,
+        my_root=None,
+        sink=sink,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                started_at=_after_cutover() - timedelta(days=5),
+                cost={"own_cents": 40.0},
+            ),
+            _Row(900000000000002, cost={"own_cents": 3.0}),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "pre_cutover")
+    charged.assert_not_awaited()
+    # 戳也不能盖：盖了就等于宣称「这棵树本机制收过了」，而它一分没收。
+    assert sink == []
+
+
+async def test_a_tree_that_started_after_the_cutover_still_charges(
+    charged, monkeypatch
+):
+    """正对照。少了它，上一条用「永远不扣」也能通过 —— 那是把计费整个关掉。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 7.0})],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (True, "charged")
+    assert charged.await_args.kwargs["cost_points"] == 7.0
+
+
+async def test_an_unreadable_cutover_refuses_to_charge_anything(charged, monkeypatch):
+    """配置坏掉 = 不知道边界在哪。往不扣那侧倒，并且与 ``pre_cutover`` 分开上报 ——
+    两者都是「没扣」，但一个是正常的老树、一个是需要人去修的配置。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_POINTS_TREE_CUTOVER", "not-a-timestamp")
+    sink: list = []
+    _db(
+        monkeypatch,
+        my_root=None,
+        sink=sink,
+        tree_rows=[_Row(800000000000001, started_at=datetime.now(timezone.utc))],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "cutover_unreadable")
+    charged.assert_not_awaited()
+    assert sink == []
+
+
+def test_the_cutover_is_read_as_an_absolute_instant():
+    """裸时间当 UTC；带时区的按它自己的时区。切换点漂到部署机的本地时区上，
+    边界就会随机器走 —— 而它必须是同一个绝对时刻。"""
+    from app.core.config import settings
+
+    for raw, expected in (
+        ("2026-09-17T06:42:56Z", datetime(2026, 9, 17, 6, 42, 56, tzinfo=timezone.utc)),
+        ("2026-09-17T06:42:56", datetime(2026, 9, 17, 6, 42, 56, tzinfo=timezone.utc)),
+        (
+            "2026-09-17T14:42:56+08:00",
+            datetime(2026, 9, 17, 6, 42, 56, tzinfo=timezone.utc),
+        ),
+    ):
+        with patch.object(settings, "AGENT_POINTS_TREE_CUTOVER", raw):
+            assert tree_charge.cutover_at() == expected
+
+    for bad in ("", "   ", "yesterday"):
+        with patch.object(settings, "AGENT_POINTS_TREE_CUTOVER", bad):
+            assert tree_charge.cutover_at() is None
+
+
+def test_a_missing_cutover_key_reads_as_unknown_not_as_zero(monkeypatch):
+    """键根本不在（旧镜像 / 半截配置）时不能当成「纪元 0」—— 那等于整个边界失效。
+
+    ⚠️ 这里换掉整个 ``settings`` 对象而不是 ``monkeypatch.setattr`` 一个值：
+    Settings 开了 ``validate_assignment``，把 None 赋给一个 ``str`` 字段会直接
+    抛 ValidationError，测不到「读不出来」那条分支。
+    """
+    from types import SimpleNamespace
+
+    import app.core.config as config_mod
+
+    monkeypatch.setattr(config_mod, "settings", SimpleNamespace())
+    assert tree_charge.cutover_at() is None

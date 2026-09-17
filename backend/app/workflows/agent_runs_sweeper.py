@@ -386,9 +386,13 @@ async def force_settle_stale_pending_trees_step() -> int:
     状态、``async_pending``、宽限期、防回溯，并靠 root 行 CAS 保证只扣一次），所以提名
     宽一点只是多几次读，不会多扣一分钱。
 
-    ⚠️ **时间窗上界是防回溯的**：本机制上线前的历史树在旧口径下已经逐 run 扣过钱，
-    它们的 ``billing.charged_at`` 同样是空的。窗口之外还有 ``settle`` 里那道
-    「这棵树扣过钱没有」的正查，两道一起才安全。
+    ⚠️ **提名下界是切换点，不是「7 天前」**（2026-09-17 事故）：上线首轮这一步把 43 棵
+    **上线前**的历史树（``ended_at`` 在 09-10~09-15）提名了进来。它们结束于积分链修好
+    之前，``point_transactions`` 里零行，于是 ``settle`` 那道「扣过钱没有」的正查放行，
+    整棵扣掉 87 分 —— 违反用户裁定「只向前不追扣」。现在下界取
+    ``max(now - FORCED_SETTLE_MAX_AGE, cutover)``，``settle`` 里还有一道按 root
+    ``started_at`` 的同源判据（``pre_cutover``）。**两道都要在**：这里是提名侧的省事，
+    那里是唯一的权威 —— 正常收口路径根本不经过这个函数。
 
     ⚠️ **`ORDER BY ended_at DESC`**：升序 + LIMIT 会让窗口里攒下的老树把新树饿死
     （它们每轮都被重提名、每轮都不动）。降序保证新结束的树永远排在前面。积压只可能
@@ -405,17 +409,25 @@ async def force_settle_stale_pending_trees_step() -> int:
     from app.services.ai.billing.tree_charge import (
         FORCED_SETTLE_MAX_AGE,
         PENDING_CHILDREN_GRACE,
+        cutover_at,
         settle_tree_if_closed,
     )
 
     now = datetime.now(timezone.utc)
+    cutover = cutover_at()
+    if cutover is None:
+        # 切换点读不出来 = 不知道哪些树算历史树。什么都不提名（``cutover_at``
+        # 已经刷过 ERROR），别凭一个坏配置去扣钱。
+        return 0
     try:
         async with read_scope() as session:
             rows = (
                 await session.execute(
                     _stale_tree_candidates_stmt(
                         older_than=now - PENDING_CHILDREN_GRACE,
-                        newer_than=now - FORCED_SETTLE_MAX_AGE,
+                        # 两个下界取晚的那个：7 天窗口是给积压兜底的，切换点是
+                        # 裁定的硬边界，谁更靠后听谁的。
+                        newer_than=max(now - FORCED_SETTLE_MAX_AGE, cutover),
                     )
                 )
             ).all()
@@ -440,7 +452,10 @@ async def force_settle_stale_pending_trees_step() -> int:
 def _stale_tree_candidates_stmt(*, older_than: datetime, newer_than: datetime):
     """提名语句。抽成纯 builder，好让测试断言它带着那几个谓词 —— 少一个都不会报错，
     只会让兜底安静地退化（``charged_at IS NULL`` 少了就是重提名已收口的树并饿死新树，
-    时间窗少了就是回溯扣历史）。"""
+    时间窗少了就是回溯扣历史 —— 后者 2026-09-17 真的发生过，87 分）。
+
+    ``newer_than`` 由调用方算成 ``max(now - FORCED_SETTLE_MAX_AGE, cutover)``，所以
+    这条语句本身不认识切换点；它只负责忠实地带上那个下界。"""
     from sqlalchemy import select
 
     from app.models import AgentRuns

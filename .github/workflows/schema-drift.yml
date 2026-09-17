@@ -200,6 +200,7 @@ on:
       # 冲掉，而钱已经扣了。三件事都只有真服务器判得了。
       - 'backend/tests/db/test_tree_charge_cas_integration.py'
       - 'backend/app/services/ai/billing/tree_charge.py'
+      - 'backend/app/services/ai/billing/pre_cutover_refund.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
