@@ -326,3 +326,97 @@ class TestCaptionAssetWorkflowReraises:
         assert ctx["workflow"] == "caption_asset"
         assert ctx["resource_id"] == "9000000000000000001"
         assert ctx["user_id"] == "u-1"
+
+
+class TestAnalyzeL1WorkflowReportsTheEmbeddingOutcomeSeparately:
+    """CLAUDE.md 防御模式 — orthogonal results are reported on their own.
+
+    A run can succeed at the thing it was paid for (the VLM analysis) and
+    still fail to land a vector. That is not a reason to fail the run, but it
+    was never a reason to stay silent either: ``content_embedding`` sat at
+    zero rows for months while every task said "Analysis complete". The
+    reason now reaches Task Center as a subtitle AND as queryable metadata,
+    while phase/status stay trigger-owned (Route-C rule 2).
+    """
+
+    async def test_embed_error_reaches_metadata_and_subtitle_but_not_the_status(self):
+        from app.workflows import analyze_l1 as m
+
+        cfg = {
+            "provider_key": "pk",
+            "provider_config": {},
+            "agent_model": "mm",
+            "agent_slug": "analyze",
+            "fallback_models": [],
+        }
+        manager = _make_manager()
+
+        with (
+            patch.object(m, "resolve_analyze_provider", AsyncMock(return_value=cfg)),
+            patch.object(
+                m,
+                "call_analyze_l1",
+                AsyncMock(
+                    return_value={
+                        "status": "ok",
+                        "embedded": False,
+                        "embed_error": "provider_error: boom 503",
+                    }
+                ),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+        ):
+            out = await inspect.unwrap(m.analyze_l1_workflow)(
+                media_id=1, cover_url="http://x", user_id="u-1"
+            )
+
+        assert out["embed_error"] == "provider_error: boom 503"
+        # ONE unthrottled write carries both halves: the subtitle is the
+        # classified code (never provider text), metadata keeps the reason.
+        manager.patch_metadata.assert_not_awaited()
+        kw = manager.update_progress.await_args.kwargs
+        assert kw["force"] is True
+        assert kw["metadata_patch"] == {"embed_error": "provider_error"}
+        assert "embedding failed: provider_error" in kw["subtitle"]
+        assert "boom 503" not in kw["subtitle"]
+        # phase/status belong to the mirror trigger, never to the workflow.
+        manager.complete.assert_not_awaited()
+        manager.fail.assert_not_awaited()
+
+    async def test_a_clean_run_says_only_analysis_complete(self):
+        from app.workflows import analyze_l1 as m
+
+        cfg = {
+            "provider_key": "pk",
+            "provider_config": {},
+            "agent_model": "mm",
+            "agent_slug": "analyze",
+            "fallback_models": [],
+        }
+        manager = _make_manager()
+
+        with (
+            patch.object(m, "resolve_analyze_provider", AsyncMock(return_value=cfg)),
+            patch.object(
+                m,
+                "call_analyze_l1",
+                AsyncMock(
+                    return_value={"status": "ok", "embedded": True, "embed_error": None}
+                ),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+        ):
+            await inspect.unwrap(m.analyze_l1_workflow)(
+                media_id=1, cover_url="http://x", user_id="u-1"
+            )
+
+        manager.patch_metadata.assert_not_awaited()
+        assert (
+            manager.update_progress.await_args.kwargs["subtitle"] == "Analysis complete"
+        )

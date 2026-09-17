@@ -14,6 +14,7 @@ from contextlib import nullcontext
 from typing import Any, Optional
 
 from dbos import DBOS
+from loguru import logger
 from sqlalchemy import select
 
 from app.db.scope import is_enforced, system_request_scope
@@ -89,8 +90,14 @@ async def call_analyze_l1(
     agent_slug: str = "analyze",
     wf_id: Optional[str] = None,
     fallback_models: Optional[list[str]] = None,
+    resource_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """Run the multimodal analysis + persist results. Returns a digest dict.
+
+    ``resource_id``: the caller's already-resolved row. When given, the
+    media→resource lookup is skipped so the run repairs the row the caller
+    chose (the backfill selects per resource; the lookup would otherwise
+    pick the user's earliest resource for that media).
 
     PR #237 audit: was sync ``def`` with ``asyncio.run(_analyze())``
     inside. Now async — same fix as workflow_health_sweeper / sweeper."""
@@ -123,14 +130,15 @@ async def call_analyze_l1(
         if is_enforced("resources")
         else nullcontext()
     )
-    async with scope_cm:
-        async with read_scope() as session:
-            resource_id_val = await session.scalar(
-                _analyze_resource_lookup_stmt(media_id, user_id)
-            )
-    if resource_id_val is None:
-        raise RuntimeError(f"no resource for parsed_media id={media_id}")
-    resource_id = int(resource_id_val)
+    if resource_id is None:
+        async with scope_cm:
+            async with read_scope() as session:
+                resource_id_val = await session.scalar(
+                    _analyze_resource_lookup_stmt(media_id, user_id)
+                )
+        if resource_id_val is None:
+            raise RuntimeError(f"no resource for parsed_media id={media_id}")
+        resource_id = int(resource_id_val)
 
     # Make resources.visual_analysis_status authoritative for the whole run:
     # 'processing' now, 'completed' on success (below), 'failed' on the no-result
@@ -298,9 +306,25 @@ async def call_analyze_l1(
         detected_scenes=result.detected_scenes,
         detected_text=result.detected_text,
     )
-    embedding = await embedding_service.generate_embedding(embedding_text)
+    # Orthogonal outcome, reported on its own (CLAUDE.md 防御模式): the
+    # analysis succeeded and was paid for regardless of whether the vector
+    # landed. A missing vector is NOT a reason to fail the run — but it was
+    # never a reason to stay silent either. ``generate_embedding`` returned a
+    # bare None for "unconfigured", "empty text" and "provider error" alike,
+    # and ``if embedding:`` swallowed all three: content_embedding sat at zero
+    # rows for months while every run reported success. Now the reason is
+    # logged at ERROR (so the post-release drift funnel sees it) and carried
+    # in the digest for the workflow to stamp onto task_tracking.
+    embedding, embed_error = await embedding_service.try_embed(embedding_text)
     if embedding:
         await analysis_repo.update_embedding(resource_id, embedding, embedding_text)
+    else:
+        logger.error(
+            f"[analyze_l1] resource {resource_id}: analysis saved but embedding "
+            f"NOT written — {embed_error}"
+        )
+
+    from app.services.ai.providers.embedding_service import classify_embed_reason
 
     return {
         "status": "ok",
@@ -308,6 +332,9 @@ async def call_analyze_l1(
         "category": result.category,
         "cost": result.cost,
         "embedded": embedding is not None,
+        # Classified, not raw: this dict is checkpointed as DBOS step output
+        # and the raw provider text already went to the ERROR log above.
+        "embed_error": classify_embed_reason(embed_error),
     }
 
 
@@ -319,6 +346,7 @@ async def analyze_l1_workflow(
     title: str = "",
     description: str = "",
     user_id: Optional[str] = None,
+    resource_id: Optional[int] = None,
 ) -> dict[str, Any]:
     """DBOS port of analyze_video_l1_task.
 
@@ -346,8 +374,31 @@ async def analyze_l1_workflow(
             agent_slug=cfg.get("agent_slug") or "analyze",
             wf_id=wf_id,
             fallback_models=cfg.get("fallback_models") or [],
+            resource_id=resource_id,
         )
-        await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
+        from app.services.ai.providers.embedding_service import classify_embed_reason
+
+        embed_error = result.get("embed_error")
+        if embed_error:
+            # Visible in Task Center (subtitle) and queryable (metadata),
+            # both as the classified code, in ONE unthrottled write: the
+            # per-step progress writes land under a second before this one,
+            # and a throttled final write would drop the visible half of the
+            # signal. Neither field carries provider text (URLs, response
+            # bodies) — /tasks returns metadata verbatim; the raw reason is
+            # in the ERROR log above.
+            code = classify_embed_reason(embed_error)
+            await manager.update_progress(
+                wf_id,
+                100,
+                subtitle=f"Analysis complete · embedding failed: {code}",
+                metadata_patch={"embed_error": code},
+                force=True,
+            )
+        else:
+            await manager.update_progress(
+                wf_id, 100, subtitle="Analysis complete", force=True
+            )
         return result
     except Exception as e:  # noqa: BLE001
         # Translate the raw failure into a stable error code the frontend
