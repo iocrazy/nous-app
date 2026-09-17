@@ -139,7 +139,8 @@ class SettleOutcome:
     #: 这次调用是不是真的扣了（或真的走到了扣费那一步）。
     settled: bool
     #: ``deferred`` 树里还有人在跑 / ``pending_children`` 还欠着异步子 run /
-    #: ``already`` 别人已收口 / ``legacy_charged`` 旧口径下已经逐 run 扣过 /
+    #: ``already`` 本机制已收过（CAS 没抢到，或戳已在） /
+    #: ``legacy_charged`` **旧口径**下逐 run 扣过、本机制从没收过 /
     #: ``charged`` 本次收口 / ``forced`` 超过宽限期强制收口 / ``unknown`` 读不到行 /
     #: ``error`` 读写失败 / ``no_run_id`` 没有可查的树。
     reason: str
@@ -187,21 +188,26 @@ async def _tree_was_ever_charged(session, run_ids) -> bool:
     ``type = 'consume' AND reference_type = 'agent_run'``，少一个条件谓词就不被蕴含，
     planner 悄悄改走顺扫 —— 那正是该索引注释里记着的陷阱，而且不会有任何东西说出来。
     """
+    row = (await session.execute(legacy_charge_probe_stmt(run_ids))).first()
+    return row is not None
+
+
+def legacy_charge_probe_stmt(run_ids):
+    """「这棵树扣过钱没有」那条查询。抽成纯 builder，好让测试断**编译出来的 WHERE**
+    而不是源码字面量 —— 后者钉的是写法，等价改写一次就红，而真正要钉的是那三个
+    谓词都在（见 :func:`_tree_was_ever_charged` 里为什么 ``type`` 不能省）。"""
     from sqlalchemy import select
 
     from app.models import PointTransactions
     from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
 
-    row = (
-        await session.execute(
-            select(PointTransactions.id)
-            .where(PointTransactions.type == "consume")
-            .where(PointTransactions.reference_type == AGENT_RUN_REFERENCE_TYPE)
-            .where(PointTransactions.reference_id.in_([str(i) for i in run_ids]))
-            .limit(1)
-        )
-    ).first()
-    return row is not None
+    return (
+        select(PointTransactions.id)
+        .where(PointTransactions.type == "consume")
+        .where(PointTransactions.reference_type == AGENT_RUN_REFERENCE_TYPE)
+        .where(PointTransactions.reference_id.in_([str(i) for i in run_ids]))
+        .limit(1)
+    )
 
 
 async def settle_tree_if_closed(
@@ -301,8 +307,16 @@ async def settle_tree_if_closed(
                 forced = True
             # 防回溯，**两条路径共用**：旧口径逐 run 扣过的老树没有戳，不拦就会被
             # 整棵再扣一遍（见 ``_tree_was_ever_charged``）。
+            #
+            # 正查在 CAS **之前**，所以本机制自己收过的树也会命中它 —— 两者都是
+            # 「不该再扣」，但**原因不同**，结局必须分得开：有戳 = 本机制收过
+            # （``already``），没戳 = 旧口径逐 run 收过（``legacy_charged``）。
+            # 合成一个会让运维读不出「这是上线前的老树」还是「刚才谁抢先了」。
             if await _tree_was_ever_charged(session, [r.id for r in rows]):
-                return SettleOutcome(False, "legacy_charged")
+                root_row = next((r for r in rows if int(r.id) == root_id), rows[0])
+                billing = (root_row.metadata_json or {}).get("billing") or {}
+                stamped = bool(billing.get("charged_at"))
+                return SettleOutcome(False, "already" if stamped else "legacy_charged")
     except Exception:  # noqa: BLE001 — 一次读失败不该变成一次误扣
         logger.exception("[tree_charge] tree read failed run={}", run_id)
         return SettleOutcome(False, "error")
@@ -467,6 +481,7 @@ def _release_stamp_stmt(root_id: int):
 
 __all__ = [
     "PENDING_CHILDREN_GRACE",
+    "legacy_charge_probe_stmt",
     "FORCED_SETTLE_MAX_AGE",
     "RunSpend",
     "TreeBuckets",

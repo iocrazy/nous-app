@@ -382,9 +382,24 @@ async def test_a_tree_charged_the_old_way_is_not_charged_again(
             str(tree["child"]),
         )
         out = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+        # 无戳 = 这棵树从没被**本机制**收过，命中的流水只能来自旧口径。
         assert (out.settled, out.reason) == (False, "legacy_charged")
         mock.assert_not_awaited()
         assert await _charged_at(pg, tree["root"]) is None, "不收口就绝不能盖戳"
+
+        # 同一条正查、同一批流水，**有戳**时必须报 already —— 两者都是「不该再扣」，
+        # 但原因不同：一个是上线前的老树，一个是本机制刚收过。合成一个会让运维
+        # 读不出到底发生了什么。
+        await pg.execute(
+            "UPDATE public.agent_runs SET metadata_json ="
+            " metadata_json || jsonb_build_object('billing',"
+            "   jsonb_build_object('charged_at', 'x'))"
+            " WHERE id = $1",
+            tree["root"],
+        )
+        again = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+        assert (again.settled, again.reason) == (False, "already")
+        mock.assert_not_awaited()
     finally:
         await pg.execute(
             "DELETE FROM public.point_transactions WHERE team_id = $1", team_id

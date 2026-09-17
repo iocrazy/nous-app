@@ -391,7 +391,9 @@ async def force_settle_stale_pending_trees_step() -> int:
     「这棵树扣过钱没有」的正查，两道一起才安全。
 
     ⚠️ **`ORDER BY ended_at DESC`**：升序 + LIMIT 会让窗口里攒下的老树把新树饿死
-    （它们每轮都被重提名、每轮都不动）。降序保证新结束的树永远排在前面。
+    （它们每轮都被重提名、每轮都不动）。降序保证新结束的树永远排在前面。积压只可能
+    来自「子 run 长期 running」那一类（树没终态，收口不成立而提名仍然命中），而它同样
+    受 7 天上界约束 —— 所以积压有界，不会无限增长到把 LIMIT 长期占满。
 
     📌 **记票（3d）**：``agent_runs`` 上没有 ``ended_at`` 索引（现有 14 个索引全是
     ``heartbeat_at`` / ``started_at`` / ``created_at`` / 坐标列，且多数带

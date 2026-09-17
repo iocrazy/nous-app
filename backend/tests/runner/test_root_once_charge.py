@@ -158,8 +158,8 @@ def _db(
 ):
     """把 ``read_scope`` / ``write_scope`` 换成桩。
 
-    读的第一条语句是「我的 root 是谁」，第二条是全树，**第三条只在强制收口那条
-    路上出现**（防回溯的「这棵树扣过钱没有」正查）；写的那一条是 CAS。
+    读的第一条语句是「我的 root 是谁」，第二条是全树，**第三条两条路径都会走**
+    （防回溯的「这棵树扣过钱没有」正查，在 CAS 之前）；写的那一条是 CAS。
     """
 
     class _Res:
@@ -517,12 +517,21 @@ def test_the_legacy_charge_probe_can_use_the_partial_index():
     """``type = 'consume'`` 不能省：mig 474 的
     ``idx_point_transactions_agent_run_consume`` 谓词是
     ``type = 'consume' AND reference_type = 'agent_run'``。少一个条件谓词就不被蕴含，
-    planner 悄悄改走顺扫 —— 不会报错，也不会有任何东西说出来。"""
-    import inspect
+    planner 悄悄改走顺扫 —— 不会报错，也不会有任何东西说出来。
 
-    src = inspect.getsource(tree_charge._tree_was_ever_charged)
-    assert 'PointTransactions.type == "consume"' in src
-    assert "AGENT_RUN_REFERENCE_TYPE" in src
+    断的是**编译出来的 WHERE**，不是源码字面量：后者钉的是写法，等价改写一次就红，
+    而真正要钉的是那两个谓词的**值**都在查询里。"""
+    from sqlalchemy.dialects.postgresql import dialect
+
+    from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+
+    compiled = tree_charge.legacy_charge_probe_stmt([1, 2]).compile(dialect=dialect())
+    # ``IN`` 那个绑定是 list（不可哈希），所以按字符串收集而不是塞进 set。
+    bound = [v for v in compiled.params.values() if isinstance(v, str)]
+    assert "consume" in bound, bound
+    assert AGENT_RUN_REFERENCE_TYPE in bound, bound
+    sql = str(compiled)
+    assert "point_transactions" in sql and "WHERE" in sql
 
 
 async def test_a_pure_byok_tree_is_reported_as_byo_key(charged, monkeypatch):
