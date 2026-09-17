@@ -386,10 +386,10 @@ async def force_settle_stale_pending_trees_step() -> int:
     状态、``async_pending``、宽限期、防回溯，并靠 root 行 CAS 保证只扣一次），所以提名
     宽一点只是多几次读，不会多扣一分钱。
 
-    ⚠️ **提名下界是切换点，不是「7 天前」**（2026-09-17 事故）：上线首轮这一步把 43 棵
+    ⚠️ **提名下界是切换点，不是「7 天前」**（2026-09-17 事故）：上线后头两轮这一步把 81 棵
     **上线前**的历史树（``ended_at`` 在 09-10~09-15）提名了进来。它们结束于积分链修好
     之前，``point_transactions`` 里零行，于是 ``settle`` 那道「扣过钱没有」的正查放行，
-    整棵扣掉 87 分 —— 违反用户裁定「只向前不追扣」。现在下界取
+    整棵扣掉 125 分 —— 违反用户裁定「只向前不追扣」。现在下界取
     ``max(now - FORCED_SETTLE_MAX_AGE, cutover)``，``settle`` 里还有一道按 root
     ``started_at`` 的同源判据（``pre_cutover``）。**两道都要在**：这里是提名侧的省事，
     那里是唯一的权威 —— 正常收口路径根本不经过这个函数。
@@ -452,7 +452,7 @@ async def force_settle_stale_pending_trees_step() -> int:
 def _stale_tree_candidates_stmt(*, older_than: datetime, newer_than: datetime):
     """提名语句。抽成纯 builder，好让测试断言它带着那几个谓词 —— 少一个都不会报错，
     只会让兜底安静地退化（``charged_at IS NULL`` 少了就是重提名已收口的树并饿死新树，
-    时间窗少了就是回溯扣历史 —— 后者 2026-09-17 真的发生过，87 分）。
+    时间窗少了就是回溯扣历史 —— 后者 2026-09-17 真的发生过，125 分）。
 
     ``newer_than`` 由调用方算成 ``max(now - FORCED_SETTLE_MAX_AGE, cutover)``，所以
     这条语句本身不认识切换点；它只负责忠实地带上那个下界。"""

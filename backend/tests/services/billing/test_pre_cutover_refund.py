@@ -1,7 +1,7 @@
 """退款脚本选谁、退多少、写不写。
 
-2026-09-17 事故：「谁把树收口谁扣费」上线首轮，清扫器把 43 棵**上线前**的历史树
-收口并扣了 87 分。这里钉住把钱退回去的那一半 —— 尤其是**两个方向的边界**，任何一
+2026-09-17 事故：「谁把树收口谁扣费」上线后头两轮，清扫器把 81 棵**上线前**的历史树
+收口并扣了 125 分。这里钉住把钱退回去的那一半 —— 尤其是**两个方向的边界**，任何一
 侧写错都会让退款本身变成第二次事故：
 
 * 只按「切换点之后扣的」选 → 会把切换点之后**正常**收的钱也退掉；
@@ -169,7 +169,7 @@ async def test_the_dry_run_touches_nothing_but_reports_the_whole_bill(
             _txn(
                 2,
                 800000000000002,
-                35,
+                73,
                 created_at=cutover + timedelta(minutes=2),
                 team_id=331438215859255,
             ),
@@ -181,8 +181,8 @@ async def test_the_dry_run_touches_nothing_but_reports_the_whole_bill(
         write_sink=sink,
     )
     report = await mod.refund_pre_cutover_charges(dry_run=True)
-    assert report.points_total == 87
-    assert report.by_team == {310812366953241: 52, 331438215859255: 35}
+    assert report.points_total == 125
+    assert report.by_team == {310812366953241: 52, 331438215859255: 73}
     # dry run 的意思是一分钱都没动，戳也没改。
     refunds.assert_not_awaited()
     assert sink == []
