@@ -8,7 +8,7 @@
 # PYTHON_BASE is pinned by digest, not by the floating `python:3.13-slim` tag.
 # That tag is rebuilt often (Debian security snapshots), and every rebuild
 # invalidates EVERY layer below it — including the apt layer that pulls
-# chromium + ffmpeg + nodejs + CJK fonts. Two deploys failed this way on
+# chromium + ffmpeg + CJK fonts. Two deploys failed this way on
 # 2026-08-05: the tag moved, the cache died, and apt spent 986s before giving
 # up. Pinning makes that a deliberate, reviewable change instead of a random
 # one. To upgrade:
@@ -117,9 +117,8 @@ ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 # 每次刷一堆警告。显式设成 copy，与 browser/Dockerfile 一致。
 ENV UV_LINK_MODE=copy
 
-# Install Chrome, ffmpeg, Node.js, build tools and dependencies.
-# Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
-# which runs douyin_bdms.js to compute the a_bogus request signature.
+# Install Chrome, ffmpeg, build tools and dependencies.
+# Node.js is NOT installed from apt — see the Node layer right below.
 #
 # This is the layer that hurts when the cache misses — several hundred MB of
 # chromium + ffmpeg + fonts. See the APT_MIRROR note at the top.
@@ -137,8 +136,34 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     fonts-noto-cjk-extra \
     build-essential \
     ffmpeg \
-    nodejs \
     --no-install-recommends
+
+# ── Node.js 22 (douyin HTTP signing tier) ────────────────────────────────
+# The ABogus tier runs douyin's own webSignUrl VM bytecode in a Node
+# subprocess and confines it with `--permission --allow-fs-read=<dir>`
+# (douyin_parse/abogus_parser.py). Measured 2026-09-16:
+#   node 20.19.2 (trixie's `nodejs` package) → bad option: --permission
+#   node 21.7.3                              → bad option: --permission
+#   node 22.23.2                             → OK
+# So the distro package yields an image where every HTTP douyin parse fails at
+# the signing step. Dropping the flag instead is not an option: it would give
+# third-party bytecode unrestricted filesystem access.
+#
+# Official tarball, pinned by version + sha256 (same policy as the
+# gpt-image-2-skill layer below). NODE_MIRROR follows the APT_MIRROR
+# convention: CN mirror by default (the checksum was verified identical to
+# nodejs.org/dist), override with https://nodejs.org/dist for builds abroad.
+# The last line fails the BUILD, not a user's parse, if the flag regresses.
+ARG NODE_MIRROR=https://registry.npmmirror.com/-/binary/node
+ARG NODE_VERSION=22.23.2
+ARG NODE_SHA256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
+RUN curl -fsSL -o /tmp/node.tar.xz "${NODE_MIRROR}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner \
+        "node-v${NODE_VERSION}-linux-x64/bin/node" \
+    && rm -f /tmp/node.tar.xz \
+    && node --version | grep -qx "v${NODE_VERSION}" \
+    && node --permission --allow-fs-read=/tmp -e "0"
 
 # ── GPU Transcode Support (uncomment as needed) ──
 # NVIDIA: Install CUDA toolkit for h264_nvenc

@@ -28,7 +28,10 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "fastapi>=0.115.12",
     "greenlet>=3.2.3",
-    "httpx>=0.28.1",
+    # [socks] pulls socksio. Without it httpx raises ImportError the moment
+    # SSRF_PROXY_URL is a socks:// endpoint, and the douyin chain reported
+    # that as a generic "parse failed" (2026-09-16).
+    "httpx[socks]>=0.28.1",
     "loguru>=0.7.3",
     "notion-client>=2.3.0",
     "openai>=1.0.0",
@@ -86,6 +89,10 @@ asyncio_mode = "auto"
 markers = [
     "unit: pure unit tests (no DB, no network)",
     "integration: integration tests (DB or network required)",
+    # Hits a third-party production service with real credentials. Skipped
+    # unless DOUYIN_ACCEPTANCE_COOKIE_FILE points at a live cookie, so a
+    # default `pytest` run — and CI — never touches douyin.
+    "live_douyin: real-request acceptance against douyin (opt-in, needs a cookie)",
 ]
 
 [project.scripts]

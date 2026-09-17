@@ -4,7 +4,8 @@
 a_bogus 签名版抖音解析器
 
 链路：share_url → aweme_id → 构造 /aweme/v1/web/aweme/detail/ 完整 URL
-     → node env.js 计算 a_bogus → 拼到 URL 尾部 → httpx GET → aweme_detail
+     → 计算 a_bogus → 拼到 URL 尾部 → webSignUrl 补 Argus 字段 → httpx GET
+     → aweme_detail
 
 与另一个 parser 的定位区别：
 - `DrissionPageParser`  起 headless Chrome 拦截 API，最稳但最重（Docker 要装 Chrome）
@@ -22,7 +23,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from loguru import logger
@@ -80,6 +81,7 @@ BASE_PARAMS: dict[str, str] = {
 }
 
 _ENV_JS = Path(__file__).with_name("env.js")
+_WEBSIGN_ENV_JS = Path(__file__).with_name("websign_env.js")
 _ID_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"/share/slides/(\d+)"), "slides"),
     (re.compile(r"/share/video/(\d+)"), "video"),
@@ -94,6 +96,23 @@ def _cookie_value(cookie_header: str, name: str) -> str:
     return m.group(1) if m else ""
 
 
+def _redact(text: str, *secrets: str) -> str:
+    """Strip live credentials out of text that is about to be logged.
+
+    The webSign signer receives the cookie through its environment, so ANY
+    diagnostic it prints — a stack trace, a dump of `process.env` — can carry
+    the whole session. That text becomes our exception, and from there the
+    log line and the task row a user can open.
+
+    Short values are left alone: redacting a two-character cookie would blank
+    unrelated substrings without protecting anything worth protecting.
+    """
+    for secret in sorted(secrets, key=len, reverse=True):
+        if secret and len(secret) >= 8:
+            text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 class ABogusDouyinParser:
     """轻量级抖音解析器（HTTP + a_bogus 签名直达 /aweme/v1/web/aweme/detail/）。
 
@@ -102,6 +121,10 @@ class ABogusDouyinParser:
         ~5ms per call, no subprocess, community-maintained algorithm.
       - "node": legacy Node subprocess over `env.js` + `douyin_bdms.js`.
         Kept as a fallback for A/B comparison; requires `node` binary.
+
+    Either way the a_bogus-ed URL then goes through douyin's own `webSignUrl`
+    VM (`websign_env.js`, Node >= 22) for the Argus fields the detail endpoint
+    demands since 2026-09.
     """
 
     DEFAULT_ENGINE: SignEngine = "python"
@@ -138,7 +161,7 @@ class ABogusDouyinParser:
             fp = cls._extract_verify_fp(cookie)
 
             url = cls._build_detail_url(aweme_id)
-            signed_url = await cls._sign(url, ua, eng, fp)
+            signed_url = await cls._sign(url, ua, eng, fp, cookie)
 
             return await cls._fetch_detail(signed_url, ua, cookie, extra_headers)
         except DouyinParseError:
@@ -209,8 +232,14 @@ class ABogusDouyinParser:
         return f"{DETAIL_API}?{urlencode(params)}"
 
     @classmethod
-    async def _sign(cls, url: str, ua: str, engine: SignEngine, fp: str) -> str:
-        """Dispatch to the configured sign engine and append `a_bogus=`."""
+    async def _sign(
+        cls, url: str, ua: str, engine: SignEngine, fp: str, cookie: str
+    ) -> str:
+        """Append `a_bogus=`, then run the whole URL through webSignUrl.
+
+        The order is fixed: webSignUrl signs the full query string, so it has
+        to see `a_bogus` already in place.
+        """
         if engine == "python":
             bogus = await asyncio.to_thread(cls._sign_with_python, url, ua, fp)
         elif engine == "node":
@@ -219,7 +248,8 @@ class ABogusDouyinParser:
             raise ValueError(f"unknown sign engine: {engine!r}")
 
         sep = "&" if "?" in url else "?"
-        return f"{url}{sep}a_bogus={bogus}"
+        a_bogus_url = f"{url}{sep}a_bogus={bogus}"
+        return await asyncio.to_thread(cls._sign_with_websign, a_bogus_url, ua, cookie)
 
     @staticmethod
     def _sign_with_python(url: str, ua: str, fp: str) -> str:
@@ -257,6 +287,78 @@ class ABogusDouyinParser:
         if not bogus:
             raise RuntimeError("node a_bogus empty")
         return bogus
+
+    @classmethod
+    def _sign_with_websign(cls, url: str, ua: str, cookie: str) -> str:
+        """Add Argus `timestamp` / `uifid` / `x-secsdk-web-signature` to `url`.
+
+        Runs douyin's bundled `webSignUrl` VM (websign_runtime.js) in a Node
+        subprocess. Cookie, UIFID and UA go in through the environment so they
+        match what the final GET sends — a mismatch between the signed and the
+        sent fingerprint is itself a rejection.
+        """
+        uifid = _cookie_value(cookie, "UIFID")
+        if not uifid:
+            # Argus rejects the request without it, and nothing in this tier
+            # can mint one: it is issued to a real browser session. The user's
+            # next move is refreshing the saved cookie, which is exactly what
+            # AUTH_REQUIRED tells them. Fail before spawning Node.
+            raise DouyinParseError(
+                DouyinFailure.AUTH_REQUIRED,
+                "Douyin cookie has no UIFID; Argus web signing needs it",
+            )
+
+        node_bin = shutil.which("node") or "node"
+        completed = subprocess.run(
+            [
+                node_bin,
+                # Confines douyin's third-party VM bytecode to reading its own
+                # directory. Node 20/21 spell this --experimental-permission;
+                # the image pins Node 22 for it (see Dockerfile). Do not drop
+                # the flag to accommodate an older runtime.
+                "--permission",
+                f"--allow-fs-read={_WEBSIGN_ENV_JS.parent}",
+                str(_WEBSIGN_ENV_JS),
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=cls.SIGN_TIMEOUT,
+            check=False,
+            **safe_popen_kwargs(
+                env_extra={
+                    "DOUYIN_COOKIE": cookie,
+                    "DOUYIN_UIFID": uifid,
+                    "DOUYIN_UA": ua,
+                }
+            ),
+        )
+        if completed.returncode != 0:
+            detail = _redact(
+                completed.stderr.strip() or completed.stdout.strip(),
+                cookie,
+                uifid,
+                *(part.partition("=")[2].strip() for part in cookie.split(";")),
+            )
+            if "bad option: --permission" in detail:
+                # Name the real cause, otherwise the operator goes looking at
+                # douyin. Measured 2026-09-16: node 20.19.2 / 21.7.3 reject the
+                # flag, 22.23.2 accepts it.
+                raise RuntimeError(
+                    "node webSign sign failed: this Node.js does not support "
+                    "--permission (needs Node >= 22; 20 and 21 call it "
+                    "--experimental-permission). Upgrade the runtime; do not "
+                    "drop the flag, it sandboxes third-party VM bytecode."
+                )
+            raise RuntimeError(
+                f"node webSign sign failed (rc={completed.returncode}): {detail}"
+            )
+
+        signed_url = completed.stdout.strip()
+        if not parse_qs(urlsplit(signed_url).query).get("x-secsdk-web-signature"):
+            # Not echoing the URL: it carries uifid as a query parameter.
+            raise RuntimeError("node webSign returned no x-secsdk-web-signature")
+        return signed_url
 
     @staticmethod
     def _extract_verify_fp(cookie: str) -> str:
@@ -358,12 +460,9 @@ class ABogusDouyinParser:
         # Measured against production on 2026-09-15, same URL, same cookie:
         #   without the header → 403 "ArgusSecurityPlugin Uifid Not Found"
         #   with the header    → 403 "ArgusSecurityPlugin Signature Not Found"
-        # The error MOVED, which is what proves the header is read. It does not
-        # make the call succeed: there is a second Argus gate behind it that
-        # wants a signature header we do not produce, so `abogus` stays down
-        # against douyin's current web API and `drissionpage` is the tier that
-        # can still work. Forwarding this costs nothing and stops the first
-        # gate from masking whatever the second one says.
+        # The error MOVED, which is what proves the header is read. The second
+        # gate is the webSignUrl signature, which `_sign_with_websign` binds to
+        # this same UIFID — the header and the signed query must agree.
         uifid = _cookie_value(cookie, "UIFID")
         if uifid:
             headers.setdefault("uifid", uifid)
