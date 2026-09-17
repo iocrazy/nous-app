@@ -116,9 +116,7 @@ async def _search(conn, user_id: uuid.UUID, **params) -> list[str]:
     sql = (
         "SELECT public.rpc_user_media_text_search("
         "p_user_id => $1, p_pattern => $2, p_fields => "
-        f"'{{{','.join(_FIELDS)}}}'::text[]"
-        + (f", {named}" if named else "")
-        + ")"
+        f"'{{{','.join(_FIELDS)}}}'::text[]" + (f", {named}" if named else "") + ")"
     )
     raw = await conn.fetchval(sql, user_id, f"%{_WORD}%", *params.values())
     import json
@@ -247,10 +245,18 @@ async def test_chips_combine_with_AND(conn):
     """Two chips at once. Either one alone would keep a row the pair must drop."""
     uid = await _mk_user(conn)
     await _mk_media(
-        conn, uid, title=f"both {_WORD}", transcript_status="completed", platform="douyin"
+        conn,
+        uid,
+        title=f"both {_WORD}",
+        transcript_status="completed",
+        platform="douyin",
     )
     await _mk_media(
-        conn, uid, title=f"onlyt {_WORD}", transcript_status="completed", platform="bilibili"
+        conn,
+        uid,
+        title=f"onlyt {_WORD}",
+        transcript_status="completed",
+        platform="bilibili",
     )
     await _mk_media(
         conn, uid, title=f"onlyp {_WORD}", transcript_status="none", platform="douyin"
@@ -266,7 +272,9 @@ async def test_a_chip_never_reaches_across_users(conn):
     mine = await _mk_user(conn)
     theirs = await _mk_user(conn)
     await _mk_media(conn, mine, title=f"mine {_WORD}", transcript_status="completed")
-    await _mk_media(conn, theirs, title=f"theirs {_WORD}", transcript_status="completed")
+    await _mk_media(
+        conn, theirs, title=f"theirs {_WORD}", transcript_status="completed"
+    )
 
     assert await _search(conn, mine, p_ai_transcribed=True) == [f"mine {_WORD}"]
 
