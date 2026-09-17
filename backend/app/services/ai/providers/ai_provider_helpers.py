@@ -1015,20 +1015,6 @@ async def resolve_script_ai_config(user_id: Optional[str]) -> ResolvedAIConfig:
     )
 
 
-async def resolve_script_provider_config(
-    user_id: Optional[str],
-) -> Tuple[str, Dict[str, Any], str, str]:
-    """Resolve the script-generation agent slug + model + user's BYO provider
-    config. Honors ``task_assignment.script_generation`` (an AI Library agent
-    slug), defaulting to the built-in ``script_ai`` agent. Same return shape as
-    the other resolvers: ``(provider_key, provider_config, model, slug)``.
-
-    Origin-dropping shim — see :func:`resolve_script_ai_config`.
-    """
-    cfg = await resolve_script_ai_config(user_id)
-    return cfg.provider_key, cfg.provider_config, cfg.model, cfg.agent_slug
-
-
 async def resolve_caption_provider_config(
     user_id: Optional[str],
 ) -> Tuple[str, Dict[str, Any], str, str]:

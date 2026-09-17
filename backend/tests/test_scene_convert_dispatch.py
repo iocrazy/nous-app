@@ -218,7 +218,7 @@ async def test_convert_step_resolves_and_passes_provider_config():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers." "resolve_script_ai_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             AsyncMock(return_value=_RESOLVED),
         ) as resolver,
         patch(

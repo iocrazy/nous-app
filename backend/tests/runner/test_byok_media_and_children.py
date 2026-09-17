@@ -320,6 +320,61 @@ def test_the_registration_lane_only_emits_the_key_when_it_is_byok():
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "register_deliverable"
     )
     assert "byok_cents" in {a.arg for a in sig.args.kwonlyargs}
+    # 而且必须是**条件展开**，不是无条件写进去：``None`` 时整个键不出现。
+    # 写成 ``"byok_cents": byok_cents`` 一样能过上面那条断言，却会让每条平台
+    # 登记都带一个 ``None``，读方从此得去分辨「没花」与「没接线」。
+    assert '**({"byok_cents": byok_cents} if byok_cents is not None else {})' in src
+
+
+@pytest.mark.asyncio
+async def test_a_platform_registration_puts_no_byok_key_in_the_event():
+    """上一条是源码形状，这一条是真跑：不是 BYOK 时事件 payload 里**没有**
+    这个键。缺席 = 平台付的。"""
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.deliverables import registry as reg
+
+    async def _run(byok_cents):
+        seen = {}
+
+        async def _emit(_rec, event_type, payload, **_k):
+            seen["payload"] = payload
+            return True
+
+        row = reg.DeliverableRow(
+            id="1",
+            run_id="9",
+            kind="generated_media",
+            ref_id="4242",
+            version=1,
+            parent_version=None,
+            title="t",
+        )
+        with (
+            patch.object(reg, "_insert_next_version", AsyncMock(return_value=row)),
+            patch.object(reg, "emit", _emit),
+            patch.object(reg, "_stamp_seq", AsyncMock()),
+            patch.object(reg, "_writer_for", AsyncMock(return_value=object())),
+            patch(
+                "app.services.search.projection.project_output_best_effort",
+                AsyncMock(),
+            ),
+        ):
+            await reg.register_deliverable(
+                run_id="9",
+                kind="generated_media",
+                ref_id="4242",
+                cost_cents=12.0,
+                byok_cents=byok_cents,
+            )
+        return seen["payload"]
+
+    platform = await _run(None)
+    assert "byok_cents" not in platform
+    assert platform["cost_cents"] == 12.0
+
+    byok = await _run(12.0)
+    assert byok["byok_cents"] == 12.0
 
 
 @pytest.mark.asyncio

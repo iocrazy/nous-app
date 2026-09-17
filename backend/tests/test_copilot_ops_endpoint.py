@@ -81,7 +81,7 @@ def _patch_service(ops_return):
     svc_cls = MagicMock(return_value=instance)
     return (
         patch(
-            "app.services.ai.providers.ai_provider_helpers." "resolve_script_ai_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             resolver,
         ),
         patch(

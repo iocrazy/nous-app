@@ -244,25 +244,34 @@ def test_a_legacy_video_string_checkpoint_still_persists():
     """出视频 step 的旧 checkpoint 同样是裸 ``str``（那边的载荷是本地路径）。"""
     import app.workflows.script_shot_generate as wf
 
+    # 第四格是层标记（积分 Task 2）。出视频这条路上恒 False —— 视频目录
+    # 没有 BYOK 层，冻结的旧 checkpoint 更不会有这个键。
     assert wf._step_output("/tmp/jimeng_x/out.mp4", key="path") == (
         "/tmp/jimeng_x/out.mp4",
         None,
         None,
+        False,
     )
     assert wf._step_output(
         {"path": "/p", "provider": "jimeng-cli", "model": "m"}, key="path"
-    ) == ("/p", "jimeng-cli", "m")
+    ) == ("/p", "jimeng-cli", "m", False)
 
 
 def test_a_legacy_string_checkpoint_still_persists():
     """DBOS 冻结的旧 step 返回值是裸 str——回放时必须照旧能走完。"""
     import app.workflows.script_shot_generate as wf
 
-    assert wf._step_output("http://cdn/x.png") == ("http://cdn/x.png", None, None)
+    assert wf._step_output("http://cdn/x.png") == (
+        "http://cdn/x.png",
+        None,
+        None,
+        False,
+    )
     assert wf._step_output({"url": "u", "provider": "ark", "model": "m"}) == (
         "u",
         "ark",
         "m",
+        False,
     )
 
 
@@ -648,3 +657,170 @@ def test_the_positional_map_matches_the_step_signature():
     assert _positional(vid.persist_video_generation)[
         : len(_VIDEO_PERSIST_POSITIONAL)
     ] == (_VIDEO_PERSIST_POSITIONAL)
+
+
+# --------------------------------------------------------------------------
+# BYOK 标记：这是第二条挂在 agent run 上的生图路（积分 Task 2 修复轮 1 I1）
+# --------------------------------------------------------------------------
+
+
+async def test_the_image_step_carries_the_byok_flag(monkeypatch):
+    """``generate_image`` 返回 dict 上并列注入的层标记，step 必须原样带出来 ——
+    丢在 step 边界上，后面每一跳都只剩「平台付的」这一个可能。"""
+    import app.workflows.script_shot_generate as wf
+
+    _stub_repos(monkeypatch)
+
+    class _Svc:
+        async def generate_image(self, **_k):
+            # 真形状：服务层回的是 asdict(ImageGenResult) 并上 byok。
+            return {
+                "image_url": "http://cdn/x.png",
+                "provider": "ark",
+                "model": "doubao-seedream-4-0",
+                "byok": True,
+            }
+
+    monkeypatch.setattr(
+        "app.services.ai.media.image_generation_service.ImageGenerationService",
+        lambda: _Svc(),
+    )
+
+    out = await _call_step(
+        wf.generate_shot_image_step,
+        shot_id="1",
+        model="dall-e-3",
+        provider="ark",
+        user_id="u",
+    )
+
+    assert out["url"] == "http://cdn/x.png"
+    assert out["byok"] is True
+
+
+async def test_a_platform_image_step_reports_no_byok(monkeypatch):
+    """服务层没给这个键（平台目录、或部署前排队的旧 workflow）→ False。"""
+    import app.workflows.script_shot_generate as wf
+
+    _stub_repos(monkeypatch)
+
+    class _Svc:
+        async def generate_image(self, **_k):
+            return {"image_url": "http://cdn/x.png", "provider": "ark", "model": "m"}
+
+    monkeypatch.setattr(
+        "app.services.ai.media.image_generation_service.ImageGenerationService",
+        lambda: _Svc(),
+    )
+
+    out = await _call_step(
+        wf.generate_shot_image_step,
+        shot_id="1",
+        model="dall-e-3",
+        provider="ark",
+        user_id="u",
+    )
+
+    assert out["byok"] is False
+
+
+async def test_step_output_reads_the_byok_flag_off_both_shapes():
+    """``_step_output`` 也要接旧的裸 ``str``（DBOS 把 step 返回值冻进
+    checkpoint，部署前排队的 workflow 恢复时拿回来的仍是它）。那条路上没有
+    层标记可读 —— 报 False，而不是让归一化的解包炸掉。"""
+    import app.workflows.script_shot_generate as wf
+
+    assert wf._step_output(
+        {"url": "u", "provider": "p", "model": "m", "byok": True}
+    ) == (
+        "u",
+        "p",
+        "m",
+        True,
+    )
+    assert wf._step_output({"url": "u"}) == ("u", None, None, False)
+    assert wf._step_output("http://cdn/legacy.png") == (
+        "http://cdn/legacy.png",
+        None,
+        None,
+        False,
+    )
+
+
+async def test_persist_generation_stamps_byok_on_the_origin(monkeypatch):
+    """终点：登记口收到的 ``GenerationOrigin.byok``。这一跳断了，前面每一步
+    带得再准也没用 —— 这条路出的图照样按平台价扣分。"""
+    import app.workflows.script_shot_generate as wf
+
+    seen: dict = {}
+
+    async def _fake_register(**kwargs):
+        seen["origin"] = kwargs["origin"]
+        return {"id": 55}
+
+    monkeypatch.setattr(
+        "app.services.library.generated_media_service.register_generated_media",
+        _fake_register,
+    )
+    _stub_repos(monkeypatch)
+    monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
+
+    await _call_step(
+        wf.persist_generation,
+        shot_id="1",
+        provider_url="http://cdn/x.png",
+        model="m",
+        provider="p",
+        user_id="u",
+        byok=True,
+    )
+    assert seen["origin"].byok is True
+
+
+async def test_persist_generation_defaults_byok_to_false(monkeypatch):
+    """DBOS 冻结输入兼容：部署前排队的 workflow 恢复时不带这个 keyword。
+    缺省必须是 False —— 默认成 True 会把平台出的图免掉积分。"""
+    import app.workflows.script_shot_generate as wf
+
+    seen: dict = {}
+
+    async def _fake_register(**kwargs):
+        seen["origin"] = kwargs["origin"]
+        return {"id": 55}
+
+    monkeypatch.setattr(
+        "app.services.library.generated_media_service.register_generated_media",
+        _fake_register,
+    )
+    _stub_repos(monkeypatch)
+    monkeypatch.setattr(wf, "_resolve_scope_id", _fake_scope_id)
+
+    await _call_step(
+        wf.persist_generation,
+        shot_id="1",
+        provider_url="http://cdn/x.png",
+        model="m",
+        provider="p",
+        user_id="u",
+    )
+    assert seen["origin"].byok is False
+
+
+def test_the_orchestrator_threads_byok_from_the_step_to_persist():
+    """两跳之间靠 ``byok=`` 这个 keyword 连起来。AST 钉住，因为中间少一跳
+    不会报错也不会让别的断言转红 —— 静默按平台价收。"""
+    import inspect
+
+    import app.workflows.script_shot_generate as wf
+
+    src = inspect.getsource(_body(wf.script_shot_generate_workflow))
+    tree = ast.parse(inspect.cleandoc(src))
+    calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "persist_generation"
+    ]
+    assert calls, "persist_generation 的调用点搬家了，更新本用例"
+    assert "byok" in {kw.arg for kw in calls[0].keywords}

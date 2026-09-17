@@ -56,7 +56,20 @@ def test_every_team_scoped_dispatch_anywhere_in_the_repo_stamps_the_origin():
     强求接线只会产出一堆为了过门禁而填的 ``None``。
 
     这条规则自己就抓到了 ``script_ai_service`` —— 它带 team_id、在清单之外、
-    从未接过线，而它的 BYOK run 一直在被按平台价扣分。"""
+    从未接过线，而它的 BYOK run 一直在被按平台价扣分。
+
+    ⚠️ **覆盖边界**（照着它去信任这条守卫之前先读）：
+
+    * 只匹配 ``ast.Name`` 形式的 ``RunRecorder(...)``。别名导入
+      （``from ... import RunRecorder as R``）、属性调用
+      （``rr.RunRecorder(...)``）、工厂函数里包一层、``**kwargs`` 展开 ——
+      一律看不见。今天全仓是清一色的直接调用（上面的清单就是从这次扫描来
+      的），所以够用；哪天有人换写法，这条守卫会**静默失效**而不是转红。
+    * 只看 ``team_id`` / ``credential_origin`` 这两个关键字**在不在**，不看
+      值。``credential_origin=None`` 照样过 —— 它挡的是「忘了接线」，不是
+      「接了线但解析器返回空」。后者只有行为用例能证明（见本文件底下三条）。
+    * 只扫 ``app/``。测试与脚本里的 ``RunRecorder(...)`` 不在此列。
+    """
     offenders = []
     for path in sorted((_BACKEND / "app").rglob("*.py")):
         for lineno, kwargs in _recorder_calls(path):
@@ -259,7 +272,8 @@ async def test_the_real_stack_builder_hands_the_resolved_origin_to_the_stack(
 
 async def test_the_script_ai_dispatch_stamps_its_resolved_origin(monkeypatch):
     """``script_ai_service`` 带 ``team_id``（真的会扣分）却从未接过 origin ——
-    它的解析器 ``resolve_script_provider_config`` 是丢 origin 的 tuple shim。
+    根因是它的解析器曾是丢 origin 的 tuple shim（已删，换成
+    ``resolve_script_ai_config``，七个生产调用点一起迁）。
     这一条钉住：调用方解析出的 origin 一路走到 ``RunRecorder``，且子 run 判据
     ``parent_run_id`` 显式为 None（这条链永远是树根）。"""
     from types import SimpleNamespace
