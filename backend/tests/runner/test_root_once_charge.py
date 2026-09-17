@@ -1,10 +1,15 @@
-"""用户裁定：一个回合的积分 = ceil(整棵树的**平台**花费之和)，只在 root 定稿时
-扣一次；BYOK 的调用一分不扣。
+"""用户裁定：一个回合的积分 = ceil(整棵树的**平台**花费之和)，一棵树只扣一次；
+BYOK 的调用一分不扣。
 
-此前是「每条 run 各 ceil 一次自身花费」——一次带委派的回合在 point_transactions
-里是 6 行，真栈实测 ≈¢0.92 被收成 7 分。读方 charged_points_for_run_trees 按
-root_run_id 全树合计，所以改成 root 一次扣之后它一行不用改：合计从「6 行相加」
-变成「1 行」，同一个数。
+**由谁来扣**这件事经真栈探针改过一次口径。计划原文写的是「root 定稿时扣」，探针
+推翻了它：workforce 的委派是 fire-and-forget，**root 通常先于子 run 结束**（实测
+一次回合：root 03:30:34 结束，三个子 run 03:30:48 / 03:30:36 / 03:30:27），而且
+``subagent_done`` 只写到**直接父**的 transcript —— root 的 ``by_child`` 对 workforce
+链恒为 ``{}``。「root 定稿扣整棵树」在那条链上退化成「每条 run 各 ceil 一次」，正是
+要修的那个（真栈 ≈¢0.92 被收成 7 分）。
+
+现在的口径：**谁把树收口谁扣**（树里全部行都终态时，CAS 抢到 root 行戳的那一条）。
+金额按**行**聚合每条 run 自身的两道花费，不看 ``by_child``。
 """
 
 from contextlib import asynccontextmanager
@@ -14,7 +19,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.ai.billing.tree_charge import bucket_tree
+from app.services.ai.billing import tree_charge
+from app.services.ai.billing.tree_charge import bucket_tree, spend_of_run
 from app.services.ai.runner import run_recorder as rr
 
 # 只标 unit：``asyncio_mode = "auto"``（pyproject）已经接管 async 用例，模块级再
@@ -22,91 +28,372 @@ from app.services.ai.runner import run_recorder as rr
 pytestmark = [pytest.mark.unit]
 
 
-# ── 纯分桶 ──────────────────────────────────────────────────────────────
+# ── 分桶：单行 ──────────────────────────────────────────────────────────
 
 
-def test_the_tree_bucket_subtracts_all_three_byok_lanes():
-    b = bucket_tree(
+def test_a_runs_own_spend_is_its_two_lanes_minus_their_byok_halves():
+    s = spend_of_run(
         {
+            "own_cents": 10.0,
             "own_byok_cents": 4.0,
             "media_cents": 5.0,
             "media_byok_cents": 5.0,
+            # by_child 在这里**刻意被忽略** —— 子树自己有行。
             "by_child": {"c1": 3.0, "c2": 4.0},
-            "by_child_byok": {"c1": 3.0},
-        },
-        10.0,
+        }
     )
-    assert b.tree_total == 22.0  # 10 own + 7 children + 5 media
-    assert b.tree_platform == 10.0  # 22 − (4 + 3 + 5)
-    assert b.own_total == 15.0  # 10 own + 5 media
-    assert b.own_platform == 6.0  # 15 − (4 + 5)
+    assert s.total == 15.0  # 10 own + 5 media，与 by_child 无关
+    assert s.platform == 6.0  # 15 − (4 + 5)
+
+
+def test_by_child_never_enters_a_rows_own_spend():
+    """整棵树的行都在手里，孙子自己那一行就是它 —— 再读 ``by_child`` 就是把同一笔
+    钱数两遍。而且 ``by_child`` 只存在于**直接父**的视图里，workforce 链上 root
+    那份恒为空，依赖它等于依赖一个对半数链路不成立的东西。"""
+    assert spend_of_run({"by_child": {"c1": 99.0}, "by_child_byok": {"c1": 1.0}}) == (
+        tree_charge.RunSpend(total=0.0, platform=0.0)
+    )
 
 
 @pytest.mark.parametrize(
-    "lane,view,expect_tree,expect_own",
+    "lane,view,expect_platform",
     [
         # own 那条虚高：media 的 5 分是平台付的，必须照收。
-        ("own", {"own_byok_cents": 999.0, "media_cents": 5.0}, 5.0, 5.0),
+        ("own", {"own_cents": 10.0, "own_byok_cents": 999.0, "media_cents": 5.0}, 5.0),
         # media 那条虚高：own 的 10 分是平台付的，必须照收。
-        ("media", {"media_cents": 1.0, "media_byok_cents": 999.0}, 10.0, 10.0),
-        # by_child 那条虚高：own + media 都是平台付的，必须照收。
         (
-            "by_child",
-            {
-                "by_child": {"c1": 1.0},
-                "by_child_byok": {"c1": 999.0},
-                "media_cents": 5.0,
-            },
-            15.0,
-            15.0,
+            "media",
+            {"own_cents": 10.0, "media_cents": 1.0, "media_byok_cents": 999.0},
+            10.0,
         ),
     ],
 )
 def test_a_byok_lane_can_never_exceed_the_component_it_belongs_to(
-    lane, view, expect_tree, expect_own
+    lane, view, expect_platform
 ):
     """两侧来源不同：``own_cents`` 可能来自 token 费率（``compute_cost_cents``），
-    而 ``own_byok_cents`` 来自 step fold。BYOK 道虚高会把真该收的钱抹成 0，
-    所以相减前钳位 —— 少收一次的代价远小于「整棵树静默免单」。
+    而 ``own_byok_cents`` 来自 step fold。BYOK 道虚高会把真该收的钱抹成 0，所以
+    相减前钳位 —— 少收一次的代价远小于「整棵树静默免单」。
 
-    ⚠️ 钳位必须**逐分量**，而且只有在「同一棵树里还有别的分量是平台付的」时才
-    看得出来：单分量的树光靠结果那个 ``max(…, 0)`` 就已经是 0，一条只测单分量的
-    用例**证不出钳位存在**（本 Task 实测：去掉 ``min`` 它照样绿）。三条道各来一
-    组，虚高的那条旁边都留着真该收的钱。"""
-    b = bucket_tree(view, 10.0)
-    assert b.tree_platform == expect_tree, f"{lane} 那条道虚高把别的分量也抹掉了"
-    assert b.own_platform == expect_own
+    ⚠️ 钳位必须**逐分量**，而且只有在「同一行里还有别的分量是平台付的」时才看得
+    出来：单分量的行光靠结果那个 ``max(…, 0)`` 就已经是 0，一条只测单分量的用例
+    **证不出钳位存在**（本 Task 实测：去掉 ``min`` 它照样绿）。"""
+    assert (
+        spend_of_run(view).platform == expect_platform
+    ), f"{lane} 那条道抹掉了别的分量"
 
 
-def test_no_folds_at_all_is_a_plain_platform_tree():
-    b = bucket_tree(None, 3.0)
-    assert (b.tree_total, b.tree_platform, b.own_total, b.own_platform) == (
-        3.0,
-        3.0,
-        3.0,
-        3.0,
-    )
+def test_an_absent_view_is_a_zero_row_not_a_crash():
+    assert spend_of_run(None) == tree_charge.RunSpend(0.0, 0.0)
 
 
 def test_junk_in_the_lanes_reads_as_zero_not_as_a_crash():
+    s = spend_of_run({"own_cents": "10", "media_cents": True, "own_byok_cents": None})
+    assert (s.total, s.platform) == (0.0, 0.0)
+
+
+def test_own_cents_can_be_overridden_by_the_token_priced_figure():
+    """``_finish`` 在费率已知时用 ``compute_cost_cents()`` 覆盖折叠值。"""
+    s = spend_of_run({"own_cents": 1.0, "media_cents": 2.0}, own_cents=9.0)
+    assert s.total == 11.0
+
+
+# ── 分桶：全树 ──────────────────────────────────────────────────────────
+
+
+def test_the_tree_is_the_sum_of_every_rows_own_spend():
     b = bucket_tree(
-        {"own_byok_cents": "4", "by_child": None, "media_byok_cents": True}, 10.0
+        [
+            {"own_cents": 10.0, "media_cents": 5.0, "media_byok_cents": 5.0},
+            {"own_cents": 3.0},
+            {"own_cents": 4.0, "own_byok_cents": 4.0},
+        ]
     )
-    assert b.tree_platform == 10.0
+    assert b.tree_total == 22.0  # 15 + 3 + 4
+    assert b.tree_platform == 13.0  # 22 − 5 media BYOK − 4 own BYOK
 
 
-# ── _finish 的扣费分支 ──────────────────────────────────────────────────
+def test_a_three_level_chain_sums_every_generation():
+    """孙子自己那一行就在树里（``root_run_id`` 指的是**真** root），所以三层链
+    不需要任何子树折叠就是全的。"""
+    b = bucket_tree([{"own_cents": 1.0}, {"own_cents": 2.0}, {"own_cents": 4.0}])
+    assert (b.tree_total, b.tree_platform) == (7.0, 7.0)
+
+
+def test_an_empty_row_set_is_zero_but_callers_must_not_read_it_as_free():
+    assert bucket_tree([]) == tree_charge.TreeBuckets(0.0, 0.0)
+
+
+# ── settle_tree_if_closed ───────────────────────────────────────────────
+
+
+class _Row:
+    def __init__(self, id, status="completed", cost=None, **kw):
+        self.id = id
+        self.status = status
+        self.team_id = kw.get("team_id", 42)
+        self.user_id = kw.get("user_id", uuid4())
+        self.model = kw.get("model", "doubao-seed-2-0-lite")
+        self.prompt_tokens = kw.get("prompt_tokens", 10)
+        self.completion_tokens = kw.get("completion_tokens", 20)
+        self.metadata_json = {"cost": cost} if cost is not None else {}
+
+
+def _db(monkeypatch, *, tree_rows, my_root=None, cas_rowcount=1, sink=None):
+    """把 ``read_scope`` / ``write_scope`` 换成桩。
+
+    读的第一条语句是「我的 root 是谁」，第二条是全树；写的那一条是 CAS。
+    """
+
+    class _Res:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def all(self):
+            return self._rows
+
+    class _ReadSession:
+        def __init__(self):
+            self._n = 0
+
+        async def execute(self, stmt):
+            self._n += 1
+            if self._n == 1:
+                return _Res([(my_root,)])
+            return _Res(tree_rows)
+
+    class _WriteSession:
+        async def execute(self, stmt):
+            if sink is not None:
+                sink.append(stmt)
+
+            class _R:
+                rowcount = cas_rowcount
+
+            return _R()
+
+    @asynccontextmanager
+    async def _read():
+        yield _ReadSession()
+
+    @asynccontextmanager
+    async def _write():
+        yield _WriteSession()
+
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "read_scope", _read)
+    monkeypatch.setattr(db_session, "write_scope", _write)
+
+
+@pytest.fixture
+def charged(monkeypatch):
+    """只拦 ``reconcile_run`` —— 收口逻辑本身是被测对象，不打桩。"""
+    from app.services.ai.billing.token_billing import ReconcileResult
+
+    mock = AsyncMock(
+        return_value=ReconcileResult(
+            charged=True, charged_points=1.0, byo_key=False, usage_logged=False
+        )
+    )
+    monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", mock)
+    return mock
+
+
+async def test_the_closer_charges_the_whole_tree_once(charged, monkeypatch):
+    _db(
+        monkeypatch,
+        my_root=None,  # 我就是 root
+        tree_rows=[
+            _Row(800000000000001, cost={"own_cents": 10.0, "media_cents": 5.0}),
+            _Row(900000000000002, cost={"own_cents": 3.0}),
+            _Row(900000000000003, cost={"own_cents": 4.0}),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (True, "charged")
+    kwargs = charged.await_args.kwargs
+    assert kwargs["cost_points"] == 22.0
+    # 一树一行流水：reference_id 是 root，读方 charged_points_for_run_trees 按
+    # root_run_id 合计，所以它一行不用改。
+    assert kwargs["run_id"] == "800000000000001"
+    # 审计行由每条 run 自己的 _finish 写，收口这一次只扣钱。
+    assert kwargs["log_usage"] is False
+    assert kwargs["byo_key"] is False
+
+
+async def test_a_tree_with_anyone_still_running_is_not_settled(charged, monkeypatch):
+    """这正是「root 先于子 run 结束」时 root 那一次的结局 —— 它不扣，等最后一个。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(800000000000001, cost={"own_cents": 10.0}),
+            _Row(900000000000002, status="running", cost={"own_cents": 3.0}),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "deferred")
+    charged.assert_not_awaited()
+
+
+async def test_the_late_child_closes_the_tree_the_root_could_not(charged, monkeypatch):
+    """root 先结束（上一条）、子 run 后结束 —— 收口落在子 run 这一次，金额仍是
+    整棵树。子 run 报的 root 是它行上的 ``root_run_id``。"""
+    _db(
+        monkeypatch,
+        my_root=800000000000001,
+        tree_rows=[
+            _Row(800000000000001, status="failed", cost={"own_cents": 10.0}),
+            _Row(900000000000002, cost={"own_cents": 3.0}),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="900000000000002")
+    assert out.reason == "charged"
+    assert charged.await_args.kwargs["cost_points"] == 13.0
+    assert charged.await_args.kwargs["run_id"] == "800000000000001"
+
+
+async def test_two_runs_closing_at_once_produce_exactly_one_charge(
+    charged, monkeypatch
+):
+    """并发收口：CAS 只有一条能把 ``charged_at`` 戳上去，另一条 rowcount 为 0。
+
+    可证伪点：把那道 ``rowcount != 1`` 判断删掉，这条立刻变成两次扣费。"""
+    rows = [
+        _Row(800000000000001, cost={"own_cents": 10.0}),
+        _Row(900000000000002, cost={"own_cents": 3.0}),
+    ]
+    _db(monkeypatch, my_root=None, tree_rows=rows, cas_rowcount=1)
+    first = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    _db(monkeypatch, my_root=800000000000001, tree_rows=rows, cas_rowcount=0)
+    second = await tree_charge.settle_tree_if_closed(run_id="900000000000002")
+    assert (first.reason, second.reason) == ("charged", "already")
+    assert charged.await_count == 1
+
+
+async def test_an_unreadable_rowcount_never_charges(charged, monkeypatch):
+    """⚠️ 与 ``closed_by_us`` 的 ``!= 0`` **方向相反**：那边「不知道」继续走下去
+    只是可能多写一行遥测，这边继续走下去是**可能重复扣一次真钱**。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0})],
+        cas_rowcount=None,
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "already")
+    charged.assert_not_awaited()
+
+
+async def test_a_pure_byok_tree_is_reported_as_byo_key(charged, monkeypatch):
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 8.0, "own_byok_cents": 8.0},
+            )
+        ],
+    )
+    await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    kwargs = charged.await_args.kwargs
+    assert kwargs["cost_points"] == 0.0
+    assert kwargs["byo_key"] is True
+
+
+async def test_a_tree_that_spent_nothing_is_not_reported_as_byo_key(
+    charged, monkeypatch
+):
+    """产品含义不同：一个是「你自己付了」，一个是「什么都没烧」。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 0.0})],
+    )
+    await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert charged.await_args.kwargs["byo_key"] is False
+
+
+@pytest.mark.parametrize(
+    "case,kw",
+    [
+        ("读不到我自己那一行", {"my_root": None, "tree_rows": [], "no_self": True}),
+        ("树上一行都没有", {"my_root": None, "tree_rows": []}),
+    ],
+)
+async def test_nothing_readable_is_never_a_charge(case, kw, charged, monkeypatch):
+    """读到零行 ≠ 这棵树没花钱。什么都不做，等下一次。"""
+    if kw.pop("no_self", False):
+
+        @asynccontextmanager
+        async def _read():
+            class _S:
+                async def execute(self, stmt):
+                    class _R:
+                        def first(self):
+                            return None
+
+                        def all(self):
+                            return []
+
+                    return _R()
+
+            yield _S()
+
+        import app.db.session as db_session
+
+        monkeypatch.setattr(db_session, "read_scope", _read)
+    else:
+        _db(monkeypatch, **kw)
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "unknown"), case
+    charged.assert_not_awaited()
+
+
+async def test_a_read_failure_is_never_a_charge(charged, monkeypatch):
+    @asynccontextmanager
+    async def _boom():
+        class _S:
+            async def execute(self, stmt):
+                raise RuntimeError("supabase down")
+
+        yield _S()
+
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "read_scope", _boom)
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "error")
+    charged.assert_not_awaited()
+
+
+async def test_a_run_without_an_id_has_no_tree_to_settle(charged):
+    out = await tree_charge.settle_tree_if_closed(run_id=None)
+    assert (out.settled, out.reason) == (False, "no_run_id")
+    charged.assert_not_awaited()
+
+
+# ── _finish 这一侧 ──────────────────────────────────────────────────────
 
 
 class _Writer:
     def __init__(self, views):
         self.views = views
+        self.persisted = 0
 
     async def refold_external_slices(self):
         return None
 
+    async def persist_views(self):
+        self.persisted += 1
 
-def _recorder(*, views, parent_run_id=None, run_id="900000000000001"):
+
+def _recorder(*, views, run_id="900000000000001"):
     rec = rr.RunRecorder.__new__(rr.RunRecorder)
     rec.run_id = run_id
     rec.user_id, rec.agent_id = uuid4(), uuid4()
@@ -120,15 +407,16 @@ def _recorder(*, views, parent_run_id=None, run_id="900000000000001"):
     rec._skill_slugs_used, rec._output_summary = [], None
     rec._prompt_rate = rec._completion_rate = None
     rec._event_writer = _Writer(views)
-    rec.parent_run_id = parent_run_id
+    rec.parent_run_id = None
     rec.credential_origin = None
     return rec
 
 
 @pytest.fixture
-def billed(monkeypatch):
-    """拦下 reconcile_run、agent_runs 的 UPDATE、小时表 upsert 与检索投影。"""
-    charged = AsyncMock()
+def audited(monkeypatch):
+    """拦下审计用的 reconcile_run、树收口、UPDATE、小时表与检索投影。"""
+    audit = AsyncMock()
+    settle = AsyncMock(return_value=tree_charge.SettleOutcome(True, "charged", 3.0))
 
     @asynccontextmanager
     async def _scope():
@@ -147,230 +435,121 @@ def billed(monkeypatch):
     monkeypatch.setattr(db_session, "write_scope", _scope)
     monkeypatch.setattr(ai_usage, "write_scope", _scope)
     monkeypatch.setattr(ai_usage, "record_usage", AsyncMock())
-    monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
+    monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", audit)
+    monkeypatch.setattr(
+        "app.services.ai.billing.tree_charge.settle_tree_if_closed", settle
+    )
     monkeypatch.setattr(
         "app.services.search.projection.project_run_best_effort", AsyncMock()
     )
-    return charged
+    return audit, settle
 
 
-_TREE = {
+_VIEWS = {
     "cost": {
         "own_cents": 10.0,
         "own_byok_cents": 0.0,
         "by_child": {"c1": 3.0, "c2": 4.0},
-        "by_child_byok": {},
         "media_cents": 5.0,
         "media_byok_cents": 0.0,
     }
 }
 
 
-async def test_the_root_charges_the_whole_tree_exactly_once(billed):
-    await _recorder(views=_TREE)._finish(status="completed")
-    assert billed.await_count == 1
-    kwargs = billed.await_args.kwargs
-    assert kwargs["cost_points"] == 22.0  # 整棵树
-    assert kwargs["usage_cost_points"] == 15.0  # 审计行仍记自身真实花费
+async def test_finish_writes_its_own_audit_row_and_charges_nothing(audited):
+    audit, _ = audited
+    await _recorder(views=_VIEWS)._finish(status="completed")
+    kwargs = audit.await_args.kwargs
+    # 审计行记**自身**真实花费（own + media），与 by_child 无关。
+    assert kwargs["usage_cost_points"] == 15.0
+    # 扣费是整棵树的事，不在这一步。
+    assert kwargs["cost_points"] == 0.0
+    assert kwargs["charge_deferred"] is True
     assert kwargs["byo_key"] is False
 
 
-async def test_a_child_does_not_charge_while_its_root_is_still_running(
-    billed, monkeypatch
+async def test_finish_asks_for_a_tree_settle_on_every_terminal_status(audited):
+    """任一终态都算收口：平台的钱已经烧掉了，与这个回合成没成功无关。"""
+    _, settle = audited
+    for status in ("completed", "failed", "cancelled"):
+        await _recorder(views=_VIEWS)._finish(status=status)
+    assert settle.await_count == 3
+    assert settle.await_args.kwargs["run_id"] == "900000000000001"
+
+
+async def test_a_run_that_spent_nothing_itself_writes_no_audit_row_but_still_settles(
+    audited,
 ):
-    """root 会替它收（它在 root 的 by_child 里）。两边都收就是对同一笔钱收两次。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=False),
-    )
+    """审计行的条件是「**这条 run 自己**真的烧了钱」——
+    ``summarize_user_usage`` 的 ``overall_run_count`` 直接数行，多写就是上抬。
+    但收口照叫：这条 run 可能正是树里最后一个结束的。"""
+    audit, settle = audited
     await _recorder(
-        views={"cost": {"own_cents": 3.0, "by_child": {}, "media_cents": 0.0}},
-        parent_run_id="800000000000001",
+        views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}}}
     )._finish(status="completed")
-    assert [c.kwargs["cost_points"] for c in billed.await_args_list] == [0.0]
-    # 审计行照写：用量表要记真实花费（用户裁定 2）。
-    assert billed.await_args.kwargs["usage_cost_points"] == 3.0
+    audit.assert_not_awaited()
+    settle.assert_awaited_once()
 
 
-async def test_a_late_child_charges_its_own_platform_spend(billed, monkeypatch):
-    """root 已经终态 → 它的 refold 快照里没有这个子 run，谁也不会替它收。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=True),
-    )
-    await _recorder(
-        views={
-            "cost": {
-                "own_cents": 3.0,
-                "own_byok_cents": 1.0,
-                "by_child": {},
-                "media_cents": 0.0,
-            }
-        },
-        parent_run_id="800000000000001",
-    )._finish(status="completed")
-    assert billed.await_args.kwargs["cost_points"] == 2.0  # 3 − 1 BYOK
+async def test_the_final_cost_view_is_persisted_before_the_run_goes_terminal(
+    monkeypatch,
+):
+    """收口按行读 ``agent_runs.metadata_json.cost``，而 ``own_cents`` 的最终值是在
+    内存里定稿的。**一旦状态不再是 running，树里任何一条 run 都可能立刻收口并读走
+    这里的值** —— 所以镜像必须发生在那条终态 UPDATE **之前**，顺序本身就是防线。
 
-
-async def test_the_refold_race_bills_the_child_at_most_once(billed, monkeypatch):
-    """竞态：子 run 在 root 的 ``refold_external_slices()`` 之后、那条 UPDATE
-    之前结束。root 的快照里没有它（所以 root 不收），它看到的 root 还是
-    ``running``（所以它也不收）—— 宁少收不重收。
-
-    可证伪点：断言这个子 run 的 3 分**恰好出现 0 次或 1 次，绝不 2 次**。
-    把 ``_finish`` 里那个 elif 改成无条件补扣，这条会立刻转红。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=False),
-    )
-    child_views = {"cost": {"own_cents": 3.0, "by_child": {}, "media_cents": 0.0}}
-    await _recorder(views=child_views, parent_run_id="800000000000001")._finish(
-        status="completed"
-    )
-    # root 的快照没赶上这个子 run。
-    root_views = {"cost": {"own_cents": 10.0, "by_child": {}, "media_cents": 0.0}}
-    await _recorder(views=root_views, run_id="800000000000001")._finish(
-        status="completed"
-    )
-    charged_amounts = [c.kwargs["cost_points"] for c in billed.await_args_list]
-    assert charged_amounts == [0.0, 10.0]
-    assert sum(1 for a in charged_amounts if a == 3.0) <= 1
-
-
-async def test_a_pure_byok_tree_is_reported_as_byo_key_not_as_zero_spend(billed):
-    """产品含义不同：一个是「你自己付了」，一个是「什么都没烧」。
-    ``ReconcileResult.note`` 两者必须分得开（裁定 ⑤）。"""
-    await _recorder(
-        views={
-            "cost": {
-                "own_cents": 8.0,
-                "own_byok_cents": 8.0,
-                "by_child": {},
-                "media_cents": 0.0,
-            }
-        }
-    )._finish(status="completed")
-    kwargs = billed.await_args.kwargs
-    assert kwargs["cost_points"] == 0.0
-    assert kwargs["byo_key"] is True
-
-
-async def test_a_tree_that_spent_nothing_is_not_reported_as_byo_key(billed):
-    await _recorder(
-        views={"cost": {"own_cents": 0.0, "by_child": {}, "media_cents": 0.0}}
-    )._finish(status="completed")
-    # 一分没花：没有审计行可写，也没有钱可扣。
-    assert billed.await_count == 0
-
-
-async def test_the_two_zero_charge_reasons_do_not_collapse_into_one_note():
-    """裁定 ⑤ 的另一半：两个都「零扣费」的结局在 ``ReconcileResult.note`` 里
-    必须分得开。上面两条只证了 ``_finish`` 传对了 ``byo_key``，这条证了
-    ``reconcile_run`` 真的把两者说成两件事。"""
+    可证伪点：断言的是**次序**而不是「调过了」。把 ``persist_views()`` 挪到
+    UPDATE 之后，这条立刻转红。"""
+    order: list[str] = []
 
     @asynccontextmanager
-    async def _ok():
+    async def _scope():
         class _S:
             async def execute(self, stmt):
-                return None
+                if getattr(getattr(stmt, "table", None), "name", None) == "agent_runs":
+                    order.append("terminal-update")
+
+                class _R:
+                    rowcount = 1
+
+                return _R()
 
         yield _S()
 
-    from app.services.ai.billing import token_billing as tb
+    import app.db.session as db_session
+    import app.services.ai_usage as ai_usage
 
-    async def _run(**over):
-        with patch("app.db.session.write_scope", new=_ok):
-            return await tb.reconcile_run(
-                run_id="900000000000001",
-                user_id=uuid4(),
-                team_id=42,
-                project_id=None,
-                session_id=None,
-                agent_id=uuid4(),
-                model="qwen-max",
-                prompt_tokens=10,
-                completion_tokens=20,
-                **over,
-            )
+    monkeypatch.setattr(db_session, "write_scope", _scope)
+    monkeypatch.setattr(ai_usage, "write_scope", _scope)
+    monkeypatch.setattr(ai_usage, "record_usage", AsyncMock())
+    monkeypatch.setattr(
+        "app.services.ai.billing.token_billing.reconcile_run", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "app.services.ai.billing.tree_charge.settle_tree_if_closed",
+        AsyncMock(return_value=tree_charge.SettleOutcome(False, "deferred")),
+    )
+    monkeypatch.setattr(
+        "app.services.search.projection.project_run_best_effort", AsyncMock()
+    )
 
-    byok = await _run(cost_points=0.0, byo_key=True)
-    idle = await _run(cost_points=0.0, byo_key=False)
-    assert "billed by user's provider" in (byok.note or "")
-    assert "zero cost" in (idle.note or "")
-    assert byok.note != idle.note
+    rec = _recorder(views=_VIEWS)
 
+    async def _persist():
+        order.append("persist-views")
 
-async def test_the_audit_row_carries_the_runs_own_spend_not_the_tree_charge():
-    """裁定 ⑬：``cost_points`` 是「该扣多少分」，``usage_cost_points`` 是写进
-    ``ai_usage_logs`` 的真实花费。沿用同一个入参会让审计表变成「root 记树 +
-    每个子 run 记自己」双计。"""
-    seen: list[Any] = []
+    rec._event_writer.persist_views = _persist
+    await rec._finish(status="completed")
 
-    @asynccontextmanager
-    async def _capture():
-        class _S:
-            async def execute(self, stmt):
-                seen.append(stmt)
-                return None
-
-        yield _S()
-
-    from app.services.ai.billing import token_billing as tb
-
-    with patch("app.db.session.write_scope", new=_capture):
-        await tb.reconcile_run(
-            run_id="900000000000001",
-            user_id=uuid4(),
-            team_id=None,  # 早退，只留审计行
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=22.0,
-            usage_cost_points=15.0,
-            byo_key=False,
-        )
-    values = seen[0].compile().params
-    assert float(values["cost_points"]) == 15.0
+    assert "persist-views" in order and "terminal-update" in order
+    assert order.index("persist-views") < order.index("terminal-update")
 
 
-async def test_omitting_usage_cost_points_keeps_the_old_single_number_behaviour():
-    """既有调用方零改动：不传时审计行仍记 ``cost_points``。"""
-    seen: list[Any] = []
-
-    @asynccontextmanager
-    async def _capture():
-        class _S:
-            async def execute(self, stmt):
-                seen.append(stmt)
-                return None
-
-        yield _S()
-
-    from app.services.ai.billing import token_billing as tb
-
-    with patch("app.db.session.write_scope", new=_capture):
-        await tb.reconcile_run(
-            run_id="900000000000001",
-            user_id=uuid4(),
-            team_id=None,
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=7.0,
-            byo_key=False,
-        )
-    assert float(seen[0].compile().params["cost_points"]) == 7.0
-
-
-async def test_the_idempotency_guard_still_covers_the_new_branch(billed, monkeypatch):
-    """rowcount 为 0 = 别人已经把这条 run 收工了。root-once 之后单次金额更大，
-    这道守卫更不能漏。"""
+async def test_a_run_that_lost_the_idempotency_guard_neither_audits_nor_settles(
+    audited, monkeypatch
+):
+    """rowcount 为 0 = 别人已经把这条 run 收工了。"""
+    audit, settle = audited
 
     @asynccontextmanager
     async def _lost():
@@ -386,342 +565,76 @@ async def test_the_idempotency_guard_still_covers_the_new_branch(billed, monkeyp
     import app.db.session as db_session
 
     monkeypatch.setattr(db_session, "write_scope", _lost)
-    await _recorder(views=_TREE)._finish(status="completed")
-    billed.assert_not_awaited()
+    await _recorder(views=_VIEWS)._finish(status="completed")
+    audit.assert_not_awaited()
+    settle.assert_not_awaited()
 
 
-# ── 修复轮 1：终态口径 / byo_key 归位 / 审计行 / 中间节点 ────────────────
+# ── token_billing 的两个新旗标 ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
-async def test_a_root_charges_the_tree_on_any_terminal_status(billed, terminal):
-    """评审 Important 1：平台的钱已经烧掉了，与这个回合成没成功无关。
+@asynccontextmanager
+async def _capture_into(sink):
+    class _S:
+        async def execute(self, stmt):
+            sink.append(stmt)
+            return None
 
-    此前只有 ``completed`` 进扣费分支。改动前扣费是逐 run 的（子 run 只要自己
-    花了钱就扣，与 root 死活无关），改成 root-once 之后子 run 把责任全交给 root
-    —— 于是「子 run 先跑完、root 随后 failed / cancelled」这条**极常见**的时序
-    上谁都不收，整棵树静默免单。"""
-    await _recorder(
-        views={"cost": {"own_cents": 1.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}}
-    )._finish(status=terminal)
-    assert billed.await_count == 1
-    assert billed.await_args.kwargs["cost_points"] == 4.0
+    yield _S()
 
 
-async def test_a_child_that_finished_first_is_still_billed_by_a_failed_root(billed):
-    """评审给的场景，端到端走一遍：子 run 3¢ 先完成（root 在跑 → 扣 0），
-    root 随后 failed → 这棵树**恰一行**扣费，金额是整棵树的平台花费。"""
-    await _recorder(
-        views={"cost": {"own_cents": 3.0, "by_child": {}, "media_cents": 0.0}},
-        parent_run_id="800000000000001",
-        run_id="900000000000009",
-    )._finish(status="completed")
-    await _recorder(
-        views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}},
-        run_id="800000000000001",
-    )._finish(status="failed")
-    charged = [
-        c.kwargs["cost_points"]
-        for c in billed.await_args_list
-        if c.kwargs["cost_points"] > 0
-    ]
-    assert charged == [3.0]
-
-
-async def test_a_deferred_child_is_never_reported_as_byo_key(billed, monkeypatch):
-    """评审 Important 2（违反裁定 ⑤）：第三分支（root 在跑、不扣）此前也满足
-    ``cost_points <= 0 and own_total > 0``，于是一条**纯平台**、真烧了钱的子 run
-    拿到 ``byo_key=True`` —— 平台付的钱被说成用户自己付的。
-
-    余额上无影响（`cost_points <= 0` 本来就早退），但 Task 4 的真栈探针正要靠
-    这个信号判断「三条 BYOK 道是否真有数」，假 BYOK 记录会把它带偏。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=False),
-    )
-    await _recorder(
-        views={"cost": {"own_cents": 3.0, "by_child": {}, "media_cents": 0.0}},
-        parent_run_id="800000000000001",
-    )._finish(status="completed")
-    kwargs = billed.await_args.kwargs
-    assert kwargs["cost_points"] == 0.0
-    assert kwargs["byo_key"] is False
-    # 「谁都不扣」与「延到 root 扣」不是一回事，note 要分得开。
-    assert kwargs["charge_deferred"] is True
-
-
-async def test_even_a_pure_byok_child_defers_instead_of_claiming_byo_key(
-    billed, monkeypatch
-):
-    """连纯 BYOK 的子 run 也不在这里下 BYOK 结论 —— root 手里才有整棵树的数。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=False),
-    )
-    await _recorder(
-        views={
-            "cost": {
-                "own_cents": 5.0,
-                "own_byok_cents": 5.0,
-                "by_child": {},
-                "media_cents": 0.0,
-            }
-        },
-        parent_run_id="800000000000001",
-    )._finish(status="completed")
-    assert billed.await_args.kwargs["byo_key"] is False
-
-
-async def test_a_deferred_charge_reads_as_deferred_not_as_zero_cost():
-    """裁定 ⑤ 的第三种结局：``reconcile_run`` 要把它说成「延到 root 扣」，
-    而不是与「什么都没烧」共用同一条 ``no team_id or zero cost`` note。"""
-
-    @asynccontextmanager
-    async def _ok():
-        class _S:
-            async def execute(self, stmt):
-                return None
-
-        yield _S()
-
+async def _reconcile(**over):
     from app.services.ai.billing import token_billing as tb
 
-    with patch("app.db.session.write_scope", new=_ok):
-        deferred = await tb.reconcile_run(
-            run_id="900000000000001",
-            user_id=uuid4(),
-            team_id=42,
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=0.0,
-            byo_key=False,
-            charge_deferred=True,
-        )
-    assert deferred.charged is False
-    assert "deferred" in (deferred.note or "")
-    assert "zero cost" not in (deferred.note or "")
+    return await tb.reconcile_run(
+        run_id="900000000000001",
+        user_id=uuid4(),
+        team_id=over.pop("team_id", None),
+        project_id=None,
+        session_id=None,
+        agent_id=uuid4(),
+        model="qwen-max",
+        prompt_tokens=10,
+        completion_tokens=20,
+        **over,
+    )
 
 
-async def test_a_root_with_no_spend_of_its_own_charges_but_writes_no_audit_row(billed):
-    """评审 Minor 4：审计行的条件回到改动前那条 —— 「**这条 run 自己**真的烧了
-    钱」。此前写成「或 cost_points > 0」会让一个自身零花费、只有子 run 烧钱的
-    root 也多出一条 ``ai_usage_logs``（cost_points=0），而
-    ``summarize_user_usage`` 的 ``overall_run_count`` 直接数行，用量面板的 run 数
-    会凭空上抬。
-
-    但钱还是要扣 —— 所以是「扣费照走、审计行不写」，用 ``log_usage`` 分开表达。"""
-    await _recorder(
-        views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}}
-    )._finish(status="completed")
-    kwargs = billed.await_args.kwargs
-    assert kwargs["cost_points"] == 3.0
-    assert kwargs["log_usage"] is False
+async def test_the_audit_row_carries_the_runs_own_spend_not_the_tree_charge():
+    """``cost_points`` 是「该扣多少分」，``usage_cost_points`` 是写进
+    ``ai_usage_logs`` 的真实花费。沿用同一个入参会让审计表双计。"""
+    seen: list[Any] = []
+    with patch("app.db.session.write_scope", new=lambda: _capture_into(seen)):
+        await _reconcile(cost_points=22.0, usage_cost_points=15.0, byo_key=False)
+    assert float(seen[0].compile().params["cost_points"]) == 15.0
 
 
-async def test_a_run_that_spent_on_its_own_still_writes_the_audit_row(billed):
-    await _recorder(views=_TREE)._finish(status="completed")
-    assert billed.await_args.kwargs["log_usage"] is True
+async def test_omitting_usage_cost_points_keeps_the_old_single_number_behaviour():
+    seen: list[Any] = []
+    with patch("app.db.session.write_scope", new=lambda: _capture_into(seen)):
+        await _reconcile(cost_points=7.0, byo_key=False)
+    assert float(seen[0].compile().params["cost_points"]) == 7.0
 
 
 async def test_log_usage_false_really_skips_the_insert():
-    """上一条只证了 ``_finish`` 传对了旗标，这条证 ``token_billing`` 真的照做。"""
+    """收口那一次用它 —— 每条 run 自身的用量已经由它自己的 ``_finish`` 记过了。"""
     seen: list[Any] = []
-
-    @asynccontextmanager
-    async def _capture():
-        class _S:
-            async def execute(self, stmt):
-                seen.append(stmt)
-                return None
-
-        yield _S()
-
-    from app.services.ai.billing import token_billing as tb
-
-    with patch("app.db.session.write_scope", new=_capture):
-        result = await tb.reconcile_run(
-            run_id="900000000000001",
-            user_id=uuid4(),
-            team_id=None,
-            project_id=None,
-            session_id=None,
-            agent_id=uuid4(),
-            model="qwen-max",
-            prompt_tokens=10,
-            completion_tokens=20,
-            cost_points=3.0,
-            usage_cost_points=0.0,
-            log_usage=False,
-            byo_key=False,
-        )
+    with patch("app.db.session.write_scope", new=lambda: _capture_into(seen)):
+        result = await _reconcile(cost_points=3.0, log_usage=False, byo_key=False)
     assert seen == []
     assert result.usage_logged is False
 
 
-async def test_a_late_intermediate_node_does_not_recharge_a_child_that_already_paid(
-    billed, monkeypatch
-):
-    """评审 Minor 5 的**反向**守卫：晚到的中间节点只补扣**自身**，不补扣子树。
-
-    把它改成按子树（``tree_platform``）补扣，会在最常见的时序上收两遍：root 终态
-    之后，孙子先结束（它自己也看到 root 已终态 → 已按自己那份扣过），父节点随后
-    结束并在 ``refold_external_slices()`` 里把那个孙子折进 ``by_child`` ——
-    按子树补扣就等于对同一笔钱收第二次。父等子是正常时序，所以这不是窄窗口。
-
-    代价是评审 Minor 5 描述的缺口仍在：那些「root 还在跑时结束、扣了 0」的孙子
-    不在任何人账上。方向是少收，符合「宁少收不重收」；已写进 ``tree_charge``
-    的模块 docstring。"""
-    monkeypatch.setattr(
-        "app.services.ai.billing.tree_charge.root_run_is_settled",
-        AsyncMock(return_value=True),
-    )
-    await _recorder(
-        views={"cost": {"own_cents": 2.0, "by_child": {"g1": 3.0}, "media_cents": 0.0}},
-        parent_run_id="800000000000001",
-    )._finish(status="completed")
-    assert billed.await_args.kwargs["cost_points"] == 2.0, "补扣了孙子已经付过的 3"
-
-
-# ── root_run_is_settled 的判据 ──────────────────────────────────────────
-
-
-def _read_scope_yielding(rows, *, raises=False):
-    """``read_scope()`` 替身：按顺序把 ``rows`` 喂给每次 ``execute().first()``。"""
-
-    class _Res:
-        def __init__(self, row):
-            self._row = row
-
-        def first(self):
-            return self._row
-
-    class _Session:
-        def __init__(self):
-            self._left = list(rows)
-
-        async def execute(self, *_a, **_kw):
-            if raises:
-                raise RuntimeError("supabase down")
-            return _Res(self._left.pop(0))
-
-    @asynccontextmanager
-    async def _scope():
-        yield _Session()
-
-    return _scope
-
-
-def _patch_read_scope(monkeypatch, scope):
-    import app.db.session as db_session
-
-    monkeypatch.setattr(db_session, "read_scope", scope)
-
-
-async def test_a_settled_root_lets_the_late_child_charge(monkeypatch):
-    from app.services.ai.billing import tree_charge
-
-    _patch_read_scope(
-        monkeypatch, _read_scope_yielding([(800000000000001, None), ("completed",)])
-    )
-    assert (
-        await tree_charge.root_run_is_settled(
-            run_id="900000000000001", parent_run_id="800000000000001"
+async def test_the_three_zero_charge_reasons_do_not_collapse_into_one_note():
+    """裁定 ⑤：「你自己付了」/「等收口那一次扣」/「什么都没烧」是三件事。"""
+    seen: list[Any] = []
+    with patch("app.db.session.write_scope", new=lambda: _capture_into(seen)):
+        byok = await _reconcile(cost_points=0.0, byo_key=True, team_id=42)
+        deferred = await _reconcile(
+            cost_points=0.0, byo_key=False, charge_deferred=True, team_id=42
         )
-        is True
-    )
-
-
-async def test_a_running_root_means_the_child_must_not_charge(monkeypatch):
-    from app.services.ai.billing import tree_charge
-
-    _patch_read_scope(
-        monkeypatch, _read_scope_yielding([(800000000000001, None), ("running",)])
-    )
-    assert (
-        await tree_charge.root_run_is_settled(
-            run_id="900000000000001", parent_run_id="800000000000001"
-        )
-        is False
-    )
-
-
-async def test_the_row_falls_back_to_parent_run_id_then_to_the_callers_copy(
-    monkeypatch,
-):
-    """``_attach_to_parent_run`` 失败时行上两列都是 NULL（已记票的既有缺陷）。
-    回落到调用方手里那个 —— 但仍然只是**查**，查不到照旧不扣。"""
-    from app.services.ai.billing import tree_charge
-
-    _patch_read_scope(monkeypatch, _read_scope_yielding([(None, None), ("completed",)]))
-    assert (
-        await tree_charge.root_run_is_settled(
-            run_id="900000000000001", parent_run_id="800000000000001"
-        )
-        is True
-    )
-
-
-@pytest.mark.parametrize(
-    "case,scope_args,parent",
-    [
-        # except 分支：一次读失败。
-        ("读库整个炸了", {"rows": [], "raises": True}, "800000000000001"),
-        # 「root 那行不存在」分支 —— 与上面那条是**不同**的代码路径，各来一条。
-        ("root 那行查不到", {"rows": [(800000000000001, None), None]}, None),
-        ("root 的 status 是 NULL", {"rows": [(800000000000001, None), (None,)]}, None),
-        # 「树上根本没有 root 可指」分支：行上两列都 NULL，调用方手里也没有。
-        ("自己这行查不到且调用方也没父", {"rows": [None]}, None),
-        ("行上两列都 NULL 且调用方也没父", {"rows": [(None, None)]}, None),
-    ],
-)
-async def test_anything_it_cannot_read_reads_as_not_settled(
-    case, scope_args, parent, monkeypatch
-):
-    """裁定 ④：「不知道」按「root 会替我收」处理 —— 宁少收不重收。读失败回 True
-    就是一次凭空的重复扣费，而这条链上没有任何对账会发现它。
-
-    ⚠️ 五条各走**不同**的 return —— 喂的行数必须刚好停在要测的那一步，多喂一步
-    就会撞 ``IndexError`` 落进 except，于是五条测的其实是同一个分支。"""
-    from app.services.ai.billing import tree_charge
-
-    _patch_read_scope(monkeypatch, _read_scope_yielding(**scope_args))
-    assert (
-        await tree_charge.root_run_is_settled(
-            run_id="900000000000001", parent_run_id=parent
-        )
-        is False
-    ), case
-
-
-async def test_a_run_without_an_id_is_never_settled():
-    """``run_id`` 为空 = 这条 run 根本没落库，没有可查的树。连库都不碰。"""
-    from app.services.ai.billing import tree_charge
-
-    assert (
-        await tree_charge.root_run_is_settled(run_id=None, parent_run_id="8") is False
-    )
-
-
-# ── parent_run_id 的真实来源 ────────────────────────────────────────────
-
-
-def test_a_really_constructed_recorder_knows_whether_it_has_a_parent():
-    """上面的桩用 ``__new__`` 绕过了 ``__init__``。这条真造两个 recorder：
-    派发站点（``subagent_task_service`` / ``agent_worker``）传什么，扣费分支
-    就读到什么。默认值必须是简单默认值，否则全仓 ``__new__`` 造的桩会整片
-    ``AttributeError``（裁定 ⑦）。"""
-    root = rr.RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
-    child = rr.RunRecorder(
-        agent_id=uuid4(),
-        user_id=uuid4(),
-        trigger="subagent",
-        parent_run_id="800000000000001",
-    )
-    assert root.parent_run_id is None
-    assert child.parent_run_id == "800000000000001"
-    # 类属性存在 ⟹ ``__new__`` 造的桩不设也读得到。
-    assert rr.RunRecorder.parent_run_id is None
+        idle = await _reconcile(cost_points=0.0, byo_key=False, team_id=42)
+    assert "billed by user's provider" in (byok.note or "")
+    assert "deferred" in (deferred.note or "")
+    assert "zero cost" in (idle.note or "")
+    assert len({byok.note, deferred.note, idle.note}) == 3

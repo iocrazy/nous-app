@@ -1,29 +1,71 @@
-"""一棵 run 树上「平台真付了钱的那部分」—— 积分只按它扣（用户裁定）。
+"""一棵 run 树的积分 —— **谁把树收口谁扣，一棵树只扣一次**（用户裁定）。
 
-``RunRecorder._finish`` 里的花费有三个分量，各有独立来源：
+一个回合的积分 = ``ceil(整棵树的平台花费之和)``，BYOK 烧掉的钱一分不扣。难点从来
+不是「算多少」，而是**由谁来扣**。
 
-* ``own_cents``   —— 这条 run 自己的 LLM 步（``step_end`` 折叠，或 token 费率算出）
-* ``by_child``    —— 每个**直接**子 run 一项，每项是那棵子树的合计（``subagent_done``）
-* ``media_cents`` —— 生图等媒体产出的精确价（``deliverable``）
+为什么不是「root 定稿时扣」（本计划原文的方案，已被真栈探针推翻）
+=============================================================
+workforce 的委派是 fire-and-forget：**root 通常先于它派出去的子 run 结束**。
+探针实例（一次真实回合）：root 03:30:34 结束，三个子 run 分别 03:30:48 /
+03:30:36 / 03:30:27。而且 ``subagent_done`` 只写到**直接父**的 transcript ——
+对 workforce 链，root 的 ``by_child`` 恒为 ``{}``。
 
-本计划给每个分量配一条平行的 ``*_byok`` 道，相减得到平台侧。
+于是「root 定稿扣整棵树」在这条链上退化成：root 只扣自己那份，每个晚到的子 run
+各自 ``ceil`` 一次 —— **逐 run 向上取整的老毛病原样回来了**，而这正是用户要修的
+那一个（真栈 ≈¢0.92 被收成 7 分）。
 
-⚠️ **``by_child`` 与 ``by_child_byok`` 必须同海拔**（都是子树合计）。孙子的钱通过
-子 run 自己的 ``spent_cents`` 已经含在 ``by_child`` 里且不重复；BYOK 侧要是只报
-「子 run 自身」，减出来的平台额会把孙子的 BYOK 花费当成平台花费收一遍。两个发射点
-``subagent_task_service._cost_cents_of`` / ``_byok_cents_of`` 的 docstring 记着
-这条不变量。
+现在的口径
+==========
+每条 run 在自己那次终态 UPDATE **成功**之后调用 :func:`settle_tree_if_closed`：
 
-⚠️ **每条 BYOK 道在相减前钳位到它所属的分量**。两侧来源不同（``own_cents`` 可能
-来自 token 费率，而 ``own_byok_cents`` 来自 step fold），一条虚高的 BYOK 道会把
-真该收的钱抹成 0 —— 那是静默免单。钳位之后最坏情况只是少收一次。钳位必须是
-**逐分量**的：一条整体钳位会让某一条虚高的道把另外两个分量的平台花费也一起抹掉。
+1. 读这棵树的全部行（``id = root OR root_run_id = root``）；
+2. 只要还有一行 ``status = 'running'`` → 不扣，返回 ``deferred``；
+3. 否则在 root 行上 CAS 盖一个 ``metadata_json.cost.charged_at`` 戳 ——
+   **抢到的那一条才扣**，rowcount 不是 1 一律返回 ``already`` 并且不扣。
+
+「最后一个结束的人负责结账」，与谁是 root、谁先谁后都无关，也不需要新表新列。
+
+金额怎么算：按**行**聚合，不看 ``by_child``
+===========================================
+树金额 = Σ 每条 run **自身**那两道（``own_cents`` + ``media_cents``）减去各自的
+BYOK 道。**刻意不使用** ``by_child`` / ``by_child_byok``：
+
+* 树的全部行都在手里，孙子自己那一行就是它，逐行求和天然不重不漏；
+* ``by_child`` 只存在于**直接父**的视图里，workforce 链上 root 那份恒为空 ——
+  依赖它就等于依赖一个对半数链路不成立的东西。
+
+⚠️ **每条 BYOK 道在相减前 ``min()`` 钳位到它所属的分量，且必须逐分量。** 两侧来源
+不同（``own_cents`` 可能来自 token 费率，而 ``own_byok_cents`` 来自 step fold），
+一条虚高的 BYOK 道会把真该收的钱抹成 0 —— 那是静默免单。只有「同一行里还有别的
+分量是平台付的」时才看得出钳位在不在：单分量的行光靠结果那个 ``max(…, 0)`` 就已经
+是 0，所以一条只测单分量的用例证不出钳位存在。
+
+⚠️ **读的是 ``agent_runs.metadata_json`` 里的 cost 视图**，所以每条 run 必须在自己
+被标成终态**之前**把最终的 ``own_cents`` 镜像落库（``RunRecorder._finish`` 里那次
+``persist_views()``）。一旦状态不再是 ``running``，树里任何一条 run 都可能立刻收口
+并读走这里的值。
+
+Stated Limitations
+==================
+* **急停期间收口的树不补扣。** ``AGENT_POINTS_CHARGE_ENABLED`` 为 false 时
+  ``reconcile_run`` 只走审计不动余额，而 ``charged_at`` 的戳照盖 —— 恢复后那棵树
+  不会再被收口一次。要补扣得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
+* **崩溃类终态必须自己叫收口。** ``liveness_scanner._mark_dead`` /
+  ``agent_runs_sweeper`` 的 ``mark_heartbeat_lost_ids`` /
+  ``liveness.reconcile.reconcile_stranded_runs`` 写终态时不经 ``_finish``，
+  它们都接了这个调用；漏掉任何一处，含那种 run 的树永远收不了口。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
+
+from loguru import logger
+
+#: 终态判据。CHECK 约束的五个状态里只有这一个不是终态，所以判 running 比枚举
+#: 其余四个更耐改（``heartbeat_lost`` 是后加的，枚举法会漏）。
+_RUNNING = "running"
 
 
 def _num(value: Any) -> float:
@@ -33,126 +75,216 @@ def _num(value: Any) -> float:
     return float(value)
 
 
-def _sum(mapping: Any) -> float:
-    if not isinstance(mapping, Mapping):
-        return 0.0
-    return sum(_num(v) for v in mapping.values())
+@dataclass(frozen=True)
+class RunSpend:
+    """一条 run **自身**的花费（own + media），单位分，都非负。"""
+
+    #: 真实花费（含用户自己 key 付的那部分）—— ``ai_usage_logs`` 按它记。
+    total: float
+    #: 其中平台付的那部分 —— 积分只按它扣。
+    platform: float
 
 
 @dataclass(frozen=True)
 class TreeBuckets:
-    """一次 ``_finish`` 上算好的四个数，单位都是分（cents），都非负。"""
+    """一棵树上全部行的合计，单位分，都非负。"""
 
-    #: 整棵树的真实花费（own + Σ子树 + media）。就是 ``agent_runs.cost_cents``。
+    #: 整棵树的真实花费。
     tree_total: float
-    #: 整棵树里**平台**付的那部分 —— root 定稿时按它扣一次。
+    #: 整棵树里平台付的那部分 —— 收口时按它扣一次。
     tree_platform: float
-    #: 这条 run 自身（own + media）的真实花费 —— 用量审计按它记。
-    own_total: float
-    #: 自身里平台付的那部分 —— root 已经收工后才结束的子 run 按它补扣。
-    own_platform: float
 
 
-def bucket_tree(
-    folded: Optional[Mapping[str, Any]], own_cents: Optional[float]
-) -> TreeBuckets:
-    """把折叠视图的 ``cost`` 切成「真实花费」与「平台花费」两组四个数。
+def spend_of_run(
+    cost: Optional[Mapping[str, Any]], *, own_cents: Optional[float] = None
+) -> RunSpend:
+    """一条 run 自身的两道花费，逐道钳位后减出平台侧。
 
-    ``own_cents`` 单独传入而不从视图里取：``_finish`` 在费率已知时用
-    ``compute_cost_cents()``（token 口径），只有费率未知才回落到折叠值，
-    两种来源在那里已经选好了。
+    ``own_cents`` 不为 None 时覆盖视图里的值：``RunRecorder._finish`` 在费率已知时
+    用 ``compute_cost_cents()``（token 口径），只有费率未知才回落到折叠值，两种来源
+    在那里已经选好了。收口路径读的是落库后的视图，不传这个参数。
     """
-    view = folded or {}
-    own = _num(own_cents)
+    view = cost or {}
+    own = _num(view.get("own_cents")) if own_cents is None else _num(own_cents)
     media = _num(view.get("media_cents"))
-    children = _sum(view.get("by_child"))
-    # 钳位：见模块 docstring。
+    # 钳位：见模块 docstring。逐分量，不是整体。
     own_byok = min(_num(view.get("own_byok_cents")), own)
     media_byok = min(_num(view.get("media_byok_cents")), media)
-    children_byok = min(_sum(view.get("by_child_byok")), children)
-
-    tree_total = round(own + children + media, 4)
-    own_total = round(own + media, 4)
-    return TreeBuckets(
-        tree_total=tree_total,
-        tree_platform=round(
-            max(tree_total - (own_byok + children_byok + media_byok), 0.0), 4
-        ),
-        own_total=own_total,
-        own_platform=round(max(own_total - (own_byok + media_byok), 0.0), 4),
+    return RunSpend(
+        total=round(own + media, 4),
+        platform=round(max((own - own_byok) + (media - media_byok), 0.0), 4),
     )
 
 
-async def root_run_is_settled(
-    *, run_id: Optional[str], parent_run_id: Optional[str]
-) -> bool:
-    """这条子 run 的 root 是不是已经终态了。
+def bucket_tree(rows: Iterable[Optional[Mapping[str, Any]]]) -> TreeBuckets:
+    """把一棵树上每一行的 cost 视图聚合成两个数。
 
-    决定一个**晚到**的子 run 要不要自己补扣：root 收工前最后一次
-    ``refold_external_slices()`` 只捞得到那一刻已经写出 ``subagent_done`` 的子
-    run，此后才结束的不在 ``by_child`` 里，没人替它收。
-
-    竞态口径（本计划裁定 ④）：子 run 以**自己看到的** root ``status`` 为准，
-    root 以**它自己的 refold 快照**为准。窄窗口里两边都判「对方会收」时就都不收
-    —— 宁可少收一次，也不对同一笔钱收两次。所以这里读不出来一律 ``False``：
-    「不知道」按「root 会替我收」处理。
-
-    ⚠️ **补扣的基数是 ``own_platform``（自身），不是 ``tree_platform``（子树）。**
-    一个晚到的**中间节点**的孩子，如果也是在 root 终态之后结束的，那它自己已经
-    按这条判据扣过一次了；而中间节点的 ``refold_external_slices()`` 会把那个孩子
-    折进 ``by_child``。按子树补扣就是对同一笔钱收第二次 —— 而且父等子是正常时序，
-    这不是窄窗口，是常态。
-
-    代价（已知缺口，方向仍是少收）：那些在 **root 还在跑时**结束、因此扣了 0 的
-    孙子，落在任何人的账外 —— 中间节点只补自己那份。要闭合它得给每条 run 记一个
-    「这笔钱收没收过」的状态，那要加列，本计划明确不加。
-
-    ``root_run_id`` 优先，回落到行上的 ``parent_run_id``，再回落到调用方手里那个
-    （``_attach_to_parent_run`` 失败时行上两列都是 NULL —— 那是已记票的既有缺陷，
-    别让它在这里变成一次误扣）。
+    入参是**每行的 cost 视图**（``metadata_json['cost']``），不是整个
+    ``metadata_json``。行数为 0 时两个数都是 0 —— 而调用方必须把「一行都没读到」
+    当成「不知道」而不是「没花钱」，那是两件事。
     """
-    from loguru import logger
+    total = platform = 0.0
+    for cost in rows:
+        spend = spend_of_run(cost)
+        total += spend.total
+        platform += spend.platform
+    return TreeBuckets(tree_total=round(total, 4), tree_platform=round(platform, 4))
 
+
+@dataclass(frozen=True)
+class SettleOutcome:
+    """一次收口尝试的结果。四种结局各自独立上报，不许折进一个布尔里。"""
+
+    #: 这次调用是不是真的扣了（或真的走到了扣费那一步）。
+    settled: bool
+    #: ``deferred`` 树里还有人在跑 / ``already`` 别人已收口 / ``charged`` 本次收口 /
+    #: ``unknown`` 读不到行 / ``error`` 读写失败 / ``no_run_id`` 没有可查的树。
+    reason: str
+    charged_points: float = 0.0
+
+
+async def settle_tree_if_closed(*, run_id: Optional[str]) -> SettleOutcome:
+    """树里最后一个结束的人给整棵树结一次账。
+
+    幂等靠 root 行上的 ``metadata_json.cost.charged_at`` CAS，所以并发调用里**恰好
+    一个**会走到扣费。
+
+    ⚠️ **rowcount 必须明确等于 1 才扣**。这与 ``_finish`` 里 ``closed_by_us`` 的
+    ``!= 0`` 口径**方向相反**，因为两处「不知道」的代价不同：那边继续走下去只是可能
+    重复写一行遥测，这边继续走下去是**可能重复扣一次真钱**。同一条纪律（「不知道」
+    要往安全的那侧倒）在两处解出不同的比较符。
+
+    任何读写失败一律不扣：一次抖动不该变成一次误扣，而漏收会在下一条 run 收口时
+    自己补上（戳还没盖）。
+    """
     if run_id is None:
-        return False
-    try:
-        from sqlalchemy import select
+        return SettleOutcome(False, "no_run_id")
 
-        from app.db.session import read_scope
+    try:
+        from sqlalchemy import cast, func, or_, select
+        from sqlalchemy import update as sa_update
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        from app.db.session import read_scope, write_scope
         from app.models import AgentRuns
 
+        rid = int(run_id)
         async with read_scope() as session:
-            own = (
+            mine = (
                 await session.execute(
-                    select(AgentRuns.root_run_id, AgentRuns.parent_run_id)
-                    .where(AgentRuns.id == int(run_id))
-                    .limit(1)
+                    select(AgentRuns.root_run_id).where(AgentRuns.id == rid).limit(1)
                 )
             ).first()
-            root_id = None
-            if own is not None:
-                root_id = own[0] or own[1]
-            if root_id is None and parent_run_id is not None:
-                root_id = int(parent_run_id)
-            if root_id is None:
-                return False
-            row = (
+            if mine is None:
+                return SettleOutcome(False, "unknown")
+            # root 行自己的 ``root_run_id`` 是 NULL（``_attach_to_parent_run`` 是
+            # 唯一写方），所以「我的 root」= 那一列，没有就是我自己。
+            root_id = int(mine[0]) if mine[0] is not None else rid
+            rows = (
                 await session.execute(
-                    select(AgentRuns.status)
-                    .where(AgentRuns.id == int(root_id))
-                    .limit(1)
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.team_id,
+                        AgentRuns.user_id,
+                        AgentRuns.model,
+                        AgentRuns.prompt_tokens,
+                        AgentRuns.completion_tokens,
+                        AgentRuns.metadata_json,
+                    ).where(
+                        or_(
+                            AgentRuns.id == root_id,
+                            AgentRuns.root_run_id == root_id,
+                        )
+                    )
                 )
-            ).first()
+            ).all()
     except Exception:  # noqa: BLE001 — 一次读失败不该变成一次误扣
-        logger.exception(
-            "[tree_charge] root status lookup failed run={} parent={}",
-            run_id,
-            parent_run_id,
-        )
-        return False
-    if row is None or row[0] is None:
-        return False
-    return str(row[0]) != "running"
+        logger.exception("[tree_charge] tree read failed run={}", run_id)
+        return SettleOutcome(False, "error")
+
+    if not rows:
+        # 读到零行 ≠ 这棵树没花钱。什么都不做，等下一次。
+        return SettleOutcome(False, "unknown")
+    if any(str(getattr(r, "status", "")) == _RUNNING for r in rows):
+        return SettleOutcome(False, "deferred")
+
+    # 戳的值在 Python 侧算好再绑进去：``jsonb_build_object`` 收到的是一个普通
+    # 文本绑定，落库就是一个 JSON 字符串。用 ``func.now()`` 反而要多一层 cast。
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).isoformat()
+    try:
+        async with write_scope() as session:
+            stamped = await session.execute(
+                sa_update(AgentRuns)
+                .where(AgentRuns.id == root_id)
+                .where(AgentRuns.metadata_json["cost"]["charged_at"].astext.is_(None))
+                .values(
+                    metadata_json=func.coalesce(
+                        AgentRuns.metadata_json, cast("{}", JSONB)
+                    ).op("||")(
+                        func.jsonb_build_object(
+                            "cost",
+                            func.coalesce(
+                                AgentRuns.metadata_json["cost"], cast("{}", JSONB)
+                            ).op("||")(func.jsonb_build_object("charged_at", stamp)),
+                        )
+                    )
+                )
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("[tree_charge] settle CAS failed root={}", root_id)
+        return SettleOutcome(False, "error")
+
+    if getattr(stamped, "rowcount", None) != 1:
+        return SettleOutcome(False, "already")
+
+    buckets = bucket_tree((r.metadata_json or {}).get("cost") for r in rows)
+    root_row = next((r for r in rows if int(r.id) == root_id), rows[0])
+    # 纯 BYOK 树（平台额 0 而真的烧了钱）与零花费树在 note 里必须分得开：
+    # 一个是「你自己付了」，一个是「什么都没烧」。
+    byo_key = buckets.tree_platform <= 0 and buckets.tree_total > 0
+    tokens = sum(
+        int(r.prompt_tokens or 0) + int(r.completion_tokens or 0) for r in rows
+    )
+    logger.info(
+        "[tree_charge] settling tree root={} runs={} total={} platform={} "
+        "byo_key={}",
+        root_id,
+        len(rows),
+        buckets.tree_total,
+        buckets.tree_platform,
+        byo_key,
+    )
+
+    from app.services.ai.billing.token_billing import reconcile_run
+
+    result = await reconcile_run(
+        run_id=str(root_id),
+        user_id=root_row.user_id,
+        team_id=root_row.team_id,
+        project_id=None,
+        session_id=None,
+        agent_id=None,
+        model=root_row.model or "?",
+        prompt_tokens=tokens,
+        completion_tokens=0,
+        cost_points=buckets.tree_platform,
+        # 审计行由每条 run 自己的 ``_finish`` 按自身花费写，收口这一次只扣钱 ——
+        # 这里再写一行就是把整棵树的花费在 ai_usage_logs 里又记一遍。
+        log_usage=False,
+        byo_key=byo_key,
+        action="agent_run",
+    )
+    return SettleOutcome(True, "charged", result.charged_points)
 
 
-__all__ = ["TreeBuckets", "bucket_tree", "root_run_is_settled"]
+__all__ = [
+    "RunSpend",
+    "TreeBuckets",
+    "SettleOutcome",
+    "spend_of_run",
+    "bucket_tree",
+    "settle_tree_if_closed",
+]

@@ -31,6 +31,10 @@ class _Writer:
     async def refold_external_slices(self) -> None:
         return None
 
+    async def persist_views(self) -> None:
+        # ``_finish`` 在把 run 标成终态之前调它 —— 树收口按行读落库的 cost 视图。
+        return None
+
 
 def _recorder(*, views, prompt=10, completion=20):
     rec = rr.RunRecorder.__new__(rr.RunRecorder)
@@ -68,6 +72,14 @@ def captured(monkeypatch):
                 async def execute(self, stmt):
                     sink.append(stmt)
 
+                    # 真驱动会报 rowcount。``closed_by_us`` 只看「是不是明确为
+                    # 0」，所以这跟原来的「什么都不返回」等价；而树收口的 CAS
+                    # 反过来要求**明确等于 1** 才扣，不报就一分不扣。
+                    class _R:
+                        rowcount = 1
+
+                    return _R()
+
             yield _S()
 
         return _cm
@@ -92,10 +104,72 @@ def _values(stmt) -> dict:
 
 
 def _run_row_updates(calls: dict[str, list]) -> list:
-    """只要打在 agent_runs 上的那些 —— Task 13 的检索投影也走 write_scope。"""
+    """只要**终态那一条** UPDATE。
+
+    打在 agent_runs 上的写不止一条：Task 13 的检索投影走 write_scope，树收口的
+    ``charged_at`` CAS 也是一条 agent_runs 的 UPDATE。终态那条是唯一带
+    ``status`` 的，按它认。
+    """
     return [
-        s for s in calls["update"] if getattr(s.table, "name", None) == "agent_runs"
+        s
+        for s in calls["update"]
+        if getattr(s.table, "name", None) == "agent_runs"
+        and "status" in {k.name for k in s._values}
     ]
+
+
+def _tree_read(monkeypatch, rows: list[dict]) -> None:
+    """把 ``read_scope`` 换成树收口那两条读：先「我的 root 是谁」，再全树。
+
+    ``rows`` 是每条 run 的 cost 视图。收口按**行**聚合，所以这里要把子 run 各自
+    摆出来 —— 它不读父行的 ``by_child``（workforce 链上 root 那份恒为空）。
+    """
+    from uuid import uuid4 as _uuid4
+
+    class _Row:
+        def __init__(self, idx, cost):
+            self.id = 800000000000000 + idx
+            self.status = "completed"
+            self.team_id, self.user_id = 42, _uuid4()
+            self.model = "doubao-seed-2-0-lite"
+            self.prompt_tokens, self.completion_tokens = 10, 20
+            self.metadata_json = {"cost": cost}
+
+    built = [_Row(i, c) for i, c in enumerate(rows)]
+
+    class _Res:
+        def __init__(self, r):
+            self._r = r
+
+        def first(self):
+            return self._r[0] if self._r else None
+
+        def all(self):
+            return self._r
+
+    class _S:
+        def __init__(self):
+            self._n = 0
+
+        async def execute(self, stmt):
+            self._n += 1
+            # 第一条：我的 root_run_id（None = 我就是 root）。第二条：全树。
+            return _Res([(None,)]) if self._n == 1 else _Res(built)
+
+    @asynccontextmanager
+    async def _read():
+        yield _S()
+
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "read_scope", _read)
+
+
+def _settle_call(charged):
+    """收口那一次 —— 它是唯一 ``log_usage=False`` 的那条。"""
+    return next(
+        c for c in charged.await_args_list if c.kwargs.get("log_usage") is False
+    )
 
 
 async def test_the_children_own_rows_sum_to_the_root_column(captured):
@@ -119,19 +193,32 @@ async def test_the_children_own_rows_sum_to_the_root_column(captured):
     assert sum(c["cost_cents"] for c in captured["usage"]) == root
 
 
-async def test_the_points_charge_is_the_whole_tree_once_at_the_root(
+async def test_the_points_charge_is_the_whole_tree_once_at_the_closer(
     captured, monkeypatch
 ):
-    """用户裁定（2026-09-17）：一个回合的积分 = ceil(整棵树的平台花费)，只在
-    root 定稿时扣一次。此前这条用例断言的是「按自身花费 15 扣」——那是每条 run
-    各 ceil 一次的口径，一次带委派的回合因此在 point_transactions 里留下好几行、
-    每行各向上取整（真栈 ≈¢0.92 收成 7 分）。
+    """用户裁定（2026-09-17）：一个回合的积分 = ceil(整棵树的平台花费)，一棵树只
+    扣一次，扣的人是**把树收口的那一条 run**。此前这条用例断言的是「按自身花费
+    15 扣」——那是每条 run 各 ceil 一次的口径，一次带委派的回合因此在
+    point_transactions 里留下好几行、每行各向上取整（真栈 ≈¢0.92 收成 7 分）。
 
-    小时表（A1）仍收自身花费 15：那张表没有 parent_run_id 维度，父行带上子 run
-    的花费就再也剔不掉。**两套账口径不同是对的** —— 一个回答「这条 run 烧了多少」，
-    一个回答「这个回合该收多少钱」。"""
+    ⚠️ 也不是「root 定稿时扣」（计划原文）：workforce 的委派是 fire-and-forget，
+    root 通常**先于**子 run 结束，而 subagent_done 只写到直接父 —— root 的
+    by_child 对那条链恒为空，那个方案会退化回逐 run ceil。
+
+    这条 run 自己那一步只写审计行（15，它自身花费），扣费由收口那一次做（22，
+    按全树逐行聚合）。小时表（A1）仍收 15：那张表没有 parent_run_id 维度，父行带
+    上子 run 的花费就再也剔不掉。**三套账口径不同是对的** —— 分别回答「这条 run
+    烧了多少」「这个回合该收多少钱」「这条 run 干了多少活」。"""
     charged = AsyncMock()
     monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
+    _tree_read(
+        monkeypatch,
+        [
+            {"own_cents": 10.0, "media_cents": 5.0},  # 这条 run 自己
+            {"own_cents": 3.0},  # 子 run c1
+            {"own_cents": 4.0},  # 子 run c2
+        ],
+    )
     await _recorder(
         views={
             "cost": {
@@ -142,24 +229,31 @@ async def test_the_points_charge_is_the_whole_tree_once_at_the_root(
         }
     )._finish(status="completed")
     assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 22.0
-    assert charged.await_args.kwargs["cost_points"] == 22.0
-    assert charged.await_args.kwargs["usage_cost_points"] == 15.0
     assert captured["usage"][-1]["cost_cents"] == 15.0
 
+    audit = charged.await_args_list[0].kwargs
+    assert audit["usage_cost_points"] == 15.0 and audit["cost_points"] == 0.0
 
-async def test_a_root_that_spent_nothing_itself_still_charges_its_children(
+    settle = _settle_call(charged).kwargs
+    assert settle["cost_points"] == 22.0
+
+
+async def test_a_run_that_spent_nothing_itself_still_closes_the_tree(
     captured, monkeypatch
 ):
-    """自身零花费、只有子 run 烧了钱：root-once 之后这个 root **要**扣 3 分
-    （整棵树的平台花费），而子 run 看到 root 还在跑时不会自己扣。此前这条断言的
-    是「根本不进扣费分支」——那在「每条 run 各扣各的」口径下才成立。"""
+    """自身零花费、只有子 run 烧了钱：**不写审计行**（那张表按自身用量记，多写一
+    行会让 overall_run_count 凭空上抬），但收口照叫 —— 这条 run 可能正是树里最后
+    一个结束的，而整棵树的 3 分要有人收。此前这条断言的是「根本不进扣费分支」，
+    那在「每条 run 各扣各的」口径下才成立。"""
     charged = AsyncMock()
     monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
+    _tree_read(monkeypatch, [{"own_cents": 0.0}, {"own_cents": 3.0}])
     await _recorder(
         views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}}
     )._finish(status="completed")
     assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 3.0
-    assert charged.await_args.kwargs["cost_points"] == 3.0
+    assert [c.kwargs["cost_points"] for c in charged.await_args_list] == [3.0]
+    assert _settle_call(charged).kwargs["cost_points"] == 3.0
 
 
 async def test_the_counters_default_to_zero_then_follow_the_fold(captured):

@@ -302,6 +302,16 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
         await project_run_id_best_effort(run_id)
         await record_crash_terminal_runs(killed_rows)
 
+        # 这条 run 永远不会走到 ``RunRecorder._finish``，所以树收口也只能由这里
+        # 跟上 —— 漏掉这一处，含一条崩溃 run 的树永远收不了口，整棵树一分不扣
+        # （见 ``tree_charge`` 模块 docstring 的 Stated Limitations）。
+        from app.services.ai.billing.tree_charge import settle_tree_if_closed
+
+        try:
+            await settle_tree_if_closed(run_id=str(run_id))
+        except Exception as exc:  # noqa: BLE001 — 计费绝不连坐终态写入
+            logger.warning(f"[liveness-scanner] tree settle {run_id} failed: {exc}")
+
 
 @DBOS.scheduled("*/30 * * * * *")  # every 30s (6-field cron)
 @DBOS.workflow()

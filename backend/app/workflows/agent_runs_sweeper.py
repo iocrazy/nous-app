@@ -89,6 +89,17 @@ async def mark_heartbeat_lost_step() -> int:
     )
     run_ids = await runs_repo.mark_heartbeat_lost_ids(stale_before=stale_before)
     await close_interrupted_runs(run_ids)
+
+    # 这条 run 永远不会走到 ``RunRecorder._finish``，所以树收口也只能由这里
+    # 跟上 —— 漏掉这一处，含一条崩溃 run 的树永远收不了口，整棵树一分不扣
+    # （见 ``tree_charge`` 模块 docstring 的 Stated Limitations）。
+    from app.services.ai.billing.tree_charge import settle_tree_if_closed
+
+    for run_id in run_ids:
+        try:
+            await settle_tree_if_closed(run_id=str(run_id))
+        except Exception as exc:  # noqa: BLE001 — 计费绝不连坐终态写入
+            logger.warning(f"[agent-runs-sweeper] tree settle {run_id} failed: {exc}")
     return len(run_ids)
 
 

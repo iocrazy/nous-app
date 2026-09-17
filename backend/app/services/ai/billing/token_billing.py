@@ -246,42 +246,45 @@ async def reconcile_run(
     this exactly once per run. Repeated calls would double-charge.
 
     ``cost_points`` 是**该扣多少分**的基数，``usage_cost_points`` 是写进
-    ``ai_usage_logs`` 的**真实花费**（缺省沿用前者）。root-once 之后两者不同：
+    ``ai_usage_logs`` 的**真实花费**（缺省沿用前者）。两者由**两个不同的调用方**
+    分别使用，所以它们不再是同一个数：
 
-    * **root**（``parent_run_id is None``）→ ``cost_points`` = 整棵树的平台花费。
-      一个回合只在这里扣一次，向上取整一次。此前是每条 run 各 ceil 一次自身花费
-      （真栈实测 ≈¢0.92 被收成 7 分）。
-    * **root 已终态后才结束的子 run** → ``cost_points`` = 它自身的平台花费。
-      root 的 refold 快照没赶上它，没人替它收。
-    * **root 仍在跑的子 run** → ``cost_points=0`` + ``charge_deferred=True``。
+    * ``RunRecorder._finish`` —— 每条 run 各调一次，只写审计行：
+      ``cost_points=0`` + ``charge_deferred=True`` + ``usage_cost_points=`` 自身
+      真实花费（own + media，含 BYOK 的那部分）。
+    * ``tree_charge.settle_tree_if_closed`` —— 一棵树只有**收口的那一条** run 调
+      一次，只扣钱：``cost_points=`` 整棵树的平台花费、``log_usage=False``、
+      ``run_id=`` root 的 id（于是 ``point_transactions.reference_id`` 是 root）。
 
-    ⚠️ **root 在任一终态（completed / failed / cancelled）都扣。** 平台的钱已经
-    烧掉了，与这个回合成没成功无关。此前只有 ``completed`` 扣 —— 那在「每条 run
-    各扣各的」口径下只漏 root 自己那份，root-once 之后会让「子 run 先跑完、root
-    随后失败」这条常见时序整棵树静默免单。
+    ⚠️ 扣费**不是**「root 定稿时做」。workforce 的委派是 fire-and-forget，root 通常
+    先于子 run 结束，而 ``subagent_done`` 只写到直接父 —— root 的 ``by_child`` 对
+    那条链恒为空。谁最后把树收口谁结账，判据与幂等在 ``tree_charge`` 里。
+
+    ⚠️ 任一终态（completed / failed / cancelled）都算收口：平台的钱已经烧掉了，
+    与这个回合成没成功无关。
 
     读方 ``billing/run_tree_points.charged_points_for_run_trees`` 按 ``root_run_id``
-    全树合计，所以这次改动它一行不用动：合计从「多行相加」变成「一行」，同一个数。
+    全树合计，所以这次改动它一行不用动：一棵树现在恰好一行流水，同一个数。
 
     三种零扣费的结局在 ``note`` 里必须分得开，它们是三件事：
 
     * ``byo_key=True`` —— **纯 BYOK 树**（平台花费为 0 而真实花费 > 0）：你自己付了。
-      **只有 root 与晚到的子 run 能下这个结论**；延期的子 run 手里没有整棵树的数。
-    * ``charge_deferred=True`` —— 这笔钱由 root 一起扣，这里只是不重复收。
+      **只有收口那一次能下这个结论**，它手里才有整棵树的数。
+    * ``charge_deferred=True`` —— 这一次不负责扣钱（``_finish`` 的审计调用恒是
+      这一种），钱由收口那一次一起结。
     * 两者都为 false 且 ``cost_points <= 0`` —— 什么都没烧。
 
-    ``log_usage=False`` 时**不写 ``ai_usage_logs``**，扣费照走。给的是「自身零花费、
-    只有子 run 烧了钱的 root」：它该扣整棵树的钱，但自己没有用量可审计，多写一行
-    会让 ``summarize_user_usage`` 的 ``overall_run_count``（直接数行）凭空上抬。
+    ``log_usage=False`` 时**不写 ``ai_usage_logs``**，扣费照走 —— 收口那一次用它，
+    因为每条 run 自身的用量已经由它自己的 ``_finish`` 记过了，再写一行就是把整棵树
+    的花费又记一遍。
 
     仍然不扣的既有缺口：顶层 workforce 派发没有父 run 可继承团队（``team_id``
     为空，下面 ``if not team_id`` 早退）；父 run 自己就没有团队（个人 scope 的
     对话派出去的活）；``team_of_run`` 查库失败降级 None。
 
-    **Stated Limitation（``heartbeat_lost`` 的 root 不扣）**：liveness 清扫器直接
-    改 ``agent_runs.status``，不经 ``_finish``，所以那类 root 连这个函数都到不了，
-    整棵树不扣。与急停同族：已知、未闭合，要闭合得另做一条按 ``ai_usage_logs``
-    反查的回填链。
+    **Stated Limitation（急停期间收口的树不补扣）**：``AGENT_POINTS_CHARGE_ENABLED``
+    为 false 时只走审计不动余额，而收口的戳照盖 —— 恢复后那棵树不会再被收口一次。
+    要补扣得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
 
     **Stated Limitation（急停不补扣）**：``AGENT_POINTS_CHARGE_ENABLED`` 为
     false 时只写审计行、不动余额，恢复后**没有补扣机制**。root-once 让单次金额
@@ -352,14 +355,15 @@ async def reconcile_run(
             note="byo_key — billed by user's provider, no points charge",
         )
     if charge_deferred:
-        # 「这笔钱 root 会一起扣」与「什么都没烧」是两件事（裁定 ⑤ 的第三种结局）。
-        # 共用同一条 note 会让一次正常的委派在账面上读起来像一次零花费的空转。
+        # 「钱由树收口那一次一起扣」与「什么都没烧」是两件事（裁定 ⑤ 的第三种
+        # 结局）。共用同一条 note 会让每一条正常 run 的审计调用在账面上读起来
+        # 像一次零花费的空转。
         return ReconcileResult(
             charged=False,
             charged_points=0.0,
             byo_key=False,
             usage_logged=usage_logged,
-            note="charge deferred to the root run — billed once for the whole tree",
+            note="charge deferred — the run that closes this tree bills it once",
         )
     if not team_id or cost_points <= 0:
         return ReconcileResult(
