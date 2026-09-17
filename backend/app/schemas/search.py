@@ -122,6 +122,12 @@ class SearchResponse(BaseModel):
     total: int
     query: str
     search_type: str  # "semantic", "hybrid", "similar"
+    # Hybrid only — what the vector leg did: "ok" | "unconfigured" |
+    # "embed_failed" | "timeout" | "unavailable" | "error" | "skipped_filters" |
+    # "skipped_no_scope" | "skipped_no_query" |
+    # "skipped_full_page". Absent on other search types. Lets a UI say
+    # "keyword results only" and a probe fire when the leg degrades.
+    vector_leg: Optional[str] = None
 
 
 class SimilarMediaRequest(BaseModel):
