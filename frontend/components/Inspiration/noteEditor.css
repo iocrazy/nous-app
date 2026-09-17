@@ -23,3 +23,15 @@
 .note-editor-content th p,
 .note-editor-content td p { margin: 0; }
 .note-editor-content p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--content-4); float: left; height: 0; pointer-events: none; }
+/* Live #tag highlight (tagHighlight.ts). Same visual language as NoteMarkdown's
+   TagChip — accent-soft fill, accent-text, medium weight — so a tag looks the
+   same while composing as it does once saved. No horizontal padding: this is
+   a decoration inside editable text, and padding would push the caret off the
+   glyph it belongs to. */
+.note-editor-content .note-tag-chip {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 500;
+  border-radius: 0.25rem;
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}

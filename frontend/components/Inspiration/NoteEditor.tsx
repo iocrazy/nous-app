@@ -22,6 +22,7 @@ import { common, createLowlight } from 'lowlight';
 import { Extension } from '@tiptap/core';
 import type { Editor } from '@tiptap/core';
 import { findActiveTag } from './noteTags';
+import { TagHighlight } from './tagHighlight';
 import './noteEditor.css';
 
 const lowlight = createLowlight(common);
@@ -111,6 +112,9 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
       // pre-existing note containing footnotes will still mangle them on
       // edit-save. Tracked as a known issue, not silently swallowed.
       Markdown,
+      // Finished #tags read as tags while composing (presentation only — the
+      // emitted markdown is unchanged). See tagHighlight.ts.
+      TagHighlight,
       Extension.create({
         name: 'submitKeymap',
         addKeyboardShortcuts() {
