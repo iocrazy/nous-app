@@ -187,8 +187,17 @@ describe('InspirationPage', () => {
   });
 
   it('delete flows through confirm and removes the card', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    deleteNote.mockResolvedValue(undefined);
+    // The confirm itself is the useConfirm mock above (resolves true); the
+    // dedicated confirm/cancel contract lives in InspirationPage.deleteConfirm.
+    //
+    // Model the server, not just the call: onDelete also bumps refreshKey,
+    // which re-runs listNotes. A listNotes that still returns the deleted note
+    // puts the card straight back, so this assertion only passed when waitFor
+    // happened to sample between the local removal and the refetch — 6 of 12
+    // runs failed once the confirm became async (#2354).
+    deleteNote.mockImplementation(async () => {
+      listNotes.mockResolvedValue([]);
+    });
     render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findByText(noteBody('first idea #hooks'));
     fireEvent.click(screen.getByLabelText('Note actions'));
