@@ -850,6 +850,13 @@ class RunRecorder:
         # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
         # 两个数各有其用。
         own_media_cents = round((own_cents or 0.0) + media_cents, 4)
+        # 积分只按「平台真付了钱的那部分」扣（用户裁定 2）。三条 BYOK 道由
+        # step_end / deliverable / subagent_done 三个 fold 各自填，这里只做减法。
+        # ⚠️ ``own_media_cents`` 保留不动 —— 小时表（record_usage）仍然收它，A1
+        # 口径不变。``buckets.own_total`` 与它是同一个数，但两者各有来源与用途。
+        from app.services.ai.billing.tree_charge import bucket_tree
+
+        buckets = bucket_tree(folded, own_cents)
         if own_cents is not None or children_cents or media_cents:
             cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
         if folded is not None and own_cents is not None:
@@ -1012,40 +1019,63 @@ class RunRecorder:
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
         # able to roll back a finished agent_runs row.
-        if status == "completed" and own_media_cents > 0 and closed_by_us:
-            try:
-                from app.services.ai.billing.token_billing import reconcile_run
+        #
+        # 用户裁定：一个回合的积分 = ceil(整棵树的平台花费)，只在 root 定稿时扣
+        # 一次。此前是每条 run 各 ceil 一次自身花费 —— 一次带委派的回合在
+        # point_transactions 里是好几行、每行各向上取整（真栈 ≈¢0.92 收成 7 分）。
+        #
+        # 三分支的竞态口径（宁少收不重收）：root 以自己的 refold 快照为准，子 run
+        # 以自己看到的 root status 为准。窄窗口里两边都判「对方会收」时就都不收。
+        if status == "completed" and closed_by_us:
+            from app.services.ai.billing import tree_charge
 
-                # own_media_cents is this run's OWN cents (own + media);
-                # PointsService treats cost_points as the same scalar (1 cent
-                # ≈ 1 point in the current billing model), then ceils it to an
-                # integer. If a future change splits the two units, that
-                # conversion belongs here.
-                await reconcile_run(
-                    run_id=self.run_id,
-                    user_id=self.user_id,
-                    team_id=self.team_id,
-                    project_id=self.project_id,
-                    session_id=self.session_id,
-                    agent_id=self.agent_id,
-                    model=self.model or "?",
-                    prompt_tokens=self._prompt_tokens,
-                    completion_tokens=self._completion_tokens,
-                    # A3：按**自身**花费扣，不按树总额 —— 子 run 自己也会走到这里
-                    # 扣它那份，父行再扣一遍就是对同一笔钱收两次。
-                    cost_points=own_media_cents,
-                    # ⚠️ 3c A3 Stated Limitation：agent_runs 没有 run 级 BYOK 标记，
-                    # 所以管理员配了 per_call_cents 的 BYOK 图片模型会被按平台价扣
-                    # 一次。闭合它要加列 + 改构造签名，另立票；现阶段的兜底是
-                    # AGENT_POINTS_CHARGE_ENABLED。
-                    byo_key=False,  # platform-model run; BYO-key runs
-                    # set this true via a future RunRecorder kwarg or
-                    # by inspecting the model string against the user's
-                    # registered keys (Phase 3.1 work)
-                    action=self.trigger,
-                )
-            except Exception as exc:
-                logger.warning(f"[RunRecorder] reconcile_run failed (non-fatal): {exc}")
+            if self.parent_run_id is None:
+                cost_points, why = buckets.tree_platform, "root charges the tree"
+            elif await tree_charge.root_run_is_settled(
+                run_id=self.run_id, parent_run_id=self.parent_run_id
+            ):
+                cost_points, why = buckets.own_platform, "late child charges its own"
+            else:
+                cost_points, why = 0.0, "root is still running and will charge"
+
+            # 纯 BYOK 树（平台额 0 而真的烧了钱）与零花费树在 note 里必须分开：
+            # 一个是「你自己付了」，一个是「什么都没烧」。
+            byo_key = cost_points <= 0 and (
+                buckets.tree_total > 0
+                if self.parent_run_id is None
+                else buckets.own_total > 0
+            )
+            logger.info(
+                f"[RunRecorder] run {self.run_id} billing: {why}; "
+                f"tree={buckets.tree_total} platform={buckets.tree_platform} "
+                f"own={buckets.own_total} charge={cost_points} byo_key={byo_key}"
+            )
+            # 审计行的条件是「真的烧了钱」，与扣不扣分无关 —— 一个不扣分的子 run
+            # 照样要在 ai_usage_logs 里留下它花掉的钱（用户裁定 2 的后半句）。
+            if buckets.own_total > 0 or cost_points > 0:
+                try:
+                    from app.services.ai.billing.token_billing import reconcile_run
+
+                    await reconcile_run(
+                        run_id=self.run_id,
+                        user_id=self.user_id,
+                        team_id=self.team_id,
+                        project_id=self.project_id,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        model=self.model or "?",
+                        prompt_tokens=self._prompt_tokens,
+                        completion_tokens=self._completion_tokens,
+                        cost_points=cost_points,
+                        # 审计行仍记这条 run 自身的真实花费（含 BYOK 的那部分）。
+                        usage_cost_points=buckets.own_total,
+                        byo_key=byo_key,
+                        action=self.trigger,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[RunRecorder] reconcile_run failed (non-fatal): {exc}"
+                    )
 
 
 def _truncate(text: str, max_chars: int) -> str:

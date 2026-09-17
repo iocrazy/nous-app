@@ -119,12 +119,17 @@ async def test_the_children_own_rows_sum_to_the_root_column(captured):
     assert sum(c["cost_cents"] for c in captured["usage"]) == root
 
 
-async def test_the_points_charge_is_the_runs_own_spend_not_the_tree(
+async def test_the_points_charge_is_the_whole_tree_once_at_the_root(
     captured, monkeypatch
 ):
-    """A3：父 run 的 cost_cents 列是树总额（22），但积分只能扣它自己那 15 ——
-    每个子 run 自己也会走到这条线扣它那份，父行再扣一遍就是对同一笔钱收两次。
-    小时表（A1）与积分账（A3）读的必须是同一个口径。"""
+    """用户裁定（2026-09-17）：一个回合的积分 = ceil(整棵树的平台花费)，只在
+    root 定稿时扣一次。此前这条用例断言的是「按自身花费 15 扣」——那是每条 run
+    各 ceil 一次的口径，一次带委派的回合因此在 point_transactions 里留下好几行、
+    每行各向上取整（真栈 ≈¢0.92 收成 7 分）。
+
+    小时表（A1）仍收自身花费 15：那张表没有 parent_run_id 维度，父行带上子 run
+    的花费就再也剔不掉。**两套账口径不同是对的** —— 一个回答「这条 run 烧了多少」，
+    一个回答「这个回合该收多少钱」。"""
     charged = AsyncMock()
     monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
     await _recorder(
@@ -137,19 +142,24 @@ async def test_the_points_charge_is_the_runs_own_spend_not_the_tree(
         }
     )._finish(status="completed")
     assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 22.0
-    assert charged.await_args.kwargs["cost_points"] == 15.0
+    assert charged.await_args.kwargs["cost_points"] == 22.0
+    assert charged.await_args.kwargs["usage_cost_points"] == 15.0
+    assert captured["usage"][-1]["cost_cents"] == 15.0
 
 
-async def test_a_run_that_spent_nothing_itself_is_not_charged(captured, monkeypatch):
-    """自身零花费、只有子 run 烧了钱 —— 守门按树总额开会让这个父 run 替子 run
-    再付一次；按自身花费开则根本不进扣费分支。"""
+async def test_a_root_that_spent_nothing_itself_still_charges_its_children(
+    captured, monkeypatch
+):
+    """自身零花费、只有子 run 烧了钱：root-once 之后这个 root **要**扣 3 分
+    （整棵树的平台花费），而子 run 看到 root 还在跑时不会自己扣。此前这条断言的
+    是「根本不进扣费分支」——那在「每条 run 各扣各的」口径下才成立。"""
     charged = AsyncMock()
     monkeypatch.setattr("app.services.ai.billing.token_billing.reconcile_run", charged)
     await _recorder(
         views={"cost": {"own_cents": 0.0, "by_child": {"c1": 3.0}, "media_cents": 0.0}}
     )._finish(status="completed")
     assert _values(_run_row_updates(captured)[-1])["cost_cents"] == 3.0
-    charged.assert_not_awaited()
+    assert charged.await_args.kwargs["cost_points"] == 3.0
 
 
 async def test_the_counters_default_to_zero_then_follow_the_fold(captured):

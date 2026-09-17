@@ -219,6 +219,7 @@ async def reconcile_run(
     prompt_tokens: int,
     completion_tokens: int,
     cost_points: float,
+    usage_cost_points: Optional[float] = None,
     byo_key: bool,
     action: str = "agent_run",
 ) -> ReconcileResult:
@@ -234,26 +235,30 @@ async def reconcile_run(
     the safer way is for the caller (RunRecorder._finish) to invoke
     this exactly once per run. Repeated calls would double-charge.
 
-    ``cost_points`` 是这个 run 的**自身**花费（own + media），不是树总额 ——
-    父行再按树总额扣一遍就是对同一笔钱收两次（3c A3，与 ai_usage_hourly 的
-    A1 同口径）。
+    ``cost_points`` 是**该扣多少分**的基数，``usage_cost_points`` 是写进
+    ``ai_usage_logs`` 的**真实花费**（缺省沿用前者）。root-once 之后两者不同：
 
-    这条口径成立的前提是**子 run 自己也扣得到**，而它一度不成立：
-    ``subagent_task_service`` 与 ``agent_worker`` 两个派发站点都硬编码
-    ``team_id=None``，子 run 在下面的 ``if not team_id`` 早退，于是委派烧掉的
-    钱两边都不收。评审轮 1 已让两处继承父 run 的 team（``team_of_run``），所以
-    现在是父子各扣各的。**仍然不扣的主要是顶层 workforce 派发** —— 它没有父
-    run 可继承，team 为空，按设计不计费。另有两种同样落到 team 为空：父 run
-    自己就没有 team（个人 scope 的对话派出去的活）；``team_of_run`` 查库失败
-    降级 None（宁可少收一次，也不让一次读失败把派发弄挂）。
+    * **root**（``parent_run_id is None``）→ ``cost_points`` = 整棵树的平台花费。
+      一个回合只在这里扣一次，向上取整一次。此前是每条 run 各 ceil 一次自身花费
+      （真栈实测 ≈¢0.92 被收成 7 分）。
+    * **root 已终态后才结束的子 run** → ``cost_points`` = 它自身的平台花费。
+      root 的 refold 快照没赶上它，没人替它收。
+    * **root 仍在跑的子 run** → ``cost_points=0``，只写审计行。
 
-    Stated Limitation（BYOK 重复计费，3c A3）：``agent_runs`` / ``generated_media``
-    都没有 run 级 BYOK 标记，``RunRecorder`` 也没有对应 kwarg，所以调用方一律
-    传 ``byo_key=False``。影响面有限 —— BYOK 的 LLM 模型通常不在
-    ``ai_model_prices`` 里（own_cents 为 0，天然不进扣费分支）；真正受影响的只
-    有管理员配了 ``per_call_cents`` 的 BYOK 图片模型，它们会被按平台价扣一次。
-    闭合它要加列 + 改 RunRecorder 构造签名，另立票；现阶段的兜底是
-    ``settings.AGENT_POINTS_CHARGE_ENABLED``。
+    读方 ``billing/run_tree_points.charged_points_for_run_trees`` 按 ``root_run_id``
+    全树合计，所以这次改动它一行不用动：合计从「多行相加」变成「一行」，同一个数。
+
+    ``byo_key=True`` 只给**纯 BYOK 树**（平台花费为 0 而真实花费 > 0）。它与
+    「零花费」在 note 里必须分得开：一个是「你自己付了」，一个是「什么都没烧」。
+
+    仍然不扣的既有缺口：顶层 workforce 派发没有父 run 可继承团队（``team_id``
+    为空，下面 ``if not team_id`` 早退）；父 run 自己就没有团队（个人 scope 的
+    对话派出去的活）；``team_of_run`` 查库失败降级 None。
+
+    **Stated Limitation（急停不补扣）**：``AGENT_POINTS_CHARGE_ENABLED`` 为
+    false 时只写审计行、不动余额，恢复后**没有补扣机制**。root-once 让单次金额
+    变大，所以急停期间跑完的树漏掉的钱也更多。这是已知且用户接受的口径；要补扣
+    得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
     """
     total_tokens = prompt_tokens + completion_tokens
 
@@ -280,7 +285,17 @@ async def reconcile_run(
                         "model": model,
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
-                        "cost_points": Decimal(str(cost_points)),
+                        # 审计行记**这条 run 自身的真实花费**，而 ``cost_points``
+                        # 是「该扣多少分」。root-once 之后两者不再是同一个数：
+                        # root 的扣费基数是整棵树，沿用同一个入参会让
+                        # ai_usage_logs 变成「root 记树 + 每个子 run 记自己」双计。
+                        "cost_points": Decimal(
+                            str(
+                                cost_points
+                                if usage_cost_points is None
+                                else usage_cost_points
+                            )
+                        ),
                     }
                 )
             )
