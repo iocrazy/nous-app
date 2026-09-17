@@ -44,6 +44,9 @@ vi.mock('react-i18next', () => ({
 }));
 const addToast = vi.fn();
 vi.mock('../components/Toast', () => ({ useToast: () => ({ addToast }) }));
+// The page confirms destructive actions through the app dialog (useConfirm),
+// which needs ConfirmProvider — mounted by AppLayout, not by this harness.
+vi.mock('../components/ConfirmDialog', () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
 // Both the composer and the edit modal mount TipTap-backed NoteEditor; swap
 // in the shared textarea shim so textbox queries in the edit-modal test
 // below keep working without driving real contenteditable DOM (see

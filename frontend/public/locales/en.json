@@ -5092,7 +5092,8 @@
     "insertCode": "Insert code block",
     "attachFile": "Attach files",
     "insertLink": "Insert link",
-    "backToThisMonth": "Back to this month"
+    "backToThisMonth": "Back to this month",
+    "deleteConfirmMessage": "This note will be permanently deleted."
   },
   "editor": {
     "brand": "Nous Projects",
