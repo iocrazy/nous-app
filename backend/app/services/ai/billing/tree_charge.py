@@ -163,6 +163,7 @@ async def settle_tree_if_closed(*, run_id: Optional[str]) -> SettleOutcome:
     try:
         from sqlalchemy import func, or_, select
         from sqlalchemy import update as sa_update
+
         from app.db.session import read_scope, write_scope
         from app.models import AgentRuns
 
