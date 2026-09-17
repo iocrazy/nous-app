@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { usePlayerMenus } from '../hooks/usePlayerMenus';
 import { Play, Pause, Volume1, Volume2, VolumeX, Maximize, SkipBack, SkipForward, Settings } from 'lucide-react';
 import Hls from 'hls.js';
 import ErrorPage from './ErrorPage';
@@ -105,16 +106,29 @@ const MIN_SEEK_DELTA_SECONDS = 2;
 const PUSH_EPSILON_SECONDS = 0.5;
 
 /** Shared chrome for every popup in the control bar, so speed / volume /
- * quality cannot drift apart visually. */
+ * quality cannot drift apart visually.
+ *
+ * Resolves against the DARK palette: the player root pins `data-theme="dark"`.
+ * The control bar always sits over video, and in the light theme the `ink`
+ * scale is inverted (`ink-900` is #F9F7F3), which is how these popups came to
+ * render as white cards on a black bar. */
 const MENU_SURFACE =
-  'bg-ink-900/95 backdrop-blur-sm border border-ink-700 rounded-lg shadow-xl';
+  'bg-ink-950/85 backdrop-blur-md ring-1 ring-white/10 rounded-lg shadow-2xl';
 
 const menuItemClass = (active: boolean): string =>
-  `w-full px-3 py-1.5 text-xs text-right font-mono transition-colors ${
+  `w-full px-4 py-1.5 text-xs text-center tabular-nums transition-colors ${
     active
-      ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
-      : 'text-ink-300 hover:bg-ink-800 hover:text-white'
+      ? 'text-[var(--accent-text)]'
+      : 'text-ink-200 hover:bg-white/10 hover:text-white'
   }`;
+
+/** The hover bridge + placement every popup shares: centred above its button.
+ *
+ * `pb-2` on the wrapper rather than `mb-2` on the popup, so the hover area is
+ * continuous from the button up into the menu. A margin leaves a gap the
+ * pointer falls through on its way up, and the menu closes before it can be
+ * reached. */
+const POPUP_ANCHOR = 'absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-20';
 
 /** A control-bar button. One place so icon and text buttons line up. */
 const BAR_BUTTON =
@@ -175,7 +189,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const volumeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedAt = useRef(0);
   const lastPushedAt = useRef(0);
   /**
@@ -255,17 +268,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(storedVolume.current.volume);
   const [isMuted, setIsMuted] = useState(storedVolume.current.muted);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showControls, setShowControls] = useState(true);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  // Speed / volume / quality popups: one behaviour, owned by one hook, so the
+  // three cannot drift apart (see hooks/usePlayerMenus).
+  const menus = usePlayerMenus();
+  const showSpeedMenu = menus.isOpen('speed');
+  const showVolumeSlider = menus.isOpen('volume');
+  const showQualityMenu = menus.isOpen('quality');
+  // Referentially stable (useCallback over a stable ref). Taken out of `menus`
+  // — a fresh object every render — so the callbacks below can depend on it
+  // without losing their own stability. `switchToOriginal` in particular must
+  // stay stable: the source-attach effect lists it, and a new identity would
+  // re-attach the video (the flash #2343 removed).
+  const closeMenus = menus.closeAll;
   const [hlsLevels, setHlsLevels] = useState<HlsLevel[]>([]);
   const [currentHlsLevel, setCurrentHlsLevel] = useState(-1);
   const [isAutoQuality, setIsAutoQuality] = useState(true);
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isOriginalMode, setIsOriginalMode] = useState(false); // Playing original file directly
   const [authError, setAuthError] = useState<401 | 403 | null>(null);
 
@@ -412,8 +434,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const clamped = Math.max(0.25, Math.min(3, rate));
     video.playbackRate = clamped;
     setPlaybackRate(clamped);
-    setShowSpeedMenu(false);
-  }, [playerRef]);
+    closeMenus();
+  }, [playerRef, closeMenus]);
 
   // Change HLS quality level (-1 = auto)
   const changeQuality = useCallback((levelIndex: number) => {
@@ -446,7 +468,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
       setCurrentHlsLevel(levelIndex >= 0 ? levelIndex : -1);
       setIsAutoQuality(levelIndex === -1);
-      setShowQualityMenu(false);
+      closeMenus();
       return;
     }
 
@@ -456,7 +478,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     hls.currentLevel = levelIndex;
     setCurrentHlsLevel(levelIndex >= 0 ? levelIndex : hls.currentLevel);
     setIsAutoQuality(levelIndex === -1);
-    setShowQualityMenu(false);
+    closeMenus();
 
     // Persist quality preference by height (stable across playlist rewrites)
     if (levelIndex === -1) {
@@ -476,7 +498,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     // Reads `srcRef` / `authTokenRef`, so neither a rotated token nor the URL
     // carrying it belongs in this list.
-  }, [isOriginalMode, isHls, playerRef, hlsLevels]);
+  }, [isOriginalMode, isHls, playerRef, hlsLevels, closeMenus]);
 
   // Switch to original (non-HLS) direct file playback
   const switchToOriginal = useCallback(() => {
@@ -502,14 +524,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     setIsOriginalMode(true);
     setIsAutoQuality(false);
-    setShowQualityMenu(false);
+    closeMenus();
 
     // Persist quality preference
     localStorage.setItem(QUALITY_PREF_KEY, 'original');
     // No URL in the list at all — everything reactive is read through a ref,
     // which keeps this callback stable and therefore keeps the source-attach
-    // effect (which depends on it) from re-running.
-  }, [playerRef]);
+    // effect (which depends on it) from re-running. `closeMenus` is stable too.
+  }, [playerRef, closeMenus]);
 
   // Attach or detach HLS / native source
   useEffect(() => {
@@ -893,7 +915,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Any popup being open pins the control bar. Fading the bar out from under
   // an open menu takes the menu with it, which reads as the click having done
   // nothing.
-  const anyMenuOpen = showSpeedMenu || showQualityMenu || showVolumeSlider;
+  const anyMenuOpen = menus.anyOpen;
 
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
@@ -968,24 +990,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsMuted(newMuted);
     writeStoredVolume(volume, newMuted);
   }, [playerRef, isMuted, volume]);
-
-  // Hover-to-reveal, with a grace period: the slider sits above the button and
-  // the pointer crosses the seam between them. Closing on the first mouseleave
-  // would make the control impossible to actually reach.
-  const openVolume = useCallback(() => {
-    if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
-    setShowVolumeSlider(true);
-  }, []);
-  const closeVolumeSoon = useCallback(() => {
-    if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
-    volumeCloseTimer.current = setTimeout(() => setShowVolumeSlider(false), 260);
-  }, []);
-  useEffect(
-    () => () => {
-      if (volumeCloseTimer.current) clearTimeout(volumeCloseTimer.current);
-    },
-    [],
-  );
 
   const handleFullscreen = useCallback(() => {
     const video = playerRef.current;
@@ -1091,6 +1095,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   return (
     <div
       ref={containerRef}
+      // Always over video, so always the dark palette — see MENU_SURFACE.
+      data-theme="dark"
       className="relative w-full h-full bg-black rounded-lg overflow-hidden group"
       onMouseMove={resetHideTimer}
       onMouseLeave={() => {
@@ -1222,16 +1228,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* ── Right: adjustments ── */}
 
-          {/* Speed */}
-          <div className="relative">
-            {showSpeedMenu && (
-              <div className="fixed inset-0 z-10" onClick={() => setShowSpeedMenu(false)} />
-            )}
+          {/* Speed — hover reveals the menu above; click toggles (touch / keyboard) */}
+          <div className="relative flex items-center" data-player-menu="speed" {...menus.hoverProps('speed')}>
             <button
-              onClick={() => {
-                setShowQualityMenu(false);
-                setShowSpeedMenu((v) => !v);
-              }}
+              onClick={() => menus.toggle('speed')}
               className={`${BAR_BUTTON} text-xs font-mono ${showSpeedMenu ? 'text-white bg-white/10' : ''}`}
               title="Playback Speed ([ / ] / \\)"
               aria-haspopup="menu"
@@ -1240,7 +1240,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               {playbackRate === 1 ? '1.0x' : `${playbackRate}x`}
             </button>
             {showSpeedMenu && (
-              <div className={`absolute bottom-full right-0 mb-2 py-1 min-w-[84px] z-20 ${MENU_SURFACE}`} role="menu">
+              <div className={POPUP_ANCHOR}>
+              <div className={`py-1 min-w-[84px] ${MENU_SURFACE}`} role="menu">
                 {/* Fastest at the top, like every speed menu users already know. */}
                 {[3, 2, 1.5, 1.25, 1, 0.75, 0.5, 0.25].map((rate) => (
                   <button
@@ -1254,18 +1255,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                 ))}
               </div>
+              </div>
             )}
           </div>
 
           {/* Volume — hover reveals a vertical slider above the button, click mutes */}
-          <div
-            className="relative flex items-center"
-            onMouseEnter={openVolume}
-            onMouseLeave={closeVolumeSoon}
-          >
+          <div className="relative flex items-center" data-player-menu="volume" {...menus.hoverProps('volume')}>
             <button
               onClick={toggleMute}
-              onFocus={openVolume}
+              onFocus={menus.hoverProps('volume').onMouseEnter}
               className={`${BAR_BUTTON} py-1.5 ${showVolumeSlider ? 'text-white bg-white/10' : ''}`}
               aria-label={isMuted ? 'Unmute' : 'Mute'}
               title={`${isMuted ? 'Unmute' : 'Mute'} (m)`}
@@ -1279,10 +1277,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
             </button>
             {showVolumeSlider && (
-              /* pb-2 lives on the wrapper, not as a margin, so the hover area
-                 is continuous from the button to the slider — a gap here makes
-                 the popup unreachable with the mouse. */
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-20">
+              <div className={POPUP_ANCHOR}>
                 <div className={`flex flex-col items-center gap-2 px-2 py-3 ${MENU_SURFACE}`}>
                   <span className="text-[11px] font-mono text-ink-300 tabular-nums select-none">
                     {Math.round((isMuted ? 0 : volume) * 100)}
@@ -1310,15 +1305,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* Quality selector (HLS) or static resolution label */}
           {(hlsLevels.length > 1 || (hlsLevels.length > 0 && originalSrc)) ? (
-            <div className="relative">
-              {showQualityMenu && (
-                <div className="fixed inset-0 z-10" onClick={() => setShowQualityMenu(false)} />
-              )}
+            <div className="relative flex items-center" data-player-menu="quality" {...menus.hoverProps('quality')}>
               <button
-                onClick={() => {
-                  setShowSpeedMenu(false);
-                  setShowQualityMenu((v) => !v);
-                }}
+                onClick={() => menus.toggle('quality')}
                 className={`${BAR_BUTTON} text-xs font-mono ${showQualityMenu ? 'text-white bg-white/10' : ''}`}
                 title="Quality"
                 aria-haspopup="menu"
@@ -1335,7 +1324,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       : 'Auto'}
               </button>
               {showQualityMenu && (
-                <div className={`absolute bottom-full right-0 mb-2 py-1 min-w-[104px] z-20 ${MENU_SURFACE}`} role="menu">
+                <div className={POPUP_ANCHOR}>
+                <div className={`py-1 min-w-[104px] ${MENU_SURFACE}`} role="menu">
                   {originalSrc && (
                     <button
                       onClick={switchToOriginal}
@@ -1369,6 +1359,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   >
                     Auto
                   </button>
+                </div>
                 </div>
               )}
             </div>
