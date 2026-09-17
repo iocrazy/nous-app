@@ -759,6 +759,9 @@ class AgentRunner:
                                 ),
                             )
                         break
+                # ``served_by_platform`` 不传：流式分块里没有响应体，拿不到
+                # 那个标记。有 ``stream`` 的 adapter 都不是 LLMFallbackChain
+                # （它没有 stream），即一个凭证服务整轮，run 级 origin 精确。
                 await self._step_ended(
                     recorder, composed, iteration, _t0, final_usage, final_finish
                 )
@@ -1176,7 +1179,15 @@ class AgentRunner:
         return _time.monotonic()
 
     async def _step_ended(
-        self, recorder, composed, step: int, t0: float, usage, finish_reason
+        self,
+        recorder,
+        composed,
+        step: int,
+        t0: float,
+        usage,
+        finish_reason,
+        *,
+        served_by_platform: Optional[bool] = None,
     ) -> None:
         """step_end bracket: usage + cost at this run's rates + duration.
         ``run.cost`` folds from these — the only place per-call cost is born."""
@@ -1210,21 +1221,26 @@ class AgentRunner:
                     recorder.measure_context(prompt, int(window))
             except Exception:  # noqa: BLE001 — a gauge never fails a turn
                 pass
-        await emit_event(
-            recorder,
-            "step_end",
-            {
-                "turn": 1,
-                "step": step,
-                "model": getattr(composed, "model", None),
-                "usage": {"prompt": prompt, "completion": completion, "cached": cached},
-                "cost_cents": cost,
-                "duration_ms": int((_time.monotonic() - t0) * 1000),
-                "finish_reason": finish_reason,
-            },
-            turn=1,
-            step=step,
+        # BYOK 免扣（用户裁定 2）：这一步的钱是不是用户自己的 key 付的，只有
+        # 这里同时知道「花了多少」与「谁的 adapter 服务的」。缺席即平台付 ——
+        # 写一个 0 会让下游分不清「平台付的」和「用户付了 0 分」。
+        from app.services.ai.billing.byok_step import step_byok_cents
+
+        payload = {
+            "turn": 1,
+            "step": step,
+            "model": getattr(composed, "model", None),
+            "usage": {"prompt": prompt, "completion": completion, "cached": cached},
+            "cost_cents": cost,
+            "duration_ms": int((_time.monotonic() - t0) * 1000),
+            "finish_reason": finish_reason,
+        }
+        byok = step_byok_cents(
+            cost, getattr(recorder, "credential_origin", None), served_by_platform
         )
+        if byok is not None:
+            payload["byok_cents"] = byok
+        await emit_event(recorder, "step_end", payload, turn=1, step=step)
 
     async def _dispatch_ask_user(
         self,
@@ -1902,6 +1918,9 @@ class AgentRunner:
                 _t0,
                 resp.get("usage"),
                 (resp.get("choices") or [{}])[0].get("finish_reason"),
+                # 只有响应体里才有这个标记；不是 LLMFallbackChain 的 adapter
+                # （直连、子 agent 栈）拿到 None，判据自动退到 run 级 origin。
+                served_by_platform=resp.get("_served_by_platform"),
             )
             if recorder is not None:
                 usage = resp.get("usage") or {}

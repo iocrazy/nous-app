@@ -127,6 +127,19 @@ class RunRecorder:
     fork_of_run_id: Optional[int] = None
     fork_at_seq: Optional[int] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # 这条 run 用的是谁的凭证：``ResolvedAIConfig.origin`` 的四态
+    # ``governance`` / ``platform`` / ``byok`` / ``env``，None = 调用方没说。
+    # **只有 ``byok`` 是用户自己的钱**（``env`` 是 BYOK 形状但没有 api_key，
+    # adapter factory 回落平台凭证）。用途只有一个：终态分桶时把用户自己付的
+    # 那部分从积分里减掉（用户裁定 2）。
+    credential_origin: Optional[str] = None
+    # 派发这条 run 的父 run（``agent_runs.id`` 的字符串形），root 为 None。
+    # ``metadata["parent_run_id"]`` 里也有一份，但那是给人看的 jsonb；扣费判据
+    # （root 一次扣）要一个不会被 metadata 结构变动带偏的字段。
+    # ⚠️ 两个字段都必须是**简单默认值** —— 简单默认值会成为类属性，全仓用
+    # ``RunRecorder.__new__(...)`` 造桩的测试才读得到 None；换成
+    # ``field(default_factory=...)`` 就没有类属性，那些测试会整片 AttributeError。
+    parent_run_id: Optional[str] = None
 
     # Internal state (populated by start / methods; not caller-facing)
     # str form of agent_runs.id (BIGINT Snowflake since mig 232). Not a UUID.

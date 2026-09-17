@@ -92,6 +92,10 @@ def empty_views() -> Views:
             # 3b §3.3：媒体产出的精确价（登记时就知道）。与 own/by_child 并列的
             # 第三个分量，不混进 own_cents——那是 LLM 每步的钱，来源不同。
             "media_cents": 0.0,
+            # BYOK 道（用户裁定 2）：与 own / by_child / media 三个分量一一平行，
+            # 相减得到「平台真付了的那部分」。三条都**不进** spent_cents。
+            # 本 Task 只填第一条，另两条由图片 / 子 agent 那个 Task 补齐。
+            "own_byok_cents": 0.0,
         },
         # 3c §3.2：与 ``cost`` 并列的计数道。花费回答「花了多少钱」，这里回答「干了
         # 多少活」——两者分母不同（花费是树总额、计数是自身量），合进一个字典必然

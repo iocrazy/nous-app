@@ -467,6 +467,7 @@ async def run_conversation_agent_turn(
             model=model or None,
             provider=provider,
             input_summary=f"conversation={conversation_id} summoner={summoner_user_id}",
+            credential_origin=stack.credential_origin,
             metadata={
                 "conversation_id": str(conversation_id),
                 "summoner": summoner_user_id,

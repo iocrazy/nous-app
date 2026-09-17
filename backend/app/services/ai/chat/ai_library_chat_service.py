@@ -1508,6 +1508,9 @@ class AILibraryChatService:
                 provider=provider,
                 input_summary=content,
                 attribution=attribution,
+                # 用户裁定 2：这条 run 花的是谁的钱。BYOK 的那部分终态不再扣
+                # 平台积分，所以它必须跟着 run 一起落库，不能只活在 wiring 里。
+                credential_origin=stack.credential_origin,
                 metadata={"full_input": content},
                 # phase 2b-2 §4.2: the issue link is written HERE, not by the
                 # post-turn backfill — a run that never returns (crash, cancel,

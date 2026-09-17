@@ -308,6 +308,10 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             model=model or None,
             provider=provider,
             input_summary=user_query,
+            credential_origin=stack.credential_origin,
+            # root 一次扣的判据是「这个字段是不是 None」。metadata 里那份是给人
+            # 看的 jsonb；扣费不该靠一个随时会改结构的 dict 取键。
+            parent_run_id=str(parent_run_id) if parent_run_id else None,
             metadata={
                 "task_id": str(task_id),
                 "parent_run_id": str(parent_run_id) if parent_run_id else None,
