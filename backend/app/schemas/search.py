@@ -65,6 +65,45 @@ class HybridSearchRequest(BaseModel):
         default_factory=lambda: list(DEFAULT_SEARCH_FIELDS),
         description="Which scopes to search; defaults to the shared default set",
     )
+    #: Same chips as /search/text — Smart Search runs through the same RPC, so
+    #: they apply identically. See LibraryChipFilters below.
+    filters: Optional["LibraryChipFilters"] = None
+
+
+class LibraryChipFilters(BaseModel):
+    """The My Downloads filter chips, in the shape the list path already uses.
+
+    These exist because the list and the search were two different queries and
+    only the list applied them. Ticking "AI · transcribed" and then typing a
+    keyword silently returned untranscribed rows, with the chip still drawn as
+    active. Field names mirror ``FetchLibraryFilterParams`` on the frontend and
+    the ``p_*`` arguments of ``rpc_downloads_library_search``, so all three can
+    be read side by side.
+
+    Every field is optional and ``None`` means "no opinion". ``False`` on a
+    boolean means the same — a chip that is off must not become a filter for
+    the opposite, which is what a naive ``if flag is not None`` would do.
+    """
+
+    tag_ids: Optional[List[str]] = None
+    min_rating: Optional[int] = None
+    ai_transcribed: Optional[bool] = None
+    ai_summarized: Optional[bool] = None
+    ai_analyzed: Optional[bool] = None
+    ai_has_prompt: Optional[bool] = None
+    created_after: Optional[str] = None
+    created_before: Optional[str] = None
+    duration_min: Optional[int] = None
+    duration_max: Optional[int] = None
+    aspect_ratios: Optional[List[str]] = None
+    platforms: Optional[List[str]] = None
+    media_types: Optional[List[str]] = None
+    has_comments: Optional[bool] = None
+    min_likes: Optional[int] = None
+    min_comments: Optional[int] = None
+    min_favorites: Optional[int] = None
+    min_shares: Optional[int] = None
+    social_combine: Optional[Literal["and", "or"]] = None
 
 
 class TextSearchRequest(BaseModel):
@@ -92,6 +131,10 @@ class TextSearchRequest(BaseModel):
     fields: List[SearchField] = Field(
         default_factory=lambda: list(DEFAULT_SEARCH_FIELDS)
     )
+    #: The caller's active filter chips. Omitted by callers that have none;
+    #: when present they narrow the hits exactly as they narrow the unsearched
+    #: list, because both end up in the same SQL predicates (migration 475).
+    filters: Optional[LibraryChipFilters] = None
 
 
 class SearchResultItem(BaseModel):
@@ -145,3 +188,7 @@ class SearchSuggestionsResponse(BaseModel):
     """Response schema for search suggestions."""
 
     suggestions: List[SearchSuggestion]
+
+
+# HybridSearchRequest references LibraryChipFilters before it is defined.
+HybridSearchRequest.model_rebuild()

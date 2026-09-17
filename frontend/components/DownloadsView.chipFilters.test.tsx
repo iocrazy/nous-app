@@ -1,33 +1,43 @@
 /**
- * My Downloads — search-scope wiring.
+ * My Downloads — the filter chips must reach the search endpoints.
  *
- * `localSearchMatch.ts` and `SearchScopePicker.loadScope` are each tested as
- * pure units. What is asserted HERE is the three call sites in DownloadsView
- * that nothing else covers, and that all three were the actual defect:
+ * They did not. The list pushed every chip into `fetchLibraryPaginated`
+ * (applied server-side); the search box called `/search/text` with no chips
+ * at all. `filteredLibrary` swaps the whole list for the hits once a backend
+ * search returns, so activating a search dropped the entire toolbar —
+ * silently, with the chips still rendered as active.
  *
- *   1. the instant local filter is fed `searchScope` (it used to match a fixed
- *      field list, so for ~300ms the list contradicted the backend answer);
- *   2. the debounced backend quick-search forwards `searchScope`;
- *   3. a scope change is persisted through the SHARED writer — this view used
- *      to inline `localStorage.setItem` against the pre-v2 key, so a choice
- *      made here was invisible to `loadSearchScope`.
+ * Measured on production before the fix, with "AI · transcribed" ticked:
  *
- * The harness mirrors DownloadsView.adaptive.test.tsx: everything outside the
- * branch under test is mocked at the module boundary, because a heavy real
- * render would fail for a dozen unrelated reasons.
+ *   query   matches   transcribed   shown
+ *   5000          4             1       4   <- filter dropped
+ *   抖音         99             3      99   <- filter dropped
+ *
+ * `toSearchChipFilters` is tested as a pure unit next to itself. What is
+ * asserted HERE is the wiring nothing else covers: the three call sites, and
+ * that a chip change re-runs a search that is already on screen.
+ *
+ * Harness mirrors DownloadsView.searchScope.test.tsx.
  */
 import { act, fireEvent, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── the collaborators under observation ────────────────────────────
-const { saveScopeMock, textSearchMock, hybridSearchMock, toolbar } = vi.hoisted(
-  () => ({
-    saveScopeMock: vi.fn(),
-    textSearchMock: vi.fn(),
-    hybridSearchMock: vi.fn(),
-    toolbar: { props: null as any },
-  }),
-);
+const {
+  saveScopeMock,
+  textSearchMock,
+  hybridSearchMock,
+  semanticSearchMock,
+  toolbar,
+  chips,
+} = vi.hoisted(() => ({
+  saveScopeMock: vi.fn(),
+  textSearchMock: vi.fn(),
+  hybridSearchMock: vi.fn(),
+  semanticSearchMock: vi.fn(),
+  toolbar: { props: null as any },
+  chips: { value: {} as Record<string, unknown> },
+}));
 
 // The search box: capture its props and expose them as buttons, so the test
 // can drive the same callbacks a typing user drives.
@@ -48,6 +58,10 @@ vi.mock('./ToolbarSearch', () => ({
           data-testid="smart-search"
           onClick={() => props.onAISearch('portrait', 'hybrid')}
         />
+        <button
+          data-testid="ai-search"
+          onClick={() => props.onAISearch('portrait', 'semantic')}
+        />
       </div>
     );
   },
@@ -61,7 +75,7 @@ vi.mock('./SearchScopePicker', () => ({
 }));
 
 vi.mock('../services/searchService', () => ({
-  semanticSearch: vi.fn(),
+  semanticSearch: semanticSearchMock,
   hybridSearch: hybridSearchMock,
   localSearch: vi.fn(() => ({ results: [] })),
   textSearch: textSearchMock,
@@ -167,8 +181,11 @@ vi.mock('../contexts/ExportTaskContext', () => ({
   useExportTasks: () => ({ tasks: [], startTask: vi.fn() }),
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: null }) }));
+// The chip toolbar, driven by the test. ``toFilterParams`` returns a fresh
+// object each call, exactly as the real hook does — which is why the view
+// keys its memo on the serialised value rather than the object.
 vi.mock('../hooks/useFilterBarConfig', () => ({
-  useFilterBarConfig: () => ({ toFilterParams: () => ({}) }),
+  useFilterBarConfig: () => ({ toFilterParams: () => ({ ...chips.value }) }),
 }));
 vi.mock('../hooks/useFilterBarVisibility', () => ({
   useFilterBarVisibility: () => ({ visible: false, toggle: vi.fn() }),
@@ -210,9 +227,9 @@ vi.mock('../services/unifiedTagService', () => ({
   createTag: vi.fn(),
   addResourceTag: vi.fn(),
 }));
-// Partial mock: DownloadsView reaches ``mediaTypesToWire`` through
-// services/searchChipFilters, and that mapping must stay REAL — it is the one
-// the list path uses and the search path must not diverge from.
+// ``mediaTypesToWire`` stays REAL: it is the shared mapping the list path uses
+// and the thing chip translation must not diverge from. Stubbing it here would
+// let the two drift and the suite would still pass.
 vi.mock('../services/dataService', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/dataService')>()),
   getDownloadUrl: () => '',
@@ -239,108 +256,108 @@ const EMPTY_TEXT_RESPONSE = {
   search_type: 'text',
 };
 
-const titles = (el: HTMLElement) =>
-  Array.from(el.querySelectorAll('[data-testid="card"]')).map((c) =>
-    c.getAttribute('data-title'),
-  );
-
-describe('DownloadsView — search scope wiring', () => {
+describe('DownloadsView — filter chips reach the search', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    chips.value = {};
     saveScopeMock.mockClear();
     textSearchMock.mockReset().mockResolvedValue(EMPTY_TEXT_RESPONSE);
     hybridSearchMock.mockReset().mockResolvedValue(EMPTY_TEXT_RESPONSE);
+    semanticSearchMock.mockReset().mockResolvedValue(EMPTY_TEXT_RESPONSE);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('filters the loaded rows through the stored scope, not a fixed field list', () => {
-    const { container, getByTestId } = render(<DownloadsView />);
-    expect(titles(container)).toHaveLength(3);
-
-    // Stored scope is ['title'] only. The debounce has NOT fired yet, so this
-    // is purely the local pass.
+  const type = async (el: HTMLElement, getByTestId: any) => {
     act(() => {
       fireEvent.click(getByTestId('type-query'));
     });
-
-    // Matched on title — kept. Matched only on description / tags — dropped,
-    // because the user unticked those. Before the fix all three survived on
-    // the description hit and the list disagreed with the backend 300ms later.
-    expect(titles(container)).toEqual(['Portrait lighting']);
-  });
-
-  it('re-filters against the tag text when the user ticks Tags', () => {
-    const { container, getByTestId } = render(<DownloadsView />);
-
-    act(() => {
-      fireEvent.click(getByTestId('type-query'));
-    });
-    expect(titles(container)).toEqual(['Portrait lighting']);
-
-    act(() => {
-      fireEvent.click(getByTestId('pick-tags-scope'));
-    });
-
-    // Scope is now ['tags']: the title hit drops out and the row whose TAG
-    // text carries the word appears. Proves the memo actually re-runs on a
-    // scope change (searchScope is in its dependency list).
-    expect(titles(container)).toEqual(['Square rig']);
-  });
-
-  it('persists a scope change through the shared writer', () => {
-    const { getByTestId } = render(<DownloadsView />);
-
-    act(() => {
-      fireEvent.click(getByTestId('pick-tags-scope'));
-    });
-
-    // Not an inline setItem against the pre-v2 key — the exported writer, so
-    // loadSearchScope can read the choice back.
-    expect(saveScopeMock).toHaveBeenCalledWith(['tags']);
-  });
-
-  it('forwards the scope on the debounced backend quick-search', async () => {
-    const { getByTestId } = render(<DownloadsView />);
-
-    act(() => {
-      fireEvent.click(getByTestId('type-query'));
-    });
-    expect(textSearchMock).not.toHaveBeenCalled();
-
     await act(async () => {
-      vi.advanceTimersByTime(350);
+      vi.advanceTimersByTime(400);
     });
+  };
 
-    // Trailing ``undefined`` is the filter-chip argument: no chip is active in
-    // this harness, so none is sent (see DownloadsView.chipFilters.test.tsx).
-    expect(textSearchMock).toHaveBeenCalledWith(
-      'portrait',
-      1000,
-      ['title'],
-      undefined,
-    );
+  it('sends the active chip with the debounced quick-search', async () => {
+    // The reported defect, at its own call site.
+    chips.value = { ai_transcribed: true };
+    const { container, getByTestId } = render(<DownloadsView />);
+
+    await type(container, getByTestId);
+
+    expect(textSearchMock).toHaveBeenCalled();
+    expect(textSearchMock.mock.calls[0][3]).toEqual({ ai_transcribed: true });
   });
 
-  it('forwards the scope on Smart Search (hybrid)', async () => {
+  it('sends nothing extra when the toolbar is untouched', async () => {
+    // A user with no chips must issue the same request as before this change.
+    const { container, getByTestId } = render(<DownloadsView />);
+
+    await type(container, getByTestId);
+
+    expect(textSearchMock.mock.calls[0][3]).toBeUndefined();
+  });
+
+  it('re-runs the search when a chip changes while hits are on screen', async () => {
+    // While a search is active the grid IS the hits, so the list's own refetch
+    // changes nothing the user can see. Without this the toolbar would move
+    // and the results would not.
+    chips.value = {};
+    const { container, getByTestId, rerender } = render(<DownloadsView />);
+    await type(container, getByTestId);
+    expect(textSearchMock).toHaveBeenCalledTimes(1);
+
+    chips.value = { ai_transcribed: true };
+    rerender(<DownloadsView />);
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+
+    expect(textSearchMock).toHaveBeenCalledTimes(2);
+    expect(textSearchMock.mock.calls[1][3]).toEqual({ ai_transcribed: true });
+  });
+
+  it('sends the chips with Smart Search too', async () => {
+    // Hybrid delegates to the same RPC on the backend, so leaving it out would
+    // have kept half the bug alive.
+    chips.value = { platforms: ['douyin'] };
     const { getByTestId } = render(<DownloadsView />);
 
     await act(async () => {
       fireEvent.click(getByTestId('smart-search'));
     });
 
-    // Hybrid used to hardcode the four basic fields backend-side; the client
-    // has to send the scope for the backend fix to be reachable at all.
-    // Trailing ``undefined``: the filter-chip argument, empty in this harness.
-    expect(hybridSearchMock).toHaveBeenCalledWith(
-      'portrait',
-      {},
-      100,
-      0.5,
-      ['title'],
-      undefined,
-    );
+    expect(hybridSearchMock).toHaveBeenCalled();
+    expect(hybridSearchMock.mock.calls[0][5]).toEqual({ platforms: ['douyin'] });
+  });
+
+  it('says so when AI Search cannot apply the chips', async () => {
+    // Semantic ranks by embedding and never reaches the chips' SQL. Returning
+    // a list that quietly ignores the toolbar is the exact failure this change
+    // removes; reproducing it in a corner would only hide it better.
+    chips.value = { ai_transcribed: true };
+    const { getByText, getByTestId } = render(<DownloadsView />);
+
+    await act(async () => {
+      fireEvent.click(getByTestId('ai-search'));
+    });
+
+    expect(
+      getByText(/AI Search ranks by meaning and does not apply your filters/),
+    ).toBeTruthy();
+  });
+
+  it('stays quiet about AI Search when there is no chip to ignore', async () => {
+    chips.value = {};
+    const { queryByText, getByTestId } = render(<DownloadsView />);
+
+    await act(async () => {
+      fireEvent.click(getByTestId('ai-search'));
+    });
+
+    expect(
+      queryByText(/AI Search ranks by meaning and does not apply your filters/),
+    ).toBeNull();
   });
 });

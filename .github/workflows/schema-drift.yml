@@ -164,6 +164,12 @@ on:
       # 3c mig 472：两张新表 + 两组计数列。trgm opclass 在不在、UNIQUE 拦不拦得住
       # 第二行、五个累加器是不是 NOT NULL DEFAULT 0 —— 只有真库能答。
       - 'backend/tests/db/test_mig_472_integration.py'
+      # mig 475：关键词搜索必须应用筛选 chip。缺陷与修复都在 SQL 函数里——桩 session
+      # 能证明后端传了 p_ai_transcribed，只有 Postgres 能证明没转录的行真的不回来。
+      # service 的 SQL 串（命名参数 + CAST）也只在这里第一次见到真库，故 service
+      # 改动同样要触发。
+      - 'backend/tests/db/test_migration_475_search_chip_filters_integration.py'
+      - 'backend/app/services/library/search_service.py'
       - 'backend/tests/db/test_search_docs_repository_integration.py'
       # 上面那个文件读迁移建出来的形状；这个读 SearchDocsRepository 的语句在
       # 服务器上跑得通不通（similarity / ON CONFLICT / Uuid 双绑定 / ILIKE
@@ -201,15 +207,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty, so it has to
+      # to it changes what "green" means for all thirty-one, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty below was counted with this command, not derived
-      # from the twenty-nine it replaced):
+      # (the thirty-one below was counted with this command, not derived
+      # from the thirty it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -770,6 +776,20 @@ jobs:
           # 累加器**是否真是 NOT NULL DEFAULT 0（可空的话 col + EXCLUDED.col 会把
           # 一整个小时桶算成 NULL），以及两张新表有没有给 anon/authenticated 开策略。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_mig_472_integration.py -v
+
+      - name: Assert mig 475 keyword search honours the filter chips
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 列表路径早就按 chip 过滤，搜索路径一个 chip 都不传——开搜索即整排 chip
+          # 静默失效（生产实测：勾「已转录」搜 5000，4 条里只有 1 条转录，UI 显示 4）。
+          # 只有服务器能回答：旧签名是否真被 DROP（超集重载并存会让 8 参调用
+          # function is not unique）、重建后的 ACL 是否仍不对 anon/authenticated
+          # 开放（DROP 会连 463 的 REVOKE 一起丢掉）、以及 SearchService 真实的
+          # SQL 串（命名参数 + CAST）是否被 Postgres 接受。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_475_search_chip_filters_integration.py -v
 
       - name: Assert the search_docs repository's statements on a real server
         working-directory: backend

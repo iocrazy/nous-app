@@ -171,8 +171,13 @@ vi.mock('../services/resourceService', () => ({
 vi.mock('../services/unifiedTagService', () => ({
   createTag: vi.fn(), addResourceTag: vi.fn(),
 }));
-vi.mock('../services/dataService', () => ({
-  getDownloadUrl: () => '', getMusicDownloadUrl: () => '',
+// Partial mock: DownloadsView reaches ``mediaTypesToWire`` through
+// services/searchChipFilters, and that mapping must stay REAL — it is the one
+// the list path uses and the search path must not diverge from.
+vi.mock('../services/dataService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/dataService')>()),
+  getDownloadUrl: () => '',
+  getMusicDownloadUrl: () => '',
 }));
 vi.mock('../utils/download', () => ({ downloadFile: vi.fn(), downloadWithAuth: vi.fn() }));
 // Only the two URL builders need stubbing (they would hit the network shape);

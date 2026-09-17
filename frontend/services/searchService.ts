@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
+import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
 export interface SearchResultItem {
@@ -72,6 +73,10 @@ export const hybridSearch = async (
   limit: number = 100,
   threshold: number = 0.3,
   fields?: SearchField[],
+  // Smart Search delegates to the same RPC as keyword search on the backend,
+  // so the chips apply identically. Distinct from ``filters`` above, which is
+  // this endpoint's own (older, narrower) filter contract.
+  chipFilters?: SearchChipFilters,
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/hybrid', {
     query,
@@ -81,6 +86,10 @@ export const hybridSearch = async (
     // backend hardcoded the four basic fields, so ticking Tags did nothing.
     ...(fields && fields.length > 0 ? { fields } : {}),
     ...filters,
+    // Spread AFTER ``filters`` would let a stale caller's key win; it is a
+    // separate key, so order is moot — but it stays last so the two filter
+    // contracts read in the order they were added.
+    ...(chipFilters ? { filters: chipFilters } : {}),
   });
 
 /** Eagle-style search-scope toggles. ``title``/``description``/``author``/
@@ -139,11 +148,17 @@ export const textSearch = async (
   query: string,
   limit: number = 1000,
   fields?: SearchField[],
+  // The caller's active filter chips. Omitted when the toolbar is untouched,
+  // so a request without filters is byte-identical to what it was before the
+  // chips were wired through — see services/searchChipFilters.ts for why they
+  // have to be here at all.
+  filters?: SearchChipFilters,
 ): Promise<SearchResponse> =>
   apiClient.post<SearchResponse>('/api/v1/search/text', {
     query,
     limit,
     fields: fields && fields.length > 0 ? fields : undefined,
+    filters,
   });
 
 /**

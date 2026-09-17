@@ -952,7 +952,8 @@
     "empty": "暂无内容",
     "searchPlaceholder": "搜索标题、标签、备注...",
     "searchResultsCount": "搜索到 {{count}} 条结果",
-    "searchResultsCountSingular": "搜索到 1 条结果"
+    "searchResultsCountSingular": "搜索到 1 条结果",
+    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。"
   },
   "search": {
     "aiPlaceholder": "AI 搜索... ↵",

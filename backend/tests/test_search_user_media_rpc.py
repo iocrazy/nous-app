@@ -105,7 +105,8 @@ async def test_search_user_media_text_calls_rpc_and_maps_rows(monkeypatch) -> No
     assert len(session.calls) == 1
     sql, params = session.calls[0]
     assert "rpc_user_media_text_search" in sql
-    assert params == {
+    # The original eight arguments pass through untouched.
+    assert {k: params[k] for k in _BASE_KEYS} == {
         "p_user_id": "u-123",
         "p_pattern": "%foo%",
         "p_fields": ["title", "notes"],
@@ -115,6 +116,94 @@ async def test_search_user_media_text_calls_rpc_and_maps_rows(monkeypatch) -> No
         "p_tag_ids": ["10", "20"],
         "p_limit": 500,
     }
+    # And with no chips given, every chip argument is "no opinion" — the SQL
+    # reads NULL (and 'and' for the combine switch) as "do not filter". A caller
+    # that never heard of chips must get exactly the old result set.
+    assert {k: v for k, v in params.items() if k not in _BASE_KEYS} == _NO_CHIPS
+
+
+_BASE_KEYS = (
+    "p_user_id",
+    "p_pattern",
+    "p_fields",
+    "p_author",
+    "p_date_from",
+    "p_date_to",
+    "p_tag_ids",
+    "p_limit",
+)
+
+#: Migration 475's chip arguments, in their "no filter" state.
+_NO_CHIPS = {
+    "p_min_rating": None,
+    "p_ai_transcribed": None,
+    "p_ai_summarized": None,
+    "p_ai_analyzed": None,
+    "p_has_prompt": None,
+    "p_created_after": None,
+    "p_created_before": None,
+    "p_duration_min": None,
+    "p_duration_max": None,
+    "p_aspect_ratios": None,
+    "p_platforms": None,
+    "p_media_types": None,
+    "p_has_comments": None,
+    "p_min_likes": None,
+    "p_min_comments": None,
+    "p_min_favorites": None,
+    "p_min_shares": None,
+    "p_social_combine": "and",
+}
+
+
+@pytest.mark.asyncio
+async def test_chip_filters_land_on_the_rpc_arguments(monkeypatch) -> None:
+    """The reported defect at the service boundary: the chip must become SQL.
+
+    Before migration 475 there was no argument for it to land on, so the
+    backend dropped it and every caller was green.
+    """
+    from app.schemas.search import LibraryChipFilters
+
+    session = _FakeSession({"rpc_user_media_text_search": {"rows": []}})
+    svc = _service_with_session(monkeypatch, session)
+
+    await svc.search_user_media_text(
+        user_id="u-1",
+        pattern="%x%",
+        fields=["title"],
+        filters=LibraryChipFilters(
+            ai_transcribed=True,
+            platforms=["douyin"],
+            tag_ids=["7"],
+            social_combine="or",
+            min_likes=5,
+        ),
+    )
+
+    _, params = session.calls[0]
+    assert params["p_ai_transcribed"] is True
+    assert params["p_platforms"] == ["douyin"]
+    assert params["p_min_likes"] == 5
+    assert params["p_social_combine"] == "or"
+    # The chip's tag filter wins the shared p_tag_ids slot.
+    assert params["p_tag_ids"] == ["7"]
+
+
+@pytest.mark.asyncio
+async def test_sql_names_every_argument(monkeypatch) -> None:
+    """26 arguments: a positional call that drifts by one filters the wrong column.
+
+    Named arguments make a mismatch a hard error at the database instead.
+    """
+    session = _FakeSession({"rpc_user_media_text_search": {"rows": []}})
+    svc = _service_with_session(monkeypatch, session)
+
+    await svc.search_user_media_text(user_id="u-1", pattern="%x%", fields=["title"])
+
+    sql, params = session.calls[0]
+    for key in params:
+        assert f"{key} =>" in sql, key
 
 
 @pytest.mark.asyncio

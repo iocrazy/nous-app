@@ -70,6 +70,7 @@ import {
   textSearch,
   type SearchField,
 } from '../services/searchService';
+import { toSearchChipFilters } from '../services/searchChipFilters';
 import {
   SearchScopePicker,
   loadSearchScope,
@@ -160,6 +161,20 @@ export const DownloadsView: React.FC = () => {
     () => JSON.stringify(libraryFilterParams),
     [libraryFilterParams],
   );
+  // The same chips, in the shape the search endpoints take. The list and the
+  // search used to disagree here — the list applied every chip server-side
+  // while the search endpoint was never told about them, so activating a
+  // search silently dropped the whole toolbar (see services/searchChipFilters).
+  const searchChipFilters = useMemo(
+    () => toSearchChipFilters(libraryFilterParams),
+    // Keyed on the serialised value: toFilterParams() returns a fresh object
+    // every render, so depending on the object itself would rebuild this (and
+    // re-fire the search below) on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [libraryFilterParamsKey],
+  );
+  const searchChipFiltersRef = useRef(searchChipFilters);
+  searchChipFiltersRef.current = searchChipFilters;
   useEffect(() => {
     setLibraryFilterParams(libraryFilterParams);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,6 +218,8 @@ export const DownloadsView: React.FC = () => {
   // indistinguishable from "no matches" — the grid renders the same empty
   // state either way, asserting the library is empty when it is not.
   const [searchError, setSearchError] = useState(false);
+  /** True when the last search ran in a mode the filter chips cannot reach. */
+  const [chipsIgnoredByMode, setChipsIgnoredByMode] = useState(false);
 
   // ─── Resource data ───────────────────────────────────
   // Need media_ids from the paginated library AND from the active search
@@ -437,6 +454,7 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Search handlers ──────────────────────────────────
   const handleSearchQueryChange = useCallback((query: string) => {
+    setChipsIgnoredByMode(false);
     setIsSearchActive(false);
     setSearchResults([]);
     setSearchVideoMap({});
@@ -451,12 +469,19 @@ export const DownloadsView: React.FC = () => {
       // — "show me all videos containing 'memory'", not "top 20 semantically
       // similar". ``hybrid`` / ``semantic`` remain available for callers
       // that explicitly want ranking.
+      const chips = searchChipFiltersRef.current;
+      // AI Search ranks by embedding similarity and never touches the SQL the
+      // chips compile into, so it is the one mode they cannot reach. Say so
+      // instead of returning a list that quietly ignores the toolbar — that
+      // silence is the defect this change exists to remove, and reproducing
+      // it in a corner would just make it harder to find next time.
+      setChipsIgnoredByMode(mode === 'semantic' && !!chips);
       const response =
         mode === 'semantic'
           ? await semanticSearch(query, 100)
           : mode === 'hybrid'
-            ? await hybridSearch(query, {}, 100, 0.5, searchScope)
-            : await textSearch(query, 1000, searchScope);
+            ? await hybridSearch(query, {}, 100, 0.5, searchScope, chips)
+            : await textSearch(query, 1000, searchScope, chips);
       setSearchResults(response.results as any);
       // Backend now attaches full ParsedMedia rows in ``videos``. Index them
       // by platform_id so filteredLibrary can render AI-status icons etc.
@@ -481,6 +506,7 @@ export const DownloadsView: React.FC = () => {
   }, [library, searchScope]);
 
   const handleSearchClear = useCallback(() => {
+    setChipsIgnoredByMode(false);
     setSearchError(false);
     setSearchResults([]);
     setSearchVideoMap({});
@@ -514,7 +540,12 @@ export const DownloadsView: React.FC = () => {
       // reads as "your library is gone" on a slow link.
       setIsAISearching(true);
       try {
-        const response = await textSearch(trimmed, 1000, searchScope);
+        const response = await textSearch(
+          trimmed,
+          1000,
+          searchScope,
+          searchChipFiltersRef.current,
+        );
         if (cancelled) return;
         setSearchResults(response.results as any);
         const hydrated: Record<string, Video> = {};
@@ -536,7 +567,11 @@ export const DownloadsView: React.FC = () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchQuery, searchScope]);
+    // ``libraryFilterParamsKey`` is a dependency because the hits on screen
+    // were computed under the old chips: the list refetches itself when a chip
+    // moves, but while a search is active the list IS the search results, so
+    // without re-running this the toolbar would change and the grid would not.
+  }, [searchQuery, searchScope, libraryFilterParamsKey]);
 
   const hasActiveQuery = isSearchActive || searchQuery.trim().length > 0;
 
@@ -1324,6 +1359,21 @@ export const DownloadsView: React.FC = () => {
         {libraryError && (
           <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
             {libraryError}
+          </div>
+        )}
+
+        {/* Shown ABOVE the result branches, not inside the "has results" one:
+            a mode that ignores the chips matters most when the list looks
+            wrong or comes back empty, which is exactly when that branch is
+            not rendered. */}
+        {chipsIgnoredByMode && (
+          <div className="w-full pb-3 flex justify-center">
+            <span className="text-warn text-xs">
+              {t(
+                'library.aiSearchIgnoresFilters',
+                'AI Search ranks by meaning and does not apply your filters.',
+              )}
+            </span>
           </div>
         )}
 
