@@ -219,12 +219,18 @@ def test_no_step_in_this_module_dispatches_a_workflow():
         and any(_is_dbos_step(d) for d in n.decorator_list)
     ]
     # Pinned so a new step cannot be added without a thought about route C.
+    #
+    # ``force_settle_stale_pending_trees_step``（积分 Task 3）登记于此：它只读
+    # agent_runs 提名候选、再调 ``tree_charge.settle_tree_if_closed`` ——
+    # 那条链是 ORM 读写 + PointsService RPC，**不派发任何 workflow**，所以它落在
+    # 路线 C 允许的这一侧。下面那段调用名扫描会继续钉住这一点。
     assert {s.name for s in steps} == {
         "mark_heartbeat_lost_step",
         "reconcile_issue_execution_state_step",
         "expire_orphan_inbox_step",
         "scan_idle_inbox_step",
         "recompute_monthly_budgets_step",
+        "force_settle_stale_pending_trees_step",
     }
     for step in steps:
         called = {

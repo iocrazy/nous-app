@@ -214,9 +214,12 @@ async def persist_generation(
     *,
     resolved_provider: Optional[str] = None,
     resolved_model: Optional[str] = None,
-    # 同样是 keyword-only + 默认值（DBOS 冻结输入兼容）。默认 **False**：
-    # 部署前排队的 workflow 恢复时不带这个键，把「不知道」当成 BYOK 会免掉
-    # 平台该收的积分。
+    # 同样是 keyword-only + 默认值（DBOS 冻结输入兼容）。
+    #
+    # ⚠️ 这个默认值**兼容不到**本函数的正常调用路径 —— 调用方恒从 ``_step_output``
+    # 取值并显式传进来，所以它真正起作用的是挂在 ``_step_output`` 的回落上：部署前
+    # 排队的 workflow 恢复时 step 返回的是旧的裸 ``str``，那里回落 False，再原样
+    # 传到这里。默认值只定方向（不知道 → 不免扣），不是这条链的主守卫。
     byok: bool = False,
 ) -> dict[str, str]:
     """Persist the provider's ephemeral image through the generated-media store.

@@ -134,8 +134,11 @@ class RunRecorder:
     # 那部分从积分里减掉（用户裁定 2）。
     credential_origin: Optional[str] = None
     # 派发这条 run 的父 run（``agent_runs.id`` 的字符串形），root 为 None。
-    # ``metadata["parent_run_id"]`` 里也有一份，但那是给人看的 jsonb；扣费判据
-    # （root 一次扣）要一个不会被 metadata 结构变动带偏的字段。
+    # ``metadata["parent_run_id"]`` 里也有一份，但那是给人看的 jsonb。
+    # ⚠️ **扣费不再读这个字段**：树收口（``tree_charge.settle_tree_if_closed``）
+    # 沿 ``agent_runs.root_run_id`` 在库里解析整棵树 —— 那一列由
+    # ``_attach_to_parent_run`` 服务端写，是唯一真相。这里留着是派发关系的
+    # provenance，别再把任何计费判据挂回它。
     # ⚠️ 两个字段都必须是**简单默认值** —— 简单默认值会成为类属性，全仓用
     # ``RunRecorder.__new__(...)`` 造桩的测试才读得到 None；换成
     # ``field(default_factory=...)`` 就没有类属性，那些测试会整片 AttributeError。
@@ -850,11 +853,26 @@ class RunRecorder:
         # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
         # 两个数各有其用。
         own_media_cents = round((own_cents or 0.0) + media_cents, 4)
+        # 积分只按「平台真付了钱的那部分」扣（用户裁定 2）。两条 BYOK 道由
+        # step_end / deliverable 两个 fold 各自填，这里只做减法。
+        # ⚠️ ``own_media_cents`` 保留不动 —— 小时表（record_usage）仍然收它，A1
+        # 口径不变。``own_spend.total`` 与它是同一个数，但两者各有来源与用途。
+        from app.services.ai.billing import tree_charge
+
+        own_spend = tree_charge.spend_of_run(folded, own_cents=own_cents)
         if own_cents is not None or children_cents or media_cents:
             cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
         if folded is not None and own_cents is not None:
             folded["own_cents"] = round(own_cents, 4)
             recompute_spent(folded)
+
+        # 树收口者（``tree_charge.settle_tree_if_closed``）按**行**聚合，读的是每条
+        # run 的 ``agent_runs.metadata_json.cost``。所以这条 run 的**最终**
+        # ``own_cents``（费率已知时是 token 口径，覆盖了折叠值）必须在它被标成终态
+        # **之前**落库 —— 一旦状态不再是 running，树里任何一条 run 都可能立刻把这棵
+        # 树收口并读走这里的值，读到的就会是上一次事件镜像的旧数。
+        if self._event_writer is not None:
+            await self._event_writer.persist_views()
 
         # W3c: classify every finished run. None → direct_human (a human turn);
         # the issue-dispatch path sets rule_owner for routine/pipeline fires.
@@ -1012,40 +1030,59 @@ class RunRecorder:
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be
         # able to roll back a finished agent_runs row.
-        if status == "completed" and own_media_cents > 0 and closed_by_us:
-            try:
-                from app.services.ai.billing.token_billing import reconcile_run
+        #
+        # 两件不同的事，分两步做（用户裁定 2026-09-17，探针复盘后改口径）：
+        #
+        # ① **审计行** —— 这条 run 自身的真实花费（含 BYOK 的那部分）写进
+        #    ai_usage_logs。条件是「自己真的烧了钱」，与扣不扣分无关。写成「或
+        #    该扣的钱 > 0」会让自身零花费的 run 也多出一行，而
+        #    summarize_user_usage 的 overall_run_count 直接数行。
+        # ② **收口** —— 谁把整棵树收口谁扣费，一棵树只扣一次。判据与幂等都在
+        #    tree_charge.settle_tree_if_closed 里（读全树状态 + root 行 CAS）。
+        #
+        # ⚠️ 为什么不是「root 定稿时扣」（本计划原文）：workforce 的委派是
+        # fire-and-forget，**root 通常先于子 run 结束**（真栈探针：root 03:30:34
+        # 结束，三个子 run 03:30:48 / 03:30:36 / 03:30:27），而且 subagent_done
+        # 只写到直接父的 transcript —— root 的 by_child 对 workforce 链恒为 {}。
+        # 那个方案在这条链上会退化成「每条 run 各 ceil 一次」，正是要修的那一个。
+        #
+        # ⚠️ 任一终态都算收口，不只 completed：平台的钱已经烧掉了，与这个回合成
+        # 没成功无关。closed_by_us 仍是唯一的幂等门。
+        if status in ("completed", "failed", "cancelled") and closed_by_us:
+            if own_spend.total > 0:
+                try:
+                    from app.services.ai.billing.token_billing import reconcile_run
 
-                # own_media_cents is this run's OWN cents (own + media);
-                # PointsService treats cost_points as the same scalar (1 cent
-                # ≈ 1 point in the current billing model), then ceils it to an
-                # integer. If a future change splits the two units, that
-                # conversion belongs here.
-                await reconcile_run(
-                    run_id=self.run_id,
-                    user_id=self.user_id,
-                    team_id=self.team_id,
-                    project_id=self.project_id,
-                    session_id=self.session_id,
-                    agent_id=self.agent_id,
-                    model=self.model or "?",
-                    prompt_tokens=self._prompt_tokens,
-                    completion_tokens=self._completion_tokens,
-                    # A3：按**自身**花费扣，不按树总额 —— 子 run 自己也会走到这里
-                    # 扣它那份，父行再扣一遍就是对同一笔钱收两次。
-                    cost_points=own_media_cents,
-                    # ⚠️ 3c A3 Stated Limitation：agent_runs 没有 run 级 BYOK 标记，
-                    # 所以管理员配了 per_call_cents 的 BYOK 图片模型会被按平台价扣
-                    # 一次。闭合它要加列 + 改构造签名，另立票；现阶段的兜底是
-                    # AGENT_POINTS_CHARGE_ENABLED。
-                    byo_key=False,  # platform-model run; BYO-key runs
-                    # set this true via a future RunRecorder kwarg or
-                    # by inspecting the model string against the user's
-                    # registered keys (Phase 3.1 work)
-                    action=self.trigger,
+                    await reconcile_run(
+                        run_id=self.run_id,
+                        user_id=self.user_id,
+                        team_id=self.team_id,
+                        project_id=self.project_id,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        model=self.model or "?",
+                        prompt_tokens=self._prompt_tokens,
+                        completion_tokens=self._completion_tokens,
+                        # 扣费不在这一步 —— 它是整棵树的事，由收口者一次做完。
+                        cost_points=0.0,
+                        usage_cost_points=own_spend.total,
+                        charge_deferred=True,
+                        byo_key=False,
+                        action=self.trigger,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[RunRecorder] usage audit failed (non-fatal): {exc}"
+                    )
+            try:
+                outcome = await tree_charge.settle_tree_if_closed(run_id=self.run_id)
+                logger.info(
+                    f"[RunRecorder] run {self.run_id} tree settle: {outcome.reason} "
+                    f"(own={own_spend.total} platform={own_spend.platform} "
+                    f"charged={outcome.charged_points})"
                 )
-            except Exception as exc:
-                logger.warning(f"[RunRecorder] reconcile_run failed (non-fatal): {exc}")
+            except Exception as exc:  # noqa: BLE001 — 计费绝不回滚一条已完成的 run
+                logger.warning(f"[RunRecorder] tree settle failed (non-fatal): {exc}")
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -1637,6 +1674,16 @@ class RunEventWriter:
             .where(AgentRuns.id == self.run_id)
             .values(metadata_json=expr)
         )
+
+    async def persist_views(self) -> None:
+        """把当前 ``view`` / ``cost`` 立刻写进 ``metadata_json``（best-effort）。
+
+        ``_finish`` 在把这条 run 标成终态之前调一次：树收口按行读落库的 cost 视图，
+        而 ``own_cents`` 的最终值是在内存里定稿的。公开这一个方法而不是让
+        ``_finish`` 去碰 ``_mirror``，因为「终态前把视图落库」是一条**契约**，
+        不是顺手复用一个内部实现。
+        """
+        await self._mirror()
 
     async def _mirror(self) -> None:
         # The mirror writes WHOLE ``view`` / ``cost`` values, so the two

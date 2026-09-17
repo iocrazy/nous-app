@@ -89,6 +89,17 @@ async def mark_heartbeat_lost_step() -> int:
     )
     run_ids = await runs_repo.mark_heartbeat_lost_ids(stale_before=stale_before)
     await close_interrupted_runs(run_ids)
+
+    # 这条 run 永远不会走到 ``RunRecorder._finish``，所以树收口也只能由这里
+    # 跟上 —— 漏掉这一处，含一条崩溃 run 的树永远收不了口，整棵树一分不扣
+    # （见 ``tree_charge`` 模块 docstring 的 Stated Limitations）。
+    from app.services.ai.billing.tree_charge import settle_tree_if_closed
+
+    for run_id in run_ids:
+        try:
+            await settle_tree_if_closed(run_id=str(run_id))
+        except Exception as exc:  # noqa: BLE001 — 计费绝不连坐终态写入
+            logger.warning(f"[agent-runs-sweeper] tree settle {run_id} failed: {exc}")
     return len(run_ids)
 
 
@@ -355,6 +366,99 @@ async def recompute_monthly_budgets_step() -> int:
     return transitions
 
 
+@DBOS.step()
+async def force_settle_stale_pending_trees_step() -> int:
+    """兜底：把过了宽限期仍没收口的 run 树捞出来再试一次。
+
+    正常情况下收口由树里最后一个可观测事件触发（每条 run 的 ``_finish``、
+    ``agent_worker`` 写完 ``subagent_done``、三个崩溃类终态写方）。捞不回来的有两类，
+    都没有任何**其他**探针会说：
+
+    * **派了但永远不会跑的异步任务** —— 收口要求全树 ``async_pending == 0``
+      （workforce 异步派发不建子 run 行，「行全终态」不蕴含「树跑完了」），那个计数
+      就永远减不回 0，钱永久不进账；
+    * **盖了戳、扣费却抛异常** —— ``settle`` 会把戳撤回去，可那之后全树已经没有 run
+      会再结束，崩溃写方也不会来。撤戳本身是对的，但**得有人重试**。
+
+    所以提名条件**不看** ``async_pending`` —— 只要「是 root 行 + 终态 + 还没盖戳 +
+    结束超过宽限期 + 在窗口内」就值得看一眼。判定全在
+    :func:`~app.services.ai.billing.tree_charge.settle_tree_if_closed` 里（它重查全树
+    状态、``async_pending``、宽限期、防回溯，并靠 root 行 CAS 保证只扣一次），所以提名
+    宽一点只是多几次读，不会多扣一分钱。
+
+    ⚠️ **时间窗上界是防回溯的**：本机制上线前的历史树在旧口径下已经逐 run 扣过钱，
+    它们的 ``billing.charged_at`` 同样是空的。窗口之外还有 ``settle`` 里那道
+    「这棵树扣过钱没有」的正查，两道一起才安全。
+
+    ⚠️ **`ORDER BY ended_at DESC`**：升序 + LIMIT 会让窗口里攒下的老树把新树饿死
+    （它们每轮都被重提名、每轮都不动）。降序保证新结束的树永远排在前面。积压只可能
+    来自「子 run 长期 running」那一类（树没终态，收口不成立而提名仍然命中），而它同样
+    受 7 天上界约束 —— 所以积压有界，不会无限增长到把 LIMIT 长期占满。
+
+    📌 **记票（3d）**：``agent_runs`` 上没有 ``ended_at`` 索引（现有 14 个索引全是
+    ``heartbeat_at`` / ``started_at`` / ``created_at`` / 坐标列，且多数带
+    ``status = 'running'`` 谓词，与这里的 ``!= 'running'`` 正相反），所以稳态下这是每
+    60 秒一次全表扫 + top-N。本计划禁迁移，索引另立票：
+    ``agent_runs(ended_at DESC) WHERE parent_run_id IS NULL``。
+    """
+    from app.db.session import read_scope
+    from app.services.ai.billing.tree_charge import (
+        FORCED_SETTLE_MAX_AGE,
+        PENDING_CHILDREN_GRACE,
+        settle_tree_if_closed,
+    )
+
+    now = datetime.now(timezone.utc)
+    try:
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    _stale_tree_candidates_stmt(
+                        older_than=now - PENDING_CHILDREN_GRACE,
+                        newer_than=now - FORCED_SETTLE_MAX_AGE,
+                    )
+                )
+            ).all()
+    except Exception as exc:  # noqa: BLE001 — 兜底失败不该把这一轮清扫弄挂
+        logger.warning(f"[sweeper] stale-tree scan failed: {exc}")
+        return 0
+
+    settled = 0
+    for row in rows:
+        try:
+            out = await settle_tree_if_closed(
+                run_id=str(row.id), force_stale_pending=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[sweeper] forced settle {row.id} failed: {exc}")
+            continue
+        if out.reason in ("forced", "charged"):
+            settled += 1
+    return settled
+
+
+def _stale_tree_candidates_stmt(*, older_than: datetime, newer_than: datetime):
+    """提名语句。抽成纯 builder，好让测试断言它带着那几个谓词 —— 少一个都不会报错，
+    只会让兜底安静地退化（``charged_at IS NULL`` 少了就是重提名已收口的树并饿死新树，
+    时间窗少了就是回溯扣历史）。"""
+    from sqlalchemy import select
+
+    from app.models import AgentRuns
+
+    return (
+        select(AgentRuns.id)
+        # 只提名 root 行：收口自己会沿 ``root_run_id`` 解析整棵树，子行提名等于
+        # 把同一棵树重复喂进来。
+        .where(AgentRuns.parent_run_id.is_(None))
+        .where(AgentRuns.status != "running")
+        .where(AgentRuns.metadata_json["billing"]["charged_at"].astext.is_(None))
+        .where(AgentRuns.ended_at < older_than)
+        .where(AgentRuns.ended_at > newer_than)
+        .order_by(AgentRuns.ended_at.desc())
+        .limit(50)
+    )
+
+
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
 async def agent_runs_sweeper_workflow(
@@ -373,17 +477,20 @@ async def agent_runs_sweeper_workflow(
         await _drain_one_issue(order, drain)
     expired_inbox = await expire_orphan_inbox_step()
     reconciled = await reconcile_issue_execution_state_step()
+    forced_settles = await force_settle_stale_pending_trees_step()
     if (
         heartbeat_lost
         or transitions
         or any(drain.values())
         or expired_inbox
         or reconciled
+        or forced_settles
     ):
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
             f"budget_transitions={transitions} "
             f"inbox_drained={drain['dispatched']} inbox_busy={drain['busy']} "
             f"inbox_drain_failed={drain['failed']} "
-            f"expired_inbox={expired_inbox} reconciled_issues={reconciled}"
+            f"expired_inbox={expired_inbox} reconciled_issues={reconciled} "
+            f"forced_tree_settles={forced_settles}"
         )

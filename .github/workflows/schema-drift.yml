@@ -194,6 +194,12 @@ on:
       - 'backend/tests/db/test_output_citations_repository_integration.py'
       - 'backend/app/repositories/output_citations_repository.py'
       - 'backend/app/services/deliverables/citations.py'
+      # 积分收口的 CAS（积分 Task 3）。幂等全挂在 root 行那一个
+      # metadata_json.cost.charged_at 上：where 要同时匹配「cost 层在」与「cost
+      # 层不在」两种形状，values 的两层 jsonb || 写错不会报错、只会把 cost 视图
+      # 冲掉，而钱已经扣了。三件事都只有真服务器判得了。
+      - 'backend/tests/db/test_tree_charge_cas_integration.py'
+      - 'backend/app/services/ai/billing/tree_charge.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -207,7 +213,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-one, so it has to
+      # to it changes what "green" means for all thirty-two, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
@@ -841,6 +847,21 @@ jobs:
           # 两条；GROUP BY 分错组的表现是血缘面板上每一版都显示整条链的引用数。
           # message_id 的外键还要求夹具建一条真消息 —— 这一条也只有真库能拒。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_output_citations_repository_integration.py -v
+
+      - name: Assert the tree-charge settle CAS on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 积分收口的幂等（积分 Task 3）。单测里的 session 是桩的，这三件事
+          # 只有真服务器能判：① CAS 的 where 要同时匹配「cost 层在」与「不在」
+          # 两种形状 —— 不匹配就是第一次收口抢不到、整棵树一分不扣，日志只说
+          # already；② values 的两层 jsonb || 写错不报错，只会把 cost 视图连同
+          # 四道花费一起冲掉，而钱已经扣了（本步骤上线时就抓到过一次：
+          # cast("{}", JSONB) 绑成 jsonb 字符串标量，|| 退化成数组拼接）；
+          # ③ 取树的 id = root OR root_run_id = root 要一次捞全三代。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_tree_charge_cas_integration.py -v
 
       - name: Assert the search_docs body backfill against a real server
         working-directory: backend

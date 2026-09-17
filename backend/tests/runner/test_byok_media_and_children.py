@@ -320,10 +320,8 @@ def test_the_registration_lane_only_emits_the_key_when_it_is_byok():
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "register_deliverable"
     )
     assert "byok_cents" in {a.arg for a in sig.args.kwonlyargs}
-    # 而且必须是**条件展开**，不是无条件写进去：``None`` 时整个键不出现。
-    # 写成 ``"byok_cents": byok_cents`` 一样能过上面那条断言，却会让每条平台
-    # 登记都带一个 ``None``，读方从此得去分辨「没花」与「没接线」。
-    assert '**({"byok_cents": byok_cents} if byok_cents is not None else {})' in src
+    # 「``None`` 时整个键不出现」这条**行为**由下一条用例真跑着证 ——
+    # 此处不再贴源码字面量：那种断言钉的是写法而不是结论，等价改写一次就红。
 
 
 @pytest.mark.asyncio

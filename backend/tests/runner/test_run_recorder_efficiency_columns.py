@@ -20,6 +20,10 @@ class _Writer:
     async def refold_external_slices(self):
         return None
 
+    async def persist_views(self):
+        # ``_finish`` 在把 run 标成终态之前调它 —— 树收口按行读落库的 cost 视图。
+        return None
+
 
 def _recorder(monkeypatch, captured, views):
     class _S:

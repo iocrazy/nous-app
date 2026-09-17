@@ -195,6 +195,14 @@ async def summarize_user_usage(
     )
 
 
+class _AuditRowNotWanted(Exception):
+    """内部哨兵：``log_usage=False`` 时跳过审计行，**不是**一次写失败。
+
+    与下面那个 ``except Exception`` 分开捕获，免得「按设计不写」被记成
+    「写挂了」的 WARNING —— 那正是本仓「空输出不是否定结论」那条纪律。
+    """
+
+
 @dataclass(frozen=True)
 class ReconcileResult:
     """Outcome of reconcile_run — used by callers + telemetry."""
@@ -219,6 +227,9 @@ async def reconcile_run(
     prompt_tokens: int,
     completion_tokens: int,
     cost_points: float,
+    usage_cost_points: Optional[float] = None,
+    log_usage: bool = True,
+    charge_deferred: bool = False,
     byo_key: bool,
     action: str = "agent_run",
 ) -> ReconcileResult:
@@ -234,30 +245,56 @@ async def reconcile_run(
     the safer way is for the caller (RunRecorder._finish) to invoke
     this exactly once per run. Repeated calls would double-charge.
 
-    ``cost_points`` 是这个 run 的**自身**花费（own + media），不是树总额 ——
-    父行再按树总额扣一遍就是对同一笔钱收两次（3c A3，与 ai_usage_hourly 的
-    A1 同口径）。
+    ``cost_points`` 是**该扣多少分**的基数，``usage_cost_points`` 是写进
+    ``ai_usage_logs`` 的**真实花费**（缺省沿用前者）。两者由**两个不同的调用方**
+    分别使用，所以它们不再是同一个数：
 
-    这条口径成立的前提是**子 run 自己也扣得到**，而它一度不成立：
-    ``subagent_task_service`` 与 ``agent_worker`` 两个派发站点都硬编码
-    ``team_id=None``，子 run 在下面的 ``if not team_id`` 早退，于是委派烧掉的
-    钱两边都不收。评审轮 1 已让两处继承父 run 的 team（``team_of_run``），所以
-    现在是父子各扣各的。**仍然不扣的主要是顶层 workforce 派发** —— 它没有父
-    run 可继承，team 为空，按设计不计费。另有两种同样落到 team 为空：父 run
-    自己就没有 team（个人 scope 的对话派出去的活）；``team_of_run`` 查库失败
-    降级 None（宁可少收一次，也不让一次读失败把派发弄挂）。
+    * ``RunRecorder._finish`` —— 每条 run 各调一次，只写审计行：
+      ``cost_points=0`` + ``charge_deferred=True`` + ``usage_cost_points=`` 自身
+      真实花费（own + media，含 BYOK 的那部分）。
+    * ``tree_charge.settle_tree_if_closed`` —— 一棵树只有**收口的那一条** run 调
+      一次，只扣钱：``cost_points=`` 整棵树的平台花费、``log_usage=False``、
+      ``run_id=`` root 的 id（于是 ``point_transactions.reference_id`` 是 root）。
 
-    Stated Limitation（BYOK 重复计费，3c A3）：``agent_runs`` / ``generated_media``
-    都没有 run 级 BYOK 标记，``RunRecorder`` 也没有对应 kwarg，所以调用方一律
-    传 ``byo_key=False``。影响面有限 —— BYOK 的 LLM 模型通常不在
-    ``ai_model_prices`` 里（own_cents 为 0，天然不进扣费分支）；真正受影响的只
-    有管理员配了 ``per_call_cents`` 的 BYOK 图片模型，它们会被按平台价扣一次。
-    闭合它要加列 + 改 RunRecorder 构造签名，另立票；现阶段的兜底是
-    ``settings.AGENT_POINTS_CHARGE_ENABLED``。
+    ⚠️ 扣费**不是**「root 定稿时做」。workforce 的委派是 fire-and-forget，root 通常
+    先于子 run 结束，而 ``subagent_done`` 只写到直接父 —— root 的 ``by_child`` 对
+    那条链恒为空。谁最后把树收口谁结账，判据与幂等在 ``tree_charge`` 里。
+
+    ⚠️ 任一终态（completed / failed / cancelled）都算收口：平台的钱已经烧掉了，
+    与这个回合成没成功无关。
+
+    读方 ``billing/run_tree_points.charged_points_for_run_trees`` 按 ``root_run_id``
+    全树合计，所以这次改动它一行不用动：一棵树现在恰好一行流水，同一个数。
+
+    三种零扣费的结局在 ``note`` 里必须分得开，它们是三件事：
+
+    * ``byo_key=True`` —— **纯 BYOK 树**（平台花费为 0 而真实花费 > 0）：你自己付了。
+      **只有收口那一次能下这个结论**，它手里才有整棵树的数。
+    * ``charge_deferred=True`` —— 这一次不负责扣钱（``_finish`` 的审计调用恒是
+      这一种），钱由收口那一次一起结。
+    * 两者都为 false 且 ``cost_points <= 0`` —— 什么都没烧。
+
+    ``log_usage=False`` 时**不写 ``ai_usage_logs``**，扣费照走 —— 收口那一次用它，
+    因为每条 run 自身的用量已经由它自己的 ``_finish`` 记过了，再写一行就是把整棵树
+    的花费又记一遍。
+
+    仍然不扣的既有缺口：顶层 workforce 派发没有父 run 可继承团队（``team_id``
+    为空，下面 ``if not team_id`` 早退）；父 run 自己就没有团队（个人 scope 的
+    对话派出去的活）；``team_of_run`` 查库失败降级 None。
+
+    **Stated Limitation（急停期间收口的树不补扣）**：``AGENT_POINTS_CHARGE_ENABLED``
+    为 false 时只走审计、不动余额，而收口的戳照盖 —— 恢复后那棵树不会再被收口一次，
+    **没有补扣机制**。这是已知且用户接受的口径；要补扣得另做一条按 ``ai_usage_logs``
+    反查未扣行的回填链。
     """
     total_tokens = prompt_tokens + completion_tokens
 
-    # 1. Audit row
+    # 1. Audit row.
+    #
+    # ``log_usage=False`` 跳过它而不跳过扣费：一个自身零花费、只有子 run 烧了钱的
+    # root 该扣整棵树的钱，却没有自己的用量可审计 —— 多写一行会让用量面板的
+    # ``overall_run_count``（直接数 ai_usage_logs 的行）凭空上抬。
+    usage_logged = False
     try:
         from sqlalchemy import insert
 
@@ -267,6 +304,8 @@ async def reconcile_run(
         # total_tokens is a GENERATED ALWAYS column (prompt + completion) — the
         # DB computes it, so it must NOT be in the insert values. cost_points is
         # DECIMAL → bind a Decimal (asyncpg is strict on numeric).
+        if not log_usage:
+            raise _AuditRowNotWanted
         async with write_scope() as session:
             await session.execute(
                 insert(AiUsageLogs).values(
@@ -280,11 +319,24 @@ async def reconcile_run(
                         "model": model,
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
-                        "cost_points": Decimal(str(cost_points)),
+                        # 审计行记**这条 run 自身的真实花费**，而 ``cost_points``
+                        # 是「该扣多少分」。root-once 之后两者不再是同一个数：
+                        # root 的扣费基数是整棵树，沿用同一个入参会让
+                        # ai_usage_logs 变成「root 记树 + 每个子 run 记自己」双计。
+                        "cost_points": Decimal(
+                            str(
+                                cost_points
+                                if usage_cost_points is None
+                                else usage_cost_points
+                            )
+                        ),
                     }
                 )
             )
         usage_logged = True
+    except _AuditRowNotWanted:
+        # 不是失败：这条 run 自己没有用量可审计（见 ``log_usage``）。
+        usage_logged = False
     except Exception as exc:
         logger.warning(f"[token_billing] ai_usage_logs insert failed: {exc}")
         usage_logged = False
@@ -297,6 +349,17 @@ async def reconcile_run(
             byo_key=True,
             usage_logged=usage_logged,
             note="byo_key — billed by user's provider, no points charge",
+        )
+    if charge_deferred:
+        # 「钱由树收口那一次一起扣」与「什么都没烧」是两件事（裁定 ⑤ 的第三种
+        # 结局）。共用同一条 note 会让每一条正常 run 的审计调用在账面上读起来
+        # 像一次零花费的空转。
+        return ReconcileResult(
+            charged=False,
+            charged_points=0.0,
+            byo_key=False,
+            usage_logged=usage_logged,
+            note="charge deferred — the run that closes this tree bills it once",
         )
     if not team_id or cost_points <= 0:
         return ReconcileResult(
