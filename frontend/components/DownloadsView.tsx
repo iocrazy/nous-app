@@ -1368,7 +1368,7 @@ export const DownloadsView: React.FC = () => {
             not rendered. */}
         {chipsIgnoredByMode && (
           <div className="w-full pb-3 flex justify-center">
-            <span className="text-warn-600 text-xs">
+            <span className="text-warn text-xs">
               {t(
                 'library.aiSearchIgnoresFilters',
                 'AI Search ranks by meaning and does not apply your filters.',
