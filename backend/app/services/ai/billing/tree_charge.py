@@ -161,10 +161,8 @@ async def settle_tree_if_closed(*, run_id: Optional[str]) -> SettleOutcome:
         return SettleOutcome(False, "no_run_id")
 
     try:
-        from sqlalchemy import cast, func, or_, select
+        from sqlalchemy import func, or_, select
         from sqlalchemy import update as sa_update
-        from sqlalchemy.dialects.postgresql import JSONB
-
         from app.db.session import read_scope, write_scope
         from app.models import AgentRuns
 
@@ -221,13 +219,24 @@ async def settle_tree_if_closed(*, run_id: Optional[str]) -> SettleOutcome:
                 .where(AgentRuns.id == root_id)
                 .where(AgentRuns.metadata_json["cost"]["charged_at"].astext.is_(None))
                 .values(
+                    # ⚠️ 空对象用 ``jsonb_build_object()``（零参数 → ``{}``），**不要**
+                    # 写 ``cast("{}", JSONB)``：那个绑定走 JSONB 的 bind processor，把
+                    # Python 字符串 ``"{}"`` 再 json.dumps 一次，落到服务器上是一个
+                    # jsonb **字符串标量**而不是空对象。后果不是报错 ——
+                    # ``'"{}"'::jsonb || '{"a":1}'::jsonb`` 走的是**数组拼接**，真库
+                    # 实测得到 ``["{}", {"charged_at": …}]``，整个 cost 视图被冲成
+                    # 数组，而扣费已经发生。同一个双重编码陷阱见
+                    # ``RunEventWriter.mirror_stmt`` 的注释（2026-09-05 真栈）。
+                    # 只有「``cost`` 这一层本来就不存在」的树会踩到，所以单测和带
+                    # cost 的集成用例都照样绿 —— 这条是真 PG 用例抓出来的。
                     metadata_json=func.coalesce(
-                        AgentRuns.metadata_json, cast("{}", JSONB)
+                        AgentRuns.metadata_json, func.jsonb_build_object()
                     ).op("||")(
                         func.jsonb_build_object(
                             "cost",
                             func.coalesce(
-                                AgentRuns.metadata_json["cost"], cast("{}", JSONB)
+                                AgentRuns.metadata_json["cost"],
+                                func.jsonb_build_object(),
                             ).op("||")(func.jsonb_build_object("charged_at", stamp)),
                         )
                     )
