@@ -283,13 +283,9 @@ async def reconcile_run(
     对话派出去的活）；``team_of_run`` 查库失败降级 None。
 
     **Stated Limitation（急停期间收口的树不补扣）**：``AGENT_POINTS_CHARGE_ENABLED``
-    为 false 时只走审计不动余额，而收口的戳照盖 —— 恢复后那棵树不会再被收口一次。
-    要补扣得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
-
-    **Stated Limitation（急停不补扣）**：``AGENT_POINTS_CHARGE_ENABLED`` 为
-    false 时只写审计行、不动余额，恢复后**没有补扣机制**。root-once 让单次金额
-    变大，所以急停期间跑完的树漏掉的钱也更多。这是已知且用户接受的口径；要补扣
-    得另做一条按 ``ai_usage_logs`` 反查未扣行的回填链。
+    为 false 时只走审计、不动余额，而收口的戳照盖 —— 恢复后那棵树不会再被收口一次，
+    **没有补扣机制**。这是已知且用户接受的口径；要补扣得另做一条按 ``ai_usage_logs``
+    反查未扣行的回填链。
     """
     total_tokens = prompt_tokens + completion_tokens
 

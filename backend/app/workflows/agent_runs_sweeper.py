@@ -366,6 +366,76 @@ async def recompute_monthly_budgets_step() -> int:
     return transitions
 
 
+@DBOS.step()
+async def force_settle_stale_pending_trees_step() -> int:
+    """兜底：把「欠着永远不会跑的异步子 run」的树强制收口。
+
+    收口的前置条件之一是全树 ``async_pending == 0``（workforce 异步派发**不建子 run
+    行**，所以「行全终态」不蕴含「树跑完了」）。代价是：派出去的任务如果永远不被
+    worker 取走，那棵树就没有任何一条 run 会再触发收口 —— 钱永久不进账，而且没有
+    任何探针会说。这一步每分钟捞一次超过宽限期的候选。
+
+    ⚠️ **提名很宽，判定全在 ``settle_tree_if_closed`` 里**（它会重查全树状态、
+    ``async_pending``、宽限期、防回溯守卫，并靠 root 行的 CAS 保证只扣一次）。这里
+    只负责「谁值得看一眼」，所以同一棵树被多条 run 提名也只会扣一次。
+
+    两道防回溯守卫缺一不可：这里的时间窗上界（本机制上线前的历史树在旧口径下已经
+    逐 run 扣过钱），以及 ``settle`` 里那道「这棵树从没扣过钱」的正查。
+    """
+    from sqlalchemy import and_, or_, select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+    from app.services.ai.billing.tree_charge import (
+        FORCED_SETTLE_MAX_AGE,
+        PENDING_CHILDREN_GRACE,
+        settle_tree_if_closed,
+    )
+
+    now = datetime.now(timezone.utc)
+    try:
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(AgentRuns.id)
+                    .where(AgentRuns.status != "running")
+                    .where(AgentRuns.ended_at < now - PENDING_CHILDREN_GRACE)
+                    .where(AgentRuns.ended_at > now - FORCED_SETTLE_MAX_AGE)
+                    .where(
+                        or_(
+                            and_(
+                                AgentRuns.metadata_json["view"]["children"][
+                                    "async_pending"
+                                ].astext.is_not(None),
+                                AgentRuns.metadata_json["view"]["children"][
+                                    "async_pending"
+                                ].astext
+                                != "0",
+                            )
+                        )
+                    )
+                    .order_by(AgentRuns.ended_at)
+                    .limit(50)
+                )
+            ).all()
+    except Exception as exc:  # noqa: BLE001 — 兜底失败不该把这一轮清扫弄挂
+        logger.warning(f"[sweeper] stale-pending scan failed: {exc}")
+        return 0
+
+    forced = 0
+    for row in rows:
+        try:
+            out = await settle_tree_if_closed(
+                run_id=str(row.id), force_stale_pending=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[sweeper] forced settle {row.id} failed: {exc}")
+            continue
+        if out.reason == "forced":
+            forced += 1
+    return forced
+
+
 @DBOS.scheduled("* * * * *")  # every minute
 @DBOS.workflow()
 async def agent_runs_sweeper_workflow(
@@ -384,17 +454,20 @@ async def agent_runs_sweeper_workflow(
         await _drain_one_issue(order, drain)
     expired_inbox = await expire_orphan_inbox_step()
     reconciled = await reconcile_issue_execution_state_step()
+    forced_settles = await force_settle_stale_pending_trees_step()
     if (
         heartbeat_lost
         or transitions
         or any(drain.values())
         or expired_inbox
         or reconciled
+        or forced_settles
     ):
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
             f"budget_transitions={transitions} "
             f"inbox_drained={drain['dispatched']} inbox_busy={drain['busy']} "
             f"inbox_drain_failed={drain['failed']} "
-            f"expired_inbox={expired_inbox} reconciled_issues={reconciled}"
+            f"expired_inbox={expired_inbox} reconciled_issues={reconciled} "
+            f"forced_tree_settles={forced_settles}"
         )

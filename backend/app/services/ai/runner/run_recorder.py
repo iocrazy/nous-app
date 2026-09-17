@@ -874,12 +874,6 @@ class RunRecorder:
         if self._event_writer is not None:
             await self._event_writer.persist_views()
 
-        # 树收口者（``tree_charge.settle_tree_if_closed``）按**行**聚合，读的是每条
-        # run 的 ``agent_runs.metadata_json.cost``。所以这条 run 的**最终**
-        # ``own_cents``（费率已知时是 token 口径，覆盖了折叠值）必须在它被标成终态
-        # **之前**落库 —— 一旦状态不再是 running，树里任何一条 run 都可能立刻把这棵
-        # 树收口并读走这里的值，读到的就会是上一次事件镜像的旧数。
-
         # W3c: classify every finished run. None → direct_human (a human turn);
         # the issue-dispatch path sets rule_owner for routine/pipeline fires.
         effective_attribution = self.attribution or "direct_human"

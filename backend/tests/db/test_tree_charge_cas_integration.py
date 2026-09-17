@@ -6,7 +6,7 @@ WHY THIS FILE EXISTS
 什么」（CLAUDE.md「读正常 ≠ 服务正常」）。这条链上有**三处**只有真库能判：
 
   * **CAS 的 where** —— ``metadata_json['cost']['charged_at'].astext.is_(None)``
-    编译成 ``metadata_json -> 'cost' ->> 'charged_at' IS NULL``。一棵还没收过口
+    编译成 ``metadata_json -> 'billing' ->> 'charged_at' IS NULL``。一棵还没收过口
     的树，``cost`` 这一层可能存在也可能不存在；两种形状都必须匹配上，否则
     **第一次收口就抢不到**，整棵树一分不扣而日志只会说 ``already``。
   * **CAS 的 values** —— 两层 ``jsonb ||`` 合并（顶层塞回 ``cost``，``cost`` 里塞
@@ -169,8 +169,11 @@ async def tree(pg) -> Dict[str, Any]:
 
 
 async def _charged_at(pg, run_id):
+    """戳住在 ``billing`` 这个**顶层兄弟键**里，不是 ``cost`` 里 —— 见
+    ``settle_tree_if_closed`` 的 docstring：``mirror_keys()`` 会把 ``cost`` 整个值
+    写回去，戳放那里会被任何一次迟到的镜像抹掉。"""
     return await pg.fetchval(
-        "SELECT metadata_json -> 'cost' ->> 'charged_at'"
+        "SELECT metadata_json -> 'billing' ->> 'charged_at'"
         " FROM public.agent_runs WHERE id = $1",
         run_id,
     )
@@ -222,11 +225,14 @@ async def test_the_first_settle_wins_the_cas_and_the_second_finds_it_taken(
 
 
 @_skip
-async def test_the_cas_merge_keeps_every_cost_lane_it_found(orm_dsn, tree, pg):
-    """两层 ``jsonb ||`` 写错的表现不是报错，是**把 cost 视图整个覆盖掉** ——
-    四道花费一起没了，而钱已经扣了。四道逐个回读。"""
+async def test_the_cas_merge_keeps_every_cost_lane_it_found(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """两层 ``jsonb ||`` 写错的表现不是报错，是**把目标键整个覆盖掉**。
+    盖戳之后 cost 的四道必须一个不少，``billing`` 是新加的兄弟键。"""
     from app.services.ai.billing import tree_charge
 
+    _stub_reconcile(monkeypatch)
     await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
 
     stored = json.loads(
@@ -238,7 +244,89 @@ async def test_the_cas_merge_keeps_every_cost_lane_it_found(orm_dsn, tree, pg):
     )
     for key in ("own_cents", "own_byok_cents", "media_cents", "media_byok_cents"):
         assert stored[key] == _ROOT_COST[key], f"{key} 被 CAS 合并冲掉了"
-    assert stored["charged_at"], "戳没进去"
+    assert "charged_at" not in stored, "戳不该住在 cost 里"
+    assert await _charged_at(pg, tree["root"]), "戳没进 billing 键"
+
+
+@_skip
+async def test_a_late_view_mirror_cannot_wipe_the_stamp(orm_dsn, tree, pg, monkeypatch):
+    """**评审 Critical 1 的决定性用例。**
+
+    ``RunEventWriter.mirror_keys()`` 把 ``cost`` / ``view`` 等五个顶层键**整个值**
+    写回去（``jsonb_set``）。戳要是住在 ``cost`` 里，任何一个在盖戳之前取过种子的
+    writer 只要之后再镜像一次就会把它抹掉 —— 戳没了，下一条 run 收口时
+    ``IS NULL`` 又成立，**整棵树被第二次扣满**。两条真实路径：崩溃写方先翻状态
+    收口而这条 run 的 recorder 还活着并随后 ``persist_views()``；``for_run`` 的
+    种子窗口。
+
+    这里跑的是**真的** ``mirror_stmt()``（真 ``jsonb_set``），不是复刻一条 SQL。"""
+    from app.services.ai.billing import tree_charge
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    _stub_reconcile(monkeypatch)
+    await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+    stamp = await _charged_at(pg, tree["root"])
+    assert stamp, "前置条件：戳要先在"
+
+    # 一个「盖戳之前就取好种子」的 writer：它内存里的 cost 里没有戳。
+    writer = RunEventWriter.__new__(RunEventWriter)
+    writer.run_id = tree["root"]
+    writer.views = {"view": {"children": {}}, "cost": dict(_ROOT_COST)}
+
+    from app.db.session import write_scope
+
+    async with write_scope() as session:
+        await session.execute(writer.mirror_stmt())
+
+    assert (
+        await _charged_at(pg, tree["root"]) == stamp
+    ), "迟到的镜像把戳抹掉了 —— 下一条 run 收口会把整棵树再扣一遍"
+
+
+@_skip
+async def test_a_tree_still_owing_async_children_is_deferred_on_a_real_server(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """workforce 异步派发不建子 run 行，所以「行全终态」不蕴含「树跑完了」。
+    ``view.children.async_pending`` 是唯一可用的信号，这里连同它的 jsonb 读取路径
+    一起在真库上跑一遍。"""
+    from app.services.ai.billing import tree_charge
+
+    mock = _stub_reconcile(monkeypatch)
+    await pg.execute(
+        "UPDATE public.agent_runs"
+        " SET metadata_json = metadata_json ||"
+        "     jsonb_build_object('view', jsonb_build_object('children',"
+        "       jsonb_build_object('async_pending', 2)))"
+        " WHERE id = $1",
+        tree["root"],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+    assert (out.settled, out.reason) == (False, "pending_children")
+    mock.assert_not_awaited()
+    assert await _charged_at(pg, tree["root"]) is None, "不收口就绝不能盖戳"
+
+
+@_skip
+async def test_two_concurrent_settles_produce_exactly_one_charge(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """**并发语义只有真库能判。** 单测里的 ``rowcount`` 是桩直接给定的，所以那条
+    用例证的是「拿到 0 就不扣」，不是「PG 会让第二个拿到 0」。这里两个协程同时收口
+    同一棵树，断言扣费**恰好一次**。"""
+    import asyncio
+
+    from app.services.ai.billing import tree_charge
+
+    mock = _stub_reconcile(monkeypatch)
+    outs = await asyncio.gather(
+        tree_charge.settle_tree_if_closed(run_id=str(tree["root"])),
+        tree_charge.settle_tree_if_closed(run_id=str(tree["child"])),
+    )
+    reasons = sorted(o.reason for o in outs)
+    assert reasons == ["already", "charged"], reasons
+    assert mock.await_count == 1
+    assert await _charged_at(pg, tree["root"])
 
 
 @_skip
@@ -275,7 +363,7 @@ async def test_a_tree_whose_cost_key_is_absent_can_still_be_settled(
     orm_dsn, pg, monkeypatch
 ):
     """``metadata_json`` 里**没有** ``cost`` 这一层时，CAS 的 where
-    （``-> 'cost' ->> 'charged_at' IS NULL``）必须照样匹配，``jsonb_set`` 式的写法
+    （``-> 'billing' ->> 'charged_at' IS NULL``）必须照样匹配，``jsonb_set`` 式的写法
     在这里会静默什么都不改 —— 那样第一次收口就抢不到，整棵树一分不扣。"""
     from app.services.ai.billing import tree_charge
 

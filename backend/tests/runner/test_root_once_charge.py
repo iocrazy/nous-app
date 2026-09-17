@@ -13,6 +13,7 @@ BYOK 的调用一分不扣。
 """
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -136,13 +137,29 @@ class _Row:
         self.model = kw.get("model", "doubao-seed-2-0-lite")
         self.prompt_tokens = kw.get("prompt_tokens", 10)
         self.completion_tokens = kw.get("completion_tokens", 20)
-        self.metadata_json = {"cost": cost} if cost is not None else {}
+        self.ended_at = kw.get("ended_at", datetime.now(timezone.utc))
+        md: dict[str, Any] = {}
+        if cost is not None:
+            md["cost"] = cost
+        pending = kw.get("async_pending")
+        if pending is not None:
+            md["view"] = {"children": {"async_pending": pending}}
+        self.metadata_json = md
 
 
-def _db(monkeypatch, *, tree_rows, my_root=None, cas_rowcount=1, sink=None):
+def _db(
+    monkeypatch,
+    *,
+    tree_rows,
+    my_root=None,
+    cas_rowcount=1,
+    sink=None,
+    ever_charged=False,
+):
     """把 ``read_scope`` / ``write_scope`` 换成桩。
 
-    读的第一条语句是「我的 root 是谁」，第二条是全树；写的那一条是 CAS。
+    读的第一条语句是「我的 root 是谁」，第二条是全树，**第三条只在强制收口那条
+    路上出现**（防回溯的「这棵树扣过钱没有」正查）；写的那一条是 CAS。
     """
 
     class _Res:
@@ -163,7 +180,9 @@ def _db(monkeypatch, *, tree_rows, my_root=None, cas_rowcount=1, sink=None):
             self._n += 1
             if self._n == 1:
                 return _Res([(my_root,)])
-            return _Res(tree_rows)
+            if self._n == 2:
+                return _Res(tree_rows)
+            return _Res([(1,)] if ever_charged else [])
 
     class _WriteSession:
         async def execute(self, stmt):
@@ -287,6 +306,153 @@ async def test_an_unreadable_rowcount_never_charges(charged, monkeypatch):
     out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
     assert (out.settled, out.reason) == (False, "already")
     charged.assert_not_awaited()
+
+
+async def test_a_tree_still_owing_async_children_is_not_settled(charged, monkeypatch):
+    """评审 Critical 2：workforce 异步派发**不建子 run 行** —— 只插一条 workforce
+    task 并发 ``subagent_spawned{child_run_id: None, mode: async}``，``agent_runs``
+    的行是 worker 事后才建的。
+
+    所以「树里的行全终态」**不蕴含**「这棵树跑完了」：root 派完活立刻结束时树上只有
+    它自己，盖了戳，子 run 后来收口全撞 ``already``，委派的钱一分不进账 —— 正是本
+    计划要修的那一类，只是从「by_child 恒空」搬到了「树成员恒少」。
+
+    可用信号已经在库里：``view.children.async_pending``。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(800000000000001, cost={"own_cents": 10.0}, async_pending=2),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "pending_children")
+    charged.assert_not_awaited()
+
+
+async def test_a_child_that_has_materialised_no_longer_blocks(charged, monkeypatch):
+    """``subagent_done`` 把 ``async_pending`` 减回去 —— 归零之后收口才成立。
+    证明上一条不是「永远收不了口」。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(800000000000001, cost={"own_cents": 10.0}, async_pending=0),
+            _Row(900000000000002, cost={"own_cents": 3.0}),
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert out.reason == "charged"
+    assert charged.await_args.kwargs["cost_points"] == 13.0
+
+
+async def test_the_pending_gate_holds_until_the_grace_period_has_passed(
+    charged, monkeypatch
+):
+    """清扫器带着 ``force_stale_pending`` 来，但树才刚结束 —— 还不到强制的时候。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0}, async_pending=1)],
+    )
+    out = await tree_charge.settle_tree_if_closed(
+        run_id="800000000000001", force_stale_pending=True
+    )
+    assert out.reason == "pending_children"
+    charged.assert_not_awaited()
+
+
+async def test_a_long_stale_pending_tree_is_force_settled(charged, monkeypatch):
+    """兜底：派出去的任务永远不被 worker 取走时，那棵树没有任何一条 run 会再触发
+    收口 —— 钱永久不进账，而且没有任何探针会说。超过宽限期就强制收口并记 WARNING。"""
+    long_ago = datetime.now(timezone.utc) - tree_charge.PENDING_CHILDREN_GRACE * 2
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 10.0},
+                async_pending=1,
+                ended_at=long_ago,
+            )
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(
+        run_id="800000000000001", force_stale_pending=True
+    )
+    assert (out.settled, out.reason) == (True, "forced")
+    assert charged.await_args.kwargs["cost_points"] == 10.0
+
+
+async def test_a_tree_that_was_already_charged_is_never_force_settled(
+    charged, monkeypatch
+):
+    """防回溯：本机制上线前的历史树在**旧口径**下已经逐 run 扣过钱，
+    ``point_transactions`` 里必然留着行。强制收口把它们扫进来就是二次扣费 ——
+    而这类扣费不会报错、只会让用户莫名其妙少一笔余额。"""
+    long_ago = datetime.now(timezone.utc) - tree_charge.PENDING_CHILDREN_GRACE * 2
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 10.0},
+                async_pending=1,
+                ended_at=long_ago,
+            )
+        ],
+        ever_charged=True,
+    )
+    out = await tree_charge.settle_tree_if_closed(
+        run_id="800000000000001", force_stale_pending=True
+    )
+    assert (out.settled, out.reason) == (False, "already")
+    charged.assert_not_awaited()
+
+
+async def test_an_unknown_end_time_is_never_treated_as_stale(charged, monkeypatch):
+    """``ended_at`` 读不出来 = 「不知道到没到点」。按「还没到」处理 —— 宁可让清扫器
+    下一轮再看一眼，也不要凭一个空值提前强制收口。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 10.0},
+                async_pending=1,
+                ended_at=None,
+            )
+        ],
+    )
+    out = await tree_charge.settle_tree_if_closed(
+        run_id="800000000000001", force_stale_pending=True
+    )
+    assert out.reason == "pending_children"
+
+
+async def test_a_charge_that_raises_releases_the_stamp(charged, monkeypatch):
+    """戳先盖、钱后扣，所以扣费**抛异常**时必须把戳撤回去 —— 否则这棵树永久收不到
+    钱，除了一行日志之外没有任何痕迹。
+
+    ⚠️ 只撤 raise 这一种：``charged=False`` 的拒绝（余额不足、无 team、急停）是
+    「扣过了、被拒了」，撤戳会让它每来一条 run 就重试一次。"""
+    writes: list[Any] = []
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0})],
+        sink=writes,
+    )
+    charged.side_effect = RuntimeError("points service exploded")
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "error")
+    # 两条写：盖戳 + 撤戳。
+    assert len(writes) == 2
+    params = writes[-1].compile().params
+    assert "charged_at" in str(params.values()), "撤戳那条没有指向 charged_at"
 
 
 async def test_a_pure_byok_tree_is_reported_as_byo_key(charged, monkeypatch):
