@@ -124,6 +124,7 @@ def _tree_read(monkeypatch, rows: list[dict]) -> None:
     ``rows`` 是每条 run 的 cost 视图。收口按**行**聚合，所以这里要把子 run 各自
     摆出来 —— 它不读父行的 ``by_child``（workforce 链上 root 那份恒为空）。
     """
+    from datetime import timedelta as _timedelta
     from uuid import uuid4 as _uuid4
 
     class _Row:
@@ -133,6 +134,15 @@ def _tree_read(monkeypatch, rows: list[dict]) -> None:
             self.team_id, self.user_id = 42, _uuid4()
             self.model = "doubao-seed-2-0-lite"
             self.prompt_tokens, self.completion_tokens = 10, 20
+            # 晚于切换点：切换点之前开始的树按用户裁定「只向前不追扣」永不收口
+            # （``tree_charge.cutover_at``）。从配置推而不是写 ``now()`` —— 后者
+            # 会让这些用例依赖跑测试的机器此刻已经过了那一刻。
+            from app.services.ai.billing.tree_charge import cutover_at
+
+            base = cutover_at()
+            assert base is not None
+            self.started_at = base + _timedelta(seconds=1)
+            self.ended_at = None
             self.metadata_json = {"cost": cost}
 
     built = [_Row(i, c) for i, c in enumerate(rows)]

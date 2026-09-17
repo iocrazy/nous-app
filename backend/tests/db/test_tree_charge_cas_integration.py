@@ -28,6 +28,7 @@ WHY THIS FILE EXISTS
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import math
 import os
@@ -471,3 +472,77 @@ async def test_a_tree_whose_cost_key_is_absent_can_still_be_settled(
     finally:
         await pg.execute("DELETE FROM public.agent_runs WHERE id = $1", run_id)
         await pg.execute("DELETE FROM public.ai_agents WHERE id = $1", agent_id)
+
+
+# ── 切换点与退款改戳（2026-09-17 事故） ─────────────────────────────────
+
+
+async def _refunded_at(pg, run_id):
+    return await pg.fetchval(
+        "SELECT metadata_json -> 'billing' ->> 'refunded_at'"
+        " FROM public.agent_runs WHERE id = $1",
+        run_id,
+    )
+
+
+@_skip
+async def test_a_pre_cutover_tree_is_left_alone_on_a_real_server(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """把这棵树的 root 倒回切换点之前：不扣、**也不盖戳**。
+
+    2026-09-17 事故的真库对照。``started_at`` 是 ``NOT NULL DEFAULT now()``，所以
+    夹具建出来的树天然在切换点之后 —— 这条用例先把它推回去，再证明守卫认得出来。
+    不盖戳这一半同样要紧：盖了就等于宣称「本机制收过这棵树」，而它一分没收。
+    """
+    from app.services.ai.billing import tree_charge
+
+    mock = _stub_reconcile(monkeypatch)
+    cutover = tree_charge.cutover_at()
+    assert cutover is not None
+    await pg.execute(
+        "UPDATE public.agent_runs SET started_at = $2 WHERE id = $1",
+        tree["root"],
+        cutover - _dt.timedelta(days=5),
+    )
+
+    out = await tree_charge.settle_tree_if_closed(run_id=str(tree["grand"]))
+    assert (out.settled, out.reason) == (False, "pre_cutover")
+    mock.assert_not_awaited()
+    assert await _charged_at(pg, tree["root"]) is None, "老树被盖了戳"
+
+
+@_skip
+async def test_the_refund_rewrites_the_stamp_without_touching_the_cost_view(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """退款那条 UPDATE 在真库上：``charged_at`` 消失、``refunded_at`` 出现、
+    ``cost`` 原样还在。
+
+    ⚠️ 这正是必须上真库的那一类：两层 ``jsonb`` 合并 + 一个 ``- 'key'``，写错不会
+    报错，只会**把 cost 视图整个覆盖掉**（``cast("{}", JSONB)`` 那个双重编码陷阱就
+    是这么在真库上被抓到的）。而这条语句要在生产上对着刚退完钱的行跑。
+    """
+    from app.db.session import write_scope
+    from app.services.ai.billing import tree_charge
+    from app.services.ai.billing.pre_cutover_refund import _refunded_stamp_stmt
+
+    _stub_reconcile(monkeypatch)
+    first = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+    assert (first.settled, first.reason) == (True, "charged")
+    assert await _charged_at(pg, tree["root"])
+
+    async with write_scope() as session:
+        await session.execute(
+            _refunded_stamp_stmt(tree["root"], "2026-09-17T08:00:00+00:00")
+        )
+
+    assert await _charged_at(pg, tree["root"]) is None, "charged_at 没被删掉"
+    assert await _refunded_at(pg, tree["root"]) == "2026-09-17T08:00:00+00:00"
+    # cost 视图必须毫发无伤 —— 它是花费的唯一记录。
+    own = await pg.fetchval(
+        "SELECT (metadata_json -> 'cost' ->> 'own_cents')::float"
+        " FROM public.agent_runs WHERE id = $1",
+        tree["root"],
+    )
+    assert own == _ROOT_COST["own_cents"]

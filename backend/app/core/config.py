@@ -103,6 +103,17 @@ class Settings(BaseSettings):
         "ReconcileResult.note = 'charging disabled'。",
     )
 
+    AGENT_POINTS_TREE_CUTOVER: str = Field(
+        default="2026-09-17T06:42:56Z",
+        description="「树收口一次扣费」上线的那一刻（ISO 8601，带时区）。root 的 "
+        "started_at 早于它的树一律不扣、也不盖戳 —— 用户裁定「只向前不追扣」。"
+        "默认值是 Task 3 那次部署 success 的时刻（c35be6db0）。"
+        "2026-09-17 事故：首轮清扫器把 81 棵上线前的历史树收口扣了 125 分。防回溯"
+        "原本只有「这棵树在 point_transactions 里扣过钱没有」一道正查，而那些树"
+        "结束于 A3（积分链修好）之前，当时一分钱都没扣过，于是正查放行。时间本身"
+        "才是这条裁定的判据，花没花过钱不是。",
+    )
+
     # ============================================
     # Feature flags — optional capabilities (default off; flip via .env)
     # ============================================
