@@ -90,6 +90,10 @@ asyncio_mode = "auto"
 markers = [
     "unit: pure unit tests (no DB, no network)",
     "integration: integration tests (DB or network required)",
+    # Hits a third-party production service with real credentials. Skipped
+    # unless DOUYIN_ACCEPTANCE_COOKIE_FILE points at a live cookie, so a
+    # default `pytest` run — and CI — never touches douyin.
+    "live_douyin: real-request acceptance against douyin (opt-in, needs a cookie)",
 ]
 
 [project.scripts]
