@@ -232,6 +232,10 @@ async def persist_video_generation(
                 model=resolved_model or model,
                 provider=resolved_provider or provider,
                 derivation_kind="shot_video",
+                # BYOK 标记刻意不接线：视频目录今天没有 BYOK 层，接一个恒
+                # False 的参数只是让人以为这里有判断。真出现 BYOK 视频行时，
+                # 照出图链那条做（``script_shot_generate.persist_generation``
+                # 的 ``byok`` 参数 → ``GenerationOrigin.byok``）。
                 # 3a：run 上下文在派发时就丢了，这里回填，否则这条路
                 # 产出的视频永远没有 run 可挂（真栈缺口，spec §1.3）。
                 run_id=run_id,
@@ -291,7 +295,10 @@ async def script_shot_video_workflow(
     never corrupts the image lane. ``user_id`` is optional (frozen DBOS input
     compat) but a real value is required to persist."""
     step_out = await generate_shot_video_step(shot_id, model, provider, user_id)
-    local_path, gen_provider, gen_model = _step_output(step_out, key="path")
+    # 第四格是层标记，出视频这条路上恒 False —— ``resolve_video_provider``
+    # 只读平台目录（``_enabled_rows("video")``），没有 BYOK 层可读。共用
+    # ``_step_output`` 是为了只有一处知道 step 返回值的形状。
+    local_path, gen_provider, gen_model, _byok = _step_output(step_out, key="path")
     video_url = await persist_video_generation(
         shot_id,
         local_path,

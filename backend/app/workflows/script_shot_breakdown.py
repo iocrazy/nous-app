@@ -52,7 +52,7 @@ async def breakdown_scene_to_shots(
     """
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
@@ -63,14 +63,13 @@ async def breakdown_scene_to_shots(
     if not isinstance(elements, list) or not elements:
         raise ValueError(f"Scene {scene_id} has no elements to break down")
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
+    cfg = await resolve_script_ai_config(user_id)
     ai_svc = ScriptAIService(
         user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
     shots = await ai_svc.scene_to_shots(elements, heading=_scene_heading(scene))
     logger.info(f"[script_shot_breakdown][step] LLM returned {len(shots)} shots")

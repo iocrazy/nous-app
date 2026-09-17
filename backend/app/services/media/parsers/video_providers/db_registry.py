@@ -148,8 +148,11 @@ def _visible_rows(
     return visible
 
 
-def _stamp_provider_key(provider: object, actual_provider: str) -> None:
-    """Record which catalog row's ``actual_provider`` built this provider.
+def _stamp_provider_key(
+    provider: object, actual_provider: str, *, source: str = "catalog"
+) -> None:
+    """Record which catalog row's ``actual_provider`` built this provider,
+    and WHOSE credentials it runs on.
 
     A built provider does NOT otherwise remember its own catalog key — the
     protocol constructs a bare adapter (``ArkImageProvider``,
@@ -159,8 +162,18 @@ def _stamp_provider_key(provider: object, actual_provider: str) -> None:
     back from, silently get ``ProviderCapabilities.none()``, and drop every
     knob the user asked for. This function is the choke point: the one place
     that both builds the provider and still holds the row.
+
+    ``source`` 是目录行的**层**（``"catalog"`` / ``"byok"``）。BYOK 行的
+    ``actual_provider`` **刻意**用协议名（如 ``ark``，与平台目录同键），所以
+    ``media_price_cents()`` 照样命中平台价 —— 这正是「BYOK 出的图被按平台价扣分」
+    的确切机理。价钱该算（血缘要真），但积分不该收，所以判据必须跟着 provider
+    对象走到登记口（用户裁定 2）。
+
+    ⚠️ ``source`` 有默认值，所以漏改一个调用点**不会报错** —— 那条链的
+    ``is_byok`` 恒 False，静默按平台价收。加新的 resolve 路径时必须显式传它。
     """
     provider.provider_key = actual_provider  # type: ignore[attr-defined]
+    provider.is_byok = source == "byok"  # type: ignore[attr-defined]
 
 
 async def resolve_image_provider(
@@ -209,7 +222,9 @@ async def resolve_image_provider(
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
     provider, actual_model = protocol.build_image_provider(row)
-    _stamp_provider_key(provider, actual_provider)
+    _stamp_provider_key(
+        provider, actual_provider, source=str(row.get("source") or "catalog")
+    )
     # Names the TIER, not just the family: "catalog" on a BYOK row would make
     # every log read as if the admin had enabled the model, and the two tiers
     # bill and fail for different reasons.
@@ -255,7 +270,12 @@ async def resolve_video_provider(
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
     provider, actual_model = protocol.build_video_provider(row)
-    _stamp_provider_key(provider, actual_provider)
+    # 视频侧今天只有平台目录（``_enabled_rows("video")``，没有 BYOK 层），所以
+    # 这里恒是 "catalog"。仍然显式传行上的值：BYOK 视频行一旦出现，这条链就已经
+    # 说得出层，而不是等着谁想起来补一个默认值。
+    _stamp_provider_key(
+        provider, actual_provider, source=str(row.get("source") or "catalog")
+    )
     logger.info(
         "Resolved video provider from catalog: jimeng-cli (model={})", actual_model
     )

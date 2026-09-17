@@ -129,6 +129,9 @@ class GenerateMediaTools:
                         provider=gen_provider,
                         params={"aspect_ratio": args.get("aspect_ratio") or "16:9"},
                         derivation_kind="image_gen",
+                        # adapter 解析出来的层标记（image_generation_service 在
+                        # 返回 dict 上并列注入）。用户自己的 key 出的图不收积分。
+                        byok=bool((raw or {}).get("byok")),
                         # 3a: the step this came out of, so the deliverable card
                         # hangs off the right one instead of the whole run.
                         turn=run_context.get("turn"),

@@ -10,7 +10,7 @@ Three contracts, each a past production bug if broken:
    for the other 4 script-AI endpoints in test_script_ai_endpoint_dispatch.py.
 
 2. DB-governed provider config (#1025/#1030): the workflow step must resolve
-   ``resolve_script_provider_config(user_id)`` and pass provider_key /
+   ``resolve_script_ai_config(user_id)`` and pass provider_key /
    provider_config into ScriptAIService — a bare ScriptAIService() falls back to
    the stale ENV key (401 on prod). Mirrors
    test_script_ai_workflow_provider_config.py.
@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.deps import AuthContext
+from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -45,12 +46,15 @@ _USER = "11111111-1111-1111-1111-111111111111"
 _SCRIPT = "9000000000000000001"
 _CHAPTER = "9000000000000000002"
 
-# Sentinel resolver return — (provider_key, provider_config, model, agent_slug).
-_RESOLVED = (
-    "doubao",
-    {"api_key": "k", "base_url": "u", "model": "m"},
-    "m",
-    "script_ai",
+# Sentinel resolver return — the TYPED ``ResolvedAIConfig`` the script path now
+# uses (``resolve_script_ai_config``). The old tuple shim dropped ``origin``,
+# which is what made every BYOK script run bill at platform rates.
+_RESOLVED = ResolvedAIConfig(
+    provider_key="doubao",
+    provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+    model="m",
+    agent_slug="script_ai",
+    origin="byok",
 )
 
 
@@ -214,8 +218,7 @@ async def test_convert_step_resolves_and_passes_provider_config():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers."
-            "resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             AsyncMock(return_value=_RESOLVED),
         ) as resolver,
         patch(
@@ -233,6 +236,7 @@ async def test_convert_step_resolves_and_passes_provider_config():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
 
 

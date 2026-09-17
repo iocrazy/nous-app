@@ -379,7 +379,7 @@ async def copilot_ops(
         raise HTTPException(status_code=404, detail="Not Found")
 
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
+        resolve_script_ai_config,
     )
     from app.services.storyboard.script.script_ai_service import ScriptAIService
 
@@ -390,14 +390,13 @@ async def copilot_ops(
     current_version = scene.get("content_version") or 0
     is_proposal = body.read_version < current_version
 
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(auth.user_id)
-    )
+    cfg = await resolve_script_ai_config(auth.user_id)
     service = ScriptAIService(
         user_id=auth.user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
+        agent_slug=cfg.agent_slug,
+        provider_key=cfg.provider_key,
+        provider_config=cfg.provider_config,
+        credential_origin=cfg.origin,
     )
 
     error_context: Optional[str] = None

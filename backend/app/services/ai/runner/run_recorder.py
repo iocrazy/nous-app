@@ -1524,6 +1524,11 @@ class RunEventWriter:
 
             self.views["view"]["children"] = scratch["view"]["children"]
             self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
+            # BYOK 半边跟着本体一起抬：两者是同一次 fold 的产物，读方拿
+            # ``by_child - by_child_byok`` 减出平台额。只抬本体，异步子 agent
+            # 的整棵 BYOK 子树就被当成平台花费收一遍——而异步正是这条重折
+            # 唯一存在的理由（活 recorder 从没折过那条 ``subagent_done``）。
+            self.views["cost"]["by_child_byok"] = scratch["cost"]["by_child_byok"]
             refolded_outputs = scratch["view"].get("outputs")
             if refolded_outputs:
                 # ONLY when the log produced one. A ``deliverable`` whose
@@ -1540,6 +1545,12 @@ class RunEventWriter:
                 # usually writes its event through a ``for_run`` writer, so the
                 # live recorder never folded that money at all.
                 self.views["cost"]["media_cents"] = scratch["cost"]["media_cents"]
+                # 同上，第四个分量。登记口常走 ``for_run`` writer，所以活
+                # recorder 连这笔钱都没折过——本体抬了而 BYOK 没抬，等于
+                # 「这张图是平台付的」，而它恰恰不是。
+                self.views["cost"]["media_byok_cents"] = scratch["cost"][
+                    "media_byok_cents"
+                ]
                 # 同一份折叠的第三个分量（3c §3.2）：``_finish`` 从这里读
                 # ``deliverables`` 列。登记口常走 ``for_run`` writer，所以活
                 # recorder 也没折过这件产出的计数——只抬 outputs 不抬计数，就是

@@ -142,7 +142,13 @@ class ImageGenerationService:
                 provider_name,
                 model,
             )
-            return asdict(result)
+            # provider 对象上的层标记（``db_registry._stamp_provider_key``）。
+            # in-proc registry 那条分支的 provider 没有这个属性 → False，
+            # 那条分支今天是空的（house rule：provider 配置住数据库）。
+            return {
+                **asdict(result),
+                "byok": bool(getattr(image_provider, "is_byok", False)),
+            }
 
         except Exception as exc:
             logger.error(

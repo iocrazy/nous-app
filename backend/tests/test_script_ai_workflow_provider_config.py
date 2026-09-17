@@ -1,5 +1,5 @@
 """Regression tests: the 4 script-AI DBOS steps must resolve the DB-governed
-provider config (``resolve_script_provider_config``) and pass it into
+provider config (``resolve_script_ai_config``) and pass it into
 ``ScriptAIService`` — not construct the service bare.
 
 Background (confirmed via prod worker logs + code): the 4 script-AI
@@ -10,10 +10,10 @@ adapter factory falls back to ``get_adapter(model, settings)`` which, for a
 ``doubao-*`` model, reads ``settings.DOUBAO_API_KEY`` — the stale ENV key,
 401-unauthorized on prod. The working key lives in the DB (``mediahub_models``
 / platform provider config) and is only reachable via
-``resolve_script_provider_config(user_id)`` — the same helper
+``resolve_script_ai_config(user_id)`` — the same helper
 ``topics_router.generate_script`` already uses correctly.
 
-These tests patch ``resolve_script_provider_config`` (so no real DB call
+These tests patch ``resolve_script_ai_config`` (so no real DB call
 happens) and ``ScriptAIService`` (recording constructor kwargs) to assert
 each of the 4 AI steps builds the service with the resolved
 ``agent_slug`` / ``provider_key`` / ``provider_config`` — parity with
@@ -26,19 +26,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
+
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 _USER = "11111111-1111-1111-1111-111111111111"
 _SCRIPT = "9000000000000000001"
 _CHAPTER = "9000000000000000002"
 
-# Sentinel resolver return — mirrors resolve_script_provider_config's
-# (provider_key, provider_config, model, agent_slug) tuple shape.
-_RESOLVED = (
-    "doubao",
-    {"api_key": "k", "base_url": "u", "model": "m"},
-    "m",
-    "script_ai",
+# Sentinel resolver return — the TYPED ``ResolvedAIConfig`` the script path now
+# uses (``resolve_script_ai_config``). The old tuple shim dropped ``origin``,
+# which is what made every BYOK script run bill at platform rates.
+_RESOLVED = ResolvedAIConfig(
+    provider_key="doubao",
+    provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+    model="m",
+    agent_slug="script_ai",
+    origin="byok",
 )
 
 
@@ -69,7 +73,7 @@ async def test_expand_step_resolves_and_passes_provider_config():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             _resolver_mock(),
         ) as resolver,
         patch(
@@ -86,6 +90,7 @@ async def test_expand_step_resolves_and_passes_provider_config():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
 
 
@@ -102,7 +107,7 @@ async def test_branches_step_resolves_and_passes_provider_config():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             _resolver_mock(),
         ) as resolver,
         patch(
@@ -121,6 +126,7 @@ async def test_branches_step_resolves_and_passes_provider_config():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
 
 
@@ -137,7 +143,7 @@ async def test_outline_step_resolves_and_passes_provider_config():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             _resolver_mock(),
         ) as resolver,
         patch(
@@ -154,6 +160,7 @@ async def test_outline_step_resolves_and_passes_provider_config():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )
 
 
@@ -166,7 +173,7 @@ async def test_outline_step_defaults_user_id_to_none():
 
     with (
         patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_script_provider_config",
+            "app.services.ai.providers.ai_provider_helpers.resolve_script_ai_config",
             _resolver_mock(),
         ) as resolver,
         patch(
@@ -182,4 +189,5 @@ async def test_outline_step_defaults_user_id_to_none():
         agent_slug="script_ai",
         provider_key="doubao",
         provider_config={"api_key": "k", "base_url": "u", "model": "m"},
+        credential_origin="byok",
     )

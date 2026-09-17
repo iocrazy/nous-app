@@ -33,9 +33,17 @@ def client(monkeypatch):
 
     # The endpoint resolves the script agent from task_assignment before running.
     async def fake_resolve(user_id):
-        return ("nous", {}, "qwen3", "script_ai")
+        from app.services.ai.providers.ai_provider_helpers import ResolvedAIConfig
 
-    monkeypatch.setattr(tr, "resolve_script_provider_config", fake_resolve)
+        return ResolvedAIConfig(
+            provider_key="nous",
+            provider_config={},
+            model="qwen3",
+            agent_slug="script_ai",
+            origin="platform",
+        )
+
+    monkeypatch.setattr(tr, "resolve_script_ai_config", fake_resolve)
 
     captured = {}
 
