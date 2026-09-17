@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import text
-
 from sqlalchemy.exc import DBAPIError
 
 from app.db.session import read_scope
