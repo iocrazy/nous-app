@@ -195,6 +195,14 @@ async def summarize_user_usage(
     )
 
 
+class _AuditRowNotWanted(Exception):
+    """内部哨兵：``log_usage=False`` 时跳过审计行，**不是**一次写失败。
+
+    与下面那个 ``except Exception`` 分开捕获，免得「按设计不写」被记成
+    「写挂了」的 WARNING —— 那正是本仓「空输出不是否定结论」那条纪律。
+    """
+
+
 @dataclass(frozen=True)
 class ReconcileResult:
     """Outcome of reconcile_run — used by callers + telemetry."""
@@ -220,6 +228,8 @@ async def reconcile_run(
     completion_tokens: int,
     cost_points: float,
     usage_cost_points: Optional[float] = None,
+    log_usage: bool = True,
+    charge_deferred: bool = False,
     byo_key: bool,
     action: str = "agent_run",
 ) -> ReconcileResult:
@@ -243,17 +253,35 @@ async def reconcile_run(
       （真栈实测 ≈¢0.92 被收成 7 分）。
     * **root 已终态后才结束的子 run** → ``cost_points`` = 它自身的平台花费。
       root 的 refold 快照没赶上它，没人替它收。
-    * **root 仍在跑的子 run** → ``cost_points=0``，只写审计行。
+    * **root 仍在跑的子 run** → ``cost_points=0`` + ``charge_deferred=True``。
+
+    ⚠️ **root 在任一终态（completed / failed / cancelled）都扣。** 平台的钱已经
+    烧掉了，与这个回合成没成功无关。此前只有 ``completed`` 扣 —— 那在「每条 run
+    各扣各的」口径下只漏 root 自己那份，root-once 之后会让「子 run 先跑完、root
+    随后失败」这条常见时序整棵树静默免单。
 
     读方 ``billing/run_tree_points.charged_points_for_run_trees`` 按 ``root_run_id``
     全树合计，所以这次改动它一行不用动：合计从「多行相加」变成「一行」，同一个数。
 
-    ``byo_key=True`` 只给**纯 BYOK 树**（平台花费为 0 而真实花费 > 0）。它与
-    「零花费」在 note 里必须分得开：一个是「你自己付了」，一个是「什么都没烧」。
+    三种零扣费的结局在 ``note`` 里必须分得开，它们是三件事：
+
+    * ``byo_key=True`` —— **纯 BYOK 树**（平台花费为 0 而真实花费 > 0）：你自己付了。
+      **只有 root 与晚到的子 run 能下这个结论**；延期的子 run 手里没有整棵树的数。
+    * ``charge_deferred=True`` —— 这笔钱由 root 一起扣，这里只是不重复收。
+    * 两者都为 false 且 ``cost_points <= 0`` —— 什么都没烧。
+
+    ``log_usage=False`` 时**不写 ``ai_usage_logs``**，扣费照走。给的是「自身零花费、
+    只有子 run 烧了钱的 root」：它该扣整棵树的钱，但自己没有用量可审计，多写一行
+    会让 ``summarize_user_usage`` 的 ``overall_run_count``（直接数行）凭空上抬。
 
     仍然不扣的既有缺口：顶层 workforce 派发没有父 run 可继承团队（``team_id``
     为空，下面 ``if not team_id`` 早退）；父 run 自己就没有团队（个人 scope 的
     对话派出去的活）；``team_of_run`` 查库失败降级 None。
+
+    **Stated Limitation（``heartbeat_lost`` 的 root 不扣）**：liveness 清扫器直接
+    改 ``agent_runs.status``，不经 ``_finish``，所以那类 root 连这个函数都到不了，
+    整棵树不扣。与急停同族：已知、未闭合，要闭合得另做一条按 ``ai_usage_logs``
+    反查的回填链。
 
     **Stated Limitation（急停不补扣）**：``AGENT_POINTS_CHARGE_ENABLED`` 为
     false 时只写审计行、不动余额，恢复后**没有补扣机制**。root-once 让单次金额
@@ -262,7 +290,12 @@ async def reconcile_run(
     """
     total_tokens = prompt_tokens + completion_tokens
 
-    # 1. Audit row
+    # 1. Audit row.
+    #
+    # ``log_usage=False`` 跳过它而不跳过扣费：一个自身零花费、只有子 run 烧了钱的
+    # root 该扣整棵树的钱，却没有自己的用量可审计 —— 多写一行会让用量面板的
+    # ``overall_run_count``（直接数 ai_usage_logs 的行）凭空上抬。
+    usage_logged = False
     try:
         from sqlalchemy import insert
 
@@ -272,6 +305,8 @@ async def reconcile_run(
         # total_tokens is a GENERATED ALWAYS column (prompt + completion) — the
         # DB computes it, so it must NOT be in the insert values. cost_points is
         # DECIMAL → bind a Decimal (asyncpg is strict on numeric).
+        if not log_usage:
+            raise _AuditRowNotWanted
         async with write_scope() as session:
             await session.execute(
                 insert(AiUsageLogs).values(
@@ -300,6 +335,9 @@ async def reconcile_run(
                 )
             )
         usage_logged = True
+    except _AuditRowNotWanted:
+        # 不是失败：这条 run 自己没有用量可审计（见 ``log_usage``）。
+        usage_logged = False
     except Exception as exc:
         logger.warning(f"[token_billing] ai_usage_logs insert failed: {exc}")
         usage_logged = False
@@ -312,6 +350,16 @@ async def reconcile_run(
             byo_key=True,
             usage_logged=usage_logged,
             note="byo_key — billed by user's provider, no points charge",
+        )
+    if charge_deferred:
+        # 「这笔钱 root 会一起扣」与「什么都没烧」是两件事（裁定 ⑤ 的第三种结局）。
+        # 共用同一条 note 会让一次正常的委派在账面上读起来像一次零花费的空转。
+        return ReconcileResult(
+            charged=False,
+            charged_points=0.0,
+            byo_key=False,
+            usage_logged=usage_logged,
+            note="charge deferred to the root run — billed once for the whole tree",
         )
     if not team_id or cost_points <= 0:
         return ReconcileResult(

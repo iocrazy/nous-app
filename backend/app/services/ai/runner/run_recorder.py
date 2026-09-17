@@ -1026,33 +1026,45 @@ class RunRecorder:
         #
         # 三分支的竞态口径（宁少收不重收）：root 以自己的 refold 快照为准，子 run
         # 以自己看到的 root status 为准。窄窗口里两边都判「对方会收」时就都不收。
-        if status == "completed" and closed_by_us:
+        #
+        # ⚠️ **任一终态都扣，不只 completed**（评审轮 1 Important 1）。平台的钱
+        # 已经烧掉了，与这个回合成没成功无关。旧口径只扣 completed，那时扣费是
+        # 逐 run 的 —— 一个失败的 root 只漏它自己那份；root-once 之后子 run 把
+        # 责任全交给 root，于是「子 run 先跑完、root 随后 failed / cancelled」
+        # 这条常见时序会让整棵树静默免单。`closed_by_us` 仍是唯一的幂等门。
+        if status in ("completed", "failed", "cancelled") and closed_by_us:
             from app.services.ai.billing import tree_charge
 
+            # 三种零扣费的结局是三件事，绝不能折进同一个标志里（裁定 ⑤）：
+            # byo_key（你自己付了）/ deferred（root 会一起扣）/ 什么都没烧。
+            # 尤其 **deferred 的子 run 不许下 BYOK 结论** —— 它手里只有自己这一
+            # 段，整棵树是不是纯 BYOK 只有 root 知道。
+            charge_deferred = False
             if self.parent_run_id is None:
                 cost_points, why = buckets.tree_platform, "root charges the tree"
+                byo_key = cost_points <= 0 and buckets.tree_total > 0
             elif await tree_charge.root_run_is_settled(
                 run_id=self.run_id, parent_run_id=self.parent_run_id
             ):
                 cost_points, why = buckets.own_platform, "late child charges its own"
+                byo_key = cost_points <= 0 and buckets.own_total > 0
             else:
                 cost_points, why = 0.0, "root is still running and will charge"
+                byo_key, charge_deferred = False, True
 
-            # 纯 BYOK 树（平台额 0 而真的烧了钱）与零花费树在 note 里必须分开：
-            # 一个是「你自己付了」，一个是「什么都没烧」。
-            byo_key = cost_points <= 0 and (
-                buckets.tree_total > 0
-                if self.parent_run_id is None
-                else buckets.own_total > 0
-            )
+            # 审计行的条件回到改动前那条：**这条 run 自己**真的烧了钱。写成
+            # 「或 cost_points > 0」会让自身零花费、只有子 run 烧钱的 root 也多
+            # 出一条 ai_usage_logs（cost_points=0），而 summarize_user_usage 的
+            # overall_run_count 直接数行 —— 用量面板的 run 数会凭空上抬。
+            # 扣费与审计因此分开表达：该扣的照扣，没有用量的不写行。
+            log_usage = buckets.own_total > 0
             logger.info(
                 f"[RunRecorder] run {self.run_id} billing: {why}; "
                 f"tree={buckets.tree_total} platform={buckets.tree_platform} "
-                f"own={buckets.own_total} charge={cost_points} byo_key={byo_key}"
+                f"own={buckets.own_total} charge={cost_points} "
+                f"byo_key={byo_key} deferred={charge_deferred} log={log_usage}"
             )
-            # 审计行的条件是「真的烧了钱」，与扣不扣分无关 —— 一个不扣分的子 run
-            # 照样要在 ai_usage_logs 里留下它花掉的钱（用户裁定 2 的后半句）。
-            if buckets.own_total > 0 or cost_points > 0:
+            if log_usage or cost_points > 0:
                 try:
                     from app.services.ai.billing.token_billing import reconcile_run
 
@@ -1069,6 +1081,8 @@ class RunRecorder:
                         cost_points=cost_points,
                         # 审计行仍记这条 run 自身的真实花费（含 BYOK 的那部分）。
                         usage_cost_points=buckets.own_total,
+                        log_usage=log_usage,
+                        charge_deferred=charge_deferred,
                         byo_key=byo_key,
                         action=self.trigger,
                     )
