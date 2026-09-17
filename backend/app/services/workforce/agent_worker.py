@@ -607,6 +607,31 @@ async def _run_subagent_task(
                 f"failed: {err}"
             )
 
+        # 这一刻是这棵树上**最后一个可观测事件**，也是积分收口唯一能成立的时机。
+        #
+        # 收口要求全树 ``view.children.async_pending == 0``（异步派发时子 run 的行
+        # 还没建出来，「行全终态」不蕴含「树跑完了」）。而那个计数**只在上面这条
+        # subagent_done 折进父视图时才减一** —— 它比子 run 自己的 ``_finish`` 晚。
+        # 于是异步链上的时序恒为：root 结束 → pending=1 不收口；子 run 结束 →
+        # pending 仍是 1，还是不收口；``subagent_done`` 落地归零 —— 而到这一步为止
+        # 全仓没有任何人会再调收口（调用点只有 ``_finish`` 与三个崩溃写方）。
+        # 不补这一次，每棵异步委派树都要等清扫器 2 小时后强制收口，而那条路径还会
+        # 打一条「async child never materialised」的 WARNING —— 与事实正好相反。
+        #
+        # 传 child：它在树里（``root_run_id`` 指向真 root），而 ``parent_run_id``
+        # 未必是 root。收口自己会沿 ``root_run_id`` 解析，并靠 CAS 保证只扣一次。
+        child_run_id = content.get("child_run_id")
+        if child_run_id:
+            try:
+                from app.services.ai.billing.tree_charge import settle_tree_if_closed
+
+                await settle_tree_if_closed(run_id=str(child_run_id))
+            except Exception as err:  # noqa: BLE001 — 计费绝不连坐这次已完成的委派
+                logger.warning(
+                    f"[agent-worker] tree settle after subagent_done "
+                    f"(child={child_run_id}) failed: {err}"
+                )
+
     ok = content["status"] == "success" and not failures
     error_code = failures[0] if failures else (None if ok else "subagent_failed")
     await _finalise_subagent_task(

@@ -408,7 +408,7 @@ async def test_a_tree_that_was_already_charged_is_never_force_settled(
     out = await tree_charge.settle_tree_if_closed(
         run_id="800000000000001", force_stale_pending=True
     )
-    assert (out.settled, out.reason) == (False, "already")
+    assert (out.settled, out.reason) == (False, "legacy_charged")
     charged.assert_not_awaited()
 
 
@@ -453,6 +453,76 @@ async def test_a_charge_that_raises_releases_the_stamp(charged, monkeypatch):
     assert len(writes) == 2
     params = writes[-1].compile().params
     assert "charged_at" in str(params.values()), "撤戳那条没有指向 charged_at"
+
+
+async def test_the_real_async_timeline_settles_once_when_the_event_lands(
+    charged, monkeypatch
+):
+    """**按真实时序走一遍**（评审修复轮 3 的 Critical）。
+
+    ``async_pending`` 只在 ``subagent_done`` 折进**父**的视图时才减一，而那条事件是
+    ``agent_worker`` 在子 run 跑完**之后**才写的。所以异步链上的三拍是：
+
+    1. root 结束 —— ``pending=1`` → 不收口；
+    2. 子 run 结束 —— 全树终态，但 root 的 ``pending`` **仍是 1** → 还是不收口；
+    3. ``subagent_done`` 落地、``pending`` 归零 —— 这一刻必须有人再叫一次收口，
+       否则整棵树停在 ``pending_children``，只能等 2 小时兜底（而那条路径还会打一条
+       「async child never materialised」的 WARNING，与事实正相反）。
+
+    第三拍的调用方是 ``agent_worker`` 写完事件之后那一次。"""
+    root_pending = _Row(800000000000001, cost={"own_cents": 10.0}, async_pending=1)
+    child = _Row(900000000000002, cost={"own_cents": 3.0})
+
+    # 第一拍与第二拍：都不收口。
+    for caller in ("800000000000001", "900000000000002"):
+        _db(
+            monkeypatch,
+            my_root=None if caller == "800000000000001" else 800000000000001,
+            tree_rows=[root_pending, child],
+        )
+        out = await tree_charge.settle_tree_if_closed(run_id=caller)
+        assert out.reason == "pending_children", caller
+    charged.assert_not_awaited()
+
+    # 第三拍：事件落地，父视图归零，worker 补调一次。
+    root_done = _Row(800000000000001, cost={"own_cents": 10.0}, async_pending=0)
+    _db(monkeypatch, my_root=800000000000001, tree_rows=[root_done, child])
+    out = await tree_charge.settle_tree_if_closed(run_id="900000000000002")
+    assert (out.settled, out.reason) == (True, "charged")
+    assert charged.await_count == 1
+    assert charged.await_args.kwargs["cost_points"] == 13.0
+
+
+async def test_a_tree_already_charged_the_old_way_is_never_charged_again(
+    charged, monkeypatch
+):
+    """防回溯必须挂在**正常**路径上，不能只挂强制路径（评审修复轮 3 的 Important 1）。
+
+    上线前的老树在旧口径下已经**逐 run** 扣过钱，而它的 ``billing.charged_at`` 当然
+    是空的。部署会重启 worker、在飞的 run 拿 heartbeat_lost 是常态 —— 那些树随后被
+    标终态，走的正是这条**正常**路径。少了这道正查，整棵树会按新口径再扣满一次，
+    叠在旧的逐 run 扣费之上。这不是边角情形，是上线首轮最可能发生的那一种。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0})],
+        ever_charged=True,
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "legacy_charged")
+    charged.assert_not_awaited()
+
+
+def test_the_legacy_charge_probe_can_use_the_partial_index():
+    """``type = 'consume'`` 不能省：mig 474 的
+    ``idx_point_transactions_agent_run_consume`` 谓词是
+    ``type = 'consume' AND reference_type = 'agent_run'``。少一个条件谓词就不被蕴含，
+    planner 悄悄改走顺扫 —— 不会报错，也不会有任何东西说出来。"""
+    import inspect
+
+    src = inspect.getsource(tree_charge._tree_was_ever_charged)
+    assert 'PointTransactions.type == "consume"' in src
+    assert "AGENT_RUN_REFERENCE_TYPE" in src
 
 
 async def test_a_pure_byok_tree_is_reported_as_byo_key(charged, monkeypatch):

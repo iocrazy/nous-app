@@ -330,6 +330,73 @@ async def test_two_concurrent_settles_produce_exactly_one_charge(
 
 
 @_skip
+async def test_a_raised_charge_releases_the_stamp_so_the_next_call_can_retry(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """撤戳这条语句只有真库能判。
+
+    它渲染成 ``coalesce(...) - %(param)s``，绑定是 **String** —— PG 要把 ``unknown``
+    解析到 ``jsonb - text``。解析不到就是运行时报错，而那时戳已经盖上、钱没扣成，
+    这棵树永久收不到钱。所以「盖戳 → 扣费 raise → 戳被撤 → 第二次调用能重新 CAS」
+    必须在真服务器上走一遍。"""
+    from app.services.ai.billing import tree_charge
+
+    mock = _stub_reconcile(monkeypatch)
+    mock.side_effect = RuntimeError("points service exploded")
+    out = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+    assert (out.settled, out.reason) == (False, "error")
+    assert await _charged_at(pg, tree["root"]) is None, "戳没撤回去"
+
+    # 第二次：戳撤干净了，CAS 才可能重新成立。
+    mock.side_effect = None
+    again = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+    assert again.reason == "charged"
+    assert await _charged_at(pg, tree["root"])
+
+
+@_skip
+async def test_a_tree_charged_the_old_way_is_not_charged_again(
+    orm_dsn, tree, pg, monkeypatch
+):
+    """防回溯的正查走真库：旧口径**逐 run** 扣过的老树在 ``point_transactions`` 里
+    留着行，而它的 ``billing.charged_at`` 是空的。少了这道，上线首轮那批被
+    heartbeat_lost 标终态的老树会按新口径被整棵再扣一次。"""
+    from app.services.ai.billing import tree_charge
+    from app.services.billing.agent_run_reference import AGENT_RUN_REFERENCE_TYPE
+
+    mock = _stub_reconcile(monkeypatch)
+    team_id = await pg.fetchval(
+        "INSERT INTO public.teams (name, owner_id, invite_code, kind)"
+        " VALUES ($1, $2, $3, 'personal') RETURNING id",
+        f"tc-team-{uuid.uuid4().hex[:8]}",
+        await pg.fetchval("INSERT INTO auth.users DEFAULT VALUES RETURNING id"),
+        f"TC{uuid.uuid4().hex[:8].upper()}",
+    )
+    try:
+        await pg.execute(
+            "INSERT INTO public.point_transactions"
+            " (team_id, type, amount, balance_after, reference_type, reference_id)"
+            " VALUES ($1, 'consume', -1, 0, $2, $3)",
+            team_id,
+            AGENT_RUN_REFERENCE_TYPE,
+            str(tree["child"]),
+        )
+        out = await tree_charge.settle_tree_if_closed(run_id=str(tree["root"]))
+        assert (out.settled, out.reason) == (False, "legacy_charged")
+        mock.assert_not_awaited()
+        assert await _charged_at(pg, tree["root"]) is None, "不收口就绝不能盖戳"
+    finally:
+        await pg.execute(
+            "DELETE FROM public.point_transactions WHERE team_id = $1", team_id
+        )
+        owner = await pg.fetchval(
+            "SELECT owner_id FROM public.teams WHERE id = $1", team_id
+        )
+        await pg.execute("DELETE FROM public.teams WHERE id = $1", team_id)
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", owner)
+
+
+@_skip
 async def test_a_tree_with_one_run_still_running_is_deferred_and_unstamped(
     orm_dsn, tree, pg, monkeypatch
 ):

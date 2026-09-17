@@ -153,8 +153,12 @@ def _tree_read(monkeypatch, rows: list[dict]) -> None:
 
         async def execute(self, stmt):
             self._n += 1
-            # 第一条：我的 root_run_id（None = 我就是 root）。第二条：全树。
-            return _Res([(None,)]) if self._n == 1 else _Res(built)
+            # 第一条：我的 root_run_id（None = 我就是 root）；第二条：全树；
+            # 第三条：防回溯正查「这棵树在 point_transactions 里扣过钱没有」——
+            # 新树是零行，所以这里必须给空，给 built 就变成 legacy_charged。
+            if self._n == 1:
+                return _Res([(None,)])
+            return _Res(built) if self._n == 2 else _Res([])
 
     @asynccontextmanager
     async def _read():

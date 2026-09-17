@@ -20,7 +20,7 @@ workforce 的委派是 fire-and-forget：**root 通常先于它派出去的子 r
 
 1. 读这棵树的全部行（``id = root OR root_run_id = root``）；
 2. 只要还有一行 ``status = 'running'`` → 不扣，返回 ``deferred``；
-3. 否则在 root 行上 CAS 盖一个 ``metadata_json.cost.charged_at`` 戳 ——
+3. 否则在 root 行上 CAS 盖一个 ``metadata_json.billing.charged_at`` 戳 ——
    **抢到的那一条才扣**，rowcount 不是 1 一律返回 ``already`` 并且不扣。
 
 「最后一个结束的人负责结账」，与谁是 root、谁先谁后都无关，也不需要新表新列。
@@ -138,8 +138,10 @@ class SettleOutcome:
 
     #: 这次调用是不是真的扣了（或真的走到了扣费那一步）。
     settled: bool
-    #: ``deferred`` 树里还有人在跑 / ``already`` 别人已收口 / ``charged`` 本次收口 /
-    #: ``unknown`` 读不到行 / ``error`` 读写失败 / ``no_run_id`` 没有可查的树。
+    #: ``deferred`` 树里还有人在跑 / ``pending_children`` 还欠着异步子 run /
+    #: ``already`` 别人已收口 / ``legacy_charged`` 旧口径下已经逐 run 扣过 /
+    #: ``charged`` 本次收口 / ``forced`` 超过宽限期强制收口 / ``unknown`` 读不到行 /
+    #: ``error`` 读写失败 / ``no_run_id`` 没有可查的树。
     reason: str
     charged_points: float = 0.0
 
@@ -170,11 +172,20 @@ def _async_pending_of(metadata: Optional[Mapping[str, Any]]) -> int:
 
 
 async def _tree_was_ever_charged(session, run_ids) -> bool:
-    """这棵树的任何一条 run 在 ``point_transactions`` 里有没有扣分记录。
+    """这棵树的任何一条 run 在 ``point_transactions`` 里有没有扣过分。
 
-    只给**强制收口**用的正查兜底：旧口径是逐 run 扣的，所以一棵上线前的老树必然
-    留着若干行；查到就不强制，免得把历史重扣一遍。新口径下一棵还没收口的树在这张
-    表里是零行，所以这道守卫不会拦住它该拦的以外的任何东西。
+    **两条路径共用**（正常收口与强制收口都要过）。旧口径是**逐 run** 扣的，所以一棵
+    上线前的老树必然留着若干行，而它的 ``billing.charged_at`` 当然是空的 —— 少了这道
+    正查，那棵树会按新口径被**整棵再扣一次**，叠在旧的逐 run 扣费之上。
+
+    ⚠️ 这不是边角情形，恰恰是**上线首轮最可能发生的那一种**：部署会重启 worker，在飞
+    的 run 拿 heartbeat_lost 是常态，于是那些树被 liveness/sweeper 标终态后走的是
+    **正常**路径而不是强制路径。新口径下一棵还没收口的树在这张表里是零行，不误伤。
+
+    ⚠️ ``type == "consume"`` 不能省：mig 474 的
+    ``idx_point_transactions_agent_run_consume`` 谓词是
+    ``type = 'consume' AND reference_type = 'agent_run'``，少一个条件谓词就不被蕴含，
+    planner 悄悄改走顺扫 —— 那正是该索引注释里记着的陷阱，而且不会有任何东西说出来。
     """
     from sqlalchemy import select
 
@@ -184,6 +195,7 @@ async def _tree_was_ever_charged(session, run_ids) -> bool:
     row = (
         await session.execute(
             select(PointTransactions.id)
+            .where(PointTransactions.type == "consume")
             .where(PointTransactions.reference_type == AGENT_RUN_REFERENCE_TYPE)
             .where(PointTransactions.reference_id.in_([str(i) for i in run_ids]))
             .limit(1)
@@ -286,10 +298,11 @@ async def settle_tree_if_closed(
             if pending > 0:
                 if not force_stale_pending or not _pending_is_stale(rows):
                     return SettleOutcome(False, "pending_children")
-                if await _tree_was_ever_charged(session, [r.id for r in rows]):
-                    # 上线前按旧口径逐 run 扣过的老树。强制收口会把它再扣一遍。
-                    return SettleOutcome(False, "already")
                 forced = True
+            # 防回溯，**两条路径共用**：旧口径逐 run 扣过的老树没有戳，不拦就会被
+            # 整棵再扣一遍（见 ``_tree_was_ever_charged``）。
+            if await _tree_was_ever_charged(session, [r.id for r in rows]):
+                return SettleOutcome(False, "legacy_charged")
     except Exception:  # noqa: BLE001 — 一次读失败不该变成一次误扣
         logger.exception("[tree_charge] tree read failed run={}", run_id)
         return SettleOutcome(False, "error")

@@ -368,24 +368,38 @@ async def recompute_monthly_budgets_step() -> int:
 
 @DBOS.step()
 async def force_settle_stale_pending_trees_step() -> int:
-    """兜底：把「欠着永远不会跑的异步子 run」的树强制收口。
+    """兜底：把过了宽限期仍没收口的 run 树捞出来再试一次。
 
-    收口的前置条件之一是全树 ``async_pending == 0``（workforce 异步派发**不建子 run
-    行**，所以「行全终态」不蕴含「树跑完了」）。代价是：派出去的任务如果永远不被
-    worker 取走，那棵树就没有任何一条 run 会再触发收口 —— 钱永久不进账，而且没有
-    任何探针会说。这一步每分钟捞一次超过宽限期的候选。
+    正常情况下收口由树里最后一个可观测事件触发（每条 run 的 ``_finish``、
+    ``agent_worker`` 写完 ``subagent_done``、三个崩溃类终态写方）。捞不回来的有两类，
+    都没有任何**其他**探针会说：
 
-    ⚠️ **提名很宽，判定全在 ``settle_tree_if_closed`` 里**（它会重查全树状态、
-    ``async_pending``、宽限期、防回溯守卫，并靠 root 行的 CAS 保证只扣一次）。这里
-    只负责「谁值得看一眼」，所以同一棵树被多条 run 提名也只会扣一次。
+    * **派了但永远不会跑的异步任务** —— 收口要求全树 ``async_pending == 0``
+      （workforce 异步派发不建子 run 行，「行全终态」不蕴含「树跑完了」），那个计数
+      就永远减不回 0，钱永久不进账；
+    * **盖了戳、扣费却抛异常** —— ``settle`` 会把戳撤回去，可那之后全树已经没有 run
+      会再结束，崩溃写方也不会来。撤戳本身是对的，但**得有人重试**。
 
-    两道防回溯守卫缺一不可：这里的时间窗上界（本机制上线前的历史树在旧口径下已经
-    逐 run 扣过钱），以及 ``settle`` 里那道「这棵树从没扣过钱」的正查。
+    所以提名条件**不看** ``async_pending`` —— 只要「是 root 行 + 终态 + 还没盖戳 +
+    结束超过宽限期 + 在窗口内」就值得看一眼。判定全在
+    :func:`~app.services.ai.billing.tree_charge.settle_tree_if_closed` 里（它重查全树
+    状态、``async_pending``、宽限期、防回溯，并靠 root 行 CAS 保证只扣一次），所以提名
+    宽一点只是多几次读，不会多扣一分钱。
+
+    ⚠️ **时间窗上界是防回溯的**：本机制上线前的历史树在旧口径下已经逐 run 扣过钱，
+    它们的 ``billing.charged_at`` 同样是空的。窗口之外还有 ``settle`` 里那道
+    「这棵树扣过钱没有」的正查，两道一起才安全。
+
+    ⚠️ **`ORDER BY ended_at DESC`**：升序 + LIMIT 会让窗口里攒下的老树把新树饿死
+    （它们每轮都被重提名、每轮都不动）。降序保证新结束的树永远排在前面。
+
+    📌 **记票（3d）**：``agent_runs`` 上没有 ``ended_at`` 索引（现有 14 个索引全是
+    ``heartbeat_at`` / ``started_at`` / ``created_at`` / 坐标列，且多数带
+    ``status = 'running'`` 谓词，与这里的 ``!= 'running'`` 正相反），所以稳态下这是每
+    60 秒一次全表扫 + top-N。本计划禁迁移，索引另立票：
+    ``agent_runs(ended_at DESC) WHERE parent_run_id IS NULL``。
     """
-    from sqlalchemy import and_, or_, select
-
     from app.db.session import read_scope
-    from app.models import AgentRuns
     from app.services.ai.billing.tree_charge import (
         FORCED_SETTLE_MAX_AGE,
         PENDING_CHILDREN_GRACE,
@@ -397,32 +411,17 @@ async def force_settle_stale_pending_trees_step() -> int:
         async with read_scope() as session:
             rows = (
                 await session.execute(
-                    select(AgentRuns.id)
-                    .where(AgentRuns.status != "running")
-                    .where(AgentRuns.ended_at < now - PENDING_CHILDREN_GRACE)
-                    .where(AgentRuns.ended_at > now - FORCED_SETTLE_MAX_AGE)
-                    .where(
-                        or_(
-                            and_(
-                                AgentRuns.metadata_json["view"]["children"][
-                                    "async_pending"
-                                ].astext.is_not(None),
-                                AgentRuns.metadata_json["view"]["children"][
-                                    "async_pending"
-                                ].astext
-                                != "0",
-                            )
-                        )
+                    _stale_tree_candidates_stmt(
+                        older_than=now - PENDING_CHILDREN_GRACE,
+                        newer_than=now - FORCED_SETTLE_MAX_AGE,
                     )
-                    .order_by(AgentRuns.ended_at)
-                    .limit(50)
                 )
             ).all()
     except Exception as exc:  # noqa: BLE001 — 兜底失败不该把这一轮清扫弄挂
-        logger.warning(f"[sweeper] stale-pending scan failed: {exc}")
+        logger.warning(f"[sweeper] stale-tree scan failed: {exc}")
         return 0
 
-    forced = 0
+    settled = 0
     for row in rows:
         try:
             out = await settle_tree_if_closed(
@@ -431,9 +430,31 @@ async def force_settle_stale_pending_trees_step() -> int:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[sweeper] forced settle {row.id} failed: {exc}")
             continue
-        if out.reason == "forced":
-            forced += 1
-    return forced
+        if out.reason in ("forced", "charged"):
+            settled += 1
+    return settled
+
+
+def _stale_tree_candidates_stmt(*, older_than: datetime, newer_than: datetime):
+    """提名语句。抽成纯 builder，好让测试断言它带着那几个谓词 —— 少一个都不会报错，
+    只会让兜底安静地退化（``charged_at IS NULL`` 少了就是重提名已收口的树并饿死新树，
+    时间窗少了就是回溯扣历史）。"""
+    from sqlalchemy import select
+
+    from app.models import AgentRuns
+
+    return (
+        select(AgentRuns.id)
+        # 只提名 root 行：收口自己会沿 ``root_run_id`` 解析整棵树，子行提名等于
+        # 把同一棵树重复喂进来。
+        .where(AgentRuns.parent_run_id.is_(None))
+        .where(AgentRuns.status != "running")
+        .where(AgentRuns.metadata_json["billing"]["charged_at"].astext.is_(None))
+        .where(AgentRuns.ended_at < older_than)
+        .where(AgentRuns.ended_at > newer_than)
+        .order_by(AgentRuns.ended_at.desc())
+        .limit(50)
+    )
 
 
 @DBOS.scheduled("* * * * *")  # every minute
