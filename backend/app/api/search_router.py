@@ -16,7 +16,10 @@ from app.schemas.search import (
 )
 from app.schemas.unified_search import UnifiedSearchResponse
 from app.services.library.like_escape import escape_like
-from app.services.library.search_service import SearchService
+from app.services.library.search_service import (
+    SearchFiltersUnavailable,
+    SearchService,
+)
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -251,6 +254,7 @@ async def hybrid_search(
             threshold=request.threshold,
             user_id=auth.user_id,
             fields=request.fields,
+            filters=request.filters,
         )
 
         platform_ids = [r.platform_id for r in response.results]
@@ -366,6 +370,15 @@ async def text_search(
             pattern=pattern,
             fields=list(request.fields),
             limit=request.limit,
+            filters=request.filters,
+        )
+    except SearchFiltersUnavailable as e:
+        # Typed, and 503 rather than 500: retryable, and it says the search is
+        # unavailable instead of returning hits that ignore the user's filters.
+        logger.error(f"Text search unavailable (migration 475 not applied): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search is briefly unavailable while an update finishes.",
         )
     except Exception as e:
         logger.error(f"Text search failed: {e}")

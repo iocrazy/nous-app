@@ -952,7 +952,8 @@
     "empty": "No content yet",
     "searchPlaceholder": "Search title, tags, notes...",
     "searchResultsCount": "Found {{count}} matching items",
-    "searchResultsCountSingular": "Found 1 matching item"
+    "searchResultsCountSingular": "Found 1 matching item",
+    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters."
   },
   "search": {
     "aiPlaceholder": "AI search... ↵",
