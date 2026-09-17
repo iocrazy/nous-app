@@ -118,6 +118,13 @@ class LLMFallbackChain:
     # every model in order, no skip-known-bad).
     health_registry: Optional[Any] = None
 
+    # 构建时命中平台目录 ``mediahub_models`` 的模型全集（``fallback_wiring``
+    # 预解析出来的那些）。它们的 adapter 用 admin 凭证，所以这一步的钱是**平台**
+    # 付的，与这条 run 的 ``credential_origin`` 无关 —— 半程 BYOK（主模型是
+    # 用户的、fallback 落到目录行）的唯一判据就是它。空集 = 调用方没有告诉我们
+    # 谁是平台侧，下游据此退到 run 级 origin。
+    platform_models: frozenset[str] = frozenset()
+
     _switch_log: list[_SwitchEvent] = field(default_factory=list, init=False)
     # Test seam: override the monotonic clock for deterministic deadline tests.
     # default_factory to keep the instance-attribute pattern — see the
@@ -308,6 +315,10 @@ class LLMFallbackChain:
                 ],
             }
             response["_actual_model"] = model
+            # 与 ``_actual_model`` 并列：那一个说「最后跑的是哪个模型」，这一个说
+            # 「那次调用的钱谁付的」。两个都是 harness 侧注入的下划线键，不进
+            # provider 的 wire 形状，消费方 ``AgentRunner._step_ended`` 读它。
+            response["_served_by_platform"] = model in self.platform_models
             return response
 
         # Every model exhausted. The message must stand alone — see the

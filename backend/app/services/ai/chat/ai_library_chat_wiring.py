@@ -102,6 +102,9 @@ class AgentRunnerStack:
     # Phase A: agent-memory recall results (flag-gated on FEATURE_AGENT_MEMORY;
     # [] when off — behavior-neutral until the flag is flipped in prod).
     agent_memory_facts: list[str] = field(default_factory=list)
+    # 这次回合用的是谁的凭证（``resolve_chat_config`` 已经算好，此前被当场
+    # 丢弃）。recorder 构造点从这里取，传给 ``RunRecorder``。
+    credential_origin: Optional[str] = None
 
 
 async def build_agent_runner_stack(
@@ -326,6 +329,9 @@ async def build_agent_runner_stack(
         agent_slug=agent.get("slug") or "",
     )
     user_provider_config = _chat_cfg.provider_config
+    # origin 不是凭证，是「这些凭证是谁的」。此前只取 provider_config，这个标记
+    # 当场丢掉，于是 BYOK 的 run 在账上与平台 run 无从区分（用户裁定 2）。
+    credential_origin = _chat_cfg.origin
 
     from app.services.ai.llm.fallback_wiring import build_fallback_llm
 
@@ -475,6 +481,7 @@ async def build_agent_runner_stack(
         fallback_chain_active=bool(fallback_models),
         user_context=honcho_context,
         agent_memory_facts=agent_memory_facts,
+        credential_origin=credential_origin,
     )
 
 

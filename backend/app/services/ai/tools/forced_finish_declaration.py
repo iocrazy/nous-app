@@ -108,7 +108,7 @@ async def attempt_forced_finish_declaration(
 
 async def _resolve_agent_and_adapter(
     session_id: str, user_id: str
-) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+) -> tuple[dict[str, Any], Any, dict[str, Any], Optional[str]]:
     """Load the issue session's agent record + a SINGLE adapter (no fallback
     chain, no retries — this is a one-shot bounded call) for its configured
     model.
@@ -146,6 +146,10 @@ async def _resolve_agent_and_adapter(
         raise RuntimeError(f"agent slug not found: {agent_slug}")
 
     model = agent_record.get("model") or "qwen-max"
+    # 用户裁定 2：origin 必须和 adapter 一起离开这里。此前只返回 adapter，调用点
+    # 拿到的是一个无从追问来路的对象，于是这条路的 BYOK run 在账上与平台 run 无
+    # 从区分 —— 而它带着 session 的 team_id，是真的会扣分的。
+    credential_origin: Optional[str]
     hit = await resolve_mediahub_model(model, "chat")
     if hit:
         actual_provider, cfg, actual_model = hit
@@ -153,6 +157,8 @@ async def _resolve_agent_and_adapter(
         key = resolve_provider_key(actual_provider, actual_model)
         adapter = get_adapter_for_key(key, actual_model, {key: creds})
         model = actual_model
+        # 目录命中 = admin 凭证 = 平台付。
+        credential_origin = "platform"
     else:
         chat_cfg = await resolve_chat_config(
             uid,
@@ -161,9 +167,10 @@ async def _resolve_agent_and_adapter(
             agent_slug=agent_slug,
         )
         adapter = get_adapter_for_user(model, chat_cfg.provider_config, None)
+        credential_origin = chat_cfg.origin
 
     resolved_agent = {**agent_record, "model": model}
-    return resolved_agent, adapter, session
+    return resolved_agent, adapter, session, credential_origin
 
 
 async def _run_forced_declare_turn(
@@ -175,8 +182,8 @@ async def _run_forced_declare_turn(
     trigger: str,
     attribution: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str]]:
-    agent_record, adapter, session = await _resolve_agent_and_adapter(
-        session_id, user_id
+    agent_record, adapter, session, credential_origin = (
+        await _resolve_agent_and_adapter(session_id, user_id)
     )
 
     composed = ComposedSystemPrompt(
@@ -245,6 +252,7 @@ async def _run_forced_declare_turn(
         # the issue's real origin (see attempt_forced_finish_declaration's
         # docstring).
         attribution=attribution,
+        credential_origin=credential_origin,
         metadata={"forced_declare": True},
     ) as recorder:
         # Explicit capability probe rather than try/except TypeError: a

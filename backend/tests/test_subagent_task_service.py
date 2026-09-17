@@ -270,7 +270,13 @@ def _wire_sync_spawn(monkeypatch, *, content="found it"):
         wiring_mod,
         "build_agent_runner_stack",
         AsyncMock(
-            return_value=SimpleNamespace(runner=SimpleNamespace(run_turn=run_turn))
+            return_value=SimpleNamespace(
+                runner=SimpleNamespace(run_turn=run_turn),
+                # 真的 ``AgentRunnerStack`` 永远有这个字段（frozen dataclass，
+                # 默认 None）。桩少一个属性，``_spawn`` 读它就 AttributeError，
+                # 而 spawn 把异常吞成 status=failed —— 桩要照真形状。
+                credential_origin=None,
+            )
         ),
     )
 

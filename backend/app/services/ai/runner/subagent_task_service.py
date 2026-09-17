@@ -577,6 +577,9 @@ class SubAgentTaskService:
                 # hanging off round 1 rather than as an unrelated sibling.
                 fork_of_run_id=int(child_run_id) if child_run_id else None,
                 fork_at_seq=continue_from[1] if continue_from else None,
+                credential_origin=stack.credential_origin,
+                # 同 agent_worker：扣费判据要一个不被 metadata 结构带偏的字段。
+                parent_run_id=str(parent_run_id) if parent_run_id else None,
                 metadata={
                     "subagent_type": slug,
                     "description": description or None,

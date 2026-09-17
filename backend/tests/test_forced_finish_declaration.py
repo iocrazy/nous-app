@@ -291,7 +291,7 @@ async def test_forced_declare_turn_forces_tool_choice_and_parses_needs_input(
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, _FakeAdapter(), session)),
+        AsyncMock(return_value=(agent_record, _FakeAdapter(), session, "platform")),
     )
 
     recorded_kwargs: dict[str, Any] = {}
@@ -366,7 +366,7 @@ async def test_forced_declare_turn_uses_legacy_session_id_when_not_conversations
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, _FakeAdapter(), session)),
+        AsyncMock(return_value=(agent_record, _FakeAdapter(), session, "platform")),
     )
     recorded_kwargs: dict[str, Any] = {}
 
@@ -399,7 +399,7 @@ async def test_forced_declare_turn_passes_the_forcing_tool_choice(monkeypatch):
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, adapter, session)),
+        AsyncMock(return_value=(agent_record, adapter, session, "platform")),
     )
     monkeypatch.setattr(fd, "RunRecorder", lambda **kw: _RecorderCM(**kw))
 
@@ -443,7 +443,7 @@ async def test_forced_declare_turn_narrows_forced_continue_to_none(monkeypatch):
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, _ContinueAdapter(), session)),
+        AsyncMock(return_value=(agent_record, _ContinueAdapter(), session, "platform")),
     )
     monkeypatch.setattr(fd, "RunRecorder", lambda **kw: _RecorderCM(**kw))
 
@@ -487,7 +487,7 @@ async def test_forced_declare_turn_falls_back_when_adapter_lacks_tool_choice_sup
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, adapter, session)),
+        AsyncMock(return_value=(agent_record, adapter, session, "platform")),
     )
     monkeypatch.setattr(fd, "RunRecorder", lambda **kw: _RecorderCM(**kw))
 
@@ -526,7 +526,7 @@ async def test_forced_declare_turn_times_out_and_fails_open(monkeypatch):
     monkeypatch.setattr(
         fd,
         "_resolve_agent_and_adapter",
-        AsyncMock(return_value=(agent_record, _HangingAdapter(), session)),
+        AsyncMock(return_value=(agent_record, _HangingAdapter(), session, "platform")),
     )
     monkeypatch.setattr(fd, "RunRecorder", lambda **kw: _RecorderCM(**kw))
     monkeypatch.setattr(fd, "FORCED_DECLARE_TIMEOUT_S", 0.05)
