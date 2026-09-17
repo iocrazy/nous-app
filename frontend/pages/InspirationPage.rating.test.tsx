@@ -35,6 +35,9 @@ vi.mock('react-i18next', () => ({
 }));
 const addToast = vi.fn();
 vi.mock('../components/Toast', () => ({ useToast: () => ({ addToast }) }));
+// The page confirms destructive actions through the app dialog (useConfirm),
+// which needs ConfirmProvider — mounted by AppLayout, not by this harness.
+vi.mock('../components/ConfirmDialog', () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
 
 import { InspirationPage } from './InspirationPage';
 

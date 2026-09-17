@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { Link2, Search, Star, Tag as TagIcon, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
 import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
@@ -66,6 +67,7 @@ export function buildTagSuggestions(
 
 export const InspirationPage: React.FC = () => {
   const { t } = useTranslation();
+  const confirm = useConfirm();
   const { addToast } = useToast();
 
   const [notes, setNotes] = useState<InspirationNote[]>([]);
@@ -258,7 +260,16 @@ export const InspirationPage: React.FC = () => {
   };
 
   const onDelete = async (note: InspirationNote) => {
-    if (!window.confirm(t('inspiration.deleteConfirm', 'Delete this note?'))) return;
+    // The app's own dialog, like every other destructive action — not the
+    // browser's native confirm, which renders in the browser's chrome.
+    const ok = await confirm({
+      variant: 'danger',
+      title: t('inspiration.deleteConfirm', 'Delete this note?'),
+      message: t('inspiration.deleteConfirmMessage', 'This note will be permanently deleted.'),
+      confirmLabel: t('inspiration.delete', 'Delete'),
+      cancelLabel: t('inspiration.cancel', 'Cancel'),
+    });
+    if (!ok) return;
     try {
       await deleteNote(note.id);
       setNotes((prev) => prev.filter((n) => n.id !== note.id));

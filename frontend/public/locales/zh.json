@@ -5093,7 +5093,8 @@
     "insertCode": "插入代码块",
     "attachFile": "添加附件",
     "insertLink": "插入链接",
-    "backToThisMonth": "回到本月"
+    "backToThisMonth": "回到本月",
+    "deleteConfirmMessage": "删除后无法恢复。"
   },
   "editor": {
     "brand": "Nous Projects",
