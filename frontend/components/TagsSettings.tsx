@@ -1317,7 +1317,7 @@ export const TagsSettings: React.FC = () => {
               {/* Reason lives HERE, not in the page banner — the overlay above
                   hides that one completely while this dialog is open. */}
               {(dialogError || duplicateOfNewTag) && (
-                <div className="p-3 rounded-lg bg-danger-soft border border-danger-border flex items-start gap-2 text-danger-text text-sm">
+                <div className="p-3 rounded-lg bg-danger-soft border border-danger-line flex items-start gap-2 text-danger text-sm">
                   <AlertCircle size={16} className="shrink-0 mt-0.5" />
                   <span>
                     {dialogError ??
@@ -1550,7 +1550,7 @@ export const TagsSettings: React.FC = () => {
                   behind this overlay, so save/delete failures must surface
                   here or not at all. */}
               {dialogError && (
-                <div className="p-3 rounded-lg bg-danger-soft border border-danger-border flex items-start gap-2 text-danger-text text-sm">
+                <div className="p-3 rounded-lg bg-danger-soft border border-danger-line flex items-start gap-2 text-danger text-sm">
                   <AlertCircle size={16} className="shrink-0 mt-0.5" />
                   <span>{dialogError}</span>
                 </div>

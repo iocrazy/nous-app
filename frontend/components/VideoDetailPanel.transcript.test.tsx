@@ -168,4 +168,38 @@ describe('Transcript tab — layout and palette', () => {
     expect(container.querySelector('[class*="indigo-"]')).toBeNull();
     expect(container.querySelector('[class*="emerald-"]')).toBeNull();
   });
+  // Reported: scrolling the transcript up, the text did not fade out under the
+  // toolbar — it showed straight through the Segments / Full Text controls.
+  // The sticky row named an `island-1` backdrop that does not exist, so it was
+  // transparent. It must use a real token, and fade the text beneath it.
+  it('gives the sticky toolbar a real, opaque backdrop in the island shell', async () => {
+    const { container } = await openTranscript({ onSeek: vi.fn(), island: true });
+    const fade = container.querySelector('[data-testid="transcript-toolbar-fade"]') as HTMLElement;
+    const toolbar = fade.parentElement as HTMLElement;
+
+    expect(toolbar.className).toContain('sticky');
+    expect(toolbar.className.split(/\s+/)).toContain('bg-island');
+    expect(toolbar.className).not.toMatch(/\bbg-island-1\b/);
+  });
+
+  it('fades the text out as it scrolls up under the toolbar', async () => {
+    const { container } = await openTranscript({ onSeek: vi.fn(), island: true });
+    const fade = container.querySelector('[data-testid="transcript-toolbar-fade"]') as HTMLElement;
+
+    expect(fade).toBeTruthy();
+    // Hangs below the row, in the row's own surface colour, dissolving to
+    // nothing — and never swallows a click on the segment underneath.
+    expect(fade.className).toContain('top-full');
+    expect(fade.className).toContain('from-island');
+    expect(fade.className).toContain('to-transparent');
+    expect(fade.className).toContain('pointer-events-none');
+    expect(fade.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('matches the fade to the drawer surface outside the island shell', async () => {
+    const { container } = await openTranscript({ onSeek: vi.fn() });
+    const fade = container.querySelector('[data-testid="transcript-toolbar-fade"]') as HTMLElement;
+    expect(fade.className).toContain('from-ink-900');
+    expect((fade.parentElement as HTMLElement).className).toContain('bg-ink-900');
+  });
 });
