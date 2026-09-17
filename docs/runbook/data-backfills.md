@@ -39,8 +39,9 @@
 ## 例外：按用户跑的嵌入补算（2026-09-16）
 
 `POST /api/v1/ai/analyze/backfill-embeddings` **不在** `_BACKFILLS` 注册表里，也不是
-admin 端点——它补的是**调用者自己**缺 `content_embedding` 的下载（`analyze_l1` 长期
-静默失败留下的存量，见 CLAUDE.md 已知陷阱「向量链路三处静默」），范围按 JWT 的
+admin 端点——它补的是**调用者自己**缺 `content_embedding` 的下载（2026-09-16 查时
+`resource_analysis` 只有 2 行、0 条向量，语义层一直是空的；背景见 CLAUDE.md 已知陷阱
+「向量链路三处静默」），范围按 JWT 的
 user_id 划，不是全表，所以走不了 `/api/v1/admin/backfill` 那条全库通道。
 
 ```
