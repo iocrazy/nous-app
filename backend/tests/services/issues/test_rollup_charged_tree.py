@@ -38,6 +38,10 @@ class _Runs:
     async def own_cost_cents_for_issue_runs(self, issue_id, conversation_id=None):
         return 0.92
 
+    async def tree_cost_cents(self, root_ids):
+        assert root_ids == [_ROOT]
+        return {str(_ROOT): 0.92}
+
     async def last_transcript_seq(self, run_id):
         return None
 

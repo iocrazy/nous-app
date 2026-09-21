@@ -194,7 +194,9 @@ async def issue_usage(issue_id: int, auth: AuthDep):
     if not visible:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
-    totals = await usage_repository.issue_totals(issue_id)
+    # 会话键白拿：鉴权那一步已经把议题行读回来了。不传就会漏掉只经 conversation
+    # 挂到这个议题上的 run —— 它们进得了驾驶舱 Budget 格与预算门禁，却不进这里。
+    totals = await usage_repository.issue_totals(issue_id, row.get("ai_session_id"))
     return IssueUsageResponse(
         issue_id=str(issue_id),
         prompt_tokens=_int(totals.get("prompt_tokens")),

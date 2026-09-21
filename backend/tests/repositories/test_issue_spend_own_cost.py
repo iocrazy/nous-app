@@ -15,6 +15,7 @@ Usage 面、驾驶舱 Budget 格、预算门禁上是三个数。
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import Any, Callable
 
 import pytest
@@ -80,7 +81,7 @@ def captured_stmt_usage(monkeypatch: pytest.MonkeyPatch):
     """同上，但 ``usage_repository.issue_totals`` 是在函数体内 import 的，
     所以要 patch ``app.db.session`` 本身。"""
 
-    async def _run() -> Any:
+    async def _run(**kw: Any) -> Any:
         import app.db.session as db_session
         from app.repositories import usage_repository
 
@@ -93,7 +94,7 @@ def captured_stmt_usage(monkeypatch: pytest.MonkeyPatch):
         }
         session = _CapturingSession(_Result(row))
         monkeypatch.setattr(db_session, "read_scope", lambda: _scope_of(session))
-        await usage_repository.issue_totals(1)
+        await usage_repository.issue_totals(1, **kw)
         return session.stmts[-1]
 
     return _run
@@ -185,11 +186,12 @@ async def test_issue_totals_cost_no_longer_root_filtered(captured_stmt_usage):
 
 
 async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
-    """``compute_rollup`` 的 ``spent`` 来自仓库那条 SUM，而不是逐 root 行的
-    ``cost_cents`` —— 所以传进去的行上写着 99 也不该影响结果。
+    """Budget 格与它下面那几行都不读 ``agent_runs.cost_cents``（行上写着 99 也影响
+    不了任何一个数）：格子来自 ``own_cost_cents_for_issue_runs``，行来自
+    ``tree_cost_cents``。
 
-    钉的是 ``load_rollup`` 这条真接线：只测纯函数的话，「忘了去问那条 SUM」会让
-    预算格永远是 0 而单测全绿。
+    钉的是 ``load_rollup`` 这条真接线：只测纯函数的话，「忘了去问那两条」会让预算格
+    永远是 0、每行退回折叠列，而单测全绿。
     """
     from unittest.mock import AsyncMock
 
@@ -201,6 +203,7 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
 
     asked: list[tuple[int, int | None]] = []
     listed: list[tuple[int, int | None]] = []
+    trees: list[list[int]] = []
 
     class _Runs:
         async def list_for_issue(self, *, issue_id, conversation_id=None):
@@ -225,6 +228,11 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
         async def own_cost_cents_for_issue_runs(self, issue_id, conversation_id=None):
             asked.append((issue_id, conversation_id))
             return 4.25
+
+        async def tree_cost_cents(self, root_ids):
+            trees.append(list(root_ids))
+            # 两棵树加起来正好是上面那个议题总额 —— 真库里本来就该对得上。
+            return {"776": 2.0, "775": 2.25}
 
         async def efficiency_for_issue(self, _issue_id):
             return {}
@@ -257,5 +265,70 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
     assert asked == [(5, 88)] and listed == [(5, 88)]
     assert out["budget"]["spent_cents"] == 4.25
     assert out["budget"]["pct"] == 4
-    # 每行那一格仍然展示这一行自己的 cost_cents —— 旧列是展示用的，没被取消。
-    assert [r["cost_cents"] for r in out["runs"]] == [99.0, 99.0]
+    # 每行那一格是**这一行那棵树**的总额（终审 I2），不是行上那个折叠列的 99。
+    assert trees == [[776, 775]]
+    assert [r["cost_cents"] for r in out["runs"]] == [2.0, 2.25]
+    # 格子与它下面的行对得上账 —— 这正是换成树总额要买的东西。
+    assert sum(r["cost_cents"] for r in out["runs"]) == out["budget"]["spent_cents"]
+
+
+def _where(sql: str) -> str:
+    """语句最外层那个 WHERE 的全文。
+
+    从右边切：``issue_totals`` 的 SELECT 列表里有 ``FILTER (WHERE …)``，从左边切会
+    切进那个 filter 里。这两条语句都没有子查询，所以最后一个 WHERE 就是外层那个。
+    编译出来的 SQL 带换行，先压成一行再切。
+    """
+    return re.sub(r"\s+", " ", sql).rsplit(" WHERE ", 1)[1]
+
+
+async def test_issue_totals_uses_the_same_or_keys_as_the_gate(
+    captured_stmt, captured_stmt_usage
+):
+    """Usage 面的议题总额与预算门禁必须用**同一组键**找行，不只是同一条 SUM。
+
+    只按 ``issue_id`` 找会漏掉只经 session 的 conversation 挂上来的 run —— 那条 run
+    进得了门禁总额与驾驶舱 Budget 格，却不进 Usage 面，而三处 docstring 都写着口径
+    一致（``_issue_scope_keys`` 就是为了不让这三处各写一份）。
+    """
+    totals = _where(_sql(await captured_stmt_usage(conversation_id=2)))
+    gate = _where(
+        _sql(
+            await captured_stmt(
+                lambda repo: repo.spent_cents_for_issue(issue_id=1, conversation_id=2)
+            )
+        )
+    )
+    assert totals == gate
+    assert "conversation_id" in totals
+
+
+async def test_issue_totals_without_a_session_key_asks_by_issue_alone(
+    captured_stmt_usage,
+):
+    """调用方没有会话键时只按 ``issue_id`` 找 —— 不是编一个。"""
+    s = _sql(await captured_stmt_usage())
+    assert "conversation_id" not in s
+    assert "agent_runs.issue_id =" in s
+
+
+async def test_issue_totals_refuses_to_sum_the_whole_table():
+    """两个键都没有 → WHERE 空掉 → 这条 SUM 变成全库花费。宁可抛，也不给一个
+    看着像数的错答案（同 ``_own_cost_sum_stmt`` 那道守卫）。"""
+    from app.repositories import usage_repository
+
+    with pytest.raises(ValueError):
+        await usage_repository.issue_totals(None)
+
+
+def test_the_shared_sum_refuses_to_run_without_a_predicate():
+    """``_own_cost_sum_stmt()`` 不带谓词拼出来的是整张 ``agent_runs`` 的 own 花费
+    之和 —— 所有用户、所有议题的一个数字，被当成某一个议题的花费喂给预算门禁。
+
+    这不是假想的手滑：``_issue_scope_keys`` 在两个键都为 None 时正好返回空列表，
+    一次空参数调用就能走到这里。
+    """
+    from app.repositories.agent_runs_repository import _own_cost_sum_stmt
+
+    with pytest.raises(ValueError):
+        _own_cost_sum_stmt()

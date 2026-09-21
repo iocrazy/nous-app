@@ -40,6 +40,7 @@ def test_efficiency_rides_through_with_cost_per_deliverable():
         0,
         {"kind": "manual"},
         spent_cents=20.0,
+        tree_cost_cents={"1": 20.0},
         efficiency=EFF,
     )
     assert out["efficiency"] == {**EFF, "cost_per_deliverable_cents": 5.0}
@@ -48,7 +49,9 @@ def test_efficiency_rides_through_with_cost_per_deliverable():
 def test_an_issue_with_no_runs_yet_still_has_the_full_shape():
     """前端无条件读这八个键——缺席的字段会渲成空白格。0 件产出时「每件多少钱」是
     不知道，不是 0：0 会被读成「很便宜」。"""
-    out = compute_rollup(ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0)
+    out = compute_rollup(
+        ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0, tree_cost_cents={}
+    )
     assert out["efficiency"] == {
         "runs": 0,
         "steps": 0,
@@ -66,6 +69,7 @@ def test_an_issue_with_no_runs_yet_still_has_the_full_shape():
         0,
         {"kind": "manual"},
         spent_cents=20.0,
+        tree_cost_cents={"1": 20.0},
         efficiency={**EFF, "deliverables": 0},
     )
     assert spent["efficiency"]["cost_per_deliverable_cents"] is None
@@ -81,6 +85,7 @@ def test_charged_points_land_on_the_matching_run_only():
         0,
         {"kind": "manual"},
         spent_cents=25.0,
+        tree_cost_cents={"1": 20.0, "2": 5.0},
         charged_points={"1": 21.0},
     )
     assert [(r["id"], r["charged_points"]) for r in out["runs"]] == [
@@ -99,6 +104,7 @@ def test_charged_points_of_zero_is_not_the_same_as_never_charged():
         0,
         {"kind": "manual"},
         spent_cents=0.0,
+        tree_cost_cents={"1": 0.0},
         charged_points={"1": 0.0},
     )
     assert out["runs"][0]["charged_points"] == 0.0
@@ -109,8 +115,12 @@ def test_the_empty_shape_is_not_shared_between_issues():
     常量本身交给调用方，谁改一下就污染了全进程后续每一个议题。"""
     from app.services.issues.issue_rollup import EMPTY_EFFICIENCY
 
-    a = compute_rollup(ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0)
-    b = compute_rollup(ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0)
+    a = compute_rollup(
+        ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0, tree_cost_cents={}
+    )
+    b = compute_rollup(
+        ISSUE, [], [], 0, {"kind": "manual"}, spent_cents=0.0, tree_cost_cents={}
+    )
     a["efficiency"]["turn_end_reasons"]["completed"] = 1
     assert b["efficiency"]["turn_end_reasons"] == {}
     assert EMPTY_EFFICIENCY["turn_end_reasons"] == {}

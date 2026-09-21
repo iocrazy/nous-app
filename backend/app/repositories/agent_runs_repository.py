@@ -142,7 +142,18 @@ def _own_cost_sum_stmt(*where: Any) -> Select[Any]:
       历史行上；不包一层的话，``SUM`` 本身照常跳过 NULL，但任何逐行运算（将来加
       ``FILTER`` / ``CASE``）会静默把整项变成 NULL。外层那个 coalesce 管的是另一
       件事：零行时 ``SUM`` 返回 NULL，调用方要的是 0。
+
+    **一个谓词都没有就 raise。** 那样拼出来的是「整张 ``agent_runs`` 的 own 花费之
+    和」——一个所有用户、所有议题的数字，被当成某一个议题的花费用在预算门禁上。
+    ``_issue_scope_keys`` 在 ``issue_id`` 与 ``conversation_id`` 都为 None 时正好返回
+    空列表，所以这不是假想的手滑，而是一次空参数调用就能走到的地方。默默回一个全库
+    总额是「钱的答案」里最坏的一种：它看着像个数。
     """
+    if not where:
+        raise ValueError(
+            "_own_cost_sum_stmt needs at least one predicate — "
+            "an unfiltered SUM is the whole table's spend, not an issue's"
+        )
     return select(
         func.coalesce(func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0)
     ).where(*where)
@@ -1158,6 +1169,12 @@ class AgentRunsRepository(AsyncpgRepository):
         # 子 run 的 scope 列是 best-effort：``team_of_run`` 查不到就降级成 None，
         # ``DispatchScope`` 同理，所以子行的 team_id / project_id 可以是 NULL 而它的
         # root 有值。按子行自己的列过滤 = 把委派那笔钱静默丢掉，而那正是本票要捞回来的。
+        #
+        # 成员判定写成 ``root_run_id IN (…) OR id IN (…)`` 而不是
+        # ``COALESCE(root_run_id, id) IN (…)``：两者选出的行完全相同，但表达式上的
+        # ``COALESCE`` 让 planner 用不上 ``idx_agent_runs_root_tree``，只能整表扫。
+        # 树键那一份**唯一拼法**留在 GROUP BY 与输出标签上（那里要的是「同一棵树归成
+        # 一行」这个语义），与 ``run_ids_in_trees`` 的 WHERE 是同一个写法。
         tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
         in_scope_roots = select(AgentRuns.id).where(*scope, root_only)
         tree_cost = (
@@ -1165,7 +1182,12 @@ class AgentRunsRepository(AsyncpgRepository):
                 tree_key.label("root"),
                 func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
             )
-            .where(tree_key.in_(in_scope_roots))
+            .where(
+                or_(
+                    AgentRuns.root_run_id.in_(in_scope_roots),
+                    AgentRuns.id.in_(in_scope_roots),
+                )
+            )
             .group_by(tree_key)
             .subquery("tree_cost")
         )
@@ -1308,8 +1330,9 @@ class AgentRunsRepository(AsyncpgRepository):
         报回父行、或者根本没报（失败 / 被取消）时它低报，而它同时又不能被求和 ——
         子 run 自己还有一行。``own_cost_cents`` 每行只记自身，求和既不低报也不双计。
 
-        每个问到的 root **至少映射到它自己**（0.0）—— 读空不等于免费，键整个缺席会让
-        调用方 ``.get`` 拿到 None 再 ``?? 0``，把一次读空写成一个关于钱的断言。
+        **每个问到的 root 都会出现在返回值里**，一行都没读到的那些映射到 ``0.0``。
+        键整个缺席会让调用方 ``.get`` 拿到 None 再 ``?? 0``，把「这棵树目前记着 0」与
+        「我没答上来」压成同一个数字；而 ``0.0`` 至少是这张图自己说得出口的那个值。
 
         ⚠️ **只许拿 root 来问。** 一条子 run 的树键指向它的根而不是它自己，所以问一个
         非 root 的 id 会拿到 0.0 —— 那是「这个 id 不是任何一棵树的根」，不是「它没花
@@ -1324,12 +1347,17 @@ class AgentRunsRepository(AsyncpgRepository):
         if not roots:
             return {}
         tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        # 收行用 ``root_run_id IN (…) OR id IN (…)``（同 ``run_ids_in_trees``）：选出的
+        # 行与 ``COALESCE(root_run_id, id) IN (…)`` 完全相同，但表达式上的 ``COALESCE``
+        # 让 planner 用不上 ``idx_agent_runs_root_tree``。树键留在 GROUP BY 与标签上。
         stmt = (
             select(
                 tree_key.label("root"),
                 func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
             )
-            .where(tree_key.in_(roots))
+            .where(
+                or_(AgentRuns.root_run_id.in_(roots), AgentRuns.id.in_(roots)),
+            )
             .group_by(tree_key)
         )
         out = {str(r): 0.0 for r in roots}

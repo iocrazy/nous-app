@@ -219,18 +219,23 @@ async def summarize(
     }
 
 
-async def issue_totals(issue_id: Any) -> dict[str, Any]:
-    """Per-issue AI spend, summed from agent_runs by the issue_id index.
+async def issue_totals(issue_id: Any, conversation_id: Any = None) -> dict[str, Any]:
+    """Per-issue AI spend, summed from agent_runs by the issue's scope keys.
+
+    ``conversation_id`` 是议题的第二条挂靠键（run 经 session 的 conversation 挂上来，
+    见 ``_issue_scope_keys``）。调用方手里有就传 —— ``usage_router`` 为了鉴权本来就
+    读了那一行，``ai_session_id`` 是白拿的。**不传就只按 ``issue_id`` 找**，那样只走
+    会话键的 run 不进这个数，下面那句「三处一致」也就只在传了的时候成立。
 
     两条口径，不能共用一条 WHERE（A2）：
 
     - ``cost_cents`` / ``prompt_tokens`` / ``completion_tokens`` /
       ``total_tokens`` —— **该议题的全部 run**（root + children）。钱读的是
       ``agent_runs.own_cost_cents``（3d 第 0 票，mig 479）：每行只记自身，不含
-      后代，所以全行求和既不双计也不漏掉委派出去的子 run。同一条表达式也用在预算
-      门禁 ``agent_runs_repository.spent_cents_for_issue`` 和驾驶舱的
-      ``own_cost_cents_for_issue_runs``，三处必须一致，否则同一个议题在 Usage 面
-      与驾驶舱 Budget 格读出两个数。token 列同样不上滚（``add_tokens`` 只累加本
+      后代，所以全行求和既不双计也不漏掉委派出去的子 run。同一条表达式、**同一组
+      OR 键**也用在预算门禁 ``agent_runs_repository.spent_cents_for_issue`` 和驾驶舱的
+      ``own_cost_cents_for_issue_runs``（三处共用 ``_issue_scope_keys``），必须一致，
+      否则同一个议题在 Usage 面与驾驶舱 Budget 格读出两个数。token 列同样不上滚（``add_tokens`` 只累加本
       run 自己那几次调用，子 run 是独立行）。
       ⚠️ **不许改回 ``cost_cents``** —— 那一列是「自身 + 已报到的后代」，只供单行
       展示；按它求和就必须重新加上 root 过滤，而那正是让 Delegate 子 run 的花费整个
@@ -239,12 +244,18 @@ async def issue_totals(issue_id: Any) -> dict[str, Any]:
       不是树上有多少个节点；所以这一列仍带 ``FILTER (WHERE parent_run_id IS
       NULL)``，与钱那一列刻意不同口径。
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     from app.db.session import read_scope
     from app.models import AgentRuns
+    from app.repositories.agent_runs_repository import _issue_scope_keys
 
     root_only = AgentRuns.parent_run_id.is_(None)
+    keys = _issue_scope_keys(_coerce_bigint(issue_id), _coerce_bigint(conversation_id))
+    if not keys:
+        # 两个键都没有 → WHERE 会空掉，这条 SUM 就变成整张表的花费（同
+        # ``_own_cost_sum_stmt`` 的那道守卫）。一个看着像数的全库总额是最坏的答案。
+        raise ValueError("issue_totals needs an issue_id or a conversation_id")
 
     async with read_scope() as session:
         row = (
@@ -267,7 +278,7 @@ async def issue_totals(issue_id: Any) -> dict[str, Any]:
                             func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
                         ).label("cost_cents"),
                         func.count().filter(root_only).label("run_count"),
-                    ).where(AgentRuns.issue_id == _coerce_bigint(issue_id))
+                    ).where(or_(*keys))
                 )
             )
             .mappings()

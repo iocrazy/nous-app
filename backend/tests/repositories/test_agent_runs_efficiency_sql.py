@@ -188,9 +188,11 @@ async def test_only_the_money_column_is_root_filtered():
         assert f"sum(public.agent_runs.{own_metric}) FILTER" not in sql
     # 主查询这一层，root 谓词只属于钱那一列（其余全是每个 run 自身的量）。
     assert sql.count("FILTER (WHERE public.agent_runs.parent_run_id IS NULL)") == 1
-    # 另一处 root 谓词在 tree_cost 的「in-scope roots」内层 select 里（裁定 7）——
-    # 那是「哪些树算数」，不是「哪一列要过滤」，两者是两回事。
-    assert sql.count("parent_run_id IS NULL") == 2
+    # 另外两处 root 谓词在 tree_cost 的「in-scope roots」内层 select 里（裁定 7）——
+    # 那是「哪些树算数」，不是「哪一列要过滤」，两者是两回事。成员判定写成
+    # ``root_run_id IN (…) OR id IN (…)``（让 planner 用得上 idx_agent_runs_root_tree），
+    # 两条臂各带一份逐字相同的内层 select，所以是 2 份而不是 1 份。
+    assert sql.count("parent_run_id IS NULL") == 3
 
 
 async def test_the_failed_run_count_coalesces_like_its_neighbours():

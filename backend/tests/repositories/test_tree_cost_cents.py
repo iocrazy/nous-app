@@ -29,7 +29,19 @@ from app.repositories.agent_runs_repository import AgentRunsRepository
 pytestmark = pytest.mark.unit
 
 #: 树键**唯一**允许的拼法，照编译出来的样子写（SQLAlchemy 带 schema 前缀）。
+#: 它的住处是 GROUP BY 与输出标签 —— 「同一棵树归成一行」这个语义。
 _TREE_KEY = "coalesce(public.agent_runs.root_run_id, public.agent_runs.id)"
+
+#: 收行那一侧的两条臂。与 ``COALESCE(root_run_id, id) IN (…)`` 选出的行完全相同，
+#: 但表达式上的 ``COALESCE`` 让 planner 用不上 ``idx_agent_runs_root_tree``，只能
+#: 整表扫 —— 所以 WHERE 侧一律写成这两条臂（同 ``run_ids_in_trees``）。
+_ROOT_ARM = "public.agent_runs.root_run_id"
+_ID_ARM = "public.agent_runs.id"
+
+
+def _membership(inner: str) -> str:
+    """「这一行属于这批树」逐字应该长的样子。"""
+    return f"{_ROOT_ARM} IN {inner} OR {_ID_ARM} IN {inner}"
 
 
 def _sql(stmt: Any) -> str:
@@ -79,16 +91,17 @@ def _tree_cost_where(region: str) -> str:
 def _inner_select(region: str) -> str:
     """``tree_cost`` 的 WHERE 里 ``IN ( … )`` 那个「窗口 + scope 内的 root」子查询。
 
-    ⚠️ 锚点必须是 ``{树键} IN (SELECT``，**不能**是裸 ``"IN ("``：``region`` 以
-    ``"LEFT OUTER JOIN ("`` 开头，而 ``"JOIN ("`` 里就含 ``"IN ("`` 这个子串
-    （``index`` 命中偏移 13），于是 ``open_at`` 会退化成 JOIN 那个括号、整段
+    ⚠️ 锚点必须带列名（``root_run_id IN (SELECT``），**不能**是裸 ``"IN ("``：
+    ``region`` 以 ``"LEFT OUTER JOIN ("`` 开头，而 ``"JOIN ("`` 里就含 ``"IN ("``
+    这个子串（``index`` 命中偏移 13），于是 ``open_at`` 会退化成 JOIN 那个括号、整段
     ``tree_cost`` 被当成「内层 select」返回 —— 下面所有「outside 里不许有 scope 列」
     的负向断言就全部落在空串上，形同虚设。这条注释是修复轮次 2 的成因本身。
 
-    树键自己也含 ``(``（``coalesce(…)``），所以要从树键**之后**开始找左括号。
+    两条臂各带一份**逐字相同**的子查询，取第一条那份即可（``_membership`` 会拿它去
+    比另一条）。
     """
-    k = region.index(f"{_TREE_KEY} IN (SELECT")
-    open_at = region.index("(", k + len(_TREE_KEY))
+    k = region.index(f"{_ROOT_ARM} IN (SELECT")
+    open_at = region.index("(", k + len(_ROOT_ARM))
     return region[open_at : _balanced(region, open_at) + 1]
 
 
@@ -179,8 +192,17 @@ async def test_tree_cost_cents_groups_by_coalesce_root_id(captured_stmt):
     assert "GROUP BY" in s
     # 旧列一次都不许出现：这里没有「输出别名」这种豁免，投影就是 (root, cents)。
     assert "own_cost_cents" in s and s.count("cost_cents") == s.count("own_cost_cents")
-    # 分组键同时是筛选键 —— 问的是这几棵树，不是这几行。
-    assert f"{_TREE_KEY} in (" in low
+    # 分组按树键。
+    assert f"group by {_TREE_KEY}" in low
+    # 收行按两条臂，问的仍是这几棵树、不是这几行 —— 但写成 planner 用得上
+    # ``idx_agent_runs_root_tree`` 的形状。
+    where = low.split(" where ")[1].split(" group by ")[0]
+    assert where == (
+        f"{_ROOT_ARM} in (__[postcompile_root_run_id_1]) "
+        f"or {_ID_ARM} in (__[postcompile_id_1])"
+    ), where
+    # 树键**不许**出现在 WHERE 里：那正是让索引失效的那个写法。
+    assert f"{_TREE_KEY} in (" not in low
 
 
 async def test_tree_cost_cents_every_root_present(repo_with_rows):
@@ -310,9 +332,7 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
     # 任何 ``fragment in where`` 式的检查都照过（成员判定还在那儿），但那个查询已经
     # 退回按子行过滤了。相等是这里唯一分得清「只有成员判定」和「成员判定 + 别的」的
     # 写法。修复轮次 2 的成因就是这条当初写成了前缀匹配。
-    assert (
-        where == f"{_TREE_KEY} IN {inner}"
-    ), f"tree_cost 的 WHERE 不只是成员判定：\n{where}"
+    assert where == _membership(inner), f"tree_cost 的 WHERE 不只是成员判定：\n{where}"
 
     # ② scope 与 root 谓词全在那个内层 select 里。
     for fragment in (
@@ -328,7 +348,7 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
     # 按子行过滤，于是 team_id 为 NULL 的子 run 的钱被悄悄丢掉。
     # ①已经覆盖了这一点，③ 留着是因为它在失败时直接点名是哪一列。
     outside = where.replace(inner, "")
-    assert outside == f"{_TREE_KEY} IN ", outside
+    assert outside == f"{_ROOT_ARM} IN  OR {_ID_ARM} IN ", outside
     for col in ("team_id", "project_id", "user_id", "created_at"):
         assert (
             col not in outside
@@ -357,7 +377,7 @@ async def test_efficiency_counts_a_child_whose_team_is_null(captured_stmt):
     where = _tree_cost_where(region)
     # ``tree_cost`` 自己的 WHERE 逐字只有成员判定 —— 没有任何地方能写下
     # ``team_id = 7``，所以 team_id 为 NULL 的那条子 run 不可能被 ``NULL = 7`` 判出局。
-    assert where == f"{_TREE_KEY} IN {_inner_select(region)}", where
+    assert where == _membership(_inner_select(region)), where
     assert "team_id" not in where.replace(_inner_select(region), "")
     # 求和的是全部成员行，没有任何行级筛选把它们挡在外面。
     assert "sum(coalesce(public.agent_runs.own_cost_cents" in region

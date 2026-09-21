@@ -39,7 +39,23 @@ class _Rec:
         self.events.append((event_type, payload, turn, step))
 
 
-def _hook(budget, prior=0.0, calls=None, wrap_up=False, consume=None, consumed=None):
+def _hook(
+    budget,
+    prior=0.0,
+    calls=None,
+    wrap_up=False,
+    consume=None,
+    consumed=None,
+    refresh=None,
+):
+    """``refresh`` 缺省是「重读回同一个 ``prior``」—— 一个不变的议题。
+
+    钩子现在每个步骤边界都重读 ``prior``（3d 第 0 票终审 I1），默认那个重读会去问真
+    仓库。这里注入一个常量重读，让下面那些**不关心跨步变化**的用例保持原样：它们测
+    的是阈值、一次性、wrap-up 授权，不是钱怎么变的。真的要测「变了」的用例自己传
+    ``refresh``（见 ``test_prior_is_re_read_at_every_step_boundary``）。
+    """
+
     async def load(recorder):
         if calls is not None:
             calls.append(recorder.run_id)
@@ -54,7 +70,12 @@ def _hook(budget, prior=0.0, calls=None, wrap_up=False, consume=None, consumed=N
             consumed.append((recorder.run_id, info.issue_id))
         return True
 
-    return BudgetGateHook(load=load, consume=consume or _consume)
+    async def _refresh(_recorder, info):
+        return info.prior_cents
+
+    return BudgetGateHook(
+        load=load, consume=consume or _consume, refresh=refresh or _refresh
+    )
 
 
 async def _step(hook, rec, step, spent, expect=StepDecision.CONTINUE):
@@ -141,6 +162,110 @@ async def test_a_reported_child_is_counted_once_not_twice():
     assert rec2.events[0][1]["spent_cents"] == 5.5
 
 
+# ── 3d 第 0 票终审 I1：prior 每步重读 ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_prior_is_re_read_at_every_step_boundary():
+    """本轮里子 agent 花的钱**只**在 ``prior`` 那条聚合里，冻住它就是对委派免疫。
+
+    ``live`` 3d 第 0 票起只剩自身两道（own + media），所以同步子 run、后台子 run、
+    Delegate 这一轮新烧的钱一分都不在视图里 —— 它们各自落在自己那一行上，要靠
+    ``spent_cents_for_issue`` 才看得见。``prior`` 若在 run 开始时冻住，一个「什么都
+    委派出去」的父 run 可以在一条 run 里烧穿 ``budget_cents`` 而门禁一声不吭。
+
+    这里两步之间**只有 ``prior`` 变了**（``live`` 恒为 0）：把重读改回 memo，第二步
+    读到的还是 1.0 → 10 %，一个事件都不会有，这条用例转红。
+    """
+    priors = iter([1.0, 9.0])
+
+    async def refresh(_recorder, _info):
+        return next(priors)
+
+    rec = _Rec()
+    hook = _hook(budget=10, prior=1.0, refresh=refresh)
+    await _step(hook, rec, 1, 0.0)
+    assert rec.events == []  # 1.0 / 10 = 10 %
+    await _step(hook, rec, 2, 0.0)
+    assert [e[1]["action"] for e in rec.events] == ["warn"]
+    assert rec.events[0][1]["spent_cents"] == 9.0  # 重读到的 9.0，不是加载时的 1.0
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_prior_keeps_the_last_good_one_and_says_so_once(
+    monkeypatch,
+):
+    """重读失败沿用既有的「fails open, loudly, once」——但回退到**上一个读到的值**，
+    不是加载时的种子，也不是 0。
+
+    回退成 0 会让一次 DB 抖动把门禁悄悄打开（议题看起来一分没花）；而每步都吵一遍
+    会让一次抖动刷满日志。两者都在这条用例里钉住。
+    """
+    from app.services.ai.runner import budget_hook as bh
+
+    class _Logger:
+        def __init__(self):
+            self.errors = []
+
+        def error(self, msg):
+            self.errors.append(msg)
+
+    log = _Logger()
+    monkeypatch.setattr(bh, "logger", log)
+
+    calls = {"n": 0}
+
+    async def refresh(_recorder, _info):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 70.0
+        raise RuntimeError("db down")
+
+    rec = _Rec()
+    hook = _hook(budget=100, prior=0.0, refresh=refresh)
+    await _step(hook, rec, 1, 0.0)  # 70 / 100 = 70 %，还没到 warn
+    assert rec.events == []
+
+    # 第二步重读炸了：回退到 70.0（不是种子 0.0）→ 70 + 12 = 82 % → warn 且放行。
+    await _step(hook, rec, 2, 12.0, expect=StepDecision.CONTINUE)
+    assert [e[1]["action"] for e in rec.events] == ["warn"]
+    assert rec.events[0][1]["spent_cents"] == 82.0
+
+    await _step(hook, rec, 3, 12.0, expect=StepDecision.CONTINUE)
+    assert len(log.errors) == 1, log.errors
+    assert "prior spend unreadable" in log.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_default_prior_reload_asks_with_both_issue_keys(monkeypatch):
+    """默认重读走的是加载时那条一模一样的聚合（同一组键、同样排除本 run）。
+
+    两处用不同的键就是同一个议题在第一步与后面几步读出两个数 —— 与
+    ``own_cost_cents_for_issue_runs`` / ``issue_totals`` 那条「三处同口径」同族。
+    """
+    import app.repositories.agent_runs_repository as runs_mod
+    from app.services.ai.runner import budget_hook as bh
+
+    asked = []
+
+    class _Runs:
+        async def spent_cents_for_issue(
+            self, *, issue_id, conversation_id, exclude_run_id
+        ):
+            asked.append((issue_id, conversation_id, exclude_run_id))
+            return 33.0
+
+    monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Runs())
+    rec = _Rec(run_id=42)
+    info = BudgetInfo(100, 0.0, issue_id=7, conversation_id=9)
+    assert await bh.reload_prior(rec, info) == 33.0
+    assert asked == [(7, 9, 42)]
+
+    # 没有议题键就不去问：那不是一次读失败，不该走 fail-open 的告警路径。
+    assert await bh.reload_prior(rec, BudgetInfo(100, 4.5)) == 4.5
+    assert asked == [(7, 9, 42)]
+
+
 @pytest.mark.asyncio
 async def test_child_runs_and_recorderless_steps_are_ignored():
     rec = _Rec(spent=500.0)
@@ -197,7 +322,11 @@ async def test_default_loader_reads_issue_budget_and_prior_spend(monkeypatch):
     rec = _Rec(run_id=42)
     rec.conversation_id = 9
     rec.issue_id = None
-    assert await bh.load_issue_budget(rec) == BudgetInfo(300, 12.5, False, issue_id=7)
+    # 会话键必须跟着 BudgetInfo 走：每步重读 ``prior`` 用的就是这两个键，掉一个就
+    # 是第一步与第二步对同一个议题用了两套口径。
+    assert await bh.load_issue_budget(rec) == BudgetInfo(
+        300, 12.5, False, issue_id=7, conversation_id=9
+    )
 
     class _NoBudget(_Issues):
         async def get_by_id(self, issue_id):
