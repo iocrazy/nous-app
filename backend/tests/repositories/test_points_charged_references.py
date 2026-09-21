@@ -23,12 +23,18 @@ pytestmark = pytest.mark.unit
 
 
 class _Session:
-    def __init__(self, rows):
-        self.stmts, self._rows = [], rows
+    """两条腿各一次 execute（consume 先、refund 后），所以桩按调用顺序发牌。
+
+    ``refunds`` 省略即「没有退款行」—— 绝大多数用例的形状。
+    """
+
+    def __init__(self, rows, refunds=None):
+        self.stmts = []
+        self._legs = [rows, refunds or []]
 
     async def execute(self, stmt):
         self.stmts.append(stmt)
-        rows = self._rows
+        rows = self._legs.pop(0) if self._legs else []
 
         class _R:
             def all(self):
@@ -73,6 +79,69 @@ async def test_a_run_that_was_charged_zero_still_reports_zero():
             reference_type="agent_run", reference_ids=["101"]
         )
     assert out == {"101": 0.0}
+
+
+async def test_a_refund_is_deducted_from_what_the_reference_still_owes():
+    """终审 I6。``refund`` 的 ``amount`` 是**正**的（mig 123 的 RPC 直接
+    ``points_balance + p_amount``），所以净扣 = 扣 − 退。
+
+    2026-09-17 那 81 棵被退款的树就卡在这里：钱退回去了，而议题线程 / 聊天气泡 /
+    ``done`` 状态帧三处仍然显示 ``◇ n``。界面说扣了、账上没扣。"""
+    sess = _Session([("101", -21.0), ("102", -4.5)], refunds=[("101", 6.0)])
+    with patch("app.repositories.points_repository.read_scope", _scope(sess)):
+        out = await PointsRepository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=["101", "102"]
+        )
+    assert out == {"101": 15.0, "102": 4.5}
+
+
+async def test_a_fully_refunded_reference_reports_zero_not_the_old_amount():
+    """全额退款后界面上该是 0，不是原来那个数。键仍在场 —— 「扣过、又退了」与
+    「从没扣过」是两个答案。"""
+    sess = _Session([("101", -21.0)], refunds=[("101", 21.0)])
+    with patch("app.repositories.points_repository.read_scope", _scope(sess)):
+        out = await PointsRepository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=["101"]
+        )
+    assert out == {"101": 0.0}
+
+
+async def test_an_over_refund_floors_at_zero_instead_of_going_negative():
+    """退得比扣的多是数据异常，但界面上不该出现一个负的消耗。"""
+    sess = _Session([("101", -5.0)], refunds=[("101", 9.0)])
+    with patch("app.repositories.points_repository.read_scope", _scope(sess)):
+        out = await PointsRepository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=["101"]
+        )
+    assert out == {"101": 0.0}
+
+
+async def test_a_refund_with_no_consume_does_not_invent_a_charged_key():
+    """凭空造一个键会把「从没扣过」读成「扣了 0」—— 正是本方法用缺席/在场区分的
+    那两件事。异常记日志，不改答案。"""
+    sess = _Session([], refunds=[("101", 3.0)])
+    with patch("app.repositories.points_repository.read_scope", _scope(sess)):
+        out = await PointsRepository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=["101"]
+        )
+    assert out == {}
+
+
+async def test_each_leg_keeps_its_equality_on_type_so_the_partial_index_holds():
+    """mig 474 的索引是 partial（``type='consume' AND reference_type='agent_run'``）。
+    把两条腿合成 ``type IN (…)`` 会让谓词不再被蕴含，planner 退回全表扫描 —— 结果
+    仍然正确，只有这条断言会说出来。"""
+    sess = _Session([("101", -1.0)])
+    with patch("app.repositories.points_repository.read_scope", _scope(sess)):
+        await PointsRepository().charged_points_for_references(
+            reference_type="agent_run", reference_ids=["101"]
+        )
+    assert len(sess.stmts) == 2
+    types = [dict(s.compile().params)["type_1"] for s in sess.stmts]
+    assert types == ["consume", "refund"]
+    for stmt in sess.stmts:
+        sql = str(stmt.compile(dialect=postgresql.dialect()))
+        assert "point_transactions.type = %(type_1)s" in sql, sql
 
 
 async def test_an_empty_id_list_asks_nothing():

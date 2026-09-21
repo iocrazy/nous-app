@@ -837,8 +837,14 @@ class RunRecorder:
         # Re-read the externally-written slices first: a background child that
         # finished mid-run put its ``subagent_done`` in the transcript, never
         # in these in-memory views, and this is the last chance to bill it.
+        #
+        # ``force=True``（终审 I2）：守卫的四个条件全读内存，而一次纯生图回合的
+        # ``media_cents`` 只存在于库里（``for_run`` writer 写的）—— 不强制的话
+        # 这里读到 0，``own_spend`` 与 ``cost_cents`` 都少掉那笔钱，而下面
+        # ``persist_views`` 的强制重折又会把它抬回视图。两处口径必须同一个数，
+        # 否则「行上写着 7.5、审计行记着 0」。
         if self._event_writer is not None:
-            await self._event_writer.refold_external_slices()
+            await self._event_writer.refold_external_slices(force=True)
         folded = self._event_writer.views["cost"] if self._event_writer else None
         own_cents: Optional[float] = None
         if self._prompt_rate is not None and self._completion_rate is not None:
@@ -871,8 +877,11 @@ class RunRecorder:
         # ``own_cents``（费率已知时是 token 口径，覆盖了折叠值）必须在它被标成终态
         # **之前**落库 —— 一旦状态不再是 running，树里任何一条 run 都可能立刻把这棵
         # 树收口并读走这里的值，读到的就会是上一次事件镜像的旧数。
+        #
+        # 没落成就不收口（终审 I1）：见下面 ``views_persisted`` 的用法。
+        views_persisted = True
         if self._event_writer is not None:
-            await self._event_writer.persist_views()
+            views_persisted = await self._event_writer.persist_views()
 
         # W3c: classify every finished run. None → direct_human (a human turn);
         # the issue-dispatch path sets rule_owner for routine/pipeline fires.
@@ -1074,15 +1083,36 @@ class RunRecorder:
                     logger.warning(
                         f"[RunRecorder] usage audit failed (non-fatal): {exc}"
                     )
-            try:
-                outcome = await tree_charge.settle_tree_if_closed(run_id=self.run_id)
-                logger.info(
-                    f"[RunRecorder] run {self.run_id} tree settle: {outcome.reason} "
-                    f"(own={own_spend.total} platform={own_spend.platform} "
-                    f"charged={outcome.charged_points})"
+            if not views_persisted:
+                # 终审 I1。收口按**行**读落库的 cost 视图，而这条 run 的视图没写
+                # 进去 —— 现在收口就是拿旧数给整棵树结账，且**不可逆**：戳一盖，
+                # 这棵树再也不会被收第二次。跳过只是晚 2 小时，清扫器按
+                # ``charged_at IS NULL`` 提名，戳没盖它还捞得回来（宁少收不错收，
+                # 而这一侧是「晚收」不是「不收」）。
+                #
+                # ERROR 而不是 WARNING：一笔可能永久漏收的钱必须能在错误漏斗里被
+                # 查出来，且带 run_id 才回查得到是哪棵树。
+                logger.error(
+                    f"[RunRecorder] run {self.run_id} view mirror failed before the "
+                    f"terminal update — skipping tree settle so the sweeper can "
+                    f"retry it (settling now would bill the tree off stale costs "
+                    f"and stamp it permanently)"
                 )
-            except Exception as exc:  # noqa: BLE001 — 计费绝不回滚一条已完成的 run
-                logger.warning(f"[RunRecorder] tree settle failed (non-fatal): {exc}")
+            else:
+                try:
+                    outcome = await tree_charge.settle_tree_if_closed(
+                        run_id=self.run_id
+                    )
+                    logger.info(
+                        f"[RunRecorder] run {self.run_id} tree settle: "
+                        f"{outcome.reason} "
+                        f"(own={own_spend.total} platform={own_spend.platform} "
+                        f"charged={outcome.charged_points})"
+                    )
+                except Exception as exc:  # noqa: BLE001 — 计费绝不回滚已完成的 run
+                    logger.warning(
+                        f"[RunRecorder] tree settle failed (non-fatal): {exc}"
+                    )
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -1449,7 +1479,7 @@ class RunEventWriter:
             # run the rollup reads the column, not the view (3b §3.3).
             await self._sync_cost_column()
 
-    async def refold_external_slices(self) -> None:
+    async def refold_external_slices(self, *, force: bool = False) -> None:
         """Rebuild the slices a SECOND writer can touch — ``view.children`` /
         ``cost.by_child`` and ``view.outputs`` — from the persisted transcript,
         then recompute ``cost.spent_cents``.
@@ -1513,12 +1543,24 @@ class RunEventWriter:
         fold that produces an unusable shape, must cost a warning and a stale
         slice, not the turn: wiping or crashing over a decoration would be
         strictly worse than the drift this method exists to correct.
+
+        ⚠️ **``force=True`` 时守卫整个不看（终审 I2）。** 上面那四个条件全读
+        **内存**，而一次纯生图回合的 ``media_cents`` 是 DBOS 那条道的 ``for_run``
+        writer 直接写进库的：活 recorder 既没折过那件产出（``outputs.total`` 恒为
+        0），也未必撞过 seq（``foreign_writer_seen``）—— 四个条件一个都不成立，
+        守卫关着，而紧接着的镜像写的是**整个** ``cost`` 值，于是刚落库的
+        ``media_cents`` 被自己的 0 盖回去。在树收口按行读这个值之前那只是「面板少
+        一件产出」，之后它是**少收钱**。终态那两个调用点（``_finish`` 的算账与
+        ``persist_views`` 的落库）因此一律 ``force=True``：一次运行各一次 indexed
+        read，换掉「靠 seq 撞车通知」这条概率性的兜底。append 路径不传，热路径的
+        零额外读原样保留。
         """
         try:
             children = self.views["view"].get("children") or {}
             outputs = self.views["view"].get("outputs") or {}
             if (
-                not int(children.get("total") or 0)
+                not force
+                and not int(children.get("total") or 0)
                 and not int(outputs.get("total") or 0)
                 and not self.foreign_writer_seen
                 and not self._unpersisted_subagent
@@ -1561,10 +1603,12 @@ class RunEventWriter:
 
             self.views["view"]["children"] = scratch["view"]["children"]
             self.views["cost"]["by_child"] = scratch["cost"]["by_child"]
-            # BYOK 半边跟着本体一起抬：两者是同一次 fold 的产物，读方拿
-            # ``by_child - by_child_byok`` 减出平台额。只抬本体，异步子 agent
-            # 的整棵 BYOK 子树就被当成平台花费收一遍——而异步正是这条重折
-            # 唯一存在的理由（活 recorder 从没折过那条 ``subagent_done``）。
+            # BYOK 半边跟着本体一起抬：两者是同一次 fold 的产物，只抬一半就是让
+            # 父行的分解自相矛盾。
+            # ⚠️ ``by_child_byok`` **当前无消费方**（终审 I3）：扣费按行聚合，
+            # ``by_child`` 与 ``by_child_byok`` 都不参与（见
+            # ``ai/billing/tree_charge.py`` 模块 docstring），异步子 agent 的 BYOK
+            # 由它自己那一行报。这里抬它是为了父行面板的一致，不是为了钱。
             self.views["cost"]["by_child_byok"] = scratch["cost"]["by_child_byok"]
             refolded_outputs = scratch["view"].get("outputs")
             if refolded_outputs:
@@ -1675,29 +1719,49 @@ class RunEventWriter:
             .values(metadata_json=expr)
         )
 
-    async def persist_views(self) -> None:
-        """把当前 ``view`` / ``cost`` 立刻写进 ``metadata_json``（best-effort）。
+    async def persist_views(self) -> bool:
+        """把当前 ``view`` / ``cost`` 立刻写进 ``metadata_json``，**并说出成没成**。
 
         ``_finish`` 在把这条 run 标成终态之前调一次：树收口按行读落库的 cost 视图，
         而 ``own_cents`` 的最终值是在内存里定稿的。公开这一个方法而不是让
         ``_finish`` 去碰 ``_mirror``，因为「终态前把视图落库」是一条**契约**，
         不是顺手复用一个内部实现。
+
+        ⚠️ **返回值不是装饰，是这条契约唯一的可证伪面（终审 I1）。** 在此之前
+        ``_mirror`` 失败只打一条 WARNING，``_finish`` 照样收口 —— 于是整棵树按
+        **上一次事件镜像的旧值**结账，而戳一盖它**再也不会被收第二次**：一次写失败
+        变成一笔永久漏收，且除了那条 WARNING 之外没有任何痕迹。声明是硬的、实现是
+        软的，中间隔着一个调用方没法查的 ``None``。现在 False 就是「这棵树此刻不能
+        结账」，由 ``_finish`` 决定让给谁。
+
+        重折在这里**无条件**（``force=True``，见 :meth:`refold_external_slices`）。
         """
-        await self._mirror()
+        await self.refold_external_slices(force=True)
+        return await self._write_mirror()
 
     async def _mirror(self) -> None:
         # The mirror writes WHOLE ``view`` / ``cost`` values, so the two
         # externally-written slices are re-read from the event log first.
         await self.refold_external_slices()
+        await self._write_mirror()
+
+    async def _write_mirror(self) -> bool:
+        """真正那次 UPDATE。True = 落库了，False = 没有（已记日志）。
+
+        与 ``_mirror`` 分开，是因为两个调用方要的不是同一件事：append 路径只要
+        「遥测绝不弄挂一个回合」，终态路径还要**知道**它成没成。
+        """
         try:
             from app.db.session import write_scope
 
             async with write_scope() as session:
                 await session.execute(self.mirror_stmt())
+            return True
         except Exception as err:  # noqa: BLE001
             logger.warning(
                 f"[RunEventWriter] view mirror failed (run={self.run_id}): {err}"
             )
+            return False
 
 
 def _jsonable(value: Any) -> Any:

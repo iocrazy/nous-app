@@ -43,12 +43,14 @@ class _Writer:
         },
     }
 
-    async def refold_external_slices(self):
+    async def refold_external_slices(self, *, force: bool = False):
         return None
 
-    async def persist_views(self):
+    async def persist_views(self) -> bool:
         # ``_finish`` 在把 run 标成终态之前调它 —— 树收口按行读落库的 cost 视图。
-        return None
+        # True = 落库成功；返回 None 会让 ``_finish`` 判定镜像失败并跳过收口
+        # （终审 I1）。
+        return True
 
 
 def _recorder(monkeypatch, rowcount):

@@ -436,16 +436,37 @@ async def force_settle_stale_pending_trees_step() -> int:
         return 0
 
     settled = 0
+    #: 按 ``SettleOutcome.reason`` 分桶（终审 M7 / T12）。此前这一步只返回一个
+    #: ``settled`` 计数，而它把 ``forced``（异步子 run 从没物化，靠强制收口捞回来）
+    #: 和 ``charged``（撤戳之后重试成功）合成了同一个数 —— 两者意味着完全不同的
+    #: 两件事，混在一起就谁也报不了警。2026-09-17 那天「一分钟内 43 棵」这个形状
+    #: 是唯一能被自动抓住的信号，而当时只能靠人去数日志。
+    buckets: dict[str, int] = {}
     for row in rows:
         try:
             out = await settle_tree_if_closed(
                 run_id=str(row.id), force_stale_pending=True
             )
         except Exception as exc:  # noqa: BLE001
+            # 既记明细（哪一棵）也进桶（这一轮炸了几棵）。只留明细的话，一轮里
+            # 炸 1 棵和炸 20 棵在汇总上长得一模一样。
             logger.warning(f"[sweeper] forced settle {row.id} failed: {exc}")
+            buckets["error"] = buckets.get("error", 0) + 1
             continue
+        buckets[out.reason] = buckets.get(out.reason, 0) + 1
         if out.reason in ("forced", "charged"):
             settled += 1
+
+    if buckets:
+        summary = " ".join(f"{k}={v}" for k, v in sorted(buckets.items()))
+        # ``forced`` 稳态下应当恒为 0 —— 非 0 就是「有异步任务在丢」。``error``
+        # 同理。两者都值得从每分钟一轮的 INFO 噪声里跳出来；其余结局
+        # （deferred / already / pre_cutover …）是正常运转的样子。
+        noisy = buckets.get("forced", 0) or buckets.get("error", 0)
+        log = logger.warning if noisy else logger.info
+        log(f"[sweeper] stale-tree settle: candidates={len(rows)} {summary}")
+    # 提名到零棵树就一行都不打：这条遥测存在的理由是让 forced 跳出来，而一个每
+    # 60 秒说一次「这轮没事」的日志会把它自己变成要过滤的噪声。
     return settled
 
 
