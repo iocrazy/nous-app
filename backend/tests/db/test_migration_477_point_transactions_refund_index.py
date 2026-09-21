@@ -101,9 +101,9 @@ def test_the_index_predicate_and_the_refund_leg_agree_on_both_equalities():
     assert len(wheres) == 2, "净扣要两条腿：consume 一条、refund 一条"
     for where in wheres:
         assert re.search(r"point_transactions\.type = %\(\w+\)s", where), where
-        assert re.search(r"point_transactions\.reference_type = %\(\w+\)s", where), (
-            where
-        )
+        assert re.search(
+            r"point_transactions\.reference_type = %\(\w+\)s", where
+        ), where
 
 
 def test_it_is_not_unique():

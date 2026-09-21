@@ -79,9 +79,9 @@ def test_a_byok_lane_can_never_exceed_the_component_it_belongs_to(
     ⚠️ 钳位必须**逐分量**，而且只有在「同一行里还有别的分量是平台付的」时才看得
     出来：单分量的行光靠结果那个 ``max(…, 0)`` 就已经是 0，一条只测单分量的用例
     **证不出钳位存在**（本 Task 实测：去掉 ``min`` 它照样绿）。"""
-    assert spend_of_run(view).platform == expect_platform, (
-        f"{lane} 那条道抹掉了别的分量"
-    )
+    assert (
+        spend_of_run(view).platform == expect_platform
+    ), f"{lane} 那条道抹掉了别的分量"
 
 
 def test_an_absent_view_is_a_zero_row_not_a_crash():
