@@ -35,7 +35,7 @@ class _Runs:
     async def efficiency_for_issue(self, issue_id):
         return {}
 
-    async def own_cost_cents_for_issue_runs(self, issue_id):
+    async def own_cost_cents_for_issue_runs(self, issue_id, conversation_id=None):
         return 0.92
 
     async def last_transcript_seq(self, run_id):

@@ -228,9 +228,13 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
 
     issue_id = int(issue["id"])
     session_id = issue.get("ai_session_id")
+    # 一条 run 挂到议题上有两条路（直接 issue_id，或经 session 的 conversation_id）。
+    # 行与钱必须用**同一组键**去找：只按 issue_id 求和会让「只走会话键」的 run 出现在
+    # 列表里却不进 Budget 格，而三处 docstring 都写着口径一致。
+    conversation_id = int(session_id) if session_id else None
     runs = await get_agent_runs_repository().list_for_issue(
         issue_id=issue_id,
-        conversation_id=int(session_id) if session_id else None,
+        conversation_id=conversation_id,
     )
     children = await issue_repository.list_children(issue_id)
     pending = await get_agent_run_inbox_repository().pending_count(
@@ -270,7 +274,9 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
     efficiency, charged, spent = await asyncio.gather(
         get_agent_runs_repository().efficiency_for_issue(issue_id),
         _charged(),
-        get_agent_runs_repository().own_cost_cents_for_issue_runs(issue_id),
+        get_agent_runs_repository().own_cost_cents_for_issue_runs(
+            issue_id, conversation_id
+        ),
     )
     current = _current_run(runs)
     last_seq = (

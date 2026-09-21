@@ -103,6 +103,23 @@ def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
     return out
 
 
+def _issue_scope_keys(
+    issue_id: Optional[int], conversation_id: Optional[int]
+) -> List[Any]:
+    """「属于这个议题」的那组 OR 键 —— 两个钱读方共用，不许各写一份。
+
+    一条 run 挂到议题上有两条路：直接戳 ``issue_id``，或者经它的 session
+    ``conversation_id``。只认前一条会漏掉只走会话键的 run，于是同一个议题在预算门禁
+    与驾驶舱 Budget 格上是两个数（``list_for_issue`` 也是拿两个键找行的）。
+    """
+    keys: List[Any] = []
+    if issue_id is not None:
+        keys.append(AgentRuns.issue_id == int(issue_id))
+    if conversation_id is not None:
+        keys.append(AgentRuns.conversation_id == int(conversation_id))
+    return keys
+
+
 def _own_cost_sum_stmt(*where: Any) -> Select[Any]:
     """``SUM(COALESCE(own_cost_cents, 0))`` over the matching rows —— 议题这一族
     「花了多少钱」的唯一表达式（3d 第 0 票）。
@@ -857,11 +874,7 @@ class AgentRunsRepository(AsyncpgRepository):
         the row's own spend (own + media, no descendants), so the whole issue's
         真花的钱 is the sum over all of them. See ``_own_cost_sum_stmt``.
         """
-        keys = []
-        if issue_id is not None:
-            keys.append(AgentRuns.issue_id == int(issue_id))
-        if conversation_id is not None:
-            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        keys = _issue_scope_keys(issue_id, conversation_id)
         if not keys:
             return 0.0
         stmt = _own_cost_sum_stmt(or_(*keys))
@@ -877,17 +890,27 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             raise
 
-    async def own_cost_cents_for_issue_runs(self, issue_id: int) -> float:
+    async def own_cost_cents_for_issue_runs(
+        self, issue_id: int, conversation_id: Optional[int] = None
+    ) -> float:
         """这个议题真花了多少钱 —— ``issue_rollup`` 的 Budget 格读它。
 
-        与 ``spent_cents_for_issue`` 是同一条表达式（同一个 helper），只是不带
-        ``exclude_run_id``：驾驶舱要的是此刻的全额，包括正在跑的那条（镜像语句
-        每次都把 ``own_cost_cents`` 写成实时值，所以 running 的行也算得准）。
+        与 ``spent_cents_for_issue`` **完全同一条语句**（同一组 OR 键 +
+        同一条 SUM 表达式），只是不带 ``exclude_run_id``：驾驶舱要的是此刻的全额，
+        包括正在跑的那条（镜像语句每次都把 ``own_cost_cents`` 写成实时值，所以
+        running 的行也算得准）。
+
+        ``conversation_id`` 必须跟着传（``load_rollup`` 手里就有 ``ai_session_id``）：
+        只按 ``issue_id`` 找会漏掉只走会话键的 run —— 那条 run 会出现在 run 列表和
+        预算门禁的总额里，却不进 Budget 格，而三处的 docstring 都写着口径一致。
 
         读失败一律 raise：rollup 的调用方自己决定怎么降级，这里回 0 就等于把一个
         花了钱的议题显示成没花钱，而那正是预算格存在的意义。
         """
-        stmt = _own_cost_sum_stmt(AgentRuns.issue_id == int(issue_id))
+        keys = _issue_scope_keys(issue_id, conversation_id)
+        if not keys:
+            return 0.0
+        stmt = _own_cost_sum_stmt(or_(*keys))
         try:
             async with read_scope() as session:
                 return float((await session.execute(stmt)).scalar_one() or 0)

@@ -122,21 +122,37 @@ async def test_budget_gate_still_excludes_the_live_run_on_request(captured_stmt)
     assert "agent_runs.id !=" in s
 
 
-async def test_rollup_sum_is_the_same_expression_as_the_gate(captured_stmt):
-    """两处问的是同一个问题，必须是同一条表达式（共用模块级 helper）。比 SQL，
-    不比注释 —— 注释不会在漂移时报错。"""
+async def test_rollup_sum_is_the_same_statement_as_the_gate(captured_stmt):
+    """两处问的是同一个问题，必须是**整条语句**相同 —— SELECT 侧（同一条 SUM
+    表达式）和 WHERE 侧（同一组 OR 键）都要比。
+
+    只比 SELECT 侧是不够的：``own_cost_cents_for_issue_runs`` 曾经只按 ``issue_id``
+    过滤，而门禁是 ``or_(issue_id, conversation_id)`` —— 一条只走会话键的 run 于是
+    进得了门禁总额、进不了 Budget 格，两个面对同一个议题说两个数，而两边的 docstring
+    都写着口径一致。比 SQL，不比注释 —— 注释不会在漂移时报错。
+    """
     gate = _sql(
-        await captured_stmt(lambda repo: repo.spent_cents_for_issue(issue_id=1))
+        await captured_stmt(
+            lambda repo: repo.spent_cents_for_issue(issue_id=1, conversation_id=2)
+        )
     )
     rollup = _sql(
-        await captured_stmt(lambda repo: repo.own_cost_cents_for_issue_runs(1))
+        await captured_stmt(lambda repo: repo.own_cost_cents_for_issue_runs(1, 2))
     )
 
-    def _select_list(sql: str) -> str:
-        return sql.split("\nFROM ")[0]
-
-    assert _select_list(gate) == _select_list(rollup)
+    assert gate == rollup
+    assert "conversation_id" in rollup
     assert "parent_run_id IS NULL" not in rollup
+
+
+async def test_rollup_sum_takes_the_conversation_key_from_the_caller(captured_stmt):
+    """不传会话键时只按 issue_id 找（``load_rollup`` 的 issue 没有 session 时就是
+    这条），传了就两个键都在。"""
+    without = _sql(
+        await captured_stmt(lambda repo: repo.own_cost_cents_for_issue_runs(1))
+    )
+    assert "conversation_id" not in without
+    assert "issue_id" in without
 
 
 async def test_rollup_sum_raises_when_the_read_fails(monkeypatch):
@@ -183,10 +199,12 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
     import app.repositories.points_repository as points_mod
     import app.services.issues.issue_rollup as rollup
 
-    asked: list[int] = []
+    asked: list[tuple[int, int | None]] = []
+    listed: list[tuple[int, int | None]] = []
 
     class _Runs:
-        async def list_for_issue(self, **_kw):
+        async def list_for_issue(self, *, issue_id, conversation_id=None):
+            listed.append((issue_id, conversation_id))
             return [
                 {
                     "id": 776,
@@ -204,8 +222,8 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
                 },
             ]
 
-        async def own_cost_cents_for_issue_runs(self, issue_id):
-            asked.append(issue_id)
+        async def own_cost_cents_for_issue_runs(self, issue_id, conversation_id=None):
+            asked.append((issue_id, conversation_id))
             return 4.25
 
         async def efficiency_for_issue(self, _issue_id):
@@ -231,10 +249,12 @@ async def test_rollup_uses_repo_sum_not_row_cost(monkeypatch):
     monkeypatch.setattr(rollup, "resolve_origin", AsyncMock(return_value={}))
 
     out = await rollup.load_rollup(
-        {"id": 5, "status": "in_progress", "budget_cents": 100, "ai_session_id": None}
+        {"id": 5, "status": "in_progress", "budget_cents": 100, "ai_session_id": 88}
     )
 
-    assert asked == [5]
+    # 行与钱必须用同一组键去问 —— 会话键掉了的话，只走会话键的 run 进得了列表却
+    # 进不了 Budget 格。
+    assert asked == [(5, 88)] and listed == [(5, 88)]
     assert out["budget"]["spent_cents"] == 4.25
     assert out["budget"]["pct"] == 4
     # 每行那一格仍然展示这一行自己的 cost_cents —— 旧列是展示用的，没被取消。

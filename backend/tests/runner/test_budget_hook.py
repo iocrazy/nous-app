@@ -13,10 +13,26 @@ from app.services.ai.runner.step_hooks import StepContext, StepDecision
 pytestmark = pytest.mark.unit
 
 
+def _cost_view(own=0.0, by_child=None, media=0.0):
+    """一份**真形状**的 cost 视图（经 ``rp`` 自己的构造 + 派生）。
+
+    手搓 ``{"spent_cents": x}`` 是错的：真视图里 ``spent_cents`` 是
+    ``own_cents + Σby_child + media_cents`` 派生出来的，而门禁 3d 第 0 票起读的是
+    ``own_cents + media_cents``（子 run 自己那一行已经在 ``prior`` 里）。只摆一个
+    ``spent_cents`` 的桩会让「门禁到底读了哪几道」这件事无法被测出来。
+    """
+    cost = rp.empty_views()["cost"]
+    cost["own_cents"] = own
+    cost["media_cents"] = media
+    cost["by_child"] = dict(by_child or {})
+    rp.recompute_spent(cost)
+    return cost
+
+
 class _Rec:
     def __init__(self, run_id=42, spent=0.0):
         self.run_id = run_id
-        self.views = {"cost": {"spent_cents": spent}, "view": {"question": None}}
+        self.views = {"cost": _cost_view(own=spent), "view": {"question": None}}
         self.events = []
 
     async def record_event(self, event_type, payload, *, turn=None, step=None):
@@ -42,7 +58,9 @@ def _hook(budget, prior=0.0, calls=None, wrap_up=False, consume=None, consumed=N
 
 
 async def _step(hook, rec, step, spent, expect=StepDecision.CONTINUE):
-    rec.views["cost"]["spent_cents"] = spent
+    # ``spent`` 是这条 run 自己烧掉的钱 → 落在 ``own_cents`` 上（没有子、没有媒体时
+    # 它同时也是 ``spent_cents``，所以各处的期望数字不变）。
+    rec.views["cost"] = _cost_view(own=spent)
     ctx = StepContext(turn=1, step=step, recorder=rec)
     assert await hook.before_llm_call(ctx) is expect
     return ctx
@@ -89,6 +107,38 @@ async def test_prior_runs_spend_counts_toward_the_issue_budget():
     await _step(hook, rec, 1, 20.0)  # 170 / 200 = 85 %
     assert [e[1]["action"] for e in rec.events] == ["warn"]
     assert rec.events[0][1]["spent_cents"] == 170.0
+
+
+@pytest.mark.asyncio
+async def test_a_reported_child_is_counted_once_not_twice():
+    """3d 第 0 票的双计口。
+
+    ``prior`` 现在是该议题**全部行**的 ``own_cost_cents`` 之和（子 run 自己那一行
+    在内），而视图里的 ``cost.spent_cents`` 是 own + Σby_child + media。两个一加，
+    每个已经 ``subagent_done`` 报回来的子 agent 就被数两遍 —— 父 1.0 + 子 4.0 +
+    媒体 0.5 会被读成 9.5 而不是 5.5，预算凭空提前触顶。
+
+    所以 ``live`` 只能是这条 run 自己的两道（own + media），与写
+    ``agent_runs.own_cost_cents`` 那一列的是同一条表达式。
+    """
+    rec = _Rec()
+    rec.views["cost"] = _cost_view(own=1.0, by_child={"c": 4.0}, media=0.5)
+    # 视图自己算出来的仍是三道之和 —— 这条测试不是要改视图，是要改门禁读哪几道。
+    assert rec.views["cost"]["spent_cents"] == 5.5
+
+    hook = _hook(budget=1000, prior=4.0)  # prior 里就是子 run c 那一行
+    ctx = StepContext(turn=1, step=1, recorder=rec)
+    assert await hook.before_llm_call(ctx) is StepDecision.CONTINUE
+    # 4.0 (prior, 含子) + 1.5 (own + media) = 5.5，不是 4.0 + 5.5 = 9.5
+    hook2 = _hook(budget=6, prior=4.0)
+    rec2 = _Rec()
+    rec2.views["cost"] = _cost_view(own=1.0, by_child={"c": 4.0}, media=0.5)
+    assert (
+        await hook2.before_llm_call(StepContext(turn=1, step=1, recorder=rec2))
+        is StepDecision.CONTINUE
+    )  # 5.5 / 6 = 92 % → warn，不是 halt
+    assert [e[1]["action"] for e in rec2.events] == ["warn"]
+    assert rec2.events[0][1]["spent_cents"] == 5.5
 
 
 @pytest.mark.asyncio
@@ -417,7 +467,7 @@ async def test_halt_question_folds_into_a_marker_the_answer_endpoint_accepts():
         def __init__(self, **kw):
             super().__init__(**kw)
             self.views = rp.empty_views()
-            self.views["cost"] = {"spent_cents": kw.get("spent", 0.0)}
+            self.views["cost"] = _cost_view(own=kw.get("spent", 0.0))
             self.seq = 0
 
         async def record_event(self, event_type, payload, *, turn=None, step=None):

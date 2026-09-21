@@ -12,10 +12,15 @@ NEXT run, which then passes with ``budget_check{action:"wrap_up"}`` and a
 queued steer telling the agent to finish in one step. No budget (NULL) → no
 event, ever.
 
-Spend is issue-level: what earlier runs on the issue already cost (read once
-per run from ``agent_runs.cost_cents``) plus this run's live ``cost.spent_cents``
-folded from its ``step_end`` events. Root runs only — a sub-agent's spend rolls
-up through its parent's ``step_end`` cost, so it must not double-report.
+Spend is issue-level, and since 3d 第 0 票 both halves are **own spend only**
+(a row's own + media, no descendants):
+
+- ``prior`` —— 该议题**全部行**（root + children）的 ``agent_runs.own_cost_cents``
+  之和，只排除本 run 的 id，每个 run 读一次。Delegate 出去的子 run 带着 ``issue_id``
+  落库，所以它们的花费终于进得了预算；此前那道 root 过滤把它们整个挡在门外。
+- ``live`` —— 本 run 折出来的 ``own_cents + media_cents``（``spend_of_run``，与写
+  ``own_cost_cents`` 列的是同一条表达式），**不含** ``by_child``：子 run 自己那一行
+  已经在 ``prior`` 里了。
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
 
+from app.services.ai.billing.tree_charge import spend_of_run
 from app.services.ai.runner.events import emit
 from app.services.ai.runner.step_hooks import StepContext, StepDecision
 
@@ -173,10 +179,13 @@ class BudgetGateHook:
         if info is None:
             return StepDecision.CONTINUE
         budget, prior = info.budget_cents, info.prior_cents
-        live = float(
-            (getattr(recorder, "views", None) or {}).get("cost", {}).get("spent_cents")
-            or 0.0
-        )
+        # 这一条 run 自己的两道钱（own + media），**不含** ``by_child`` —— 用的是写
+        # ``agent_runs.own_cost_cents`` 那一列的同一条表达式。
+        # ⚠️ 不能用 ``cost.spent_cents``（= own + Σby_child + media）：3d 第 0 票起
+        # ``prior`` 是该议题**全部行**的 ``own_cost_cents`` 之和（只排除本 run 的 id），
+        # 子 run 自己那一行就在里面，再加一遍 ``by_child`` 就是把每个已报回的子 agent
+        # 数两遍 —— 父 a + 子 c + 媒体 m 会被读成 a + 2c + m，预算提前触顶。
+        live = spend_of_run((getattr(recorder, "views", None) or {}).get("cost")).total
         spent = round(prior + live, 4)
         pct = (
             spent * 100.0 / budget

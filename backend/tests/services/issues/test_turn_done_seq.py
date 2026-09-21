@@ -121,7 +121,7 @@ async def test_load_rollup_asks_the_running_run_for_its_watermark(monkeypatch):
         async def efficiency_for_issue(self, _issue_id):
             return {}
 
-        async def own_cost_cents_for_issue_runs(self, _issue_id):
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
             return 0.0
 
     class _Inbox:
@@ -172,7 +172,7 @@ async def test_load_rollup_asks_nobody_when_no_run_is_running(monkeypatch):
         async def efficiency_for_issue(self, _issue_id):
             return {}
 
-        async def own_cost_cents_for_issue_runs(self, _issue_id):
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
             return 0.0
 
     class _Inbox:
@@ -257,7 +257,7 @@ async def test_a_failed_points_read_empties_only_that_field(monkeypatch):
         async def efficiency_for_issue(self, _issue_id):
             return {"tool_calls": 7}
 
-        async def own_cost_cents_for_issue_runs(self, _issue_id):
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
             return 0.0
 
     class _Inbox:
