@@ -944,7 +944,13 @@ jobs:
           # ② tier 2 的 NOT EXISTS —— 它是「有后代的行别碰老列」的全部实现；
           # ③ tier 3 是一次「不写」，只有在另外两档真的跑过的库上才观察得到；
           # ④ own_cost_cents IS NULL 守卫 —— PR-B 让写方实时写这一列之后，一次
-          #    迁移重跑会把正确的自身花费覆盖成含后代的 cost_cents。
-          # 四次突变实测各杀各的：摘 NOT EXISTS 杀 tier 3、tier 1 加总 by_child 杀
-          # tier 1、摘 IS NULL 守卫杀「重跑不覆盖」、删掉第④段杀 issue_id 继承。
+          #    迁移重跑会把正确的自身花费覆盖成含后代的 cost_cents；
+          # ⑤ 第④段的 issue_id 与 conversation_id 走**各自**的 OR 臂和各自的
+          #    COALESCE，所以两者必须各有一个用例：只造「两列同时为 NULL」的行
+          #    分不出这两条臂，摘掉 conversation_id 赋值照样绿。
+          # 六次突变实测各杀各的：摘 NOT EXISTS 杀 tier 3、tier 1 加总 by_child 杀
+          # tier 1、摘 IS NULL 守卫杀「重跑不覆盖」、摘 issue_id 赋值杀 issue_id
+          # 继承、摘 conversation_id 赋值与把第二条 OR 臂写成 r.issue_id 各杀
+          # conversation_id 继承（那条用例刻意造非对称行：子 run 自己已有
+          # issue_id、只有 root 有会话绑定，所以唯一能选中它的就是第二条臂）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_479_own_cost_backfill.py -v

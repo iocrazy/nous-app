@@ -117,6 +117,38 @@ async def _mk_issue(conn, agent: uuid.UUID) -> int:
     )
 
 
+async def _mk_user(conn) -> uuid.UUID:
+    """``teams.owner_id`` FKs to ``auth.users``; nothing here needs a real
+    signup, just a row to point at."""
+    uid = uuid.uuid4()
+    await conn.execute(
+        "INSERT INTO auth.users (id, email) VALUES ($1, $2)",
+        uid,
+        f"own-cost-{uuid.uuid4().hex[:8]}@test.dev",
+    )
+    return uid
+
+
+async def _mk_conversation(conn) -> int:
+    """``conversations`` wants type / scope_id / created_by, and ``scope_id``
+    FKs to ``teams`` — which in turn wants name / owner_id / invite_code."""
+    owner = await _mk_user(conn)
+    suffix = uuid.uuid4().hex[:8]
+    team = await conn.fetchval(
+        "INSERT INTO public.teams (name, owner_id, invite_code) "
+        "VALUES ($1, $2, $3) RETURNING id",
+        f"Own Cost Team {suffix}",
+        owner,
+        f"OWNCOST{suffix}",
+    )
+    return await conn.fetchval(
+        "INSERT INTO public.conversations (type, scope_id, created_by) "
+        "VALUES ('direct_agent', $1, $2) RETURNING id",
+        team,
+        owner,
+    )
+
+
 async def _insert_run(
     conn,
     rid: int,
@@ -127,6 +159,7 @@ async def _insert_run(
     parent: int | None = None,
     root: int | None = None,
     issue: int | None = None,
+    conversation: int | None = None,
 ) -> None:
     """One ``agent_runs`` row. ``cost`` is the jsonb ``metadata_json.cost``
     view as the writers store it; omitting it is the "no cost view" shape the
@@ -135,8 +168,8 @@ async def _insert_run(
     await conn.execute(
         "INSERT INTO public.agent_runs "
         "  (id, agent_id, user_id, status, trigger, cost_cents, "
-        "   parent_run_id, root_run_id, issue_id, metadata_json) "
-        "VALUES ($1, $2, $3, 'completed', 'manual', $4, $5, $6, $7, $8::jsonb)",
+        "   parent_run_id, root_run_id, issue_id, conversation_id, metadata_json) "
+        "VALUES ($1, $2, $3, 'completed', 'manual', $4, $5, $6, $7, $8, $9::jsonb)",
         rid,
         agent,
         uuid.uuid4(),
@@ -144,6 +177,7 @@ async def _insert_run(
         parent,
         root,
         issue,
+        conversation,
         meta,
     )
 
@@ -227,6 +261,44 @@ async def test_a_child_inherits_the_issue_id_from_its_root(conn):
         await conn.fetchval("SELECT issue_id FROM public.agent_runs WHERE id = 90006")
         == issue
     )
+
+
+@_skip
+async def test_a_child_inherits_the_conversation_id_on_its_own(conn):
+    """Step ④ copies two columns, and the second one needs its own case.
+
+    ``issue_id`` and ``conversation_id`` are carried by **separate** OR arms
+    and separate COALESCEs, so a suite that only ever builds rows where both
+    are NULL together cannot tell the two apart — deleting the
+    ``conversation_id`` assignment, or mistyping the second arm to test
+    ``r.issue_id``, would sail through it.
+
+    So this is the asymmetric row only the second arm reaches: the child
+    already HAS an ``issue_id`` of its own (arm one is false for it) and the
+    root has none, while the conversation binding exists only on the root.
+    Getting here requires the arm to look at ``conversation_id`` on both
+    sides, and the SET to actually assign it.
+
+    The child's own ``issue_id`` is asserted too: ``COALESCE(c.issue_id,
+    r.issue_id)`` must leave a value already present alone rather than
+    overwriting it with the root's NULL.
+    """
+    agent = await _mk_agent(conn)
+    conversation = await _mk_conversation(conn)
+    issue = await _mk_issue(conn, agent)
+
+    await _insert_run(conn, 90009, agent, cost_cents="1", conversation=conversation)
+    await _insert_run(
+        conn, 90010, agent, cost_cents="1", parent=90009, root=90009, issue=issue
+    )
+
+    await conn.execute(_body())
+
+    child = await conn.fetchrow(
+        "SELECT issue_id, conversation_id FROM public.agent_runs WHERE id = 90010"
+    )
+    assert child["conversation_id"] == conversation
+    assert child["issue_id"] == issue
 
 
 @_skip
