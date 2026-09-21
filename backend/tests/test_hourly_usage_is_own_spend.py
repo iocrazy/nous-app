@@ -28,12 +28,14 @@ class _Writer:
     def __init__(self, views: dict[str, Any]) -> None:
         self.views = views
 
-    async def refold_external_slices(self) -> None:
+    async def refold_external_slices(self, *, force: bool = False) -> None:
         return None
 
-    async def persist_views(self) -> None:
+    async def persist_views(self) -> bool:
         # ``_finish`` 在把 run 标成终态之前调它 —— 树收口按行读落库的 cost 视图。
-        return None
+        # 返回 True = 「视图真的落库了」。返回 None 的桩会让 ``_finish`` 判定镜像
+        # 失败并**跳过收口**（终审 I1），于是每条断言收口的用例都红在桩上。
+        return True
 
 
 def _recorder(*, views, prompt=10, completion=20):

@@ -159,8 +159,12 @@ def _cost_cents_of(recorder: Any) -> float:
     crashing the emit.
 
     ``_byok_cents_of`` 报的是这同一棵子树里用户自己付掉的那部分，两者**必须
-    同海拔** —— 父行拿 ``by_child - by_child_byok`` 减出平台额。改这里的口径
-    （换分支、换回落）必须同步改那边，否则差额会静默变成多收的积分。"""
+    同海拔**。改这里的口径（换分支、换回落）必须同步改那边，否则两条道对不上。
+
+    ⚠️ 那条 BYOK 道**当前没有任何消费方**（终审 I3）：积分按**行**聚合，只读每条
+    run 自己的 ``own_cents`` / ``media_cents`` 减各自的 BYOK 道，``by_child`` 与
+    ``by_child_byok`` 都不参与（见 ``ai/billing/tree_charge.py`` 模块 docstring）。
+    所以此处的海拔今天只影响面板上的父行花费，不影响扣多少钱。"""
     try:
         folded = (getattr(recorder, "views", None) or {}).get("cost") or {}
         spent = float(folded.get("spent_cents") or 0.0)
@@ -186,8 +190,12 @@ def _byok_cents_of(recorder: Any) -> float:
       ``credential_origin``。不回落的后果：一条没有 step fold 的 BYOK 子 run
       报出「花了 7 分、BYOK 0 分」，父行照平台价收它。
 
-    海拔不一致的代价是静默的：父行拿 ``by_child - by_child_byok`` 减平台额，
-    BYOK 侧少报多少，就多收多少。
+    ⚠️ **这个返回值当前没有任何消费方**（终审 I3）。它经 ``subagent_done`` 落到父行
+    的 ``cost.by_child_byok``，而扣费按**行**聚合、根本不看 ``by_child*``（见
+    ``ai/billing/tree_charge.py`` 模块 docstring「金额怎么算」）—— 子 run 自己那一行
+    的 BYOK 由它自己的 ``own_byok_cents`` / ``media_byok_cents`` 报，收口时逐行读。
+    所以海拔不一致今天不会多收钱；但两条道仍必须对齐，因为它们是同一个数的两半，
+    而异步链将来若改回按 ``by_child`` 聚合，这里就直接回到钱上。
 
     报不出来一律 0.0 —— 遥测永远不该让一次 turn 失败。
     """

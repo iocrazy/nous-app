@@ -73,8 +73,15 @@ def fold_done(views, payload):
             str(child_run_id): float(cents),
         }
         # 同样 SET。两条道**同海拔**：都是那棵子树的合计（见发射点
-        # ``_cost_cents_of`` / ``_byok_cents_of`` 的 docstring），父行拿
-        # ``by_child - by_child_byok`` 减出平台额才成立。
+        # ``_cost_cents_of`` / ``_byok_cents_of`` 的 docstring）。
+        #
+        # ⚠️ **这条道当前没有任何消费方**（终审 I3）。扣费按**行**聚合，只读每条
+        # run 自己的 ``own_cents`` / ``media_cents`` 及其两条 BYOK 道，``by_child``
+        # 与 ``by_child_byok`` 都不参与 —— 见 ``ai/billing/tree_charge.py`` 模块
+        # docstring「金额怎么算」。这里留着是因为它是 ``subagent_done`` 的诚实字段
+        # （子树 BYOK 合计），异步链将来若改回按 ``by_child`` 聚合还要用它。
+        # **不要**照着「父行减一下就是平台额」去改本函数的海拔 —— 那个减法今天不
+        # 存在于任何代码里，改它动不了钱，只会让两条道对不上。
         byok = payload.get("byok_cents")
         if isinstance(byok, (int, float)) and not isinstance(byok, bool):
             views["cost"]["by_child_byok"] = {

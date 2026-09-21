@@ -96,8 +96,10 @@ def empty_views() -> Views:
             # 相减得到「平台真付了的那部分」。三条都**不进** spent_cents。
             "own_byok_cents": 0.0,
             "media_byok_cents": 0.0,
-            # 与 ``by_child`` 同键、同海拔（每项是那棵子树的 BYOK 合计），
-            # 所以 ``by_child - by_child_byok`` 才是那棵子树的平台额。
+            # 与 ``by_child`` 同键、同海拔（每项是那棵子树的 BYOK 合计）。
+            # ⚠️ **当前无消费方**（终审 I3）：扣费按行聚合，只看每行自己的
+            # own/media 两道减各自 BYOK，``by_child*`` 两条都不参与（见
+            # ``ai/billing/tree_charge.py`` 模块 docstring）。
             "by_child_byok": {},
         },
         # 3c §3.2：与 ``cost`` 并列的计数道。花费回答「花了多少钱」，这里回答「干了

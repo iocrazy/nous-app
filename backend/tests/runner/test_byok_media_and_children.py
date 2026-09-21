@@ -2,8 +2,15 @@
 
 ``by_child`` 与 ``by_child_byok`` 必须**同海拔**（都是整棵子树的合计）。
 ``_cost_cents_of`` 的 docstring 写明 ``by_child`` 存的是子树总额 —— 孙子的钱通过
-子 run 自己的 ``spent_cents`` 已经含在里面。BYOK 侧要是只报「子 run 自身」的
-BYOK，父行 ``by_child - by_child_byok`` 就会把孙子的 BYOK 花费当成平台花费收一遍。
+子 run 自己的 ``spent_cents`` 已经含在里面，所以 BYOK 侧也必须报整棵子树，不能
+只报「子 run 自身」的那部分。
+
+⚠️ **``by_child_byok`` 当前没有任何消费方**（终审 I3）：扣费按**行**聚合，只读每条
+run 自己的 ``own_cents`` / ``media_cents`` 减各自的 BYOK 道，``by_child*`` 两条都不
+参与（见 ``ai/billing/tree_charge.py`` 模块 docstring）—— 子 run 的 BYOK 由它自己
+那一行报。所以海拔对不上今天**不会多收钱**，只会让父行面板上的分解不自洽；两条道
+仍要对齐，因为它们是同一个数的两半。本文件另一半（``media_*``）则**是**钱：那是
+本行自己的分量，收口逐行读它。
 """
 
 import pytest

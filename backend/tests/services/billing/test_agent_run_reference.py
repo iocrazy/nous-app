@@ -3,8 +3,9 @@
 写方（``token_billing`` 把它交给 ``PointsService``）与三个读方（议题 rollup、
 议题聊天帧、``/ai-library/runs/costs``）必须逐字一致，否则读方一条都查不到 ——
 ``token_billing`` 那段注释已经解释过这个陷阱的由来（跟着 ``trigger`` 走会让这张
-表按触发方式碎成若干值）。第五处是 mig 474 的 partial 索引谓词：它是 SQL 字符串，
-import 不进去，所以反过来断言它逐字包含常量值。
+表按触发方式碎成若干值）。第五、第六处是两条 partial 索引的谓词（mig 474 的
+consume 腿与 mig 477 的 refund 腿）：它们是 SQL 字符串，import 不进去，所以反过来
+断言它们逐字包含常量值。
 """
 
 from __future__ import annotations
@@ -31,15 +32,21 @@ def test_the_value_is_the_one_the_billing_rpc_writes():
     assert AGENT_RUN_REFERENCE_TYPE == "agent_run"
 
 
-def test_the_partial_index_predicate_spells_it_the_same_way():
+@pytest.mark.parametrize(
+    "index_name,txn_type",
+    [
+        ("idx_point_transactions_agent_run_consume", "consume"),
+        # 第二条腿（mig 477）。净扣 = 扣 − 退，两条腿各发一次查询、各配一个索引，
+        # 所以这个字面量陷阱现在有**两份**要钉。
+        ("idx_point_transactions_agent_run_refund", "refund"),
+    ],
+)
+def test_the_partial_index_predicate_spells_it_the_same_way(index_name, txn_type):
     """谓词与查询谓词不一致时 planner 用不上索引，而没有任何东西会说出来。"""
-    index = next(
-        i
-        for i in PointTransactions.__table__.indexes
-        if i.name == "idx_point_transactions_agent_run_consume"
-    )
+    index = next(i for i in PointTransactions.__table__.indexes if i.name == index_name)
     where = str(index.dialect_options["postgresql"]["where"])
     assert f"reference_type = '{AGENT_RUN_REFERENCE_TYPE}'" in where
+    assert f"type = '{txn_type}'" in where
 
 
 #: 只盯**积分账那两个关键字**上的字面量。``"agent_run"`` 这个词在别处另有其人

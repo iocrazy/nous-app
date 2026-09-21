@@ -436,16 +436,50 @@ async def force_settle_stale_pending_trees_step() -> int:
         return 0
 
     settled = 0
+    #: 按 ``SettleOutcome.reason`` 分桶（终审 M7 / T12）。此前这一步只返回一个
+    #: ``settled`` 计数，而它把 ``forced``（异步子 run 从没物化，靠强制收口捞回来）
+    #: 和 ``charged``（撤戳之后重试成功）合成了同一个数 —— 两者意味着完全不同的
+    #: 两件事，混在一起就谁也报不了警。2026-09-17 那天「一分钟内 43 棵」这个形状
+    #: 是唯一能被自动抓住的信号，而当时只能靠人去数日志。
+    buckets: dict[str, int] = {}
     for row in rows:
         try:
             out = await settle_tree_if_closed(
                 run_id=str(row.id), force_stale_pending=True
             )
         except Exception as exc:  # noqa: BLE001
+            # 既记明细（哪一棵）也进桶（这一轮炸了几棵）。只留明细的话，一轮里
+            # 炸 1 棵和炸 20 棵在汇总上长得一模一样。
             logger.warning(f"[sweeper] forced settle {row.id} failed: {exc}")
+            buckets["error"] = buckets.get("error", 0) + 1
             continue
+        buckets[out.reason] = buckets.get(out.reason, 0) + 1
         if out.reason in ("forced", "charged"):
             settled += 1
+
+    if buckets:
+        summary = " ".join(f"{k}={v}" for k, v in sorted(buckets.items()))
+        # 三级，按**这一轮到底发生了什么**分（评审 M-4）：
+        #
+        # * WARNING —— ``forced`` 稳态下应当恒为 0，非 0 就是「有异步任务在丢」；
+        #   ``error`` 同理。这两样要能从噪声里跳出来，那是本段遥测存在的理由。
+        # * INFO —— 这一轮真的收了一棵树（``charged``）。发生了事，值得留痕。
+        # * DEBUG —— 其余全是「提名到了、但什么都没做」。
+        #
+        # ⚠️ 安静的那一档**不能只列 ``deferred``**。提名谓词是
+        # ``charged_at IS NULL``，所以 ``legacy_charged`` / ``partially_charged`` /
+        # ``pending_children`` 的树同样没有戳，同样会被每分钟重新提名一次，直到掉
+        # 出 7 天窗口 —— 只放过 ``deferred`` 等于只堵了其中一条。判据因此是
+        # 「有没有发生事」而不是「reason 叫什么」：一棵卡住的树会连打 7 天 × 1440
+        # 行，那时这条遥测已经从信号退化成要过滤的噪声。
+        if buckets.get("forced", 0) or buckets.get("error", 0):
+            log = logger.warning
+        elif buckets.get("charged", 0):
+            log = logger.info
+        else:
+            log = logger.debug
+        log(f"[sweeper] stale-tree settle: candidates={len(rows)} {summary}")
+    # 提名到零棵树则一行都不打 —— 连 DEBUG 都不必，没有任何可说的。
     return settled
 
 

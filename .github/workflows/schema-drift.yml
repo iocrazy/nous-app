@@ -201,6 +201,14 @@ on:
       - 'backend/tests/db/test_tree_charge_cas_integration.py'
       - 'backend/app/services/ai/billing/tree_charge.py'
       - 'backend/app/services/ai/billing/pre_cutover_refund.py'
+      # 退款抵扣读方（终审 I6）。两条腿的谓词、``consume`` 负 / ``refund`` 正这
+      # 两个符号（mig 123 的 RPC 定的，不是代码里的约定）、以及 ``amount`` 是
+      # INTEGER —— 桩 session 对这三件事一无所知：它按调用顺序发牌，根本不看
+      # WHERE，所以把 refund 那条腿的 reference_type 写错单测照样绿而真库交出
+      # 零行（退款不抵扣，回到缺陷本身）。
+      - 'backend/tests/db/test_points_refund_offset_integration.py'
+      - 'backend/app/repositories/points_repository.py'
+      - 'backend/app/services/billing/run_tree_points.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -214,15 +222,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-two, so it has to
+      # to it changes what "green" means for all thirty-three, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-one below was counted with this command, not derived
-      # from the thirty it replaced):
+      # (the thirty-three below was counted with this command, not derived
+      # from the thirty-two it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -863,6 +871,23 @@ jobs:
           # cast("{}", JSONB) 绑成 jsonb 字符串标量，|| 退化成数组拼接）；
           # ③ 取树的 id = root OR root_run_id = root 要一次捞全三代。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_tree_charge_cas_integration.py -v
+
+      - name: Assert refunds offset the charged-points readers on a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 终审 I6：退款行必须从「这次回合扣了多少」里减掉，否则已退款的树在
+          # 议题线程 / 聊天气泡 / done 状态帧三处仍然显示 ◇ n —— 界面说扣了、
+          # 账上已经退了（2026-09-17 的 81 棵树就是这个形状）。三件事只有真
+          # 服务器判得了：① 两条腿各自的 type/reference_type 谓词真的选得出行
+          # （桩 session 按调用顺序发牌，谓词写错它照样绿）；② consume 负 /
+          # refund 正这两个符号是 mig 123 那个 RPC 的行为，不是代码里的约定，
+          # 减法方向只能由真写进表里的行来证；③ amount 是 INTEGER 而不是
+          # numeric。顺带把 charged_points_for_run_trees 一起过一遍 —— 那是三个
+          # 宿主真正读的那一层。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_points_refund_offset_integration.py -v
 
       - name: Assert the search_docs body backfill against a real server
         working-directory: backend

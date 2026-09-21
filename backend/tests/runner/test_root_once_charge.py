@@ -159,6 +159,11 @@ class _Row:
         pending = kw.get("async_pending")
         if pending is not None:
             md["view"] = {"children": {"async_pending": pending}}
+        billing = kw.get("billing")
+        if billing is not None:
+            # 戳与结局标记住在顶层 ``billing``，不在 ``cost`` 里 —— ``mirror_keys()``
+            # 会把 ``cost`` 整个值写回去，放那里会被任何一次迟到的镜像抹掉。
+            md["billing"] = billing
         self.metadata_json = md
 
 
@@ -470,6 +475,92 @@ async def test_a_charge_that_raises_releases_the_stamp(charged, monkeypatch):
     assert "charged_at" in str(params.values()), "撤戳那条没有指向 charged_at"
 
 
+async def test_releasing_the_stamp_also_records_why(charged, monkeypatch):
+    """终审 M5/T16。撤戳把这棵树变回「没戳、但流水里有 consume 行」—— 与一棵
+    **上线前**的老树形状**一模一样**。光撤戳，下一次收口只能把它读成
+    ``legacy_charged``（「旧口径逐 run 扣过」），而它其实是「本机制扣过、收尾炸了」。
+
+    所以撤戳的同时留一个结局标记。**不撤戳的语义不变** —— 标记是加在旁边的，
+    CAS 的判据仍然只看 ``charged_at``，这棵树照样能被重试收口。"""
+    writes: list[Any] = []
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0})],
+        sink=writes,
+    )
+    charged.side_effect = RuntimeError("points service exploded")
+    await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+
+    released = str(writes[-1].compile().params.values())
+    assert "charge_status" in released, "撤戳没留下结局标记"
+    assert tree_charge.CHARGE_STATUS_RAISED in released
+
+
+async def test_a_tree_whose_charge_raised_is_not_mislabelled_as_a_legacy_one(
+    charged, monkeypatch
+):
+    """有流水、没戳、**带结局标记** → ``partially_charged``。
+
+    行为与 ``legacy_charged`` 相同（都不重扣，正查在 CAS 之前挡住），差别只在运维
+    读日志时看到的是「本机制扣过但收尾炸了」还是「这是棵上线前的老树」—— 后者会让
+    人去查一个根本不存在的历史迁移。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 10.0},
+                billing={"charge_status": tree_charge.CHARGE_STATUS_RAISED},
+            )
+        ],
+        ever_charged=True,
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "partially_charged")
+    charged.assert_not_awaited()
+
+
+async def test_a_legacy_tree_without_the_marker_is_still_called_legacy(
+    charged, monkeypatch
+):
+    """负向对照：没有标记的还是 ``legacy_charged``。少了这条，一个「永远报
+    partially_charged」的实现也能让上面那条转绿。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[_Row(800000000000001, cost={"own_cents": 10.0})],
+        ever_charged=True,
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "legacy_charged")
+
+
+async def test_a_stamped_tree_still_reports_already_even_with_the_marker(
+    charged, monkeypatch
+):
+    """戳优先。一棵「炸过一次、之后被重试并真的收口成功」的树两个字段都在，
+    它的答案必须是 ``already``（本机制收过了），不是 ``partially_charged``。"""
+    _db(
+        monkeypatch,
+        my_root=None,
+        tree_rows=[
+            _Row(
+                800000000000001,
+                cost={"own_cents": 10.0},
+                billing={
+                    "charged_at": "2026-09-18T00:00:00+00:00",
+                    "charge_status": tree_charge.CHARGE_STATUS_RAISED,
+                },
+            )
+        ],
+        ever_charged=True,
+    )
+    out = await tree_charge.settle_tree_if_closed(run_id="800000000000001")
+    assert (out.settled, out.reason) == (False, "already")
+
+
 async def test_the_real_async_timeline_settles_once_when_the_event_lands(
     charged, monkeypatch
 ):
@@ -646,11 +737,14 @@ class _Writer:
         self.views = views
         self.persisted = 0
 
-    async def refold_external_slices(self):
+    async def refold_external_slices(self, *, force: bool = False):
         return None
 
-    async def persist_views(self):
+    async def persist_views(self) -> bool:
         self.persisted += 1
+        # True = 落库成功。返回 None 会让 ``_finish`` 判定镜像失败并**跳过收口**
+        # （终审 I1），于是本文件里每条断言收口的用例都红在桩上。
+        return True
 
 
 def _recorder(*, views, run_id="900000000000001"):

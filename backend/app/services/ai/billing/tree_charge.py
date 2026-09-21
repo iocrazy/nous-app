@@ -45,6 +45,23 @@ BYOK 道。**刻意不使用** ``by_child`` / ``by_child_byok``：
 ``persist_views()``）。一旦状态不再是 ``running``，树里任何一条 run 都可能立刻收口
 并读走这里的值。
 
+``persist_views()`` 会说出它有没有落库，落不了时 ``_finish`` **不调本函数**并打一条
+带 run_id 的 ERROR（终审 I1）。⚠️ **这换到的不是「晚收但收对」** —— 那次镜像是这条
+run 唯一一次把终态 ``own_cents`` 写进 ``metadata_json`` 的机会，之后**没有任何人会
+重写那一行**（recorder 到此结束，``_sync_cost_column`` 只碰 ``cost_cents`` 列）。
+2 小时后清扫器提名到这棵树时，读的仍是**同一行、同样陈旧的**那份视图，照旧数结账。
+
+换到的只有两样，都不是「把那个数捞回来」：
+
+1. **一条带 run_id 的 ERROR** —— 在此之前整件事只有一条 WARNING，没有任何探针会说
+   出「这棵树是按旧数结的账」，也无从回查是哪一棵；
+2. **不在错数上当场盖一个永久的戳** —— 戳一盖这棵树再也收不了第二次，而不盖就给
+   「别的 writer 恰好又镜像了一次」留了一个窗口。
+
+方向仍然是少收（接受），但**别把它读成已经闭合**。真要闭合得让那一行被重写：
+``persist_views`` 失败时重试一次，或退化成一条只写 ``cost.own_cents`` 的最小
+UPDATE —— 已记票（评审 I-1 / 修复轮 1）。
+
 Stated Limitations
 ==================
 * **急停期间收口的树不补扣。** ``AGENT_POINTS_CHARGE_ENABLED`` 为 false 时
@@ -145,6 +162,9 @@ class SettleOutcome:
     #: ``deferred`` 树里还有人在跑 / ``pending_children`` 还欠着异步子 run /
     #: ``already`` 本机制已收过（CAS 没抢到，或戳已在） /
     #: ``legacy_charged`` **旧口径**下逐 run 扣过、本机制从没收过 /
+    #: ``partially_charged`` 本机制扣过，但 ``reconcile_run`` 随后 raise、戳被撤
+    #: （与 ``legacy_charged`` 行为相同 —— 都不重扣 —— 但成因完全不同，见
+    #: :data:`CHARGE_STATUS_RAISED`）/
     #: ``charged`` 本次收口 / ``forced`` 超过宽限期强制收口 / ``unknown`` 读不到行 /
     #: ``pre_cutover`` root 在切换点之前就开始了，按裁定只向前不追扣 /
     #: ``cutover_unreadable`` 切换点配置读不出来，拒绝扣任何一笔 /
@@ -152,6 +172,18 @@ class SettleOutcome:
     reason: str
     charged_points: float = 0.0
 
+
+#: 撤戳时留在 ``metadata_json.billing.charge_status`` 里的结局标记（终审 M5）。
+#:
+#: 撤戳把这棵树变回「没戳、但 ``point_transactions`` 里有 consume 行」，而那与一棵
+#: **上线前**的老树形状**一模一样**。少了这个标记，下一次收口只能把它读成
+#: ``legacy_charged``（「旧口径逐 run 扣过」）—— 行为是对的（不重扣），标签是骗人的：
+#: 运维会以为撞上了一棵历史树，去查一个根本不存在的迁移，而真相是「本机制扣过、
+#: 收尾炸了」，那是一条该有人去看的错误。
+#:
+#: ⚠️ 它**不改变撤戳的语义**：CAS 的判据仍然只有 ``charged_at``，带着这个标记的树
+#: 照样能被重新收口（那正是撤戳的目的）。标记只回答「上次为什么没有戳」。
+CHARGE_STATUS_RAISED = "charge_raised"
 
 #: 「派了但永远不会跑」的异步任务不该让一棵树永不收口。全树终态、仍有
 #: ``async_pending``、且最后一行结束已超过这个宽限期 → 由清扫器强制收口。
@@ -382,15 +414,22 @@ async def settle_tree_if_closed(
             # 防回溯，**两条路径共用**：旧口径逐 run 扣过的老树没有戳，不拦就会被
             # 整棵再扣一遍（见 ``_tree_was_ever_charged``）。
             #
-            # 正查在 CAS **之前**，所以本机制自己收过的树也会命中它 —— 两者都是
-            # 「不该再扣」，但**原因不同**，结局必须分得开：有戳 = 本机制收过
-            # （``already``），没戳 = 旧口径逐 run 收过（``legacy_charged``）。
-            # 合成一个会让运维读不出「这是上线前的老树」还是「刚才谁抢先了」。
+            # 正查在 CAS **之前**，所以本机制自己收过的树也会命中它 —— 三者都是
+            # 「不该再扣」，但**原因不同**，结局必须分得开：
+            #   有戳                  = 本机制收过（``already``）
+            #   没戳 + 有结局标记     = 本机制扣过、收尾 raise 撤了戳
+            #                           （``partially_charged``，终审 M5）
+            #   没戳 + 没标记         = 旧口径逐 run 收过（``legacy_charged``）
+            # 合成一个会让运维读不出「这是上线前的老树」「刚才谁抢先了」还是
+            # 「有一次扣费炸在半路上」—— 只有最后那一种是该有人去看的。
             if await _tree_was_ever_charged(session, [r.id for r in rows]):
                 root_row = _root_row_of(rows, root_id)
                 billing = (root_row.metadata_json or {}).get("billing") or {}
-                stamped = bool(billing.get("charged_at"))
-                return SettleOutcome(False, "already" if stamped else "legacy_charged")
+                if billing.get("charged_at"):
+                    return SettleOutcome(False, "already")
+                if billing.get("charge_status") == CHARGE_STATUS_RAISED:
+                    return SettleOutcome(False, "partially_charged")
+                return SettleOutcome(False, "legacy_charged")
     except Exception:  # noqa: BLE001 — 一次读失败不该变成一次误扣
         logger.exception("[tree_charge] tree read failed run={}", run_id)
         return SettleOutcome(False, "error")
@@ -527,8 +566,16 @@ def _stamp_stmt(root_id: int, stamp: str):
 
 
 def _release_stamp_stmt(root_id: int):
-    """把戳撤回去（只在扣费 raise 时用）。``- 'charged_at'`` 删键而不是写 null ——
-    CAS 的判据是 ``->>'charged_at' IS NULL``，两种形状都能让它重新成立，删键更干净。"""
+    """把戳撤回去（只在扣费 raise 时用），**并留下这是为什么**。
+
+    ``- 'charged_at'`` 删键而不是写 null —— CAS 的判据是 ``->>'charged_at' IS NULL``，
+    两种形状都能让它重新成立，删键更干净。
+
+    同一次写里把 ``charge_status`` 塞进去（:data:`CHARGE_STATUS_RAISED`，终审 M5）：
+    删键与写标记必须是**同一条** UPDATE，否则两者之间的任何失败都会留下一棵没戳也
+    没标记的树 —— 正好是它要区分的那两种形状里被误判的那一种。顺序上先减后并，
+    所以标记不会被 ``-`` 顺手删掉。
+    """
     from sqlalchemy import func
     from sqlalchemy import update as sa_update
 
@@ -546,7 +593,11 @@ def _release_stamp_stmt(root_id: int):
                     func.coalesce(
                         AgentRuns.metadata_json["billing"],
                         func.jsonb_build_object(),
-                    ).op("-")("charged_at"),
+                    )
+                    .op("-")("charged_at")
+                    .op("||")(
+                        func.jsonb_build_object("charge_status", CHARGE_STATUS_RAISED)
+                    ),
                 )
             )
         )
@@ -554,6 +605,7 @@ def _release_stamp_stmt(root_id: int):
 
 
 __all__ = [
+    "CHARGE_STATUS_RAISED",
     "PENDING_CHILDREN_GRACE",
     "cutover_at",
     "legacy_charge_probe_stmt",

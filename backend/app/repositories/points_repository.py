@@ -811,34 +811,96 @@ class PointsRepository:
             logger.error(f"Failed to create transaction: {e}")
             raise
 
+    @staticmethod
+    def _charge_leg_stmt(
+        *, txn_type: str, reference_type: str, reference_ids: List[str]
+    ):
+        """一条「按引用合计某一种流水」的语句。
+
+        两条腿各编译一次而不是写成 ``type IN ('consume','refund')``，因为**每条腿
+        各有一个 partial 索引**，而 partial 索引只在它的谓词被查询条件**蕴含**时才
+        会被 planner 选中：
+
+        * ``consume`` 腿 → mig 474 ``idx_point_transactions_agent_run_consume``
+        * ``refund`` 腿 → mig 477 ``idx_point_transactions_agent_run_refund``
+
+        两条索引的谓词都是 ``type = '<那一种>' AND reference_type = 'agent_run'``，
+        与这里发出去的两个等值条件逐字一致。改成 ``IN`` 会让**两条**同时不再被蕴含
+        —— 结果仍然正确，只是这条**被前端轮询**的查询（议题详情页每次刷新）悄悄退回
+        全表扫描，而且随积分流水线性变慢，没有任何探针会说出来。那正是 474 存在的
+        理由，而 477 是终审 I-2 抓到的同一个洞在第二条腿上的复现。
+
+        ⚠️ mig 123 的 ``idx_point_transactions_unique_refund`` **帮不上 refund 腿**：
+        它首列是 ``team_id``，而这条查询不带 ``team_id``。这就是 477 必须单独存在、
+        而不是「表上已经有个 refund 索引了」的原因。
+        """
+        return (
+            select(
+                PointTransactions.reference_id,
+                func.sum(PointTransactions.amount).label("amount"),
+            )
+            .where(PointTransactions.type == txn_type)
+            .where(PointTransactions.reference_type == reference_type)
+            .where(PointTransactions.reference_id.in_(reference_ids))
+            .group_by(PointTransactions.reference_id)
+        )
+
     async def charged_points_for_references(
         self, *, reference_type: str, reference_ids: List[str]
     ) -> Dict[str, float]:
-        """这些引用各自真扣掉的积分（正数）。
+        """这些引用各自**此刻仍然欠着**的积分（正数，已抵扣退款）。
 
-        真相在 ``point_transactions``（``type='consume'``，``amount`` 为负），不在任
-        何效率表里——效率账引用积分账，不复制它。同一引用可能有多行（重试、补扣），
-        所以求和。**没扣过的 id 不出现**：调用方读到 None 才能把「没扣」和「扣了 0」
-        分开。"""
+        真相在 ``point_transactions``，不在任何效率表里——效率账引用积分账，不复制
+        它。同一引用可能有多行（重试、补扣），所以求和。**没扣过的 id 不出现**：
+        调用方读到 None 才能把「没扣」和「扣了 0」分开。
+
+        ⚠️ **退款必须抵扣（终审 I6）。** 在此之前这里只看 ``type='consume'``，于是
+        2026-09-17 那 81 棵被退款的 pre-cutover 树在三个用户可见的宿主上（议题线程、
+        聊天气泡消耗行、``done`` 状态帧）仍然显示 ``◇ n`` —— **界面说扣了、账上已经
+        退了**。两种流水的符号是相反的：``consume`` 的 ``amount`` 为负，``refund``
+        的为正（mig 123 的 RPC 直接 ``points_balance + p_amount``），所以「净扣」
+        就是两者相加再取负。
+
+        下限 0：退得比扣的多是数据异常，但它不该在界面上显示成一个负的消耗。
+        """
         wanted = [str(r) for r in reference_ids if r is not None]
         if not wanted:
             return {}
         try:
-            stmt = (
-                select(
-                    PointTransactions.reference_id,
-                    func.sum(PointTransactions.amount).label("amount"),
-                )
-                .where(PointTransactions.type == "consume")
-                .where(PointTransactions.reference_type == reference_type)
-                .where(PointTransactions.reference_id.in_(wanted))
-                .group_by(PointTransactions.reference_id)
-            )
             async with read_scope() as session:
-                rows = (await session.execute(stmt)).all()
+                consumed = (
+                    await session.execute(
+                        self._charge_leg_stmt(
+                            txn_type="consume",
+                            reference_type=reference_type,
+                            reference_ids=wanted,
+                        )
+                    )
+                ).all()
+                refunded = (
+                    await session.execute(
+                        self._charge_leg_stmt(
+                            txn_type="refund",
+                            reference_type=reference_type,
+                            reference_ids=wanted,
+                        )
+                    )
+                ).all()
             # 取负而不是 abs()：``type='consume'`` 的行一律是负数，取负正好还原
             # 扣了多少。abs() 会把一个本不该出现的正数悄悄读成扣分，掩盖数据异常。
-            return {str(ref): -float(amount or 0) for ref, amount in rows}
+            out = {str(ref): -float(amount or 0) for ref, amount in consumed}
+            for ref, amount in refunded:
+                key = str(ref)
+                if key not in out:
+                    # 只退不扣。**不要**凭空造一个键 —— 那会把「从没扣过」读成
+                    # 「扣了 0」，正是本方法用缺席/在场区分的那两件事。
+                    logger.warning(
+                        f"Refund without a matching consume for {reference_type} "
+                        f"{key} (+{float(amount or 0)}) — ledger anomaly"
+                    )
+                    continue
+                out[key] = round(max(out[key] - float(amount or 0), 0.0), 4)
+            return out
         except Exception as e:
             # RAISE, never ``{}``. The two readers want opposite things from a
             # failure and only one of them can be served by a default: the cost

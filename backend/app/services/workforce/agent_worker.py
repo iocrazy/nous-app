@@ -496,8 +496,10 @@ async def _run_subagent_task(
         "status": envelope.get("status"),
         "summary": envelope.get("summary") or "",
         "cost_cents": envelope.get("cost_cents") or 0,
-        # 同海拔的 BYOK 分量（整棵子树）。父行拿 by_child - by_child_byok
-        # 减出平台额，所以这一项漏传等于把 BYOK 的钱按平台价收。
+        # 同海拔的 BYOK 分量（整棵子树），落到父行的 cost.by_child_byok。
+        # ⚠️ 当前无消费方（终审 I3）：扣费按行聚合，不看 by_child*——子 run 的
+        # BYOK 由它自己那一行报（见 ai/billing/tree_charge.py 模块 docstring）。
+        # 所以漏传这一项今天不会多收钱，只会让父行面板上的分解少半边。
         "byok_cents": envelope.get("byok_cents") or 0,
         "tokens_used": envelope.get("tokens_used") or 0,
     }
@@ -555,8 +557,7 @@ async def _run_subagent_task(
         )
     except Exception as err:  # noqa: BLE001 — audit, not delivery
         logger.exception(
-            f"[agent-worker] subagent task {task_id}: audit outbox write "
-            f"failed: {err}"
+            f"[agent-worker] subagent task {task_id}: audit outbox write failed: {err}"
         )
 
     # The wake ORDER, not the wake. Only an issue has turns to start, so a
