@@ -383,3 +383,144 @@ def test_post_notes_rejects_out_of_range_rating_with_422():
 
     assert resp.status_code == 422
     svc.create_note.assert_not_awaited()
+
+
+# ── Archive (mig 478) ────────────────────────────────────────────────────────
+#
+# Archive is a PATCH field rather than its own endpoint, which makes the
+# router's job the interesting one: `archived` and the ordinary fields go to
+# two DIFFERENT service calls (archiving also clears `pinned`, so it cannot
+# ride the generic SET clause). These pin which call each body reaches.
+
+_ROW = {
+    "id": 9,
+    "content_md": "x",
+    "tags": [],
+    "note_date": "2026-09-20",
+    "pinned": False,
+    "attachments": [],
+    "ref_hotspot": None,
+    "created_at": "2026-09-20T00:00:00Z",
+    "updated_at": "2026-09-20T00:00:00Z",
+}
+
+
+@pytest.mark.asyncio
+async def test_list_defaults_to_the_live_view():
+    """The flag has to default to False at the ROUTER, not only in the repo —
+    an archived note must not reappear because a caller omitted it."""
+    svc = AsyncMock()
+    svc.list_notes.return_value = []
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await list_notes(
+            date=None, tag=None, q=None, limit=50, before_id=None, current_user=USER
+        )
+    assert svc.list_notes.await_args.kwargs["archived"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_threads_the_archive_cursor_to_the_service():
+    svc = AsyncMock()
+    svc.list_notes.return_value = []
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await list_notes(
+            date=None,
+            tag=None,
+            q=None,
+            limit=50,
+            before_id="7",
+            before_archived_at="2026-09-19T10:00:00+00:00",
+            archived=True,
+            current_user=USER,
+        )
+    kwargs = svc.list_notes.await_args.kwargs
+    assert kwargs["archived"] is True
+    assert kwargs["before_id"] == "7"
+    assert kwargs["before_archived_at"] == "2026-09-19T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_archive_only_patch_never_touches_the_body():
+    """A body of just {"archived": true} must not reach update_note — doing so
+    would rewrite content_md/tags on every archive."""
+    svc = AsyncMock()
+    svc.set_archived.return_value = dict(_ROW, archived_at="2026-09-20T01:00:00Z")
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        out = await update_note("9", NoteUpdateIn(archived=True), current_user=USER)
+    svc.set_archived.assert_awaited_once_with("u1", "9", True)
+    svc.update_note.assert_not_awaited()
+    assert out.archived_at == "2026-09-20T01:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_unarchive_is_the_same_path_with_false():
+    """False is a value, not an absence — `archived=False` must restore, not
+    be read as "no archive field given"."""
+    svc = AsyncMock()
+    svc.set_archived.return_value = dict(_ROW, archived_at=None)
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        out = await update_note("9", NoteUpdateIn(archived=False), current_user=USER)
+    svc.set_archived.assert_awaited_once_with("u1", "9", False)
+    assert out.archived_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_body_without_archived_still_goes_to_update_note():
+    svc = AsyncMock()
+    svc.update_note.return_value = _ROW
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await update_note("9", NoteUpdateIn(pinned=True), current_user=USER)
+    svc.set_archived.assert_not_awaited()
+    assert svc.update_note.await_args.kwargs["pinned"] is True
+
+
+@pytest.mark.asyncio
+async def test_archive_maps_notfound_to_404():
+    svc = AsyncMock()
+    svc.set_archived.side_effect = NoteNotFound()
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        with pytest.raises(HTTPException) as exc:
+            await update_note("9", NoteUpdateIn(archived=True), current_user=USER)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_archive_maps_persist_failed_to_502():
+    """A failed archive must be a typed failure the UI can show, never a
+    silent no-op that leaves the note where it was."""
+    svc = AsyncMock()
+    svc.set_archived.side_effect = NotePersistFailed()
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        with pytest.raises(HTTPException) as exc:
+            await update_note("9", NoteUpdateIn(archived=True), current_user=USER)
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_archiving_and_pinning_in_one_patch_is_refused():
+    """Archiving gives the pin up; a patch that does both would rebuild the
+    state archiving exists to clear — a pinned note in nobody's list."""
+    svc = AsyncMock()
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        with pytest.raises(HTTPException) as exc:
+            await update_note(
+                "9", NoteUpdateIn(archived=True, pinned=True), current_user=USER
+            )
+    assert exc.value.status_code == 400
+    svc.set_archived.assert_not_awaited()
+    svc.update_note.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unpinning_while_archiving_is_allowed():
+    """`pinned=False` asks for the same end state archiving produces, so there
+    is nothing to refuse — the guard is about the contradiction, not about the
+    two fields appearing together."""
+    svc = AsyncMock()
+    svc.set_archived.return_value = dict(_ROW, archived_at="2026-09-20T01:00:00Z")
+    svc.update_note.return_value = dict(_ROW, archived_at="2026-09-20T01:00:00Z")
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await update_note(
+            "9", NoteUpdateIn(archived=True, pinned=False), current_user=USER
+        )
+    svc.set_archived.assert_awaited_once()

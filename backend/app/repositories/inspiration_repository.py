@@ -18,7 +18,7 @@ from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import select, text
+from sqlalchemy import select, text, tuple_
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
@@ -37,6 +37,14 @@ def _date(value: Any) -> datetime.date:
     if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
         return value
     return datetime.date.fromisoformat(str(value))
+
+
+def _ts(value: Any) -> datetime.datetime:
+    """Coerce an ISO timestamp string to an aware datetime for a timestamptz
+    bind (asyncpg rejects a bare string, the same way it does for DATE)."""
+    if isinstance(value, datetime.datetime):
+        return value
+    return datetime.datetime.fromisoformat(str(value))
 
 
 def _serialize(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -125,11 +133,21 @@ class InspirationNotesRepository:
         min_rating: Optional[int] = None,
         limit: int = 50,
         before_id: Optional[Any] = None,
+        before_archived_at: Optional[str] = None,
+        archived: bool = False,
     ) -> List[Dict[str, Any]]:
+        """One query, two views. ``archived`` picks a side of the mig 478
+        predicate; it is never "both", because a note that left the default
+        list must not come back through a filter the caller forgot to pass."""
         try:
             stmt = select(InspirationNotes).where(
                 InspirationNotes.user_id == user_id,
                 InspirationNotes.deleted_at.is_(None),
+                (
+                    InspirationNotes.archived_at.is_not(None)
+                    if archived
+                    else InspirationNotes.archived_at.is_(None)
+                ),
             )
             if date:
                 stmt = stmt.where(InspirationNotes.note_date == _date(date))
@@ -143,9 +161,26 @@ class InspirationNotesRepository:
             # ever go negative or become nullable.
             if min_rating:
                 stmt = stmt.where(InspirationNotes.rating >= min_rating)
-            if before_id:
-                stmt = stmt.where(InspirationNotes.id < _bigint(before_id))
-            stmt = stmt.order_by(InspirationNotes.id.desc()).limit(limit)
+            # A keyset cursor has to be keyed the way the rows are ordered, or
+            # a page boundary skips rows. The default list orders by id, so its
+            # cursor is an id. The archive answers "what did I just put away"
+            # and orders by archived_at, with id breaking ties (several notes
+            # archived in one statement share a timestamp) — so its cursor is
+            # the pair, compared as a row.
+            if archived:
+                stmt = stmt.order_by(
+                    InspirationNotes.archived_at.desc(), InspirationNotes.id.desc()
+                )
+                if before_id and before_archived_at:
+                    stmt = stmt.where(
+                        tuple_(InspirationNotes.archived_at, InspirationNotes.id)
+                        < (_ts(before_archived_at), _bigint(before_id))
+                    )
+            else:
+                stmt = stmt.order_by(InspirationNotes.id.desc())
+                if before_id:
+                    stmt = stmt.where(InspirationNotes.id < _bigint(before_id))
+            stmt = stmt.limit(limit)
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 return [_serialize(_row_dict(o)) for o in result.scalars().all()]
@@ -184,6 +219,39 @@ class InspirationNotesRepository:
             return _serialize(dict(row)) if row else None
         except Exception as e:
             logger.error(f"inspiration update({note_id}) failed: {e}")
+            return None
+
+    async def set_archived(
+        self, note_id: Any, archived: bool
+    ) -> Optional[Dict[str, Any]]:
+        """Archive or restore a note.
+
+        Archiving clears ``pinned`` in the SAME statement. A pin is a claim on
+        the top of the default list, and an archived note is not in that list
+        at all — leaving the flag set would make restoring the note silently
+        jump it to the top, days later, for a reason the user cannot see.
+        Restoring does not put the pin back: it was given up, not suspended.
+        """
+        try:
+            values: Dict[str, Any] = {
+                "updated_at": datetime.datetime.now(timezone.utc),
+                "archived_at": (
+                    datetime.datetime.now(timezone.utc) if archived else None
+                ),
+            }
+            if archived:
+                values["pinned"] = False
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(InspirationNotes)
+                    .where(InspirationNotes.id == _bigint(note_id))
+                    .values(**values)
+                    .returning(*InspirationNotes.__table__.columns)
+                )
+                row = result.mappings().first()
+            return _serialize(dict(row)) if row else None
+        except Exception as e:
+            logger.error(f"inspiration set_archived({note_id}) failed: {e}")
             return None
 
     async def soft_delete(self, note_id: Any) -> bool:

@@ -20,6 +20,10 @@ class NoteUpdateIn(BaseModel):
     content_md: Optional[str] = Field(None, max_length=100_000)
     pinned: Optional[bool] = None
     rating: Optional[int] = Field(None, ge=0, le=5)
+    # mig 478. True archives, False restores, None leaves it alone — the same
+    # three-state shape as `pinned`. Archiving also clears `pinned`; that rule
+    # lives in the repo so it cannot be applied by one caller and not another.
+    archived: Optional[bool] = None
 
 
 class AttachmentOut(BaseModel):
@@ -43,6 +47,9 @@ class NoteOut(BaseModel):
     note_date: str
     created_at: str
     updated_at: str
+    # mig 478. None = a normal note. The archive view renders it ("Archived on
+    # …") and pages with it — it is half of that view's keyset cursor.
+    archived_at: Optional[str] = None
     attachments: List[AttachmentOut] = []
 
 

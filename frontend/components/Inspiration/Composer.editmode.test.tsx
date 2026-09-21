@@ -38,6 +38,7 @@ const NOTE: InspirationNote = {
   note_date: '2026-09-02',
   created_at: '2026-09-02T09:00:00+00:00',
   updated_at: '2026-09-02T09:00:00+00:00',
+  archived_at: null,
   attachments: [],
 };
 

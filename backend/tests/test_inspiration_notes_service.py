@@ -436,3 +436,89 @@ async def test_update_rating_rejects_non_owner_as_not_found():
     with pytest.raises(NoteNotFound):
         await svc.update_note("u1", "1", rating=5)
     svc._notes.update.assert_not_awaited()
+
+
+# ── Archive (mig 478) ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_non_owner_as_not_found():
+    """Same contract as every other write: another user's note does not exist,
+    and no write is attempted before the ownership check."""
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "someone-else"}
+    with pytest.raises(NoteNotFound):
+        await svc.set_archived("u1", "1", True)
+    svc._notes.set_archived.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_archive_failure_raises_instead_of_returning_the_note():
+    """A repo write that reports failure must surface as a typed failure. A
+    silent no-op here would leave the UI showing the note as archived while the
+    row never moved."""
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.set_archived.return_value = None
+    with pytest.raises(NotePersistFailed):
+        await svc.set_archived("u1", "1", True)
+
+
+@pytest.mark.asyncio
+async def test_archive_folds_attachments_into_the_response():
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.set_archived.return_value = {
+        "id": 1,
+        "archived_at": "2026-09-20T00:00:00Z",
+    }
+    svc._attachments.list_for_notes.return_value = [
+        {
+            "note_id": 1,
+            "id": 7,
+            "mime": "image/png",
+            "size_bytes": 1,
+            "original_name": "a.png",
+        }
+    ]
+    row = await svc.set_archived("u1", "1", True)
+    assert [a["id"] for a in row["attachments"]] == [7]
+
+
+@pytest.mark.asyncio
+async def test_archive_does_not_reparse_tags():
+    """Archiving does not change the body, so the tag pool has nothing to
+    resync — and the tag COUNTS come from inspiration_tag_counts, which reads
+    the archive predicate itself (mig 478)."""
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.set_archived.return_value = {"id": 1}
+    await svc.set_archived("u1", "1", True)
+    svc._notes.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_defaults_to_the_live_view():
+    svc = _service()
+    svc._notes.list.return_value = []
+    await svc.list_notes("u1", date=None, tag=None, q=None, limit=50, before_id=None)
+    assert svc._notes.list.await_args.kwargs["archived"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_threads_the_archive_cursor_to_the_repo():
+    svc = _service()
+    svc._notes.list.return_value = []
+    await svc.list_notes(
+        "u1",
+        date=None,
+        tag=None,
+        q=None,
+        limit=50,
+        before_id="7",
+        before_archived_at="2026-09-19T10:00:00+00:00",
+        archived=True,
+    )
+    kwargs = svc._notes.list.await_args.kwargs
+    assert kwargs["archived"] is True
+    assert kwargs["before_archived_at"] == "2026-09-19T10:00:00+00:00"

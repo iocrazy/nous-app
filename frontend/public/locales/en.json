@@ -5094,7 +5094,17 @@
     "attachFile": "Attach files",
     "insertLink": "Insert link",
     "backToThisMonth": "Back to this month",
-    "deleteConfirmMessage": "This note will be permanently deleted."
+    "deleteConfirmMessage": "This note will be permanently deleted.",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archived": "Note archived",
+    "unarchived": "Note restored",
+    "undo": "Undo",
+    "emptyArchive": "Nothing archived. Notes you put away land here.",
+    "noteActions": "Note actions",
+    "noteView": "Note view",
+    "viewActive": "Active",
+    "viewArchived": "Archived"
   },
   "editor": {
     "brand": "Nous Projects",

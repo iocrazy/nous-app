@@ -5094,7 +5094,17 @@
     "attachFile": "添加附件",
     "insertLink": "插入链接",
     "backToThisMonth": "回到本月",
-    "deleteConfirmMessage": "删除后无法恢复。"
+    "deleteConfirmMessage": "删除后无法恢复。",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "archived": "笔记已归档",
+    "unarchived": "笔记已恢复",
+    "undo": "撤销",
+    "emptyArchive": "归档是空的。收起来的笔记会出现在这里。",
+    "noteActions": "笔记操作",
+    "noteView": "笔记视图",
+    "viewActive": "当前",
+    "viewArchived": "已归档"
   },
   "editor": {
     "brand": "Nous Projects",

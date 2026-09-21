@@ -25,6 +25,7 @@ const N = (id: string, over: Partial<InspirationNote> = {}): InspirationNote => 
   note_date: '2026-07-09',
   created_at: '2026-07-09T09:42:00+00:00',
   updated_at: '2026-07-09T09:42:00+00:00',
+  archived_at: null,
   attachments: [],
   ...over,
 });
