@@ -64,7 +64,7 @@ workforce 面板 recent_runs）。它不再参与任何聚合；列注释与 ORM
 语句**的 `.values(...)` 里，值取自同一份内存视图：
 
 ```python
-.values(metadata_json=expr, own_cost_cents=own_media_cents_of(self._views["cost"]))
+.values(metadata_json=expr, own_cost_cents=spend_of_run(self.views.get("cost")).total)
 ```
 
 由此得到三条性质，都不需要额外的写路径：
