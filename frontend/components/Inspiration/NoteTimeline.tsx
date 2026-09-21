@@ -68,6 +68,23 @@ export const NoteTimeline: React.FC<Props> = ({
     );
   }
 
+  if (!notes.length) {
+    // Loading with nothing to show used to render blank — which, on a view
+    // switch, is indistinguishable from a click that did nothing. The count
+    // is arbitrary; these only have to hold the space and say "fetching".
+    return (
+      <div className="space-y-2.5" aria-busy="true" data-testid="note-timeline-skeleton">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="animate-pulse rounded-xl bg-island px-4 py-3">
+            <div className="h-2.5 w-16 rounded bg-line" />
+            <div className="mt-3 h-3 w-3/4 rounded bg-line" />
+            <div className="mt-2 h-3 w-1/2 rounded bg-line" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2.5">
       {groups.map(([day, dayNotes]) => (
