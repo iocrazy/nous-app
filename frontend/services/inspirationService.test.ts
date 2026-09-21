@@ -27,7 +27,10 @@ describe('inspirationService', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('listNotes composes query params and auth header', async () => {
-    await listNotes({ date: '2026-07-07', tag: 'hooks', q: 'ferry' }, 20, '99');
+    await listNotes({ date: '2026-07-07', tag: 'hooks', q: 'ferry' }, 20, {
+      id: '99',
+      archivedAt: null,
+    });
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toContain('http://api.test/api/v1/inspiration/notes?');
     expect(url).toContain('date=2026-07-07');
@@ -53,6 +56,59 @@ describe('inspirationService', () => {
     const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(2);
     for (const [url] of calls) expect(String(url)).not.toContain('min_rating');
+  });
+
+  // ── Archive (mig 478) ──────────────────────────────────────────────────
+  //
+  // The live list and the archive are the same endpoint with different
+  // params, so these pin the params rather than the responses: a dropped
+  // `archived` silently returns the OTHER view's rows, which looks like data
+  // loss, and a half-sent cursor silently skips a page.
+
+  it('listNotes asks for the archive only when the filter says so', async () => {
+    await listNotes({ archived: true });
+    await listNotes({ archived: false });
+    await listNotes({});
+    const [a, b, c] = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([u]) =>
+      String(u),
+    );
+    expect(a).toContain('archived=true');
+    // Omitted, not `archived=false`: absence is what the live list means, and
+    // it is what the backend defaults to.
+    expect(b).not.toContain('archived');
+    expect(c).not.toContain('archived');
+  });
+
+  it('listNotes sends BOTH halves of the archive cursor', async () => {
+    await listNotes({ archived: true }, 50, {
+      id: '99',
+      archivedAt: '2026-09-19T10:00:00+00:00',
+    });
+    const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toContain('before_id=99');
+    expect(decodeURIComponent(String(url))).toContain(
+      'before_archived_at=2026-09-19T10:00:00+00:00',
+    );
+  });
+
+  it('listNotes does not send an archive cursor on the live list', async () => {
+    // The live list is ordered by id; a stray before_archived_at there would
+    // be a predicate on a column it does not sort by.
+    await listNotes({}, 50, { id: '99', archivedAt: '2026-09-19T10:00:00+00:00' });
+    const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toContain('before_id=99');
+    expect(String(url)).not.toContain('before_archived_at');
+  });
+
+  it('updateNote PATCHes archived in both directions', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1' })));
+    await updateNote('1', { archived: true });
+    await updateNote('1', { archived: false });
+    const bodies = (fetch as ReturnType<typeof vi.fn>).mock.calls.map(([, init]) =>
+      JSON.parse(init.body as string),
+    );
+    // false is a value, not an absence — it is what restores a note.
+    expect(bodies).toEqual([{ archived: true }, { archived: false }]);
   });
 
   it('createNote POSTs content and optional ref_hotspot', async () => {

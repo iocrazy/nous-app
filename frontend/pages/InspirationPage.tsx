@@ -3,7 +3,7 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link2, Search, Star, Tag as TagIcon, X } from 'lucide-react';
+import { Archive, Link2, NotebookPen, Search, Star, Tag as TagIcon, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Composer } from '../components/Inspiration/Composer';
@@ -86,6 +86,10 @@ export const InspirationPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editing, setEditing] = useState<InspirationNote | null>(null);
   const [tab, setTab] = useState<'notes' | 'hotspots'>('notes');
+  // Which half of the Notes tab is showing (mig 478). Archive is a view of
+  // notes, not a third tab — the top-level tabs are the two KINDS of thing
+  // this page holds (notes, hotspots), and an archived note is still a note.
+  const [view, setView] = useState<'live' | 'archive'>('live');
   const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [parseOpen, setParseOpen] = useState(false);
@@ -136,8 +140,9 @@ export const InspirationPage: React.FC = () => {
       // `|| undefined`, not the raw 0: "Any rating" must drop the param
       // rather than ask for `rating >= 0`.
       min_rating: minRating || undefined,
+      archived: view === 'archive',
     }),
-    [date, tag, q, minRating],
+    [date, tag, q, minRating, view],
   );
 
   // Autocomplete suggestions shared by the Composer and the edit NoteEditor —
@@ -214,7 +219,11 @@ export const InspirationPage: React.FC = () => {
     const seq = requestSeq.current;
     setLoading(true);
     try {
-      const rows = await listNotes(filters, PAGE_SIZE, notes[notes.length - 1].id);
+      const last = notes[notes.length - 1];
+      const rows = await listNotes(filters, PAGE_SIZE, {
+        id: last.id,
+        archivedAt: last.archived_at,
+      });
       if (seq !== requestSeq.current) return; // filters changed while in-flight; discard
       setNotes((prev) => [...prev, ...rows]);
       setHasMore(rows.length === PAGE_SIZE);
@@ -254,6 +263,49 @@ export const InspirationPage: React.FC = () => {
     try {
       const updated = await updateNote(note.id, { pinned: !note.pinned });
       setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+    } catch (err) {
+      addToast((err as Error).message, 'error');
+    }
+  };
+
+  /**
+   * Archive a note, or restore one (mig 478).
+   *
+   * No confirm dialog: archiving is reversible, and the note is gone from
+   * this view the moment it succeeds, so the undo offer rides the toast that
+   * reports it — one click, no decision asked for up front. If the undo
+   * fails the note is put back on screen, because a failed undo means the
+   * note really is where the first toast said it was.
+   */
+  const onArchive = async (note: InspirationNote) => {
+    const archiving = !note.archived_at;
+    try {
+      const updated = await updateNote(note.id, { archived: archiving });
+      // It left THIS view either way — live notes and archived notes are
+      // disjoint, so one list never has to show the other's rows.
+      setNotes((prev) => prev.filter((n) => n.id !== note.id));
+      setRefreshKey((k) => k + 1);
+      addToast(
+        archiving
+          ? t('inspiration.archived', 'Note archived')
+          : t('inspiration.unarchived', 'Note restored'),
+        'success',
+        6000,
+        {
+          label: t('inspiration.undo', 'Undo'),
+          onClick: () => {
+            void (async () => {
+              try {
+                const back = await updateNote(updated.id, { archived: !archiving });
+                setNotes((prev) => [back, ...prev.filter((n) => n.id !== back.id)]);
+                setRefreshKey((k) => k + 1);
+              } catch (err) {
+                addToast((err as Error).message, 'error');
+              }
+            })();
+          },
+        },
+      );
     } catch (err) {
       addToast((err as Error).message, 'error');
     }
@@ -553,6 +605,36 @@ export const InspirationPage: React.FC = () => {
             }}
           />
         </FilterChip>
+        {/* Live ｜ Archive. Same segmented control as the Hotspots workspace's
+            Ranked/Timeline switch — it picks which rows the one list below is
+            showing, which is exactly what that control means elsewhere here.
+            Right-aligned and after the chips, because the chips narrow
+            whichever view this selects. */}
+        <div
+          role="group"
+          aria-label={t('inspiration.noteView', 'Note view')}
+          className="ml-auto flex rounded-md bg-island-2 p-0.5"
+        >
+          {(
+            [
+              // "Active", not "Notes": the tab directly above already says
+              // Notes, and both halves of this switch are notes.
+              ['live', t('inspiration.viewActive', 'Active'), NotebookPen],
+              ['archive', t('inspiration.viewArchived', 'Archived'), Archive],
+            ] as const
+          ).map(([v, label, Icon]) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              aria-pressed={view === v}
+              className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold ${
+                view === v ? 'bg-island text-[var(--accent-text)]' : 'text-content-4'
+              }`}
+            >
+              <Icon size={11} /> {label}
+            </button>
+          ))}
+        </div>
       </div>
       )}
 
@@ -560,22 +642,27 @@ export const InspirationPage: React.FC = () => {
         <div className="min-w-0 flex-1 space-y-2.5">
           {tab === 'notes' ? (
             <>
-              <Composer
-                key={prefillNonce}
-                prefill={prefill}
-                autoFocus={!!prefill}
-                onCreated={(note) => {
-                  onCreated(note);
-                  setPrefill(null);
-                }}
-                onAttachmentUploaded={onAttachmentUploaded}
-                tagSuggestions={tagSuggestions}
-              />
+              {/* No composer in the archive: anything written there would be
+                  created live and vanish from the view it was typed into. */}
+              {view === 'live' && (
+                <Composer
+                  key={prefillNonce}
+                  prefill={prefill}
+                  autoFocus={!!prefill}
+                  onCreated={(note) => {
+                    onCreated(note);
+                    setPrefill(null);
+                  }}
+                  onAttachmentUploaded={onAttachmentUploaded}
+                  tagSuggestions={tagSuggestions}
+                />
+              )}
               <NoteTimeline
                 notes={notes}
                 onEdit={startEdit}
                 onTogglePin={onTogglePin}
                 onDelete={onDelete}
+                onArchive={onArchive}
                 onTagClick={(tg) => setTag(tg)}
                 onToggleTask={(note, index) => void onToggleTask(note, index)}
                 onRating={(note, value) => void onRating(note, value)}
@@ -583,6 +670,14 @@ export const InspirationPage: React.FC = () => {
                 loading={loading}
                 loadMore={() => void loadMore()}
                 filtered={!!(date || tag || q)}
+                emptyText={
+                  view === 'archive'
+                    ? t(
+                        'inspiration.emptyArchive',
+                        'Nothing archived. Notes you put away land here.',
+                      )
+                    : undefined
+                }
               />
             </>
           ) : (

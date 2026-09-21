@@ -4,15 +4,30 @@ import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info';
 
+/** One inline affordance on a toast — an "Undo" for an action that already
+ *  happened. Clicking it dismisses the toast, so the caller never has to.
+ *  A toast with an action is an offer with a deadline: it disappears on the
+ *  same timer as any other, so never put a step the user MUST take here. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: string;
   message: string;
   type: ToastType;
   duration: number;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  addToast: (message: string, type?: ToastType, duration?: number) => void;
+  addToast: (
+    message: string,
+    type?: ToastType,
+    duration?: number,
+    action?: ToastAction,
+  ) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -54,6 +69,17 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = (
     >
       <Icon size={18} className={`${style.iconColor} shrink-0 mt-0.5`} />
       <p className={`text-sm ${style.text} flex-1`}>{toast.message}</p>
+      {toast.action && (
+        <button
+          onClick={() => {
+            toast.action?.onClick();
+            onDismiss(toast.id);
+          }}
+          className="shrink-0 text-sm font-semibold text-[var(--accent-text)] hover:underline"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         onClick={() => onDismiss(toast.id)}
         className="text-content-3 hover:text-content shrink-0"
@@ -68,10 +94,18 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counterRef = useRef(0);
 
-  const addToast = useCallback((message: string, type: ToastType = 'info', duration = 5000) => {
-    const id = `toast-${++counterRef.current}-${Date.now()}`;
-    setToasts(prev => [...prev, { id, message, type, duration }]);
-  }, []);
+  const addToast = useCallback(
+    (
+      message: string,
+      type: ToastType = 'info',
+      duration = 5000,
+      action?: ToastAction,
+    ) => {
+      const id = `toast-${++counterRef.current}-${Date.now()}`;
+      setToasts(prev => [...prev, { id, message, type, duration, action }]);
+    },
+    [],
+  );
 
   const dismissToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));

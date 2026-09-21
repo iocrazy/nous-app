@@ -126,8 +126,18 @@ async def list_notes(
     min_rating: Optional[int] = Query(None, ge=0, le=5),
     limit: int = 50,
     before_id: Optional[str] = None,
+    before_archived_at: Optional[str] = None,
+    archived: bool = False,
     current_user: dict = Depends(get_current_user),
 ):
+    """The notes list. ``archived=true`` returns the archive view instead —
+    one or the other, never both, because a note the user put away must not
+    reappear here just because a caller omitted the flag (mig 478).
+
+    The archive orders by when each note was put away, so paging it needs
+    both halves of that key: pass the last row's ``id`` AND its
+    ``archived_at``. ``before_id`` alone pages the default list.
+    """
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
     return await get_notes_service().list_notes(
@@ -138,6 +148,8 @@ async def list_notes(
         min_rating=min_rating,
         limit=limit,
         before_id=before_id,
+        before_archived_at=before_archived_at,
+        archived=archived,
     )
 
 
@@ -167,16 +179,37 @@ async def create_note(
 async def update_note(
     note_id: str, body: NoteUpdateIn, current_user: dict = Depends(get_current_user)
 ):
+    uid = _uid(current_user)
+    rest = (body.content_md, body.pinned, body.rating)
+    # Archiving gives the pin up, and the rest of the patch lands on top — so
+    # this one combination would quietly rebuild the state archiving exists to
+    # clear: a pinned note in nobody's list. Refuse it instead of picking a
+    # winner the caller cannot see.
+    if body.archived and body.pinned:
+        raise HTTPException(status_code=400, detail="an archived note cannot be pinned")
     try:
-        row = await get_notes_service().update_note(
-            _uid(current_user),
-            note_id,
-            content_md=body.content_md,
-            pinned=body.pinned,
-            rating=body.rating,
+        # Archiving is its own write — it also clears `pinned`, so it cannot be
+        # folded into the generic SET clause. It runs first and the rest of the
+        # patch, if any, then lands on top. A body carrying only `archived`
+        # therefore never touches content, tags or rating; a body carrying
+        # neither still goes through update_note, as it always has.
+        row = (
+            await get_notes_service().set_archived(uid, note_id, body.archived)
+            if body.archived is not None
+            else None
         )
+        if row is None or any(v is not None for v in rest):
+            row = await get_notes_service().update_note(
+                uid,
+                note_id,
+                content_md=body.content_md,
+                pinned=body.pinned,
+                rating=body.rating,
+            )
     except NoteNotFound:
         raise HTTPException(status_code=404, detail="note not found")
+    except NotePersistFailed:
+        raise HTTPException(status_code=502, detail="note update failed")
     if row is None:
         raise HTTPException(status_code=502, detail="note update failed")
     return NoteOut(**row)

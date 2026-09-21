@@ -28,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
+    desc,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -48,6 +49,22 @@ class InspirationNotes(Base):
         Index("idx_inspiration_notes_user_date", "user_id", "note_date"),
         Index("idx_inspiration_notes_user_pinned", "user_id", "pinned"),
         Index("idx_inspiration_notes_tags", "tags", postgresql_using="gin"),
+        # mig 478. Both partial, and on opposite sides of the same predicate:
+        # the default list reads only live notes, the archive view only
+        # archived ones, so neither index carries the other's rows.
+        Index(
+            "idx_inspiration_notes_user_live",
+            "user_id",
+            desc("id"),
+            postgresql_where=text("deleted_at IS NULL AND archived_at IS NULL"),
+        ),
+        Index(
+            "idx_inspiration_notes_user_archived",
+            "user_id",
+            desc("archived_at"),
+            desc("id"),
+            postgresql_where=text("deleted_at IS NULL AND archived_at IS NOT NULL"),
+        ),
         {"schema": "public"},
     )
 
@@ -78,6 +95,12 @@ class InspirationNotes(Base):
         DateTime(True), nullable=False, server_default=text("now()")
     )
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    # mig 478. NULL = a normal note. Archived notes are excluded from the
+    # default list, the tag counts and the activity calendar, and are reachable
+    # only through the archive view. A timestamp rather than a flag: the
+    # archive is ordered by when the note was put away, which a boolean cannot
+    # answer. Distinct from deleted_at, which has no way back in the UI.
+    archived_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
 
 
 class InspirationAttachments(Base):

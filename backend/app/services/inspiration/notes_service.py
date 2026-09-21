@@ -105,6 +105,8 @@ class NotesService:
         limit: int,
         before_id: Optional[str],
         min_rating: Optional[int] = None,
+        before_archived_at: Optional[str] = None,
+        archived: bool = False,
     ) -> List[Dict[str, Any]]:
         rows = await self._notes.list(
             user_id,
@@ -114,6 +116,8 @@ class NotesService:
             min_rating=min_rating,
             limit=limit,
             before_id=before_id,
+            before_archived_at=before_archived_at,
+            archived=archived,
         )
         atts = (
             await self._attachments.list_for_notes([r["id"] for r in rows])
@@ -177,6 +181,24 @@ class NotesService:
         names = list(row.get("tags") or [])
         tag_ids = await get_tags_repository().resolve_note_tags(user_id, names)
         await get_note_tags_repository().sync_for_note(int(row["id"]), tag_ids)
+
+    async def set_archived(
+        self, user_id: str, note_id: Any, archived: bool
+    ) -> Dict[str, Any]:
+        """Move a note into or out of the archive.
+
+        A single write, so no unit of work — unlike a content save, nothing
+        here has to stay in step with the tag pool: archiving does not change
+        the note body, and the tag COUNTS the sidebar shows come from
+        ``inspiration_tag_counts``, which reads the archive predicate itself
+        (mig 478) rather than a table this would have to update.
+        """
+        await self._owned(user_id, note_id)
+        row = await self._notes.set_archived(note_id, archived)
+        if row is None:
+            raise NotePersistFailed()
+        row["attachments"] = await self._attachments.list_for_notes([row["id"]])
+        return row
 
     async def delete_note(self, user_id: str, note_id: Any) -> None:
         await self._owned(user_id, note_id)

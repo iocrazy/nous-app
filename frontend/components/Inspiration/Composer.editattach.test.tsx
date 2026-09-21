@@ -40,6 +40,7 @@ const SAVED: InspirationNote = {
   id: '7', content_md: 'edited', tags: [], ref_hotspot: null, pinned: false, rating: 0,
   note_date: '2026-09-02', created_at: '2026-09-02T09:00:00+00:00',
   updated_at: '2026-09-02T09:00:00+00:00', attachments: [],
+  archived_at: null,
 };
 
 function renderEditor(over: Partial<React.ComponentProps<typeof Composer>> = {}) {

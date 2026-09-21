@@ -17,6 +17,8 @@ interface Props {
   onEdit: (n: InspirationNote) => void;
   onTogglePin: (n: InspirationNote) => void;
   onDelete: (n: InspirationNote) => void;
+  /** Archive/restore, passed straight to each card (mig 478). */
+  onArchive?: (n: InspirationNote) => void;
   onTagClick: (tag: string) => void;
   onToggleTask?: (note: InspirationNote, index: number) => void;
   onRating?: (note: InspirationNote, value: number) => void;
@@ -24,10 +26,15 @@ interface Props {
   loading: boolean;
   loadMore: () => void;
   filtered?: boolean;
+  /** Overrides the "no notes yet" copy. The archive's empty state is not an
+   *  invitation to write ("capture your first idea above" — there is no
+   *  composer there), so it supplies its own. `filtered` still wins: "no
+   *  matching notes" describes the filters, whichever view is showing. */
+  emptyText?: string;
 }
 
 export const NoteTimeline: React.FC<Props> = ({
-  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, onRating, hasMore, loading, loadMore, filtered,
+  notes, onEdit, onTogglePin, onDelete, onArchive, onTagClick, onToggleTask, onRating, hasMore, loading, loadMore, filtered, emptyText,
 }) => {
   const { t } = useTranslation();
   const groups = useMemo(() => {
@@ -50,12 +57,13 @@ export const NoteTimeline: React.FC<Props> = ({
   }, [notes]);
 
   if (!notes.length && !loading) {
-    const emptyText = filtered
+    const text = filtered
       ? t('inspiration.noMatching', 'No matching notes.')
-      : t('inspiration.empty', 'No notes yet — capture your first idea above.');
+      : (emptyText ??
+        t('inspiration.empty', 'No notes yet — capture your first idea above.'));
     return (
       <div className="rounded-xl bg-island px-4 py-10 text-center text-sm text-content-3">
-        {emptyText}
+        {text}
       </div>
     );
   }
@@ -78,6 +86,7 @@ export const NoteTimeline: React.FC<Props> = ({
               onEdit={onEdit}
               onTogglePin={onTogglePin}
               onDelete={onDelete}
+              onArchive={onArchive}
               onTagClick={onTagClick}
               onToggleTask={onToggleTask}
               onRating={onRating}

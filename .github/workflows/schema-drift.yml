@@ -170,6 +170,10 @@ on:
       # 改动同样要触发。
       - 'backend/tests/db/test_migration_475_search_chip_filters_integration.py'
       - 'backend/app/services/library/search_service.py'
+      # mig 478：笔记归档。「移出视线」是四个查询的共同主张，其中两个是 SQL
+      # 函数（inspiration_tag_counts / inspiration_activity）——桩能证明后端调了
+      # 它们，只有 Postgres 能说出归档笔记是不是还被数在里面。
+      - 'backend/tests/db/test_migration_478_inspiration_archive_integration.py'
       - 'backend/tests/db/test_search_docs_repository_integration.py'
       # 上面那个文件读迁移建出来的形状；这个读 SearchDocsRepository 的语句在
       # 服务器上跑得通不通（similarity / ON CONFLICT / Uuid 双绑定 / ILIKE
@@ -222,15 +226,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-three, so it has to
+      # to it changes what "green" means for all thirty-four, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-three below was counted with this command, not derived
-      # from the thirty-two it replaced):
+      # (the thirty-four below was counted with this command, not derived
+      # from the thirty-three it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -805,6 +809,17 @@ jobs:
           # 开放（DROP 会连 463 的 REVOKE 一起丢掉）、以及 SearchService 真实的
           # SQL 串（命名参数 + CAST）是否被 Postgres 接受。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_475_search_chip_filters_integration.py -v
+
+      - name: Assert mig 478 archived notes leave every surface
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 归档要同时从列表、归档视图、标签计数、活跃度日历四个面生效。忘了列表
+          # 那条谓词是吵的（笔记明摆着还在）；忘了标签计数那条是静默的——侧栏比
+          # 它所标注的列表多数一条，而任何 mock 掉函数的测试都不会发现。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_478_inspiration_archive_integration.py -v
 
       - name: Assert the search_docs repository's statements on a real server
         working-directory: backend

@@ -32,7 +32,18 @@ export interface InspirationNote {
   note_date: string;
   created_at: string;
   updated_at: string;
+  /** When the note was archived (mig 478), or null for a normal note. It is
+   *  also half of the archive view's keyset cursor — see `NoteCursor`. */
+  archived_at: string | null;
   attachments: NoteAttachment[];
+}
+
+/** Where the next page starts. The two views are ordered differently, so a
+ *  bare id is not enough: the live list orders by id, the archive orders by
+ *  archived_at with id breaking ties. Build it from the last row you have. */
+export interface NoteCursor {
+  id: string;
+  archivedAt: string | null;
 }
 
 export interface NoteFilters {
@@ -41,6 +52,9 @@ export interface NoteFilters {
   q?: string;
   /** 1-5 = only notes rated at least this. 0/undefined = no rating filter. */
   min_rating?: number;
+  /** true = the archive view instead of the live list (mig 478). The two are
+   *  disjoint: a note is in one or the other, never both. */
+  archived?: boolean;
 }
 
 export interface ApiToken {
@@ -99,7 +113,7 @@ function toArray<T>(value: unknown, fnName: string): T[] {
 export async function listNotes(
   filters: NoteFilters,
   limit = 50,
-  beforeId?: string,
+  cursor?: NoteCursor,
 ): Promise<InspirationNote[]> {
   const params = new URLSearchParams();
   if (filters.date) params.set('date', filters.date);
@@ -110,8 +124,18 @@ export async function listNotes(
   // backend to filter by `rating >= 0`, which is a different request that
   // happens to return the same rows.
   if (filters.min_rating) params.set('min_rating', String(filters.min_rating));
+  // The flag is only sent for the archive: omitting it is what the live list
+  // means, and the backend defaults to it.
+  if (filters.archived) params.set('archived', 'true');
   params.set('limit', String(limit));
-  if (beforeId) params.set('before_id', beforeId);
+  if (cursor) {
+    params.set('before_id', cursor.id);
+    // The archive is ordered by archived_at, so paging it needs both halves
+    // of that key — an id alone would skip rows whose archived_at differs.
+    if (filters.archived && cursor.archivedAt) {
+      params.set('before_archived_at', cursor.archivedAt);
+    }
+  }
   const resp = await fetch(`${base()}/notes?${params.toString()}`, {
     headers: await getAuthHeaders(),
   });
@@ -143,6 +167,10 @@ export async function updateNote(
     content_md?: string;
     pinned?: boolean;
     rating?: number;
+    /** true archives the note, false restores it (mig 478). Archiving also
+     *  clears `pinned` — the backend does that, so the row this resolves to
+     *  is the truth about both fields. */
+    archived?: boolean;
   },
 ): Promise<InspirationNote> {
   const resp = await fetch(`${base()}/notes/${id}`, {

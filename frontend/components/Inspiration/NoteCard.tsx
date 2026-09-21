@@ -3,7 +3,7 @@
 // ref_hotspot reference card, tag chips, attachments.
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
+import { Archive, ArchiveRestore, ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
 import { NoteMarkdown } from './NoteMarkdown';
 import { AttachmentView } from './AttachmentView';
 import { RatingStars } from '../detail/DetailCardKit';
@@ -14,6 +14,11 @@ interface Props {
   onEdit: (note: InspirationNote) => void;
   onTogglePin: (note: InspirationNote) => void;
   onDelete: (note: InspirationNote) => void;
+  /** Archive the note, or restore it when it already is (mig 478). Omitted →
+   *  the menu item is not rendered, same optional-affordance convention as
+   *  onToggleTask. Which of the two it offers follows `note.archived_at`, not
+   *  a prop, so a card can never offer "Archive" on an archived note. */
+  onArchive?: (note: InspirationNote) => void;
   onTagClick: (tag: string) => void;
   onToggleTask?: (note: InspirationNote, index: number) => void;
   /** Rate the note 0-5 (mig 448). Omitted → the stars are not rendered at all,
@@ -27,7 +32,7 @@ function timeOf(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, onRating }) => {
+export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onArchive, onTagClick, onToggleTask, onRating }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -83,14 +88,44 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
           >
             <MoreHorizontal size={15} />
           </button>
+          {/* role="menu" so the items inside can be addressed as a set. Two
+              buttons on this page read "Archive" — this one and the
+              Active/Archived view switch — and naming the container is what
+              keeps them apart for a screen reader as well as for a test. */}
           {menuOpen && (
-            <div className="absolute right-0 z-10 mt-1 w-32 rounded-lg border border-line bg-island-2 py-1 text-xs text-content-2 shadow-lg">
+            <div
+              role="menu"
+              aria-label={t('inspiration.noteActions', 'Note actions')}
+              className="absolute right-0 z-10 mt-1 w-36 rounded-lg border border-line bg-island-2 py-1 text-xs text-content-2 shadow-lg"
+            >
               <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onEdit(note))}>
                 {t('inspiration.edit', 'Edit')}
               </button>
-              <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onTogglePin(note))}>
-                {note.pinned ? t('inspiration.unpin', 'Unpin') : t('inspiration.pin', 'Pin')}
-              </button>
+              {/* Not offered on an archived note: a pin is a claim on the top
+                  of the live list, which this note is not in. Archiving gives
+                  the pin up (mig 478), so offering it back here would rebuild
+                  the state the archive just cleared. */}
+              {!note.archived_at && (
+                <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onTogglePin(note))}>
+                  {note.pinned ? t('inspiration.unpin', 'Unpin') : t('inspiration.pin', 'Pin')}
+                </button>
+              )}
+              {onArchive && (
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-line"
+                  onClick={() => runMenuAction(() => onArchive(note))}
+                >
+                  {note.archived_at ? (
+                    <>
+                      <ArchiveRestore size={12} /> {t('inspiration.unarchive', 'Unarchive')}
+                    </>
+                  ) : (
+                    <>
+                      <Archive size={12} /> {t('inspiration.archive', 'Archive')}
+                    </>
+                  )}
+                </button>
+              )}
               <button className="block w-full px-3 py-1.5 text-left text-danger hover:bg-line" onClick={() => runMenuAction(() => onDelete(note))}>
                 {t('inspiration.delete', 'Delete')}
               </button>
