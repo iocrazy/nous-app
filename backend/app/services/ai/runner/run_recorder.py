@@ -940,6 +940,11 @@ class RunRecorder:
             updates["liveness_state"] = "cancelled"
         if cost_cents is not None:
             updates["cost_cents"] = cost_cents
+        # 自身花费列（mig 479）。**无条件**写：``own_spend.total`` 在费率未知时也
+        # 还有 media 那一道，跳过会让这一行在聚合里表现成「没花钱」而不是「不知道」。
+        # 最后一次镜像失败（``persist_views`` 返回 False）时，这里仍把终态内存里的
+        # 真值落库 —— 与 ``metadata_json.cost`` 那条路径互不依赖。
+        updates["own_cost_cents"] = own_spend.total
         if self._output_summary is not None:
             updates["output_summary"] = self._output_summary
         if error_code is not None:
@@ -1705,6 +1710,7 @@ class RunEventWriter:
         from sqlalchemy.dialects.postgresql import JSONB, array
 
         from app.models.agents import AgentRuns
+        from app.services.ai.billing.tree_charge import spend_of_run
 
         expr = func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB))
         for key, value in self.mirror_keys().items():
@@ -1722,7 +1728,14 @@ class RunEventWriter:
         return (
             update(AgentRuns)
             .where(AgentRuns.id == self.run_id)
-            .values(metadata_json=expr)
+            .values(
+                metadata_json=expr,
+                # 自身花费列（mig 479），跟每次镜像一起落：running 时就是实时的，
+                # 而崩溃写方（liveness / sweeper）只翻 status、不碰这一列，所以它
+                # 停在最后一次镜像的值 —— 与树收口按行读 ``metadata_json.cost``
+                # 得到的是同一个数。
+                own_cost_cents=spend_of_run(self.views.get("cost")).total,
+            )
         )
 
     async def persist_views(self) -> bool:
