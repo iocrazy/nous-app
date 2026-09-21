@@ -40,9 +40,11 @@ def _run_cents(run: dict[str, Any]) -> float:
     3d 第 0 票终审 I2 起，``runs[].cost_cents`` 的正路是 ``tree_cost_cents`` 那张
     按树求和的图（见 ``_row_cents``）。这个函数只剩两个住处：
 
-    1. **running 那一行** —— 它的 ``own_cost_cents`` 要到收口才写，库里那棵树这会儿
-       看不到它烧的钱；视图里的折算是此刻唯一活的数，也与同一份 payload 里的
-       ``current_run.cost`` 是同一个数。
+    1. **running 那一行** —— 库里那一列**不是**空的：``run_recorder`` 的 ``mirror_stmt``
+       每次镜像都把 ``own_cost_cents`` 一起写下去，所以树总额对一条在跑的 run 也是
+       有值的、只是停在**最后一次镜像**。选视图是因为它更新：内存里的折算比最后那次
+       镜像新，而且这样 ``runs[<running>].cost_cents`` 与同一份 payload 里的
+       ``current_run.cost`` 逐字是同一个数 —— 一个面上两个数字打架比落后一拍更糟。
     2. **树图里没有这个 root 的键** —— 一次读空不该把一行的钱显示成 0，退回这一行
        自己那一列（低报总好过凭空归零）。
 

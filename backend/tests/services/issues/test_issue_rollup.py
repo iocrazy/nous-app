@@ -123,8 +123,9 @@ def test_rollup_puts_the_repo_spend_against_the_budget():
         "total": 4,
     }
     assert [r["id"] for r in out["runs"]] == ["3", "2", "1"]
-    # running 的行读实时视图，不读树图里那个 0.0 —— 它的 own_cost_cents 要到收口
-    # 才写，库里这会儿看不见它正在烧的钱。
+    # running 的行读实时视图，不读树图里那个 0.0 —— 内存里的折算比最后一次镜像新，
+    # 且与同一份 payload 的 current_run.cost 是同一个数（库里那一列每次镜像都写，
+    # 不是空的，只是落后一拍）。
     assert out["runs"][0]["cost_cents"] == 30.0
     # 结束的两行读树总额。
     assert [r["cost_cents"] for r in out["runs"][1:]] == [50.0, 5.5]

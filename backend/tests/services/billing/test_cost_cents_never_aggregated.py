@@ -102,10 +102,21 @@ PY_ROLLUP_PATTERNS = (
 # 清它在加什么**」。新加一处就转红，作者必须在这里写下那批行的来源；而写这一行的
 # 时候，人正好被迫去看那个 select 到底 project 了哪一列 —— 这就是它买到的东西。
 #
-# 已知缺口，写下来免得被误当成全覆盖：**已登记文件内部**再加一个错的求和点不会被
-# 拦（Ruling 6 之前那个 ``sum_cost_cents += float(cost)`` 就在 ``ai_library_router``
-# 里）。要根治得让标签不再说谎 —— 把两处 label 改成 ``own_cost_cents``、消费方跟着
-# 改读法，这条守卫才能升级成直接拦。那是一次独立的改动。
+# 已知缺口，写下来免得被误当成全覆盖：**这条守卫拦的是新文件，不是已登记文件里的
+# 新求和点。** 在 ``ai_library_router`` / ``agent_runs_sweeper`` 内部再写一个对着
+# **裸投影**求和的地方，登记表照过 —— Ruling 6 之前那个
+# ``sum_cost_cents += float(cost)`` 正是在 ``ai_library_router`` 里。
+#
+# 而「裸投影」是常态，不是边角：``AgentRuns.cost_cents`` 这一列的**自己的名字就是**
+# ``cost_cents``，所以 ``select(..., AgentRuns.cost_cents)`` + ``.mappings()`` 不需要
+# 任何 ``.label()`` 就能产出 ``row["cost_cents"]``。全仓现有 8 处这样的投影
+# （``agent_runs_repository.py:1052,1270``、``workforce_router.py:223,660``、
+# ``ai_library_router.py:1891,1924,2063,2321`` —— 都是单行展示，本身没问题）。
+# 下面那条别名禁令**管不到它们**：它们压根没有 ``.label()``。
+#
+# 要根治得让标签不再说谎 —— 把两处 ``own_cost_cents.label("cost_cents")`` 改成
+# ``own_cost_cents``、消费方跟着改读法，届时「读到 ``cost_cents`` 键」就等价于
+# 「读到折叠列」，这条守卫才能从登记制升级成直接拦。那是一次独立的改动。
 PY_ROLLUP_ALLOWLIST = {
     "api/ai_library_router.py": (
         "行来自 monthly_usage_by_agent 与本文件 3447 行那个 "
@@ -120,9 +131,12 @@ PY_ROLLUP_ALLOWLIST = {
     ),
 }
 
-#: 折叠列**不许改名**。``r["cost_cents"]`` 那一族读法之所以安全，唯一的依据就是
-#: 这个标签底下装的永远是 ``own_cost_cents``；给折叠列贴个标签送出去，等于让一个
-#: 双计的数字冒充已迁移的那个，而上面每一个登记条目的理由同时失效。
+#: 折叠列**不许改名**：把它贴上别的标签送出去，读的人就再也看不出手里是哪一列。
+#:
+#: ⚠️ 这条**不是**「`r["cost_cents"]` 一族安全」的依据，别那么读它。折叠列不加
+#: `.label()` 也照样落在 `cost_cents` 这个键上（列名本来就叫这个），所以这条禁令
+#: 覆盖不到裸投影 —— 见上面 `PY_ROLLUP_ALLOWLIST` 的已知缺口那段。它只堵住「改名」
+#: 这一种额外的混淆，是补充，不是那道门。
 COST_CENTS_ALIAS_PATTERN = r"AgentRuns\.cost_cents\.label\("
 
 
@@ -320,8 +334,11 @@ def test_the_rollup_guard_lets_the_new_column_through():
 
 def test_the_folded_column_never_travels_under_an_alias():
     """``own_cost_cents.label("cost_cents")`` 是刻意的（wire 形状不变）；反过来给
-    折叠列贴标签则会让一个双计的数字冒充已迁移的那个，并让登记表里每一条理由同时
-    失效。"""
+    折叠列改名，读的人就再也看不出手里是哪一列。
+
+    ⚠️ 这条不覆盖**裸投影** —— 折叠列的列名本来就是 ``cost_cents``，不加 ``.label()``
+    也落在同一个键上（全仓 8 处，见 ``PY_ROLLUP_ALLOWLIST`` 上方那段）。它只堵「改名」
+    这一种额外的混淆。"""
     hits = []
     for path, src in _app_sources():
         for hit in _hits(_code_only(src), (COST_CENTS_ALIAS_PATTERN,)):
