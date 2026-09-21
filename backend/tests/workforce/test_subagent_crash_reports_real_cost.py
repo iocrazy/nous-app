@@ -12,10 +12,19 @@
 ⚠️ 这里读的是 ``agent_runs.cost_cents`` —— **老列**，展示语义（自身 + 已报到的
 后代），与 ``subagent_done.cost_cents`` 一直以来的口径一致。聚合读面（议题预算、
 效率账、树总额）自 mig 479 起读 ``own_cost_cents``，不经过这条路径。
+
+⚠️ **``payload["sub_run_id"]`` 是一个今天没有任何生产代码会写的键。** 本文件用它
+来驱动回落分支，因为回落只在 ``run_background_task`` **整个抛穿**时才进得去，而那
+几处（``_child_chain_ok`` / ``_continue_messages`` / ``resolve_dispatch_scope`` /
+``team_of_run``）都跑在建 recorder 之前 —— 子 run 行压根不存在，真实答案就是 0。
+所以：**回落本身在生产上基本是死代码，真正的修复在 ``_spawn`` 的崩溃 envelope**
+（覆盖在 ``tests/test_subagent_task_service.py``）。留着它是为了「有 id 就别猜」，
+将来谁把子 run id 放进 payload，它立刻生效。别把这个键读成一份已生效的契约。
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -151,7 +160,7 @@ def _inbox_content(w):
 
 async def test_a_crashed_child_reports_the_row_s_cost_not_zero():
     """行上写着 0.42 分，父级两处投影都必须是 0.42。"""
-    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": Decimal("0.42")}])
 
     out = await _run(w, _task(sub_run_id=CHILD_RUN_ID))
 
@@ -168,7 +177,7 @@ async def test_the_recovered_cost_travels_with_the_child_id():
     （`folds/subagents.py`）—— 回落读到 0.42、事件照发、父级什么也没收到，而
     ``children.async_pending`` 也不减一。两处必须用同一个解析出来的 id。
     """
-    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": Decimal("0.42")}])
 
     out = await _run(w, _task(sub_run_id=CHILD_RUN_ID))
 
@@ -185,7 +194,7 @@ async def test_the_done_event_survives_the_fold_and_lands_on_by_child():
     """
     from app.services.ai.runner import run_projection as rp
 
-    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": Decimal("0.42")}])
     await _run(w, _task(sub_run_id=CHILD_RUN_ID))
 
     # 父的视图：先有一条异步 spawned（worker 之前由 _spawn_async 写的）
@@ -211,7 +220,7 @@ async def test_settlement_is_invoked_once_the_child_id_is_known():
     CAS），所以这里钉的是「有没有被调用」，不是「扣了多少」。金额分析见
     task-6 报告 §10。
     """
-    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": Decimal("0.42")}])
     await _run(w, _task(sub_run_id=CHILD_RUN_ID))
     assert w.settle.await_args.kwargs == {"run_id": CHILD_RUN_ID}
 
@@ -246,7 +255,7 @@ async def test_a_child_row_that_is_not_there_reports_zero():
 
 async def test_no_child_id_never_touches_the_database():
     """没有子 run id 就没有可读的行；别拿别人的行凑数，也别白跑一次查询。"""
-    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": Decimal("0.42")}])
 
     await _run(w, _task())  # payload 里没有 sub_run_id
 
@@ -271,6 +280,34 @@ async def test_an_envelope_that_reports_its_cost_is_believed():
 
     w.runs_repo.cost_rows_for_ids.assert_not_awaited()
     assert _done_event(w)["cost_cents"] == pytest.approx(1.5)
+
+
+async def test_a_non_numeric_envelope_cost_becomes_zero_not_a_dropped_entry():
+    """键在、但不是个数 → 归一成 0，**不能**原样透传。
+
+    ``fold_done`` 用 isinstance 判断，非数字会让它整笔跳过 ``by_child`` ——
+    父行少的不是精度，是这个孩子的全部花费。老写法 ``... or 0`` 顺手把 ``""``
+    折成 0；改成 `is None` 判断之后这条得自己写回来。
+    """
+    from app.services.ai.runner import run_projection as rp
+
+    w = _wire(
+        envelope={
+            "status": "failed",
+            "error": "boom",
+            "summary": "",
+            "sub_run_id": "52",
+            "cost_cents": "",  # 形状漂移
+            "tokens_used": 0,
+        }
+    )
+
+    await _run(w, _task())
+
+    assert _done_event(w)["cost_cents"] == 0.0
+    # 真消费方能收下它（透传 "" 的话这一句会是空 dict）。
+    views = rp.apply(rp.empty_views(), "subagent_done", _done_event(w))
+    assert views["cost"]["by_child"] == {"52": 0.0}
 
 
 async def test_a_zero_cost_envelope_is_believed_too():

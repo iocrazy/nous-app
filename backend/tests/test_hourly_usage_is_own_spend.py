@@ -309,6 +309,29 @@ async def test_a_media_only_run_still_reaches_the_hourly_table(captured):
     assert captured["usage"][0]["cost_cents"] == 6.0
 
 
+async def test_a_non_numeric_media_cents_reads_as_zero_not_as_a_coerced_string(
+    captured,
+):
+    """``own_media_cents`` 现在取 ``spend_of_run(...).total``，于是非数字读作 0。
+
+    以前这里是手算的 ``float((folded or {}).get("media_cents") or 0.0)`` ——
+    字符串 ``"6.0"`` 会被强转成 6.0，而 ``"abc"`` 直接抛 ValueError。
+    ``tree_charge._num`` 的约定是「非数字（含 bool、字符串、None）一律 0.0」。
+
+    这不是回归，是**把两个消费方钉到同一个值上**：``agent_runs.own_cost_cents``
+    列（mig 479）写的就是 ``own_spend.total``。两边若各算各的，就会出现「行上
+    写着 0、小时表记着 6」这种谁也说不清的分歧。
+    """
+    rec = _recorder(
+        views={"cost": {"own_cents": None, "by_child": {}, "media_cents": "6.0"}},
+        prompt=0,
+        completion=0,
+    )
+    await rec._finish(status="completed")
+    assert captured["usage"], "这一行仍然要进小时表"
+    assert captured["usage"][0]["cost_cents"] == 0.0
+
+
 async def test_a_zero_token_failed_run_is_counted_but_is_not_an_event(captured):
     """预检即拒、provider 认证失败、预算门禁停机 —— 这三类零 token 零花费，旧守门
     把它们整行丢掉，于是 failed_runs 从第一天起偏低，而那正是效率账最该看见的

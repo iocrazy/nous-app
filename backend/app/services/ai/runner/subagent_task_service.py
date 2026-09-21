@@ -731,6 +731,22 @@ class SubAgentTaskService:
             # ``parent_recorder``，``_emit_parent`` 直接 return，父级看到的唯一数字
             # 就是这个 envelope 里的 0（worker 自己再发一条 ``subagent_done``）。
             # 与 Task 7b defect A 同族 —— 那次是成功路径漏了同一个键。
+            #
+            # ⚠️ **行为变更：这里带上 ``sub_run_id`` 会让崩溃的后台子 run 按时收口。**
+            # worker 的 ``content["child_run_id"]`` 由 None 变成真 id，于是
+            # ``folds/subagents.py::fold_done`` 不再整条丢弃这次 ``subagent_done``
+            # —— ``cost.by_child`` 记上这个崩溃的孩子，``children.async_pending``
+            # 减一，``agent_worker`` 那次 ``settle_tree_if_closed`` 这才成立。
+            #
+            # 这是**改善，不是计费口径变更**：此前这棵树并非不扣，而是卡着
+            # ``async_pending=1`` 一直等到清扫器过了 ``PENDING_CHILDREN_GRACE``（2h）
+            # 强制收口，还附一条与事实相反的「async child never materialised」
+            # WARNING。金额一分不差（``bucket_tree`` 按行聚合，根本不读
+            # ``by_child``），重复扣由 root 行 ``billing.charged_at`` 的 CAS 挡住，
+            # 树里还有 run 在跑时照旧 ``deferred``。**成功**的后台子 run 一直就是
+            # 这么收口的，崩溃的那个只是被 ``child_run_id=None`` 意外挡在外面。
+            # 分析见 task-6 报告 §10，钉在
+            # ``tests/workforce/test_subagent_crash_reports_real_cost.py``。
             crashed_cost = _cost_cents_of(announced_recorder)
             crashed_byok = _byok_cents_of(announced_recorder)
             crashed_tokens = _tokens_of(announced_recorder)

@@ -502,6 +502,17 @@ async def _run_subagent_task(
     cost_cents = envelope.get("cost_cents")
     if cost_cents is None:
         cost_cents = await _child_row_cost_cents(child_run_id, task_id)
+    elif isinstance(cost_cents, bool) or not isinstance(cost_cents, (int, float)):
+        # 键在、但不是个数（信封形状漂移）。这里必须显式归一，不能原样透传：
+        # ``fold_done`` 用 ``isinstance(cents, (int, float))`` 判断，非数字会让它
+        # **整笔**跳过 ``by_child`` —— 父行少的不是精度，是这个孩子的全部花费。
+        # 老写法 `envelope.get("cost_cents") or 0` 顺手把 "" / [] 折成 0，改成
+        # 显式判断后这条得自己写回来。真数字（含 0.0）不走这里。
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: envelope cost_cents "
+            f"{cost_cents!r} is not a number; reporting 0"
+        )
+        cost_cents = 0.0
 
     content = {
         "child_run_id": child_run_id,
