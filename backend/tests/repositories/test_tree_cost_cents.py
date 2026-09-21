@@ -65,10 +65,30 @@ def _tree_cost_region(sql: str) -> str:
     return sql[j : _balanced(sql, open_at) + 1]
 
 
+def _tree_cost_where(region: str) -> str:
+    """``tree_cost`` 子查询**自己那一层**的 WHERE 全文（到它的 ``GROUP BY`` 为止）。
+
+    区域内第一个 ``WHERE`` 就是它自己的（内层 ``IN (SELECT …)`` 的 WHERE 在其后、更深
+    一层），最后一个 ``GROUP BY`` 是它自己的（内层那个 select 不分组）。
+    """
+    start = region.index(" WHERE ") + len(" WHERE ")
+    end = region.rindex(" GROUP BY ")
+    return region[start:end]
+
+
 def _inner_select(region: str) -> str:
-    """``tree_cost`` 子查询里 ``IN ( … )`` 那个「窗口 + scope 内的 root」子查询。"""
-    k = region.index("IN (")
-    open_at = region.index("(", k)
+    """``tree_cost`` 的 WHERE 里 ``IN ( … )`` 那个「窗口 + scope 内的 root」子查询。
+
+    ⚠️ 锚点必须是 ``{树键} IN (SELECT``，**不能**是裸 ``"IN ("``：``region`` 以
+    ``"LEFT OUTER JOIN ("`` 开头，而 ``"JOIN ("`` 里就含 ``"IN ("`` 这个子串
+    （``index`` 命中偏移 13），于是 ``open_at`` 会退化成 JOIN 那个括号、整段
+    ``tree_cost`` 被当成「内层 select」返回 —— 下面所有「outside 里不许有 scope 列」
+    的负向断言就全部落在空串上，形同虚设。这条注释是修复轮次 2 的成因本身。
+
+    树键自己也含 ``(``（``coalesce(…)``），所以要从树键**之后**开始找左括号。
+    """
+    k = region.index(f"{_TREE_KEY} IN (SELECT")
+    open_at = region.index("(", k + len(_TREE_KEY))
     return region[open_at : _balanced(region, open_at) + 1]
 
 
@@ -280,12 +300,21 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
         )
     )
     region = _tree_cost_region(s)
-
-    # 子查询自己的 WHERE 只有一条谓词：树键落在「窗口内的 root」这个集合里。
-    assert f"WHERE {_TREE_KEY} IN (SELECT public.agent_runs.id" in region, region
-
+    where = _tree_cost_where(region)
     inner = _inner_select(region)
-    # scope 与 root 谓词全在那个内层 select 里。
+
+    # ① 主断言，也是唯一咬得住「部分回归」的那条：``tree_cost`` 自己的 WHERE
+    # **逐字等于**成员判定，前后什么都没有。
+    #
+    # 用相等而不是 ``in``：把 ``*scope`` 重新加回 ``.where()`` 而**保留**成员判定，
+    # 任何 ``fragment in where`` 式的检查都照过（成员判定还在那儿），但那个查询已经
+    # 退回按子行过滤了。相等是这里唯一分得清「只有成员判定」和「成员判定 + 别的」的
+    # 写法。修复轮次 2 的成因就是这条当初写成了前缀匹配。
+    assert (
+        where == f"{_TREE_KEY} IN {inner}"
+    ), f"tree_cost 的 WHERE 不只是成员判定：\n{where}"
+
+    # ② scope 与 root 谓词全在那个内层 select 里。
     for fragment in (
         "agent_runs.team_id =",
         "agent_runs.project_id =",
@@ -295,9 +324,11 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
     ):
         assert fragment in inner, f"{fragment} 不在「in-scope roots」内层 select 里"
 
-    # 而子查询**自己那层**一个 scope 列都不许碰 —— 碰了就是按子行过滤，
-    # 于是 team_id 为 NULL 的子 run 的钱被悄悄丢掉。
-    outside = region.replace(inner, "")
+    # ③ 把内层切掉之后，``tree_cost`` **自己那层**一个 scope 列都不许剩 —— 剩了就是
+    # 按子行过滤，于是 team_id 为 NULL 的子 run 的钱被悄悄丢掉。
+    # ①已经覆盖了这一点，③ 留着是因为它在失败时直接点名是哪一列。
+    outside = where.replace(inner, "")
+    assert outside == f"{_TREE_KEY} IN ", outside
     for col in ("team_id", "project_id", "user_id", "created_at"):
         assert (
             col not in outside
@@ -323,8 +354,11 @@ async def test_efficiency_counts_a_child_whose_team_is_null(captured_stmt):
         )
     )
     region = _tree_cost_region(s)
-    outside = region.replace(_inner_select(region), "")
-    assert "team_id" not in outside
+    where = _tree_cost_where(region)
+    # ``tree_cost`` 自己的 WHERE 逐字只有成员判定 —— 没有任何地方能写下
+    # ``team_id = 7``，所以 team_id 为 NULL 的那条子 run 不可能被 ``NULL = 7`` 判出局。
+    assert where == f"{_TREE_KEY} IN {_inner_select(region)}", where
+    assert "team_id" not in where.replace(_inner_select(region), "")
     # 求和的是全部成员行，没有任何行级筛选把它们挡在外面。
     assert "sum(coalesce(public.agent_runs.own_cost_cents" in region
 
