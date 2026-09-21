@@ -65,6 +65,15 @@ export function buildTagSuggestions(
   return out;
 }
 
+type NoteView = 'live' | 'archive';
+
+/** One view's rows as the user last saw them — including any local optimistic
+ *  edits, since it is taken from state rather than from a response. */
+interface ViewSnapshot {
+  notes: InspirationNote[];
+  hasMore: boolean;
+}
+
 export const InspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const confirm = useConfirm();
@@ -89,7 +98,11 @@ export const InspirationPage: React.FC = () => {
   // Which half of the Notes tab is showing (mig 478). Archive is a view of
   // notes, not a third tab — the top-level tabs are the two KINDS of thing
   // this page holds (notes, hotspots), and an archived note is still a note.
-  const [view, setView] = useState<'live' | 'archive'>('live');
+  const [view, setView] = useState<NoteView>('live');
+  // What each view looked like the last time it was on screen. Switching puts
+  // the target's rows up immediately and lets the refetch overwrite them, so
+  // going back and forth costs nothing instead of a round trip each way.
+  const viewCache = useRef<Partial<Record<NoteView, ViewSnapshot>>>({});
   const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [parseOpen, setParseOpen] = useState(false);
@@ -131,6 +144,37 @@ export const InspirationPage: React.FC = () => {
   useEffect(() => {
     setActiveCategory(null);
   }, [date]);
+
+  // A snapshot only speaks for the filters it was taken under, and only until
+  // something is written. refreshKey covers the writes: archiving or deleting
+  // a note changes BOTH views, while the write itself only updates the one on
+  // screen — so the other view's snapshot would be a stale promise.
+  useEffect(() => {
+    viewCache.current = {};
+  }, [date, tag, q, minRating, refreshKey]);
+
+  /**
+   * Switch views without waiting for the network.
+   *
+   * This used to be a bare `setView`. During the refetch that follows,
+   * `notes` still held the PREVIOUS view's rows, and NoteTimeline's empty
+   * guard is `!notes.length && !loading` — so the old list stayed fully
+   * rendered. The click looked like it did nothing, then the content swapped
+   * wholesale. That reads as "slow" even when the request is quick: the delay
+   * is real but short, and what makes it feel long is that the page spends it
+   * showing the view the user just navigated away from.
+   *
+   * Now the target view's last rows go up at once (or nothing, which hands
+   * the skeleton over), and the refetch overwrites them when it lands.
+   */
+  const switchView = (next: NoteView) => {
+    if (next === view) return;
+    viewCache.current[view] = { notes, hasMore };
+    const snapshot = viewCache.current[next];
+    setNotes(snapshot?.notes ?? []);
+    setHasMore(snapshot?.hasMore ?? false);
+    setView(next);
+  };
 
   const filters = useMemo(
     () => ({
@@ -625,7 +669,7 @@ export const InspirationPage: React.FC = () => {
           ).map(([v, label, Icon]) => (
             <button
               key={v}
-              onClick={() => setView(v)}
+              onClick={() => switchView(v)}
               aria-pressed={view === v}
               className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold ${
                 view === v ? 'bg-island text-[var(--accent-text)]' : 'text-content-4'
