@@ -16,6 +16,7 @@ Postgres 干的活，真库执行覆盖在 Task 7。
 from __future__ import annotations
 
 import contextlib
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import patch
@@ -32,7 +33,43 @@ _TREE_KEY = "coalesce(public.agent_runs.root_run_id, public.agent_runs.id)"
 
 
 def _sql(stmt: Any) -> str:
-    return str(stmt.compile(dialect=postgresql.dialect()))
+    return re.sub(r"\s+", " ", str(stmt.compile(dialect=postgresql.dialect())))
+
+
+def _balanced(s: str, open_at: int) -> int:
+    """``s[open_at]`` 那个 ``(`` 对应的 ``)`` 的下标。
+
+    子查询里套子查询，所以不能用 ``str.index(")")`` —— 那会停在内层。
+    """
+    assert s[open_at] == "(", s[open_at:]
+    depth = 0
+    for i in range(open_at, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    raise AssertionError(f"括号不配对：{s}")
+
+
+def _tree_cost_region(sql: str) -> str:
+    """``LEFT OUTER JOIN ( … )`` 里 ``tree_cost`` 那个派生表的完整文本。
+
+    按区域断言而不是对整条 SQL 做 ``count()``：一个谓词在「子查询自己的 WHERE」里
+    和在「子查询内层的 in-scope roots select」里，字符串上长得一模一样，含义却正好
+    相反（前者按子行过滤=缺陷，后者按 root 选树=正确）。数次数分不出这两者。
+    """
+    j = sql.index("LEFT OUTER JOIN (")
+    open_at = sql.index("(", j)
+    return sql[j : _balanced(sql, open_at) + 1]
+
+
+def _inner_select(region: str) -> str:
+    """``tree_cost`` 子查询里 ``IN ( … )`` 那个「窗口 + scope 内的 root」子查询。"""
+    k = region.index("IN (")
+    open_at = region.index("(", k)
+    return region[open_at : _balanced(region, open_at) + 1]
 
 
 class _Session:
@@ -210,14 +247,25 @@ async def test_efficiency_groups_cost_is_tree_sum_joined_to_root_group(captured_
     assert "LEFT OUTER JOIN" in s and "tree_cost" in s
 
 
-async def test_efficiency_subquery_carries_the_same_scope_as_the_outer_query(
+async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_rows(
     captured_stmt,
 ):
-    """子查询与主查询**同窗同 scope**，这是这次改动最容易出错的一处。
+    """子查询按**「属于某棵在 scope 内的树」**收行，不按每行自己的 scope 列（裁定 7）。
 
-    子查询宽了：窗口外 / 别的团队的子 run 的钱会顺着 join 漏进这一屏的合计（跨租户
-    金额泄漏，不只是数字不准）。子查询窄了：窗口内的委派花费又整个不见，正是本票要
-    修的那个缺口。所以两边共用同一个 ``scope`` 列表，而不是各写一份 where。
+    这是本票最容易写错、且错了完全静默的一处。子 run 的 scope 列是 best-effort：
+    ``team_of_run``（``app/services/ai/scope/scope_binding.py:203`）明说「A lookup
+    failure degrades to ``None``」，3c A3 之前两个 spawn 站点更是直接写死
+    ``team_id=None``；``DispatchScope`` 同理，子的 ``project_id`` 可以是 NULL 而它的
+    root 有值。
+
+    所以一旦按子行自己的 ``team_id`` / ``project_id`` / ``user_id`` 过滤：root 在
+    scope 里、join 也落得下来，但那条子 run 的 ``own_cost_cents`` 压根没被加进
+    ``tree_cost.cents`` —— 树总额**少掉委派那笔**，而这正是本票要捞回来的钱。没有任何
+    报错，页面上就是一个小一点的数字。
+
+    改成：先选出「窗口 + scope 内的 root」，再把树键落在这个集合里的**所有**行求和。
+    root 才是被授权、被 scope 的那个对象，整棵树归属于它 —— 与 ``tree_cost_cents`` /
+    ``tree_charge`` 同一套语义。
     """
     to = datetime.now(timezone.utc)
     s = _sql(
@@ -231,15 +279,54 @@ async def test_efficiency_subquery_carries_the_same_scope_as_the_outer_query(
             )
         )
     )
+    region = _tree_cost_region(s)
 
-    # 每个 scope 谓词都出现两次：一次在子查询，一次在主查询。
+    # 子查询自己的 WHERE 只有一条谓词：树键落在「窗口内的 root」这个集合里。
+    assert f"WHERE {_TREE_KEY} IN (SELECT public.agent_runs.id" in region, region
+
+    inner = _inner_select(region)
+    # scope 与 root 谓词全在那个内层 select 里。
     for fragment in (
         "agent_runs.team_id =",
         "agent_runs.project_id =",
         "agent_runs.created_at >=",
         "agent_runs.created_at <",
+        "agent_runs.parent_run_id IS NULL",
     ):
-        assert s.count(fragment) == 2, f"{fragment} 没有在两侧各出现一次：\n{s}"
+        assert fragment in inner, f"{fragment} 不在「in-scope roots」内层 select 里"
+
+    # 而子查询**自己那层**一个 scope 列都不许碰 —— 碰了就是按子行过滤，
+    # 于是 team_id 为 NULL 的子 run 的钱被悄悄丢掉。
+    outside = region.replace(inner, "")
+    for col in ("team_id", "project_id", "user_id", "created_at"):
+        assert (
+            col not in outside
+        ), f"tree_cost 子查询在按自己的 {col} 过滤行：\n{region}"
+
+
+async def test_efficiency_counts_a_child_whose_team_is_null(captured_stmt):
+    """上一条的具体后果，写成它自己的一条用例。
+
+    真实形状：root 属于 team 7，它委派出去的子 run ``team_id IS NULL``（lookup 失败
+    降级，或 3c A3 之前留下的历史行）。子 run 的行必须进这棵树的合计。
+
+    SQL 层面的证据就是「子查询不带 ``team_id`` 谓词」—— 带了，``NULL = 7`` 判 false，
+    那条子 run 直接出局。行为层面的证明要真库（本文件全是编译断言，Task 7 / 控制器
+    的真 PG 跑覆盖它）。
+    """
+    to = datetime.now(timezone.utc)
+    s = _sql(
+        await captured_stmt(
+            lambda repo: repo.efficiency_groups(
+                group_by="model", frm=to - timedelta(days=30), to=to, team_id=7
+            )
+        )
+    )
+    region = _tree_cost_region(s)
+    outside = region.replace(_inner_select(region), "")
+    assert "team_id" not in outside
+    # 求和的是全部成员行，没有任何行级筛选把它们挡在外面。
+    assert "sum(coalesce(public.agent_runs.own_cost_cents" in region
 
 
 async def test_efficiency_join_cannot_fan_out_the_counters(captured_stmt):

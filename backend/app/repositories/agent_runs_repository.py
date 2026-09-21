@@ -1104,12 +1104,22 @@ class AgentRunsRepository(AsyncpgRepository):
           而读旧的 ``cost_cents`` 则会低报：那一列是「自身 + **已报到的**后代」，子 run
           没报回父行时它不含那笔钱 —— Delegate 出去的花费于是整个漏出这张表（3d 第 0
           票，与 ``usage_repository.issue_totals`` / ``spent_cents_for_issue`` 同批迁）。
-          ⚠️ 子查询与主查询**共用同一个 ``scope`` 列表**，不许各写一份 where：子查询宽
-          了，窗口外 / 别的团队的子 run 的钱会顺着 join 漏进这一屏；窄了，窗口内的委派
-          花费又不见。
-          ⚠️ 已知边界：子 run 在窗口内、它的 root 在窗口外时，那棵树的 root 行不在主
-          查询里，join 无处落地，这笔钱不计入本窗口。这与旧口径一致（旧口径同样只从
-          窗口内的 root 行取数），是「按 root 归属」这个选择的必然代价。
+
+          ⚠️ **子查询收行的条件是「属于某棵在 scope 内的树」，不是每行自己的 scope 列**
+          （裁定 7）。``scope`` 与 root 谓词只作用在内层那个 ``in_scope_roots`` 选择上，
+          子查询自己那层**不带任何**行级 scope 过滤。理由：root 才是被授权、被 scope 的
+          那个对象，整棵树归属于它 —— 与 ``tree_cost_cents`` / ``tree_charge`` 同一套
+          语义；而子 run 的 scope 列是 best-effort（``team_of_run`` 查不到就降级成
+          ``None``，``DispatchScope`` 同理），子行的 ``team_id`` 完全可以是 NULL 而它的
+          root 有值。按子行自己的列过滤的后果是**静默的**：root 在 scope 里、join 也落
+          得下来，但那条子 run 的钱压根没进 ``tree_cost.cents``，树总额少掉委派那笔。
+
+          这个选择定下的两个边界，方向相反，都是有意的：
+          1. 子 run 在**窗口外**、它的 root 在窗口内 → **算**。跟旧的折叠列行为一致
+             （root 收口时把后代的钱折进来，不问后代是什么时候跑的）。尾窗口尤其常见：
+             root 在 ``to`` 附近起，孩子在它之后才结束。
+          2. 子 run 在窗口内、它的 root 在**窗口外** → **不算**。那棵树的 root 行不在
+             主查询里，join 无处落地。这是「钱按 root 归属」的必然代价。
         - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
           ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
           不上滚；按 root 过滤会把子 run 干的活整个丢掉。
@@ -1143,15 +1153,19 @@ class AgentRunsRepository(AsyncpgRepository):
         # letting them read as "instant".
         timed = and_(AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None))
         # 钱：先把整棵树的 own_cost_cents 加成每棵树一行，再左联回 root 行所在的分组。
-        # 同一个 ``scope`` 列表喂给两侧——两边口径一旦分叉，多出来的钱会顺着 join 进
-        # 这一屏，少掉的钱则悄悄消失，两种都不会报错。
+        #
+        # 收行的条件是**「属于某棵在 scope 内的树」**，不是每行自己的 scope 列（裁定 7）。
+        # 子 run 的 scope 列是 best-effort：``team_of_run`` 查不到就降级成 None，
+        # ``DispatchScope`` 同理，所以子行的 team_id / project_id 可以是 NULL 而它的
+        # root 有值。按子行自己的列过滤 = 把委派那笔钱静默丢掉，而那正是本票要捞回来的。
         tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        in_scope_roots = select(AgentRuns.id).where(*scope, root_only)
         tree_cost = (
             select(
                 tree_key.label("root"),
                 func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
             )
-            .where(*scope)
+            .where(tree_key.in_(in_scope_roots))
             .group_by(tree_key)
             .subquery("tree_cost")
         )
