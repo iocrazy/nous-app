@@ -28,24 +28,16 @@ class _Trees:
 
 
 class _Repo:
-    async def cost_rows_for_ids(self, ids):
-        assert ids == [77]
-        return [
-            {
-                "id": 77,
-                "user_id": "u",
-                "issue_id": 5,
-                "cost_cents": 0.82,
-                "model": "m",
-                "status": "completed",
-                "prompt_tokens": 1,
-                "completion_tokens": 2,
-            }
-        ]
+    async def tree_cost_cents(self, root_ids):
+        # 花费也按整棵树取（3d 第 0 票）：77 自身 0.82 + 委派出去的 78 那份 0.20。
+        # 行上的 ``cost_cents`` 会停在 0.82 —— 子 run 还没报回父行时它就是低报的，
+        # 而这一帧恰恰发在回合刚结束、子 run 可能仍在收口的那一刻。
+        assert root_ids == [77]
+        return {"77": 1.02}
 
 
 class _Boom:
-    async def cost_rows_for_ids(self, ids):
+    async def tree_cost_cents(self, root_ids):
         raise RuntimeError("db down")
 
 
@@ -75,7 +67,8 @@ async def test_done_frame_carries_cost_and_points(monkeypatch):
 
     await ics.publish_status(5, "done", run_id=77)
 
-    assert published[-1]["cost_cents"] == 0.82
+    # 1.02 = 0.82（root 自身）+ 0.20（委派出去那条）—— 整棵树，不是行上那个 0.82。
+    assert published[-1]["cost_cents"] == 1.02
     # 0.62（root）+ 0.20（委派出去那条）—— 帧上的数回答的是「这次回合扣了多少」。
     assert published[-1]["charged_points"] == 0.82
 
@@ -130,12 +123,12 @@ async def test_a_run_nobody_billed_reports_cost_without_points(monkeypatch):
 
     await ics.publish_status(5, "done", run_id=77)
 
-    assert published[-1]["cost_cents"] == 0.82
+    assert published[-1]["cost_cents"] == 1.02
     assert published[-1]["charged_points"] is None
 
 
 async def test_a_failed_points_read_keeps_the_cost_that_was_already_read(monkeypatch):
-    """两个读是**正交**的：run 行读到了，积分行炸了，帧就该报出花费 + 「不知道扣没扣」。
+    """两个读是**正交**的：花费读到了，积分行炸了，帧就该报出花费 + 「不知道扣没扣」。
 
     共用一个 ``try`` 会把已经读到的 ``cost_cents`` 一起丢掉 —— 一次积分故障把一个
     真花了钱的 run 画成「完全没有账」。口径同 ``issue_rollup._charged``：谁失败只
@@ -154,12 +147,12 @@ async def test_a_failed_points_read_keeps_the_cost_that_was_already_read(monkeyp
 
     await ics.publish_status(5, "done", run_id=77)
 
-    assert published[-1]["cost_cents"] == 0.82
+    assert published[-1]["cost_cents"] == 1.02
     assert published[-1]["charged_points"] is None
 
 
 async def test_a_failed_run_row_read_still_reports_the_points(monkeypatch):
-    """反向同理：积分账是另一张表，run 行读不到不该把它一起拖下水。"""
+    """反向同理：积分账是另一张表，花费读不到不该把它一起拖下水。"""
     published: list[dict] = []
     ics = _patch(monkeypatch, _Boom(), published)
 

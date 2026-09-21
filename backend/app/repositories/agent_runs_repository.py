@@ -1097,14 +1097,19 @@ class AgentRunsRepository(AsyncpgRepository):
 
         **两种粒度混在一张表里，每一列的口径写死在这里（同 ``issue_totals``）：**
 
-        - ``cost_cents`` —— **只算 root run**。root 行的 ``cost_cents`` 已经是整棵树
-          的总额（``run_recorder._finish`` 把 own + children + media 加起来），子 run
-          自己还有一行，不过滤就是双计。
-          ⚠️ 这里与议题那一族（``usage_repository.issue_totals`` /
-          ``spent_cents_for_issue``）**刻意不同**：那两处 3d 第 0 票起改读只记自身的
-          ``own_cost_cents`` 并去掉 root 过滤（Delegate 子 run 的花费此前整个逃出预算）。
-          这条窗口聚合还没迁，所以它仍是「root 行的树总额」口径 —— 两种算法在树完整时
-          得数相同，在子 run 没报回父行时不同。迁它是另一张票。
+        - ``cost_cents`` —— **整棵树的钱，记在 root 所在的那一组**。取数分两步：子查询
+          按 ``COALESCE(root_run_id, id)`` 把 ``own_cost_cents`` 预聚合成每棵树一行，
+          主查询左联回来，只在 root 行上求和（``FILTER (WHERE parent_run_id IS NULL)``）。
+          直接对分组里的行求 ``own_cost_cents`` 会**改掉归属口径**（见下面的 I5 注），
+          而读旧的 ``cost_cents`` 则会低报：那一列是「自身 + **已报到的**后代」，子 run
+          没报回父行时它不含那笔钱 —— Delegate 出去的花费于是整个漏出这张表（3d 第 0
+          票，与 ``usage_repository.issue_totals`` / ``spent_cents_for_issue`` 同批迁）。
+          ⚠️ 子查询与主查询**共用同一个 ``scope`` 列表**，不许各写一份 where：子查询宽
+          了，窗口外 / 别的团队的子 run 的钱会顺着 join 漏进这一屏；窄了，窗口内的委派
+          花费又不见。
+          ⚠️ 已知边界：子 run 在窗口内、它的 root 在窗口外时，那棵树的 root 行不在主
+          查询里，join 无处落地，这笔钱不计入本窗口。这与旧口径一致（旧口径同样只从
+          窗口内的 root 行取数），是「按 root 归属」这个选择的必然代价。
         - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
           ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
           不上滚；按 root 过滤会把子 run 干的活整个丢掉。
@@ -1137,6 +1142,19 @@ class AgentRunsRepository(AsyncpgRepository):
         # keeps half-stamped rows out of the average's denominator instead of
         # letting them read as "instant".
         timed = and_(AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None))
+        # 钱：先把整棵树的 own_cost_cents 加成每棵树一行，再左联回 root 行所在的分组。
+        # 同一个 ``scope`` 列表喂给两侧——两边口径一旦分叉，多出来的钱会顺着 join 进
+        # 这一屏，少掉的钱则悄悄消失，两种都不会报错。
+        tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        tree_cost = (
+            select(
+                tree_key.label("root"),
+                func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
+            )
+            .where(*scope)
+            .group_by(tree_key)
+            .subquery("tree_cost")
+        )
         try:
             rows_stmt = (
                 select(
@@ -1169,10 +1187,14 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
                         "deliverables"
                     ),
+                    # root 行至多联到一行（子查询已按树分好组），所以这个 join 不会
+                    # 放大上面那几个回合粒度的计数。
                     func.coalesce(
-                        func.sum(AgentRuns.cost_cents).filter(root_only), 0
+                        func.sum(tree_cost.c.cents).filter(root_only), 0
                     ).label("cost_cents"),
                 )
+                .select_from(AgentRuns)
+                .outerjoin(tree_cost, tree_cost.c.root == AgentRuns.id)
                 .where(*scope)
                 .group_by(key_col)
             )
@@ -1197,7 +1219,12 @@ class AgentRunsRepository(AsyncpgRepository):
         return out, {str(k): int(v) for k, v in reasons}
 
     async def cost_rows_for_ids(self, ids: List[int]) -> List[Dict[str, Any]]:
-        """这批 run 的花费与归属列。可见性判定在路由层——仓库不认识调用者。"""
+        """这批 run 的归属列与行级展示列。可见性判定在路由层——仓库不认识调用者。
+
+        ⚠️ 这里的 ``cost_cents`` 是**行上那一列**（自身 + 已报到的后代），只够单行展示。
+        气泡与 ``done`` 帧回答的「这次回合花了多少」走 ``tree_cost_cents``（3d 第 0 票）
+        —— 别把这一列当成树总额加起来。
+        """
         if not ids:
             return []
         stmt = select(
@@ -1254,6 +1281,52 @@ class AgentRunsRepository(AsyncpgRepository):
             if key in out:
                 out[key].add(str(run_id))
         return {k: sorted(v) for k, v in out.items()}
+
+    async def tree_cost_cents(self, root_ids: List[int]) -> Dict[str, float]:
+        """每个 root → 整棵树的真实花费（Σ ``own_cost_cents``），字符串键。
+
+        树键 ``COALESCE(root_run_id, id)``：root 行自己的 ``root_run_id`` 恒为 NULL
+        （``_attach_to_parent_run`` 是唯一写方），所以这一个表达式同时覆盖根与后代，
+        与 ``run_ids_in_trees`` 答的是同一棵树。**全仓只许这一种拼法。**
+
+        为什么不直接读 root 行的 ``cost_cents``：那一列是「自身 + **已报到的**后代」，
+        由 ``run_recorder._finish`` 在父 run 收口时折叠出来（3d 第 0 票）。子 run 还没
+        报回父行、或者根本没报（失败 / 被取消）时它低报，而它同时又不能被求和 ——
+        子 run 自己还有一行。``own_cost_cents`` 每行只记自身，求和既不低报也不双计。
+
+        每个问到的 root **至少映射到它自己**（0.0）—— 读空不等于免费，键整个缺席会让
+        调用方 ``.get`` 拿到 None 再 ``?? 0``，把一次读空写成一个关于钱的断言。
+
+        ⚠️ **只许拿 root 来问。** 一条子 run 的树键指向它的根而不是它自己，所以问一个
+        非 root 的 id 会拿到 0.0 —— 那是「这个 id 不是任何一棵树的根」，不是「它没花
+        钱」。同族的已知边界见 ``run_ids_in_trees``（那里问中间节点只拿回它自己）。两个
+        宿主（``/runs/costs`` 与 ``done`` 帧）问的都是 root：气泡与状态帧都由 root 的
+        recorder 发。加第三个消费方前先确认它手里那个 id 是根。
+
+        与 ``tree_charge.bucket_tree`` 的 ``tree_total`` 是同一个数。读失败一律 raise：
+        降级成 0 就是把一次故障说成「这次回合免费」，``/runs/costs`` 正靠这个异常答 503。
+        """
+        roots = [int(r) for r in root_ids if r is not None]
+        if not roots:
+            return {}
+        tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        stmt = (
+            select(
+                tree_key.label("root"),
+                func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
+            )
+            .where(tree_key.in_(roots))
+            .group_by(tree_key)
+        )
+        out = {str(r): 0.0 for r in roots}
+        try:
+            async with read_scope() as session:
+                for root, cents in (await session.execute(stmt)).all():
+                    out[str(root)] = round(float(cents or 0), 4)
+        except Exception as e:
+            logger.error(f"[agent_runs] tree_cost_cents failed: {e}")
+            raise
+        return out
 
     # ------------------------------------------------------------------
     # Sweeper helpers
