@@ -34,6 +34,12 @@ def _cost(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_cents(run: dict[str, Any]) -> float:
+    """**一行自己那一格**要显示的钱（``runs[].cost_cents`` 列表项）。
+
+    ⚠️ 这不是议题的花费。议题那个数由 ``own_cost_cents_for_issue_runs`` 在库里
+    求和 —— 在这里把每行加起来只会得到 root 们的树总额，把 Delegate 子 run 漏在
+    外面（3d 第 0 票）。
+    """
     if run.get("status") == "running":
         return float(_cost(run).get("spent_cents") or 0.0)
     try:
@@ -99,15 +105,23 @@ def compute_rollup(
     inbox_pending: int,
     origin: dict[str, Any],
     *,
+    spent_cents: float,
     now: Optional[dt.datetime] = None,
     last_seq: Optional[int] = None,
     efficiency: Optional[dict[str, Any]] = None,
     charged_points: Optional[dict[str, float]] = None,
 ) -> dict[str, Any]:
-    """``runs`` newest first, root runs only."""
+    """``runs`` newest first, root runs only.
+
+    ``spent_cents`` 是这个议题的花费，由调用方从
+    ``agent_runs_repository.own_cost_cents_for_issue_runs`` 取（``load_rollup``
+    负责）。**没有默认值**，因为唯一合理的默认是 0，而一个忘了传的调用方会让预算格
+    永远显示「没花钱」——预算门禁那边同时在拦人，两个面各说一套。逐行加
+    ``_run_cents`` 也不行：那样只数得到 root 的树总额，Delegate 子 run 不在其中。
+    """
     now = now or dt.datetime.now(dt.timezone.utc)
     current = _current_run(runs)
-    spent = round(sum(_run_cents(r) for r in runs), 4)
+    spent = round(float(spent_cents), 4)
     budget = issue.get("budget_cents")
     # Same reading as BudgetGateHook: NULL = unlimited (no pct), 0 = a real
     # budget meaning "spend nothing more" — any spend is 100 % over it. Before
@@ -124,10 +138,10 @@ def compute_rollup(
     if pct is not None:
         state = "over" if pct >= 100 else "warn" if pct >= 80 else "ok"
     done_children = sum(1 for s in sub_issues if s.get("status") in TERMINAL_ISSUE)
-    # 3c §3.3：计数按全体 run 求和（root + children），因为计数是每个 run 的自身量，
-    # 不像 cost_cents 那样父行已含子行。分子 ``spent`` 却是 root-only 的树总额——换
-    # 成 root-only 的计数会漏掉子 agent 干的活，换成全体求和的花费会把子 agent 的钱
-    # 数两遍。
+    # 3c §3.3：计数按全体 run 求和（root + children），因为计数是每个 run 的自身量。
+    # 3d 第 0 票起分子 ``spent`` 也是全体求和（``own_cost_cents`` 每行只记自身），
+    # 所以 ``¢/output`` 的分子分母终于同一批 run —— 此前分子是 root 的树总额、分母
+    # 含子 agent 干的活，委派越多单价越虚高。
     eff = {**EMPTY_EFFICIENCY, **(efficiency or {})}
     # 浅拷贝只复制顶层：没带 turn_end_reasons 的调用方会拿到 EMPTY_EFFICIENCY 里
     # 那一个 dict 本身，谁改一下就污染了之后每一个议题。重新包一层。
@@ -249,9 +263,14 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
             )
             return {}
 
-    efficiency, charged = await asyncio.gather(
+    # 花费问库，不是把 ``runs`` 加起来：``runs`` 是 root-only，而钱要算上 Delegate
+    # 出去的子 run（3d 第 0 票）。读失败**故意**往上抛 —— 预算格是个门禁面，把读不到
+    # 显示成 0 就是说「随便花」。效率账那条自己回 {}，积分那条自己 catch，只有这条
+    # 有资格带走整个 rollup。
+    efficiency, charged, spent = await asyncio.gather(
         get_agent_runs_repository().efficiency_for_issue(issue_id),
         _charged(),
+        get_agent_runs_repository().own_cost_cents_for_issue_runs(issue_id),
     )
     current = _current_run(runs)
     last_seq = (
@@ -265,6 +284,7 @@ async def load_rollup(issue: dict[str, Any]) -> dict[str, Any]:
         children,
         pending,
         origin,
+        spent_cents=spent,
         last_seq=last_seq,
         efficiency=efficiency,
         charged_points=charged,

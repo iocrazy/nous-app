@@ -212,24 +212,39 @@ async def test_for_run_seeds_own_cents_from_a_pre_change_runs_total(monkeypatch)
     assert w.views["cost"]["spent_cents"] == 12.5
 
 
-def test_the_issue_queries_still_exclude_child_runs():
-    """Load-bearing since review I2 gave background children an ``issue_id``.
+def test_the_issue_run_list_still_shows_root_runs_only():
+    """``list_for_issue`` 喂的是驾驶舱那张 run 列表 —— 一行一次顶层运行，每行显示
+    它自己那棵树的总额（``cost_cents``）。把子 run 也列进去既是重复展示，也会让
+    同一笔钱在列表里出现两次。
 
-    A child's spend reaches the issue exactly once — through its parent's
-    ``by_child`` and so through the parent's ``cost_cents``. If either of
-    these two queries stopped filtering to root runs, the child's own row
-    would be summed a second time and every fan-out would double-bill.
+    ⚠️ 与它成对的 ``spent_cents_for_issue`` **不再** root-only：见下一条。
     """
     import inspect
 
     from app.repositories import agent_runs_repository as repo
 
-    for fn in (
-        repo.AgentRunsRepository.list_for_issue,
-        repo.AgentRunsRepository.spent_cents_for_issue,
-    ):
-        src = inspect.getsource(fn)
-        assert "parent_run_id.is_(None)" in src, fn.__name__
+    src = inspect.getsource(repo.AgentRunsRepository.list_for_issue)
+    assert "parent_run_id.is_(None)" in src
+
+
+def test_the_budget_gate_no_longer_excludes_child_runs():
+    """I2 给后台子 run 发了 ``issue_id``，而 I3 让父行的 ``cost_cents`` 包含子的钱
+    —— 两条合起来逼出当时那道 root 过滤（不滤就双计）。代价是：只有**已经报回父行**
+    的子 run 才进得了议题的账，Delegate 出去、还没报回来（或根本不报回来）的那部分
+    对预算完全隐形。
+
+    3d 第 0 票换了列：``own_cost_cents`` 每行只记自身，不含后代，所以双计的前提没了
+    —— 全行求和才是这个议题真花的钱。SQL 形状由
+    ``tests/repositories/test_issue_spend_own_cost.py`` 钉住，这里只拦「有人把 root
+    过滤加回来」。
+    """
+    import inspect
+
+    from app.repositories import agent_runs_repository as repo
+
+    src = inspect.getsource(repo.AgentRunsRepository.spent_cents_for_issue)
+    assert "parent_run_id.is_(None)" not in src
+    assert "_own_cost_sum_stmt" in src
 
 
 # ─── 3b Task 4b fix 1：媒体的钱也必须两侧同名 ──────────────────────────

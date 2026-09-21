@@ -87,7 +87,10 @@ def test_blocked_and_done_and_idle():
 # ── aggregation ────────────────────────────────────────────────────────────
 
 
-def test_rollup_sums_ended_run_cost_plus_live_spend_against_the_budget():
+def test_rollup_puts_the_repo_spend_against_the_budget():
+    """3d 第 0 票起 ``spent_cents`` 由调用方从 ``own_cost_cents_for_issue_runs``
+    取（全部 run 求和，含 Delegate 子 run），不再是这里逐行加 ``cost_cents``。
+    每行那一格仍然自己折算——running 的行读视图、结束的行读列。"""
     runs = [
         _run(
             "running",
@@ -99,7 +102,13 @@ def test_rollup_sums_ended_run_cost_plus_live_spend_against_the_budget():
         _run("failed", id=1, cents=5.5),
     ]
     out = compute_rollup(
-        _issue(budget_cents=100), runs, [], 2, {"kind": "manual"}, now=T0
+        _issue(budget_cents=100),
+        runs,
+        [],
+        2,
+        {"kind": "manual"},
+        spent_cents=85.5,
+        now=T0,
     )
     assert out["phase"] == "running"
     assert out["budget"] == {
@@ -130,6 +139,7 @@ def test_rollup_zero_budget_is_a_real_budget_not_unlimited():
         [],
         0,
         {"kind": "manual"},
+        spent_cents=0.128,
         now=T0,
     )
     assert out["budget"] == {
@@ -139,7 +149,9 @@ def test_rollup_zero_budget_is_a_real_budget_not_unlimited():
         "state": "over",
     }
     # ...and nothing spent yet is 0 %, not "over" — the run has not started.
-    out = compute_rollup(_issue(budget_cents=0), [], [], 0, {"kind": "manual"}, now=T0)
+    out = compute_rollup(
+        _issue(budget_cents=0), [], [], 0, {"kind": "manual"}, spent_cents=0.0, now=T0
+    )
     assert out["budget"]["pct"] == 0 and out["budget"]["state"] == "ok"
 
 
@@ -148,7 +160,9 @@ def test_rollup_without_budget_and_children_done_count():
         {"id": 11, "identifier": "N-11", "title": "a", "status": "done"},
         {"id": 12, "identifier": "N-12", "title": "b", "status": "in_progress"},
     ]
-    out = compute_rollup(_issue(), [], children, 0, {"kind": "manual"}, now=T0)
+    out = compute_rollup(
+        _issue(), [], children, 0, {"kind": "manual"}, spent_cents=0.0, now=T0
+    )
     assert out["budget"] == {
         "budget_cents": None,
         "spent_cents": 0.0,

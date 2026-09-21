@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy import Select, and_, case, func, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -101,6 +101,28 @@ def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
         if val is not None:
             out[col] = str(val)
     return out
+
+
+def _own_cost_sum_stmt(*where: Any) -> Select[Any]:
+    """``SUM(COALESCE(own_cost_cents, 0))`` over the matching rows —— 议题这一族
+    「花了多少钱」的唯一表达式（3d 第 0 票）。
+
+    两件事写死在这里，两个读方（``spent_cents_for_issue`` 与
+    ``own_cost_cents_for_issue_runs``）共用，免得哪天只改一个：
+
+    - **不按 root 过滤。** ``own_cost_cents`` 每行只记自身（own + media，不含
+      后代），全行求和才是这个议题真花的钱。旧的 ``cost_cents`` 是「自身 + 已报到
+      的后代」，求和时必须 root-only 才不双计 —— 而 Delegate 出去的子 run 带着
+      ``issue_id`` 落库，正是被那道 root 过滤挡在预算之外，让议题预算对委派花费
+      完全无感。这条 helper 就是那个缺陷的修法。
+    - **每行读 ``COALESCE(own_cost_cents, 0)``。** NULL 只出现在「从没算过」的
+      历史行上；不包一层的话，``SUM`` 本身照常跳过 NULL，但任何逐行运算（将来加
+      ``FILTER`` / ``CASE``）会静默把整项变成 NULL。外层那个 coalesce 管的是另一
+      件事：零行时 ``SUM`` 返回 NULL，调用方要的是 0。
+    """
+    return select(
+        func.coalesce(func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0)
+    ).where(*where)
 
 
 def _agent_run_to_dict(obj: Any) -> Dict[str, Any]:
@@ -827,10 +849,14 @@ class AgentRunsRepository(AsyncpgRepository):
         conversation_id: Optional[int] = None,
         exclude_run_id: Optional[int] = None,
     ) -> float:
-        """Sum of ``cost_cents`` over the issue's runs (by issue_id or its
-        session conversation), optionally excluding the live run whose spend
-        the caller tracks itself. Root runs only — children roll up through
-        their parent's step costs."""
+        """Sum of ``own_cost_cents`` over the issue's runs (by issue_id or its
+        session conversation), optionally excluding the live run whose spend the
+        caller tracks itself.
+
+        **Every run, root and child alike** — ``own_cost_cents`` records only
+        the row's own spend (own + media, no descendants), so the whole issue's
+        真花的钱 is the sum over all of them. See ``_own_cost_sum_stmt``.
+        """
         keys = []
         if issue_id is not None:
             keys.append(AgentRuns.issue_id == int(issue_id))
@@ -838,11 +864,7 @@ class AgentRunsRepository(AsyncpgRepository):
             keys.append(AgentRuns.conversation_id == int(conversation_id))
         if not keys:
             return 0.0
-        stmt = (
-            select(func.coalesce(func.sum(AgentRuns.cost_cents), 0))
-            .where(or_(*keys))
-            .where(AgentRuns.parent_run_id.is_(None))
-        )
+        stmt = _own_cost_sum_stmt(or_(*keys))
         if exclude_run_id is not None:
             stmt = stmt.where(AgentRuns.id != int(exclude_run_id))
         try:
@@ -855,11 +877,30 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             raise
 
+    async def own_cost_cents_for_issue_runs(self, issue_id: int) -> float:
+        """这个议题真花了多少钱 —— ``issue_rollup`` 的 Budget 格读它。
+
+        与 ``spent_cents_for_issue`` 是同一条表达式（同一个 helper），只是不带
+        ``exclude_run_id``：驾驶舱要的是此刻的全额，包括正在跑的那条（镜像语句
+        每次都把 ``own_cost_cents`` 写成实时值，所以 running 的行也算得准）。
+
+        读失败一律 raise：rollup 的调用方自己决定怎么降级，这里回 0 就等于把一个
+        花了钱的议题显示成没花钱，而那正是预算格存在的意义。
+        """
+        stmt = _own_cost_sum_stmt(AgentRuns.issue_id == int(issue_id))
+        try:
+            async with read_scope() as session:
+                return float((await session.execute(stmt)).scalar_one() or 0)
+        except Exception as e:
+            logger.error(f"[agent_runs] own_cost_cents_for_issue_runs failed: {e}")
+            raise
+
     async def efficiency_for_issue(self, issue_id: int) -> Dict[str, Any]:
         """这个议题上所有 run 的工作量（3c §3.3）。
 
         **不**加 root 过滤：五个计数是每个 run 的自身量，父行不含子行，全体求和才是
-        真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
+        真数（``spent_cents_for_issue`` 自 3d 第 0 票起同理——它改读只记自身的
+        ``own_cost_cents``，也不再 root-only）。一条 SQL 按
         ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
 
         ⚠️ 「全体」的准确口径是**带着这个 ``issue_id`` 的全部 run**，不是「这棵树的
@@ -1020,9 +1061,12 @@ class AgentRunsRepository(AsyncpgRepository):
 
         - ``cost_cents`` —— **只算 root run**。root 行的 ``cost_cents`` 已经是整棵树
           的总额（``run_recorder._finish`` 把 own + children + media 加起来），子 run
-          自己还有一行，不过滤就是双计。同一条谓词也用在 ``usage_repository
-          .issue_totals`` 与 ``spent_cents_for_issue``；**三处必须一致**，否则同一笔
-          花费在 Usage 面、驾驶舱 Budget 格、效率表上是三个数。
+          自己还有一行，不过滤就是双计。
+          ⚠️ 这里与议题那一族（``usage_repository.issue_totals`` /
+          ``spent_cents_for_issue``）**刻意不同**：那两处 3d 第 0 票起改读只记自身的
+          ``own_cost_cents`` 并去掉 root 过滤（Delegate 子 run 的花费此前整个逃出预算）。
+          这条窗口聚合还没迁，所以它仍是「root 行的树总额」口径 —— 两种算法在树完整时
+          得数相同，在子 run 没报回父行时不同。迁它是另一张票。
         - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
           ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
           不上滚；按 root 过滤会把子 run 干的活整个丢掉。

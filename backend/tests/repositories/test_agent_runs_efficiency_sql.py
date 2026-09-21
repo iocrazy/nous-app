@@ -168,9 +168,11 @@ async def test_only_the_money_column_is_root_filtered():
 
     A root run's ``cost_cents`` is already the whole tree's total (own +
     children + media — ``run_recorder._finish`` rolls it up), so summing every
-    row would bill each child twice. Same predicate as ``issue_totals`` and
-    ``spent_cents_for_issue``; if these three ever disagree, one screen shows a
-    different number for the same spend.
+    row would bill each child twice.
+
+    ⚠️ 议题那一族（``issue_totals`` / ``spent_cents_for_issue``）3d 第 0 票起换成了
+    ``own_cost_cents`` 并去掉 root 过滤；这条窗口聚合还没迁，仍是旧口径。两边不同是
+    已知的、有票的，不是漂移。
 
     The counters are the opposite: ``tool_calls`` / ``tool_errors`` /
     ``deliverables`` count what a run did ITSELF and never roll up, so filtering
