@@ -546,6 +546,9 @@ async def test_monthly_usage_matches_rest_value_types_consumer_path(
     conn = await asyncpg.connect(integration_db_url)
     try:
         agent_id, user_id = await _seed_agent_and_user(conn)
+        # 两列故意给不同的值：投影读的是 own_cost_cents（这一行自己烧的钱），旧列
+        # 是「自身 + 已报到的后代」。下面断言拿到的是 0.50 而不是 9.99 —— 真库上
+        # 证明换列生效了，不只是编译出来的 SQL 对。
         await _insert_run(
             conn,
             agent_id,
@@ -553,7 +556,8 @@ async def test_monthly_usage_matches_rest_value_types_consumer_path(
             started_at=datetime.now(timezone.utc),
             prompt_tokens=100,
             completion_tokens=50,
-            cost_cents=cost,
+            cost_cents=Decimal("9.99"),
+            own_cost_cents=cost,
         )
     finally:
         await conn.close()
@@ -583,6 +587,7 @@ async def test_monthly_usage_matches_rest_value_types_consumer_path(
     assert (
         type(row["cost_cents"]) is str
     ), "cost_cents must match the REST numeric→str contract"
+    # 0.5（own_cost_cents）而不是 9.99（旧列）—— 键没变，读的列变了。
     assert float(row["cost_cents"]) == 0.5
 
 

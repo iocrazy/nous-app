@@ -855,17 +855,22 @@ class RunRecorder:
             float(v or 0) for v in ((folded or {}).get("by_child") or {}).values()
         )
         media_cents = float((folded or {}).get("media_cents") or 0.0)
-        # A1：小时表收**自身**花费（own + media；积分账待 Task 4）。列里的
-        # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
-        # 两个数各有其用。
-        own_media_cents = round((own_cents or 0.0) + media_cents, 4)
         # 积分只按「平台真付了钱的那部分」扣（用户裁定 2）。两条 BYOK 道由
         # step_end / deliverable 两个 fold 各自填，这里只做减法。
-        # ⚠️ ``own_media_cents`` 保留不动 —— 小时表（record_usage）仍然收它，A1
-        # 口径不变。``own_spend.total`` 与它是同一个数，但两者各有来源与用途。
         from app.services.ai.billing import tree_charge
 
         own_spend = tree_charge.spend_of_run(folded, own_cents=own_cents)
+        # A1：小时表收**自身**花费（own + media；积分账待 Task 4）。列里的
+        # cost_cents 仍是树总额（review I3：父 run 完成时花费不能倒退），
+        # 两个数各有其用。
+        #
+        # 这里曾经自己再加一遍 ``round((own_cents or 0.0) + media_cents, 4)``。
+        # 同一个数、两份公式：``own_cost_cents`` 列（mig 479）写的是
+        # ``own_spend.total``，小时表写的是那份手算 —— 两边谁也不知道对方存在，
+        # 而 ``spend_of_run`` 的约定（非数字读作 0、逐分量钳位）只写在它自己那里。
+        # 现在两个消费方读同一个值；公式只剩 ``spend_of_run`` 一份，有守卫钉住
+        # （tests/services/billing/test_cost_cents_never_aggregated.py）。
+        own_media_cents = own_spend.total
         if own_cents is not None or children_cents or media_cents:
             cost_cents = round((own_cents or 0.0) + children_cents + media_cents, 4)
         if folded is not None and own_cents is not None:
@@ -940,6 +945,11 @@ class RunRecorder:
             updates["liveness_state"] = "cancelled"
         if cost_cents is not None:
             updates["cost_cents"] = cost_cents
+        # 自身花费列（mig 479）。**无条件**写：``own_spend.total`` 在费率未知时也
+        # 还有 media 那一道，跳过会让这一行在聚合里表现成「没花钱」而不是「不知道」。
+        # 最后一次镜像失败（``persist_views`` 返回 False）时，这里仍把终态内存里的
+        # 真值落库 —— 与 ``metadata_json.cost`` 那条路径互不依赖。
+        updates["own_cost_cents"] = own_spend.total
         if self._output_summary is not None:
             updates["output_summary"] = self._output_summary
         if error_code is not None:
@@ -1705,6 +1715,7 @@ class RunEventWriter:
         from sqlalchemy.dialects.postgresql import JSONB, array
 
         from app.models.agents import AgentRuns
+        from app.services.ai.billing.tree_charge import spend_of_run
 
         expr = func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB))
         for key, value in self.mirror_keys().items():
@@ -1722,7 +1733,14 @@ class RunEventWriter:
         return (
             update(AgentRuns)
             .where(AgentRuns.id == self.run_id)
-            .values(metadata_json=expr)
+            .values(
+                metadata_json=expr,
+                # 自身花费列（mig 479），跟每次镜像一起落：running 时就是实时的，
+                # 而崩溃写方（liveness / sweeper）只翻 status、不碰这一列，所以它
+                # 停在最后一次镜像的值 —— 与树收口按行读 ``metadata_json.cost``
+                # 得到的是同一个数。
+                own_cost_cents=spend_of_run(self.views.get("cost")).total,
+            )
         )
 
     async def persist_views(self) -> bool:

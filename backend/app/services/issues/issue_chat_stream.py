@@ -73,13 +73,21 @@ async def _run_output_keys(run_id: Any) -> list[dict[str, Any]]:
 
 
 async def _cost_cents_for(rid: int) -> Optional[float]:
-    """这条 run 记的花费。读失败回 None —— 降级只影响这一个字段。"""
+    """这次回合花了多少 —— **以这条 run 为根的整棵树**的 ``own_cost_cents`` 合计
+    （3d 第 0 票）。
+
+    ``run_id`` 在这条路径上恒是 root（帧由 root 的 recorder 发）。此前读的是行上那一
+    列 ``cost_cents``，它是「自身 + **已报到的**后代」：子 run 还没报回父行时帧上这个
+    数就低报，而帧恰恰是在回合刚结束、子 run 可能仍在收口的那一刻发出去的。取数与
+    ``/ai-library/runs/costs`` 共用 ``tree_cost_cents``，否则同一次回合在两处说两个数。
+
+    读失败回 None —— 降级只影响这一个字段（``run_cost_for_frame`` 的两个读各自 catch）。
+    """
     try:
         from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-        rows = await get_agent_runs_repository().cost_rows_for_ids([rid])
-        row = next((r for r in rows if int(r["id"]) == rid), None) or {}
-        return row.get("cost_cents")
+        tree = await get_agent_runs_repository().tree_cost_cents([rid])
+        return tree.get(str(rid))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[issue_chat_stream] cost read failed (run={rid}): {e}")
         return None
@@ -108,10 +116,11 @@ async def run_cost_for_frame(run_id: Any) -> dict[str, Optional[float]]:
     两个键**恒定存在**，``null`` 说的是「不知道」—— 缺席会被读成 0，而 0 在钱上是
     另一个答案（「这次免费」）。
 
-    ⚠️ 两个键的口径**不同**，这是有意的：``cost_cents`` 取 root 行那一列（它本身
-    已经是树总额，``_finish`` 把 own + children + media 加起来），``charged_points``
-    则要自己把整棵树的 consume 流水加起来（扣费逐 run 发生，积分账里没有「树」这个
-    概念）。两者都回答「这次回合」，只是一个已经滚好、一个要现滚。
+    两个键现在是**同一个口径**（3d 第 0 票）：都把以这条 run 为根的整棵树加起来，
+    只是加的东西不同 —— ``cost_cents`` 加 ``agent_runs.own_cost_cents``（每行只记
+    自身），``charged_points`` 加各 run 的 consume 流水（扣费逐 run 发生，积分账里
+    没有「树」这个概念）。此前 ``cost_cents`` 取的是 root 行上那一列，那是「自身 +
+    已报到的后代」，子 run 没报回父行时低报。
 
     **两个读各自 catch，绝不共用一个 try**：它们打的是两张表、答的是两个正交的问题
     （花了多少 / 收了多少）。共用一个 ``try`` 时，积分读抛出会把**已经读到的**

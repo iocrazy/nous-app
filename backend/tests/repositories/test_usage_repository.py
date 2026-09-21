@@ -217,13 +217,13 @@ def _select_fragments(sql: str) -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_issue_totals_bills_root_runs_but_counts_every_run_s_tokens(monkeypatch):
+async def test_issue_totals_bills_every_run_but_counts_only_root_runs(monkeypatch):
     """同一个查询里两条口径。
 
-    ``cost_cents`` 上滚：子 run 的花费已经加进父行（run_recorder 的树总额），
-    所以求和必须只取 root，否则双计。``prompt/completion/total_tokens``
-    **不**上滚 —— 每行只记自己那一次的 token，子 run 是独立行 —— 所以按 root
-    过滤会把子 run 的 token 整个丢掉。共用一条 WHERE 必然错一边。
+    钱与 token 都按**该议题的全部 run** 求和：钱读 ``own_cost_cents``（3d 第 0 票，
+    每行只记自身、不含后代，所以不双计），token 三列本来就不上滚（每行只记自己那
+    一次调用）。``run_count`` 反过来只数 root —— 「跑了几次」问的是顶层运行数。
+    共用一条 WHERE 必然错一边，所以 root 谓词只挂在计数那一列的 FILTER 上。
     """
     session = _RecordingSession(_FakeResult(_EMPTY_TOTALS))
     _install(monkeypatch, session)
@@ -232,8 +232,10 @@ async def test_issue_totals_bills_root_runs_but_counts_every_run_s_tokens(monkey
     sql, binds = session.calls[0]
     frags = _select_fragments(sql)
 
-    # 钱与条数：root-only。
-    assert "parent_run_id IS NULL" in frags["cost_cents"]
+    # 钱：自身列、全部 run，一点 root 过滤都不许剩。
+    assert "own_cost_cents" in frags["cost_cents"]
+    assert "parent_run_id IS NULL" not in frags["cost_cents"]
+    # 条数：root-only。
     assert "parent_run_id IS NULL" in frags["run_count"]
     # token 三列：该议题的全部 run。
     assert "parent_run_id IS NULL" not in frags["prompt_tokens"]
@@ -246,8 +248,8 @@ async def test_issue_totals_bills_root_runs_but_counts_every_run_s_tokens(monkey
 
 
 @pytest.mark.asyncio
-async def test_issue_totals_and_the_budget_gate_use_the_same_predicate(monkeypatch):
-    """两处「这个议题花了多少钱」必须同一条谓词。比的是编译出的 SQL 片段，不是
+async def test_issue_totals_and_the_budget_gate_sum_the_same_expression(monkeypatch):
+    """两处「这个议题花了多少钱」必须同一条表达式。比的是编译出的 SQL 片段，不是
     各自的注释 —— 注释不会在漂移时报错。"""
     from app.repositories import agent_runs_repository as gate_module
 
@@ -271,6 +273,11 @@ async def test_issue_totals_and_the_budget_gate_use_the_same_predicate(monkeypat
     monkeypatch.setattr(gate_module, "read_scope", fake_read_scope)
     await gate_module.AgentRunsRepository().spent_cents_for_issue(issue_id=1)
 
-    # 比的是**钱那一列**，不是整串 SQL：token 列现在刻意不带这条谓词。
-    assert "parent_run_id IS NULL" in _select_fragments(totals_sql)["cost_cents"]
-    assert "parent_run_id IS NULL" in gate_session.calls[0][0]
+    # 比的是**钱那一列**，不是整串 SQL：``run_count`` 现在刻意还带 root 谓词。
+    # 绑定参数名（coalesce_N）两边不同，所以比的是列名与聚合形状。
+    money = _select_fragments(totals_sql)["cost_cents"]
+    gate_sql = gate_session.calls[0][0]
+    assert "sum(coalesce(public.agent_runs.own_cost_cents" in money.lower()
+    assert "sum(coalesce(public.agent_runs.own_cost_cents" in gate_sql.lower()
+    assert "parent_run_id IS NULL" not in money
+    assert "parent_run_id IS NULL" not in gate_sql

@@ -84,12 +84,14 @@ async def test_a_frame_without_a_run_still_goes_out(monkeypatch):
 
 
 def test_current_run_reports_its_last_seq():
-    out = compute_rollup(ISSUE, RUNS, [], 0, {}, last_seq=42)
+    out = compute_rollup(
+        ISSUE, RUNS, [], 0, {}, spent_cents=0.0, tree_cost_cents={}, last_seq=42
+    )
     assert out["current_run"]["last_seq"] == 42
 
 
 def test_current_run_last_seq_is_none_when_unknown():
-    out = compute_rollup(ISSUE, RUNS, [], 0, {})
+    out = compute_rollup(ISSUE, RUNS, [], 0, {}, spent_cents=0.0, tree_cost_cents={})
     assert out["current_run"]["last_seq"] is None
 
 
@@ -116,9 +118,16 @@ async def test_load_rollup_asks_the_running_run_for_its_watermark(monkeypatch):
             asked.append(run_id)
             return 42
 
-        # 3c §3.3：``load_rollup`` 也问效率账。桩不报数，这条钉的仍是水位。
+        # 3c §3.3：``load_rollup`` 也问效率账；3d 第 0 票起还问这个议题的花费。
+        # 桩都不报数，这条钉的仍是水位。
         async def efficiency_for_issue(self, _issue_id):
             return {}
+
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
+            return 0.0
+
+        async def tree_cost_cents(self, root_ids):
+            return {str(r): 0.0 for r in root_ids}
 
     class _Inbox:
         async def pending_count(self, **_kw):
@@ -163,9 +172,16 @@ async def test_load_rollup_asks_nobody_when_no_run_is_running(monkeypatch):
             asked.append(run_id)
             return 42
 
-        # 3c §3.3：``load_rollup`` 也问效率账。桩不报数，这条钉的仍是水位。
+        # 3c §3.3：``load_rollup`` 也问效率账；3d 第 0 票起还问这个议题的花费。
+        # 桩都不报数，这条钉的仍是水位。
         async def efficiency_for_issue(self, _issue_id):
             return {}
+
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
+            return 0.0
+
+        async def tree_cost_cents(self, root_ids):
+            return {str(r): 0.0 for r in root_ids}
 
     class _Inbox:
         async def pending_count(self, **_kw):
@@ -248,6 +264,12 @@ async def test_a_failed_points_read_empties_only_that_field(monkeypatch):
 
         async def efficiency_for_issue(self, _issue_id):
             return {"tool_calls": 7}
+
+        async def own_cost_cents_for_issue_runs(self, _issue_id, _conv_id=None):
+            return 0.0
+
+        async def tree_cost_cents(self, root_ids):
+            return {str(r): 0.0 for r in root_ids}
 
     class _Inbox:
         async def pending_count(self, **_kw):

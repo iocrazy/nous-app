@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy import Select, and_, case, func, or_, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -50,7 +50,9 @@ from app.services.ai.runner.turn_end import TurnEndReason
 _AGENT_RUNS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(AgentRuns)
 
 # The 9-column projection monthly_usage_by_agent returns. Pinned here so the ORM
-# select returns EXACTLY the columns the REST/legacy impl did.
+# select returns EXACTLY the columns the REST/legacy impl did. The money column
+# is the 9th and is built separately (_USAGE_COST_COL) — it reads own_cost_cents
+# but keeps the cost_cents KEY, see below.
 _USAGE_COLS = (
     "agent_id",
     "user_id",
@@ -60,7 +62,6 @@ _USAGE_COLS = (
     "prompt_tokens",
     "completion_tokens",
     "total_tokens",
-    "cost_cents",
 )
 
 # Columns of the usage projection whose VALUE TYPE must match what the live REST
@@ -80,6 +81,11 @@ _USAGE_COLS = (
 # ZERO. Tokens (int4) and status (text) already match REST — left as-is. NULLs
 # pass through unchanged.
 _USAGE_STR_COLS = ("agent_id", "user_id", "cost_cents")
+
+# 钱那一列：读 ``own_cost_cents``（这一行自己烧的钱），但**键仍叫 cost_cents** —— 两个
+# 消费方（``ai_library_router.get_usage`` 与 ``recompute_monthly_budgets_step``）按这
+# 个键逐行累加，改的是读哪一列，不是投影的形状（3d 第 0 票）。
+_USAGE_COST_COL = AgentRuns.own_cost_cents.label("cost_cents")
 
 # Cap for the last-resort conversation title (first user message). The
 # workbench row is one truncated line, so anything past this only costs
@@ -101,6 +107,56 @@ def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
         if val is not None:
             out[col] = str(val)
     return out
+
+
+def _issue_scope_keys(
+    issue_id: Optional[int], conversation_id: Optional[int]
+) -> List[Any]:
+    """「属于这个议题」的那组 OR 键 —— 两个钱读方共用，不许各写一份。
+
+    一条 run 挂到议题上有两条路：直接戳 ``issue_id``，或者经它的 session
+    ``conversation_id``。只认前一条会漏掉只走会话键的 run，于是同一个议题在预算门禁
+    与驾驶舱 Budget 格上是两个数（``list_for_issue`` 也是拿两个键找行的）。
+    """
+    keys: List[Any] = []
+    if issue_id is not None:
+        keys.append(AgentRuns.issue_id == int(issue_id))
+    if conversation_id is not None:
+        keys.append(AgentRuns.conversation_id == int(conversation_id))
+    return keys
+
+
+def _own_cost_sum_stmt(*where: Any) -> Select[Any]:
+    """``SUM(COALESCE(own_cost_cents, 0))`` over the matching rows —— 议题这一族
+    「花了多少钱」的唯一表达式（3d 第 0 票）。
+
+    两件事写死在这里，两个读方（``spent_cents_for_issue`` 与
+    ``own_cost_cents_for_issue_runs``）共用，免得哪天只改一个：
+
+    - **不按 root 过滤。** ``own_cost_cents`` 每行只记自身（own + media，不含
+      后代），全行求和才是这个议题真花的钱。旧的 ``cost_cents`` 是「自身 + 已报到
+      的后代」，求和时必须 root-only 才不双计 —— 而 Delegate 出去的子 run 带着
+      ``issue_id`` 落库，正是被那道 root 过滤挡在预算之外，让议题预算对委派花费
+      完全无感。这条 helper 就是那个缺陷的修法。
+    - **每行读 ``COALESCE(own_cost_cents, 0)``。** NULL 只出现在「从没算过」的
+      历史行上；不包一层的话，``SUM`` 本身照常跳过 NULL，但任何逐行运算（将来加
+      ``FILTER`` / ``CASE``）会静默把整项变成 NULL。外层那个 coalesce 管的是另一
+      件事：零行时 ``SUM`` 返回 NULL，调用方要的是 0。
+
+    **一个谓词都没有就 raise。** 那样拼出来的是「整张 ``agent_runs`` 的 own 花费之
+    和」——一个所有用户、所有议题的数字，被当成某一个议题的花费用在预算门禁上。
+    ``_issue_scope_keys`` 在 ``issue_id`` 与 ``conversation_id`` 都为 None 时正好返回
+    空列表，所以这不是假想的手滑，而是一次空参数调用就能走到的地方。默默回一个全库
+    总额是「钱的答案」里最坏的一种：它看着像个数。
+    """
+    if not where:
+        raise ValueError(
+            "_own_cost_sum_stmt needs at least one predicate — "
+            "an unfiltered SUM is the whole table's spend, not an issue's"
+        )
+    return select(
+        func.coalesce(func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0)
+    ).where(*where)
 
 
 def _agent_run_to_dict(obj: Any) -> Dict[str, Any]:
@@ -222,7 +278,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     COUNT(*)::int                               AS run_count,
                     COALESCE(SUM(prompt_tokens), 0)::bigint     AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
-                    SUM(cost_cents)                             AS cost_cents,
+                    -- 自身列：父行的 cost_cents 已折进后代的花费，而同一个分组里
+                    -- 通常也有那些子 run 的行 —— 求和就把它们数两遍。
+                    SUM(COALESCE(own_cost_cents, 0))            AS cost_cents,
                     MIN(started_at)                             AS first_started_at,
                     MAX(started_at)                             AS last_started_at,
                     BOOL_OR(status = 'running')                 AS any_running,
@@ -467,7 +525,11 @@ class AgentRunsRepository(AsyncpgRepository):
         Returns rows ``{date, model, provider, requests, total_tokens,
         cost_cents}`` ordered by date. NULL model groups as-is (router renders
         'unknown'). Datetime bound as ``datetime``. ``user_id`` narrows to one
-        user's runs (the user-facing usage page); None = all users (admin)."""
+        user's runs (the user-facing usage page); None = all users (admin).
+
+        ``cost_cents`` 求的是 ``own_cost_cents``（键不变）：旧列是「自身 + 已报到的
+        后代」，子 run 于是被数两遍，而且父行那笔折叠额还挂在**父那次调用的模型**
+        上——按模型分组时连归属都是错的。"""
         try:
             day = func.date(AgentRuns.started_at).label("date")
             stmt = (
@@ -479,9 +541,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                         "total_tokens"
                     ),
-                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                        "cost_cents"
-                    ),
+                    func.coalesce(
+                        func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                    ).label("cost_cents"),
                 )
                 .where(AgentRuns.started_at >= started_after)
                 .group_by(day, AgentRuns.model, AgentRuns.provider)
@@ -512,7 +574,10 @@ class AgentRunsRepository(AsyncpgRepository):
         is the model name or the agent_id (uuid → str; caller enriches to a
         display label). ``failed_requests`` counts failed + heartbeat_lost so
         the page can surface a success rate. Unknown ``group_by`` falls back
-        to model."""
+        to model.
+
+        ``cost_cents`` 求的是 ``own_cost_cents``（键不变）——同
+        ``daily_usage_by_model``：旧列把子 run 的花费在父行里再数一遍。"""
         key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
         try:
             day = func.date(AgentRuns.started_at).label("date")
@@ -537,9 +602,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                         "total_tokens"
                     ),
-                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                        "cost_cents"
-                    ),
+                    func.coalesce(
+                        func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                    ).label("cost_cents"),
                 )
                 .where(AgentRuns.started_at >= started_after)
                 .group_by(day, key_col)
@@ -827,22 +892,18 @@ class AgentRunsRepository(AsyncpgRepository):
         conversation_id: Optional[int] = None,
         exclude_run_id: Optional[int] = None,
     ) -> float:
-        """Sum of ``cost_cents`` over the issue's runs (by issue_id or its
-        session conversation), optionally excluding the live run whose spend
-        the caller tracks itself. Root runs only — children roll up through
-        their parent's step costs."""
-        keys = []
-        if issue_id is not None:
-            keys.append(AgentRuns.issue_id == int(issue_id))
-        if conversation_id is not None:
-            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        """Sum of ``own_cost_cents`` over the issue's runs (by issue_id or its
+        session conversation), optionally excluding the live run whose spend the
+        caller tracks itself.
+
+        **Every run, root and child alike** — ``own_cost_cents`` records only
+        the row's own spend (own + media, no descendants), so the whole issue's
+        真花的钱 is the sum over all of them. See ``_own_cost_sum_stmt``.
+        """
+        keys = _issue_scope_keys(issue_id, conversation_id)
         if not keys:
             return 0.0
-        stmt = (
-            select(func.coalesce(func.sum(AgentRuns.cost_cents), 0))
-            .where(or_(*keys))
-            .where(AgentRuns.parent_run_id.is_(None))
-        )
+        stmt = _own_cost_sum_stmt(or_(*keys))
         if exclude_run_id is not None:
             stmt = stmt.where(AgentRuns.id != int(exclude_run_id))
         try:
@@ -855,11 +916,40 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] spent_cents_for_issue failed: {e}")
             raise
 
+    async def own_cost_cents_for_issue_runs(
+        self, issue_id: int, conversation_id: Optional[int] = None
+    ) -> float:
+        """这个议题真花了多少钱 —— ``issue_rollup`` 的 Budget 格读它。
+
+        与 ``spent_cents_for_issue`` **完全同一条语句**（同一组 OR 键 +
+        同一条 SUM 表达式），只是不带 ``exclude_run_id``：驾驶舱要的是此刻的全额，
+        包括正在跑的那条（镜像语句每次都把 ``own_cost_cents`` 写成实时值，所以
+        running 的行也算得准）。
+
+        ``conversation_id`` 必须跟着传（``load_rollup`` 手里就有 ``ai_session_id``）：
+        只按 ``issue_id`` 找会漏掉只走会话键的 run —— 那条 run 会出现在 run 列表和
+        预算门禁的总额里，却不进 Budget 格，而三处的 docstring 都写着口径一致。
+
+        读失败一律 raise：rollup 的调用方自己决定怎么降级，这里回 0 就等于把一个
+        花了钱的议题显示成没花钱，而那正是预算格存在的意义。
+        """
+        keys = _issue_scope_keys(issue_id, conversation_id)
+        if not keys:
+            return 0.0
+        stmt = _own_cost_sum_stmt(or_(*keys))
+        try:
+            async with read_scope() as session:
+                return float((await session.execute(stmt)).scalar_one() or 0)
+        except Exception as e:
+            logger.error(f"[agent_runs] own_cost_cents_for_issue_runs failed: {e}")
+            raise
+
     async def efficiency_for_issue(self, issue_id: int) -> Dict[str, Any]:
         """这个议题上所有 run 的工作量（3c §3.3）。
 
         **不**加 root 过滤：五个计数是每个 run 的自身量，父行不含子行，全体求和才是
-        真数（``spent_cents_for_issue`` 反过来，那里必须 root-only）。一条 SQL 按
+        真数（``spent_cents_for_issue`` 自 3d 第 0 票起同理——它改读只记自身的
+        ``own_cost_cents``，也不再 root-only）。一条 SQL 按
         ``turn_end_reason`` 分组，总量在 Python 侧加起来——分布与总量同源。
 
         ⚠️ 「全体」的准确口径是**带着这个 ``issue_id`` 的全部 run**，不是「这棵树的
@@ -1018,11 +1108,29 @@ class AgentRunsRepository(AsyncpgRepository):
 
         **两种粒度混在一张表里，每一列的口径写死在这里（同 ``issue_totals``）：**
 
-        - ``cost_cents`` —— **只算 root run**。root 行的 ``cost_cents`` 已经是整棵树
-          的总额（``run_recorder._finish`` 把 own + children + media 加起来），子 run
-          自己还有一行，不过滤就是双计。同一条谓词也用在 ``usage_repository
-          .issue_totals`` 与 ``spent_cents_for_issue``；**三处必须一致**，否则同一笔
-          花费在 Usage 面、驾驶舱 Budget 格、效率表上是三个数。
+        - ``cost_cents`` —— **整棵树的钱，记在 root 所在的那一组**。取数分两步：子查询
+          按 ``COALESCE(root_run_id, id)`` 把 ``own_cost_cents`` 预聚合成每棵树一行，
+          主查询左联回来，只在 root 行上求和（``FILTER (WHERE parent_run_id IS NULL)``）。
+          直接对分组里的行求 ``own_cost_cents`` 会**改掉归属口径**（见下面的 I5 注），
+          而读旧的 ``cost_cents`` 则会低报：那一列是「自身 + **已报到的**后代」，子 run
+          没报回父行时它不含那笔钱 —— Delegate 出去的花费于是整个漏出这张表（3d 第 0
+          票，与 ``usage_repository.issue_totals`` / ``spent_cents_for_issue`` 同批迁）。
+
+          ⚠️ **子查询收行的条件是「属于某棵在 scope 内的树」，不是每行自己的 scope 列**
+          （裁定 7）。``scope`` 与 root 谓词只作用在内层那个 ``in_scope_roots`` 选择上，
+          子查询自己那层**不带任何**行级 scope 过滤。理由：root 才是被授权、被 scope 的
+          那个对象，整棵树归属于它 —— 与 ``tree_cost_cents`` / ``tree_charge`` 同一套
+          语义；而子 run 的 scope 列是 best-effort（``team_of_run`` 查不到就降级成
+          ``None``，``DispatchScope`` 同理），子行的 ``team_id`` 完全可以是 NULL 而它的
+          root 有值。按子行自己的列过滤的后果是**静默的**：root 在 scope 里、join 也落
+          得下来，但那条子 run 的钱压根没进 ``tree_cost.cents``，树总额少掉委派那笔。
+
+          这个选择定下的两个边界，方向相反，都是有意的：
+          1. 子 run 在**窗口外**、它的 root 在窗口内 → **算**。跟旧的折叠列行为一致
+             （root 收口时把后代的钱折进来，不问后代是什么时候跑的）。尾窗口尤其常见：
+             root 在 ``to`` 附近起，孩子在它之后才结束。
+          2. 子 run 在窗口内、它的 root 在**窗口外** → **不算**。那棵树的 root 行不在
+             主查询里，join 无处落地。这是「钱按 root 归属」的必然代价。
         - ``run_count`` / ``failed_runs`` / ``tool_calls`` / ``tool_errors`` /
           ``deliverables`` —— **root + children 全算**。这些是每个 run **自身**的量，
           不上滚；按 root 过滤会把子 run 干的活整个丢掉。
@@ -1055,6 +1163,34 @@ class AgentRunsRepository(AsyncpgRepository):
         # keeps half-stamped rows out of the average's denominator instead of
         # letting them read as "instant".
         timed = and_(AgentRuns.started_at.isnot(None), AgentRuns.ended_at.isnot(None))
+        # 钱：先把整棵树的 own_cost_cents 加成每棵树一行，再左联回 root 行所在的分组。
+        #
+        # 收行的条件是**「属于某棵在 scope 内的树」**，不是每行自己的 scope 列（裁定 7）。
+        # 子 run 的 scope 列是 best-effort：``team_of_run`` 查不到就降级成 None，
+        # ``DispatchScope`` 同理，所以子行的 team_id / project_id 可以是 NULL 而它的
+        # root 有值。按子行自己的列过滤 = 把委派那笔钱静默丢掉，而那正是本票要捞回来的。
+        #
+        # 成员判定写成 ``root_run_id IN (…) OR id IN (…)`` 而不是
+        # ``COALESCE(root_run_id, id) IN (…)``：两者选出的行完全相同，但表达式上的
+        # ``COALESCE`` 让 planner 用不上 ``idx_agent_runs_root_tree``，只能整表扫。
+        # 树键那一份**唯一拼法**留在 GROUP BY 与输出标签上（那里要的是「同一棵树归成
+        # 一行」这个语义），与 ``run_ids_in_trees`` 的 WHERE 是同一个写法。
+        tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        in_scope_roots = select(AgentRuns.id).where(*scope, root_only)
+        tree_cost = (
+            select(
+                tree_key.label("root"),
+                func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
+            )
+            .where(
+                or_(
+                    AgentRuns.root_run_id.in_(in_scope_roots),
+                    AgentRuns.id.in_(in_scope_roots),
+                )
+            )
+            .group_by(tree_key)
+            .subquery("tree_cost")
+        )
         try:
             rows_stmt = (
                 select(
@@ -1087,10 +1223,14 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.deliverables), 0).label(
                         "deliverables"
                     ),
+                    # root 行至多联到一行（子查询已按树分好组），所以这个 join 不会
+                    # 放大上面那几个回合粒度的计数。
                     func.coalesce(
-                        func.sum(AgentRuns.cost_cents).filter(root_only), 0
+                        func.sum(tree_cost.c.cents).filter(root_only), 0
                     ).label("cost_cents"),
                 )
+                .select_from(AgentRuns)
+                .outerjoin(tree_cost, tree_cost.c.root == AgentRuns.id)
                 .where(*scope)
                 .group_by(key_col)
             )
@@ -1115,7 +1255,12 @@ class AgentRunsRepository(AsyncpgRepository):
         return out, {str(k): int(v) for k, v in reasons}
 
     async def cost_rows_for_ids(self, ids: List[int]) -> List[Dict[str, Any]]:
-        """这批 run 的花费与归属列。可见性判定在路由层——仓库不认识调用者。"""
+        """这批 run 的归属列与行级展示列。可见性判定在路由层——仓库不认识调用者。
+
+        ⚠️ 这里的 ``cost_cents`` 是**行上那一列**（自身 + 已报到的后代），只够单行展示。
+        气泡与 ``done`` 帧回答的「这次回合花了多少」走 ``tree_cost_cents``（3d 第 0 票）
+        —— 别把这一列当成树总额加起来。
+        """
         if not ids:
             return []
         stmt = select(
@@ -1172,6 +1317,58 @@ class AgentRunsRepository(AsyncpgRepository):
             if key in out:
                 out[key].add(str(run_id))
         return {k: sorted(v) for k, v in out.items()}
+
+    async def tree_cost_cents(self, root_ids: List[int]) -> Dict[str, float]:
+        """每个 root → 整棵树的真实花费（Σ ``own_cost_cents``），字符串键。
+
+        树键 ``COALESCE(root_run_id, id)``：root 行自己的 ``root_run_id`` 恒为 NULL
+        （``_attach_to_parent_run`` 是唯一写方），所以这一个表达式同时覆盖根与后代，
+        与 ``run_ids_in_trees`` 答的是同一棵树。**全仓只许这一种拼法。**
+
+        为什么不直接读 root 行的 ``cost_cents``：那一列是「自身 + **已报到的**后代」，
+        由 ``run_recorder._finish`` 在父 run 收口时折叠出来（3d 第 0 票）。子 run 还没
+        报回父行、或者根本没报（失败 / 被取消）时它低报，而它同时又不能被求和 ——
+        子 run 自己还有一行。``own_cost_cents`` 每行只记自身，求和既不低报也不双计。
+
+        **每个问到的 root 都会出现在返回值里**，一行都没读到的那些映射到 ``0.0``。
+        键整个缺席会让调用方 ``.get`` 拿到 None 再 ``?? 0``，把「这棵树目前记着 0」与
+        「我没答上来」压成同一个数字；而 ``0.0`` 至少是这张图自己说得出口的那个值。
+
+        ⚠️ **只许拿 root 来问。** 一条子 run 的树键指向它的根而不是它自己，所以问一个
+        非 root 的 id 会拿到 0.0 —— 那是「这个 id 不是任何一棵树的根」，不是「它没花
+        钱」。同族的已知边界见 ``run_ids_in_trees``（那里问中间节点只拿回它自己）。两个
+        宿主（``/runs/costs`` 与 ``done`` 帧）问的都是 root：气泡与状态帧都由 root 的
+        recorder 发。加第三个消费方前先确认它手里那个 id 是根。
+
+        与 ``tree_charge.bucket_tree`` 的 ``tree_total`` 是同一个数。读失败一律 raise：
+        降级成 0 就是把一次故障说成「这次回合免费」，``/runs/costs`` 正靠这个异常答 503。
+        """
+        roots = [int(r) for r in root_ids if r is not None]
+        if not roots:
+            return {}
+        tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
+        # 收行用 ``root_run_id IN (…) OR id IN (…)``（同 ``run_ids_in_trees``）：选出的
+        # 行与 ``COALESCE(root_run_id, id) IN (…)`` 完全相同，但表达式上的 ``COALESCE``
+        # 让 planner 用不上 ``idx_agent_runs_root_tree``。树键留在 GROUP BY 与标签上。
+        stmt = (
+            select(
+                tree_key.label("root"),
+                func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)).label("cents"),
+            )
+            .where(
+                or_(AgentRuns.root_run_id.in_(roots), AgentRuns.id.in_(roots)),
+            )
+            .group_by(tree_key)
+        )
+        out = {str(r): 0.0 for r in roots}
+        try:
+            async with read_scope() as session:
+                for root, cents in (await session.execute(stmt)).all():
+                    out[str(root)] = round(float(cents or 0), 4)
+        except Exception as e:
+            logger.error(f"[agent_runs] tree_cost_cents failed: {e}")
+            raise
+        return out
 
     # ------------------------------------------------------------------
     # Sweeper helpers
@@ -1261,9 +1458,18 @@ class AgentRunsRepository(AsyncpgRepository):
         ``UUID(str(r["agent_id"]))`` / ``float(cost_cents)`` and breaks on a
         native ``uuid.UUID`` / ``Decimal``. team_id / project_id (bigint) stay
         native int (REST backend returned int; the scope filter is a bare int
-        compare — stringifying them silently zeroes team/project scopes)."""
+        compare — stringifying them silently zeroes team/project scopes).
+
+        钱那一列读 ``own_cost_cents``（键仍是 ``cost_cents``，见
+        ``_USAGE_COST_COL``）：按 agent 求和的是**这个 agent 自己**烧的钱；父子不同
+        agent 时各记各的——这正是按 agent 限额想要的。此前读 ``cost_cents`` 把子 run
+        算了两遍（父行的 ``cost_cents`` 已经折进了后代的花费，而子 run 自己那行也在
+        同一批结果里）。"""
         try:
-            cols = [getattr(AgentRuns, name) for name in _USAGE_COLS]
+            cols = [
+                *(getattr(AgentRuns, name) for name in _USAGE_COLS),
+                _USAGE_COST_COL,
+            ]
             async with read_scope() as session:
                 result = await session.execute(
                     select(*cols)
@@ -1295,6 +1501,10 @@ class AgentRunsRepository(AsyncpgRepository):
         the gallery and the agent workbench both want "what did this week
         cost", and a separate aggregate would double the round-trips this
         endpoint exists to collapse.
+
+        那一列求的是 ``own_cost_cents``（键不变，router 的 ``cost_cents_7d`` 直接读
+        它）：一棵树跨两个 agent 时，旧列让父 agent 的七日花费把子 agent 那份又算
+        一遍。
         """
         if not agent_ids:
             return {}
@@ -1307,9 +1517,9 @@ class AgentRunsRepository(AsyncpgRepository):
                         func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                             "tokens"
                         ),
-                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                            "cost_cents"
-                        ),
+                        func.coalesce(
+                            func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                        ).label("cost_cents"),
                     )
                     .where(AgentRuns.agent_id.in_(agent_ids))
                     .where(AgentRuns.started_at >= since)

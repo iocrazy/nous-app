@@ -489,13 +489,38 @@ async def _run_subagent_task(
         envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
         failures.append("subagent_crashed")
 
+    # 子 run id **解析一次，两处都用**。两处指：下面 ``content["child_run_id"]``
+    # 与花费回落读的那一行。分开解析过一次，代价是回落读回来的钱当场又被丢掉 ——
+    # ``fold_done`` 在 ``child_run_id`` 为假时整条 ``subagent_done`` 直接丢弃
+    # （`folds/subagents.py`），于是父的 ``by_child`` 拿不到那笔钱、
+    # ``children.async_pending`` 也不减一，收口继续被挡在门外。
+    child_run_id = _resolve_child_run_id(envelope, payload)
+
+    # 崩溃分支自己造的 envelope 没有 ``cost_cents`` 键，而一个跑了十轮工具调用
+    # 才挂掉的子 run 花的是真钱 —— 把「没有这个键」读成 0，报 0 的恰恰是最值得
+    # 注意的那些 run（Task 7b defect A 同族）。键缺席时改去问子 run 行。
+    cost_cents = envelope.get("cost_cents")
+    if cost_cents is None:
+        cost_cents = await _child_row_cost_cents(child_run_id, task_id)
+    elif isinstance(cost_cents, bool) or not isinstance(cost_cents, (int, float)):
+        # 键在、但不是个数（信封形状漂移）。这里必须显式归一，不能原样透传：
+        # ``fold_done`` 用 ``isinstance(cents, (int, float))`` 判断，非数字会让它
+        # **整笔**跳过 ``by_child`` —— 父行少的不是精度，是这个孩子的全部花费。
+        # 老写法 `envelope.get("cost_cents") or 0` 顺手把 "" / [] 折成 0，改成
+        # 显式判断后这条得自己写回来。真数字（含 0.0）不走这里。
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: envelope cost_cents "
+            f"{cost_cents!r} is not a number; reporting 0"
+        )
+        cost_cents = 0.0
+
     content = {
-        "child_run_id": envelope.get("sub_run_id"),
+        "child_run_id": child_run_id,
         "subagent_type": payload.get("subagent_type"),
         "description": payload.get("description"),
         "status": envelope.get("status"),
         "summary": envelope.get("summary") or "",
-        "cost_cents": envelope.get("cost_cents") or 0,
+        "cost_cents": cost_cents,
         # 同海拔的 BYOK 分量（整棵子树），落到父行的 cost.by_child_byok。
         # ⚠️ 当前无消费方（终审 I3）：扣费按行聚合，不看 by_child*——子 run 的
         # BYOK 由它自己那一行报（见 ai/billing/tree_charge.py 模块 docstring）。
@@ -644,6 +669,85 @@ async def _run_subagent_task(
         "run_id": content["child_run_id"],
         "idle_dispatch": idle_dispatch,
     }
+
+
+def _resolve_child_run_id(
+    envelope: dict[str, Any], payload: dict[str, Any]
+) -> Optional[str]:
+    """这次委派的子 run id，字符串或 None。
+
+    ``_build_envelope`` 与 ``_spawn`` 的崩溃分支都给字符串，所以这里统一成字符串
+    —— 下游三个消费方（``fold_done`` 的 ``str()``、``settle_tree_if_closed`` 的
+    ``int()``、workflow 结果里的 ``run_id``）对形状的期望本来就是它。
+
+    ``payload["child_run_id"]`` **不在候选里**：那是被续写的**上一轮**，这一轮是
+    它的 fork，是另一行。见 :func:`_child_row_cost_cents`。
+    """
+    raw = envelope.get("sub_run_id") or payload.get("sub_run_id")
+    if raw is None:
+        return None
+    return str(raw).strip() or None
+
+
+async def _child_row_cost_cents(child_run_id: Optional[str], task_id: UUID) -> float:
+    """子 run 行上的 ``cost_cents``，读不到就 0.0（并说出来）。
+
+    只在 envelope **没有** ``cost_cents`` 键时调用 —— 也就是
+    ``run_background_task`` 整个抛了出来、这个函数自己造了一个 envelope 的时候。
+    有键就按键走，``0.0`` 是一个答案而不是「没答案」。
+
+    ⚠️ 读的是 ``agent_runs.cost_cents``，**老列**：自身 + 已报到的后代，展示语义
+    —— 与 ``subagent_done.cost_cents`` 一直以来的口径一致，父行卡片上的那个数就
+    该是整棵子树。聚合读面（议题预算 ``prior``、效率账、树总额）自 mig 479 起一律
+    读 ``own_cost_cents``，不经过这里，所以这条回落不会把老列重新拉回钱上。
+
+    这是**第二道**防线。第一道在源头：``_spawn`` 崩溃时返回的 envelope 现在带着
+    ``sub_run_id`` 与 ``cost_cents``（同批修的），所以子 run 真的跑起来过的那些
+    崩溃根本走不到这里 —— 有键，按键走。
+
+    ⚠️ 走到这里的是 ``run_background_task`` **整个抛穿**的情形，而那几处
+    （``_child_chain_ok`` / ``_continue_messages`` / ``resolve_dispatch_scope`` /
+    ``team_of_run``）都跑在建 recorder 之前 —— 子 run 行压根还不存在，所以今天这
+    条路的答案通常就是回落的 0.0，且那个 0 是**对的**。留着这条读库是为了「有 id
+    就别猜」：将来谁把子 run id 放进 payload（``sub_run_id``），它立刻生效。
+    ``payload["child_run_id"]`` **不算**：那是被续写的**上一轮**，崩掉的这一轮是
+    它的 fork，是另一行；拿它的钱冒充这一轮，比报 0 更糟。
+    """
+    try:
+        child_id = int(child_run_id) if child_run_id is not None else None
+    except (TypeError, ValueError):
+        child_id = None
+    if child_id is None:
+        logger.warning(
+            f"[agent-worker] subagent task {task_id} crashed with no child run "
+            f"id; its cost is reported as 0 (it may have spent real money)"
+        )
+        return 0.0
+
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    try:
+        rows = await get_agent_runs_repository().cost_rows_for_ids([child_id])
+    except Exception as err:  # noqa: BLE001 — 遥测永远不该让收口失败
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: child run {child_id} cost "
+            f"unreadable, reporting 0: {err}"
+        )
+        return 0.0
+    if not rows:
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: child run {child_id} has no "
+            f"row; cost reported as 0"
+        )
+        return 0.0
+    try:
+        return float(rows[0].get("cost_cents") or 0.0)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"[agent-worker] subagent task {task_id}: child run {child_id} cost "
+            f"{rows[0].get('cost_cents')!r} is not a number; reporting 0"
+        )
+        return 0.0
 
 
 async def _finalise_subagent_task(

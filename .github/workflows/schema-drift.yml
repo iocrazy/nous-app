@@ -218,6 +218,15 @@ on:
       # ``?`` 与 ``->>`` 取值、把有后代的行挡在 tier 2 之外的 NOT EXISTS、以及
       # 「已经有值就不许再写」这三件，全在服务器那边。
       - 'backend/tests/db/test_migration_479_own_cost_backfill.py'
+      # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
+      # / 按议题 / 按 agent 求和给同一个数」只有在一棵真树上才成立得了：三条语句的
+      # WHERE 与 GROUP BY 毫无共同之处，而桩 session 按调用顺序发牌，三条都写错成
+      # 同一个错数照样绿。所以被测的四个读方也要挂在这条链上。
+      # 被测的四个读方里三个在 agent_runs_repository.py —— 它已经在上面（3b Task
+      # 4b 那组）列过了，paths 是「任一命中即触发」，重列一遍只会让下次有人删上面
+      # 那行时以为还有人兜着。第四个（issue_totals）在 usage_repository.py。
+      - 'backend/tests/db/test_own_cost_tree_invariants_integration.py'
+      - 'backend/app/repositories/usage_repository.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -231,15 +240,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-five, so it has to
+      # to it changes what "green" means for all thirty-six, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-five below was counted with this command, not derived
-      # from the thirty-four it replaced):
+      # (the thirty-six below was counted with this command, not derived
+      # from the thirty-five it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -954,3 +963,35 @@ jobs:
           # conversation_id 继承（那条用例刻意造非对称行：子 run 自己已有
           # issue_id、只有 root 有会话绑定，所以唯一能选中它的就是第二条臂）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_479_own_cost_backfill.py -v
+
+      - name: Assert the own_cost_cents tree invariants against a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 3d 第 0 票 PR-B：六个读面从 cost_cents（自身 + 已报到的后代）换成
+          # own_cost_cents（只记自身）。一棵真的 4 层树（root / 进程内子 / 后台子 /
+          # 两层 Delegate 子，跨两个 agent），spec §3 不变量 1–4 全部对着手算常数
+          # 断言（5 / 6 是源码扫描，不在这里）。桩 session 看不见的六件：
+          # ① 三条语句的 WHERE 与 GROUP BY 毫无共同之处（树按
+          #    COALESCE(root_run_id, id)、议题按 issue_id OR conversation_id、agent
+          #    按 agent_id 开时间窗），却必须给同一个数 —— 桩按调用顺序发牌，三条
+          #    都写错成同一个错数照样绿；
+          # ② COALESCE(root_run_id, id) 这个树键是服务器在算：写成 root_run_id 丢
+          #    掉 root 自己那份，写成 id 把一棵树拆成五棵，两种在桩里都「成功」；
+          # ③ 委派子 run 进不进预算就是一条 WHERE 的事（旧语句的
+          #    parent_run_id IS NULL 正是本票要拆的），只能靠真删两行看差值；
+          # ④ 门禁那道 prior + live 不许双计 —— prior 必须恰好是 B..E 的自身之和；
+          # ⑤ 效率页那条子查询按「属于某棵在 scope 内的树」收行、不按每行自己的
+          #    scope 列过滤（裁定 7）。夹具为此造 scope 不对称（D、E 的 team_id 是
+          #    NULL，真实形状：子 run 的 scope 是 best-effort）；
+          # ⑥ §3-4 崩溃行不归零 —— 真的跑一遍 mark_heartbeat_lost_ids，看那条终态
+          #    UPDATE 有没有碰 own_cost_cents。此前这句承诺只写在
+          #    tests/runner/test_own_cost_column_writers.py 的散文里，没有测试。
+          # 四次突变实测各杀各的：_own_cost_sum_stmt 指回 cost_cents 杀三条（不变量
+          # 1 / 3 / 4）、_USAGE_COST_COL 指回 cost_cents 杀按 agent 那一步、
+          # tree_cost_cents 指回 cost_cents 杀不变量 1 与 2、给效率页子查询补上行级
+          # scope 过滤杀效率页那条（35.75 变 21.75）。⚠️ 最后一次突变在 scope 列一
+          # 致的夹具上**不会**转红 —— 那个不对称是必需的，别把它「整理」掉。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_own_cost_tree_invariants_integration.py -v

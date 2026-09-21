@@ -1844,7 +1844,8 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
         tasks_by_status_14d: lifecycle_status → count over 14d.
         success_rate_14d: [{date, success, total}] daily.
         costs_14d: prompt_tokens / completion_tokens / total_cost_cents
-            summed over 14d.
+            summed over 14d. ``total_cost_cents`` 求的是 ``own_cost_cents``
+            （键不变）—— 逐行累加旧列会把 Delegate 子 run 数两遍（3d 第 0 票）。
         recent_tasks: 5 most recent agent_tasks rows.
         recent_runs: 10 most recent slim agent_runs rows.
     """
@@ -1885,7 +1886,13 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
                         AgentRuns.ended_at,
                         AgentRuns.prompt_tokens,
                         AgentRuns.completion_tokens,
+                        # 行上那一列，供逐行展示；``costs_14d`` 的合计**不**读它
+                        # （见 own_cost_cents 那一行）。
                         AgentRuns.cost_cents,
+                        # 14 天合计读自身列（3d 第 0 票）：一次 Delegate 里父行的
+                        # ``cost_cents`` 已经折进了子 run 的钱，而子 run 自己那行
+                        # 也在同一批结果里 —— Python 端逐行累加就把它数了两遍。
+                        AgentRuns.own_cost_cents,
                     )
                     .where(AgentRuns.agent_id == str(agent_uuid))
                     .where(AgentRuns.user_id == str(user_uuid))
@@ -1965,7 +1972,9 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
                 success_buckets[date_key]["success"] += 1
         sum_prompt += int(r.get("prompt_tokens") or 0)
         sum_completion += int(r.get("completion_tokens") or 0)
-        cost = r.get("cost_cents")
+        # 自身列 —— 见上面 select 里的注释：读 ``cost_cents`` 会把委派出去的子 run
+        # 数两遍（一遍在它自己那行，一遍在父行那笔折叠额里）。
+        cost = r.get("own_cost_cents")
         if cost is not None:
             try:
                 sum_cost_cents += float(cost)
@@ -2365,7 +2374,10 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
 
     ``charged_points`` 是**以该 run 为根的整棵树**扣掉的积分合计（含委派出去的子
     agent），不是 root 自己那一条流水 —— 扣费逐 run 发生，而气泡回答的是「这次回合
-    扣了我多少」（3c 终审 I2）。``cost_cents`` 取 root 行那一列，它本身就是树总额。
+    扣了我多少」（3c 终审 I2）。``cost_cents`` 同一口径：整棵树的 ``own_cost_cents``
+    求和（``tree_cost_cents``），不是 root 行上那一列 —— 那一列是「自身 + **已报到
+    的**后代」，子 run 没报回父行时它低报（3d 第 0 票）。两个键于是回答的是同一个
+    问题的两面：这次回合花了多少、收了我多少。
 
     NOTE: 必须注册在 ``/runs/{run_id}`` 之前（同 ``/runs/live``）——否则 ``costs``
     会被当成一个 run_id 吃掉，端点永远拿不到请求，而单测直接调函数看不出来。"""
@@ -2418,12 +2430,24 @@ async def get_run_costs(auth: AuthDep, ids: str = "") -> Dict[str, Any]:
         raise HTTPException(
             status_code=503, detail={"code": "run_costs_unavailable"}
         ) from exc
+    try:
+        # 花费同样按树取（3d 第 0 票）：``own_cost_cents`` 每行只记自身，按
+        # ``COALESCE(root_run_id, id)`` 求和才是这次回合真花的钱。读 root 行那一列
+        # 会在子 run 没报回父行时低报，而那正是气泡上最容易被当成「便宜」的情形。
+        tree = await get_agent_runs_repository().tree_cost_cents(
+            [r["id"] for r in allowed]
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 与 ``charged`` 同一条理由、同一个码：降级成 0 / None 会把一次读故障说成
+        # 「这批 run 没花钱」。
+        logger.error(f"[runs/costs] tree cost read failed: {exc}")
+        raise HTTPException(
+            status_code=503, detail={"code": "run_costs_unavailable"}
+        ) from exc
     return {
         "items": {
             str(r["id"]): {
-                "cost_cents": (
-                    float(r["cost_cents"]) if r["cost_cents"] is not None else None
-                ),
+                "cost_cents": tree.get(str(r["id"])),
                 "charged_points": charged.get(str(r["id"])),
                 "model": r["model"],
                 "status": r["status"],
@@ -3416,7 +3440,11 @@ async def admin_telemetry(
                         AgentRuns.prompt_tokens,
                         AgentRuns.completion_tokens,
                         AgentRuns.total_tokens,
-                        AgentRuns.cost_cents,
+                        # 自身花费（不含后代），但键仍叫 cost_cents —— 下面
+                        # overview / top_agents / top_users / daily_trend 四处都
+                        # 按这个键做 Python 端求和。旧列是「自身 + 已报到的后代」，
+                        # 而子 run 自己那行也在同一批结果里，四处于是全在双计。
+                        AgentRuns.own_cost_cents.label("cost_cents"),
                         AgentRuns.started_at,
                         AgentRuns.error_code,
                     )

@@ -144,6 +144,7 @@ async def test_issue_usage_success_for_creator(app, monkeypatch):
                 "created_by_user_id": _AuthStub.user_id,
                 "assignee_user_id": None,
                 "team_id": None,
+                "ai_session_id": 4242,
             }
 
         async def is_team_member(self, user_id, team_id):
@@ -153,7 +154,12 @@ async def test_issue_usage_success_for_creator(app, monkeypatch):
 
     monkeypatch.setattr(ir_mod, "issue_repository", _IssueRepo())
 
-    async def fake_issue_totals(issue_id):
+    asked: list = []
+
+    async def fake_issue_totals(issue_id, conversation_id=None):
+        # 会话键从鉴权那步已经读回来的议题行里白拿 —— 不传就漏掉只经 conversation
+        # 挂上来的 run，同一个议题在这个面与驾驶舱 Budget 格读出两个数。
+        asked.append((issue_id, conversation_id))
         return {
             "prompt_tokens": 50,
             "completion_tokens": 20,
@@ -169,6 +175,7 @@ async def test_issue_usage_success_for_creator(app, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["issue_id"] == "555" and body["total_tokens"] == 70
+    assert asked == [(555, 4242)]
 
 
 class _TeamOk:

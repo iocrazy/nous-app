@@ -161,7 +161,10 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
             "ended_at": today_iso,
             "prompt_tokens": 100,
             "completion_tokens": 50,
+            # 这是一次 Delegate 的 root：行上的 cost_cents 已经把子 run 那 0.5
+            # 折进去了，而子 run 自己那行也在同一批结果里。逐行累加旧列 = 双计。
             "cost_cents": "1.5",  # mimic PostgREST string-numeric
+            "own_cost_cents": "1.0",
         },
         {
             "id": str(uuid4()),
@@ -172,7 +175,9 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
             "ended_at": today_iso,
             "prompt_tokens": 10,
             "completion_tokens": 0,
+            # 委派出去的那条子 run：自身即全额。
             "cost_cents": "0.5",
+            "own_cost_cents": "0.5",
         },
     ]
     latest_run = runs_14d[0]
@@ -253,7 +258,9 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
     assert body["costs_14d"]["prompt_tokens"] == 110
     assert body["costs_14d"]["completion_tokens"] == 50
     assert body["costs_14d"]["total_tokens"] == 160
-    assert body["costs_14d"]["total_cost_cents"] == 2.0
+    # 1.0 + 0.5 —— 读 own_cost_cents（3d 第 0 票）。读旧列会得到 2.0，那是把子 run
+    # 数了两遍：一遍在它自己那行，一遍在 root 那笔折叠额里。
+    assert body["costs_14d"]["total_cost_cents"] == 1.5
     assert body["costs_14d"]["run_count"] == 2
 
     # Tasks by status: 1 queued, 2 done
@@ -284,6 +291,7 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
         "prompt_tokens": 1,
         "completion_tokens": 1,
         "cost_cents": "0.1",
+        "own_cost_cents": "0.1",
     }
     scope = _orm_read_scope(
         {
@@ -309,6 +317,60 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
     assert isinstance(body["latest_run"]["id"], str)
     assert body["recent_runs"][0]["id"] == str(big_id)
     assert all(isinstance(r["id"], str) for r in body["recent_runs"])
+
+
+@pytest.mark.asyncio
+async def test_dashboard_costs_sum_own_cost_not_the_folded_column(
+    client: AsyncClient,
+) -> None:
+    """``costs_14d.total_cost_cents`` 逐行累加 ``own_cost_cents``，不是 ``cost_cents``
+    （3d 第 0 票）。
+
+    这个端点把一批 run 拉回来在 Python 端求和，而这一批里 root 和它委派出去的子 run
+    **都在**。``cost_cents`` 在 root 行上是「自身 + 已报到的后代」——加一遍 root 的
+    折叠额、再加一遍子 run 自己那行，子 run 的钱就进去了两次。这里把两列拉开到不可能
+    混淆的距离：读错列会得到 110.0，读对是 11.0。
+
+    字段名不变（``total_cost_cents``），前端无感；改的是读哪一列。
+    """
+    agent_id = str(uuid4())
+    today_iso = datetime.now(timezone.utc).isoformat()
+
+    def _run(rid: str, cost: str, own: str) -> dict:
+        return {
+            "id": rid,
+            "status": "completed",
+            "trigger": "manual",
+            "model": "qwen-max",
+            "started_at": today_iso,
+            "ended_at": today_iso,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cost_cents": cost,
+            "own_cost_cents": own,
+        }
+
+    runs = [
+        # root：自身 1.0，折叠额 100.0（含九条子 run 报回来的钱）
+        _run("1", "100.0", "1.0"),
+        # 同一棵树上的一条子 run，自身 10.0 —— 它的钱已经在上面那 100.0 里了
+        _run("2", "10.0", "10.0"),
+    ]
+    scope = _orm_read_scope(
+        {"agent_runs": [runs, runs[:1], runs], "task_tracking": [[], []]}
+    )
+
+    with (
+        patch("app.api.ai_library_router.get_agent_repository") as mock_repo,
+        patch("app.db.session.read_scope", scope),
+    ):
+        mock_repo.return_value.get_by_slug = AsyncMock(
+            return_value={"id": agent_id, "slug": "ceo", "name": "CEO"}
+        )
+        resp = await client.get(f"{BASE}/agents/ceo/dashboard")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["costs_14d"]["total_cost_cents"] == 11.0
 
 
 @pytest.mark.asyncio

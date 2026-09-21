@@ -95,7 +95,10 @@ async def test_done_frame_keeps_the_two_keys_when_the_money_read_fails(monkeypat
     import app.repositories.agent_runs_repository as runs_mod
 
     class _Boom:
-        async def cost_rows_for_ids(self, ids):
+        # 花费那一侧现在走 ``tree_cost_cents``（3d 第 0 票）。桩要照着真方法名写：
+        # 名字对不上时 ``AttributeError`` 同样会被那个 except 兜住，测试照绿，而它
+        # 钉住的就不再是「读失败」这条路径了。
+        async def tree_cost_cents(self, root_ids):
             raise RuntimeError("db down")
 
     monkeypatch.setattr(runs_mod, "get_agent_runs_repository", lambda: _Boom())

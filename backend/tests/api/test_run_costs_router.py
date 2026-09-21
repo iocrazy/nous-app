@@ -60,6 +60,11 @@ class _Auth:
 TREES = {"1": ["1", "11"], "2": ["2"], "3": ["3"]}
 CHARGED = {"1": 13.0, "11": 4.0}
 
+#: 花费同理走整棵树（3d 第 0 票）。**故意与行上的 ``cost_cents`` 不同**：行上那一列
+#: 是「自身 + 已报到的后代」，子 run 11 还没报回父行时它停在 12.5，而这次回合真花的
+#: 是 17.5。端点读错列的话，这里的断言会精确地指出来。
+TREE_COST = {"1": 17.5, "2": 3.5}
+
 
 def _stub(monkeypatch, visible):
     class _Repo:
@@ -68,6 +73,9 @@ def _stub(monkeypatch, visible):
 
         async def run_ids_in_trees(self, root_ids):
             return {k: v for k, v in TREES.items() if int(k) in root_ids}
+
+        async def tree_cost_cents(self, root_ids):
+            return {str(i): TREE_COST.get(str(i), 0.0) for i in root_ids}
 
     class _Points:
         async def charged_points_for_references(self, *, reference_type, reference_ids):
@@ -87,7 +95,8 @@ async def test_owner_and_visible_issue_rows_come_back(monkeypatch):
     out = await R.get_run_costs(_Auth(), ids="1,2,3")
     assert sorted(out["items"]) == ["1", "2"]
     assert out["items"]["1"] == {
-        "cost_cents": 12.5,
+        # 17.5 是整棵树的 own_cost_cents 合计，不是行上那个 12.5（3d 第 0 票）。
+        "cost_cents": 17.5,
         # 13.0（root 自己）+ 4.0（委派出去那条子 run）—— 气泡回答的是「这次回合
         # 扣了我多少」，而扣费是逐 run 发生的（3c 终审 I2）。
         "charged_points": 17.0,
@@ -167,6 +176,28 @@ async def test_the_tree_read_failing_is_the_same_typed_503(monkeypatch):
             raise RuntimeError("db down")
 
     monkeypatch.setattr(TREE, "get_agent_runs_repository", lambda: _BrokenTree())
+    with pytest.raises(HTTPException) as e:
+        await R.get_run_costs(_Auth(), ids="1")
+    assert e.value.status_code == 503
+    assert e.value.detail["code"] == "run_costs_unavailable"
+
+
+async def test_the_cost_read_failing_is_the_same_typed_503(monkeypatch):
+    """花费那条读挂了也是整条 503，不是「这批 run 免费」。
+
+    第四条臂，与 run 行 / 可见性 / 积分三条同码。降级成行上那个 ``cost_cents`` 尤其
+    不行 —— 那会在一次故障里悄悄换掉口径，而界面上看不出区别（3d 第 0 票）。
+    """
+    _stub(monkeypatch, {"77"})
+
+    class _BrokenCost:
+        async def cost_rows_for_ids(self, ids):
+            return [r for r in ROWS if r["id"] in ids]
+
+        async def tree_cost_cents(self, root_ids):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(R, "get_agent_runs_repository", lambda: _BrokenCost())
     with pytest.raises(HTTPException) as e:
         await R.get_run_costs(_Auth(), ids="1")
     assert e.value.status_code == 503

@@ -164,13 +164,12 @@ async def test_a_read_failure_raises_instead_of_returning_an_empty_aggregate():
 
 
 async def test_only_the_money_column_is_root_filtered():
-    """The double-count guard, in the one place it can be checked cheaply.
+    """两种粒度的分界线，在唯一能便宜检查的地方。
 
-    A root run's ``cost_cents`` is already the whole tree's total (own +
-    children + media — ``run_recorder._finish`` rolls it up), so summing every
-    row would bill each child twice. Same predicate as ``issue_totals`` and
-    ``spent_cents_for_issue``; if these three ever disagree, one screen shows a
-    different number for the same spend.
+    钱按**树**算并记在 root 所在的组：子查询按 ``COALESCE(root_run_id, id)`` 把
+    ``own_cost_cents`` 预聚合，主查询左联回来后只在 root 行上求和。旧写法
+    ``sum(cost_cents) FILTER (root)`` 读的是行上那笔折叠额，子 run 没报回父行时低报
+    （3d 第 0 票，与 ``issue_totals`` / ``spent_cents_for_issue`` 同批迁）。
 
     The counters are the opposite: ``tool_calls`` / ``tool_errors`` /
     ``deliverables`` count what a run did ITSELF and never roll up, so filtering
@@ -179,13 +178,21 @@ async def test_only_the_money_column_is_root_filtered():
     sql = _sql((await _run(team_id=7, group_by="model")).stmts[0])
 
     assert (
-        "sum(public.agent_runs.cost_cents) FILTER "
+        "sum(tree_cost.cents) FILTER "
         "(WHERE public.agent_runs.parent_run_id IS NULL)" in sql
     )
+    # 旧列一个引用都不许剩（``AS cost_cents`` 是对外字段名，不是列引用）。
+    assert "public.agent_runs.cost_cents" not in sql
+    assert "own_cost_cents" in sql
     for own_metric in ("tool_calls", "tool_errors", "deliverables"):
         assert f"sum(public.agent_runs.{own_metric}) FILTER" not in sql
-    # The root predicate belongs to the money column alone.
-    assert sql.count("parent_run_id IS NULL") == 1
+    # 主查询这一层，root 谓词只属于钱那一列（其余全是每个 run 自身的量）。
+    assert sql.count("FILTER (WHERE public.agent_runs.parent_run_id IS NULL)") == 1
+    # 另外两处 root 谓词在 tree_cost 的「in-scope roots」内层 select 里（裁定 7）——
+    # 那是「哪些树算数」，不是「哪一列要过滤」，两者是两回事。成员判定写成
+    # ``root_run_id IN (…) OR id IN (…)``（让 planner 用得上 idx_agent_runs_root_tree），
+    # 两条臂各带一份逐字相同的内层 select，所以是 2 份而不是 1 份。
+    assert sql.count("parent_run_id IS NULL") == 3
 
 
 async def test_the_failed_run_count_coalesces_like_its_neighbours():
