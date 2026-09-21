@@ -1,7 +1,7 @@
 # agent_runs 自身花费列：让「花了多少」在任意树深、任意委派链上都能安全求和
 
 - 日期：2026-09-21
-- 状态：待用户审阅
+- 状态：用户已确认（2026-09-21），实施计划 `docs/superpowers/plans/2026-09-21-agent-run-own-cost-column.md`
 - 前身：harness 3c 记的「3d 第 0 票」（真栈实证 B3 FAIL）
 - 侦察：`.superpowers/sdd/2026-09-21-3d-0-tree-cost/recon.md`（master `e8105861d`，全部 file:line 出处在那里）
 
@@ -77,8 +77,9 @@ workforce 面板 recent_runs）。它不再参与任何聚合；列注释与 ORM
 `_finish` 的终态 UPDATE 也显式写一次（值同 `own_media_cents`），这样即使最后一次镜像失败
 （`persist_views()` 返回 False），列上仍是终态时内存里的真值——**比 JSON 那一侧少一个洞**。
 
-`own_media_cents_of(cost) -> Decimal` 是一个纯函数，放在 `app/services/ai/billing/` 下，
-`_finish`、`mirror_stmt`、`spend_of_run` 三处共用，杜绝第三份公式拷贝。
+公式不新建：`tree_charge.spend_of_run(cost).total` 已经是「own + media」的唯一实现（积分收口
+在用），`_finish` 与 `mirror_stmt` 都从它取值；`_finish` 里现存的那份 `own_media_cents` 加法改为
+同一来源，源码扫描守卫钉住「相加只许出现在 `spend_of_run`」。
 
 ### 2.3 读方：一个表达式、两种分组
 
@@ -143,7 +144,7 @@ UPDATE 上撞 `42703`——所以代码 PR 必须在迁移 PR 上线并核实之
 3. **预算看得见委派**：`Delegate` 子 run 花费计入 `spent_cents_for_issue`（现状红、改后绿）。
 4. **崩溃行不归零**：镜像过至少一次的 run 被崩溃写方终结后，`own_cost_cents` 保持最后镜像值。
 5. **公式只有一份**：源码扫描守卫——`own_cents` 与 `media_cents` 相加只许出现在
-   `own_media_cents_of` 里。
+   `tree_charge.spend_of_run` 里。
 6. **老列不进聚合**：源码扫描守卫——`func.sum(AgentRuns.cost_cents)` / 裸 SQL `SUM(cost_cents)`
    在 `app/` 下零命中。
 
