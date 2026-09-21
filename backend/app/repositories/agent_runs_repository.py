@@ -50,7 +50,9 @@ from app.services.ai.runner.turn_end import TurnEndReason
 _AGENT_RUNS_NAME_TO_ATTR: Dict[str, str] = _name_to_attr(AgentRuns)
 
 # The 9-column projection monthly_usage_by_agent returns. Pinned here so the ORM
-# select returns EXACTLY the columns the REST/legacy impl did.
+# select returns EXACTLY the columns the REST/legacy impl did. The money column
+# is the 9th and is built separately (_USAGE_COST_COL) — it reads own_cost_cents
+# but keeps the cost_cents KEY, see below.
 _USAGE_COLS = (
     "agent_id",
     "user_id",
@@ -60,7 +62,6 @@ _USAGE_COLS = (
     "prompt_tokens",
     "completion_tokens",
     "total_tokens",
-    "cost_cents",
 )
 
 # Columns of the usage projection whose VALUE TYPE must match what the live REST
@@ -80,6 +81,11 @@ _USAGE_COLS = (
 # ZERO. Tokens (int4) and status (text) already match REST — left as-is. NULLs
 # pass through unchanged.
 _USAGE_STR_COLS = ("agent_id", "user_id", "cost_cents")
+
+# 钱那一列：读 ``own_cost_cents``（这一行自己烧的钱），但**键仍叫 cost_cents** —— 两个
+# 消费方（``ai_library_router.get_usage`` 与 ``recompute_monthly_budgets_step``）按这
+# 个键逐行累加，改的是读哪一列，不是投影的形状（3d 第 0 票）。
+_USAGE_COST_COL = AgentRuns.own_cost_cents.label("cost_cents")
 
 # Cap for the last-resort conversation title (first user message). The
 # workbench row is one truncated line, so anything past this only costs
@@ -261,7 +267,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     COUNT(*)::int                               AS run_count,
                     COALESCE(SUM(prompt_tokens), 0)::bigint     AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
-                    SUM(cost_cents)                             AS cost_cents,
+                    -- 自身列：父行的 cost_cents 已折进后代的花费，而同一个分组里
+                    -- 通常也有那些子 run 的行 —— 求和就把它们数两遍。
+                    SUM(COALESCE(own_cost_cents, 0))            AS cost_cents,
                     MIN(started_at)                             AS first_started_at,
                     MAX(started_at)                             AS last_started_at,
                     BOOL_OR(status = 'running')                 AS any_running,
@@ -506,7 +514,11 @@ class AgentRunsRepository(AsyncpgRepository):
         Returns rows ``{date, model, provider, requests, total_tokens,
         cost_cents}`` ordered by date. NULL model groups as-is (router renders
         'unknown'). Datetime bound as ``datetime``. ``user_id`` narrows to one
-        user's runs (the user-facing usage page); None = all users (admin)."""
+        user's runs (the user-facing usage page); None = all users (admin).
+
+        ``cost_cents`` 求的是 ``own_cost_cents``（键不变）：旧列是「自身 + 已报到的
+        后代」，子 run 于是被数两遍，而且父行那笔折叠额还挂在**父那次调用的模型**
+        上——按模型分组时连归属都是错的。"""
         try:
             day = func.date(AgentRuns.started_at).label("date")
             stmt = (
@@ -518,9 +530,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                         "total_tokens"
                     ),
-                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                        "cost_cents"
-                    ),
+                    func.coalesce(
+                        func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                    ).label("cost_cents"),
                 )
                 .where(AgentRuns.started_at >= started_after)
                 .group_by(day, AgentRuns.model, AgentRuns.provider)
@@ -551,7 +563,10 @@ class AgentRunsRepository(AsyncpgRepository):
         is the model name or the agent_id (uuid → str; caller enriches to a
         display label). ``failed_requests`` counts failed + heartbeat_lost so
         the page can surface a success rate. Unknown ``group_by`` falls back
-        to model."""
+        to model.
+
+        ``cost_cents`` 求的是 ``own_cost_cents``（键不变）——同
+        ``daily_usage_by_model``：旧列把子 run 的花费在父行里再数一遍。"""
         key_col = AgentRuns.agent_id if group_by == "agent" else AgentRuns.model
         try:
             day = func.date(AgentRuns.started_at).label("date")
@@ -576,9 +591,9 @@ class AgentRunsRepository(AsyncpgRepository):
                     func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                         "total_tokens"
                     ),
-                    func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                        "cost_cents"
-                    ),
+                    func.coalesce(
+                        func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                    ).label("cost_cents"),
                 )
                 .where(AgentRuns.started_at >= started_after)
                 .group_by(day, key_col)
@@ -1328,9 +1343,18 @@ class AgentRunsRepository(AsyncpgRepository):
         ``UUID(str(r["agent_id"]))`` / ``float(cost_cents)`` and breaks on a
         native ``uuid.UUID`` / ``Decimal``. team_id / project_id (bigint) stay
         native int (REST backend returned int; the scope filter is a bare int
-        compare — stringifying them silently zeroes team/project scopes)."""
+        compare — stringifying them silently zeroes team/project scopes).
+
+        钱那一列读 ``own_cost_cents``（键仍是 ``cost_cents``，见
+        ``_USAGE_COST_COL``）：按 agent 求和的是**这个 agent 自己**烧的钱；父子不同
+        agent 时各记各的——这正是按 agent 限额想要的。此前读 ``cost_cents`` 把子 run
+        算了两遍（父行的 ``cost_cents`` 已经折进了后代的花费，而子 run 自己那行也在
+        同一批结果里）。"""
         try:
-            cols = [getattr(AgentRuns, name) for name in _USAGE_COLS]
+            cols = [
+                *(getattr(AgentRuns, name) for name in _USAGE_COLS),
+                _USAGE_COST_COL,
+            ]
             async with read_scope() as session:
                 result = await session.execute(
                     select(*cols)
@@ -1362,6 +1386,10 @@ class AgentRunsRepository(AsyncpgRepository):
         the gallery and the agent workbench both want "what did this week
         cost", and a separate aggregate would double the round-trips this
         endpoint exists to collapse.
+
+        那一列求的是 ``own_cost_cents``（键不变，router 的 ``cost_cents_7d`` 直接读
+        它）：一棵树跨两个 agent 时，旧列让父 agent 的七日花费把子 agent 那份又算
+        一遍。
         """
         if not agent_ids:
             return {}
@@ -1374,9 +1402,9 @@ class AgentRunsRepository(AsyncpgRepository):
                         func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                             "tokens"
                         ),
-                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
-                            "cost_cents"
-                        ),
+                        func.coalesce(
+                            func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), 0
+                        ).label("cost_cents"),
                     )
                     .where(AgentRuns.agent_id.in_(agent_ids))
                     .where(AgentRuns.started_at >= since)

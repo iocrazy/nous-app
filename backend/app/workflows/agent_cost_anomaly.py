@@ -6,8 +6,8 @@ existing ``alert_history`` (admin Alerts page) anchored to a system
 rule row, plus a WARNING in application_logs.
 
 Method: for each agent, the trailing 7-day distribution of HOURLY
-cost_cents (agent_runs) is the baseline; the last CLOSED hour is the
-sample. Flag when all of:
+own_cost_cents (agent_runs — each row's OWN spend, descendants excluded)
+is the baseline; the last CLOSED hour is the sample. Flag when all of:
     baseline has >= MIN_BASELINE_HOURS hours with spend,
     z = (hour_cost - mean) / stddev >= Z_THRESHOLD,
     hour_cost >= MIN_HOUR_COST_CENTS (absolute floor — tiny baselines
@@ -37,7 +37,11 @@ def _findings_stmt(min_hours: int, z: float, min_cost: float):
     """Core CTE expression for the hourly z-score scan (ORM, Phase B4).
 
     Mirrors the legacy ``_FINDINGS_SQL`` CTE-by-CTE:
-      hourly — per-(agent, hour) spend over the trailing 7 days.
+      hourly — per-(agent, hour) spend over the trailing 7 days. Spend is
+               ``own_cost_cents`` (this run's OWN spend): the old
+               ``cost_cents`` folds descendants into the parent row, so one
+               delegating run inflated its parent agent's hour twice over and
+               the alert named the wrong agent.
       base   — per-agent mean/stddev/n over every hour EXCEPT the last
                closed one (the baseline).
       cur    — the last closed hour's spend per agent (the sample).
@@ -58,7 +62,9 @@ def _findings_stmt(min_hours: int, z: float, min_cost: float):
         select(
             AgentRuns.agent_id.label("agent_id"),
             hour_trunc.label("h"),
-            cast(func.sum(func.coalesce(AgentRuns.cost_cents, 0)), Float).label("cost"),
+            cast(func.sum(func.coalesce(AgentRuns.own_cost_cents, 0)), Float).label(
+                "cost"
+            ),
         )
         .where(
             AgentRuns.created_at >= func.now() - text("interval '7 days'"),

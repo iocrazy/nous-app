@@ -3416,7 +3416,11 @@ async def admin_telemetry(
                         AgentRuns.prompt_tokens,
                         AgentRuns.completion_tokens,
                         AgentRuns.total_tokens,
-                        AgentRuns.cost_cents,
+                        # 自身花费（不含后代），但键仍叫 cost_cents —— 下面
+                        # overview / top_agents / top_users / daily_trend 四处都
+                        # 按这个键做 Python 端求和。旧列是「自身 + 已报到的后代」，
+                        # 而子 run 自己那行也在同一批结果里，四处于是全在双计。
+                        AgentRuns.own_cost_cents.label("cost_cents"),
                         AgentRuns.started_at,
                         AgentRuns.error_code,
                     )
