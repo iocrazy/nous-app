@@ -213,6 +213,11 @@ on:
       - 'backend/tests/db/test_points_refund_offset_integration.py'
       - 'backend/app/repositories/points_repository.py'
       - 'backend/app/services/billing/run_tree_points.py'
+      # own_cost_cents 的三档回填与子 run 的 issue_id 补齐（3d 第 0 票）。整条
+      # 迁移就是四条 UPDATE 的谓词，而谓词正是桩 session 看不见的东西：jsonb 的
+      # ``?`` 与 ``->>`` 取值、把有后代的行挡在 tier 2 之外的 NOT EXISTS、以及
+      # 「已经有值就不许再写」这三件，全在服务器那边。
+      - 'backend/tests/db/test_migration_479_own_cost_backfill.py'
       # ORM 索引门禁（C1）。这个文件自己就是门禁的全部实现 —— 它的豁免名单
       # 一放宽，整条索引对账就随之失效，所以改它必须重跑它。
       - 'backend/tests/db/test_orm_indexes_integration.py'
@@ -226,15 +231,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-four, so it has to
+      # to it changes what "green" means for all thirty-five, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-four below was counted with this command, not derived
-      # from the thirty-three it replaced):
+      # (the thirty-five below was counted with this command, not derived
+      # from the thirty-four it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -923,3 +928,23 @@ jobs:
           # 都要有）、顺手 bump updated_at 杀时间戳那条、自己拼一个渲染器杀
           # 「与实时写方同一串」那条。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_search_docs_body_backfill_integration.py -v
+
+      - name: Assert the own_cost_cents backfill against a real server
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # mig 479 的三档回填 + 子 run 的 issue_id 补齐（3d 第 0 票 PR-A）。这条
+          # 迁移没有新对象可供 schema diff 比对行为 —— 它全部的内容就是四条
+          # UPDATE 的谓词，而谓词恰好是桩 session 唯一看不见的东西（它按调用顺序
+          # 发牌，WHERE 写成什么都点头）。四件只有真库能判：
+          # ① tier 1 的 jsonb 取值 —— own_cents + media_cents castable，且
+          #    by_child（后代的钱，正是新列要甩掉的那部分）没有被顺手加进来；
+          # ② tier 2 的 NOT EXISTS —— 它是「有后代的行别碰老列」的全部实现；
+          # ③ tier 3 是一次「不写」，只有在另外两档真的跑过的库上才观察得到；
+          # ④ own_cost_cents IS NULL 守卫 —— PR-B 让写方实时写这一列之后，一次
+          #    迁移重跑会把正确的自身花费覆盖成含后代的 cost_cents。
+          # 四次突变实测各杀各的：摘 NOT EXISTS 杀 tier 3、tier 1 加总 by_child 杀
+          # tier 1、摘 IS NULL 守卫杀「重跑不覆盖」、删掉第④段杀 issue_id 继承。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_479_own_cost_backfill.py -v

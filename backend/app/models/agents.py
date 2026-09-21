@@ -362,6 +362,9 @@ class AgentRuns(Base):
         Numeric(12, 6)
     )
     cost_cents: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(12, 6))
+    # 这条 run 自己花的钱（cost.own_cents + media_cents），不含后代。聚合读面只许读它；
+    # cost_cents 是「自身 + 已报到的后代」，只供单行展示。mig 479。
+    own_cost_cents: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(12, 6))
     input_summary: Mapped[Optional[str]] = mapped_column(Text)
     output_summary: Mapped[Optional[str]] = mapped_column(Text)
     error_code: Mapped[Optional[str]] = mapped_column(Text)
