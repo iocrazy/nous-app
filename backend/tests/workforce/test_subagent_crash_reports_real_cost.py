@@ -91,6 +91,9 @@ def _wire(*, envelope=None, crashes=False, rows=None, rows_raise=False):
         run_bg=run_bg,
         runs_repo=runs_repo,
         agent_repo=agent_repo,
+        # 收口在真实实现里会碰库。桩掉并留着 mock，好让「这次委派把收口叫起来了
+        # 没有」成为可断言的事 —— 那正是本文件要钉的激活面。
+        settle=AsyncMock(return_value=SimpleNamespace(settled=True, reason="charged")),
     )
 
 
@@ -115,6 +118,10 @@ async def _run(w, task):
             return_value=w.runs_repo,
         ),
         patch.object(inbox_mod, "get_agent_run_inbox_repository", lambda: w.inbox_repo),
+        patch(
+            "app.services.ai.billing.tree_charge.settle_tree_if_closed",
+            w.settle,
+        ),
         patch.object(deliver_mod, "deliver_or_dispatch", AsyncMock()),
         patch.object(recorder_mod.RunEventWriter, "for_run", w.for_run),
         patch(
@@ -152,6 +159,66 @@ async def test_a_crashed_child_reports_the_row_s_cost_not_zero():
     assert w.runs_repo.cost_rows_for_ids.await_args.args[0] == [77]
     assert _done_event(w)["cost_cents"] == pytest.approx(0.42)
     assert _inbox_content(w)["cost_cents"] == pytest.approx(0.42)
+
+
+async def test_the_recovered_cost_travels_with_the_child_id():
+    """读回来的钱必须**带着 id** 一起走，否则等于没读。
+
+    ``fold_done`` 在 ``child_run_id`` 为假时把整条 ``subagent_done`` 丢掉
+    （`folds/subagents.py`）—— 回落读到 0.42、事件照发、父级什么也没收到，而
+    ``children.async_pending`` 也不减一。两处必须用同一个解析出来的 id。
+    """
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+
+    out = await _run(w, _task(sub_run_id=CHILD_RUN_ID))
+
+    assert _inbox_content(w)["child_run_id"] == CHILD_RUN_ID
+    assert _done_event(w)["child_run_id"] == CHILD_RUN_ID
+    assert out["run_id"] == CHILD_RUN_ID
+
+
+async def test_the_done_event_survives_the_fold_and_lands_on_by_child():
+    """把 worker 真发出去的那条事件喂进**真 fold**，钱必须落进 ``by_child``。
+
+    只断言「事件发出去了」是不够的：丢弃发生在 fold 里，而 fold 沉默地返回
+    ``None``。这条把两端接上 —— 发射点的 payload × 真实消费方。
+    """
+    from app.services.ai.runner import run_projection as rp
+
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    await _run(w, _task(sub_run_id=CHILD_RUN_ID))
+
+    # 父的视图：先有一条异步 spawned（worker 之前由 _spawn_async 写的）
+    views = rp.apply(
+        rp.empty_views(),
+        "subagent_spawned",
+        {"child_run_id": None, "task_id": "t1", "mode": "async"},
+    )
+    assert views["view"]["children"]["async_pending"] == 1
+
+    views = rp.apply(views, "subagent_done", _done_event(w))
+
+    assert views is not None, "事件被 fold 丢弃了"
+    assert views["cost"]["by_child"] == {CHILD_RUN_ID: pytest.approx(0.42)}
+    # 收口的前置条件：这个计数只在 done 折进来时才减一。
+    assert views["view"]["children"]["async_pending"] == 0
+
+
+async def test_settlement_is_invoked_once_the_child_id_is_known():
+    """激活面：有 id → 收口被叫起来；没有 id → 连叫都叫不起来。
+
+    ``settle_tree_if_closed`` 自己是幂等的（root 行 ``billing.charged_at`` 的
+    CAS），所以这里钉的是「有没有被调用」，不是「扣了多少」。金额分析见
+    task-6 报告 §10。
+    """
+    w = _wire(crashes=True, rows=[{"id": 77, "cost_cents": 0.42}])
+    await _run(w, _task(sub_run_id=CHILD_RUN_ID))
+    assert w.settle.await_args.kwargs == {"run_id": CHILD_RUN_ID}
+
+    # 负向对照：解析不出 id 时不叫收口 —— 没有可收的树，也没有可传的 run_id。
+    w2 = _wire(crashes=True, rows=[])
+    await _run(w2, _task())
+    w2.settle.assert_not_awaited()
 
 
 async def test_an_unreadable_child_row_falls_back_to_zero():

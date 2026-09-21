@@ -489,15 +489,22 @@ async def _run_subagent_task(
         envelope = {"status": "failed", "error": f"{err!s:.200}", "summary": ""}
         failures.append("subagent_crashed")
 
+    # 子 run id **解析一次，两处都用**。两处指：下面 ``content["child_run_id"]``
+    # 与花费回落读的那一行。分开解析过一次，代价是回落读回来的钱当场又被丢掉 ——
+    # ``fold_done`` 在 ``child_run_id`` 为假时整条 ``subagent_done`` 直接丢弃
+    # （`folds/subagents.py`），于是父的 ``by_child`` 拿不到那笔钱、
+    # ``children.async_pending`` 也不减一，收口继续被挡在门外。
+    child_run_id = _resolve_child_run_id(envelope, payload)
+
     # 崩溃分支自己造的 envelope 没有 ``cost_cents`` 键，而一个跑了十轮工具调用
     # 才挂掉的子 run 花的是真钱 —— 把「没有这个键」读成 0，报 0 的恰恰是最值得
     # 注意的那些 run（Task 7b defect A 同族）。键缺席时改去问子 run 行。
     cost_cents = envelope.get("cost_cents")
     if cost_cents is None:
-        cost_cents = await _child_row_cost_cents(envelope, payload, task_id)
+        cost_cents = await _child_row_cost_cents(child_run_id, task_id)
 
     content = {
-        "child_run_id": envelope.get("sub_run_id"),
+        "child_run_id": child_run_id,
         "subagent_type": payload.get("subagent_type"),
         "description": payload.get("description"),
         "status": envelope.get("status"),
@@ -653,9 +660,25 @@ async def _run_subagent_task(
     }
 
 
-async def _child_row_cost_cents(
-    envelope: dict[str, Any], payload: dict[str, Any], task_id: UUID
-) -> float:
+def _resolve_child_run_id(
+    envelope: dict[str, Any], payload: dict[str, Any]
+) -> Optional[str]:
+    """这次委派的子 run id，字符串或 None。
+
+    ``_build_envelope`` 与 ``_spawn`` 的崩溃分支都给字符串，所以这里统一成字符串
+    —— 下游三个消费方（``fold_done`` 的 ``str()``、``settle_tree_if_closed`` 的
+    ``int()``、workflow 结果里的 ``run_id``）对形状的期望本来就是它。
+
+    ``payload["child_run_id"]`` **不在候选里**：那是被续写的**上一轮**，这一轮是
+    它的 fork，是另一行。见 :func:`_child_row_cost_cents`。
+    """
+    raw = envelope.get("sub_run_id") or payload.get("sub_run_id")
+    if raw is None:
+        return None
+    return str(raw).strip() or None
+
+
+async def _child_row_cost_cents(child_run_id: Optional[str], task_id: UUID) -> float:
     """子 run 行上的 ``cost_cents``，读不到就 0.0（并说出来）。
 
     只在 envelope **没有** ``cost_cents`` 键时调用 —— 也就是
@@ -679,9 +702,8 @@ async def _child_row_cost_cents(
     ``payload["child_run_id"]`` **不算**：那是被续写的**上一轮**，崩掉的这一轮是
     它的 fork，是另一行；拿它的钱冒充这一轮，比报 0 更糟。
     """
-    raw = envelope.get("sub_run_id") or payload.get("sub_run_id")
     try:
-        child_id = int(raw) if raw is not None else None
+        child_id = int(child_run_id) if child_run_id is not None else None
     except (TypeError, ValueError):
         child_id = None
     if child_id is None:
