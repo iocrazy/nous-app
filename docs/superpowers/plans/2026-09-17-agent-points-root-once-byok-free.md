@@ -2034,41 +2034,275 @@ gh pr create --base master --title "docs(plan): 积分改造完成账"
 
 ---
 
-## 完成账（Task 4 Step 7 填）
+## 完成账
 
 ### 一、交付
 
-| Task | PR | 合并 SHA | 真栈验收 |
+| Task | PR | 合并 SHA | 评审轮次 | 部署证据 |
+|---|---|---|---|---|
+| 1 LLM 的 BYOK 标记按步分桶 | #2352 | `b4da4971e` | 1 轮（Approved，无修复轮；并入项转 Task 2） | `deploy-gpu` success；容器内 `symbols ok step_byok_cents` |
+| 2 生图 / 子 agent 两条 BYOK 道 | #2355 | `65ad78897` | 2 轮（首轮 Needs fixes → 修复轮 1 → Approved） | `deploy-gpu` RID=35176468976 success；`symbols ok _byok_cents_of`；`readyz` dbos=enabled |
+| 3 树收口者一次扣 + BYOK 免扣 | #2357 | `c35be6db0` | 5 轮（首轮 + 设计变更返工 + 修复轮 2/3/4 + 收尾核 diff） | `deploy-gpu` RID=35190891682 success（**2026-09-17T06:42:56Z = 新口径切换点**）；`symbols ok settle_tree_if_closed` |
+| 热修 切换点常量 + 退款脚本 | #2361 | `25c3cce64` | 1 轮快审（0 Critical，可合） | `deploy-gpu` RID=35198662854 success；容器内 `AGENT_POINTS_TREE_CUTOVER=2026-09-17T06:42:56Z` |
+| 最终修复批 T1/T2/T3/T6/T16/T12 + mig 477 | #2362 | `0b41942a4` | 2 轮（首轮 0 Critical / 3 Important → 修复轮 1 → Approved）+ 1 个 black 格式提交 | `deploy-gpu` RID=35552165952 success；`symbols ok CHARGE_STATUS_RAISED`；`run-migration` success，生产 `pg_indexes` 实查到 `idx_point_transactions_agent_run_refund`；`readyz` dbos=enabled |
+| 4 真栈验收 + 完成账 | 本 PR | — | — | 无代码改动 |
+
+Task 3 的 5 轮里，第 2 轮不是「修 bug」而是**设计变更返工**：Task 4 Step 1 的探针打出
+`by_child` 在 workforce 链上恒为 `{}`，原计划「root 定稿时按 `by_child` 扣整棵树」的前提
+当场不成立，改为「谁把树收口谁扣费」。代价是 Task 3 返工一轮，收益是绕开了一个读方假设
+（见口径披露 a）。
+
+### 二、真栈验收
+
+**Step 1（Task 3 合并之前，2026-09-17 03:25–03:35 UTC）**
+
+| # | 结论 | 证据 |
+|---|---|---|
+| (1) 平台 LLM 回合三条 BYOK 道存在 | **PASS** | run `350406624210194`：`? 'own_byok_cents'` / `? 'media_byok_cents'` / `? 'by_child_byok'` 三个 `t`；`own_byok_cents=0.0`；正对照 `own_cents=0.1426 > 0` 证明视图是真写出来的，不是原样落库的空壳 |
+| (2) BYOK ark 出图 | **UNVERIFIED** | 真栈无这条道：`provider_byok_keys` 空表（0 行）；`actual_provider ILIKE '%ark%'` 与 `actual_model ILIKE '%seedream-5%'` 均零行；期间 `generated_media` 新增 0 行。未造数据、未拿平台模型冒充 |
+| (3) 派子 agent 的回合 | **半通过 → 触发设计变更** | `by_child_byok` 键存在且为 `{}` ✔；但 `by_child` 也是 `{}` ✘。root `350406827261364` 的 `cost_cents` 0.3249 恰等于自身 `own_cents`，后代 0.2205 没折进来。判别式定位到 `trigger`：`subagent_task` 折、`workforce` 不折（全库 10 条 `by_child` 非空的全是前者） |
+
+**Step 2–8（新口径上线后，2026-09-17 08:19–08:35 UTC）**
+
+| # | 结论 | 证据 |
+|---|---|---|
+| (2) 整棵树恰一行流水 | **PASS** | 树 root `350478260280825`，4 个 run 全 completed。`point_transactions` 恰 1 行，`reference_id` = root，三个子 run 零行；`charged_at` 只在 root 非空；余额 595→594。金额 `1 = ceil(0.5761)`，0.5761 由四行 `own+media−钳位 byok` 逐行手算，与 worker 日志 `runs=4 total=0.5761 platform=0.5761 points=1.0` 逐字相同。**收口者是晚 119ms 结束的子 run**：root 08:21:20 先结束，子 run `350478350515718` 08:21:36.349 最后结束，扣费发生在 08:21:36.468 |
+| (3) BYOK 出图零扣费 | **UNVERIFIED** | premise 本批重核：`provider_byok_keys` 0 行、ark/seedream-5 模型 0 行、近 1 小时 `generated_media` 0 行。三条判据（零流水 + 用量有花费 + 日志 `byo_key=True`）无法产生。本次树日志 `byo_key=False`，与「无 BYOK 参与」一致 |
+| (4) 消耗行 ◇n 与流水一致 | **PASS** | MH-95 尾栏 `◇ 1.00 · doubao-seed-2-0-lite-260428`，hover `¢0.33` + `Charged ◇ 1.00 (incl. sub-agents)`。正对照：同一线程末尾四条读数各不相同，**同规模 4-run 树旧口径读 ◇ 4.00、新口径读 ◇ 1.00** |
+| (5) 急停开关 | **UNVERIFIED by design** | 裁定 ⑫ 规定不在生产切换。只读确认 `AGENT_POINTS_CHARGE_ENABLED=True`，本批没有动过 |
+| (6) `npm run e2e:prod` | **PASS** | 3 passed / 1 skipped（默认跳过的 get-token），21.0s。临时 spec 删除后跑的 |
+| (7) 清扫器无误扫 | **PASS（样本 1，原因写明）** | 容器启动以来 `settled tree` 仅 1 行，就是 (2) 那棵，root `started_at` 08:19:41 > cutover 06:42:56，`charged=True` 正确。样本少是因为 `nous-worker` 08:16:45Z 刚随热修重启，日志只覆盖之后；这条的强度实际靠 (8) 的账面核对 |
+| (8) 流水全部对应 post-cutover root | **PASS** | 热修容器启动后的 consume 行仅 1 条，是 root 且 `started_at >= cutover`，违规计数 0。**正对照**：同一条谓词换到热修之前的窗口立刻抓出 81 条（全部 `pre_cutover_root=t / is_child=f`），证明这个查询会说「不」。账面：`consume 82 / −126` 对 `refund 81 / +125`，净额 −1 正是本批该扣的 |
+
+容器内落地确认（两条都跑过）：`settings.AGENT_POINTS_TREE_CUTOVER = 2026-09-17T06:42:56Z`、
+`from app.services.ai.billing.tree_charge import bucket_tree` OK；Step 1 原命令整条通过，
+输出 `['by_child_byok', 'media_byok_cents', 'own_byok_cents']`。
+
+⚠️ **对终审 I4 / T4 的更正：异步 workforce 收口路径已经真栈验过，不是 UNVERIFIED。**
+终审报告记「异步 workforce 收口（`agent_worker` 钩子 + `pending_children` 归零）真栈未验」，
+但 (2) 那棵树正是这条路径。生产原样读数：
+
+```
+SELECT id, trigger, started_at::time, ended_at::time FROM agent_runs
+WHERE id=350478260280825 OR root_run_id=350478260280825 ORDER BY started_at;
+
+350478260280825|issue_reply|08:19:41.512397|08:21:20.236288
+350478350515718|workforce|08:20:03.542454|08:21:36.349126
+350478396280342|workforce|08:20:14.715113|08:21:13.778415
+350478474391081|workforce|08:20:33.785082|08:20:49.074784
+```
+
+三个子 run 的 `trigger` 都是 `workforce`；root 在 `08:21:20.236288` 就结束了，而子 run
+`350478350515718` 比它**晚 16 秒**、到 `08:21:36.349126` 才结束，扣费发生在其后 119ms 的
+`08:21:36.468`。如果走的是同步链或 root 定稿扣，这笔账会少算该子 run 的 0.0904，而且扣费
+时刻会跟着 root 的 `08:21:20` 走。所以 Step 2 的 PASS 里**包含**异步收口，T4 应改判为已验。
+
+### 三、口径披露
+
+这一节是**相对计划原文和相对旧行为的差异**，每条都是用户需要知道的，不是实现细节。
+
+**(a) 扣费发生在「树收口者」身上，取代计划原文的「root 定稿时扣」。**
+探针数据推翻了原计划的前提：workforce 委派是 fire-and-forget，root 常常**先于**子 run
+结束（本批实测 root 08:21:20、最后一个子 run 08:21:36），而 `subagent_done` 只写直接父，
+所以 root 行的 `by_child` 在这条链上恒为 `{}`。按 root 定稿扣会漏掉全部后代，晚到的子 run
+各自 `ceil` 又会把叠加重现一遍。现在的语义是：每个 run 终态落库后检查整棵树，树内无
+`running` 时由**最后那个收口的 run** 以 CAS 盖戳、按 `root_run_id` 重新聚合全树、开一行
+`reference_id=root` 的流水。
+
+**(b) 失败 / 取消的回合现在也扣费（相对旧口径的变化）。**
+计划原文写的是「root `completed` 才扣」，评审指出子 run 先完成、root 随后 `failed` 时全树
+漏收，裁定改为 **root 任一终态都扣该树平台桶**。所以一次报错收场的回合也会消耗积分——
+钱确实花在 provider 上了。例外：`heartbeat_lost` 不经 `_finish`，作为 Stated Limitation 记着。
+
+**(c) 只向前不追扣，切换点是一个常量，它的来历是一次事故。**
+`AGENT_POINTS_TREE_CUTOVER = 2026-09-17T06:42:56Z`，取 Task 3 `deploy-gpu` success 的时刻。
+两道守卫方向不同：清扫器提名侧下界取 `max(now − 7d, cutover)`；收口侧在判 `running`
+**之前**读 root 的 `started_at`，早于切换点一律返回 `pre_cutover`，**不扣也不盖戳**。
+这个常量不是设计之初就有的，是下面事故复盘的产物。
+
+**(d) BYOK 免扣：LLM 与图片两条道已接线，embedding 无此路径，生产无 BYOK 配置故未真栈验。**
+LLM 在 Task 1（按步分桶 `own_byok_cents`）、图片在 Task 2（`media_byok_cents` +
+`by_child_byok`）。embedding 今天根本没有 BYOK 路径可接（裁定 ⑧：接入时走同一标记）。
+真栈上 `provider_byok_keys` 是空表、没有任何 ark/seedream-5 模型行，所以
+「BYOK 出图零扣费」这条**只有单测和集成测试覆盖，没有真栈证据**（T18）。要验它需要先在
+Admin → AI Models 建一行用用户自己 key 的图片模型并对 fixture 团队开放——那是配置动作，
+本期没做。
+
+**(e) 退款行不进 `charged_points` 读模型。**
+`refund` 类型的流水不抵扣读方的 `charged_points_for_run_trees`，这是既有口径。后果：
+被退款的那 81 棵老树，在血缘页和消耗行上**仍然显示「已扣」**，尽管钱已经回到余额里。
+余额是对的（2448→2500、522→595），显示是旧的。**已由 #2362 修复并真栈验过**（2026-09-21，
+生产容器内调三个宿主共用的 `charged_points_for_run_trees`）：已退款老树 `349592702134848` → `0.0`
+（键在场，界面显示 ◇ 0.00）；正常扣的树 `350478260280825` → `1.0`；没扣过的 id → 键缺席。
+
+**(f) 切换点常量的值来自代码默认，改它要改代码 / 配置，不是改 env。**
+两个容器 `printenv AGENT_POINTS_TREE_CUTOVER` 都是**空**——没有 `backend.env` 行，
+值来自 `app/core/config.py` 的默认 + `backend/config.yml`。这与 CLAUDE.md 里
+「`backend.env` 会静默盖掉 `config.yml`」那条陷阱方向相反：这里没有 env 行可盖。
+
+**(g) 团队积分耗尽期间收口的树，永久免单，充值后不补扣。**（T5，**需用户裁定**）
+余额不足 / 取不到 team / 急停这三种情况下，收口逻辑**保留戳**并记 `charged=False`，
+这棵树就此定稿——之后充值也没有任何机制回头补扣它。此前只有「急停」那一半写在
+`tree_charge` 的 docstring 里，「余额不足」这一半至今没有任何裁定提过，而它是本次口径
+变更**放大**出来的：旧口径一棵树是 N 笔小额，耗尽时只漏掉后面几笔；新口径一棵树一笔，
+漏就漏整棵。请在两条里选一条：① 接受现状（耗尽期间的树免费）；② 把「余额不足」也列进
+撤戳，让清扫器稍后重试。已记票「充值后重收口 job」。
+
+### 四、事故复盘：清扫器追扣 81 棵上线前的历史树
+
+**时间线（UTC）**
+
+| 时刻 | 事件 |
+|---|---|
+| 2026-09-16 09:26 | A3 —— 积分扣费链修好并开始真扣。**此前每轮 `TypeError` 被吞成 WARNING，一分钱没扣过** |
+| 2026-09-17 06:42:56 | Task 3 `c35be6db0` 部署 success，新口径上线（这个时刻后来成了切换点常量） |
+| 06:43 | 首轮清扫 `force_settle_stale_pending_trees_step` 提名并收口 43 棵历史树，扣 87 分 |
+| 06:44:09 | 第二轮再收 38 棵，合计 **81 棵 / 125 分** |
+| 06:45 起 | 候选池耗尽，未再增长。06:45:51–06:48:23 每 30 秒复核 `rows=81` 恒定，扣费已停 |
+| ~07:20 | 用户要求暂停（热修 PR 未合、退款未执行、Task 4 未跑）；随后「继续」 |
+| 08:16:45 | 热修 `25c3cce64` 部署 success，`nous-worker` 重启 |
+| 08:2x | 退款脚本 dry-run → `--execute` → 复核余额，事故闭合 |
+
+**机理：「有没有扣过钱」回答不了「该不该扣」。**
+
+链路是这样接上的：① 提名窗是 `now−2h` 到 `now−7d`，那批 `ended_at` 在 09-10~09-15 的树
+正好落在窗里；② 它们从没被本机制收过口，`billing.charged_at` 是空的，提名条件
+`charged_at IS NULL` 也满足；③ `async_pending` 为 0 的那些不走强制路径、走正常路径；
+④ 正常路径的防回溯正查问的是「这棵树在 `point_transactions` 里扣过钱没有」，而它们结束于
+A3 之前，**当时一分钱都没扣过、零行**，`_tree_was_ever_charged` 返回 False 放行；
+⑤ CAS 盖戳 → `reconcile_run` → 真扣。
+
+防回溯守卫假定「上线前的老树必然留着旧口径逐 run 扣的流水」。A3 之前那整段历史压根没有流水
+——假定不成立，守卫就整条失效。而用户的裁定「只向前不追扣」，判据是**时间**，与花没花过钱无关。
+
+**影响面**
+
+| team | 棵数 | 分数 |
+|---|---|---|
+| 310812366953241 | 8 | 52 |
+| 331438215859255（fixture 团队） | 73 | 73 |
+| 合计 | **81** | **125** |
+
+⚠️ 这两个数字只用来核对，退款脚本里一个都没写死——候选按查询动态取。第一份通报是
+「43 棵 / 87 分」（只含首轮），**按快照写死会漏掉一半**。
+
+**止血与退款**
+
+热修 #2361 落两道时间守卫止住向前的口子；退款脚本 `refund_pre_cutover_tree_charges.py`
+按三条谓词选行（`type='consume'` 且 `reference_type='agent_run'`；`created_at >= cutover`；
+`reference_id` 指向的 run 是 root 且 `started_at < cutover`——第 2 与第 3 条方向相反，
+缺一不可），逐行走 `PointsService.refund_points` → `rpc_refund_team_points_idempotent`
+（mig 123，唯一索引保证至多退一次，重跑安全）。**先退钱再改戳**：反过来的话改戳成功而
+退款失败就再也认不出这笔该退。
+
+实测：dry-run 81 笔 = 81 个不重复 root = 125 分（52 + 73），`--execute` 退成 81 笔 / 125 分、
+改戳 81 行。余额 310812366953241 **2448→2500**、331438215859255 **522→595**。
+`point_transactions` 账面 `consume 81 / −125` 对 `refund 81 / +125`；pre-cutover 树的
+`charged_at` 全清、`refunded_at` 81 行。
+
+**防复发**
+
+- 收口侧：读到全部行之后、判 `running` **之前**取 root 的 `started_at`，早于切换点返回
+  `pre_cutover`，不扣不盖戳。放最前面是因为这是关于这棵树的**永久**结论，与它此刻跑没跑完无关；
+  不盖戳是因为盖了就等于宣称「本机制收过这棵树」，而它一分没收。
+- 提名侧：下界 `max(now − FORCED_SETTLE_MAX_AGE, cutover)`。这一道是省事，不是权威——
+  正常收口路径根本不经过清扫器。
+- 三个判断方向都往「不扣」那侧倒：切换点读不出来 → 返回 `cutover_unreadable` 并刷 ERROR，
+  清扫器一棵树都不提名（与 `pre_cutover` **分开上报**，一个是正常老树、一个是要人去修的配置）；
+  root 的 `started_at` 读不出来 → 按 `pre_cutover` 处理；裸时间戳按 UTC 解析，不随部署机时区漂。
+
+**教训**
+
+用「有没有发生过 X」去代理「该不该做 Y」，只在两者历史上恰好同步时有效；一旦有一段历史
+X 没发生过（这里是 A3 之前的静默期），代理关系就断了，而守卫**不会报错，只会放行**。
+判据该是什么就写什么——用户说的是时间，就用时间，别用花销记录去猜时间。
+同族：CLAUDE.md 的「空输出不是否定结论」「探针够不着 ≠ 目标是坏的」。
+
+### 五、裁定
+
+| # | 裁定 | 场景 |
+|---|---|---|
+| R1 | 预检扫描无冲突，按计划合并顺序 1→2→3→4 串行；Task 3 是最后一个后端 PR（真扣） | 开工前共享文件扫描 |
+| R2 | Task 1 评审的 ①②③（`script_ai_service` 缺 `credential_origin`、AST 守卫只扫五个写死路径、wiring 取值无用例）并进 Task 2（同为标记工作）；Task 1 直接合并 | Task 1 评审 |
+| R3 | Task 2 评审的 Critical / Important / Minor 全部进修复轮 1，零调用 shim 直接删 | Task 2 评审 |
+| R4 | root **任一终态**都扣树平台桶（失败 / 取消回合也扣，完成账披露）；`heartbeat_lost` 不经 `_finish`，记 Stated Limitation | Task 3 首轮评审 |
+| R5 | `byo_key=True` 只在前两分支算，不贴到每个「root 在跑」的子 run（守裁定 ⑤） | Task 3 首轮评审 |
+| R6 | **设计变更：改「树收口者扣费」** —— 每 run `_finish` 终态 UPDATE 后 `settle_tree_if_closed(root)`：树内无 `running` → CAS 标 root `charged_at` → 扣 Σ 各行自身平台桶（own + media − 钳位 BYOK），`reference_id=root`，一树一行；崩溃类终态写方也收口；不再依赖 `by_child`；删 `root_run_is_settled` 三分支。理由：workforce fire-and-forget 让 root 定稿扣漏后代，且晚到子 run 各自 `ceil` 重现叠加 | Task 4 Step 1 探针之后 |
+| R7 | 接受不加 `RunRecorder.root_run_id`（`agent_runs.root_run_id` 是唯一真相）；让实施者先补 CAS 真 PG 集成用例接 `schema-drift`（省一轮） | Task 3 返工中 |
+| R8 | v2 评审的 Critical（`charged_at` 搬到顶层 `billing` 键、`async_pending` 门 + 2h 兜底）、Blocker（真 PG 集成用例）、Minor 全部进修复轮 3 | Task 3 v2 评审 |
+| R9 | fix3 评审：worker 写完 `subagent_done` 补调 `settle(child)`；防回溯挂正常路径并加 `type=consume`；清扫器提名加 `charged_at IS NULL` + 双向窗 + root-only，索引记票；仍 resume 同一实施者（非卡住，是设计变更后的新发现，模型已是最高档） | Task 3 fix3 评审 |
+| R10 | **事故裁定**：① 热修切换点常量 `AGENT_POINTS_TREE_CUTOVER=2026-09-17T06:42:56Z`，提名侧 `ended_at >= cutover`、正常路径 root `started_at < cutover` → `pre_cutover` 不扣不盖戳；② 一次性退款脚本（dry-run 先）按 `PointsService` 退款路径原额退回；③ 完成账与用户报告披露 | 2026-09-17 06:43 事故 |
+| R11 | 热修可合：合并部署止血 → dry-run 核 81 笔 / 81 root / 125 分 → `--execute` → 核余额；「同 root 多条 consume 按笔退会少退」与「退款后读模型仍显示 charged_points」两条记票并告知用户 | 热修快审 |
+
+### 六、记票
+
+底表是终审报告的「记票合并表」T1–T19（从 ledger、五份 review 报告、四份 task 报告去重合并）。
+分三类：**最终修复批 PR 现在就修** / **归档记票** / **需用户裁定或披露**。终审 Verdict 是
+**Approved with follow-ups**：没有 Critical，6 个 Important **全部是少收方向**，没有一条能多扣
+或错扣他人。
+
+**现在就修（最终修复批 PR #2362，已合并上线 `0b41942a4`，不碰扣费算法）**
+
+> 修复批自己的评审又推翻/收紧了下表的三处，以这里为准：
+> - **T1 换不到「晚收但收对」。** 镜像失败后没有人重写那一行，清扫器 2 小时后读到的是同一份陈旧
+>   视图、按旧数结账。T1 真正换到的只有「一条带 run_id 的 ERROR」和「不把错数即时钉死」。少收方向，
+>   接受；视图重写记票 R-1。下表 T1 行里「把树让给清扫器」应按此理解。
+> - **T2 扩到了 `_finish` 的第一次重折**，否则行上的 `cost` 与审计行 / 小时表会分歧。评审沿
+>   `spend_of_run` 公式逐项核过：不会多扣（重折是重建后赋值、按 `kind:ref_id:version` 去重）。
+>   **用户可见后果：纯生图回合从此如实计入出图花费**（此前静默漏收）。
+> - **T6 带了一条迁移（mig 477）**，与本计划「禁迁移」的全局约束相悖，控制方裁定破例：refund 腿
+>   没有任何可用索引，而这条查询被前端轮询——正是 mig 474 存在的理由。没用 `type IN (…)`
+>   （会让两条 partial 索引都不被蕴含、退回顺扫），改成两条腿各配一个 partial 索引，真库 EXPLAIN
+>   用例 + 突变验证钉住。全额退款显示 **◇ 0**（键在场）而非徽章消失。
+> - T12 的安静档定为「除 `charged` / `forced` / `error` 之外全部降 DEBUG」：无戳的树每分钟都会被
+>   重新提名，只放过 `deferred` 堵不住噪声。代价：卡住的树只在 DEBUG 可见。
+> - `partially_charged` 只对新发生的撤戳生效，历史不回填（回填得靠猜）。
+>
+> 修复批新记的票（不在本批）：**R-1** 镜像失败后的视图重写；**R-2** 终态重折两次，两次之间落地的
+> 产出会让镜像 media 高于 `cost_cents`（best-effort）；**R-3** 纯生图回合数字上涨需上线后观察首批
+> run 行；**R-4** `force` 重折在「内存产出 > 账本产出」时会把 media 调低；**R-5** 下限 0 只加在
+> refund 分支；**R-6** `billing.charge_status` 写入后不清除；**R-7** EXPLAIN 用例的 `_LEG_SQL` 是手写
+> 字面量，给查询加第三个条件时它仍会绿。
+
+| # | 票 | 严重度 | 要做什么 |
 |---|---|---|---|
-| 1 LLM BYOK 标记按步分桶 | # | | Step 1 |
-| 2 生图 / 子 agent 两条道 | # | | Step 1、Step 3 |
-| 3 root 一次扣 + BYOK 免扣 | # | | Step 2、Step 3、Step 4 |
-| 4 完成账 | # | | — |
+| T1 | `persist_views` 失败即整棵树静默少收且不重试 | 高 | `persist_views()` 返回成功与否；`_finish` 失败时打 ERROR 并**跳过** settle，把树让给清扫器。本批唯一一处「契约声明是硬的、实现是软的」，而它正对着钱 |
+| T2 | `refold_external_slices` 提前返回可在终态前抹掉 `media_cents` | 高 | `persist_views()` 路径无条件重折（或守卫加上「`cost` 四个金额分量任一非零」）。缺陷先于本批，后果由本批放大 |
+| T3 | `by_child_byok` 全链无读方，五处注释声称的减法不存在 | 中 | 改那五处注释，把「`by_child − by_child_byok` 减出平台额」换成「当前无消费方，扣费按行聚合」。零行为改动，防的是下一个人按一句假话去改钱 |
+| T6 | refund 行不进 `charged_points_for_run_trees`，81 棵已退树仍显示 ◇ 已扣 | 中 | `charged_points_for_references` 把 refund 行算进去。用户可见、已经错了、两个真实团队受影响 |
+| T16 | 撤戳后重试被误标 `legacy_charged` | 低 | 加 `partially_charged` 结局。两行代码，换掉一条会误导运维的日志 |
+| T12 | 清扫器缺按 `reason` 分桶的遥测，`forced > 0` 无告警 | 中 | 按 `SettleOutcome.reason` 分桶打 INFO。这是事故当天唯一能自动抓住的形状 |
 
-### 二、真栈读数
+**归档记票，不在本批做**
 
-| 判据 | 期望 | 实测 | 结论 |
+| # | 票 | 严重度 | 备注 |
 |---|---|---|---|
-| 三条 BYOK 道装进容器 | 三个键 | | |
-| 派子 agent 回合的流水行数 | 1 | | |
-| 该行金额 | `ceil(tree_platform)` | | |
-| 子 run 流水行数 | 0 | | |
-| BYOK 出图回合的流水行数 | 0 | | |
-| BYOK 回合 `ai_usage_logs.cost_points` | > 0 | | |
-| BYOK 回合 `ai_usage_hourly.cost_cents` | > 0 | | |
-| 消耗行 ◇n vs 流水 | 相等 | | |
-| `AGENT_POINTS_CHARGE_ENABLED` | True（未切换） | | |
+| T7 | `agent_runs(ended_at DESC) WHERE parent_run_id IS NULL` 索引缺失，稳态下清扫器每 60 秒一次全表扫 | 中 | 需迁移，本计划禁迁移；另立票并接 C1 索引棘轮 |
+| T8 | `RunEventWriter.mirror_stmt` 的 `cast("{}", JSONB)` 双重编码 | 低 | 同款写法在 Task 3 里把 cost 视图冲成数组而钱已扣。票里要写清**无害的理由是列的 NOT NULL 约束，不是这段代码** |
+| T9 | 退款脚本无 runbook、无入口 | 中 | 脚本仍在仓库，下次要用时没人知道怎么跑 |
+| T10 | 退款脚本按笔退 + 按 root 幂等 → 同 root 多笔会少退 | 低 | 本次未咬到（dry-run 核过笔数 = 不重复 root 数 = 81） |
+| T11 | `AGENT_POINTS_TREE_CUTOVER` 可被 `backend.env` 静默覆盖；`cutover_unreadable` = 收入归零且无告警 | 中 | 见口径披露 (f)：今天没有 env 行可盖，但没有东西拦住将来加一行 |
+| T13 | `simulate-complete` dev 端点是第五个终态写方，未接收口也未在 docstring 点名 | 低 | dev 端点，不影响生产账 |
+| T14 | 孤儿 run 各成单节点树，逐 run `ceil` 回归 + 读方看不到 | 低 | **刻意不修**，已在 `tree_charge` docstring 文档化 |
+| T17 | 收口那次 `reconcile_run` 的 token 参数是拼凑的，只流向 description | 极低 | 不参与任何金额计算 |
+| T19 | CI `isort` 逐文件与本地目录模式不等价 | 低 | 终审建议**直接写进 CLAUDE.md** |
 
-### 三、记票
+**需用户裁定或披露（对应口径披露 (d)(e)(g) 与下方更正）**
 
-| # | 问题 | 位置 | 严重度 | 去向 | 本期修否 |
-|---|---|---|---|---|---|
-| P1 | 急停期间跑完的树不补扣，root-once 让单次漏扣金额变大 | `token_billing.reconcile_run` docstring | Stated Limitation | 票（按 `ai_usage_logs` 反查未扣行的回填链） | 否，用户已知 |
-| P2 | Embedding 无 BYOK 路径，接入用户 key 时必须走同一标记 | `providers/embedding_config.py` | — | 票 | 否（今天没有这条路） |
-| P3 | 画布直出的图不走 agent 积分链，`GenerationOrigin.byok` 在那些调用点恒 False | 画布 / DBOS 分镜四个调用点 | Minor | 票 | 否（那条链本就不收积分） |
-| P4 | `_attach_to_parent_run` 失败 → `parent_run_id` / `root_run_id` 双 NULL 的子 run 自认 root，会按**自己那棵子树**再扣一次 | `run_recorder` / `agent_worker._attach_to_parent_run` | Minor（钱） | 票（既有 K48，root-once 让它从「多扣一点」变成「多扣一棵子树」） | 否 |
-| P5 | `by_child` 的 50 条 `seen` 窗口给账划界（`folds/deliverables.py` 自己的注释记着）——超过 50 个不同产出后重复到达会多计一次钱，BYOK 道同此 | `folds/deliverables.py` | Minor | 票（既有） | 否 |
-| P6 | | | | | |
+| # | 票 | 严重度 | 需要用户做什么 |
+|---|---|---|---|
+| T5 | 余额不足 / 无 team / 急停 → 保留戳 → 那棵树永久免单、无补扣 | 中 | **请明确裁定**：接受「积分耗尽期间的树永久免费」，或同意把「余额不足」列进撤戳让清扫器重试。见口径披露 (g)。此前只有「急停」那一半被文档化过 |
+| T18 | BYOK 图片道真栈两轮都是 UNVERIFIED | 中 | 需先在 Admin → AI Models 配一个用用户自己 key 的 BYOK 图片模型并对 fixture 团队开放，才能验。见口径披露 (d) |
+| T15 | 跨切换点的树（root 在 cutover 前、子 run 在之后）永久免费 | 低 | 一次性、量极小，披露即可 |
+| T4 | 终审记「异步 workforce 收口真栈未验」 | 中 | **更正：不成立，已真栈验**——详见第二节末的更正说明 |
+
+**计划原文记的票里，终审合并表未覆盖的三条**（P1 已并入 T5，P4 已并入 T14）：
+
+| # | 票 | 位置 | 严重度 | 去向 |
+|---|---|---|---|---|
+| P2 | Embedding 无 BYOK 路径，接入用户 key 时必须走同一标记 | `providers/embedding_config.py` | — | 票（今天没有这条路，见口径披露 (d)） |
+| P3 | 画布直出的图不走 agent 积分链，`GenerationOrigin.byok` 在那些调用点恒 False | 画布 / DBOS 分镜四个调用点 | Minor | 票（那条链本就不收积分） |
+| P5 | `by_child` 的 50 条 `seen` 窗口给账划界，超过 50 个不同产出后重复到达会多计一次钱，BYOK 道同此 | `folds/deliverables.py` | Minor | 票（既有） |
 
 ---
 
