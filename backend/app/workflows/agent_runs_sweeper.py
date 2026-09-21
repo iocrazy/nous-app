@@ -459,14 +459,27 @@ async def force_settle_stale_pending_trees_step() -> int:
 
     if buckets:
         summary = " ".join(f"{k}={v}" for k, v in sorted(buckets.items()))
-        # ``forced`` 稳态下应当恒为 0 —— 非 0 就是「有异步任务在丢」。``error``
-        # 同理。两者都值得从每分钟一轮的 INFO 噪声里跳出来；其余结局
-        # （deferred / already / pre_cutover …）是正常运转的样子。
-        noisy = buckets.get("forced", 0) or buckets.get("error", 0)
-        log = logger.warning if noisy else logger.info
+        # 三级，按**这一轮到底发生了什么**分（评审 M-4）：
+        #
+        # * WARNING —— ``forced`` 稳态下应当恒为 0，非 0 就是「有异步任务在丢」；
+        #   ``error`` 同理。这两样要能从噪声里跳出来，那是本段遥测存在的理由。
+        # * INFO —— 这一轮真的收了一棵树（``charged``）。发生了事，值得留痕。
+        # * DEBUG —— 其余全是「提名到了、但什么都没做」。
+        #
+        # ⚠️ 安静的那一档**不能只列 ``deferred``**。提名谓词是
+        # ``charged_at IS NULL``，所以 ``legacy_charged`` / ``partially_charged`` /
+        # ``pending_children`` 的树同样没有戳，同样会被每分钟重新提名一次，直到掉
+        # 出 7 天窗口 —— 只放过 ``deferred`` 等于只堵了其中一条。判据因此是
+        # 「有没有发生事」而不是「reason 叫什么」：一棵卡住的树会连打 7 天 × 1440
+        # 行，那时这条遥测已经从信号退化成要过滤的噪声。
+        if buckets.get("forced", 0) or buckets.get("error", 0):
+            log = logger.warning
+        elif buckets.get("charged", 0):
+            log = logger.info
+        else:
+            log = logger.debug
         log(f"[sweeper] stale-tree settle: candidates={len(rows)} {summary}")
-    # 提名到零棵树就一行都不打：这条遥测存在的理由是让 forced 跳出来，而一个每
-    # 60 秒说一次「这轮没事」的日志会把它自己变成要过滤的噪声。
+    # 提名到零棵树则一行都不打 —— 连 DEBUG 都不必，没有任何可说的。
     return settled
 
 

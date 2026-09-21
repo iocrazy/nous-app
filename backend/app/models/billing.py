@@ -211,6 +211,22 @@ class PointTransactions(Base):
             # 逐字一致：谓词对不上，planner 就悄悄改走顺扫，没有任何东西会说出来。
             postgresql_where=text("type = 'consume' AND reference_type = 'agent_run'"),
         ),
+        # mig 477 —— 同一次轮询的**第二条腿**。终审 I6 之后
+        # charged_points_for_references 报的是净扣（扣 − 退），于是它按 type 拆成
+        # 两条查询各发一次（写成 type IN (…) 会让上面那个 partial 索引的谓词不再
+        # 被蕴含，consume 腿跟着一起退回顺扫）。两条腿因此各配一个 partial 索引。
+        # ⚠️ 与 mig 123 的 idx_point_transactions_unique_refund 并存是刻意的：那个
+        # 首列是 team_id 且负责唯一性约束，这条查询不带 team_id，用不上它。
+        # ⚠️ 同样不是 UNIQUE —— 见 477 的注释（建成 UNIQUE 等于用一个少了 team_id
+        # 的更弱的键重述 123 的约束，跨团队同名引用会写不进去）。
+        Index(
+            "idx_point_transactions_agent_run_refund",
+            "reference_id",
+            # 'agent_run' 的第六份拷贝，理由同上一条（SQL 字符串 import 不进来）。
+            # tests/services/billing/test_agent_run_reference.py 对两条索引都断言
+            # 它逐字等于 AGENT_RUN_REFERENCE_TYPE。
+            postgresql_where=text("type = 'refund' AND reference_type = 'agent_run'"),
+        ),
         {"schema": "public"},
     )
 

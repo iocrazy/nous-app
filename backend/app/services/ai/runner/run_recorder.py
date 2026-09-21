@@ -1086,17 +1086,23 @@ class RunRecorder:
             if not views_persisted:
                 # 终审 I1。收口按**行**读落库的 cost 视图，而这条 run 的视图没写
                 # 进去 —— 现在收口就是拿旧数给整棵树结账，且**不可逆**：戳一盖，
-                # 这棵树再也不会被收第二次。跳过只是晚 2 小时，清扫器按
-                # ``charged_at IS NULL`` 提名，戳没盖它还捞得回来（宁少收不错收，
-                # 而这一侧是「晚收」不是「不收」）。
+                # 这棵树再也不会被收第二次。
                 #
-                # ERROR 而不是 WARNING：一笔可能永久漏收的钱必须能在错误漏斗里被
+                # ⚠️ 跳过**换不到「晚收但收对」**（评审 I-1）。这一行之后没有任何人
+                # 会重写它的 cost 视图（recorder 到此结束，``_sync_cost_column`` 只
+                # 碰 cost_cents 列），所以 2 小时后清扫器读到的是**同一份陈旧视图**，
+                # 照旧数结账。跳过真正换到的是两样：① 这条带 run_id 的 ERROR；
+                # ② 不在错数上当场盖一个永久的戳（不盖就给「别的 writer 恰好又镜像
+                # 了一次」留了个窗口）。方向仍是少收，但别当它已经闭合。
+                #
+                # ERROR 而不是 WARNING：一笔可能永久少收的钱必须能在错误漏斗里被
                 # 查出来，且带 run_id 才回查得到是哪棵树。
                 logger.error(
                     f"[RunRecorder] run {self.run_id} view mirror failed before the "
-                    f"terminal update — skipping tree settle so the sweeper can "
-                    f"retry it (settling now would bill the tree off stale costs "
-                    f"and stamp it permanently)"
+                    f"terminal update — skipping tree settle (this tree will be "
+                    f"billed off STALE costs whenever it is settled; nothing "
+                    f"rewrites this row's cost view, so the sweeper sees the same "
+                    f"stale figures — skipping only avoids stamping it now)"
                 )
             else:
                 try:
@@ -1730,9 +1736,16 @@ class RunEventWriter:
         ⚠️ **返回值不是装饰，是这条契约唯一的可证伪面（终审 I1）。** 在此之前
         ``_mirror`` 失败只打一条 WARNING，``_finish`` 照样收口 —— 于是整棵树按
         **上一次事件镜像的旧值**结账，而戳一盖它**再也不会被收第二次**：一次写失败
-        变成一笔永久漏收，且除了那条 WARNING 之外没有任何痕迹。声明是硬的、实现是
-        软的，中间隔着一个调用方没法查的 ``None``。现在 False 就是「这棵树此刻不能
-        结账」，由 ``_finish`` 决定让给谁。
+        变成一笔永久漏收，且除了那条 WARNING 之外没有任何痕迹。现在 False 就是
+        「这一行的终态花费没写进去」，由 ``_finish`` 决定接下来做什么。
+
+        ⚠️ **False 之后没有任何人会重写那一行**（评审 I-1）。这里是本条 run 唯一
+        一次把终态 ``own_cents`` 落库的机会：返回之后 recorder 就结束了，
+        ``_sync_cost_column`` 只碰 ``cost_cents`` 列、不碰 ``metadata_json``。所以
+        ``_finish`` 跳过收口换到的是**可见性**（一条带 run_id 的 ERROR）与**不把错数
+        永久钉死**（不盖戳），**不是**「晚一会儿再收、而且收对」—— 清扫器 2 小时后
+        读的仍是这次没写进去的那份视图。要真正闭合，得在这里重试一次、或退化成一条
+        只写 ``cost.own_cents`` 的最小 UPDATE；已记票，本批不做。
 
         重折在这里**无条件**（``force=True``，见 :meth:`refold_external_slices`）。
         """

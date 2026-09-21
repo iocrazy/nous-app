@@ -5,8 +5,10 @@
 
 * **I1** —— ``persist_views`` → ``_mirror`` 整段 ``except Exception`` 只打一条
   WARNING，然后 ``_finish`` 照样收口。镜像失败 = 按**上一次事件镜像的旧值**收口，
-  而戳一盖这棵树**再也不会被收第二次**。现在失败要说出来，``_finish`` 跳过收口，
-  把树留给清扫器（提名条件是 ``charged_at IS NULL``，戳没盖就还提得到）。
+  而戳一盖这棵树**再也不会被收第二次**。现在失败要说出来，``_finish`` 跳过收口。
+  ⚠️ **跳过换到的不是「晚收但收对」**（评审 I-1）：这一行之后没有任何人会重写它的
+  cost 视图，清扫器 2 小时后读的是同一份陈旧数据。换到的是①一条带 run_id 的
+  ERROR，②不在错数上当场盖一个不可逆的戳。下面的用例只断言这两样。
 * **I2** —— ``refold_external_slices`` 的提前返回只看**内存**。一次纯生图回合的
   ``media_cents`` 是 ``for_run`` writer 写进库的，活 recorder 的内存里 outputs 恒为
   0，于是守卫关着、整个 ``cost`` 值被原样盖回去、``media_cents`` 归 0 —— 收口读到
@@ -81,10 +83,13 @@ async def _finish_with(monkeypatch, *, mirrored: bool):
     return settle
 
 
-async def test_a_failed_mirror_hands_the_tree_to_the_sweeper(monkeypatch):
-    """镜像失败时收口**必须不发生**。当场收口是拿旧数扣钱且不可逆（戳盖上就没有
-    第二次）；跳过只是晚 2 小时 —— 清扫器按 ``charged_at IS NULL`` 提名，戳没盖，
-    它还捞得回来。"""
+async def test_a_failed_mirror_does_not_settle_the_tree_now(monkeypatch):
+    """镜像失败时收口**必须不发生**。当场收口是拿旧数扣钱**且不可逆** —— 戳一盖
+    就没有第二次了。
+
+    ⚠️ 这条断的只是「此刻不收」，**不是**「以后会收对」。那一行的 cost 视图之后
+    没有任何人重写，清扫器届时读到的是同一份旧数（评审 I-1）。不盖戳换到的是一个
+    还没被钉死的状态，不是一个正确的数。"""
     settle = await _finish_with(monkeypatch, mirrored=False)
     assert settle.await_count == 0
 

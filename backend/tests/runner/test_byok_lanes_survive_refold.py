@@ -6,10 +6,20 @@
 活 recorder 的下一次镜像会把另一个 writer 折出来的那半边抹掉）。BYOK 半边
 是同一次 fold 的产物 —— scratch 里数据是全的，只是没往回拷。
 
-漏掉的代价**完全静默**：`_finish` 之后 Task 3 读六个数分桶，
-``by_child - by_child_byok`` 与 ``media_cents - media_byok_cents`` 就是平台桶。
-BYOK 那半边少多少，平台桶就多收多少。而两条道少的恰好是**异步子 agent 的整棵
-子树**与**经 ``for_run`` writer 登记的产出** —— 也就是生产上最常见的那两种。
+漏掉的代价**完全静默**。⚠️ 注意口径已经变过一次（终审 I3）：**当前扣费按「行」
+聚合**，只读每条 run 自己的 ``own_cents`` / ``media_cents`` 减各自的 BYOK 道，
+``by_child`` 与 ``by_child_byok`` 都**不参与**（见 ``ai/billing/tree_charge.py``
+模块 docstring）。所以今天两条道的代价各不相同：
+
+* ``media_cents`` / ``media_byok_cents`` —— **真的是钱**。它们是本行自己的分量，
+  收口逐行读它们，少抬 BYOK 半边就是按平台价收一笔用户自己付过的账。
+* ``by_child`` / ``by_child_byok`` —— **当前无消费方**，只影响父行面板上的分解；
+  异步子 agent 的 BYOK 由它自己那一行报。两条道仍必须一起抬，因为它们是同一次
+  fold 的两半，只抬一半会让父行的分解自相矛盾（而异步链将来若改回按 ``by_child``
+  聚合，它就直接回到钱上）。
+
+两条道少的恰好是**异步子 agent 的整棵子树**与**经 ``for_run`` writer 登记的产出**
+—— 也就是生产上最常见的那两种。
 
 ⚠️ 这里刻意不模拟 ``(run_id, seq)`` 唯一索引，理由与
 ``test_outputs_refold_from_transcript`` 顶部那条逐字相同。
@@ -136,8 +146,11 @@ def _wire(monkeypatch, db: _FakeDb) -> None:
 
 async def test_both_byok_lanes_come_back_from_the_transcript(monkeypatch):
     """两条**外部 writer** 写的事件（迟到的登记 + 异步子 agent），活 recorder
-    一条都没折过。重折必须把本体和 BYOK 半边一起抬回来 —— 只抬本体，
-    ``by_child - by_child_byok`` 就把整棵 BYOK 子树当平台花费收一遍。"""
+    一条都没折过。重折必须把本体和 BYOK 半边一起抬回来。
+
+    只抬本体的代价按道不同（终审 I3）：``media_byok_cents`` 那条是**真钱**（收口
+    逐行读本行的 media 两道）；``by_child_byok`` 那条当前无消费方，只让父行面板的
+    分解自相矛盾 —— 但两条都是同一次 fold 的两半，要抬一起抬。"""
     db = _FakeDb()
     _wire(monkeypatch, db)
 

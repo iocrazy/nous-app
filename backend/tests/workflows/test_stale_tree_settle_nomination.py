@@ -200,12 +200,19 @@ def _sweeper_with(monkeypatch, outcomes):
 
 
 def _logs(monkeypatch):
-    """抓这一步打出去的 INFO / WARNING。"""
+    """抓这一步打出去的 DEBUG / INFO / WARNING。
+
+    **级别本身就是被断言的东西**（评审 M-4）：这一步每 60 秒跑一轮，一个无变化的
+    轮次落在 INFO 上就是每分钟一行噪声，而它存在的理由正是让 ``forced`` 跳出来。
+    """
     import app.workflows.agent_runs_sweeper as sweeper
 
     seen: list[tuple[str, str]] = []
 
     class _Logger:
+        def debug(self, msg, *a, **k):
+            seen.append(("debug", str(msg)))
+
         def info(self, msg, *a, **k):
             seen.append(("info", str(msg)))
 
@@ -278,13 +285,72 @@ async def test_a_quiet_round_says_nothing_at_all(monkeypatch):
     assert seen == [], seen
 
 
-async def test_an_ordinary_round_stays_at_info(monkeypatch):
-    """全是 ``deferred`` / ``already`` 这类正常结局时只打 INFO —— WARNING 留给
-    forced 与 error 两种真信号。"""
+async def test_an_ordinary_round_never_reaches_warning(monkeypatch):
+    """全是 ``deferred`` / ``already`` 这类正常结局时**绝不**打 WARNING —— 那一级
+    只留给 ``forced`` 与 ``error`` 两种真信号，否则它们就淹了。
+
+    （具体落在 INFO 还是 DEBUG 由「这一轮有没有发生事」决定，见 M-4 那组用例；
+    这条只守 WARNING 那道门。）"""
     from app.services.ai.billing.tree_charge import SettleOutcome
     from app.workflows.agent_runs_sweeper import force_settle_stale_pending_trees_step
 
     _sweeper_with(monkeypatch, [SettleOutcome(False, "already")])
     seen = _logs(monkeypatch)
     await force_settle_stale_pending_trees_step()
-    assert seen and all(lvl == "info" for lvl, _ in seen), seen
+    assert seen and all(lvl != "warning" for lvl, _ in seen), seen
+
+
+# ── 降噪：无变化的一轮不该每分钟刷一行（评审 M-4）─────────────────────────
+
+
+async def test_a_round_where_nothing_happened_stays_at_debug(monkeypatch):
+    """一棵卡在 ``deferred`` 的树（子 run 长期 running）会在 7 天窗口里**每分钟**
+    被提名一次。打成 INFO 就是每分钟一行、连打七天 —— 而这条遥测存在的理由正是让
+    ``forced`` 从噪声里跳出来，它自己不能是噪声。"""
+    from app.services.ai.billing.tree_charge import SettleOutcome
+    from app.workflows.agent_runs_sweeper import force_settle_stale_pending_trees_step
+
+    _sweeper_with(monkeypatch, [SettleOutcome(False, "deferred")] * 3)
+    seen = _logs(monkeypatch)
+    assert await force_settle_stale_pending_trees_step() == 0
+    assert [lvl for lvl, _ in seen] == ["debug"], seen
+    assert "deferred=3" in seen[0][1], seen
+
+
+async def test_the_other_repeating_no_op_reasons_are_quiet_too(monkeypatch):
+    """⚠️ 安静的不只有 ``deferred``。``legacy_charged`` / ``partially_charged`` 的
+    树同样**没有戳**（提名谓词是 ``charged_at IS NULL``），所以它们也会被每分钟重新
+    提名一次、直到掉出 7 天窗口 —— 只放过 ``deferred`` 等于只堵了三条里的一条。
+
+    判据不是「reason 叫什么」，而是**这一轮有没有发生任何事**。"""
+    from app.services.ai.billing.tree_charge import SettleOutcome
+    from app.workflows.agent_runs_sweeper import force_settle_stale_pending_trees_step
+
+    for reason in (
+        "legacy_charged",
+        "partially_charged",
+        "pending_children",
+        "pre_cutover",
+        "already",
+        "unknown",
+    ):
+        _sweeper_with(monkeypatch, [SettleOutcome(False, reason)])
+        seen = _logs(monkeypatch)
+        await force_settle_stale_pending_trees_step()
+        assert [lvl for lvl, _ in seen] == ["debug"], (reason, seen)
+
+
+async def test_a_round_that_actually_charged_something_is_info(monkeypatch):
+    """真的收了一棵树 = 这一轮发生了事，值得留在 INFO 里。"""
+    from app.services.ai.billing.tree_charge import SettleOutcome
+    from app.workflows.agent_runs_sweeper import force_settle_stale_pending_trees_step
+
+    _sweeper_with(
+        monkeypatch,
+        [SettleOutcome(True, "charged", 3.0), SettleOutcome(False, "deferred")],
+    )
+    seen = _logs(monkeypatch)
+    assert await force_settle_stale_pending_trees_step() == 1
+    assert [lvl for lvl, _ in seen] == ["info"], seen
+    # 分桶仍然完整 —— 降噪不该把同一轮里的其他结局吞掉。
+    assert "charged=1" in seen[0][1] and "deferred=1" in seen[0][1], seen

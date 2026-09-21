@@ -817,12 +817,22 @@ class PointsRepository:
     ):
         """一条「按引用合计某一种流水」的语句。
 
-        两条腿各编译一次而不是写成 ``type IN ('consume','refund')``：mig 474 的
-        ``idx_point_transactions_agent_run_consume`` 是 **partial** 索引，谓词
-        ``type = 'consume' AND reference_type = 'agent_run'`` 必须被查询条件蕴含，
-        planner 才用得上它。改成 ``IN`` 就不再蕴含 —— 结果仍然正确，只是这条**被
-        前端轮询**的查询悄悄退回全表扫描，而且随流水线性变慢，没有任何探针会说出来
-        （那正是 474 存在的理由，原文写在该迁移的注释里）。
+        两条腿各编译一次而不是写成 ``type IN ('consume','refund')``，因为**每条腿
+        各有一个 partial 索引**，而 partial 索引只在它的谓词被查询条件**蕴含**时才
+        会被 planner 选中：
+
+        * ``consume`` 腿 → mig 474 ``idx_point_transactions_agent_run_consume``
+        * ``refund`` 腿 → mig 477 ``idx_point_transactions_agent_run_refund``
+
+        两条索引的谓词都是 ``type = '<那一种>' AND reference_type = 'agent_run'``，
+        与这里发出去的两个等值条件逐字一致。改成 ``IN`` 会让**两条**同时不再被蕴含
+        —— 结果仍然正确，只是这条**被前端轮询**的查询（议题详情页每次刷新）悄悄退回
+        全表扫描，而且随积分流水线性变慢，没有任何探针会说出来。那正是 474 存在的
+        理由，而 477 是终审 I-2 抓到的同一个洞在第二条腿上的复现。
+
+        ⚠️ mig 123 的 ``idx_point_transactions_unique_refund`` **帮不上 refund 腿**：
+        它首列是 ``team_id``，而这条查询不带 ``team_id``。这就是 477 必须单独存在、
+        而不是「表上已经有个 refund 索引了」的原因。
         """
         return (
             select(

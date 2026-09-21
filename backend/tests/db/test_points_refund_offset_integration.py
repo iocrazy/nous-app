@@ -17,6 +17,10 @@ WHY THIS FILE EXISTS
     的实现会**加**上去，而单测的夹具正好是自己编的那一份。
   * **``amount`` 是 INTEGER** —— 这张表的金额列不是 numeric。桩里随手写 21.0 能过，
     真库上非整数会被拒/被截，所以这里的夹具必须是整数，这件事只有真库说得出来。
+  * **两条 partial 索引到底能不能被 planner 用上**（mig 474 / mig 477）—— 「谓词蕴含」
+    是 **planner 的判断**，不是我们读 SQL 文本能断言的事。单测里那条
+    ``test_each_leg_keeps_its_equality_on_type_so_the_partial_index_holds`` 只能证明
+    我们**发出去**的两条 WHERE 长什么样；索引到底被选中没有，只有 ``EXPLAIN`` 说了算。
 
 ``charged_points_for_run_trees`` 一并在真库上跑：它按 ``root_run_id`` 把全树的流水
 合起来，而「退款挂在 root 那一行、consume 也挂在 root」这个真实形状（2026-09-17 那
@@ -246,3 +250,74 @@ async def test_the_tree_reader_sees_the_refund_too(orm_dsn, pg, team):
                 "DELETE FROM public.agent_runs WHERE id = ANY($1::bigint[])", made
             )
         await pg.execute("DELETE FROM public.ai_agents WHERE id = $1", agent_id)
+
+
+# ── 两条腿的 partial 索引真的被 planner 选中（mig 474 / 477，终审 I-2）──────
+
+
+#: 两条腿真发出去的查询形状。与 ``_charge_leg_stmt`` 编译结果同构 —— 这里写字面 SQL
+#: 是因为 ``EXPLAIN`` 要的是一条能直接喂给服务器的语句，而被测的命题（「planner 用不
+#: 用得上那个 partial 索引」）只取决于 WHERE 的**形状**，不取决于它由谁拼出来。
+#: 形状与 ORM 的一致性由单测那条编译断言 + mig 477 的文本断言两侧共同钉住。
+_LEG_SQL = (
+    "SELECT reference_id, sum(amount) FROM point_transactions"
+    " WHERE type=$1 AND reference_type='agent_run'"
+    " AND reference_id IN ('1','2') GROUP BY reference_id"
+)
+
+
+async def _plan(pg, sql: str) -> str:
+    """强制关掉顺扫之后的执行计划。
+
+    ⚠️ 关顺扫是必须的：drift 库里这张表只有个位数行，planner 永远会选顺扫（它更
+    便宜），于是「索引能不能用」这个命题在小表上根本观察不到。关掉之后如果计划里
+    仍然是 Seq Scan（带天价 cost），就说明那条索引**用不上** —— 这正是要区分的事。
+    """
+    rows = await pg.fetch(f"EXPLAIN {sql}")
+    return "\n".join(r[0] for r in rows)
+
+
+@_skip
+@pytest.mark.parametrize(
+    "txn_type,index_name",
+    [
+        ("consume", "idx_point_transactions_agent_run_consume"),
+        ("refund", "idx_point_transactions_agent_run_refund"),
+    ],
+)
+async def test_each_leg_is_served_by_its_own_partial_index(pg, txn_type, index_name):
+    """终审 I-2 的决定性验证：refund 腿此前**没有任何索引**可用（mig 123 那个
+    refund 唯一索引首列是 ``team_id``，这条查询不带 team_id），于是在同一个被前端
+    轮询的端点上又开了一条全扫。
+
+    断言两件事，缺一不可：
+      ① 计划里点名了**这一条**索引；
+      ② ``Index Cond`` 之外**没有** ``Filter`` —— 没有残留过滤才说明 planner 真的从
+         partial 谓词里把 ``type`` / ``reference_type`` 两个等值**证掉了**（那就是
+         「蕴含」本身）。只断言 ①、不断言 ②，一个谓词写歪但仍能走索引+过滤的版本
+         会照样转绿，而那正是慢下来的那种形状。
+    """
+    await pg.execute("SET enable_seqscan=off")
+    plan = await _plan(pg, _LEG_SQL.replace("$1", f"'{txn_type}'"))
+    assert index_name in plan, plan
+    assert "Seq Scan" not in plan, plan
+    assert "Filter:" not in plan, plan
+
+
+@_skip
+async def test_the_in_form_loses_both_indexes(pg):
+    """反向对照，也是「两条腿而不是一条 ``type IN (…)``」这个设计的**证据**。
+
+    没有这一条，上面那条用例在「合成一条 IN 查询」的实现上也可能碰巧转绿（比如
+    planner 选了别的索引），于是那个设计决定就变回了一句无法证伪的注释。
+    """
+    await pg.execute("SET enable_seqscan=off")
+    plan = await _plan(
+        pg,
+        "SELECT reference_id, sum(amount) FROM point_transactions"
+        " WHERE type IN ('consume','refund') AND reference_type='agent_run'"
+        " AND reference_id IN ('1','2') GROUP BY reference_id",
+    )
+    assert "idx_point_transactions_agent_run_consume" not in plan, plan
+    assert "idx_point_transactions_agent_run_refund" not in plan, plan
+    assert "Seq Scan" in plan, plan
