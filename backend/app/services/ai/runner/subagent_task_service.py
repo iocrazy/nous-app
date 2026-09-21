@@ -715,26 +715,50 @@ class SubAgentTaskService:
         except Exception as exc:
             logger.exception("[subagent_task] run_turn failed slug={}", slug)
             error_msg = f"sub-agent crashed: {exc!s:.120}"
-            if announced_child_id is not None:
-                await self._emit_parent(
-                    "subagent_done",
-                    {
-                        "child_run_id": announced_child_id,
-                        "task_id": None,
-                        "mode": "sync",
-                        "subagent_type": slug,
-                        "status": "failed",
-                        # There is no envelope to summarise, so the card says
-                        # WHY instead of going blank — the parent's trajectory
-                        # is the only place that reason is ever shown.
-                        "summary": clip_claimed_text(error_msg),
-                        "cost_cents": _cost_cents_of(announced_recorder),
-                        "byok_cents": _byok_cents_of(announced_recorder),
-                        "tokens_used": _tokens_of(announced_recorder),
-                        "duration_ms": int((time.monotonic() - started) * 1000),
-                    },
-                )
-            return self._failed(error_msg)
+            if announced_child_id is None:
+                # 宣告之前就挂了：没有子 run，也就没有 id、没有花费可报。
+                return self._failed(error_msg)
+            # 崩溃子 run 的真花费**只有这里报得出来** —— worker 那条读子 run 行的
+            # 回落是安全网、生产上进不去（可达性分析见
+            # ``agent_worker._child_row_cost_cents`` 的 docstring）。
+            #
+            # 一条跑了十轮工具调用才挂掉的子 run 花的是真钱。这三个数下面的
+            # ``subagent_done`` 一直在报，而返回的 envelope 以前是裸 ``_failed``
+            # —— 全零、``sub_run_id`` 也是 None。
+            #
+            # 同步路上没人发现，是因为父行的花费来自那条 ``subagent_done``。
+            # **后台路上没有那条**：worker 建 ``SubAgentTaskService`` 时不传
+            # ``parent_recorder``，``_emit_parent`` 直接 return，父级看到的唯一数字
+            # 就是这个 envelope 里的 0（worker 自己再发一条 ``subagent_done``）。
+            # 与 Task 7b defect A 同族 —— 那次是成功路径漏了同一个键。
+            crashed_cost = _cost_cents_of(announced_recorder)
+            crashed_byok = _byok_cents_of(announced_recorder)
+            crashed_tokens = _tokens_of(announced_recorder)
+            await self._emit_parent(
+                "subagent_done",
+                {
+                    "child_run_id": announced_child_id,
+                    "task_id": None,
+                    "mode": "sync",
+                    "subagent_type": slug,
+                    "status": "failed",
+                    # There is no envelope to summarise, so the card says
+                    # WHY instead of going blank — the parent's trajectory
+                    # is the only place that reason is ever shown.
+                    "summary": clip_claimed_text(error_msg),
+                    "cost_cents": crashed_cost,
+                    "byok_cents": crashed_byok,
+                    "tokens_used": crashed_tokens,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            return {
+                **self._failed(error_msg),
+                "sub_run_id": announced_child_id,
+                "cost_cents": crashed_cost,
+                "byok_cents": crashed_byok,
+                "tokens_used": crashed_tokens,
+            }
 
     # ── background (await=false) ──────────────────────────────────────
 

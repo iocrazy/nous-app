@@ -411,6 +411,65 @@ async def test_a_crashing_child_still_reports_done(monkeypatch, caller_ctx):
     assert "provider exploded" in done["summary"]
 
 
+async def test_the_crash_envelope_carries_what_the_child_burned(
+    monkeypatch, caller_ctx
+):
+    """崩溃返回的 envelope 必须带上子 run 的 id 与它烧掉的钱。
+
+    以前是裸 ``_failed``：``sub_run_id`` None、``cost_cents`` 0.0 —— 而同一个
+    ``except`` 分支下面那条 ``subagent_done`` 报的是 3.0。同步路上看不出来（父行
+    的花费来自那条事件）；**后台路上那条事件不存在** —— worker 建
+    ``SubAgentTaskService`` 时不传 ``parent_recorder``，``_emit_parent`` 直接
+    return，父级唯一能看到的数字就是这个 envelope 里的 0。
+
+    Task 7b defect A 同族：那次是成功路径漏了同一个键。
+    """
+    wired = _wire_sync_spawn(monkeypatch)
+    wired.run_turn.side_effect = RuntimeError("provider exploded")
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+
+    out = await service.spawn({"subagent_type": "librarian", "prompt": "dig"})
+
+    assert out["status"] == "failed"
+    assert out["sub_run_id"] == "51"
+    assert out["cost_cents"] == 3.0
+    assert out["tokens_used"] == 15
+    # 事件与 envelope 是同一个数的两份投影，不许各说各的。
+    done = rec.events[1][1]
+    assert (done["cost_cents"], done["child_run_id"]) == (
+        out["cost_cents"],
+        out["sub_run_id"],
+    )
+
+
+async def test_a_crash_before_the_announcement_reports_no_child(
+    monkeypatch, caller_ctx
+):
+    """负向对照：宣告之前就挂了 —— 没有子 run，报出 id 或花费都是凭空捏造。
+
+    ``stack build failed`` 走的是 ``_spawn`` 里更早的那个 ``except``，与上面那条
+    共用 ``_failed``，所以这条同时钉住「别把花费无条件塞进 ``_failed``」。
+    """
+    wired = _wire_sync_spawn(monkeypatch)
+    import app.services.ai.chat.ai_library_chat_wiring as wiring_mod
+
+    monkeypatch.setattr(
+        wiring_mod,
+        "build_agent_runner_stack",
+        AsyncMock(side_effect=RuntimeError("no provider")),
+    )
+    rec = _EventRecorder()
+    service = SubAgentTaskService(**caller_ctx, parent_recorder=rec)
+
+    out = await service.spawn({"subagent_type": "librarian", "prompt": "dig"})
+
+    assert out["status"] == "failed"
+    assert out["sub_run_id"] is None and out["cost_cents"] == 0.0
+    assert rec.events == []  # 没宣告过，也就不欠一条 done
+    wired.run_turn.assert_not_awaited()
+
+
 async def test_a_child_that_never_started_reports_no_done(monkeypatch, caller_ctx):
     """Negative control: a spawn refused BEFORE the recorder opened never
     emitted spawned either, so a done would invent a child."""
