@@ -220,6 +220,14 @@ class AgentRuns(Base):
             "started_at",
             postgresql_where="(root_run_id IS NOT NULL)",
         ),
+        # mig 483：efficiency_groups 的项目 scope 与 count_auto_dispatches_today 的谓词。
+        # partial：project_id 大面积为 NULL。
+        Index(
+            "idx_agent_runs_project_started",
+            "project_id",
+            text("started_at DESC"),
+            postgresql_where="(project_id IS NOT NULL)",
+        ),
         Index(
             "idx_agent_runs_running_agent",
             "agent_id",
