@@ -1,4 +1,4 @@
-"""三条源码扫描守卫，钉住 mig 479 之后的三条口径。
+"""四条源码扫描守卫，钉住 mig 479 之后的四条口径。
 
 1. **``agent_runs.cost_cents`` 是展示列，不许进聚合。** 它是「自身 + 已报到的
    后代」，同一棵树上父行与子行各自都含着同一笔钱 —— 按它 SUM 就是把委派链上
@@ -13,8 +13,13 @@
    挪到 Python 不会改变它的错法 —— ``for r in rows: total += r["cost_cents"]``
    与 ``SUM(cost_cents)`` 是同一个双计。见下面 ``PY_ROLLUP_ALLOWLIST`` 的长注释：
    这条为什么只能是登记制，而不能像守卫 1 那样直接拦。
+4. **把老列放进 select 参数位（裸投影）的地方，也必须逐个登记。** 裸投影本身合法
+   —— 那一列就是行上的展示值。但它一旦流出仓库，行里那个 ``cost_cents`` 键与
+   ``own_cost_cents.label("cost_cents")`` 送出去的键**逐字一样**，于是守卫 3 在消
+   费端分不清自己看的是哪一列，而守卫 1 只认聚合形态、别名禁令只认 ``.label()``
+   —— 三条都看不见这一族写法。见 ``BARE_PROJECTION_ALLOWLIST``。
 
-三条都是**源码扫描**，所以它们不看行为、只看写法 —— 能绕过（换个变量名、拼
+四条都是**源码扫描**，所以它们不看行为、只看写法 —— 能绕过（换个变量名、拼
 字符串）。它们要拦的不是恶意，是「照着旁边那行抄一个聚合」这种复发。
 
 ⚠️ **它们扫的文本不一样，这是故意的：**
@@ -28,6 +33,10 @@
   ``recompute_spent`` 的 docstring），拦它们等于逼着大家不许把公式写进文档。
 * 守卫 3 同守卫 1 扫**原样源码**，理由一样：它找的是字典键 ``r["cost_cents"]``，
   而键名就是字符串字面量。
+* 守卫 4 同守卫 2 扫 ``_code_only``：它找的是一次 ORM 属性引用
+  （``AgentRuns.cost_cents`` 出现在代码里），散文里提到这个名字不该被要求登记 ——
+  ``app/`` 下的注释与 docstring 正在这么提它（比如 ``cost_rows_for_ids`` 那段
+  「别把这一列当成树总额加起来」的警告）。
 """
 
 from __future__ import annotations
@@ -109,10 +118,9 @@ PY_ROLLUP_PATTERNS = (
 #
 # 而「裸投影」是常态，不是边角：``AgentRuns.cost_cents`` 这一列的**自己的名字就是**
 # ``cost_cents``，所以 ``select(..., AgentRuns.cost_cents)`` + ``.mappings()`` 不需要
-# 任何 ``.label()`` 就能产出 ``row["cost_cents"]``。全仓现有 8 处这样的投影
-# （``agent_runs_repository.py:1052,1270``、``workforce_router.py:223,660``、
-# ``ai_library_router.py:1891,1924,2063,2321`` —— 都是单行展示，本身没问题）。
-# 下面那条别名禁令**管不到它们**：它们压根没有 ``.label()``。
+# 任何 ``.label()`` 就能产出 ``row["cost_cents"]``。下面那条别名禁令**管不到它们**：
+# 它们压根没有 ``.label()``。那一族现在由**守卫 4**（``BARE_PROJECTION_ALLOWLIST``）
+# 按文件登记 —— 它不替这条守卫回答「这次求和对不对」，它让投影那一侧也有人签字。
 #
 # 要根治得让标签不再说谎 —— 把两处 ``own_cost_cents.label("cost_cents")`` 改成
 # ``own_cost_cents``、消费方跟着改读法，届时「读到 ``cost_cents`` 键」就等价于
@@ -135,9 +143,55 @@ PY_ROLLUP_ALLOWLIST = {
 #:
 #: ⚠️ 这条**不是**「`r["cost_cents"]` 一族安全」的依据，别那么读它。折叠列不加
 #: `.label()` 也照样落在 `cost_cents` 这个键上（列名本来就叫这个），所以这条禁令
-#: 覆盖不到裸投影 —— 见上面 `PY_ROLLUP_ALLOWLIST` 的已知缺口那段。它只堵住「改名」
-#: 这一种额外的混淆，是补充，不是那道门。
+#: 覆盖不到裸投影 —— 那一族归守卫 4。它只堵住「改名」这一种额外的混淆，是补充，
+#: 不是那道门。
 COST_CENTS_ALIAS_PATTERN = r"AgentRuns\.cost_cents\.label\("
+
+# ── 守卫 4 的材料 ──────────────────────────────────────────────────────
+
+#: 一次**裸投影** = 源码里对 ``AgentRuns.cost_cents`` 的一次引用，既没被聚合函数包住
+#: （那归守卫 1），也没被 ``.label()`` 改名（那归上面的别名禁令）。剩下的形态实际上
+#: 只有一种：把这一列摆进 select 的参数位（或者先攒进一个 ``cols`` 元组再
+#: ``select(*cols)`` —— ``list_for_issue`` 就是后者，所以这条守卫**不**去匹配
+#: ``select(`` 这个词，只认那次属性引用）。
+BARE_PROJECTION_PATTERN = r"AgentRuns\.cost_cents\b(?!\s*\.label\()"
+
+#: 命中点紧邻其后的这两个包裹之一 → 聚合形态，归守卫 1，不在这条守卫的管辖里
+#: （让同一处写法同时点亮两条守卫只会让报错更难读）。
+_AGGREGATE_WRAPS = ("func.sum(", "func.coalesce(")
+
+#: 登记表：``app/`` 下的相对路径 → 那几处投影把这一列送去干什么。
+#:
+#: ⚠️ **为什么裸投影需要登记**：老列是展示列，摆进 select 本身完全合法 —— 单行上
+#: 「这次 run 花了多少（含已报到的后代）」就是它的正确用法。危险在它**流出仓库之后**：
+#: 行里那个键叫 ``cost_cents``，而 ``monthly_usage_by_agent`` / ``ai_library_router``
+#: 刻意用 ``own_cost_cents.label("cost_cents")`` 送出的键**一模一样**。于是守卫 3 在
+#: 消费端根本分不清手里是哪一列（它的长注释里写的就是这件事），而守卫 1 只认聚合形态、
+#: 别名禁令只认 ``.label()`` —— 这一族对三条守卫全部隐形，Ruling 6 之前
+#: ``ai_library_router`` 里那个 ``sum_cost_cents += float(cost)`` 正是这么长出来的。
+#:
+#: 所以这条守卫问的是：**有没有人新开了一个「把折叠列发出去」的口子而没说清它去哪儿**。
+#: 新增一处就转红，作者必须在这里写下用途；写这一行的时候，人正好被迫回答「下游会不会
+#: 把它加起来」。
+#:
+#: 已知缺口，写下来免得被误当成全覆盖：**登记是按文件的，不是按处的。** 在一个已登记
+#: 的文件里再加一处裸投影，这张表照过。要收紧就得把值改成 (处数, 理由) 并接受它随无关
+#: 编辑而 churn —— 那是一次独立的权衡，不是这一票顺手能定的。
+BARE_PROJECTION_ALLOWLIST: dict[str, str] = {
+    "repositories/agent_runs_repository.py": (
+        "list_for_issue 的议题 run 列表 + cost_rows_for_ids 的按 id 取行 —— "
+        "两处都是单行展示列，跨行的钱走 own_cost_cents（tree_cost_cents / "
+        "spent_cents_for_issue）"
+    ),
+    "api/workforce_router.py": (
+        "workforce 面板的 recent runs（总览每 agent 5 条 + agent 详情 20 条）—— "
+        "逐行渲染，本文件不对它求和"
+    ),
+    "api/ai_library_router.py": (
+        "dashboard 的 run 行 / 最近一条 run 横幅 / recent runs 表 / runs 列表 —— "
+        "四处都是逐行展示；同一批响应里的合计读的是 own_cost_cents"
+    ),
+}
 
 
 def _code_only(src: str) -> str:
@@ -351,6 +405,76 @@ def test_the_folded_column_never_travels_under_an_alias():
     assert not _hits(
         'AgentRuns.own_cost_cents.label("cost_cents")', (COST_CENTS_ALIAS_PATTERN,)
     )
+
+
+# ── 守卫 4：裸投影逐个登记 ─────────────────────────────────────────────
+
+
+def _bare_projections_in(code: str) -> list[str]:
+    """``_code_only`` 之后的源码里，那些没被聚合包住的 ``AgentRuns.cost_cents``。"""
+    out: list[str] = []
+    for match in re.finditer(BARE_PROJECTION_PATTERN, code):
+        before = code[: match.start()]
+        if before.rstrip().endswith(_AGGREGATE_WRAPS):
+            continue  # 聚合形态归守卫 1
+        line = before.count("\n") + 1
+        out.append(f"L{line}: {match.group(0)}")
+    return out
+
+
+def _bare_projection_hits() -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for path, src in _app_sources():
+        hits = _bare_projections_in(_code_only(src))
+        if hits:
+            out[str(path.relative_to(APP))] = hits
+    return out
+
+
+def test_bare_projections_of_cost_cents_are_registered():
+    """两向：没登记的新投影要红，登记了却已经不存在的条目也要红。
+
+    后者不是洁癖 —— 一个失效条目会替将来某个新出现的、没人看过的投影背书，而那正是
+    这条守卫唯一要买的东西。
+    """
+    hits = _bare_projection_hits()
+    unregistered = {k: v for k, v in hits.items() if k not in BARE_PROJECTION_ALLOWLIST}
+    stale = sorted(set(BARE_PROJECTION_ALLOWLIST) - set(hits))
+    assert set(hits) == set(BARE_PROJECTION_ALLOWLIST), (
+        "老列被摆进了新的 select 参数位。它本身合法（展示列），但送出去之后那个 "
+        "cost_cents 键与 own_cost_cents.label('cost_cents') 逐字一样，下游分不清 —— "
+        "把文件连同用途写进 BARE_PROJECTION_ALLOWLIST，或者改投 own_cost_cents。"
+        f"未登记：{unregistered}；失效登记：{stale}"
+    )
+
+
+def test_the_bare_projection_guard_bites():
+    """正例：select 参数位与先攒 ``cols`` 元组两种写法都要被抓。"""
+    for snippet in (
+        "stmt = select(AgentRuns.id, AgentRuns.cost_cents)",
+        "cols = (\n    AgentRuns.id,\n    AgentRuns.cost_cents,\n)",
+        "stmt = select(func.count(), AgentRuns.cost_cents)",
+    ):
+        assert _bare_projections_in(snippet), snippet
+
+
+def test_the_bare_projection_guard_leaves_the_other_guards_forms_alone():
+    """反例：自身列、聚合形态、别名 —— 三者各有各的守卫，这条一个都不许重复点亮。"""
+    for snippet in (
+        "stmt = select(AgentRuns.id, AgentRuns.own_cost_cents)",
+        'AgentRuns.own_cost_cents.label("cost_cents")',
+        "total = func.sum(AgentRuns.cost_cents)",
+        "total = func.sum(func.coalesce(AgentRuns.own_cost_cents, 0))",
+        "total = sum(func.coalesce(AgentRuns.cost_cents, 0))",
+        'stmt = select(AgentRuns.cost_cents.label("spend"))',
+    ):
+        assert not _bare_projections_in(snippet), snippet
+
+
+def test_every_registered_bare_projection_says_where_it_goes():
+    """条目的价值全在那句用途上。空着等于签到，不是判断。"""
+    for path, why in BARE_PROJECTION_ALLOWLIST.items():
+        assert len(why) > 20 and ("展示" in why or "渲染" in why), path
 
 
 # ── _code_only ─────────────────────────────────────────────────────────
