@@ -244,12 +244,11 @@ services:
       retries: 3
     restart: unless-stopped
 
-  falkordb:
-    image: falkordb/falkordb:latest
-    container_name: nous-falkordb
-    volumes:
-      - /media/heygo/program/datahub/nous/data/falkordb:/var/lib/falkordb/data
-    restart: unless-stopped
+  # falkordb（Graphiti L3 图记忆）已于 2026-09-22 下线：三个月 0 节点、get_context
+  # 零读方；system_settings 已置 memory.l3_provider=none / graph_memory_enabled=false，
+  # 容器已 stop，数据卷 /media/heygo/program/datahub/nous/data/falkordb 未删。
+  # 要恢复：把服务块加回来 + 两把设置开关翻回去。Honcho（L2）的 compose 在仓库外
+  # /media/heygo/program/datahub/nous/honcho/，同日改名 .disabled-2026-09-22。
 
   newsnow:
     image: ghcr.io/ourongxing/newsnow:latest
