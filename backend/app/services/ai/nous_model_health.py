@@ -426,6 +426,45 @@ async def probe_nous_model(
             # empty-stringifying timeout MORE likely here than on the chat path.
             ok = bool(res.get("success"))
             err = res.get("error") or ""
+
+            # "The endpoint answered" is not "this model works". test_connection
+            # returns success as soon as list_models() does not raise, without
+            # ever looking at whether THIS row's model is in the list it just
+            # fetched — so a green ASR dot used to mean only that /v1/models
+            # replied.
+            #
+            # Measured on the nous-engine gateway 2026-09-22, minutes apart:
+            # /v1/models listed [moss-asr, wemm-embedding-4b, qwen3-8-27b] while
+            # POST /embeddings for wemm returned 503 "model is not loaded"; a
+            # minute later the list was [moss-asr] alone, yet qwen3 still served
+            # 200. The engine loads models on demand, so its list is a snapshot
+            # of what is loaded, and neither direction is a verdict on its own.
+            #
+            # Hence three outcomes, with the middle one carrying the honesty:
+            # listed → ok; answered but unlisted → not_probed (we confirmed
+            # nothing — a lazily loaded model can be absent and still serve, so
+            # calling it broken would be the "探针够不着 ≠ 目标是坏的" mistake);
+            # call failed → fail, unchanged.
+            #
+            # ``models is None`` means the provider exposes no catalog at all
+            # (volcengine ASR is the documented case). Demanding membership in a
+            # list that does not exist would paint every such row permanently
+            # red — the false red this is otherwise removing — so it stays ok.
+            listed = res.get("models")
+            if ok and isinstance(listed, list) and model and model not in listed:
+                offered = ", ".join(str(m) for m in listed[:8]) or "(none)"
+                return {
+                    "ok": False,
+                    "not_probed": True,
+                    "detail": (
+                        f"endpoint answered but did not list {model!r}; "
+                        f"it offered: {offered}"
+                    ),
+                    "error": None,
+                    "dims": None,
+                    "code": None,
+                }
+
             return {
                 "ok": ok,
                 "detail": "reachable" if ok else "",
