@@ -38,6 +38,7 @@ class JimengLocalProtocol(ProviderProtocol):
     # long as that video row was unroutable — listing an option the dropdown
     # could only ever fail on is worse than not listing it.
     model_types = ("image", "video")
+    credential_kind = "user_device"
     generation_family = "jimeng-local"
     # Same knobs as the server-side jimeng-cli protocol — it is the same CLI,
     # just executed on the user's machine (spec §3.2 groups them on one row).

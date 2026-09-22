@@ -96,6 +96,7 @@ class CodexProtocol(ProviderProtocol):
         "(no api_key; ChatGPT subscription quota). Image generation only."
     )
     model_types = ("image",)
+    credential_kind = "server_session"
     aliases = ()
     generation_family = "codex"
     capabilities = ProviderCapabilities(

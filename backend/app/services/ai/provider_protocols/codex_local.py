@@ -29,6 +29,7 @@ class CodexLocalProtocol(ProviderProtocol):
     label = "Codex (Local daemon)"
     description = "codex exec on the user's paired device — text (no tools) and images."
     model_types = ("llm", "image")
+    credential_kind = "user_device"
     is_chat_key = True
     generation_family = "codex-local"
     # The server-side codex protocol's knobs — it is the same CLI, just

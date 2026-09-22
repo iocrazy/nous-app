@@ -64,6 +64,12 @@ class MediahubModelResponse(BaseModel):
     pricing_value: float
     is_enabled: bool
     sort_order: int
+    # Migration 431: a non-NULL owner makes this row ONE user's — RLS and
+    # list_enabled(viewer_user_id=…) hide it from everyone else. Projected for
+    # the admin page so a private row and a platform-wide row stop rendering as
+    # two identical cards (2026-09-21: codex-image vs codex-local-image were
+    # exactly that pair). Admin-only surface; never in _PUBLIC_COLS.
+    owner_user_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     # Last connectivity-test result (persisted; drives the status dot + the
@@ -133,6 +139,11 @@ class ProviderProtocolItem(BaseModel):
     model_types: List[str]
     aliases: List[str]
     is_default: bool
+    # "api_key" | "server_session" | "user_device" — whose credential runs
+    # this, and so whose machine and whose quota. The only thing separating
+    # the three gpt-image cards from each other in the admin UI; see
+    # ProviderProtocol.credential_kind.
+    credential_kind: str
 
 
 class ProviderProtocolListResponse(BaseModel):

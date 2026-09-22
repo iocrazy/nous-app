@@ -14,6 +14,7 @@ class QwenProtocol(ProviderProtocol):
         "— the base_url + key is the whole credential."
     )
     model_types = ("llm", "embedding", "asr")
+    credential_kind = "api_key"
     is_chat_key = True
     is_default = True
 

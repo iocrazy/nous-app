@@ -10,6 +10,7 @@ class ClaudeProtocol(ProviderProtocol):
     label = "Claude (Anthropic)"
     description = "Native Anthropic Messages API (claude-*)."
     model_types = ("llm",)
+    credential_kind = "api_key"
     is_chat_key = True
 
     def build_chat_adapter(

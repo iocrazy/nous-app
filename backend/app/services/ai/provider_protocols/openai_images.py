@@ -40,6 +40,7 @@ class OpenAIImagesProtocol(ProviderProtocol):
         "(per docs 2026-09-13; not yet measured on the live API)."
     )
     model_types = ("image",)
+    credential_kind = "api_key"
     aliases = ()
     generation_family = "openai-images"
     supports_http_image_probe = False  # shells out to the CLI, like codex
