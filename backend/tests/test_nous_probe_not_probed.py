@@ -1,4 +1,4 @@
-# backend/tests/test_mediahub_probe_not_probed.py
+# backend/tests/test_nous_probe_not_probed.py
 
 """F1 — the probe must say "I can't check this", not "this is broken".
 
@@ -33,11 +33,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.mediahub_model_health import (
+from app.services.ai.nous_model_health import (
     LOCAL_ENGINE_PROVIDERS,
     PROBE_STATUSES,
     PROBEABLE_TYPES,
-    probe_mediahub_model,
+    probe_nous_model,
     probe_result_status,
 )
 
@@ -64,11 +64,11 @@ def _no_network():
     factory (the ``asr`` branch's way out)."""
     return (
         patch(
-            "app.services.ai.mediahub_model_health.httpx.AsyncClient",
+            "app.services.ai.nous_model_health.httpx.AsyncClient",
             _ExplodingClient,
         ),
         patch(
-            "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+            "app.services.ai.nous_model_health.AIProviderFactory.test_connection",
             new=AsyncMock(side_effect=_NetworkTouched("probe called the provider")),
         ),
     )
@@ -93,7 +93,7 @@ async def test_unprobeable_type_returns_not_probed_without_touching_the_network(
 ) -> None:
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(_row(typ))
+        result = await probe_nous_model(_row(typ))
 
     assert result["not_probed"] is True
     # Not a success. A caller counting "green lights" must not pick this up.
@@ -126,7 +126,7 @@ async def test_unprobeable_type_maps_to_the_not_probed_status(typ: str) -> None:
     """The persisted ``last_test_status``, via the mapping both writers share."""
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(_row(typ))
+        result = await probe_nous_model(_row(typ))
 
     assert probe_result_status(result) == "not_probed"
 
@@ -152,7 +152,7 @@ async def test_probeable_types_still_reach_the_transport(typ: str) -> None:
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
         with pytest.raises(_NetworkTouched):
-            await probe_mediahub_model(row)
+            await probe_nous_model(row)
 
 
 def test_probe_result_status_maps_all_three_outcomes() -> None:
@@ -186,12 +186,12 @@ def test_probe_statuses_matches_the_orm_check_constraint() -> None:
     tuple stayed put. The ORM constraint is the checkable stand-in for the DB —
     migration 428 wrote both, and ``schema-drift`` keeps ORM and DB aligned.
     """
-    from app.models.ai import MediahubModels
+    from app.models.ai import NousModels
 
     constraint = next(
         c
-        for c in MediahubModels.__table__.constraints
-        if c.name == "mediahub_models_last_test_status_check"
+        for c in NousModels.__table__.constraints
+        if c.name == "nous_models_last_test_status_check"
     )
     literals = set(re.findall(r"'([^']*)'", str(constraint.sqltext)))
     assert literals == set(PROBE_STATUSES)
@@ -226,7 +226,7 @@ async def test_local_engine_is_not_probed_and_never_touches_the_network(
 ) -> None:
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(_local_row(provider))
+        result = await probe_nous_model(_local_row(provider))
 
     assert result["not_probed"] is True
     assert result["ok"] is False
@@ -242,7 +242,7 @@ async def test_local_engine_llm_row_maps_to_not_probed_status() -> None:
     reached the chat branch and persisted ``fail`` on every hourly poll."""
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(_local_row("codex-local"))
+        result = await probe_nous_model(_local_row("codex-local"))
 
     assert probe_result_status(result) == "not_probed"
 
@@ -259,7 +259,7 @@ async def test_local_engine_check_precedes_the_type_gate() -> None:
 
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(row)
+        result = await probe_nous_model(row)
 
     assert result["not_probed"] is True
     # The reason names the LOCAL boundary, not the type boundary.
@@ -270,7 +270,7 @@ def test_local_engine_providers_membership_is_pinned() -> None:
     """Change-detector, same role as the PROBEABLE_TYPES one above.
 
     NOTE: sibling copies of this literal live in
-    ``mediahub_model_repository.list_enabled`` (the picker's ``is_local`` flag)
+    ``nous_model_repository.list_enabled`` (the picker's ``is_local`` flag)
     and ``workflows/canvas_generation._LOCAL_ENGINES``. They are not imported
     from here yet — see the task report's follow-up item.
     """

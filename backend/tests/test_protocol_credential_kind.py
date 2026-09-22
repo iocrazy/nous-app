@@ -100,7 +100,7 @@ def test_protocols_endpoint_ships_the_field():
     key names again — the mirror this field was added to remove."""
     import asyncio
 
-    from app.api.admin.mediahub_model_router import list_provider_protocols
+    from app.api.admin.nous_model_router import list_provider_protocols
 
     resp = asyncio.run(list_provider_protocols(auth=object()))
     got = {p.key: p.credential_kind for p in resp.protocols}

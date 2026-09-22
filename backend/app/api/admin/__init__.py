@@ -21,8 +21,8 @@ from .credits_router import router as credits_router
 # ``app/api/__init__.py``.
 from .distribution_inspect_router import router as distribution_inspect_api_router
 from .jimeng_auth_router import router as jimeng_auth_router
-from .mediahub_model_router import router as mediahub_model_router
 from .monitoring_router import router as monitoring_router
+from .nous_model_router import router as nous_model_router
 from .request_logs_router import router as request_logs_router
 from .search_router import router as search_router
 from .settings_router import router as settings_router
@@ -138,7 +138,7 @@ admin_router.include_router(credits_router, prefix="/credits", tags=["Admin - Cr
 admin_router.include_router(tags_router, prefix="/tags", tags=["Admin - Tags"])
 admin_router.include_router(celery_router, prefix="/celery", tags=["Admin - Celery"])
 admin_router.include_router(
-    mediahub_model_router, prefix="/mediahub-models", tags=["Admin - Mediahub Models"]
+    nous_model_router, prefix="/nous-models", tags=["Admin - Nous Models"]
 )
 admin_router.include_router(
     jimeng_auth_router, prefix="/jimeng", tags=["Admin - Jimeng Auth"]

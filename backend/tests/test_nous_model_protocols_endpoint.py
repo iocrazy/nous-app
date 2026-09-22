@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.admin.mediahub_model_router import list_provider_protocols
+from app.api.admin.nous_model_router import list_provider_protocols
 
 
 @pytest.mark.asyncio

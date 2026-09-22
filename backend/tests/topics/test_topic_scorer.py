@@ -150,7 +150,7 @@ def _patch_nous(monkeypatch, *, allowed=False, models=None):
             return None
 
     monkeypatch.setattr(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         lambda: _Repo(),
     )
 

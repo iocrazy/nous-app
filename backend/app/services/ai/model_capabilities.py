@@ -32,7 +32,7 @@ _cache_loaded: bool = False
 # "accepts image input" for it would be a different claim entirely.
 _LOCAL_VISION_PROVIDERS = frozenset({"codex-local"})
 
-# Lowercased ``mediahub_models.name`` values served by one of those providers.
+# Lowercased ``nous_models.name`` values served by one of those providers.
 # Cached beside _cache so the common path stays zero extra roundtrips — the
 # gate runs once per chat turn, and a per-turn catalog SELECT for EVERY model
 # would be a real cost paid by every user to fix one provider.
@@ -115,10 +115,10 @@ async def _fetch_local_vision_models() -> set[str]:
     from sqlalchemy import select
 
     from app.db.session import read_scope
-    from app.models.ai import MediahubModels
+    from app.models.ai import NousModels
 
-    stmt = select(MediahubModels.name).where(
-        MediahubModels.actual_provider.in_(tuple(_LOCAL_VISION_PROVIDERS))
+    stmt = select(NousModels.name).where(
+        NousModels.actual_provider.in_(tuple(_LOCAL_VISION_PROVIDERS))
     )
     async with read_scope() as session:
         rows = (await session.execute(stmt)).scalars().all()

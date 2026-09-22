@@ -2,7 +2,7 @@
 
 The in-proc video provider_registry ships EMPTY (same as images), so before
 this slice every canvas video_gen op died on KeyError. Mirror the image
-path: KeyError → resolve the provider from the mediahub_models catalog
+path: KeyError → resolve the provider from the nous_models catalog
 (db_registry), bridge the durable /cover source URL back to a local file
 for image2video, and return a VideoGenResult-dict whose ``video_path`` is
 the CLI's local product (``video_url`` stays empty — no URL exists).

@@ -201,12 +201,12 @@ async def pg_connection_pressure_workflow(
 
 
 @DBOS.step()
-async def probe_mediahub_models_step() -> dict[str, Any]:
+async def probe_nous_models_step() -> dict[str, Any]:
     """Probe every ENABLED admin-configured platform (Nous) model and persist
     the result, so the admin's connectivity dots stay fresh without anyone
     clicking Test.
 
-    Reuses the exact probe (``probe_mediahub_model``) the manual admin Test endpoint
+    Reuses the exact probe (``probe_nous_model``) the manual admin Test endpoint
     runs, and the same persistence (``repo.record_test_result``) — no duplicated
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
@@ -216,13 +216,13 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
     image/video models red on the admin page and produced a WARNING per model
     per hour about nothing (2026-08-14).
     """
-    from app.repositories.mediahub_model_repository import get_mediahub_model_repository
-    from app.services.ai.mediahub_model_health import (
-        probe_mediahub_model,
+    from app.repositories.nous_model_repository import get_nous_model_repository
+    from app.services.ai.nous_model_health import (
+        probe_nous_model,
         probe_result_status,
     )
 
-    repo = get_mediahub_model_repository()
+    repo = get_nous_model_repository()
     rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
 
@@ -232,7 +232,7 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
         # enabled model, and the image probe spends a real generation per call.
         # Image rows stay ``not_probed`` here; the admin Test button is where a
         # paid probe is affordable. test_image_model_probe.py pins this.
-        result = await probe_mediahub_model(row)
+        result = await probe_nous_model(row)
         status = probe_result_status(result)
         detail = result.get("detail") or (result.get("error") or "")
         await repo.record_test_result(
@@ -249,7 +249,7 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
             # about the probe, not an event, and repeating it hourly is the
             # noise this change exists to remove.
             logger.warning(
-                f"[mediahub_model_health] {row.get('name') or row.get('id')} "
+                f"[nous_model_health] {row.get('name') or row.get('id')} "
                 f"status={status} code={result.get('code') or '<none>'} "
                 f"reason={detail or '<no detail>'}"
             )
@@ -267,10 +267,10 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
 # per enabled model per hour.
 @DBOS.scheduled("0 * * * *")
 @DBOS.workflow()
-async def mediahub_model_health_workflow(
+async def nous_model_health_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
-    summary = await probe_mediahub_models_step()
+    summary = await probe_nous_models_step()
     # ``not_probed`` is reported in both branches rather than folded into
     # either: "3/4 unreachable" was a wrong sentence about a run in which
     # nothing was wrong, and silently dropping the count would hide the fact
@@ -278,11 +278,11 @@ async def mediahub_model_health_workflow(
     skipped = summary.get("not_probed", 0)
     if summary["failed"]:
         logger.warning(
-            f"[mediahub_model_health] {summary['failed']}/{summary['total']} "
+            f"[nous_model_health] {summary['failed']}/{summary['total']} "
             f"platform models unreachable (not_probed={skipped})"
         )
     else:
         logger.info(
-            f"[mediahub_model_health] all {summary['ok']} probeable platform "
+            f"[nous_model_health] all {summary['ok']} probeable platform "
             f"models reachable (not_probed={skipped})"
         )

@@ -183,7 +183,7 @@ async def summarize(
 
     try:
         # DB-only credential resolution (铁律 2026-07-07): platform
-        # ``mediahub_models`` catalog first, no env fallback. The compaction
+        # ``nous_models`` catalog first, no env fallback. The compaction
         # provider is an admin-level system setting, so there is no user BYOK
         # dict to thread through here.
         adapter = await resolve_db_adapter(provider, "summarizer")

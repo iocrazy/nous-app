@@ -622,7 +622,7 @@ async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
 # The catalog row name, not a provider key — same vocabulary the model picker
 # shows (``GET /canvases/generation-models``).
 #
-# The 100-character bound is OURS, not the column's: ``mediahub_models.name``
+# The 100-character bound is OURS, not the column's: ``nous_models.name``
 # is unbounded ``Text``. It keeps a hostile query string from buying a full
 # catalog scan that was always going to end in ``model_unknown``. ⚠️ The cost
 # is that a catalog name longer than 100 characters answers a bare validation

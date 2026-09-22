@@ -1,6 +1,6 @@
 """媒体每次调用价（3b spec §3.2）。
 
-没有任何图片/视频 provider 回花费，``mediahub_models.pricing_value`` 又是积分，
+没有任何图片/视频 provider 回花费，``nous_models.pricing_value`` 又是积分，
 所以唯一来源是管理员配的 ``ai_model_prices.per_call_cents``（mig 466）。查法同
 ``RunRecorder._snapshot_rates``，差别是 provider **必填**——媒体侧同一个模型名
 可能挂两个 provider（订阅行与 API-key 行的价完全不同）。**无价回 None，绝不回

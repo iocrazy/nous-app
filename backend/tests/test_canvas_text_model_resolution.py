@@ -1,12 +1,12 @@
 """P0-1 regression net: the smart-canvas text prompt MUST resolve its model
-through the platform ``mediahub_models`` DB catalog — never a hardcoded slug.
+through the platform ``nous_models`` DB catalog — never a hardcoded slug.
 
 The whole class of bug this guards against (user real-machine walkthrough
 2026-07-12) was invisible to the existing suite because
 ``test_canvas_run_service.py`` mocks ``_get_adapter``/``resolve_db_adapter``
 away. These tests deliberately do the OPPOSITE: they drive the REAL resolve
 chain (``CanvasRunService._get_adapter`` → ``resolve_db_adapter`` →
-``resolve_mediahub_model`` → adapter factory) and only stub the repository
+``resolve_nous_model`` → adapter factory) and only stub the repository
 (the DB seam) with a fixture catalog. That is the only setup that can catch a
 default that names a model the catalog doesn't have.
 """
@@ -23,7 +23,7 @@ from app.services.canvas.canvas_run_service import CanvasRunService
 
 
 def _enabled_llm_row() -> dict:
-    """One enabled llm row shaped like a real ``mediahub_models`` catalog
+    """One enabled llm row shaped like a real ``nous_models`` catalog
     entry (doubao-backed, platform credentials present)."""
     return {
         "name": "mediahub-doubao-llm",
@@ -61,7 +61,7 @@ async def test_hardcoded_qwen_plus_default_is_unconfigured():
     svc = _make_service()
     repo = _repo(name_hit=None, enabled_llm=[])
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with pytest.raises(ProviderNotConfiguredError):
@@ -75,7 +75,7 @@ async def test_default_text_model_is_first_enabled_llm_from_catalog():
     svc = _make_service()
     repo = _repo(name_hit=_enabled_llm_row(), enabled_llm=[_enabled_llm_row()])
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         model = await svc._default_text_model()
@@ -91,7 +91,7 @@ async def test_catalog_llm_name_builds_a_real_adapter():
     svc = _make_service()
     repo = _repo(name_hit=_enabled_llm_row(), enabled_llm=[_enabled_llm_row()])
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with patch(

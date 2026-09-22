@@ -143,7 +143,7 @@ async def test_inventory_providers_reads_enabled_catalog_rows():
         {"actual_provider": "", "is_enabled": True},  # blank → out
     ]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=_catalog_repo(rows),
     ):
         providers = await inventory_providers()
@@ -154,7 +154,7 @@ async def test_inventory_providers_reads_enabled_catalog_rows():
 @pytest.mark.asyncio
 async def test_inventory_providers_settings_arg_is_ignored():
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=_catalog_repo([{"actual_provider": "doubao", "is_enabled": True}]),
     ):
         providers = await inventory_providers(
@@ -170,7 +170,7 @@ async def test_inventory_providers_empty_on_catalog_failure():
     repo = MagicMock()
     repo.list_all = AsyncMock(side_effect=RuntimeError("db down"))
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         assert await inventory_providers() == frozenset()

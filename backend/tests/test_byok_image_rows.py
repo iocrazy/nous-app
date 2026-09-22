@@ -1,5 +1,5 @@
 """The BYOK tier of the image chain: a user's own Settings → AI providers,
-projected into ``mediahub_models``-shaped rows.
+projected into ``nous_models``-shaped rows.
 
 Every case here is about ADMISSION — which of a user's enabled models may be
 dialled by the agent image chain and with whose credential. The tier must fail

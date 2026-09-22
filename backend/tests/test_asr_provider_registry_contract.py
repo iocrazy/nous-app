@@ -24,7 +24,7 @@ because only ONE probe type reaches the second one: ``llm`` and ``embedding``
 probe over direct httpx (which is why those two rows stayed green), while
 ``asr`` goes through ``AIProviderFactory.test_connection``.
 
-The blast radius was not just the red dot. ``resolve_mediahub_model`` returns
+The blast radius was not just the red dot. ``resolve_nous_model`` returns
 the row's ``actual_provider`` as the provider key, so
 ``ai_transcription`` → ``WhisperService(provider_key='nous')`` →
 ``get_provider('nous')`` raised on every real transcription too.

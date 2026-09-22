@@ -82,18 +82,18 @@ async def inventory_providers(settings_obj: Any = None) -> frozenset[str]:
     """Provider names that have credentials configured.
 
     Credentials are DB-only (铁律 2026-07-07): availability comes from the
-    enabled rows of the platform ``mediahub_models`` catalog (their
+    enabled rows of the platform ``nous_models`` catalog (their
     ``actual_provider`` values), not from env probing — ``settings_obj`` is
     accepted for signature compatibility and ignored. Does NOT verify the
     keys work. Best-effort: a broken catalog read degrades to an empty set
     (the advertisement just claims no provider capability).
     """
     try:
-        from app.repositories.mediahub_model_repository import (
-            get_mediahub_model_repository,
+        from app.repositories.nous_model_repository import (
+            get_nous_model_repository,
         )
 
-        rows = await get_mediahub_model_repository().list_all()
+        rows = await get_nous_model_repository().list_all()
     except Exception:  # noqa: BLE001 — inventory must not break startup
         return frozenset()
     return frozenset(

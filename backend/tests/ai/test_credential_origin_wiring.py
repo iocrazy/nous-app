@@ -153,7 +153,7 @@ def _wire_forced_declare_resolver(monkeypatch, *, catalog_hit, chat_origin):
     )
     monkeypatch.setattr(
         helpers_mod,
-        "resolve_mediahub_model",
+        "resolve_nous_model",
         AsyncMock(
             return_value=(
                 ("qwen", {"api_key": "k", "base_url": "u"}, "m")

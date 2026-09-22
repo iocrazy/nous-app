@@ -16,7 +16,7 @@ Route C discipline:
   - failures ``raise`` — never a failed-dict (a returned dict would read as
     SUCCESS and strand the UI on a green task with no result).
 
-Provider resolution mirrors G4-B0: the ``mediahub_models`` catalog via
+Provider resolution mirrors G4-B0: the ``nous_models`` catalog via
 ``db_registry`` (jimeng-cli local files / Ark remote URLs); persistence goes
 through the Tier-1 generated-media store which mints the durable same-origin
 ``/cover`` (image) or ``/stream`` (video) URL a bare <img>/<video> can load.

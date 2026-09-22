@@ -196,9 +196,9 @@ class TestGenerationModels:
             },
         ]
         repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
-        import app.repositories.mediahub_model_repository as repo_mod
+        import app.repositories.nous_model_repository as repo_mod
 
-        monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
         resp = await client.get("/api/v1/canvases/generation-models")
         assert resp.status_code == 200
@@ -229,9 +229,9 @@ class TestTextModels:
         ]
         list_enabled = AsyncMock(return_value=llm_rows)
         repo = SimpleNamespace(list_enabled=list_enabled)
-        import app.repositories.mediahub_model_repository as repo_mod
+        import app.repositories.nous_model_repository as repo_mod
 
-        monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
         resp = await client.get("/api/v1/canvases/text-models")
         assert resp.status_code == 200
@@ -355,14 +355,14 @@ class TestGenerationModelsFollowSettings:
     async def test_models_the_user_switched_off_in_settings_are_not_listed(
         self, client, monkeypatch
     ):
-        from app.repositories import mediahub_model_repository as repo_mod
+        from app.repositories import nous_model_repository as repo_mod
 
         rows = [
             {"name": "codex-image", "display_name": "GPT Image", "type": "image"},
             {"name": "jimeng-cli-image", "display_name": "Dreamina", "type": "image"},
         ]
         repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
-        monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
         async def _gate(user_id):
             return True, frozenset({"codex-image"})

@@ -1,4 +1,4 @@
-# backend/tests/test_mediahub_probe_reason_code.py
+# backend/tests/test_nous_probe_reason_code.py
 
 """F1 — the probe must classify a failure into a CLOSED enum, not free text.
 
@@ -10,7 +10,7 @@ fix it) — and the UI said the same thing about both.
 
 The raw reason cannot simply be forwarded: it routinely embeds the upstream
 host, the private ``base_url`` and the upstream model id, and the public
-``GET /api/v1/ai/mediahub-models`` is served to every user. A closed enum is
+``GET /api/v1/ai/nous-models`` is served to every user. A closed enum is
 the one shape that carries the actionable part and cannot carry a secret,
 because it is not built from the message at all — it is derived from the
 exception TYPE and the HTTP status the probe already holds.
@@ -25,9 +25,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from app.services.ai.mediahub_model_health import (
+from app.services.ai.nous_model_health import (
     classify_probe_failure,
-    probe_mediahub_model,
+    probe_nous_model,
 )
 
 # --------------------------------------------------------------------------
@@ -121,7 +121,7 @@ def test_exception_outranks_a_stale_status() -> None:
 
 def test_classifier_never_invents_a_code_outside_the_enum() -> None:
     """The whole security argument rests on the return being a closed set."""
-    from app.services.ai.mediahub_model_health import PROBE_FAILURE_CODES
+    from app.services.ai.nous_model_health import PROBE_FAILURE_CODES
 
     samples = [
         classify_probe_failure(status_code=None, exc=httpx.ReadTimeout("")),
@@ -196,16 +196,14 @@ class _RespondingClient:
 
 def _patch_raising(exc: Exception):
     _RaisingClient._exc = exc
-    return patch(
-        "app.services.ai.mediahub_model_health.httpx.AsyncClient", _RaisingClient
-    )
+    return patch("app.services.ai.nous_model_health.httpx.AsyncClient", _RaisingClient)
 
 
 def _patch_responding(status: int, body: dict):
     _RespondingClient._status = status
     _RespondingClient._body = body
     return patch(
-        "app.services.ai.mediahub_model_health.httpx.AsyncClient", _RespondingClient
+        "app.services.ai.nous_model_health.httpx.AsyncClient", _RespondingClient
     )
 
 
@@ -236,7 +234,7 @@ _ASR_ROW = {
 @pytest.mark.asyncio
 async def test_transport_failure_carries_a_code() -> None:
     with _patch_raising(httpx.ReadTimeout("")):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
     assert out["ok"] is False
     assert out["code"] == "timeout"
 
@@ -245,7 +243,7 @@ async def test_transport_failure_carries_a_code() -> None:
 async def test_chat_http_error_carries_the_status_code() -> None:
     """The 2026-08-14 doubao case end to end."""
     with _patch_responding(429, {"error": "SetLimitExceeded"}):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
     assert out["ok"] is False
     assert out["code"] == "rate_limit"
 
@@ -253,7 +251,7 @@ async def test_chat_http_error_carries_the_status_code() -> None:
 @pytest.mark.asyncio
 async def test_embedding_http_error_carries_the_status_code() -> None:
     with _patch_responding(401, {"error": "bad key"}):
-        out = await probe_mediahub_model(_EMBEDDING_ROW)
+        out = await probe_nous_model(_EMBEDDING_ROW)
     assert out["ok"] is False
     assert out["code"] == "auth"
 
@@ -261,7 +259,7 @@ async def test_embedding_http_error_carries_the_status_code() -> None:
 @pytest.mark.asyncio
 async def test_chat_200_without_choices_is_bad_response() -> None:
     with _patch_responding(200, {"id": "x"}):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
     assert out["ok"] is False
     assert out["code"] == "bad_response"
 
@@ -269,7 +267,7 @@ async def test_chat_200_without_choices_is_bad_response() -> None:
 @pytest.mark.asyncio
 async def test_embedding_200_without_a_vector_is_bad_response() -> None:
     with _patch_responding(200, {"data": [{"index": 0}]}):
-        out = await probe_mediahub_model(_EMBEDDING_ROW)
+        out = await probe_nous_model(_EMBEDDING_ROW)
     assert out["ok"] is False
     assert out["code"] == "bad_response"
 
@@ -287,10 +285,10 @@ async def test_asr_failure_is_always_other() -> None:
     are a separate, larger change (design §3, backlog).
     """
     with patch(
-        "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+        "app.services.ai.nous_model_health.AIProviderFactory.test_connection",
         AsyncMock(return_value={"success": False, "error": "HTTP 429 rate limited"}),
     ):
-        out = await probe_mediahub_model(_ASR_ROW)
+        out = await probe_nous_model(_ASR_ROW)
     assert out["ok"] is False
     assert out["code"] == "other", "asr must not be classified by substring"
 
@@ -300,7 +298,7 @@ async def test_success_records_no_code() -> None:
     """A green result must CLEAR the code, not leave the last failure's behind —
     the column is written on every probe, so ``None`` here is what erases it."""
     with _patch_responding(200, {"choices": [{"message": {"content": "pong"}}]}):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
     assert out["ok"] is True
     assert out["code"] is None
 
@@ -308,9 +306,9 @@ async def test_success_records_no_code() -> None:
 @pytest.mark.asyncio
 async def test_asr_success_records_no_code() -> None:
     with patch(
-        "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+        "app.services.ai.nous_model_health.AIProviderFactory.test_connection",
         AsyncMock(return_value={"success": True}),
     ):
-        out = await probe_mediahub_model(_ASR_ROW)
+        out = await probe_nous_model(_ASR_ROW)
     assert out["ok"] is True
     assert out["code"] is None

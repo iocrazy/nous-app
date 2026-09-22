@@ -1,10 +1,10 @@
-# backend/app/services/ai/mediahub_model_health.py
+# backend/app/services/ai/nous_model_health.py
 
 """Connectivity probe for admin-configured platform (Nous) AI models.
 
 Single source of truth for "is this platform model actually reachable" — used
-by BOTH the manual admin ``POST /admin/mediahub-models/{id}/test`` endpoint and the
-scheduled health poll (``scheduled_health.probe_mediahub_models_step``). Keeping one
+by BOTH the manual admin ``POST /admin/nous-models/{id}/test`` endpoint and the
+scheduled health poll (``scheduled_health.probe_nous_models_step``). Keeping one
 implementation avoids the two drifting apart.
 
 The probe performs a real minimal inference per model TYPE (chat / embedding /
@@ -47,7 +47,7 @@ from app.services.ai.providers.embedding_config import _is_multimodal
 # builds an invalid URL. All three models were healthy.
 #
 # Widen this set only together with a branch below that genuinely speaks that
-# type's protocol (test_mediahub_probe_not_probed.py pins the two together).
+# type's protocol (test_nous_probe_not_probed.py pins the two together).
 PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 
 # Providers whose work runs on the USER's OWN machine via their paired daemon,
@@ -67,9 +67,9 @@ PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 # could be true for every user at once.
 LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
 
-# Values ``mediahub_models.last_test_status`` may hold. Twin of the DB CHECK in
+# Values ``nous_models.last_test_status`` may hold. Twin of the DB CHECK in
 # migration 428 / ``models/ai.py`` — both sides must change together, and
-# test_mediahub_probe_not_probed.py::test_probe_statuses_matches_the_orm_check_constraint
+# test_nous_probe_not_probed.py::test_probe_statuses_matches_the_orm_check_constraint
 # reads the ORM constraint back and compares, so the pairing is enforced rather
 # than merely asserted here.
 PROBE_STATUSES = ("ok", "fail", "not_probed")
@@ -327,7 +327,7 @@ async def _probe_image_model(row: Dict[str, Any], prov: str) -> Dict[str, Any]:
     }
 
 
-async def probe_mediahub_model(
+async def probe_nous_model(
     row: Dict[str, Any], *, allow_costly: bool = False
 ) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
@@ -518,7 +518,7 @@ async def probe_mediahub_model(
         # httpx's ReadTimeout / ConnectTimeout / ReadError all stringify to ""
         # (verified inside nous-backend), which landed in the DB as a red light
         # with a blank reason — indistinguishable from a genuinely broken model.
-        # See test_mediahub_model_health_diagnosable.py.
+        # See test_nous_model_health_diagnosable.py.
         reason = f"{type(e).__name__}: {str(e) or '<no message>'}"
         return {
             "ok": False,

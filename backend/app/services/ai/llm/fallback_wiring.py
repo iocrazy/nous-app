@@ -30,25 +30,25 @@ from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 LOCAL_ONLY_CHAT_KEY = "codex-local"
 
 
-async def resolve_mediahub_model(model_name: str, module: str):
-    """Deferred re-export of :func:`ai_provider_helpers.resolve_mediahub_model`.
+async def resolve_nous_model(model_name: str, module: str):
+    """Deferred re-export of :func:`ai_provider_helpers.resolve_nous_model`.
 
     Re-imports the source function on every call instead of binding it once
     at module-import time. Two reasons this matters, both bitten in practice:
     1. legacy chat-wiring tests patch the SOURCE module attribute
-       (``app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model``),
+       (``app.services.ai.providers.ai_provider_helpers.resolve_nous_model``),
        expecting each call to observe whatever is currently patched there;
-    2. a plain top-level ``from ... import resolve_mediahub_model`` freezes
+    2. a plain top-level ``from ... import resolve_nous_model`` freezes
        whatever value was active the FIRST time this module got imported
        (which, in a shared test process, may be a PREVIOUS test's mock) —
        every later call would silently keep using that stale mock instead
        of the real function or the CURRENT test's patch. This module-level
        name is still directly patchable via
-       ``unittest.mock.patch.object(fallback_wiring, "resolve_mediahub_model", ...)``
+       ``unittest.mock.patch.object(fallback_wiring, "resolve_nous_model", ...)``
        for this module's own tests and Task 2/3 callers.
     """
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_mediahub_model as _impl,
+        resolve_nous_model as _impl,
     )
 
     return await _impl(model_name, module)
@@ -122,7 +122,7 @@ async def build_fallback_llm(
     arbitrary daemon.
     """
     # Pre-resolve every model the fallback chain may dial against the platform
-    # ``mediahub_models`` catalog (async — the factory below must stay sync for
+    # ``nous_models`` catalog (async — the factory below must stay sync for
     # LLMFallbackChain). A catalog hit is served by admin-managed credentials
     # under the catalog's ``actual_model``; a found-but-disabled/gated model
     # raises here (fail-closed) instead of silently 401-ing through BYOK.
@@ -132,7 +132,7 @@ async def build_fallback_llm(
     _platform_adapters: dict = {}
     _primary_is_local = False
     for _m in dict.fromkeys([primary_model, *fallback_models]):
-        _hit = await resolve_mediahub_model(_m, module)
+        _hit = await resolve_nous_model(_m, module)
         if _hit:
             _prov, _pcfg, _actual = _hit
             _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}

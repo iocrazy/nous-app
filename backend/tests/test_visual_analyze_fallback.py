@@ -138,7 +138,7 @@ async def test_resolve_task_ai_config_agent_branch_carries_fallback_models() -> 
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(
@@ -177,7 +177,7 @@ async def test_resolve_task_ai_config_agent_branch_missing_or_none_is_empty(
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(
@@ -226,7 +226,7 @@ async def test_resolve_task_ai_config_nous_direct_pick_fallback_models_empty() -
         ),
         patch.object(
             helpers_mod,
-            "resolve_mediahub_model",
+            "resolve_nous_model",
             new=AsyncMock(
                 return_value=(
                     "doubao",
@@ -276,7 +276,7 @@ async def test_summarization_byok_carries_the_agent_rows_fallback_models() -> No
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
         ),
     ):
         cfg = await helpers_mod.resolve_task_ai_config(

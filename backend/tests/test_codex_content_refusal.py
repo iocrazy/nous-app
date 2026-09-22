@@ -266,7 +266,7 @@ def test_content_refused_is_a_non_retryable_4xx_on_the_llm_path():
 
 @pytest.mark.asyncio
 async def test_the_server_side_codex_branch_records_the_refusal_too():
-    """`mediahub_models` has BOTH codex image rows enabled: codex-local-image
+    """`nous_models` has BOTH codex image rows enabled: codex-local-image
     (the daemon) and codex-image (the in-container subprocess). The two
     surfaces must read the same failure the same way — fixing one and not the
     other is how PromptNodeView drifted from Task Center in the first place."""

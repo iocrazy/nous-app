@@ -25,7 +25,7 @@ Highest-risk items in this batch, none of which Task 1's coverage touched:
     not nested).
   - The remaining ``secrets_selfheal`` write paths
     (``_heal_system_settings_flat`` / ``_heal_platform_providers`` /
-    ``_heal_mediahub_models`` / ``_heal_user_mcp_servers``) are simple
+    ``_heal_nous_models`` / ``_heal_user_mcp_servers``) are simple
     UPDATEs, but per the migration brief this module is a STARTUP GATE
     (``readyz``) — every write path gets dedicated coverage regardless of
     shape simplicity.
@@ -260,10 +260,10 @@ async def test_heal_platform_providers_writes_merged_dict_value(
     assert any(isinstance(b, dict) for b in binds)
 
 
-# ─── secrets_selfheal._heal_mediahub_models ────────────────────────────────
+# ─── secrets_selfheal._heal_nous_models ────────────────────────────────
 
 
-async def test_heal_mediahub_models_guards_null_and_empty_then_writes_key(
+async def test_heal_nous_models_guards_null_and_empty_then_writes_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -273,15 +273,15 @@ async def test_heal_mediahub_models_guards_null_and_empty_then_writes_key(
         monkeypatch, _FakeResult(rows=[{"id": 42, "api_key": "plaintext"}])
     )
 
-    rewritten = await secrets_selfheal._heal_mediahub_models()
+    rewritten = await secrets_selfheal._heal_nous_models()
 
     assert rewritten == 1
     sql = _all_sql(calls)
-    assert "SELECT public.mediahub_models.id, public.mediahub_models.api_key" in sql
-    assert "public.mediahub_models.api_key IS NOT NULL" in sql
-    assert "public.mediahub_models.api_key != " in sql
-    assert "UPDATE public.mediahub_models SET api_key=" in sql
-    assert "WHERE public.mediahub_models.id = " in sql
+    assert "SELECT public.nous_models.id, public.nous_models.api_key" in sql
+    assert "public.nous_models.api_key IS NOT NULL" in sql
+    assert "public.nous_models.api_key != " in sql
+    assert "UPDATE public.nous_models SET api_key=" in sql
+    assert "WHERE public.nous_models.id = " in sql
     binds = _all_binds(calls)
     assert "enc:v1:HEALED" in binds
     assert 42 in binds

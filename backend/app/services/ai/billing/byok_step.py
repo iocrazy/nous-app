@@ -7,7 +7,7 @@
   ``env`` 是「BYOK 形状但没有 api_key」，adapter factory 回落平台凭证，平台真
   付了钱（用户裁定 2 的裁定 ①）。
 * ``served_by_platform`` —— 这一次调用最终由哪一侧的凭证服务。
-  ``LLMFallbackChain`` 在构建时就把命中平台目录 ``mediahub_models`` 的模型预解析
+  ``LLMFallbackChain`` 在构建时就把命中平台目录 ``nous_models`` 的模型预解析
   成 admin 凭证的 adapter，所以「命中目录」⟺「平台付钱」，与 run 级 origin 无关。
   三态：``True`` 平台付 / ``False`` 用户付 / ``None`` **这条链没有 fallback 机制**
   （直连 adapter、流式分块里拿不到响应体），此时一个凭证服务整轮，run 级 origin

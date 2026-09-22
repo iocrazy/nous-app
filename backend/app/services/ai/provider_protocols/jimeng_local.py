@@ -11,7 +11,7 @@ class JimengLocalProtocol(ProviderProtocol):
     """Image AND video generation on the user's OWN machine via the paired
     nous-codex daemon driving the dreamina CLI.
 
-    ``jimeng-local`` has been a live ``mediahub_models.actual_provider`` value
+    ``jimeng-local`` has been a live ``nous_models.actual_provider`` value
     all along (``canvas_generation._LOCAL_ENGINES`` routes it to the daemon),
     but no protocol declared it — so it resolved to None and had no place to
     hang its capabilities.

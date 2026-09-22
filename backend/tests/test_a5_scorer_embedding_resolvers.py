@@ -72,7 +72,7 @@ async def test_scorer_falls_to_first_enabled_platform_llm():
             AsyncMock(return_value=True),
         ),
         patch(
-            "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+            "app.repositories.nous_model_repository.get_nous_model_repository",
             return_value=repo,
         ),
     ):

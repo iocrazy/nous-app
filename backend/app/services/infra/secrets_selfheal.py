@@ -15,7 +15,7 @@ material that is either:
 
 1. ``system_settings`` flat secret keys (``SECRET_SETTING_KEYS``)
 2. ``system_settings['platform.ai_providers']`` per-provider api_key/app_id
-3. ``mediahub_models.api_key``
+3. ``nous_models.api_key``
 4. ``user_mcp_servers.bearer_token`` (raw Fernet, no ``enc:v1:`` marker —
    that repo's own scheme; healed dev-keyed → real-keyed, and legacy
    plaintext → encrypted)
@@ -81,7 +81,7 @@ def _real_decrypt(ciphertext: str) -> Optional[str]:
 
 
 def _heal_marked_value(value: Any) -> Optional[str]:
-    """Compute the healed replacement for one system_settings/mediahub_models
+    """Compute the healed replacement for one system_settings/nous_models
     secret value (``enc:v1:`` marker scheme), or None when no rewrite is
     needed (already real-keyed / blank / non-string).
 
@@ -205,17 +205,17 @@ async def _heal_platform_providers() -> int:
     return rewritten
 
 
-async def _heal_mediahub_models() -> int:
+async def _heal_nous_models() -> int:
     from sqlalchemy import select
     from sqlalchemy import update as sa_update
 
     from app.db.session import read_scope, write_scope
-    from app.models import MediahubModels
+    from app.models import NousModels
 
     async with read_scope() as session:
         result = await session.execute(
-            select(MediahubModels.id, MediahubModels.api_key).where(
-                MediahubModels.api_key.isnot(None), MediahubModels.api_key != ""
+            select(NousModels.id, NousModels.api_key).where(
+                NousModels.api_key.isnot(None), NousModels.api_key != ""
             )
         )
         rows = result.mappings().all()
@@ -227,8 +227,8 @@ async def _heal_mediahub_models() -> int:
             continue
         async with write_scope() as session:
             await session.execute(
-                sa_update(MediahubModels)
-                .where(MediahubModels.id == row["id"])
+                sa_update(NousModels)
+                .where(NousModels.id == row["id"])
                 .values(api_key=healed)
             )
         rewritten += 1
@@ -425,7 +425,7 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
     for label, fn in (
         ("system_settings", _heal_system_settings_flat),
         ("platform_ai_providers", _heal_platform_providers),
-        ("mediahub_models", _heal_mediahub_models),
+        ("nous_models", _heal_nous_models),
         ("user_mcp_servers", _heal_user_mcp_servers),
         ("user_settings_ai_providers", _heal_user_settings_ai_providers),
     ):
@@ -437,11 +437,11 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
             summary["errors"] += 1
     logger.info(
         "[secrets-selfheal] done — system_settings={} platform_ai_providers={} "
-        "mediahub_models={} user_mcp_servers={} user_settings_ai_providers={} "
+        "nous_models={} user_mcp_servers={} user_settings_ai_providers={} "
         "errors={}",
         summary["system_settings"],
         summary["platform_ai_providers"],
-        summary["mediahub_models"],
+        summary["nous_models"],
         summary["user_mcp_servers"],
         summary["user_settings_ai_providers"],
         summary["errors"],

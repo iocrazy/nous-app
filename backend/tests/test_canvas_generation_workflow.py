@@ -237,7 +237,7 @@ async def test_persist_without_user_raises():
 
 @pytest.mark.asyncio
 async def test_image_step_never_sends_catalog_row_name_upstream():
-    """Regression (2026-08-18): the canvas picker's value is the mediahub_models
+    """Regression (2026-08-18): the canvas picker's value is the nous_models
     ROW NAME (e.g. 'codex-image'); the upstream call must use the resolved
     row's actual_model ('gpt-5.4'). Sending the row name produced a live
     HTTP 400: "The 'codex-image' model is not supported"."""

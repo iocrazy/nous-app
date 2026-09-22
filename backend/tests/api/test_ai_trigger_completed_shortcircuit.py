@@ -167,7 +167,7 @@ def _patch_billing_spy(monkeypatch, *, transcription_model="nous-whisper"):
         }
     )
     monkeypatch.setattr(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         lambda: nous_repo,
     )
 

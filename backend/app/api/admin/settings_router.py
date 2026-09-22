@@ -727,7 +727,7 @@ async def update_platform_ai_providers_settings(
 async def encrypt_secrets(auth: AdminAuthDep):
     """Manually re-run the secret-at-rest self-heal sweep (same code path the
     startup task runs): re-encrypts plaintext / dev-keyed secrets in
-    system_settings, platform.ai_providers, mediahub_models.api_key and
+    system_settings, platform.ai_providers, nous_models.api_key and
     user_mcp_servers.bearer_token under the real env key. Idempotent —
     a repeat run rewrites 0 rows. 409 when no real encryption key is set."""
     from app.core import secret_box

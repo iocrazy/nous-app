@@ -1499,7 +1499,7 @@ class AssetsService:
             "aspect_ratio": prompt["aspect_ratio"],
             "reference_resource_ids": [str(r) for r in refs],
             # No model is chosen for a preview: the effective one is resolved
-            # from the mediahub_models catalog at generation time, and echoing
+            # from the nous_models catalog at generation time, and echoing
             # the legacy ``dall-e-3`` sentinel here would name a model that is
             # not what runs.
             "model": None,

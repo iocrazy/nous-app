@@ -11,7 +11,7 @@ Unknown prefixes raise ValueError.
 
 CREDENTIALS ARE DB-ONLY (铁律, 2026-07-07): environment variables no longer
 supply LLM keys or endpoints. The resolution order everywhere is
-  platform ``mediahub_models`` catalog (admin-managed, encrypted at rest)
+  platform ``nous_models`` catalog (admin-managed, encrypted at rest)
   → user BYOK (``user_settings.ai_settings.ai_providers``)
   → ProviderNotConfiguredError.
 Use :func:`app.services.ai.providers.ai_provider_helpers.resolve_db_adapter`
@@ -89,7 +89,7 @@ _PROVIDER_KEYS = _chat_keys()
 
 
 def resolve_provider_key(actual_provider: str, model: str) -> str:
-    """Dispatch key for a PLATFORM catalog row (``mediahub_models``).
+    """Dispatch key for a PLATFORM catalog row (``nous_models``).
 
     The admin explicitly named the provider on the row, so that wins when it
     matches a buildable adapter key. Unknown labels fall back to the
@@ -129,7 +129,7 @@ def get_adapter_for_user(
     ``user_provider_config`` is the user's full ``ai_providers`` dict, e.g.
     ``{"qwen": {"api_key": "...", "base_url": "..."}, "doubao": {...}}`` —
     OR a platform-credential dict in the same shape, as produced by
-    ``resolve_db_adapter`` from the ``mediahub_models`` catalog.
+    ``resolve_db_adapter`` from the ``nous_models`` catalog.
 
     ``fallback_settings`` is DEPRECATED AND IGNORED (env credentials retired
     2026-07-07, 铁律): a provider with no resolved key raises

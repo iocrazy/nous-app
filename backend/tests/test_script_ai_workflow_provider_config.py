@@ -8,7 +8,7 @@ built ``ScriptAIService()`` / ``ScriptAIService(user_id=user_id)`` with no
 ``provider_key`` / ``provider_config``. With neither supplied, the service's
 adapter factory falls back to ``get_adapter(model, settings)`` which, for a
 ``doubao-*`` model, reads ``settings.DOUBAO_API_KEY`` — the stale ENV key,
-401-unauthorized on prod. The working key lives in the DB (``mediahub_models``
+401-unauthorized on prod. The working key lives in the DB (``nous_models``
 / platform provider config) and is only reachable via
 ``resolve_script_ai_config(user_id)`` — the same helper
 ``topics_router.generate_script`` already uses correctly.

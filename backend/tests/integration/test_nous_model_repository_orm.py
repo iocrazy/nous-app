@@ -1,7 +1,7 @@
-"""Integration tests for MediahubModelRepositoryOrm (Phase 2 M batch) against real PG.
+"""Integration tests for NousModelRepositoryOrm (Phase 2 M batch) against real PG.
 
 Proves the REST → ORM swap is invisible AND that STRATEGY-C value-type parity
-holds on mediahub_models:
+holds on nous_models:
 
   - id (BIGINT snowflake) → STAYS native int (the 5.3 trap).
   - created_at / updated_at (timestamptz) → ISO STR.
@@ -16,7 +16,7 @@ the REST 'updated_at=now()' sentinel drop → func.now().
 Setup: requires INTEGRATION_DATABASE_URL. Skips cleanly otherwise:
 
     source /tmp/orm2_integration.env
-    uv run pytest tests/integration/test_mediahub_model_repository_orm.py -v
+    uv run pytest tests/integration/test_nous_model_repository_orm.py -v
 """
 
 from __future__ import annotations
@@ -62,17 +62,15 @@ async def cleanup_test_rows(integration_db_url):
     yield
     conn = await asyncpg.connect(integration_db_url)
     try:
-        await conn.execute(
-            "DELETE FROM mediahub_models WHERE name LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM nous_models WHERE name LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
 
 
 def _repo():
-    from app.repositories.mediahub_model_repository import MediahubModelRepository
+    from app.repositories.nous_model_repository import NousModelRepository
 
-    return MediahubModelRepository()
+    return NousModelRepository()
 
 
 def _model_payload(**overrides) -> dict:
@@ -115,7 +113,7 @@ async def test_create_commit_and_parity(
     conn = await asyncpg.connect(integration_db_url)
     try:
         persisted = await conn.fetchval(
-            "SELECT name FROM mediahub_models WHERE id = $1", created["id"]
+            "SELECT name FROM nous_models WHERE id = $1", created["id"]
         )
     finally:
         await conn.close()
@@ -142,7 +140,7 @@ async def test_update_commit_and_now_sentinel(
     conn = await asyncpg.connect(integration_db_url)
     try:
         persisted = await conn.fetchval(
-            "SELECT display_name FROM mediahub_models WHERE id = $1", created["id"]
+            "SELECT display_name FROM nous_models WHERE id = $1", created["id"]
         )
     finally:
         await conn.close()
@@ -157,7 +155,7 @@ async def test_delete_commit(integration_db_url, patched_engine, cleanup_test_ro
     conn = await asyncpg.connect(integration_db_url)
     try:
         gone = await conn.fetchval(
-            "SELECT count(*) FROM mediahub_models WHERE id = $1", created["id"]
+            "SELECT count(*) FROM nous_models WHERE id = $1", created["id"]
         )
     finally:
         await conn.close()
@@ -213,7 +211,7 @@ async def test_list_all_and_list_enabled_public_cols(
 
 async def test_factory_returns_collapsed_repo():
     """Post-rollout the factory unconditionally returns the collapsed ORM repo."""
-    from app.repositories import mediahub_model_repository as mod
+    from app.repositories import nous_model_repository as mod
 
-    repo = mod.get_mediahub_model_repository()
-    assert type(repo) is mod.MediahubModelRepository
+    repo = mod.get_nous_model_repository()
+    assert type(repo) is mod.NousModelRepository

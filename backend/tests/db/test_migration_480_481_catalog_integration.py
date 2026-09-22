@@ -4,7 +4,7 @@ Both assertions are things only Postgres can answer, and both cover a gap that
 stayed invisible for months precisely because the unit lane cannot see it:
 
   * 481 — the browser roles' table privileges. Every unit test around
-    ``MediahubModelRepository`` asserts the ``_PUBLIC_COLS`` projection hides
+    ``NousModelRepository`` asserts the ``_PUBLIC_COLS`` projection hides
     ``api_key`` / ``base_url`` / ``description``, and every one of them passed
     the entire time the anon key could read all three straight off PostgREST.
     A column allowlist on one path says nothing about a second path; only a
@@ -59,12 +59,12 @@ async def pg():
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
 async def test_browser_roles_have_no_table_privilege(pg, role: str, privilege: str):
     granted = await pg.fetchval(
-        "SELECT has_table_privilege($1, 'public.mediahub_models', $2)",
+        "SELECT has_table_privilege($1, 'public.nous_models', $2)",
         role,
         privilege,
     )
     assert granted is False, (
-        f"{role} can {privilege} public.mediahub_models — PostgREST will honour "
+        f"{role} can {privilege} public.nous_models — PostgREST will honour "
         f"that with the publishable key that ships in the browser bundle, "
         f"bypassing the _PUBLIC_COLS allowlist and exposing base_url/api_key."
     )
@@ -98,7 +98,7 @@ async def test_the_backend_role_keeps_access(pg):
     rather than just SELECT.
     """
     granted = await pg.fetchval(
-        "SELECT has_table_privilege($1, 'public.mediahub_models', 'SELECT')",
+        "SELECT has_table_privilege($1, 'public.nous_models', 'SELECT')",
         "postgres",
     )
     assert granted is True
@@ -121,7 +121,7 @@ async def test_no_engine_row_is_left_on_the_openai_vendor_key(pg):
     rows = await pg.fetch(
         """
         SELECT name, actual_provider
-          FROM public.mediahub_models
+          FROM public.nous_models
          WHERE name IN ('nous-qwen3-llm', 'nous-qwen3-embedding-8b',
                         'mediahub-moss-asr')
         """
@@ -142,7 +142,7 @@ async def test_rename_is_scoped_and_leaves_other_openai_rows_alone(pg):
     """
     await pg.execute(
         """
-        INSERT INTO public.mediahub_models
+        INSERT INTO public.nous_models
             (name, display_name, type, actual_provider, actual_model, api_key,
              base_url, is_enabled, sort_order)
         VALUES ('test-480-real-openai', 'Real OpenAI', 'llm', 'openai',
@@ -152,12 +152,12 @@ async def test_rename_is_scoped_and_leaves_other_openai_rows_alone(pg):
     )
     try:
         provider = await pg.fetchval(
-            "SELECT actual_provider FROM public.mediahub_models WHERE name = $1",
+            "SELECT actual_provider FROM public.nous_models WHERE name = $1",
             "test-480-real-openai",
         )
         assert provider == "openai"
     finally:
         await pg.execute(
-            "DELETE FROM public.mediahub_models WHERE name = $1",
+            "DELETE FROM public.nous_models WHERE name = $1",
             "test-480-real-openai",
         )

@@ -351,30 +351,30 @@ class AiSessionMemory(Base):
     session_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
 
-class MediahubModels(Base):
-    __tablename__ = "mediahub_models"
+class NousModels(Base):
+    __tablename__ = "nous_models"
     __table_args__ = (
         CheckConstraint(
             "type = ANY (ARRAY['llm'::text, 'embedding'::text, 'tts'::text, 'asr'::text])",
-            name="mediahub_models_type_check",
+            name="nous_models_type_check",
         ),
         CheckConstraint(
             "pricing_type = ANY (ARRAY['per_hour'::text, 'per_request'::text, 'per_token'::text])",
-            name="mediahub_models_pricing_type_check",
+            name="nous_models_pricing_type_check",
         ),
         CheckConstraint(
             "last_test_status IS NULL OR last_test_status IN "
             "('ok', 'fail', 'not_probed')",
-            name="mediahub_models_last_test_status_check",
+            name="nous_models_last_test_status_check",
         ),
         CheckConstraint(
             "last_test_code IS NULL OR last_test_code IN ('timeout', 'unreachable', "
             "'auth', 'rate_limit', 'model_not_found', 'upstream_error', "
             "'bad_response', 'other')",
-            name="mediahub_models_last_test_code_check",
+            name="nous_models_last_test_code_check",
         ),
-        PrimaryKeyConstraint("id", name="mediahub_models_pkey"),
-        UniqueConstraint("name", name="mediahub_models_name_key"),
+        PrimaryKeyConstraint("id", name="nous_models_pkey"),
+        UniqueConstraint("name", name="nous_models_name_key"),
         {"schema": "public"},
     )
 

@@ -42,7 +42,7 @@ async def test_outline_uses_composed_system_message(monkeypatch):
     from app.services.ai.runner import agent_runner as ar_module
 
     # Credentials are DB-only (铁律 2026-07-07): the ungoverned path resolves
-    # the agent's model through resolve_db_adapter (mediahub_models catalog).
+    # the agent's model through resolve_db_adapter (nous_models catalog).
     # This test only exercises the composer/runner wiring, so stub the
     # resolution with a dummy adapter.
     monkeypatch.setattr(

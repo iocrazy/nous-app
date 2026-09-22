@@ -429,7 +429,7 @@ class GenerateSlotPreview(BaseModel):
     """What a generate-slot run would compose — the dry run of the paid call.
 
     ``model`` is null unless the caller pinned one: the effective model is
-    resolved from the ``mediahub_models`` catalog at generation time, and
+    resolved from the ``nous_models`` catalog at generation time, and
     echoing the legacy ``dall-e-3`` sentinel here would name a model that is
     not what runs.
     """

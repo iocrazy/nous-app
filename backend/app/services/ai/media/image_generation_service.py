@@ -1,7 +1,7 @@
 """Generic AI media-generation service (image + video).
 
 Provider-agnostic single-image and single-video generation via the platform
-provider registry / ``mediahub_models`` DB catalog. Extracted from
+provider registry / ``nous_models`` DB catalog. Extracted from
 ``StoryboardAIService`` so the two LIVE consumers of that class's generic
 generation capability — ``workflows/script_shot_generate`` (script editor shot
 imagery) and ``services/ai/tools/generate_media_tools`` (the agent
@@ -19,7 +19,7 @@ character ids — so no live behaviour changes.
 
 Credentials are DB-only (铁律 2026-07-07): the image/video registries ship
 EMPTY, so every call resolves its provider against the platform
-``mediahub_models`` catalog rather than env.
+``nous_models`` catalog rather than env.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class ImageGenerationService:
             # Provider precedence: the in-process registry wins when it has the
             # named provider (reserved for future in-proc providers). Today the
             # image registry ships EMPTY, so every call KeyErrors here and
-            # resolves against the DB mediahub_models catalog (house rule:
+            # resolves against the DB nous_models catalog (house rule:
             # provider config lives in the DB, not env).
             #
             # Model precedence on the DB path: an explicit non-default caller
@@ -194,7 +194,7 @@ class ImageGenerationService:
         try:
             # In practice this in-proc registry ships EMPTY for video (same as
             # images), so every call KeyErrors and resolves against the DB
-            # mediahub_models catalog below (config env→DB house rule). The
+            # nous_models catalog below (config env→DB house rule). The
             # registry hit is kept for tests / future in-proc providers.
             try:
                 video_provider = provider_registry.get_video_provider(provider_name)
@@ -247,7 +247,7 @@ class ImageGenerationService:
     ) -> Dict[str, Any]:
         """DB-catalog video fallback (G4-B0), mirroring the image path.
 
-        Resolves the provider from ``mediahub_models`` (only jimeng-cli has a
+        Resolves the provider from ``nous_models`` (only jimeng-cli has a
         wired video path today) and bridges the durable ``/cover`` source URL
         back to its local file for image2video — both filesystem AND
         object-store rows resolve now (Task 2: ``generated_media_local_path``

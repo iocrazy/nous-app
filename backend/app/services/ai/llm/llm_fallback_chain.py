@@ -118,7 +118,7 @@ class LLMFallbackChain:
     # every model in order, no skip-known-bad).
     health_registry: Optional[Any] = None
 
-    # 构建时命中平台目录 ``mediahub_models`` 的模型全集（``fallback_wiring``
+    # 构建时命中平台目录 ``nous_models`` 的模型全集（``fallback_wiring``
     # 预解析出来的那些）。它们的 adapter 用 admin 凭证，所以这一步的钱是**平台**
     # 付的，与这条 run 的 ``credential_origin`` 无关 —— 半程 BYOK（主模型是
     # 用户的、fallback 落到目录行）的唯一判据就是它。空集 = 调用方没有告诉我们

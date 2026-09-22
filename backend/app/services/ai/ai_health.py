@@ -237,7 +237,7 @@ async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -
     join them instead of dialing anything new:
 
       - platform/governance rows → the admin probe board
-        (``mediahub_models.last_test_status`` / ``last_test_detail``). For a
+        (``nous_models.last_test_status`` / ``last_test_detail``). For a
         governance row the admin's manual key usually IS the catalog key, so
         the probe verdict is the best available signal (hint says so).
       - byok rows → the user's persisted test-connection verdicts
@@ -262,11 +262,11 @@ async def _overlay_probe_health(rows: list[dict[str, Any]], ai_settings: dict) -
     verdicts: dict[str, tuple[str, str]] = {}
     if catalog_models:
         try:
-            from app.repositories.mediahub_model_repository import (
-                get_mediahub_model_repository,
+            from app.repositories.nous_model_repository import (
+                get_nous_model_repository,
             )
 
-            repo = get_mediahub_model_repository()
+            repo = get_nous_model_repository()
             for model in catalog_models:
                 row = await repo.get_by_name(model)
                 if not row:
@@ -455,12 +455,12 @@ async def _system_capability_rows(
     try:
         from app.services.ai.providers.ai_provider_helpers import (
             get_maintenance_model,
-            resolve_mediahub_model,
+            resolve_nous_model,
         )
 
         m = await get_maintenance_model()
         try:
-            hit = await resolve_mediahub_model(m, "maintenance")
+            hit = await resolve_nous_model(m, "maintenance")
         except RuntimeError:
             hit = None  # found but disabled/gated → treat as unresolved
         if hit:

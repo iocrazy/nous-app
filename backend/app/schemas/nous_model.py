@@ -1,4 +1,4 @@
-# backend/app/schemas/mediahub_model.py
+# backend/app/schemas/nous_model.py
 
 """Pydantic schemas for Nous models API."""
 
@@ -11,17 +11,17 @@ from pydantic import BaseModel
 # image and video, so the API rejected two types it was already storing —
 # every image/video row was inserted by a migration and could not afterwards
 # be edited through the admin dialog (which echoes `type` back in the PATCH).
-# Guarded by tests/test_mediahub_model_type_vocabulary.py and, against the
-# real constraint, tests/db/test_mediahub_model_type_matches_db_check.py.
-MediahubModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
+# Guarded by tests/test_nous_model_type_vocabulary.py and, against the
+# real constraint, tests/db/test_nous_model_type_matches_db_check.py.
+NousModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
 
 
-class MediahubModelCreate(BaseModel):
+class NousModelCreate(BaseModel):
     """Request body for creating a Mediahub model."""
 
     name: str
     display_name: str
-    type: MediahubModelType
+    type: NousModelType
     description: Optional[str] = None
     actual_provider: str
     actual_model: str
@@ -36,12 +36,12 @@ class MediahubModelCreate(BaseModel):
     sort_order: int = 0
 
 
-class MediahubModelUpdate(BaseModel):
+class NousModelUpdate(BaseModel):
     """Request body for updating a Mediahub model (all fields optional)."""
 
     name: Optional[str] = None
     display_name: Optional[str] = None
-    type: Optional[MediahubModelType] = None
+    type: Optional[NousModelType] = None
     description: Optional[str] = None
     actual_provider: Optional[str] = None
     actual_model: Optional[str] = None
@@ -54,7 +54,7 @@ class MediahubModelUpdate(BaseModel):
     sort_order: Optional[int] = None
 
 
-class MediahubModelResponse(BaseModel):
+class NousModelResponse(BaseModel):
     """Admin response — api_key masked."""
 
     id: str
@@ -91,7 +91,7 @@ class MediahubModelResponse(BaseModel):
     price_coverage: Optional[str] = None
 
 
-class MediahubModelPublic(BaseModel):
+class NousModelPublic(BaseModel):
     """Public response — no API key or provider details."""
 
     name: str
@@ -102,7 +102,7 @@ class MediahubModelPublic(BaseModel):
     pricing_value: float
 
 
-class MediahubModelProbeRequest(BaseModel):
+class NousModelProbeRequest(BaseModel):
     """Admin 'Test & Load Models' request.
 
     ``name`` is the existing model being edited (optional): when ``api_key`` is
@@ -119,7 +119,7 @@ class MediahubModelProbeRequest(BaseModel):
     name: Optional[str] = None
 
 
-class MediahubModelTestResponse(BaseModel):
+class NousModelTestResponse(BaseModel):
     """Result of a real per-model connectivity probe (chat / embedding / asr)."""
 
     ok: bool

@@ -1,6 +1,6 @@
 """The SERVER-side `gpt-image-2-skill` path must explain a refusal too.
 
-`mediahub_models` has both codex image rows enabled — `codex-local-image`
+`nous_models` has both codex image rows enabled — `codex-local-image`
 (actual_provider codex-local, the user's own daemon) and `codex-image`
 (actual_provider codex, this subprocess). Fixing only the daemon would leave
 the two surfaces reading the same failure differently, which is exactly the

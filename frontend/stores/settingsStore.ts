@@ -186,7 +186,7 @@ export const useSettingsStore = create<SettingsState>()(
       migrate: (persistedState: unknown) => {
         // Drop retired client-side storyboard BYOK fields (v2): the storyboard
         // provider config panel was retired — image generation is fully driven
-        // by the backend DB (mediahub_models), so these persisted keys are dead.
+        // by the backend DB (nous_models), so these persisted keys are dead.
         const {
           apiKeys: _apiKeys,
           providerEndpoints: _providerEndpoints,
