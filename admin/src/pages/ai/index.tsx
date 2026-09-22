@@ -617,6 +617,7 @@ export function AIModelsPage() {
       display_name: m.display_name,
       actual_model: m.actual_model,
       type: m.type,
+      actual_provider: m.actual_provider,
       base_url: m.base_url || '',
       pricing_value: m.pricing_value,
       api_key: '', // blank = keep current
@@ -662,6 +663,7 @@ export function AIModelsPage() {
           display_name: values.display_name,
           actual_model: values.actual_model,
           type: values.type,
+          actual_provider: values.actual_provider,
           base_url: values.base_url || '',
           pricing_value: Number(values.pricing_value) || 0,
         }
@@ -1065,8 +1067,29 @@ export function AIModelsPage() {
                 <Input placeholder="Model id sent to the provider" />
               </FormItem>
               <FormItem label="Type" field="type" rules={[{ required: true }]}>
+                {/* image/video were missing here for as long as they have been
+                    valid (migration 345). The dialog pre-fills the row's own
+                    type, so an image row could not even be saved unchanged. */}
                 <Select
-                  options={['llm', 'embedding', 'tts', 'asr'].map((v) => ({ label: v, value: v }))}
+                  options={['llm', 'embedding', 'tts', 'asr', 'image', 'video'].map(
+                    (v) => ({ label: v, value: v }),
+                  )}
+                />
+              </FormItem>
+              <FormItem
+                label="Actual Provider"
+                field="actual_provider"
+                rules={[{ required: true }]}
+                extra="The dispatch protocol. Changing it moves this model to that provider's card — do it when a row was filed under the wrong protocol (e.g. a self-hosted engine created as OpenAI before `nous` existed)."
+              >
+                {/* The PUT body has accepted actual_provider all along; only
+                    this form never offered it, so a misfiled row could be
+                    fixed by deleting and recreating it, or not at all. */}
+                <Select
+                  allowCreate
+                  showSearch
+                  placeholder="Select a protocol"
+                  options={protocolOptions}
                 />
               </FormItem>
               <FormItem label="Pricing Value" field="pricing_value">

@@ -6,7 +6,14 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
-MediahubModelType = Literal["llm", "embedding", "tts", "asr"]
+# Must stay in lockstep with the table's CHECK constraint (migration 345).
+# It stopped at "asr" from 345 until 2026-09-21 while the database accepted
+# image and video, so the API rejected two types it was already storing —
+# every image/video row was inserted by a migration and could not afterwards
+# be edited through the admin dialog (which echoes `type` back in the PATCH).
+# Guarded by tests/test_mediahub_model_type_vocabulary.py and, against the
+# real constraint, tests/db/test_mediahub_model_type_matches_db_check.py.
+MediahubModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
 
 
 class MediahubModelCreate(BaseModel):
