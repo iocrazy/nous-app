@@ -10,6 +10,7 @@ class OpenAIProtocol(ProviderProtocol):
     label = "OpenAI (native)"
     description = "Native OpenAI API (multimodal gpt-*/o1/o3)."
     model_types = ("llm", "embedding", "asr")
+    credential_kind = "api_key"
     is_chat_key = True
 
     def build_chat_adapter(

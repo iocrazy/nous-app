@@ -34,8 +34,14 @@ async def test_build_runner_dispatches_on_explicit_provider_key():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_build_runner_unknown_provider_label_degrades_to_openai_compatible():
-    """Unknown label ('nous') + unknown prefix → OpenAI-compatible
-    QwenAdapter with the supplied base_url (resolve_provider_key ladder)."""
-    svc = ScriptAIService(provider_key="nous", provider_config=dict(_CFG))
+    """Unknown label + unknown prefix → OpenAI-compatible QwenAdapter with the
+    supplied base_url (resolve_provider_key ladder).
+
+    The label was 'nous' until the self-hosted engine got a protocol of that
+    name, at which point this test was asserting the fallback while feeding it
+    a registered key — green, and measuring nothing."""
+    svc = ScriptAIService(
+        provider_key="not-a-registered-protocol", provider_config=dict(_CFG)
+    )
     runner = await svc._build_runner("qwen3-6-35b")
     assert isinstance(runner.adapter, QwenAdapter)

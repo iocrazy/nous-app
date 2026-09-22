@@ -10,6 +10,7 @@ class ModelScopeProtocol(ProviderProtocol):
     label = "ModelScope"
     description = "ModelScope org/name models (BYO key)."
     model_types = ("llm",)
+    credential_kind = "api_key"
     is_chat_key = True
 
     def build_chat_adapter(

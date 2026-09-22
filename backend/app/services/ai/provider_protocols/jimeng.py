@@ -62,6 +62,7 @@ class JimengProtocol(ProviderProtocol):
         "api_key). Primary image/video generator."
     )
     model_types = ("image", "video")
+    credential_kind = "server_session"
     aliases = ("jimeng",)
     generation_family = "jimeng-cli"
     capabilities = ProviderCapabilities(

@@ -13,6 +13,7 @@ class ArkProtocol(ProviderProtocol):
     label = "Ark image/video (方舟)"
     description = "Volcengine Ark task protocol for image/video generation."
     model_types = ("image", "video")
+    credential_kind = "api_key"
     aliases = ("doubao",)
     generation_family = "ark"
     # Ark's /images/generations is a plain synchronous HTTP call from this

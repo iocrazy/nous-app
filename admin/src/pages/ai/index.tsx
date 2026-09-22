@@ -53,6 +53,11 @@ interface NousModel {
   // the output lineage and the budget, so these types are no longer a
   // permanent `not_applicable`.
   price_coverage?: 'priced' | 'missing' | 'not_applicable' | 'unknown' | null
+  // Migration 431: non-null = this row belongs to ONE user and is hidden from
+  // everyone else. Two enabled rows, one private and one platform-wide, used
+  // to render as two identical cards — which is most of why the catalog reads
+  // as full of mysterious duplicates.
+  owner_user_id?: string | null
 }
 
 interface ProviderProtocol {
@@ -62,6 +67,11 @@ interface ProviderProtocol {
   model_types: string[]
   aliases: string[]
   is_default: boolean
+  // Whose credential runs it: 'api_key' | 'server_session' | 'user_device'.
+  // Declared on the backend protocol (single source) rather than guessed here
+  // from key names. This is the ONLY thing separating the three gpt-image
+  // cards from each other, and the two dreamina cards.
+  credential_kind: string
 }
 
 // A provider card groups every model that shares the same provider + base URL
@@ -79,6 +89,42 @@ const TYPE_COLORS: Record<string, string> = {
   embedding: 'green',
   tts: 'orange',
   asr: 'purple',
+}
+
+// How a protocol's `credential_kind` reads on the card. The vocabulary is
+// closed on the backend (test_protocol_credential_kind), so an unknown value
+// here means the two sides disagree — render it raw rather than inventing a
+// friendly label for something we do not recognise.
+const CREDENTIAL_KIND: Record<string, { text: string; color: string; hint: string }> = {
+  api_key: {
+    text: 'API key',
+    color: 'arcoblue',
+    hint: 'Runs on our servers using the API key stored on these rows. Billed per token/call to that account.',
+  },
+  server_session: {
+    text: 'Server session',
+    color: 'purple',
+    hint: 'Runs on our servers against an OAuth session nous holds — a subscription quota, not a key. Nothing to paste here.',
+  },
+  user_device: {
+    text: 'User device',
+    color: 'green',
+    hint: "Runs on the user's own machine through their paired daemon, on their own credential. nous never sees it and never pays for it.",
+  },
+}
+
+// Cards sort by the backend registry's declaration order, which already groups
+// families: the two dreamina protocols are adjacent, and so are the three that
+// drive the gpt-image binary. Sorting by the rows' `sort_order` (the previous
+// behaviour, inherited from whatever the Map happened to see first) scattered
+// them — in production the local rows carry 51/52/53 and everything else 0,
+// so the pairs an admin most needs to compare landed furthest apart.
+function protocolRank(protocols: ProviderProtocol[], key: string): number {
+  const i = protocols.findIndex((p) => p.key === key)
+  // Unknown providers (a custom value typed into "Add Provider") sort last
+  // rather than first — they have no protocol to explain them, so they are
+  // exactly the cards that should not be at the top of the page.
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i
 }
 
 // Full-auto: infer the model TYPE from its name so the admin never picks it.
@@ -286,8 +332,19 @@ export function AIModelsPage() {
       }
       map.get(key)!.models.push(m)
     }
-    return Array.from(map.values())
-  }, [models])
+    return Array.from(map.values()).sort((a, b) => {
+      const ra = protocolRank(protocols, a.provider)
+      const rb = protocolRank(protocols, b.provider)
+      // Same protocol, different base URLs (one card per endpoint) — keep a
+      // stable order between them instead of Map insertion order.
+      return ra !== rb ? ra - rb : a.base_url.localeCompare(b.base_url)
+    })
+  }, [models, protocols])
+
+  const protocolByKey = useMemo(
+    () => new Map(protocols.map((p) => [p.key, p])),
+    [protocols],
+  )
 
   const protocolOptions = useMemo(
     () =>
@@ -695,9 +752,77 @@ export function AIModelsPage() {
                         .map((m) => `${m.actual_model}: ${m.last_test_detail || 'failed'}`)
                         .join(' | ') || undefined}
                     />
-                    {g.provider}
+                    {/* The protocol's own label, with the dispatch key kept
+                        visible next to it. Rendering the raw `actual_provider`
+                        alone left an admin staring at `codex` / `codex-local` /
+                        `openai-images` — three cards driving ONE binary, told
+                        apart by nothing on screen. The label and description
+                        were already in the /protocols payload this page
+                        fetches; they were simply never used outside the Add
+                        Provider dropdown. */}
+                    {protocolByKey.get(g.provider)?.label || g.provider}
+                    <Text
+                      code
+                      style={{ fontSize: 12, fontWeight: 400 }}
+                      title="actual_provider — the dispatch key stored on every row of this card"
+                    >
+                      {g.provider}
+                    </Text>
+                    {(() => {
+                      const kind = protocolByKey.get(g.provider)?.credential_kind
+                      if (!kind) return null
+                      const meta = CREDENTIAL_KIND[kind]
+                      return (
+                        <Tag
+                          size="small"
+                          color={meta?.color || 'gray'}
+                          title={meta?.hint || kind}
+                        >
+                          {meta?.text || kind}
+                        </Tag>
+                      )
+                    })()}
+                    {(() => {
+                      // Owner-scoped rows (migration 431) belong to ONE user
+                      // and are invisible to everyone else. Unlabelled, such a
+                      // card is indistinguishable from a platform-wide one —
+                      // which is exactly how codex-image and codex-local-image
+                      // came to look like pointless duplicates.
+                      const owners = Array.from(
+                        new Set(
+                          g.models
+                            .map((m) => m.owner_user_id)
+                            .filter((o): o is string => Boolean(o)),
+                        ),
+                      )
+                      if (owners.length === 0) return null
+                      const all = owners.length === g.models.length
+                      return (
+                        <Tag
+                          size="small"
+                          color="orange"
+                          title={`Private to ${owners.join(', ')} — hidden from every other account. ${
+                            all ? '' : 'Only SOME rows on this card are private.'
+                          }`}
+                        >
+                          {all ? 'Private' : 'Partly private'}
+                        </Tag>
+                      )
+                    })()}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace' }}>
+                  {protocolByKey.get(g.provider)?.description ? (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-text-2)',
+                        marginTop: 4,
+                        maxWidth: 620,
+                      }}
+                    >
+                      {protocolByKey.get(g.provider)!.description}
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: 12, color: 'var(--color-text-3)', fontFamily: 'monospace', marginTop: 4 }}>
                     {g.base_url || '(provider default base URL)'}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
@@ -758,7 +883,22 @@ export function AIModelsPage() {
                 </Space>
               </div>
 
-              <Text style={{ fontSize: 12, color: 'var(--color-text-3)' }}>Enabled Models</Text>
+              {/* Said "Enabled Models" while rendering EVERY row, disabled ones
+                  merely dimmed to 50% opacity. A heading that contradicts what
+                  is under it is worse than no heading: the retired-looking rows
+                  an admin is trying to account for were sitting right there,
+                  labelled as enabled. */}
+              {(() => {
+                const on = g.models.filter((m) => m.is_enabled).length
+                const total = g.models.length
+                return (
+                  <Text style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+                    {on === total
+                      ? `Models (${total})`
+                      : `Models (${on} of ${total} enabled)`}
+                  </Text>
+                )
+              })()}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
                 {g.models.map((m) => (
                   <div
@@ -808,7 +948,14 @@ export function AIModelsPage() {
       )}
 
       <Modal
-        title={modalMode === 'new' ? 'Add Provider' : `Add Models — ${modalGroup?.provider}`}
+        title={
+          modalMode === 'new'
+            ? 'Add Provider'
+            : `Add Models — ${
+                (modalGroup && protocolByKey.get(modalGroup.provider)?.label) ||
+                modalGroup?.provider
+              }`
+        }
         visible={modalVisible}
         onOk={handleSaveModels}
         confirmLoading={saving}
@@ -849,7 +996,12 @@ export function AIModelsPage() {
             </>
           ) : (
             <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--color-text-2)' }}>
-              <div><b>Provider:</b> {modalGroup?.provider}</div>
+              <div>
+                <b>Provider:</b>{' '}
+                {(modalGroup && protocolByKey.get(modalGroup.provider)?.label) ||
+                  modalGroup?.provider}{' '}
+                <Text code style={{ fontSize: 12 }}>{modalGroup?.provider}</Text>
+              </div>
               <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{modalGroup?.base_url}</div>
               <div style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 2 }}>
                 Key reused from this provider — no need to re-enter.

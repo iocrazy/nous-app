@@ -10,6 +10,7 @@ class DeepSeekProtocol(ProviderProtocol):
     label = "DeepSeek"
     description = "DeepSeek chat-completions endpoint."
     model_types = ("llm",)
+    credential_kind = "api_key"
     is_chat_key = True
 
     def build_chat_adapter(

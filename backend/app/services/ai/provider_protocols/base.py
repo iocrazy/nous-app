@@ -127,6 +127,26 @@ class ProviderProtocol:
     generation_family: Optional[str] = None
     is_default: bool = False
 
+    # Whose credential this protocol runs on — and therefore whose machine
+    # executes it and whose quota pays for it. One of:
+    #
+    #   "api_key"        a key stored on the catalog row; runs on our servers
+    #   "server_session" an OAuth session held by nous (no key on the row);
+    #                    runs on our servers against a subscription quota
+    #   "user_device"    the user's own credential on the user's own machine,
+    #                    reached through the paired daemon; nous never sees it
+    #
+    # This is the ONLY thing separating the three gpt-image cards in Admin →
+    # AI Models (codex / codex-local / openai-images) and the two dreamina
+    # cards (jimeng-cli / jimeng-local). They drive the same binaries and
+    # cannot be merged — sharing a generation_family would let db_registry
+    # build a server-side provider for a row meant to run on the user's
+    # machine — so the admin surface has to name the difference instead.
+    #
+    # Empty by default and rejected by test_protocol_credential_kind, so a new
+    # protocol answers the question rather than inheriting a wrong answer.
+    credential_kind: str = ""
+
     # Whether image generation for this family is an HTTP call made BY THIS
     # PROCESS — the only shape a server-side health probe can reach.
     #

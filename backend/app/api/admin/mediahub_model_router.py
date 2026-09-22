@@ -70,6 +70,9 @@ def _to_response(
         pricing_value=float(row["pricing_value"]),
         is_enabled=row["is_enabled"],
         sort_order=row["sort_order"],
+        # str() not a bare pass-through: asyncpg yields uuid.UUID here and the
+        # admin page treats it as text.
+        owner_user_id=(str(row["owner_user_id"]) if row.get("owner_user_id") else None),
         created_at=str(row.get("created_at", "")),
         updated_at=str(row.get("updated_at", "")),
         last_test_status=row.get("last_test_status"),
@@ -105,6 +108,7 @@ async def list_provider_protocols(auth: AdminAuthDep):
                 model_types=list(p.model_types),
                 aliases=list(p.aliases),
                 is_default=p.is_default,
+                credential_kind=p.credential_kind,
             )
             for p in all_protocols()
         ]
