@@ -15,6 +15,7 @@ class QwenProtocol(ProviderProtocol):
     )
     model_types = ("llm", "embedding", "asr")
     credential_kind = "api_key"
+    ai_provider_name = "QwenProvider"
     is_chat_key = True
     is_default = True
 

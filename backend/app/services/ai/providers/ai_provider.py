@@ -404,41 +404,89 @@ class ModelScopeProvider(OpenAICompatibleProvider):
         return models
 
 
+# ---------------------------------------------------------------------------
+# The provider registry — ONE source, projected here.
+# ---------------------------------------------------------------------------
+# ``provider_protocols`` is the single source of truth: each protocol names its
+# ``AIProvider`` subclass via ``ai_provider_name``. The two dicts below are the
+# only things this module contributes, and both are explicit lists rather than
+# silence.
+
+# Keys that have an AIProvider but deliberately NO protocol. These are BYOK
+# provider cards (Settings → AI Providers), not platform-catalog protocols.
+# Promoting them would not be a refactor: it would put them into
+# ``chat_provider_keys()``, which feeds ``adapters.factory``'s dispatch ladder
+# and the admin protocol dropdown.
+#
+# ``volcengine`` is an alias, not a product: 火山引擎 serves the doubao LLM, and
+# the two keys have always pointed at the same class.
+BYOK_ONLY_PROVIDERS = {
+    "volcengine": DoubaoProvider,
+    "minimax": MiniMaxProvider,
+    "kimi": KimiProvider,
+    "ollama": OllamaProvider,
+    "lmstudio": LMStudioProvider,
+}
+
+# Protocols that have no AIProvider at all, and why. Being listed here is a
+# claim, and test_provider_registry_is_derived re-checks it against the
+# protocol's own ``ai_provider_name`` rather than trusting the comment.
+PROTOCOLS_WITHOUT_AI_PROVIDER = {
+    "claude": "Anthropic Messages API — no AIProvider implementation exists",
+    "codex-local": "runs on the user's device via the daemon; no HTTP endpoint",
+    "codex": "image-only, server-side CLI subprocess",
+    "openai-images": "image-only, CLI subprocess over the Images API",
+    "jimeng-cli": "image/video-only, CLI subprocess",
+    "jimeng-local": "image/video-only, on the user's device",
+    "ark": "image/video-only, Volcengine task protocol",
+}
+
+
+def _protocol_providers() -> dict:
+    """``{protocol key: AIProvider subclass}`` for every protocol that names one.
+
+    The name is resolved against this module's globals rather than imported by
+    the protocol, so ``provider_protocols`` stays free of any dependency on the
+    provider layer — which is what lets the dependency point this way at all.
+    """
+    from app.services.ai.provider_protocols import all_protocols
+
+    out = {}
+    for protocol in all_protocols():
+        name = getattr(protocol, "ai_provider_name", "")
+        if not name:
+            continue
+        cls = globals().get(name)
+        if cls is None:
+            # Loud, not silent: a typo'd or deleted class name would otherwise
+            # drop the protocol out of the registry exactly the way the
+            # hand-written dict used to, which is the failure being removed.
+            raise RuntimeError(
+                f"protocol {protocol.key!r} names AIProvider {name!r}, which "
+                f"does not exist in {__name__}"
+            )
+        out[protocol.key] = cls
+    return out
+
+
+def _build_registry() -> dict:
+    """Protocol-derived entries plus the BYOK-only extras."""
+    return {**_protocol_providers(), **BYOK_ONLY_PROVIDERS}
+
+
 class AIProviderFactory:
     """Factory for creating AI provider instances."""
 
-    # ⚠️ This is the SECOND provider registry. ``provider_protocols`` is the
-    # documented single source (the admin dropdown reads it; ``adapters.factory``
-    # derives its key set from it), and nothing connects the two — adding a key
-    # there does NOT add it here, and ``get_provider`` raises on an unknown key
-    # with no fallback.
+    # DERIVED, not hand-written — see ``_build_registry`` above. This used to be
+    # a second list maintained by hand next to ``provider_protocols``; adding a
+    # key to one did not add it to the other, and that is exactly how ``nous``
+    # came to be missing here while being present there (PR #2375: every
+    # transcription raised ``Unknown provider: nous``).
     #
-    # Only ONE caller path reaches this dict from a catalog row: the ``asr``
-    # probe and the transcription chain (``llm`` / ``embedding`` probe over
-    # direct httpx). So the invariant that matters is "every protocol declaring
-    # asr has an entry here", and it is pinned by
-    # tests/test_asr_provider_registry_contract.py — which also forces every
-    # other protocol to be explicitly classified rather than silently absent.
-    _registry = {
-        "openai": OpenAIProvider,
-        # The self-hosted nous-engine gateway. OpenAIProvider is not a generic
-        # stand-in here: its ``transcribe`` carries this server's quirks by name
-        # (moss-asr reads the ``context`` form field, ignores two OpenAI params,
-        # and returns the diarization ``speaker`` label WhisperService persists).
-        # Before migration 480 these rows were filed under "openai" and reached
-        # exactly this class; the rename moved the key and left the mapping
-        # behind, which broke every transcription until 2026-09-22.
-        "nous": OpenAIProvider,
-        "deepseek": DeepSeekProvider,
-        "doubao": DoubaoProvider,
-        "volcengine": DoubaoProvider,  # 火山引擎 = doubao LLM (alias)
-        "minimax": MiniMaxProvider,
-        "kimi": KimiProvider,
-        "qwen": QwenProvider,
-        "modelscope": ModelScopeProvider,
-        "ollama": OllamaProvider,
-        "lmstudio": LMStudioProvider,
-    }
+    # Pinned key-for-key against its pre-refactor contents by
+    # tests/test_provider_registry_is_derived.py, so this rewiring is provably
+    # behaviour-preserving.
+    _registry = _build_registry()
 
     @classmethod
     def get_provider(cls, provider_key: str, config: dict = None) -> AIProvider:

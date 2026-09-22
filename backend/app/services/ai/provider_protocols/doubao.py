@@ -11,6 +11,7 @@ class DoubaoProtocol(ProviderProtocol):
     description = "Volcengine Doubao chat-completions (doubao-*/ep-*)."
     model_types = ("llm", "embedding", "asr")
     credential_kind = "api_key"
+    ai_provider_name = "DoubaoProvider"
     is_chat_key = True
 
     def build_chat_adapter(

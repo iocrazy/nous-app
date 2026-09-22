@@ -147,6 +147,26 @@ class ProviderProtocol:
     # protocol answers the question rather than inheriting a wrong answer.
     credential_kind: str = ""
 
+    # The ``AIProvider`` subclass (app/services/ai/providers/ai_provider.py)
+    # that serves this key, BY NAME — a string, not the class, so this module
+    # never imports that one (the protocols are loaded at startup; the provider
+    # module drags in the OpenAI SDK, and a real import here would also invert
+    # the dependency that lets ai_provider derive its registry from us).
+    #
+    # ``AIProviderFactory`` resolves the name against its own module globals and
+    # builds its registry from every protocol that sets this. Before 2026-09-22
+    # that registry was a SECOND hand-written dict: adding ``nous`` to the
+    # protocols did not add it there, and every transcription raised
+    # ``Unknown provider: nous`` (PR #2375). Deriving it is why that can no
+    # longer happen.
+    #
+    # Empty means "this protocol has no AIProvider" — legitimate for the
+    # CLI/daemon families and for chat-only protocols the factory never serves.
+    # Those keys must be listed in ``PROTOCOLS_WITHOUT_AI_PROVIDER``;
+    # test_provider_registry_is_derived rejects a protocol that is neither
+    # mapped nor exempt.
+    ai_provider_name: str = ""
+
     # Whether image generation for this family is an HTTP call made BY THIS
     # PROCESS — the only shape a server-side health probe can reach.
     #
