@@ -22,7 +22,7 @@ class NousProtocol(ProviderProtocol):
     """
 
     key = "nous"
-    label = "Nous Engine (self-hosted)"
+    label = "Nous Engine"
     description = (
         "Self-hosted nous-engine gateway (OpenAI-compatible /chat/completions). "
         "The base_url is part of the credential — the engine has no public "
