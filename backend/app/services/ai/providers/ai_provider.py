@@ -407,8 +407,28 @@ class ModelScopeProvider(OpenAICompatibleProvider):
 class AIProviderFactory:
     """Factory for creating AI provider instances."""
 
+    # ⚠️ This is the SECOND provider registry. ``provider_protocols`` is the
+    # documented single source (the admin dropdown reads it; ``adapters.factory``
+    # derives its key set from it), and nothing connects the two — adding a key
+    # there does NOT add it here, and ``get_provider`` raises on an unknown key
+    # with no fallback.
+    #
+    # Only ONE caller path reaches this dict from a catalog row: the ``asr``
+    # probe and the transcription chain (``llm`` / ``embedding`` probe over
+    # direct httpx). So the invariant that matters is "every protocol declaring
+    # asr has an entry here", and it is pinned by
+    # tests/test_asr_provider_registry_contract.py — which also forces every
+    # other protocol to be explicitly classified rather than silently absent.
     _registry = {
         "openai": OpenAIProvider,
+        # The self-hosted nous-engine gateway. OpenAIProvider is not a generic
+        # stand-in here: its ``transcribe`` carries this server's quirks by name
+        # (moss-asr reads the ``context`` form field, ignores two OpenAI params,
+        # and returns the diarization ``speaker`` label WhisperService persists).
+        # Before migration 480 these rows were filed under "openai" and reached
+        # exactly this class; the rename moved the key and left the mapping
+        # behind, which broke every transcription until 2026-09-22.
+        "nous": OpenAIProvider,
         "deepseek": DeepSeekProvider,
         "doubao": DoubaoProvider,
         "volcengine": DoubaoProvider,  # 火山引擎 = doubao LLM (alias)
