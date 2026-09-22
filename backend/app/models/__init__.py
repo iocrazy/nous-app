@@ -187,7 +187,6 @@ from app.models.provider_costs import (  # noqa: F401
     ProviderByokKeys,
     ProviderContracts,
     ProviderCredits,
-    ProviderMonthlySpend,
     ProviderPricing,
 )
 from app.models.reviews import (  # noqa: F401
@@ -451,7 +450,6 @@ __all__ = [
     "ProviderByokKeys",
     "ProviderContracts",
     "ProviderCredits",
-    "ProviderMonthlySpend",
     "ProviderPricing",
     # topics / signal feed
     "Hotspots",

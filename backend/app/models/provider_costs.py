@@ -10,8 +10,6 @@ the user-facing credits/points/orders ledger). These tables are what
     volume tier / prepay / overage terms)
   * ``ProviderCredits``       — provider_credits (vendor credits consumed
     before real spend)
-  * ``ProviderMonthlySpend``  — provider_monthly_spend (rollup cache feeding
-    the volume tiers)
   * ``ProviderByokKeys``      — provider_byok_keys (BYOK identification;
     flagged calls are zero-billed)
   * ``FxRates``               — fx_rates (rate history; the id is frozen into
@@ -29,7 +27,6 @@ import uuid
 from typing import Optional
 
 from sqlalchemy import (
-    CHAR,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -282,42 +279,6 @@ class ProviderCredits(Base):
     consumed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     reason: Mapped[Optional[str]] = mapped_column(Text)
     evidence_url: Mapped[Optional[str]] = mapped_column(Text)
-
-
-class ProviderMonthlySpend(Base):
-    __tablename__ = "provider_monthly_spend"
-    __table_args__ = (
-        PrimaryKeyConstraint(
-            "provider_slug",
-            "contract_id",
-            "year_month",
-            name="provider_monthly_spend_pkey",
-        ),
-        {
-            "comment": (
-                "Rollup cache. Background job refreshes from agent_run_events "
-                "every 5 min.\n   compute_cost() reads this to apply "
-                "volume_tier_json from contracts."
-            ),
-            "schema": "public",
-        },
-    )
-
-    provider_slug: Mapped[str] = mapped_column(Text, primary_key=True)
-    contract_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    year_month: Mapped[str] = mapped_column(CHAR(7), primary_key=True)
-    total_usd: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(12, 4), nullable=False, server_default=text("0")
-    )
-    total_local_cents: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
-    call_count: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
-    last_updated: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
 
 
 class ProviderByokKeys(Base):
