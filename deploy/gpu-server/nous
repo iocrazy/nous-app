@@ -35,7 +35,10 @@ cmd="${1:-status}"; shift || true
 
 case "$cmd" in
   status|st)
-    printf "${c_dim}NOUS APP STACK  (docker · GPU 10.0.0.10)${c_rst}\n\n"
+    # 主机名现取 —— 写死 IP 会随网络方案变更过期(ZeroTier 10.0.0.10 →
+    # Tailscale),而这个脚本本来就只在那台机器上跑,问它自己永远是对的。
+    # 走 %s 而不是内插,免得 hostname 里的 % 被当成格式符。
+    printf "${c_dim}NOUS APP STACK  (docker · %s)${c_rst}\n\n" "$(hostname)"
     printf "%-28s %s\n" "CONTAINER" "STATUS"
     docker ps -a --format '{{.Names}}\t{{.Status}}' \
       | grep -E '^(nous-|realtime-dev.nous)' | sort \
