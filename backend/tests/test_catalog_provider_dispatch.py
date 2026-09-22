@@ -80,7 +80,9 @@ class TestResolveProviderKey:
         # the fallback while exercising a real key. A sentinel has to be a
         # string that cannot become a provider, not merely one that is not a
         # provider yet.
-        assert resolve_provider_key("not-a-registered-protocol", "qwen3-6-35b") == "qwen"
+        assert (
+            resolve_provider_key("not-a-registered-protocol", "qwen3-6-35b") == "qwen"
+        )
 
 
 class TestCatalogDispatch:
