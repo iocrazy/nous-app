@@ -125,8 +125,8 @@ ATOMIC MONEY PATHS (balance mutations) — preserved EXACTLY, no locking added
     ``add_points``'s read-then-write (2026-09-22, 3d batch 1): crediting was the
     one balance mutation that never got an atomic form — consume/refund have had
     RPCs since mig 120/123 — so two concurrent credits (admin gift / admin
-    adjust / the payment-callback fallback) could lose one. No migration: the
-    fix is in the statement, not the schema.
+    adjust) could lose one. No migration: the fix is in the statement, not the
+    schema.
 
   NON-ATOMIC read-then-write money paths that REMAIN — REPRODUCED, NOT fixed
   (inert discipline; flagged as a CONCERN for a human, NOT repaired here):
@@ -454,7 +454,11 @@ class PointsRepository:
 
                 # DO NOTHING ⇒ RETURNING is empty. Someone else created it
                 # between our read and our write; hand back THEIR row rather
-                # than {} — add_points does .get() on this result immediately.
+                # than {} — ``add_points`` discards this return value and
+                # re-reads the balance via ``increment_points_balance``, but
+                # other callers (and any future one) read the row, and a lying
+                # empty dict is the worst shape to hand back for a quota row
+                # that demonstrably exists.
                 existing = (
                     (
                         await session.execute(

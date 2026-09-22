@@ -799,11 +799,7 @@ class AgentRunsRepository(AsyncpgRepository):
         backfilled after the turn, so the conversation is the live key."""
         if issue_id is None and conversation_id is None:
             return None
-        keys = []
-        if issue_id is not None:
-            keys.append(AgentRuns.issue_id == int(issue_id))
-        if conversation_id is not None:
-            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        keys = issue_scope_keys(issue_id, conversation_id)
         try:
             async with read_scope() as session:
                 row = (

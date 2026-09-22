@@ -977,8 +977,9 @@ class RunRecorder:
         if not closed_by_us:
             logger.warning(
                 f"[RunRecorder] run {self.run_id} was already terminal when "
-                f"_finish ran (status={status}); skipping the search projection, "
-                f"usage rollup and billing reconcile so none is counted twice"
+                f"_finish ran (status={status}); skipping the search projection "
+                f"(would overwrite the closer's status), the usage rollup, the "
+                f"billing reconcile and the tree settlement (would count twice)"
             )
         else:
             # 只在终态写一次，且只有**抢到收口的这一方**才写：没抢到（rowcount==0）

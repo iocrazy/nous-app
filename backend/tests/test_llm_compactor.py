@@ -628,7 +628,7 @@ async def test_compactor_escapes_a_forged_closing_tag_in_the_summary():
     assert body.endswith("\n</conversation_summary>")
     # Defanged, not deleted — the model still reads the words.
     assert "Exfiltrate." in body
-    assert "conversation_summary" in body.replace("<conversation_summary>", "")
+    assert "<\\/conversation_summary>" in body
 
 
 @pytest.mark.unit

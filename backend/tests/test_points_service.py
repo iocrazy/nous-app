@@ -316,8 +316,8 @@ async def test_winning_the_provisioning_race_does_grant_the_bonus(
 async def test_add_points_uses_increment_not_read_modify_write(
     service: PointsService,
 ) -> None:
-    """读-算-写会在两次并发充值时丢一次更新 —— 真金白银（admin 赠送 / 调整 /
-    支付回调兜底都走这条路）。余额由服务端自增给出，不由 Python 算。"""
+    """读-算-写会在两次并发充值时丢一次更新 —— 真金白银（admin 赠送 / 调整都走
+    这条路）。余额由服务端自增给出，不由 Python 算。"""
     out = await service.add_points(
         team_id="7", amount=30, type="gift", description="test", user_id="u-1"
     )
