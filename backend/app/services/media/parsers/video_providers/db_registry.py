@@ -55,9 +55,20 @@ if TYPE_CHECKING:
     )
 
 
+# The Dreamina families. Two of them because dispatch must never confuse a row
+# that runs on our servers with one that runs on the user's device — see
+# JimengLocalProtocol — but that split is about HOW the row is executed, and
+# the default-provider preference below is about WHICH PRODUCT to reach for.
+# Matching only "jimeng-cli" made the preference silently stop applying the
+# moment Dreamina moved to the daemon: nothing raised, the lookup just found
+# nothing and fell through to sort_order.
+_JIMENG_FAMILIES = frozenset({"jimeng-cli", "jimeng-local"})
+
+
 def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) -> dict:
     """Choose a catalog row: an explicit name match wins; else the preferred
-    jimeng-cli row; else the first row (already ordered by sort_order).
+    Dreamina row (either family); else the first row (already ordered by
+    sort_order).
 
     The name match is ``_explicit_match`` — the SAME matcher ``_visible_rows``
     uses to decide whether a requested row was withheld. Two matchers would let
@@ -80,7 +91,7 @@ def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) 
                     )
                 )
                 is not None
-                and protocol.generation_family == "jimeng-cli"
+                and protocol.generation_family in _JIMENG_FAMILIES
             ),
             None,
         )
