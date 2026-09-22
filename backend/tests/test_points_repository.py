@@ -293,6 +293,49 @@ async def test_update_points_balance_updates_native_int(
 
 
 @pytest.mark.asyncio
+async def test_increment_points_balance_is_a_single_server_side_add(
+    repo: PointsRepository, fake_session: _FakeSession
+) -> None:
+    """充值必须是一条 ``SET points_balance = points_balance + :amount``。
+
+    读-算-写（读余额、Python 相加、写绝对值）在两次并发充值下会丢一次更新 ——
+    真金白银。把自增留在服务端，PG 的行锁就替我们排队了。
+    """
+    fake_session.scalar_rows = [TeamQuotas(team_id=7, points_balance=130)]
+    out = await repo.increment_points_balance("7", 30)
+    assert type(out["points_balance"]) is int and out["points_balance"] == 130
+
+    sql, binds = fake_session.calls[-1]
+    s = sql.replace("public.", "")
+    assert "SET points_balance=(team_quotas.points_balance + " in s
+    assert "RETURNING" in s
+    # 绑的是增量，不是算好的绝对值 —— 绝对值一旦出现就说明又退回读-算-写了。
+    assert set(binds.values()) == {30, 7}
+
+
+@pytest.mark.asyncio
+async def test_increment_points_balance_returns_empty_when_team_has_no_quota(
+    repo: PointsRepository, fake_session: _FakeSession
+) -> None:
+    fake_session.scalar_rows = []
+    assert await repo.increment_points_balance("7", 30) == {}
+
+
+@pytest.mark.asyncio
+async def test_increment_points_balance_raises_instead_of_reporting_zero(
+    repo: PointsRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DB 报错时抛出 —— 返回 ``{}`` 会让调用方把一次没发生的充值写成 0 余额。"""
+
+    def _boom() -> Any:
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(mod, "write_scope", _boom)
+    with pytest.raises(RuntimeError):
+        await repo.increment_points_balance("7", 30)
+
+
+@pytest.mark.asyncio
 async def test_update_storage_used_updates_bigint(
     repo: PointsRepository, fake_session: _FakeSession
 ) -> None:

@@ -15,6 +15,7 @@
 
 import type { AgentRunEvent } from '../../../types';
 import type { CostKind } from '../outputCost';
+import { judgeToolOk, toolTimedOut } from '../toolOutcome';
 
 export type StepLineType = 'tool' | 'retry' | 'compaction' | 'todo' | 'output' | 'model';
 
@@ -510,13 +511,15 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
         // Phase 2b-1 §3: a wall-clock timeout is a typed tool result
         // ({error:"timeout", timed_out:true, timeout_s, elapsed_s}) — a
         // failure with its own badge, never a generic "failed".
-        const timedOut = result !== null && result.timed_out === true;
+        const timedOut = toolTimedOut(result);
         // 失败的真来源是**顶层** `error_code`（Task 8）。后端 `tool_error_code` 把三
         // 种形状归一到它：处理方给的 `error_code`、非 `ok` 的 `outcome`、以及光有
         // `error` 键——后两种都不带 `ok:false`。只认 `result.ok` 会把 denied、
         // invalid_args 这类失败读成成功，而动作动词那一行正是靠 `ok` 决定要不要说
         // "failed"（3c §4.1）。两个判据都要，不是二选一。
-        const ok = !(result !== null && (result.ok === false || timedOut)) && str(p.error_code) === null;
+        // 判断本体在 `../toolOutcome`，与 `toolActivity.ts` 的 chips 共用同一个函数
+        // ——3d batch1 Task 4 之前这两处各判各的，chips 那边漏了 `error_code`。
+        const ok = judgeToolOk({ result, errorCode: str(p.error_code) });
         upsertLine(node, `tool:${ev.seq}`, () => ({
           type: 'tool',
           label: tool,

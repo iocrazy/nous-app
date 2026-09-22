@@ -317,6 +317,15 @@ class ChatToolCall(BaseModel):
     iteration: int  # 1-indexed loop tick within the turn
     args: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] = Field(default_factory=dict)
+    # The SAME normalised failure code the transcript's ``tool_call`` event
+    # carries — both come from one ``tool_error_code(result)`` call per
+    # dispatch, so the bubble and the timeline cannot disagree about whether a
+    # call failed. ``None`` means success. Reading ``result`` alone is NOT
+    # equivalent: ``tool_error_code`` also folds in a non-``ok`` ``outcome``
+    # and the bare presence of an ``error`` key, and neither of those shapes
+    # carries ``ok: false``. Optional so a client predating this field (and a
+    # replayed trace persisted without it) still validates.
+    error_code: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

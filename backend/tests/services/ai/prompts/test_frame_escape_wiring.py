@@ -121,6 +121,9 @@ _PROMPT_SOURCES = (
     ("services", "storyboard", "script", "script_ai_service.py"),
     ("services", "ai", "chat", "ai_library_chat_service.py"),
     ("services", "ai", "runner", "inbox.py"),
+    # 不是提示词组装模块，但它同样往模型可见的 system 消息里写一个框
+    # （``<conversation_summary>``）—— 框在哪渲染，守卫就得扫到哪。
+    ("services", "ai", "llm", "llm_compactor.py"),
 )
 
 # Excluded on purpose, with the reason each is not a frame:

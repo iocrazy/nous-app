@@ -26,6 +26,7 @@ FK teams.id) + a real auth.users row (member/txn user_id). Skips cleanly:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import decimal
 import os
@@ -151,6 +152,46 @@ async def test_balance_debit_credit_round_trips_exact(
     finally:
         await conn.close()
     assert persisted == 0
+
+
+async def test_concurrent_increments_do_not_lose_updates(
+    integration_db_url, patched_engine, seed_team
+):
+    """20 笔并发 +1 必须一分不差地落成 +20。
+
+    读-算-写（读余额 → Python 相加 → 写绝对值）在这里会丢更新：两笔充值读到
+    同一个旧余额，后写的那笔把前一笔盖掉。引擎用的是 ``NullPool``，所以每个
+    ``write_scope()`` 都是一条独立的 asyncpg 连接 —— ``asyncio.gather`` 是真并发，
+    不是被共享连接串起来的假并发。
+    """
+    team_id, _user = seed_team
+    await _repo().create_team_quota(team_id=str(team_id), points_balance=100)
+
+    results = await asyncio.gather(
+        *[_repo().increment_points_balance(str(team_id), 1) for _ in range(20)]
+    )
+    # 每一笔都拿到自己那一步之后的余额（行锁串行化），而不是同一个数。
+    assert sorted(r["points_balance"] for r in results) == list(range(101, 121))
+
+    fresh = await _repo().get_team_quota(str(team_id))
+    assert fresh["points_balance"] == 120
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        persisted = await conn.fetchval(
+            "SELECT points_balance FROM team_quotas WHERE team_id = $1", team_id
+        )
+    finally:
+        await conn.close()
+    assert persisted == 120
+
+
+async def test_increment_points_balance_on_missing_quota_returns_empty(
+    integration_db_url, patched_engine, seed_team
+):
+    """没有 quota 行时 0 行被更新 —— 返回 ``{}``，不能凭空建一行余额。"""
+    team_id, _user = seed_team
+    assert await _repo().increment_points_balance(str(team_id), 30) == {}
 
 
 # ─── transactions: native int amounts + Numeric str + uuid str ──────────

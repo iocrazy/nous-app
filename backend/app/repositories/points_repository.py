@@ -28,7 +28,10 @@ teams.py):
        math/compare on it —
          • points_service.check_quota: ``current_balance < points_cost`` (a
            ``<`` balance check — a str here would raise/compare lexically).
-         • points_service.add_points: ``current_balance + amount`` (accumulate).
+         • points_service.add_points: reads the increment's RETURNING value
+           straight into the ledger row's ``balance_after`` (the Python
+           ``current_balance + amount`` accumulate is gone — see
+           increment_points_balance below).
          • points_service.reclaim_daily_gift: ``min(amount, current_balance)``
            then ``current_balance - actual_reclaim``.
          • points_service.get_balance: ``storage_used / storage_limit``.
@@ -115,26 +118,39 @@ ATOMIC MONEY PATHS (balance mutations) — preserved EXACTLY, no locking added
     pattern; idempotent via the partial-unique refund index, so Celery retries
     are safe. team_id → int, user_id str-or-None. write_scope() commit.
 
-  NON-ATOMIC read-then-write money paths — REPRODUCED, NOT fixed (inert
-  discipline; flagged as a CONCERN for a human, NOT repaired here):
-    add_points / reclaim_daily_gift / admin_adjust(<0) live in the SERVICE/
-    ROUTER layer: they read get_team_quota, compute in Python, then call
-    update_points_balance + create_transaction as TWO separate repo calls. That
-    read-then-write is a PRE-EXISTING non-atomic balance mutation (a concurrent
-    add+add can lose an increment). It is unchanged by this migration — each
-    repo call still commits independently via write_scope() (parity with the
-    legacy's two independent REST writes). increment_member_usage is likewise a
-    pre-existing read-then-write (get_member_quota → update). We REPRODUCE the
-    same shape and do NOT add locking. ⚠️ CONCERN (reported, not fixed): these
-    are non-atomic money paths; only the RPC consume/refund paths are atomic.
+  increment_points_balance → ONE statement: ``UPDATE team_quotas SET
+    points_balance = points_balance + :amount … RETURNING *``. The add is
+    server-side, so PG's row lock serialises concurrent credits for us and the
+    returned ``points_balance`` IS the caller's ``balance_after``. This replaced
+    ``add_points``'s read-then-write (2026-09-22, 3d batch 1): crediting was the
+    one balance mutation that never got an atomic form — consume/refund have had
+    RPCs since mig 120/123 — so two concurrent credits (admin gift / admin
+    adjust) could lose one. No migration: the fix is in the statement, not the
+    schema.
+
+  NON-ATOMIC read-then-write money paths that REMAIN — REPRODUCED, NOT fixed
+  (inert discipline; flagged as a CONCERN for a human, NOT repaired here):
+    reclaim_daily_gift / admin_adjust(<0) live in the SERVICE/ROUTER layer: they
+    read get_team_quota, compute in Python, then call update_points_balance +
+    create_transaction as TWO separate repo calls. That read-then-write is a
+    PRE-EXISTING non-atomic balance mutation (a concurrent pair can lose one
+    mutation). It is unchanged — each repo call still commits independently via
+    write_scope() (parity with the legacy's two independent REST writes).
+    increment_member_usage is likewise a pre-existing read-then-write
+    (get_member_quota → update). We REPRODUCE the same shape and do NOT add
+    locking. ⚠️ CONCERN (reported, not fixed): these are non-atomic money paths;
+    only the RPC consume/refund paths and increment_points_balance are atomic.
+    (Both remaining ones DEBIT and clamp at the read balance, so they need the
+    clamp decision in the same statement — a wider change than this ticket.)
 
 PHANTOM-COLUMN PRE-FLIGHT (per write path — verified vs models + migrations)
 ============================================================================
   create_team_quota   : INSERT team_quotas {team_id, points_balance,
     storage_limit_bytes, storage_used_bytes} — all mapped. team_id is the
     BIGINT PK (inbound str → int). ✔ no phantom.
-  update_points_balance / update_storage_used : UPDATE single mapped Integer/
-    BigInteger col WHERE team_id. ✔ no phantom.
+  update_points_balance / increment_points_balance / update_storage_used :
+    UPDATE single mapped Integer/BigInteger col WHERE team_id (the increment's
+    SET references that same mapped col). ✔ no phantom.
   upsert_member_quota : INSERT … ON CONFLICT (team_id,user_id) DO UPDATE on the
     member_quotas_team_id_user_id_key unique constraint — {team_id, user_id,
     monthly_points_limit} all mapped. ✔ no phantom.
@@ -174,8 +190,10 @@ Writes commit via ``write_scope()`` (the lost-money silent-rollback lesson —
 EVERY balance/quota/transaction mutation goes through it). Reads use
 ``read_scope()``. Error handling mirrors the legacy EXACTLY: get_* /list_* reads
 swallow + return None/[]; create_team_quota / update_points_balance /
-update_storage_used / upsert_member_quota / increment_member_usage /
-create_transaction swallow + RE-RAISE (the legacy ``raise``s on these writes);
+increment_points_balance / update_storage_used / upsert_member_quota /
+increment_member_usage / create_transaction swallow + RE-RAISE (the legacy
+``raise``s on these writes — a money write that returns ``{}`` on failure reads
+to the caller as "credited, balance 0");
 consume/refund RPC swallow + return None; get_admin_overview / get_usage_stats
 swallow + return the zeroed dict.
 """
@@ -436,7 +454,11 @@ class PointsRepository:
 
                 # DO NOTHING ⇒ RETURNING is empty. Someone else created it
                 # between our read and our write; hand back THEIR row rather
-                # than {} — add_points does .get() on this result immediately.
+                # than {} — ``add_points`` discards this return value and
+                # re-reads the balance via ``increment_points_balance``, but
+                # other callers (and any future one) read the row, and a lying
+                # empty dict is the worst shape to hand back for a quota row
+                # that demonstrably exists.
                 existing = (
                     (
                         await session.execute(
@@ -550,11 +572,54 @@ class PointsRepository:
             )
             return None
 
+    async def increment_points_balance(
+        self, team_id: str, amount: int
+    ) -> Dict[str, Any]:
+        """服务端自增：``SET points_balance = points_balance + :amount``，一条语句。
+
+        ``add_points`` 此前是读-算-写三步（读余额、Python 相加、
+        ``update_points_balance`` 写绝对值），两次并发充值会丢一次更新 —— 消费与
+        退款早就走 RPC 原子了（mig 120/123），只有加钱这一条没有。自增留在服务端，
+        PG 的行锁就替我们把并发排好了队。
+
+        Args:
+            team_id: UUID of the team.
+            amount: 增量（可正可负；调用方负责判定符号与下限）。
+
+        Returns:
+            自增后的 quota 行 dict；``points_balance`` 即 ``balance_after``。
+            团队没有 quota 行（UPDATE 匹配 0 行）时返回 ``{}``。
+        """
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    sa_update(TeamQuotas)
+                    .where(TeamQuotas.team_id == int(team_id))
+                    .values(points_balance=TeamQuotas.points_balance + int(amount))
+                    .returning(TeamQuotas)
+                )
+                row = result.scalars().first()
+                out = _team_quota_row(row) if row else {}
+            logger.info(
+                f"Incremented points balance for team {team_id} by {amount} "
+                f"-> {out.get('points_balance')}"
+            )
+            return out
+        except Exception as e:
+            # 绝不 swallow：返回 {} 会让调用方把一次没发生的充值读成 0 余额。
+            logger.error(f"Failed to increment points balance for {team_id}: {e}")
+            raise
+
     async def update_points_balance(
         self, team_id: str, new_balance: int
     ) -> Dict[str, Any]:
         """
         Set the points balance for a team.
+
+        ⚠️ 绝对值覆盖写 —— **不要用它做加减**。读余额 → Python 加减 → 写绝对值
+        这三步在并发下会丢更新。加钱走 ``increment_points_balance``（单语句服务端
+        自增），扣钱走 ``consume_points_atomic`` / ``refund_points_atomic`` 两个
+        RPC。留在这里只为真正需要「设成某个值」的场景。
 
         Args:
             team_id: UUID of the team.

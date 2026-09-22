@@ -1,6 +1,6 @@
-"""一棵真的 4 层树上的钱 —— spec §3 不变量 1–4，加两条同族的。
+"""一棵真的 4 层树上的钱 —— spec §3 不变量 1–4，加三条同族的。
 
-七条用例，各自钉一件事：
+八条用例，各自钉一件事：
 
 ===================================================  ==========================
 用例                                                 钉什么
@@ -10,6 +10,7 @@
 ``..._delegate_child_counts_toward_budget``          §3-3 预算看得见委派
 ``..._crash_writer_leaves_the_mirrored_own_cost``    §3-4 崩溃行不归零
 ``..._prior_plus_live_without_double_count``         门禁那道加法（T3 评审 Critical）
+``..._conversation_only_run_counts_toward_the_...``  议题那组 OR 键的第二条臂
 ``..._whole_tree_on_the_roots_group``                效率页：钱按 root 归属（裁定 7）
 ``..._dirty_column_is_not_the_answer``               夹具自证：读错列会得出别的数
 ===================================================  ==========================
@@ -34,6 +35,9 @@ WHY THIS FILE EXISTS
 * **委派子 run 进不进议题预算，是一条 WHERE 的事。** 旧语句带 ``parent_run_id IS
   NULL``，于是 Delegate 出去的花费整个绕过议题预算门禁 —— 这就是本票的起点。证明它
   被捞回来了，只能靠真的删掉那两行再看总额掉了多少。
+* **议题那组键是 ``issue_id OR conversation_id``，而 ``OR`` 的两侧会重叠。** root 行
+  两个键都有，所以「第二条臂在不在」与「它会不会把同一行数两遍」只能靠一个真的既有
+  重叠行、又有只走会话那条路的行的库来分开 —— 桩 session 对这两件事一视同仁。
 * **``own_cost_cents`` 是 numeric。** 12.5 / 3.25 这类值经 Decimal 往返后还等不等于
   手算的浮点数，是库 + 驱动 + 仓库那层 ``float()`` 合起来的答案。
 
@@ -89,8 +93,25 @@ _skip = pytest.mark.skipif(
 # 确答案（实测过）。
 A, B, C, D, E = 91001, 91002, 91003, 91004, 91005
 
-#: 带 ``team_id`` 的那三行 —— 效率页主查询能看见的就是它们。
-_SCOPED = (A, B, C)
+#: 这棵树的五行。
+_TREE = (A, B, C, D, E)
+
+#: 第六行，**不在这棵树里**：没有父、没有 ``root_run_id``，也**没有 ``issue_id``**。
+#: 它挂到议题上的唯一凭据是 ``conversation_id`` —— 这正是 ``issue_scope_keys`` 第二
+#: 条臂负责的那种 run（走会话直接找 agent 聊出来的，从没戳过 issue 列）。在此之前
+#: 这个夹具一行都没有，那条臂于是从未在真库上跑过。
+#:
+#: agent 取 X（与 root 同一个），所以「按 agent 开窗求和」会看见它 —— 那是唯一一个
+#: 不按议题键收行的读方，它的手算常数因此要含这一笔。
+CONV_ONLY = 91006
+
+#: 带 ``conversation_id`` 的两行。root A 也戳着同一个会话 —— 真实形状就是这样
+#: （议题的 session 会话上跑出来的 root 两个键都有），而且它让「两条臂 OR 起来会不会
+#: 把 A 数两遍」变成一个真的、能被测到的风险。
+_CONVERSATION_ROWS = (A, CONV_ONLY)
+
+#: 带 ``team_id`` 的那四行 —— 效率页主查询能看见的就是它们。
+_SCOPED = (A, B, C, CONV_ONLY)
 
 #: 每行 ``metadata_json.cost`` 的自身两道（own + media），单位分。写方
 #: （``RunRecorder`` / ``RunEventWriter``）把 ``spend_of_run(cost).total`` 落进
@@ -101,16 +122,24 @@ _LEGS = {
     C: (5.0, 1.0),
     D: (7.5, 0.5),
     E: (6.0, 0.0),
+    CONV_ONLY: (2.0, 0.5),
 }
 
 #: 手算的每行自身花费 —— 全文件唯一的真相来源。
-OWNS = {rid: round(own + media, 4) for rid, (own, media) in _LEGS.items()}
+#: **只含这棵树的五行** —— ``CONV_ONLY`` 不在里面，它自成一棵树（见 ``OWN_CONV``）。
+OWNS = {rid: round(sum(_LEGS[rid]), 4) for rid in _TREE}
 
 #: 议题/树的总额：12.5 + 3.25 + 6.0 + 8.0 + 6.0
 TOTAL = 35.75
 #: 按 agent 切：X 拿 A + B，Y 拿 C + D + E。
 OWN_X = 15.75
 OWN_Y = 20.0
+
+#: 只挂会话那行的自身花费：2.0 + 0.5。
+OWN_CONV = 2.5
+#: 两条臂一起看时的议题总额：35.75 + 2.5。``spent_cents_for_issue`` 传了
+#: ``conversation_id`` 才是这个数；不传就是 ``TOTAL``。
+TOTAL_WITH_CONV = 38.25
 
 #: 旧列 ``cost_cents`` 上**故意**填的脏值 = 自身 + **已报到的**后代。
 #:
@@ -130,6 +159,15 @@ DIRTY = {
     E: 6.0,  # 叶子
 }
 
+#: ``CONV_ONLY`` 的旧列：2.5 + by_child{9199006: 6.5}。同样**刻意**不等于自身花费
+#: （2.5），所以按 agent 求和那条用例里，读错列会算出别的数而不是碰巧对上。
+DIRTY_CONV = 9.0
+
+#: 插入时用的合并视图 —— 常数各自定义在自己该在的地方（树的在 ``OWNS`` / ``DIRTY``，
+#: 会话那行的在 ``OWN_CONV`` / ``DIRTY_CONV``），只有写库这一步需要把六行看成一批。
+_ALL_OWN = {**OWNS, CONV_ONLY: OWN_CONV}
+_ALL_DIRTY = {**DIRTY, CONV_ONLY: DIRTY_CONV}
+
 #: ``metadata_json.cost`` 里除两道之外的噪声，按行。
 #:
 #: ``by_child`` 必须在场：它是后代的钱，而新列的全部意义就是**不含**它；一棵没有
@@ -143,6 +181,7 @@ _NOISE = {
     C: {"by_child": {"9199002": 14.0}},
     D: {"by_child": {"9199003": 6.0}},
     E: {"own_byok_cents": 6.0},
+    CONV_ONLY: {"by_child": {"9199006": 6.5}},
 }
 
 #: 窗口锚点。挑一个远离「现在」的固定时刻，让按时间开窗的两个读方
@@ -198,7 +237,10 @@ async def pg():
 
 @pytest.fixture
 async def tree(pg):
-    """五行 ``agent_runs`` + 它们要的外键行，**提交**后交出去，用完逐一删干净。
+    """六行 ``agent_runs`` + 它们要的外键行，**提交**后交出去，用完逐一删干净。
+
+    五行是那棵树（A..E，共用一个 ``issue_id``），第六行 ``CONV_ONLY`` 自成一棵树、
+    只挂 ``conversation_id`` —— 议题那组 OR 键的第二条臂。
 
     为什么不是「开个事务、跑完回滚」（``test_migration_479`` 那个形状）：那边被测
     的是一条 SQL 文件，跑在同一条连接上；这边被测的是仓库方法，它们各自开自己的
@@ -238,6 +280,15 @@ async def tree(pg):
         user_id,
         f"OWNTREE{suffix.upper()}",
     )
+    # ``conversations`` 的三个非空无默认列是 type / scope_id / created_by，
+    # ``scope_id`` FK 到 ``teams``（照 test_migration_479 的 ``_mk_conversation``，
+    # 只是复用本夹具已有的 team 与 user，少造两行）。
+    conversation_id = await pg.fetchval(
+        "INSERT INTO public.conversations (type, scope_id, created_by) "
+        "VALUES ('direct_agent', $1, $2) RETURNING id",
+        team_id,
+        user_id,
+    )
 
     # (id, agent, parent, root)
     shape = [
@@ -246,24 +297,26 @@ async def tree(pg):
         (C, agent_y, A, A),
         (D, agent_y, C, A),
         (E, agent_y, D, A),
+        (CONV_ONLY, agent_x, None, None),
     ]
     for rid, agent, parent, root in shape:
         await pg.execute(
             "INSERT INTO public.agent_runs "
             "  (id, agent_id, user_id, team_id, status, trigger, issue_id, "
-            "   parent_run_id, root_run_id, own_cost_cents, cost_cents, "
-            "   started_at, ended_at, created_at, metadata_json) "
+            "   conversation_id, parent_run_id, root_run_id, own_cost_cents, "
+            "   cost_cents, started_at, ended_at, created_at, metadata_json) "
             "VALUES ($1, $2, $3, $4, 'completed', 'manual', $5, $6, $7, $8, $9, "
-            "        $10, $11, $10, $12::jsonb)",
+            "        $10, $11, $12, $11, $13::jsonb)",
             rid,
             agent,
             user_id,
             team_id if rid in _SCOPED else None,
-            issue_id,
+            None if rid == CONV_ONLY else issue_id,
+            conversation_id if rid in _CONVERSATION_ROWS else None,
             parent,
             root,
-            OWNS[rid],
-            DIRTY[rid],
+            _ALL_OWN[rid],
+            _ALL_DIRTY[rid],
             _ANCHOR,
             _ANCHOR + timedelta(seconds=30),
             json.dumps({"cost": _cost_view(rid)}),
@@ -272,6 +325,7 @@ async def tree(pg):
     try:
         yield {
             "issue_id": issue_id,
+            "conversation_id": conversation_id,
             "user_id": user_id,
             "team_id": team_id,
             "agent_x": agent_x,
@@ -287,11 +341,16 @@ async def tree(pg):
         )
         await pg.execute(
             "DELETE FROM public.search_docs WHERE run_id = ANY($1::bigint[])",
-            [A, B, C, D, E],
+            [*_TREE, CONV_ONLY],
         )
-        for rid in (E, D, C, B, A):
+        for rid in (CONV_ONLY, E, D, C, B, A):
             await pg.execute("DELETE FROM public.agent_runs WHERE id = $1", rid)
         await pg.execute("DELETE FROM public.issues WHERE id = $1", issue_id)
+        # 会话在 team 之前删：``conversations.scope_id`` 是 ON DELETE CASCADE，
+        # 删 team 也会带走它，但靠级联清理等于让「谁负责删」取决于 schema 细节。
+        await pg.execute(
+            "DELETE FROM public.conversations WHERE id = $1", conversation_id
+        )
         await pg.execute("DELETE FROM public.teams WHERE id = $1", team_id)
         await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
         await pg.execute(
@@ -344,9 +403,14 @@ async def test_tree_issue_agent_sums_agree(orm_dsn, tree):
             # 这个投影把 numeric 渲染成 str（REST 口径），消费方自己 float()。
             mine[key] += float(r["cost_cents"] or 0)
 
-    assert mine[str(tree["agent_x"])] == OWN_X
+    # ⚠️ 这个读方**只按时间开窗**，不按议题也不按树收行，所以它看见的是六行：这棵树
+    # 加上那条只挂会话的 ``CONV_ONLY``（同属 agent X）。它是唯一一个口径比另外三条宽
+    # 的读方 —— 「三种分组一个数」说的是同一批行，不是同一个窗口。
+    assert mine[str(tree["agent_x"])] == round(OWN_X + OWN_CONV, 4) == 18.25
     assert mine[str(tree["agent_y"])] == OWN_Y
-    assert round(sum(mine.values()), 4) == TOTAL
+    assert round(sum(mine.values()), 4) == TOTAL_WITH_CONV
+    # 把窗口多出来的那一行减掉，正好还原按树 / 按议题的那个数。
+    assert round(sum(mine.values()) - OWN_CONV, 4) == TOTAL
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +522,50 @@ async def test_budget_gate_composes_prior_plus_live_without_double_count(orm_dsn
 
 
 # ---------------------------------------------------------------------------
+# 议题的第二条臂：只挂会话的 run
+# ---------------------------------------------------------------------------
+
+
+@_skip
+async def test_a_conversation_only_run_counts_toward_the_issue_when_the_key_is_passed(
+    orm_dsn, tree
+):
+    """``issue_scope_keys`` 的 ``conversation_id`` 那条臂，在真库上跑一遍。
+
+    一条 run 挂到议题上有两条路：直接戳 ``issue_id``，或者经它的 session
+    ``conversation_id``。走会话直接找 agent 聊出来的 run 从没戳过 ``issue_id`` ——
+    只认第一条臂，这笔钱在预算门禁与 Budget 格上就是不存在的。
+
+    两个方向一起断言，缺一不可：
+
+    * **第二臂在** —— 传了会话键，总额才含 ``CONV_ONLY`` 那 2.5。只断言这一条的话，
+      一个「把两条臂写成 AND」或干脆把会话键忽略掉的实现会给出 ``TOTAL``，而
+      ``TOTAL`` 看着也像个对的数。
+    * **第二臂不多收** —— root A **两个键都有**（它就是这个议题的 session 上跑出来
+      的），所以 ``OR`` 起来必须只数它一遍。把 OR 写成两条语句相加、或者 join 出笛卡
+      尔积，A 那 12.5 会出现两次，总额变成 50.75。不传会话键时仍是 ``TOTAL``，正是
+      「多出来的恰好只有那一行」的另一面。
+
+    ``own_cost_cents_for_issue_runs``（驾驶舱 Budget 格）走同一组键 —— 模块头那条
+    「三个读方一个数」的承诺在这条臂上同样要成立，而它此前也没有真库覆盖。
+    """
+    repo = _repo()
+
+    with_key = await repo.spent_cents_for_issue(
+        issue_id=tree["issue_id"], conversation_id=tree["conversation_id"]
+    )
+    without = await repo.spent_cents_for_issue(issue_id=tree["issue_id"])
+
+    assert without == TOTAL
+    assert with_key == TOTAL_WITH_CONV == round(TOTAL + OWN_CONV, 4)
+
+    rollup = await repo.own_cost_cents_for_issue_runs(
+        tree["issue_id"], tree["conversation_id"]
+    )
+    assert rollup == TOTAL_WITH_CONV
+
+
+# ---------------------------------------------------------------------------
 # 效率页：钱按 root 归属，活按 run 归属
 # ---------------------------------------------------------------------------
 
@@ -480,6 +588,20 @@ async def test_efficiency_groups_puts_the_whole_tree_on_the_roots_group(orm_dsn,
 
     ⚠️ 第 2 点是这个夹具为什么要造 scope 不对称：实测过，五行 ``team_id`` 一致时，
     错的那种写法给出的答案与正确写法**逐字节相同**。
+
+    3. **同一组里两棵树各算各的，然后相加。** ``CONV_ONLY`` 也属 agent X、也带
+       ``team_id``、也是 root（没父、没 ``root_run_id``），所以它是 X 组里的第二棵
+       树 —— 一棵只有一行的树。X 组于是拿 35.75 + 2.5 = 38.25，``run_count`` 3。
+
+       这一条钉的是那个聚合**真的在求和**：``sum(tree_cost.cents) FILTER (root_only)``
+       第一次有两个加数落在同一组里。在只有一棵树的夹具上，把 ``func.sum`` 换成
+       ``func.max`` / 取第一行 / ``LIMIT 1`` 全都给出同一个 35.75 —— 实测过：
+       ``sum`` → ``max`` 在旧的五行夹具上**照样绿**，加上这一行才转红。
+
+       ⚠️ 它**不是**为了钉树键 ``COALESCE(root_run_id, id)`` —— 那个旧夹具早就拦得住
+       （把它换成裸 ``root_run_id``，A 归 NULL 组、B..E 归 A 组，而 join 条件是
+       ``tree_cost.root == AgentRuns.id``，NULL 组永远落不下来，X 直接掉到 23.25；
+       实测确认）。
     """
     rows, _reasons = await _repo().efficiency_groups(
         frm=_WINDOW[0],
@@ -492,10 +614,11 @@ async def test_efficiency_groups_puts_the_whole_tree_on_the_roots_group(orm_dsn,
     x = by_key[str(tree["agent_x"])]
     y = by_key[str(tree["agent_y"])]
 
-    assert float(x["cost_cents"]) == TOTAL
+    assert float(x["cost_cents"]) == TOTAL_WITH_CONV
     assert float(y["cost_cents"]) == 0.0
-    # 活按行数，且只数 scope 内的行：X 拿 A + B，Y 只拿 C（D、E 没 team_id）。
-    assert (x["run_count"], y["run_count"]) == (2, 1)
+    # 活按行数，且只数 scope 内的行：X 拿 A + B + CONV_ONLY，Y 只拿 C（D、E 没
+    # team_id）。
+    assert (x["run_count"], y["run_count"]) == (3, 1)
 
 
 # ---------------------------------------------------------------------------

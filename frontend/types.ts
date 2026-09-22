@@ -2461,6 +2461,19 @@ export interface ChatToolCall {
   args: Record<string, unknown>;
   /** Raw result payload the dispatched tool returned. */
   result: Record<string, unknown>;
+  /**
+   * The SAME normalised failure code the transcript's `tool_call` event
+   * carries — backend computes `tool_error_code(result)` once per dispatch and
+   * puts it on both. `null`/absent means success.
+   *
+   * Reading `result` alone is NOT equivalent: the code also folds in a
+   * non-`ok` `outcome` and the bare presence of an `error` key, and neither of
+   * those shapes carries `ok: false`. Judge with `judgeToolOk`, never by hand.
+   *
+   * Optional because assistant messages persisted before the backend added it
+   * replay without the key — absent reads as "no code", not as a failure.
+   */
+  error_code?: string | null;
 }
 
 /**

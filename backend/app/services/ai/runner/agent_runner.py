@@ -1063,12 +1063,19 @@ class AgentRunner:
                 # turns — run_issue_agent always streams) vanished and
                 # issue_lifecycle silently fell back to its in_review
                 # default.
+                #
+                # ``error_code`` 与下面 transcript 事件用的是**同一个值**（算一次，
+                # 两处共用）。3d batch1 Task 4：聊天气泡走的是这条 trace，不是
+                # transcript，所以少了它，被拒绝/没执行的写工具会在气泡上渲染成成功
+                # 并被计进「wrote N cards」——用户去画布上找一张不存在的卡。
+                _error_code = tool_error_code(result)
                 tool_call_trace.append(
                     {
                         "name": tool_name,
                         "args": args,
                         "result": result,
                         "iteration": iteration,
+                        "error_code": _error_code,
                     }
                 )
 
@@ -1081,7 +1088,7 @@ class AgentRunner:
                     result=result,
                     iteration=iteration,
                     duration_ms=_tool_ms,
-                    error_code=tool_error_code(result),
+                    error_code=_error_code,
                 )
 
                 # ── PostToolUse chain (mirrors run_turn) ────────────────────
@@ -1311,8 +1318,18 @@ class AgentRunner:
                     "content": _json.dumps(result, ensure_ascii=False),
                 }
             )
+            # ``skipped`` 结果自带 ``error`` 键但**没有** ``ok`` 键，所以
+            # ``tool_error_code`` 把它归一成 ``tool_error``——trace 与 transcript
+            # 共用这一个值，气泡和时间线才会同口径地说「这次没成」。
+            _error_code = tool_error_code(result)
             tool_call_trace.append(
-                {"name": name, "args": {}, "result": result, "iteration": iteration}
+                {
+                    "name": name,
+                    "args": {},
+                    "result": result,
+                    "iteration": iteration,
+                    "error_code": _error_code,
+                }
             )
             await emit_tool_call(
                 recorder,
@@ -1323,7 +1340,7 @@ class AgentRunner:
                 # 没执行过所以没有耗时；``skipped`` 结果自带 ``error`` 键，会被算进
                 # 工具错误——这是想要的：被腰斩的回合里那几个调用确实没成。
                 duration_ms=0,
-                error_code=tool_error_code(result),
+                error_code=_error_code,
             )
 
     @staticmethod
@@ -1534,8 +1551,13 @@ class AgentRunner:
             "team_id": recorder.team_id if recorder else None,
             "agent_id": str(composed.agent_id),
             # 产出登记要坐标才能把卡挂到正确的那一步（3a）。turn 与
-            # ``_step_started`` 同源：目前恒为 1，改它要一起改。没有 recorder
-            # 就没有 run，那一路的产出不该假装属于某个 turn。
+            # ``_step_started`` 同源，恒为 1 —— 那是 mig 453 立下的契约，不是待办：
+            # 「a run is one turn; the target outlives it」（``agent_run_inbox``
+            # 的表注释；收件箱按 issue / conversation 这个**长寿目标**键控，正因为
+            # run 本身只活一个 turn）。要支持一 run 多 turn 是架构改动，届时这里、
+            # ``_step_started`` 与 ``step_costs.load_step_shares`` 的
+            # ``(run_id, turn, step)`` 键要一起动。没有 recorder 就没有 run，
+            # 那一路的产出不该假装属于某个 turn。
             "turn": 1 if recorder else None,
             "step": step,
             # 3a T8c 缺陷 1：登记口没拿到 recorder 就退回
@@ -2213,12 +2235,17 @@ class AgentRunner:
                 # plain dict from skill_tool / delegate_tool; we don't
                 # truncate here — the frontend renders summarised, this
                 # keeps the API truthful.
+                #
+                # ``error_code`` 算一次，trace 与下面的 transcript 事件共用，两个面
+                # 不会各判各的（3d batch1 Task 4）。
+                _error_code = tool_error_code(result)
                 tool_call_trace.append(
                     {
                         "name": tool_name,
                         "args": args,
                         "result": result,
                         "iteration": iteration,
+                        "error_code": _error_code,
                     }
                 )
 
@@ -2231,7 +2258,7 @@ class AgentRunner:
                     result=result,
                     iteration=iteration,
                     duration_ms=_tool_ms,
-                    error_code=tool_error_code(result),
+                    error_code=_error_code,
                 )
 
                 # Wave G (G3): observe for loop detection. Args

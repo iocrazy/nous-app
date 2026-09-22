@@ -289,7 +289,7 @@ async def test_issue_totals_uses_the_same_or_keys_as_the_gate(
 
     只按 ``issue_id`` 找会漏掉只经 session 的 conversation 挂上来的 run —— 那条 run
     进得了门禁总额与驾驶舱 Budget 格，却不进 Usage 面，而三处 docstring 都写着口径
-    一致（``_issue_scope_keys`` 就是为了不让这三处各写一份）。
+    一致（``issue_scope_keys`` 就是为了不让这三处各写一份）。
     """
     totals = _where(_sql(await captured_stmt_usage(conversation_id=2)))
     gate = _where(
@@ -325,7 +325,7 @@ def test_the_shared_sum_refuses_to_run_without_a_predicate():
     """``_own_cost_sum_stmt()`` 不带谓词拼出来的是整张 ``agent_runs`` 的 own 花费
     之和 —— 所有用户、所有议题的一个数字，被当成某一个议题的花费喂给预算门禁。
 
-    这不是假想的手滑：``_issue_scope_keys`` 在两个键都为 None 时正好返回空列表，
+    这不是假想的手滑：``issue_scope_keys`` 在两个键都为 None 时正好返回空列表，
     一次空参数调用就能走到这里。
     """
     from app.repositories.agent_runs_repository import _own_cost_sum_stmt
