@@ -977,31 +977,34 @@ class RunRecorder:
         if not closed_by_us:
             logger.warning(
                 f"[RunRecorder] run {self.run_id} was already terminal when "
-                f"_finish ran (status={status}); skipping usage rollup and "
-                f"billing reconcile so neither is counted twice"
+                f"_finish ran (status={status}); skipping the search projection, "
+                f"usage rollup and billing reconcile so none is counted twice"
             )
+        else:
+            # 只在终态写一次，且只有**抢到收口的这一方**才写：没抢到（rowcount==0）
+            # 说明清扫器 / liveness 已把这行翻成 heartbeat_lost 之类并自己投影过了；
+            # 这里若再按本次 _finish 的入参投影，search_docs.status 会被覆盖成
+            # completed，检索面与 run 行说两个话。放在 UPDATE 之后，投影读到的就是
+            # 刚落库的那份 status / error_code / output_summary；放在 write_scope
+            # 之外，所以投影失败不会碰到刚提交的那个事务（best-effort，见
+            # projection 的模块 docstring）。
+            from app.services.search.projection import project_run_best_effort
 
-        # 只在终态写一次。放在 UPDATE 之后，投影读到的就是刚落库的那份
-        # status / error_code / output_summary；放在 write_scope 之外，所以
-        # 投影失败不会碰到刚提交的那个事务（best-effort，见 projection 的
-        # 模块 docstring）。
-        from app.services.search.projection import project_run_best_effort
-
-        await project_run_best_effort(
-            {
-                "id": self.run_id,
-                "issue_id": self.issue_id,
-                "team_id": self.team_id,
-                "project_id": self.project_id,
-                "agent_id": self.agent_id,
-                "user_id": self.user_id,
-                "model": self.model,
-                "status": status,
-                "error_code": error_code,
-                "input_summary": self.input_summary,
-                "output_summary": self._output_summary,
-            }
-        )
+            await project_run_best_effort(
+                {
+                    "id": self.run_id,
+                    "issue_id": self.issue_id,
+                    "team_id": self.team_id,
+                    "project_id": self.project_id,
+                    "agent_id": self.agent_id,
+                    "user_id": self.user_id,
+                    "model": self.model,
+                    "status": status,
+                    "error_code": error_code,
+                    "input_summary": self.input_summary,
+                    "output_summary": self._output_summary,
+                }
+            )
 
         # W3c: accumulate this turn into the ai_usage_hourly rollup the Usage
         # panel reads. Fire-and-forget (record_usage swallows internally).
