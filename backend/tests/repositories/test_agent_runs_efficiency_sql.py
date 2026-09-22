@@ -188,11 +188,13 @@ async def test_only_the_money_column_is_root_filtered():
         assert f"sum(public.agent_runs.{own_metric}) FILTER" not in sql
     # 主查询这一层，root 谓词只属于钱那一列（其余全是每个 run 自身的量）。
     assert sql.count("FILTER (WHERE public.agent_runs.parent_run_id IS NULL)") == 1
-    # 另外两处 root 谓词在 tree_cost 的「in-scope roots」内层 select 里（裁定 7）——
-    # 那是「哪些树算数」，不是「哪一列要过滤」，两者是两回事。成员判定写成
-    # ``root_run_id IN (…) OR id IN (…)``（让 planner 用得上 idx_agent_runs_root_tree），
-    # 两条臂各带一份逐字相同的内层 select，所以是 2 份而不是 1 份。
-    assert sql.count("parent_run_id IS NULL") == 3
+    # 另一处 root 谓词在 ``in_scope_roots`` 这个 CTE 里（裁定 7）—— 那是「哪些树算数」，
+    # 不是「哪一列要过滤」，两者是两回事。成员判定写成 ``root_run_id IN (…) OR id IN (…)``
+    # （让 planner 用得上 idx_agent_runs_root_tree），两条臂**引用同一个 CTE**，所以那段
+    # select 只渲染一份 —— 全语句 2 次而不是 3 次。曾经是 3：两条臂各内联一份，PG 于是
+    # 按同一套窗口 + scope 扫两遍 agent_runs（改用 CTE 的原因，见
+    # ``test_tree_cost_cents.py::test_efficiency_in_scope_roots_is_a_cte_rendered_once``）。
+    assert sql.count("parent_run_id IS NULL") == 2
 
 
 async def test_the_failed_run_count_coalesces_like_its_neighbours():

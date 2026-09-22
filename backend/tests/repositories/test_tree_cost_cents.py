@@ -38,6 +38,13 @@ _TREE_KEY = "coalesce(public.agent_runs.root_run_id, public.agent_runs.id)"
 _ROOT_ARM = "public.agent_runs.root_run_id"
 _ID_ARM = "public.agent_runs.id"
 
+#: 「窗口 + scope 内的 root」那段 select 的住处。两条臂都引用它，所以它必须是个 CTE
+#: 而不是被内联两遍的 ``Select``（见 ``test_efficiency_in_scope_roots_is_a_cte_…``）。
+_CTE_HEAD = "WITH in_scope_roots AS ("
+
+#: 两条臂**唯一**该长的样子：引用 CTE，而不是又一份内联 select。
+_CTE_REF = "(SELECT in_scope_roots.id FROM in_scope_roots)"
+
 
 def _membership(inner: str) -> str:
     """「这一行属于这批树」逐字应该长的样子。"""
@@ -88,8 +95,19 @@ def _tree_cost_where(region: str) -> str:
     return region[start:end]
 
 
+def _cte_body(sql: str) -> str:
+    """``WITH in_scope_roots AS ( … )`` 括号里那段 select 的全文（不含外层括号）。
+
+    scope 与 root 谓词从 ``tree_cost`` 的 WHERE 里搬到了这里 —— 语义没变（仍然只作用
+    在「选哪些 root」上），住处变了，所以按 root 选树的那组断言改指这个区域。
+    """
+    k = sql.index(_CTE_HEAD)
+    open_at = k + len(_CTE_HEAD) - 1
+    return sql[open_at + 1 : _balanced(sql, open_at)]
+
+
 def _inner_select(region: str) -> str:
-    """``tree_cost`` 的 WHERE 里 ``IN ( … )`` 那个「窗口 + scope 内的 root」子查询。
+    """``tree_cost`` 的 WHERE 里 ``IN ( … )`` 那个「在 scope 内的 root」引用。
 
     ⚠️ 锚点必须带列名（``root_run_id IN (SELECT``），**不能**是裸 ``"IN ("``：
     ``region`` 以 ``"LEFT OUTER JOIN ("`` 开头，而 ``"JOIN ("`` 里就含 ``"IN ("``
@@ -97,8 +115,8 @@ def _inner_select(region: str) -> str:
     ``tree_cost`` 被当成「内层 select」返回 —— 下面所有「outside 里不许有 scope 列」
     的负向断言就全部落在空串上，形同虚设。这条注释是修复轮次 2 的成因本身。
 
-    两条臂各带一份**逐字相同**的子查询，取第一条那份即可（``_membership`` 会拿它去
-    比另一条）。
+    两条臂各带一份**逐字相同**的 CTE 引用，取第一条那份即可（``_membership`` 会拿它
+    去比另一条）。
     """
     k = region.index(f"{_ROOT_ARM} IN (SELECT")
     open_at = region.index("(", k + len(_ROOT_ARM))
@@ -334,7 +352,9 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
     # 写法。修复轮次 2 的成因就是这条当初写成了前缀匹配。
     assert where == _membership(inner), f"tree_cost 的 WHERE 不只是成员判定：\n{where}"
 
-    # ② scope 与 root 谓词全在那个内层 select 里。
+    # ② scope 与 root 谓词全在 ``in_scope_roots`` 这个 CTE 里 —— 两条臂只是引用它。
+    assert inner == _CTE_REF, inner
+    cte = _cte_body(s)
     for fragment in (
         "agent_runs.team_id =",
         "agent_runs.project_id =",
@@ -342,7 +362,7 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
         "agent_runs.created_at <",
         "agent_runs.parent_run_id IS NULL",
     ):
-        assert fragment in inner, f"{fragment} 不在「in-scope roots」内层 select 里"
+        assert fragment in cte, f"{fragment} 不在「in-scope roots」CTE 里"
 
     # ③ 把内层切掉之后，``tree_cost`` **自己那层**一个 scope 列都不许剩 —— 剩了就是
     # 按子行过滤，于是 team_id 为 NULL 的子 run 的钱被悄悄丢掉。
@@ -353,6 +373,56 @@ async def test_efficiency_subquery_is_scoped_by_tree_membership_not_by_child_row
         assert (
             col not in outside
         ), f"tree_cost 子查询在按自己的 {col} 过滤行：\n{region}"
+
+
+async def test_efficiency_in_scope_roots_is_a_cte_rendered_once(captured_stmt):
+    """「窗口 + scope 内的 root」只算一次 —— 它是 CTE，不是被内联两遍的 ``Select``。
+
+    成员判定有两条臂（``root_run_id IN (…) OR id IN (…)``，见 ``_membership`` 上面的
+    注释：换成 ``COALESCE(...) IN (…)`` 会让 planner 用不上 ``idx_agent_runs_root_tree``）。
+    把同一个 ``Select`` 对象放进两条臂，SQLAlchemy 会把那段 SQL **原样渲染两遍**，PG
+    于是把 ``agent_runs`` 按窗口 + scope 扫两次。非递归 CTE 被引用 >1 次时 PG 默认物化
+    —— 一次扫描，两条臂共用。
+
+    ⚠️ 这条断言的是**渲染出来的文本**，不是 EXPLAIN。「扫一次」是 PG 对物化 CTE 的行为，
+    这里能钉住的是「我们只给了它一份 SQL」这个前提 —— 前提没了，后面那句话就无从谈起。
+    """
+    to = datetime.now(timezone.utc)
+    s = _sql(
+        await captured_stmt(
+            lambda repo: repo.efficiency_groups(
+                group_by="agent",
+                frm=to - timedelta(days=30),
+                to=to,
+                team_id=7,
+                project_id=9,
+            )
+        )
+    )
+
+    # ① 一个 CTE 定义，不多不少。
+    assert s.count(_CTE_HEAD) == 1, s
+
+    # ② 它的 body 在整条语句里**只出现一次**。这就是本次改动买到的东西；两条臂各内联
+    # 一份时这里是 2。
+    cte = _cte_body(s)
+    assert (
+        s.count(cte) == 1
+    ), f"in-scope roots 的 select 被渲染了 {s.count(cte)} 遍：\n{cte}"
+
+    # ③ 而且它确实是那段 select —— 窗口 + scope + root 谓词逐字都在，免得 ② 因为
+    # 切错区域而在一段无关文本上「通过」。
+    assert cte.endswith(
+        "FROM public.agent_runs "
+        "WHERE public.agent_runs.created_at >= %(created_at_1)s "
+        "AND public.agent_runs.created_at < %(created_at_2)s "
+        "AND public.agent_runs.team_id = %(team_id_1)s "
+        "AND public.agent_runs.project_id = %(project_id_1)s "
+        "AND public.agent_runs.parent_run_id IS NULL"
+    ), cte
+
+    # ④ 两条臂引用的都是这个 CTE，没有谁偷偷留了一份内联 select。
+    assert s.count(f"IN {_CTE_REF}") == 2, s
 
 
 async def test_efficiency_counts_a_child_whose_team_is_null(captured_stmt):

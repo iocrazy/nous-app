@@ -109,10 +109,15 @@ def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
     return out
 
 
-def _issue_scope_keys(
+def issue_scope_keys(
     issue_id: Optional[int], conversation_id: Optional[int]
 ) -> List[Any]:
     """「属于这个议题」的那组 OR 键 —— 两个钱读方共用，不许各写一份。
+
+    **名字不带下划线是有意的**：``usage_repository.issue_totals`` 跨模块 import 它，
+    第三个读方就在那边。一个跨模块的下划线名字是在说「别用我」，而这里的契约恰好相反
+    —— 三处钱读方**必须**用同一组键，不然同一个议题在预算门禁、驾驶舱 Budget 格与
+    Usage 面上是三个数。
 
     一条 run 挂到议题上有两条路：直接戳 ``issue_id``，或者经它的 session
     ``conversation_id``。只认前一条会漏掉只走会话键的 run，于是同一个议题在预算门禁
@@ -145,7 +150,7 @@ def _own_cost_sum_stmt(*where: Any) -> Select[Any]:
 
     **一个谓词都没有就 raise。** 那样拼出来的是「整张 ``agent_runs`` 的 own 花费之
     和」——一个所有用户、所有议题的数字，被当成某一个议题的花费用在预算门禁上。
-    ``_issue_scope_keys`` 在 ``issue_id`` 与 ``conversation_id`` 都为 None 时正好返回
+    ``issue_scope_keys`` 在 ``issue_id`` 与 ``conversation_id`` 都为 None 时正好返回
     空列表，所以这不是假想的手滑，而是一次空参数调用就能走到的地方。默默回一个全库
     总额是「钱的答案」里最坏的一种：它看着像个数。
     """
@@ -900,7 +905,7 @@ class AgentRunsRepository(AsyncpgRepository):
         the row's own spend (own + media, no descendants), so the whole issue's
         真花的钱 is the sum over all of them. See ``_own_cost_sum_stmt``.
         """
-        keys = _issue_scope_keys(issue_id, conversation_id)
+        keys = issue_scope_keys(issue_id, conversation_id)
         if not keys:
             return 0.0
         stmt = _own_cost_sum_stmt(or_(*keys))
@@ -933,7 +938,7 @@ class AgentRunsRepository(AsyncpgRepository):
         读失败一律 raise：rollup 的调用方自己决定怎么降级，这里回 0 就等于把一个
         花了钱的议题显示成没花钱，而那正是预算格存在的意义。
         """
-        keys = _issue_scope_keys(issue_id, conversation_id)
+        keys = issue_scope_keys(issue_id, conversation_id)
         if not keys:
             return 0.0
         stmt = _own_cost_sum_stmt(or_(*keys))
@@ -1175,8 +1180,16 @@ class AgentRunsRepository(AsyncpgRepository):
         # ``COALESCE`` 让 planner 用不上 ``idx_agent_runs_root_tree``，只能整表扫。
         # 树键那一份**唯一拼法**留在 GROUP BY 与输出标签上（那里要的是「同一棵树归成
         # 一行」这个语义），与 ``run_ids_in_trees`` 的 WHERE 是同一个写法。
+        #
+        # 那批 root 用 **CTE** 而不是把同一个 ``Select`` 对象塞进两条臂：后者会被
+        # SQLAlchemy 原样渲染两遍，PG 于是把 ``agent_runs`` 按同一套窗口 + scope 扫两次
+        # 算出同一个集合。非递归 CTE 被引用 >1 次时 PG 默认物化，一次扫描两条臂共用。
+        # 选出来的行完全相同 —— 这是纯粹的执行开销，不是口径改动。
         tree_key = func.coalesce(AgentRuns.root_run_id, AgentRuns.id)
-        in_scope_roots = select(AgentRuns.id).where(*scope, root_only)
+        in_scope_roots = (
+            select(AgentRuns.id).where(*scope, root_only).cte("in_scope_roots")
+        )
+        roots_ids = select(in_scope_roots.c.id)
         tree_cost = (
             select(
                 tree_key.label("root"),
@@ -1184,8 +1197,8 @@ class AgentRunsRepository(AsyncpgRepository):
             )
             .where(
                 or_(
-                    AgentRuns.root_run_id.in_(in_scope_roots),
-                    AgentRuns.id.in_(in_scope_roots),
+                    AgentRuns.root_run_id.in_(roots_ids),
+                    AgentRuns.id.in_(roots_ids),
                 )
             )
             .group_by(tree_key)

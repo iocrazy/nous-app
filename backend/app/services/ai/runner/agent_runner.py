@@ -1551,8 +1551,13 @@ class AgentRunner:
             "team_id": recorder.team_id if recorder else None,
             "agent_id": str(composed.agent_id),
             # 产出登记要坐标才能把卡挂到正确的那一步（3a）。turn 与
-            # ``_step_started`` 同源：目前恒为 1，改它要一起改。没有 recorder
-            # 就没有 run，那一路的产出不该假装属于某个 turn。
+            # ``_step_started`` 同源，恒为 1 —— 那是 mig 453 立下的契约，不是待办：
+            # 「a run is one turn; the target outlives it」（``agent_run_inbox``
+            # 的表注释；收件箱按 issue / conversation 这个**长寿目标**键控，正因为
+            # run 本身只活一个 turn）。要支持一 run 多 turn 是架构改动，届时这里、
+            # ``_step_started`` 与 ``step_costs.load_step_shares`` 的
+            # ``(run_id, turn, step)`` 键要一起动。没有 recorder 就没有 run，
+            # 那一路的产出不该假装属于某个 turn。
             "turn": 1 if recorder else None,
             "step": step,
             # 3a T8c 缺陷 1：登记口没拿到 recorder 就退回
