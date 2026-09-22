@@ -59,6 +59,13 @@ describe('isScreenwritingTool', () => {
     // flips, the chat bubble would render them in BOTH renderers.
     expect(isScreenwritingTool('Delegate')).toBe(false);
     expect(isScreenwritingTool('Skill')).toBe(false);
+    // FinishIssue must stay out too, and for a second reason: backend
+    // `tool_error_code` stamps even a SUCCESSFUL FinishIssue with a code
+    // (its outcomes are completed/needs_input/continue, none of which is the
+    // literal "ok"), so a chip would render it failed. `AIChatBubble.tsx:364`
+    // filters on this predicate before building activities, which is what
+    // keeps that backend quirk off the bubble. Tracked as its own ticket.
+    expect(isScreenwritingTool('FinishIssue')).toBe(false);
     expect(isScreenwritingTool('toString')).toBe(false);
   });
 });
@@ -397,16 +404,92 @@ describe('toolActivity — top-level error_code (3d batch1 Task 4)', () => {
     expect(summarizeWrites(acts).shots).toHaveLength(2);
   });
 
-  it('chat tool calls have no error_code field, so the old judgement stands', () => {
-    // ChatToolCall (types.ts) is name/iteration/args/result — there is no
-    // error_code to read, so `fromChatToolCalls` must pass null rather than
-    // inventing a failure.
+  it('a successful chat tool call stays ok', () => {
     const acts = fromChatToolCalls([
       { name: 'CreateShot', iteration: 1, args: {}, result: { ok: true, shot: shot('9', 1, 'Wide', '24mm') } },
       { name: 'ReadScene', iteration: 1, args: {}, result: { ok: true } },
     ]);
     expect(acts.map((a) => a.ok)).toEqual([true, true]);
     expect(summarizeWrites(acts).shots).toHaveLength(1);
+  });
+
+  it('a trace entry predating error_code (absent key) is still judged on result', () => {
+    // Assistant messages persisted before the backend added the field replay
+    // with no `error_code` at all. Absent must read as "no code", never as a
+    // failure — otherwise every historical turn turns red on refetch.
+    const acts = fromChatToolCalls([
+      { name: 'CreateShot', iteration: 1, args: {}, result: { ok: true, shot: shot('9', 1, 'Wide', '24mm') } },
+    ]);
+    expect(acts[0].ok).toBe(true);
+    expect(summarizeWrites(acts).shots).toHaveLength(1);
+  });
+});
+
+/**
+ * The bubble path — the ONE place the user actually reads "wrote N cards".
+ *
+ * `AIChatBubble.tsx:362-370` folds `ChatResponse.tool_calls` through
+ * `fromChatToolCalls` → `summarizeWrites`; nothing destructures
+ * `useRunToolActivity`'s `activities`. So a fix that only reaches the
+ * transcript adapter does not reach the count the user sees. Fixtures here are
+ * the real `ChatResponse.tool_calls` wire shape (backend `ChatToolCall`:
+ * name / iteration / args / result / error_code), NOT the transcript's
+ * JSON-stringified `result`.
+ */
+describe('the chat bubble path honours error_code (3d batch1 Task 4, fix round 1)', () => {
+  const unexecutedCreateShot: ChatToolCall = {
+    name: 'CreateShot',
+    iteration: 1,
+    args: { scene_id: '9', description: 'Wide on the ridge' },
+    result: {
+      error: 'not executed: the turn parked on AskUser before this call',
+      skipped: true,
+    },
+    error_code: 'tool_error',
+  };
+
+  it('an unexecuted write is not ok', () => {
+    const acts = fromChatToolCalls([unexecutedCreateShot]);
+    expect(acts[0].ok).toBe(false);
+    expect(acts[0].errorText).toBe(
+      'not executed: the turn parked on AskUser before this call',
+    );
+  });
+
+  it('...and the bubble does not claim a card that was never written', () => {
+    expect(summarizeWrites(fromChatToolCalls([unexecutedCreateShot]))).toEqual({
+      shots: [],
+      otherWriteCount: 0,
+    });
+  });
+
+  it('a real write in the same turn still counts', () => {
+    // The count must not collapse to "nothing ever counts" — one genuine card
+    // alongside one refused call reads as exactly one card.
+    const acts = fromChatToolCalls([
+      unexecutedCreateShot,
+      {
+        name: 'CreateShot',
+        iteration: 2,
+        args: {},
+        result: { ok: true, shot: shot('9', 1, 'Wide', '24mm') },
+        error_code: null,
+      },
+    ]);
+    expect(acts.map((a) => a.ok)).toEqual([false, true]);
+    expect(summarizeWrites(acts).shots).toHaveLength(1);
+  });
+
+  it('agrees with the transcript adapter on the same underlying call', () => {
+    // Two views of ONE emission (module docstring). Now that both carry the
+    // code, they must reach the same verdict — that is the whole point of the
+    // backend change.
+    const fromChat = fromChatToolCalls([unexecutedCreateShot]);
+    const fromEvents = fromTranscriptEvents([
+      codedEvent(1, 'CreateShot', unexecutedCreateShot.result, 'tool_error'),
+    ]);
+    expect(fromChat[0].ok).toBe(fromEvents[0].ok);
+    expect(fromChat[0].errorText).toBe(fromEvents[0].errorText);
   });
 });
 

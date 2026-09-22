@@ -260,11 +260,15 @@ export function fromChatToolCalls(calls: ChatToolCall[]): ToolActivity[] {
     perIteration.set(iteration, ordinal + 1);
     const key = `it:${iteration}:${ordinal}`;
     if (seen.has(key)) continue;
-    // ChatToolCall is name/iteration/args/result (types.ts) — there is no
-    // error_code on this wire at all, so pass null rather than inventing one.
-    // The chat panel therefore still judges on `result` alone; that is a gap
-    // in the SOURCE, not a second opinion about what failure means.
-    seen.set(key, buildActivity(key, call.name, iteration, call.result, null));
+    // 与 transcript 同一个值：后端每次派发只算一次 `tool_error_code(result)`，
+    // 同时写进 trace 与 transcript 事件。这条路径**才是**用户看到「wrote N cards」
+    // 的那条（AIChatBubble.tsx:362-370）——没有它，一个排在 AskUser 后面根本没执行
+    // 的 CreateShot 会在气泡上渲染成成功并被计进卡片数。
+    // 老消息重放时该键缺席，`str()` 给出 null，即退回只看 `result` 的旧判定。
+    seen.set(
+      key,
+      buildActivity(key, call.name, iteration, call.result, str(call.error_code)),
+    );
   }
   return [...seen.values()];
 }
