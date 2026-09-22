@@ -34,7 +34,7 @@ former REST PostgREST serialisation):
   analyzed_at / created_at / updated_at (DateTime(True) / timestamptz)
       ORM → ``.isoformat()`` (None stays None).
 
-  content_embedding (Vector(1536))
+  content_embedding (Vector(2048), since migration 315)
       NOT projected in any SELECT-* consumer beyond a truthiness check
       (``analysis.get("content_embedding")`` in search_router.py).
       ORM → native ``list[float]`` (pgvector.sqlalchemy Vector type).

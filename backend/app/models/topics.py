@@ -73,7 +73,12 @@ class TopicGroups(Base):
     last_seen: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    # vector(2048) since migration 314 (doubao-embedding-vision). pgvector
+    # validates dimensions at bind time, so a stale 1536 here raises
+    # ``ValueError: expected 1536 dimensions, not 2048`` on every ORM write —
+    # it only stayed latent because topic_groups_repository inserts via raw
+    # SQL. Pinned by tests/test_topics_orm_vector_dims.py.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
