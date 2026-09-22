@@ -22,6 +22,7 @@
  */
 
 import type { AgentRunEvent, ChatToolCall } from '../../types';
+import { judgeToolOk } from './toolOutcome';
 
 /** How a tool call reads to a human: did it look, suggest, or change things. */
 export type ToolActivityKind = 'read' | 'write' | 'propose' | 'generate' | 'other';
@@ -148,25 +149,28 @@ function buildActivity(
   tool: string,
   iteration: number,
   rawResult: unknown,
+  errorCode: string | null,
 ): ToolActivity {
   const result = coerceRecord(rawResult);
   // A payload that was present but unparseable means the detail was clipped in
   // transit; a payload that was absent entirely (older rows) is not a parse
   // failure, just an empty one.
   const detailUnavailable = rawResult != null && result === null;
-  // ``ok`` is an explicit field on every screenwriting tool result. Absent
-  // (or unparseable) is treated as success: the runner only records a
-  // tool_call event for a call it actually executed.
-  // Phase 2b-1 §3: a wall-clock timeout ({error:"timeout", timed_out:true})
-  // carries no `ok` key — it is a failure on every surface, chips included.
-  const ok = result?.ok !== false && result?.timed_out !== true;
+  // 口径与 foldEvents.ts 完全一致——判断本身在 toolOutcome.ts，两边共用一个函数，
+  // 不允许再各判各的。`result` 不是唯一判据：后端 `tool_error_code` 把三种失败形状
+  // 归一到**顶层** `error_code`，其中「非 ok 的 outcome」与「光有 error 键」两种都
+  // 不带 `ok:false`。此前这里只看 result，于是被拒绝/没执行的写工具既渲染成成功，
+  // 又被 `summarizeWrites` 计进「wrote N cards」——用户去画布上找一张不存在的卡。
+  const ok = judgeToolOk({ result, errorCode });
   return {
     key,
     tool,
     kind: TOOL_KINDS[tool] ?? 'other',
     iteration,
     ok,
-    errorText: ok ? null : str(result?.error),
+    // 结果里的散文优先（对模型/用户都更具体）；只有码没有散文时回落到码本身，
+    // 这样失败永远说得出原因，不会退化成一个没有理由的红点。
+    errorText: ok ? null : (str(result?.error) ?? errorCode),
     shots: extractShots(tool, result),
     detailUnavailable,
   };
@@ -190,7 +194,13 @@ export function fromTranscriptEvents(events: AgentRunEvent[]): ToolActivity[] {
     if (seen.has(key)) continue;
     const iteration =
       typeof payload.iteration === 'number' ? payload.iteration : 0;
-    seen.set(key, buildActivity(key, tool, iteration, payload.result));
+    // `error_code` sits at the payload's TOP level (3c §3.2), beside `result`
+    // rather than inside it — `_truncate_payload` only stringifies the nested
+    // dicts, so this one is read directly.
+    seen.set(
+      key,
+      buildActivity(key, tool, iteration, payload.result, str(payload.error_code)),
+    );
   }
   return [...seen.values()];
 }
@@ -250,7 +260,11 @@ export function fromChatToolCalls(calls: ChatToolCall[]): ToolActivity[] {
     perIteration.set(iteration, ordinal + 1);
     const key = `it:${iteration}:${ordinal}`;
     if (seen.has(key)) continue;
-    seen.set(key, buildActivity(key, call.name, iteration, call.result));
+    // ChatToolCall is name/iteration/args/result (types.ts) — there is no
+    // error_code on this wire at all, so pass null rather than inventing one.
+    // The chat panel therefore still judges on `result` alone; that is a gap
+    // in the SOURCE, not a second opinion about what failure means.
+    seen.set(key, buildActivity(key, call.name, iteration, call.result, null));
   }
   return [...seen.values()];
 }
