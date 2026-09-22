@@ -7,10 +7,15 @@
 
 ## gpupc 栈(2026-07-28 起,当前形态)
 
-- 拓扑:nas-A 反代 `cn.nous.ink:88` → `10.0.0.10:8080` = **`nous-gateway`**(nginx,
+- 拓扑:nas-A 反代 `cn.nous.ink:88` → `${NOUS_BIND_IP}:8080` = **`nous-gateway`**(nginx,
   `deploy/gpu-server/nginx-gateway/default.conf.template`):`/f/` secure_link 直出
   `/mnt/heytime/Sources/nous/media`(ro),其余转 `nous-backend`。backend 宿主口退到
-  `10.0.0.10:8890`(排障用)。公网 `api.nous.ink` 走 cloudflared→docker 网络,不经网关。
+  `${NOUS_BIND_IP}:8890`(排障用)。公网 `api.nous.ink` 走 cloudflared→docker 网络,不经网关。
+- **绑定地址是变量,不是常量**(2026-09-21 ZeroTier → Tailscale 迁移)。当前值
+  `100.124.149.118`(gpupc 的 Tailscale IP),定义在仓库外的
+  `secrets/stack.env`(gpu-server 栈)与 `secrets/supabase.env`(supabase 栈),
+  由 `up.sh` / `nous` 脚本经 `--env-file` 喂给 compose。换 VPN / 换机器只改这两行。
+  ⚠️ NAS-A 侧配套要求见下方「nas-A 的 VPN 必须有内核路由」。
 - secret:`secrets/backend.env` 的 `NGINX_SECURE_LINK_SECRET`,backend(签名)与
   gateway(验签)共用同一 env_file。
 - DB 开关(base_url 必须是新入口):
@@ -27,6 +32,45 @@
 - 事故存档(2026-07-27):品牌迁移只改了 env/config.yml,漏了这条 **DB 里的
   base_url**——老域名入口拆除后,302 全部指向死地址,`ERR_EMPTY_RESPONSE` 刷屏。
   DB 存的配置也要进迁移 checklist。
+
+## nas-A 的 VPN 必须有内核路由(2026-09-21 血泪)
+
+DSM 的反向代理是 nginx,**走内核路由表**。所以 nas-A 上的 VPN 客户端必须创建真的
+虚拟网卡,只有"进程自己能通"是不够的。
+
+ZeroTier 套件以 root 跑,拿得到 `CAP_NET_ADMIN`,所以有真网卡(`ztu7tc2vml` =
+`10.0.0.9`),反代一直能用。**Tailscale 官方 DSM 套件默认以非 root 的 package 用户跑**
+(`/var/packages/Tailscale/conf/privilege` 的 `"run-as": "package"`),创建 TUN 时
+`TUNSETIFF` 拿 EPERM,于是**静默回退**到 userspace-networking——启动脚本里那句
+`# TODO(maisem/crawshaw): Disable the tun device in DSM7 for now.` 就是说的这个。
+
+这个失败模式会自我掩护,别被它骗过去:
+
+| 信号 | userspace 模式下 | 能说明什么 |
+|---|---|---|
+| `tailscale status` | `active; direct`,延迟正常 | ❌ 什么都说明不了 |
+| `tailscale ping <peer>` | `pong ... in 38ms` | ❌ 走的是 tailscaled 自己的用户态协议栈 |
+| `ip addr show tailscale0` | `does not exist` | ✅ 决定性 |
+| `tailscale status --json` 的 `TUN` | `false` | ✅ 决定性 |
+| `curl http://<peer-100.x>:<port>` | `000` | ✅ **唯一的真信号**——反代走的就是这条路 |
+
+**排查顺序**:先 `curl`,再看 `TUN`。拿 `tailscale ping` 通就下结论"链路没问题"会把
+方向带偏到反代配置上,而根因在网络层。
+
+修复(让 tailscaled 以 root 跑,与 ZeroTier 对等):
+
+```bash
+sudo cp -p /var/packages/Tailscale/conf/privilege{,.bak}
+sudo sed -i 's/"run-as": "package"/"run-as": "root"/' /var/packages/Tailscale/conf/privilege
+sudo /usr/syno/bin/synopkg restart Tailscale     # ⚠️ 绝对路径,PATH 里没有 synopkg
+```
+
+⚠️ **套件升级会覆盖 `privilege`**,升级后要重做并复验——复验用上表里的真信号,不是
+`tailscale status`。
+
+⚠️ 后台派发重启时 ssh 不能立刻退出(`nohup ... &` 后跟 `sleep 5`),否则 `synopkg`
+还没 fork 起来就被带走,表现是"命令返回了但进程压根没重启"——`ps -eo lstart` 看
+tailscaled 的启动时间是识别它的办法。
 
 ---
 

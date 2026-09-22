@@ -17,8 +17,17 @@ if [ ! -f "$WORK_MARKER" ]; then
   exit 1
 fi
 
+# compose 变量插值的来源（NOUS_BIND_IP 等）。必须是仓库外的绝对路径：本目录
+# 在 runner workspace 里，actions/checkout 默认 clean:true 会 git clean -ffdx，
+# 放在这儿的 .env 每次部署都会被删。
+#
+# 文件不存在时 docker compose 自己会报错退出——这是想要的行为，不要加 `|| true`
+# 兜底：缺了 NOUS_BIND_IP 而继续起栈，端口会绑到 0.0.0.0（见 compose 里 gateway
+# 那段的说明）。
+STACK_ENV=/media/heygo/program/datahub/nous/secrets/stack.env
+
 # 共享网络 nous-net 由此处统一预建（supabase 与本 compose 均以 external 挂入，
 # 避免跨 compose 项目的网络标签冲突）
 docker network inspect nous-net >/dev/null 2>&1 || docker network create nous-net
 
-exec docker compose up -d "$@"
+exec docker compose --env-file "$STACK_ENV" up -d "$@"
