@@ -456,7 +456,10 @@ async def test_platform_catalog_unknown_provider_label_degrades_to_openai_compat
     from app.services.ai.adapters.qwen import QwenAdapter
 
     hit = (
-        "nous",  # not a buildable provider key
+        # Must be a label that can never BECOME a key: "nous" used to sit here
+        # and quietly stopped testing the fallback once the self-hosted engine
+        # got its own protocol.
+        "not-a-registered-protocol",
         {"api_key": "platform-key", "base_url": "https://nous.example.com/v1"},
         "qwen3-6-35b",
     )

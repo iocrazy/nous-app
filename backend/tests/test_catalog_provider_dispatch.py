@@ -74,7 +74,13 @@ class TestResolveProviderKey:
 
     def test_unknown_label_and_prefix_fall_back_to_openai_compatible(self):
         # Same contract the health probe validates: base_url + /chat/completions.
-        assert resolve_provider_key("nous", "qwen3-6-35b") == "qwen"
+        #
+        # The sentinel used to be "nous", which stopped being unknown the day
+        # the self-hosted engine got its own protocol — the test then asserted
+        # the fallback while exercising a real key. A sentinel has to be a
+        # string that cannot become a provider, not merely one that is not a
+        # provider yet.
+        assert resolve_provider_key("not-a-registered-protocol", "qwen3-6-35b") == "qwen"
 
 
 class TestCatalogDispatch:
@@ -87,7 +93,7 @@ class TestCatalogDispatch:
 
     @pytest.mark.asyncio
     async def test_free_text_actual_provider_still_builds(self):
-        adapter = await _resolve(_row(actual_provider="nous"))
+        adapter = await _resolve(_row(actual_provider="some-free-text-label"))
         assert adapter is not None
 
     @pytest.mark.asyncio
