@@ -112,16 +112,19 @@ def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
 def issue_scope_keys(
     issue_id: Optional[int], conversation_id: Optional[int]
 ) -> List[Any]:
-    """「属于这个议题」的那组 OR 键 —— 两个钱读方共用，不许各写一份。
+    """「属于这个议题」的那组 OR 键 —— 所有按议题收行的读方共用，不许各写一份。
 
     **名字不带下划线是有意的**：``usage_repository.issue_totals`` 跨模块 import 它，
-    第三个读方就在那边。一个跨模块的下划线名字是在说「别用我」，而这里的契约恰好相反
-    —— 三处钱读方**必须**用同一组键，不然同一个议题在预算门禁、驾驶舱 Budget 格与
-    Usage 面上是三个数。
+    第三个钱读方就在那边。一个跨模块的下划线名字是在说「别用我」，而这里的契约恰好
+    相反 —— 三处钱读方（预算门禁 ``spent_cents_for_issue``、驾驶舱 Budget 格
+    ``own_cost_cents_for_issue_runs``、Usage 面 ``issue_totals``）**必须**用同一组键，
+    不然同一个议题在三个面上是三个数。
 
     一条 run 挂到议题上有两条路：直接戳 ``issue_id``，或者经它的 session
-    ``conversation_id``。只认前一条会漏掉只走会话键的 run，于是同一个议题在预算门禁
-    与驾驶舱 Budget 格上是两个数（``list_for_issue`` 也是拿两个键找行的）。
+    ``conversation_id``。只认前一条会漏掉只走会话键的 run。
+
+    ``list_for_issue``（驾驶舱那张 run 列表）也走这里 —— 它不是钱读方，但它必须与钱
+    读方**收同一批行**：列表里没有、总额里却有的那笔钱，用户无处对账。
     """
     keys: List[Any] = []
     if issue_id is not None:
@@ -1040,11 +1043,7 @@ class AgentRunsRepository(AsyncpgRepository):
         """Root runs on an issue (by issue_id or its session conversation),
         newest first, with the folded ``metadata_json`` views. ``id`` /
         ``parent_run_id`` stay native int (issue.rollup stringifies)."""
-        keys = []
-        if issue_id is not None:
-            keys.append(AgentRuns.issue_id == int(issue_id))
-        if conversation_id is not None:
-            keys.append(AgentRuns.conversation_id == int(conversation_id))
+        keys = issue_scope_keys(issue_id, conversation_id)
         if not keys:
             return []
         cols = (

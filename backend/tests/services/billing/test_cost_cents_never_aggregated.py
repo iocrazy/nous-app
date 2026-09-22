@@ -149,16 +149,24 @@ COST_CENTS_ALIAS_PATTERN = r"AgentRuns\.cost_cents\.label\("
 
 # ── 守卫 4 的材料 ──────────────────────────────────────────────────────
 
-#: 一次**裸投影** = 源码里对 ``AgentRuns.cost_cents`` 的一次引用，既没被聚合函数包住
-#: （那归守卫 1），也没被 ``.label()`` 改名（那归上面的别名禁令）。剩下的形态实际上
-#: 只有一种：把这一列摆进 select 的参数位（或者先攒进一个 ``cols`` 元组再
-#: ``select(*cols)`` —— ``list_for_issue`` 就是后者，所以这条守卫**不**去匹配
-#: ``select(`` 这个词，只认那次属性引用）。
+#: 一次**裸投影** = 源码里对 ``AgentRuns.cost_cents`` 的一次引用，既没被聚合包住
+#: （那归守卫 1，见 ``_AGGREGATE_WRAP_RE``），也没被 ``.label()`` 改名（那归上面的别名
+#: 禁令）。现存写法有两类：直接摆进 select 的参数位，或先攒进一个 ``cols`` 元组再
+#: ``select(*cols)``（``list_for_issue`` 就是后者）—— 所以这条守卫**不**去匹配
+#: ``select(`` 这个词，只认那次属性引用。
 BARE_PROJECTION_PATTERN = r"AgentRuns\.cost_cents\b(?!\s*\.label\()"
 
-#: 命中点紧邻其后的这两个包裹之一 → 聚合形态，归守卫 1，不在这条守卫的管辖里
-#: （让同一处写法同时点亮两条守卫只会让报错更难读）。
-_AGGREGATE_WRAPS = ("func.sum(", "func.coalesce(")
+#: 命中点**紧邻其前**是这个形状 → 聚合形态，归守卫 1，这条不重复点亮（同一处写法
+#: 同时红两条只会让报错更难读）。
+#:
+#: ⚠️ 刻意只放过 **coalesce 套在 sum 里**的那一种，不是所有 coalesce。裸的
+#: ``select(func.coalesce(AgentRuns.cost_cents, 0))`` **不是聚合** —— 它是给这一列配
+#: 个逐行的 NULL 默认值，也就是一次裸投影，守卫 1 的第三条模式
+#: （``sum\(\s*func\.coalesce\(…``）也不认它。把 ``func.coalesce(`` 整个放过去，等于
+#: 开一个四条守卫全都看不见的口子；所以这里写成一条正则，把「coalesce 前面得有 sum」
+#: 钉死。用正则而不是 ``endswith`` 是因为 Python 的 lookbehind 定宽，跨行的
+#: ``func.sum(\n    AgentRuns.cost_cents`` 会漏。
+_AGGREGATE_WRAP_RE = re.compile(r"(?:func\.)?sum\(\s*(?:func\.coalesce\(\s*)?\Z")
 
 #: 登记表：``app/`` 下的相对路径 → 那几处投影把这一列送去干什么。
 #:
@@ -184,12 +192,13 @@ BARE_PROJECTION_ALLOWLIST: dict[str, str] = {
         "spent_cents_for_issue）"
     ),
     "api/workforce_router.py": (
-        "workforce 面板的 recent runs（总览每 agent 5 条 + agent 详情 20 条）—— "
-        "逐行渲染，本文件不对它求和"
+        "get_workforce_board 的每 agent 最近 5 条 + get_agent_detail 的最近 20 条 —— "
+        "两处都是逐行渲染，本文件不对它求和"
     ),
     "api/ai_library_router.py": (
-        "dashboard 的 run 行 / 最近一条 run 横幅 / recent runs 表 / runs 列表 —— "
-        "四处都是逐行展示；同一批响应里的合计读的是 own_cost_cents"
+        "get_agent_dashboard 三处（run 行 / 最近一条 run 横幅 / recent runs 表）"
+        "+ list_live_runs 一处 —— 四处都是逐行展示；同一批响应里的 costs_14d 合计"
+        "读的是 own_cost_cents"
     ),
 }
 
@@ -391,8 +400,8 @@ def test_the_folded_column_never_travels_under_an_alias():
     折叠列改名，读的人就再也看不出手里是哪一列。
 
     ⚠️ 这条不覆盖**裸投影** —— 折叠列的列名本来就是 ``cost_cents``，不加 ``.label()``
-    也落在同一个键上（全仓 8 处，见 ``PY_ROLLUP_ALLOWLIST`` 上方那段）。它只堵「改名」
-    这一种额外的混淆。"""
+    也落在同一个键上。那一族归守卫 4（``BARE_PROJECTION_ALLOWLIST``，按文件登记，现存
+    处数以它扫出来的为准）。这一条只堵「改名」这一种额外的混淆。"""
     hits = []
     for path, src in _app_sources():
         for hit in _hits(_code_only(src), (COST_CENTS_ALIAS_PATTERN,)):
@@ -415,7 +424,7 @@ def _bare_projections_in(code: str) -> list[str]:
     out: list[str] = []
     for match in re.finditer(BARE_PROJECTION_PATTERN, code):
         before = code[: match.start()]
-        if before.rstrip().endswith(_AGGREGATE_WRAPS):
+        if _AGGREGATE_WRAP_RE.search(before):
             continue  # 聚合形态归守卫 1
         line = before.count("\n") + 1
         out.append(f"L{line}: {match.group(0)}")
@@ -449,11 +458,14 @@ def test_bare_projections_of_cost_cents_are_registered():
 
 
 def test_the_bare_projection_guard_bites():
-    """正例：select 参数位与先攒 ``cols`` 元组两种写法都要被抓。"""
+    """正例：select 参数位、先攒 ``cols`` 元组、以及**没有 sum 包着的** coalesce。"""
     for snippet in (
         "stmt = select(AgentRuns.id, AgentRuns.cost_cents)",
         "cols = (\n    AgentRuns.id,\n    AgentRuns.cost_cents,\n)",
         "stmt = select(func.count(), AgentRuns.cost_cents)",
+        # 逐行的 NULL 默认值，不是聚合 —— 守卫 1 的 sum(coalesce(…)) 模式不认它，
+        # 所以它必须落在这条守卫上，否则四条守卫全都看不见。
+        "stmt = select(func.coalesce(AgentRuns.cost_cents, 0))",
     ):
         assert _bare_projections_in(snippet), snippet
 
@@ -464,8 +476,10 @@ def test_the_bare_projection_guard_leaves_the_other_guards_forms_alone():
         "stmt = select(AgentRuns.id, AgentRuns.own_cost_cents)",
         'AgentRuns.own_cost_cents.label("cost_cents")',
         "total = func.sum(AgentRuns.cost_cents)",
+        "total = func.sum(\n    AgentRuns.cost_cents\n)",  # 跨行的 sum 也算聚合
         "total = func.sum(func.coalesce(AgentRuns.own_cost_cents, 0))",
         "total = sum(func.coalesce(AgentRuns.cost_cents, 0))",
+        "total = func.sum(func.coalesce(AgentRuns.cost_cents, 0))",
         'stmt = select(AgentRuns.cost_cents.label("spend"))',
     ):
         assert not _bare_projections_in(snippet), snippet

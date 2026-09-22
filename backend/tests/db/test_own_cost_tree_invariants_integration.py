@@ -589,12 +589,19 @@ async def test_efficiency_groups_puts_the_whole_tree_on_the_roots_group(orm_dsn,
     ⚠️ 第 2 点是这个夹具为什么要造 scope 不对称：实测过，五行 ``team_id`` 一致时，
     错的那种写法给出的答案与正确写法**逐字节相同**。
 
-    3. **同一组里两棵树各算各的，加起来。** ``CONV_ONLY`` 也属 agent X、也带
+    3. **同一组里两棵树各算各的，然后相加。** ``CONV_ONLY`` 也属 agent X、也带
        ``team_id``、也是 root（没父、没 ``root_run_id``），所以它是 X 组里的第二棵
-       树 —— 一棵只有一行的树。X 组于是拿 35.75 + 2.5。这一条钉的是树键那个
-       ``COALESCE(root_run_id, id)``：一行既没父也没 root 时它必须归成**自己**那棵
-       树；写成裸 ``root_run_id`` 会把它和 A 一起塞进 NULL 那一组，两棵树的钱糊成
-       一笔（在只有一棵树的夹具上，这个错法看不出来）。
+       树 —— 一棵只有一行的树。X 组于是拿 35.75 + 2.5 = 38.25，``run_count`` 3。
+
+       这一条钉的是那个聚合**真的在求和**：``sum(tree_cost.cents) FILTER (root_only)``
+       第一次有两个加数落在同一组里。在只有一棵树的夹具上，把 ``func.sum`` 换成
+       ``func.max`` / 取第一行 / ``LIMIT 1`` 全都给出同一个 35.75 —— 实测过：
+       ``sum`` → ``max`` 在旧的五行夹具上**照样绿**，加上这一行才转红。
+
+       ⚠️ 它**不是**为了钉树键 ``COALESCE(root_run_id, id)`` —— 那个旧夹具早就拦得住
+       （把它换成裸 ``root_run_id``，A 归 NULL 组、B..E 归 A 组，而 join 条件是
+       ``tree_cost.root == AgentRuns.id``，NULL 组永远落不下来，X 直接掉到 23.25；
+       实测确认）。
     """
     rows, _reasons = await _repo().efficiency_groups(
         frm=_WINDOW[0],
