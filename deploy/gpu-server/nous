@@ -19,8 +19,14 @@ GPU_DIR="$REPO/deploy/gpu-server"
 SB_DIR=/media/heygo/program/datahub/nous/supabase
 MARKER=/media/heygo/program/datahub/nous/.mounted
 
+# compose 变量插值的来源(NOUS_BIND_IP 等),与 up.sh 同一个文件。
+# 只有应用栈需要显式指定:compose 从 `-f` 文件所在目录读 .env(实测,不是 cwd),
+# 而 $GPU_DIR 在 runner workspace 里会被 checkout 的 git clean 扫掉,不能放 .env;
+# $SB_DIR 是活目录,它自己的 .env 软链到 secrets/supabase.env,所以 sb_compose 不用管。
+STACK_ENV=/media/heygo/program/datahub/nous/secrets/stack.env
+
 # 两个 compose 项目(应用栈 + Supabase 栈)
-app_compose() { docker compose -f "$GPU_DIR/docker-compose.yml" "$@"; }
+app_compose() { docker compose --env-file "$STACK_ENV" -f "$GPU_DIR/docker-compose.yml" "$@"; }
 sb_compose()  { docker compose -f "$SB_DIR/docker-compose.yml" "$@"; }
 
 c_grn='\033[32m'; c_red='\033[31m'; c_dim='\033[2m'; c_rst='\033[0m'

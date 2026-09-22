@@ -36,12 +36,11 @@ services:
     image: nous-backend:local
     container_name: nous-backend
     ports:
-      # 2026-07-28 起 10.0.0.10:8080 归 gateway(nginx 分流 /f/ 直出),
+      # 2026-07-28 起 VPN 内网的 8080 归 gateway(nginx 分流 /f/ 直出),
       # backend 退到 8890 作内网排障口(沿 NAS 时代 APP_PORT=8890 惯例)。
-      # nas-A 反代目标不变(仍 10.0.0.10:8080),公网 api.nous.ink 经
-      # cloudflared 走 docker 网络直连 nous-backend:8080,均不受影响。
-      # 注意: ZeroTier 未起时 docker 会绑定失败,restart 策略会重试。
-      - "10.0.0.10:8890:8080"
+      # 公网 api.nous.ink 经 cloudflared 走 docker 网络直连 nous-backend:8080,
+      # 不受本行影响。绑定地址见下方 gateway 处的说明。
+      - "${NOUS_BIND_IP:?NOUS_BIND_IP unset - see secrets/stack.env}:8890:8080"
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
@@ -173,7 +172,16 @@ services:
       # nas-A(cn.nous.ink:88)的反代目标。全部转 nous-backend;/f/ 签名直出
       # 已于 2026-09-07 退役(库里没有本地路径了),gateway 不再挂任何媒体目录、
       # 也不再需要 secrets env。
-      - "10.0.0.10:8080:80"
+      #
+      # 绑定地址参数化(2026-09-21,ZeroTier → Tailscale 迁移)。值在仓库外的
+      # secrets/stack.env,由 up.sh / nous 脚本经 --env-file 喂进来,所以换
+      # VPN、换机器只改那一行,不动本文件。
+      #
+      # ⚠️ 刻意不给默认值。compose 对未定义变量只 warning 然后当空串,
+      # ":8080:80" 会绑到 0.0.0.0 —— 本机 iptables INPUT 是空的,那等于把内网
+      # 口静默暴露给局域网。`:?` 让变量缺失时直接拒绝起栈,与 up.sh 的两个挂载
+      # marker 守卫同范式:宁可响亮失败,不要静默扩大暴露面。
+      - "${NOUS_BIND_IP:?NOUS_BIND_IP unset - see secrets/stack.env}:8080:80"
     volumes:
       - ./nginx-gateway:/etc/nginx/templates:ro
     depends_on:

@@ -698,7 +698,9 @@ cd frontend && npm run e2e:prod
 
 那个目录（`/media/heygo/program/projects-code/repos/nous-app`）降级为**部署 checkout**：只读、没人在上面编辑、由 `nous deploy` 自己 `fetch + reset --hard` 同步。区别是语义上的（有没有人在上面写代码），不是路径上的。`deploy/gpu-server/nous` 的 dirty 守卫把这条约定变成可执行检查 —— 目录一脏，`nous deploy` 就拒绝并逐行列出脏文件，而不是静默 `reset --hard` 抹掉。
 
-从 Mac mini 做运维的通道是 **ZeroTier + SSH**（`heygo@10.0.0.10`，免密已通）。SSH 进去看日志/探针/重启**不等于**在那编辑代码，两者不冲突。完整闭环：本机编辑 → `gh pr create` → CI 在 GitHub → 合并 → `deploy-gpu.yml` 自动在 gpupc 部署 → `gh run watch` 看 smoke → `ssh gpupc 'nous status'` 验真栈 → 本机 `npm run e2e:prod` 走查。
+从 Mac mini 做运维的通道是 **Tailscale + SSH**（`heygo@100.124.149.118`，免密已通；2026-09-21 从 ZeroTier `10.0.0.10` 迁来）。SSH 进去看日志/探针/重启**不等于**在那编辑代码，两者不冲突。
+
+⚠️ **nas-A 反代的目标地址是变量 `NOUS_BIND_IP`，不要在代码里硬编码**。它定义在仓库外的 `secrets/stack.env`（gpu-server 栈）与 `secrets/supabase.env`（supabase 栈），由 `up.sh` / `nous` 脚本经 `--env-file` 喂给 compose；compose 里用 `${NOUS_BIND_IP:?...}` 而**不给默认值**——变量缺失时端口会绑到 `0.0.0.0`，本机 iptables INPUT 是空的，那等于把内网口静默暴露给局域网。nas-A 侧的配套前提（VPN 必须有内核路由，否则 DSM 反代够不着）见 [`docs/runbook/nginx-direct-serve.md`](docs/runbook/nginx-direct-serve.md) 的「nas-A 的 VPN 必须有内核路由」。完整闭环：本机编辑 → `gh pr create` → CI 在 GitHub → 合并 → `deploy-gpu.yml` 自动在 gpupc 部署 → `gh run watch` 看 smoke → `ssh gpupc 'nous status'` 验真栈 → 本机 `npm run e2e:prod` 走查。
 
 铁律：**同一时刻只有一台机器往 master 推**，谁先推谁赢，另一台 `git rebase origin/master`。
 

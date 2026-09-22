@@ -408,7 +408,7 @@ class Settings(BaseSettings):
     MEDIA_PUBLIC_URL: str = Field(
         default="https://cn.nous.ink:88",
         description="Public URL for media file access. Defaults to the "
-        "mainland direct-connect entrypoint (nas-A :88 -> ZeroTier -> gpupc); "
+        "mainland direct-connect entrypoint (nas-A :88 -> VPN -> gpupc); "
         "override to https://api.nous.ink when the consumer is an overseas "
         "service that cannot reach a non-standard port.",
     )

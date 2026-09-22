@@ -98,10 +98,13 @@ services:
       # nous-kong:8000，不依赖宿主机端口。宿主机映射仅留给本机调试。
       - 127.0.0.1:${KONG_HTTP_PORT}:8000/tcp
       - 127.0.0.1:${KONG_HTTPS_PORT}:8443/tcp
-      # ZeroTier 内网 —— nas-A 经 10.0.0.10:9082 反代 cn-sb.nous.ink，供大陆用户
-      # 国内直连 Supabase(绕开 CF 隧道跨境)。与 backend 的 10.0.0.10:8080 同模式。
-      # 注意: ZeroTier 未起时 docker 绑定会失败，restart 策略会重试。
-      - 10.0.0.10:${KONG_HTTP_PORT}:8000/tcp
+      # VPN 内网 —— nas-A 经 ${NOUS_BIND_IP}:9082 反代 cn-sb.nous.ink，供大陆用户
+      # 国内直连 Supabase(绕开 CF 隧道跨境)。与 gateway 的 8080 同模式。
+      # 地址参数化(2026-09-21 ZeroTier→Tailscale 迁移):值在 secrets/supabase.env,
+      # 换 VPN / 换机器只改那一行。刻意不给默认值 —— compose 对未定义变量只 warning
+      # 然后当空串,":9082" 会绑到 0.0.0.0，把内网口静默暴露给局域网(本机 iptables
+      # INPUT 是空的)。`:?` 让变量缺失时拒绝起栈,与 up.sh 的挂载 marker 守卫同范式。
+      - "${NOUS_BIND_IP:?NOUS_BIND_IP unset - see secrets/supabase.env}:${KONG_HTTP_PORT}:8000/tcp"
     volumes:
       # https://github.com/supabase/supabase/issues/12661
       - ./volumes/api/kong.yml:/home/kong/temp.yml:ro,z
