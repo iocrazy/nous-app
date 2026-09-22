@@ -28,6 +28,8 @@ class _FakeRepo:
         self.create_transaction = AsyncMock(return_value={})
         self.get_team_quota = AsyncMock(return_value={"points_balance": 100})
         self.create_team_quota = AsyncMock(return_value={"points_balance": 0})
+        self.update_points_balance = AsyncMock(return_value={})
+        self.increment_points_balance = AsyncMock(return_value={"points_balance": 130})
         # (row, created) —— created 是欢迎积分该不该发的唯一依据。
         self.create_team_quota_if_absent = AsyncMock(
             return_value=({"points_balance": 500}, True)
@@ -303,3 +305,41 @@ async def test_winning_the_provisioning_race_does_grant_the_bonus(
     assert payload["type"] == "gift"
     assert payload["reference_type"] == "welcome_bonus"
     assert payload["amount"] == 500
+
+
+# ---------------------------------------------------------------------------
+# add_points — 充值必须走服务端自增
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_points_uses_increment_not_read_modify_write(
+    service: PointsService,
+) -> None:
+    """读-算-写会在两次并发充值时丢一次更新 —— 真金白银（admin 赠送 / 调整 /
+    支付回调兜底都走这条路）。余额由服务端自增给出，不由 Python 算。"""
+    out = await service.add_points(
+        team_id="7", amount=30, type="gift", description="test", user_id="u-1"
+    )
+
+    service.repo.update_points_balance.assert_not_awaited()  # type: ignore[attr-defined]
+    assert service.repo.increment_points_balance.await_args.args == ("7", 30)  # type: ignore[attr-defined]
+    # balance_after 取自自增返回的行，不是 read 到的 100 + 30。
+    payload = service.repo.create_transaction.await_args.args[0]
+    assert payload["balance_after"] == 130
+    assert out == {"success": True, "new_balance": 130}
+
+
+@pytest.mark.asyncio
+async def test_add_points_raises_when_the_increment_matched_no_quota_row(
+    service: PointsService,
+) -> None:
+    """自增没命中任何行 = 这笔钱没加上。绝不能接着写一条余额是瞎编的流水。"""
+    service.repo.increment_points_balance = AsyncMock(return_value={})  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError):
+        await service.add_points(
+            team_id="7", amount=30, type="gift", description="test", user_id="u-1"
+        )
+
+    service.repo.create_transaction.assert_not_awaited()

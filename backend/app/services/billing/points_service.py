@@ -330,6 +330,10 @@ class PointsService:
 
         Returns:
             Dict with keys: success, new_balance.
+
+        Raises:
+            RuntimeError: 自增没命中任何 quota 行（钱没加上）。宁可抛，也不写一条
+                余额是编出来的流水。
         """
         if amount <= 0:
             logger.warning(
@@ -343,12 +347,18 @@ class PointsService:
             logger.warning(
                 f"add_points: no team quota for team {team_id}; " f"creating one first"
             )
-            team_quota = await self.repo.create_team_quota(team_id)
+            await self.repo.create_team_quota(team_id)
 
-        current_balance = team_quota.get("points_balance", 0)
-        new_balance = current_balance + amount
-
-        await self.repo.update_points_balance(team_id, new_balance)
+        # 服务端自增，一条语句 —— 读-算-写在两次并发充值下会丢一次更新（真钱）。
+        row = await self.repo.increment_points_balance(team_id, amount)
+        if not row:
+            # UPDATE 匹配 0 行（quota 行刚被删 / 并发建行失败）= 这笔钱没加上。
+            # 绝不能接着写一条余额是瞎编的流水 —— 让调用方看见失败。
+            raise RuntimeError(
+                f"add_points: increment matched no quota row for team {team_id} "
+                f"(amount={amount}, type={type})"
+            )
+        new_balance = row["points_balance"]
 
         await self.repo.create_transaction(
             {
@@ -363,9 +373,10 @@ class PointsService:
             }
         )
 
+        # 自增后的余额由服务端给出；不记「加之前是多少」—— 并发下那个读数已经过期。
         logger.info(
             f"Added {amount} points ({type}) to team {team_id}. "
-            f"Balance: {current_balance} -> {new_balance}"
+            f"Balance now: {new_balance}"
         )
 
         return {"success": True, "new_balance": new_balance}
