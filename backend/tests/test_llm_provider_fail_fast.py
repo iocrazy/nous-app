@@ -2,7 +2,7 @@
 
 History: the old implicit localhost:8000 default was removed first (#1112),
 then env credentials were retired entirely (铁律 2026-07-07) — resolution is
-DB-only (mediahub_models catalog → user BYOK → ProviderNotConfiguredError).
+DB-only (nous_models catalog → user BYOK → ProviderNotConfiguredError).
 """
 
 from __future__ import annotations

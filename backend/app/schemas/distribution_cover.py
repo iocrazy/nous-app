@@ -184,7 +184,7 @@ class CoverGenerateRequest(BaseModel):
     # 风格 = 一个 category='cover' 的 skill 的 slug。内置的 viral-video-cover
     # 走代码里转录好的骨架；其余 skill 走 cover_styles.build_from_skill。
     style: str = Field(default="viral-video-cover", max_length=120)
-    # mediahub_models catalog row name; "" = let the catalog pick.
+    # nous_models catalog row name; "" = let the catalog pick.
     model: str = ""
     # generated_media reference URLs, in pool order. The server re-checks the
     # cap, so a client bug cannot quietly spend more than nine.

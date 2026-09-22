@@ -33,7 +33,7 @@ class EmbeddingConfig:
     # data.embedding (dict), NOT the OpenAI /v1/embeddings shape.
     multimodal: bool = False
     # WHICH resolution branch produced this config (for the health board):
-    # "platform" = mediahub_models catalog hit; "governance" = admin manual
+    # "platform" = nous_models catalog hit; "governance" = admin manual
     # config (ai_module.embedding.* or legacy graph_embedder_*). "" = legacy
     # constructor without attribution.
     source: str = ""

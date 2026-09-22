@@ -386,7 +386,7 @@ async def test_user_picks_platform_model_for_llm_task():
         ),
         patch.object(
             helpers_mod,
-            "resolve_mediahub_model",
+            "resolve_nous_model",
             new=AsyncMock(
                 return_value=(
                     "doubao",
@@ -431,7 +431,7 @@ async def test_platform_model_gone_falls_back_to_default_agent():
         ),
         patch.object(
             helpers_mod,
-            "resolve_mediahub_model",
+            "resolve_nous_model",
             new=AsyncMock(return_value=None),
         ),
         patch(

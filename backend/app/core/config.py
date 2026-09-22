@@ -366,14 +366,14 @@ class Settings(BaseSettings):
 
     # OpenAI credentials are DB-ONLY too (2026-07-07, follow-up to the LLM
     # retirement): OPENAI_API_KEY / OPENAI_MODEL were removed. Visual analysis
-    # and embedding resolve through the mediahub_models catalog / user BYOK.
+    # and embedding resolve through the nous_models catalog / user BYOK.
 
     # ============================================
     # LLM Configuration (Script / Storyboard AI)
     # ============================================
     # LLM credentials are DB-ONLY (铁律 2026-07-07): LLM_API_URL / LLM_API_KEY /
     # LLM_MODEL, DEEPSEEK_*, DOUBAO_* and CLAUDE_API_KEY were removed. Platform
-    # models live in the admin-managed ``mediahub_models`` catalog (encrypted
+    # models live in the admin-managed ``nous_models`` catalog (encrypted
     # at rest); users bring their own keys in Settings → AI Providers. Only
     # non-credential knobs (timeouts, budgets) remain here.
     LLM_TIMEOUT_SECONDS: float = Field(

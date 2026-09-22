@@ -1,5 +1,5 @@
 # backend/tests/test_nous_public_endpoint.py
-"""Public mediahub-models endpoint honors ?type=; governance exposes nous gates."""
+"""Public nous-models endpoint honors ?type=; governance exposes nous gates."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,18 +9,18 @@ from app.services.ai.governance.ai_governance import AIModuleGovernance
 
 
 @pytest.mark.asyncio
-async def test_list_mediahub_models_passes_type_filter():
-    from app.api.ai_settings_router import list_mediahub_models
+async def test_list_nous_models_passes_type_filter():
+    from app.api.ai_settings_router import list_nous_models
 
     repo = MagicMock()
     repo.list_enabled = AsyncMock(return_value=[{"name": "nous-llm", "type": "llm"}])
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         from types import SimpleNamespace
 
-        result = await list_mediahub_models(
+        result = await list_nous_models(
             auth=SimpleNamespace(user_id="viewer-1"), type="llm"
         )
     repo.list_enabled.assert_awaited_once_with("llm", viewer_user_id="viewer-1")
@@ -31,7 +31,7 @@ def test_public_projection_excludes_admin_description():
     """The public list_enabled projection must never expose ``description`` —
     it carries admin-internal ops notes (private ZeroTier IPs, BYOK source refs)
     that would leak into the user-facing platform-models card."""
-    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+    from app.repositories.nous_model_repository import _PUBLIC_COLS
 
     col_names = {c.key for c in _PUBLIC_COLS}
     assert "description" not in col_names
@@ -46,7 +46,7 @@ def test_public_projection_never_exposes_credentials():
     stays out, including ``last_test_detail`` (a probe failure text routinely
     embeds the private base_url / upstream host, the same leak class that got
     ``description`` excluded)."""
-    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+    from app.repositories.nous_model_repository import _PUBLIC_COLS
 
     col_names = {c.key for c in _PUBLIC_COLS}
     forbidden = {
@@ -67,7 +67,7 @@ def test_public_projection_exposes_health_status_and_time():
     payload, so 'the UI doesn't show it' was really 'the UI can't know'.
     ``last_tested_at`` rides along because a stale green light must not read as
     'currently fine'."""
-    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+    from app.repositories.nous_model_repository import _PUBLIC_COLS
 
     col_names = {c.key for c in _PUBLIC_COLS}
     assert "last_test_status" in col_names
@@ -84,7 +84,7 @@ def test_public_projection_exposes_the_reason_code_but_not_the_reason_text():
     ``last_test_detail`` stays out for the reason asserted above: on 2026-08-14
     it held a URL fragment.
     """
-    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+    from app.repositories.nous_model_repository import _PUBLIC_COLS
 
     col_names = {c.key for c in _PUBLIC_COLS}
     assert "last_test_code" in col_names
@@ -116,20 +116,18 @@ async def test_governance_includes_nous_enabled_and_modules():
 
 
 @pytest.mark.asyncio
-async def test_list_mediahub_models_passes_viewer_from_auth():
+async def test_list_nous_models_passes_viewer_from_auth():
     """The catalog endpoint must scope the list to the calling user so
     owner-private rows (codex/jimeng, migration 431) never leak to others."""
     from types import SimpleNamespace
 
-    from app.api.ai_settings_router import list_mediahub_models
+    from app.api.ai_settings_router import list_nous_models
 
     repo = MagicMock()
     repo.list_enabled = AsyncMock(return_value=[])
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
-        await list_mediahub_models(
-            auth=SimpleNamespace(user_id="viewer-1"), type="image"
-        )
+        await list_nous_models(auth=SimpleNamespace(user_id="viewer-1"), type="image")
     repo.list_enabled.assert_awaited_once_with("image", viewer_user_id="viewer-1")

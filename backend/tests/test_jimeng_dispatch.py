@@ -40,11 +40,9 @@ class _FakeRepo:
 
 
 def _patch_repo(monkeypatch, rows):
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
 
-    monkeypatch.setattr(
-        repo_mod, "get_mediahub_model_repository", lambda: _FakeRepo(rows)
-    )
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _FakeRepo(rows))
 
 
 # --------------------------------------------------------------- image dispatch
@@ -302,7 +300,7 @@ async def test_no_user_in_scope_still_consults_the_tier_which_returns_nothing(
 async def test_the_empty_message_names_both_tiers(monkeypatch):
     _patch_repo(monkeypatch, [_row(is_enabled=False)])
     _patch_byok(monkeypatch, [])
-    with pytest.raises(RuntimeError, match=r"mediahub_models catalog or user BYOK"):
+    with pytest.raises(RuntimeError, match=r"nous_models catalog or user BYOK"):
         await resolve_image_provider(user_id="u1")
 
 

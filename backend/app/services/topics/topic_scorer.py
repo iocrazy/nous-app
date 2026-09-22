@@ -113,11 +113,11 @@ class TopicScorerService:
         try:
             if not await is_nous_allowed("topic_scorer"):
                 return cands
-            from app.repositories.mediahub_model_repository import (
-                get_mediahub_model_repository,
+            from app.repositories.nous_model_repository import (
+                get_nous_model_repository,
             )
 
-            repo = get_mediahub_model_repository()
+            repo = get_nous_model_repository()
             for m in await repo.list_enabled("llm"):
                 full = await repo.get_by_name(m["name"])
                 if full and full.get("base_url") and full.get("api_key"):

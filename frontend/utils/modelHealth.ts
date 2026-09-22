@@ -45,7 +45,7 @@ export interface ModelHealth {
  *
  * The probe branches on type and sends everything that is not `asr` or
  * `embedding` to `POST {base_url}/chat/completions`
- * (backend/app/services/ai/mediahub_model_health.py). So `image` / `video` /
+ * (backend/app/services/ai/nous_model_health.py). So `image` / `video` /
  * `tts` are ALWAYS recorded as failing, whatever their real state: a
  * text-to-image model 404s on a chat endpoint, and CLI-backed models have no
  * base_url at all so the probe builds an invalid URL. Production confirms it —

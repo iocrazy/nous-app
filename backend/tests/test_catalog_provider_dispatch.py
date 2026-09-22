@@ -51,7 +51,7 @@ def _repo(row: dict) -> MagicMock:
 
 async def _resolve(row: dict):
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=_repo(row),
     ):
         with patch(

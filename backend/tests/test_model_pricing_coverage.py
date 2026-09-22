@@ -225,7 +225,7 @@ async def test_load_reads_both_faces_in_one_session():
 
 @pytest.mark.asyncio
 async def test_admin_list_carries_price_coverage_per_row():
-    from app.api.admin.mediahub_model_router import list_mediahub_models
+    from app.api.admin.nous_model_router import list_nous_models
 
     rows = [
         _row(id=1),
@@ -265,15 +265,15 @@ async def test_admin_list_carries_price_coverage_per_row():
     repo.list_all = AsyncMock(return_value=rows)
     with (
         patch(
-            "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+            "app.api.admin.nous_model_router.get_nous_model_repository",
             return_value=repo,
         ),
         patch(
-            "app.api.admin.mediahub_model_router.load_priced_models",
+            "app.api.admin.nous_model_router.load_priced_models",
             AsyncMock(return_value=PRICED),
         ),
     ):
-        out = await list_mediahub_models(MagicMock())
+        out = await list_nous_models(MagicMock())
     assert [o.price_coverage for o in out] == [
         "priced",
         "missing",

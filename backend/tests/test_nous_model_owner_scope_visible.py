@@ -2,7 +2,7 @@
 
 WHY THIS WAS MISSING AND WHY IT MATTERS
 ───────────────────────────────────────
-Migration 431 gave ``mediahub_models`` an ``owner_user_id``: a non-NULL owner
+Migration 431 gave ``nous_models`` an ``owner_user_id``: a non-NULL owner
 makes the row that ONE user's, and RLS plus ``list_enabled(viewer_user_id=…)``
 hide it from everybody else. The admin page, however, never received the field
 — ``_to_response`` simply did not project it.
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.admin.mediahub_model_router import _to_response
+from app.api.admin.nous_model_router import _to_response
 
 
 def _row(**over):

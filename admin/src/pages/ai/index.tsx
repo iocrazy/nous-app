@@ -137,7 +137,7 @@ function guessType(model: string): string {
 }
 
 function sanitizeName(model: string): string {
-  return 'mediahub-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return 'nous-' + model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 // Human "5m ago" from an ISO timestamp (empty string when never tested).
@@ -286,7 +286,7 @@ export function AIModelsPage() {
   const fetchModels = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models`, { headers })
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, { headers })
       if (res.ok) setModels(await res.json())
     } catch {
       Message.error('Failed to fetch models')
@@ -302,7 +302,7 @@ export function AIModelsPage() {
     // a plain text input (see the Actual Provider FormItem).
     const loadProtocols = async () => {
       try {
-        const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/protocols`, { headers })
+        const res = await fetch(`${apiBase}/api/v1/admin/nous-models/protocols`, { headers })
         if (res.ok) {
           const data = await res.json()
           setProtocols(data.protocols || [])
@@ -386,7 +386,7 @@ export function AIModelsPage() {
     m: NousModel,
   ): Promise<'ok' | 'fail' | 'not_probed'> => {
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${m.id}/test`, {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${m.id}/test`, {
         method: 'POST',
         headers,
       })
@@ -492,7 +492,7 @@ export function AIModelsPage() {
     }
     setProbeLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/probe-models`, {
+      const res = await fetch(`${apiBase}/api/v1/admin/nous-models/probe-models`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -578,7 +578,7 @@ export function AIModelsPage() {
         sort_order: 0,
       }
       try {
-        const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models`, {
+        const res = await fetch(`${apiBase}/api/v1/admin/nous-models`, {
           method: 'POST',
           headers,
           body: JSON.stringify(payload),
@@ -601,7 +601,7 @@ export function AIModelsPage() {
   }
 
   const handleDeleteModel = async (id: string) => {
-    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${id}`, { method: 'DELETE', headers })
+    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${id}`, { method: 'DELETE', headers })
     if (res.ok) {
       Message.success('Model removed')
       fetchModels()
@@ -636,7 +636,7 @@ export function AIModelsPage() {
 
   // PUT one model. Only non-empty fields are sent (blank api_key = keep).
   const putModel = async (id: string, patch: Record<string, unknown>) => {
-    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${id}`, {
+    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(patch),
@@ -694,7 +694,7 @@ export function AIModelsPage() {
   }
 
   const handleToggleEnabled = async (record: NousModel) => {
-    const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${record.id}`, {
+    const res = await fetch(`${apiBase}/api/v1/admin/nous-models/${record.id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ is_enabled: !record.is_enabled }),
@@ -726,7 +726,7 @@ export function AIModelsPage() {
   return (
     <div style={{ padding: '0 4px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title heading={5} style={{ margin: 0 }}>MediaHub AI Models</Title>
+        <Title heading={5} style={{ margin: 0 }}>Nous AI Models</Title>
         <Button type="primary" icon={<IconPlus />} onClick={openAddProvider}>Add Provider</Button>
       </div>
 

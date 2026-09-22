@@ -175,13 +175,11 @@ async def test_a_local_catalog_row_never_yields_a_server_side_provider(
     None and raised; the danger of giving them capabilities was that the
     obvious way to do it (aliasing the server class) would have turned that
     raise into a silent server-side build on nous' own OAuth session."""
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
     from app.services.media.parsers.video_providers import db_registry
 
     rows = [_local_row(provider, typ)]
-    monkeypatch.setattr(
-        repo_mod, "get_mediahub_model_repository", lambda: _FakeRepo(rows)
-    )
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _FakeRepo(rows))
     with pytest.raises(RuntimeError):
         await getattr(db_registry, resolve_name)()
 

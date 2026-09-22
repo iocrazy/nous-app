@@ -86,7 +86,7 @@ class _FakeDB:
 
     def __init__(self) -> None:
         self.system_settings: dict[str, Any] = {}
-        self.mediahub_models: dict[int, str] = {}  # id → api_key
+        self.nous_models: dict[int, str] = {}  # id → api_key
         self.user_mcp_servers: dict[int, str] = {}  # id → bearer_token
         # user_id → full settings_json blob (mirrors the real jsonb column —
         # used to assert the healer's jsonb_set touches ONLY ai_providers).
@@ -118,11 +118,9 @@ class _FakeDB:
                 return _FakeResult(
                     scalar_value=self.system_settings.get(params["key_1"])
                 )
-            if "public.mediahub_models.id, public.mediahub_models.api_key" in sql:
+            if "public.nous_models.id, public.nous_models.api_key" in sql:
                 rows = [
-                    {"id": i, "api_key": v}
-                    for i, v in self.mediahub_models.items()
-                    if v
+                    {"id": i, "api_key": v} for i, v in self.nous_models.items() if v
                 ]
                 return _FakeResult(rows=rows)
             if (
@@ -149,8 +147,8 @@ class _FakeDB:
             if "UPDATE public.system_settings" in sql:
                 self.system_settings[params["key_1"]] = params["value"]
                 return _FakeResult()
-            if "UPDATE public.mediahub_models" in sql:
-                self.mediahub_models[params["id_1"]] = params["api_key"]
+            if "UPDATE public.nous_models" in sql:
+                self.nous_models[params["id_1"]] = params["api_key"]
                 return _FakeResult()
             if "UPDATE public.user_mcp_servers" in sql:
                 self.user_mcp_servers[params["id_1"]] = params["bearer_token"]
@@ -200,7 +198,7 @@ async def test_mixed_table_sweep_marks_everything(real_key, fake_db: _FakeDB):
             "doubao": {"api_key": "plain-ark", "base_url": "https://ark/v3"},
         },
     }
-    fake_db.mediahub_models = {1: "plain-model-key", 2: encrypt_marked("ok")}
+    fake_db.nous_models = {1: "plain-model-key", 2: encrypt_marked("ok")}
     fake_db.user_mcp_servers = {
         10: _dev_encrypt("dev-keyed-token"),  # dev Fernet → re-encrypt
         11: "legacy-plaintext-token",  # plaintext → encrypt
@@ -213,7 +211,7 @@ async def test_mixed_table_sweep_marks_everything(real_key, fake_db: _FakeDB):
     assert summary["errors"] == 0
     assert summary["system_settings"] == 2  # caption + graph_extractor
     assert summary["platform_ai_providers"] == 1  # doubao.api_key
-    assert summary["mediahub_models"] == 1
+    assert summary["nous_models"] == 1
     assert summary["user_mcp_servers"] == 2
 
     # Everything decrypts back under the real key (no dev fallback).
@@ -227,7 +225,7 @@ async def test_mixed_table_sweep_marks_everything(real_key, fake_db: _FakeDB):
     assert prov["api_key"].startswith(MARKER)
     assert reveal(prov["api_key"]) == "plain-ark"
     assert prov["base_url"] == "https://ark/v3"
-    assert reveal(fake_db.mediahub_models[1]) == "plain-model-key"
+    assert reveal(fake_db.nous_models[1]) == "plain-model-key"
     assert (
         secret_box.decrypt(fake_db.user_mcp_servers[10], allow_dev_fallback=False)
         == "dev-keyed-token"
@@ -244,14 +242,14 @@ async def test_second_pass_is_zero_rewrites(real_key, fake_db: _FakeDB):
         "ai_module.caption.api_key": "plain-1",
         "platform.ai_providers": {"qwen": {"api_key": "plain-2"}},
     }
-    fake_db.mediahub_models = {1: "plain-3"}
+    fake_db.nous_models = {1: "plain-3"}
     fake_db.user_mcp_servers = {1: "plain-4"}
 
     first = await run_secrets_selfheal()
     assert (
         first["system_settings"]
         + first["platform_ai_providers"]
-        + first["mediahub_models"]
+        + first["nous_models"]
         + first["user_mcp_servers"]
         == 4
     )
@@ -260,7 +258,7 @@ async def test_second_pass_is_zero_rewrites(real_key, fake_db: _FakeDB):
     second = await run_secrets_selfheal()
     assert second["system_settings"] == 0
     assert second["platform_ai_providers"] == 0
-    assert second["mediahub_models"] == 0
+    assert second["nous_models"] == 0
     assert second["user_mcp_servers"] == 0
     assert fake_db.writes == writes_after_first  # zero extra UPDATEs
 
@@ -474,7 +472,7 @@ async def test_encrypt_secrets_endpoint_runs_sweep(monkeypatch, real_key):
             "errors": 0,
             "system_settings": 3,
             "platform_ai_providers": 1,
-            "mediahub_models": 2,
+            "nous_models": 2,
             "user_mcp_servers": 5,
         }
 

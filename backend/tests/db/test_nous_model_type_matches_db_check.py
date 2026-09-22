@@ -1,6 +1,6 @@
 """The API's type Literal, checked against the REAL constraint.
 
-``tests/test_mediahub_model_type_vocabulary.py`` compares the Literal to a tuple
+``tests/test_nous_model_type_vocabulary.py`` compares the Literal to a tuple
 transcribed from migration 345 — which catches a narrow Literal but not a
 migration that widens the constraint again without touching Python. That is
 exactly how the gap this file closes was opened: 345 widened the CHECK, the
@@ -13,7 +13,7 @@ the answer.
 Gated on INTEGRATION_DATABASE_URL — skips cleanly in the unit lane:
 
   INTEGRATION_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drift \
-      uv run pytest tests/db/test_mediahub_model_type_matches_db_check.py
+      uv run pytest tests/db/test_nous_model_type_matches_db_check.py
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import get_args
 import asyncpg
 import pytest
 
-from app.schemas.mediahub_model import MediahubModelType
+from app.schemas.nous_model import NousModelType
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -54,8 +54,8 @@ async def test_literal_matches_the_check_constraint(pg):
         """
         SELECT pg_get_constraintdef(oid)
           FROM pg_constraint
-         WHERE conrelid = 'public.mediahub_models'::regclass
-           AND conname = 'mediahub_models_type_check'
+         WHERE conrelid = 'public.nous_models'::regclass
+           AND conname = 'nous_models_type_check'
         """
     )
     # Not an assertion about the constraint's text: a missing constraint would
@@ -63,7 +63,7 @@ async def test_literal_matches_the_check_constraint(pg):
     # as "the database accepts no types" — a false green dressed as a failure.
     # Fail on the absence explicitly instead.
     assert src, (
-        "mediahub_models_type_check is gone. Either a migration dropped it "
+        "nous_models_type_check is gone. Either a migration dropped it "
         "without re-adding (the table now accepts any string), or it was "
         "renamed — either way this guard is no longer guarding anything."
     )
@@ -71,9 +71,9 @@ async def test_literal_matches_the_check_constraint(pg):
     db_types = set(re.findall(r"'([a-z_]+)'::text", src))
     assert db_types, f"could not parse types out of the constraint: {src!r}"
 
-    literal_types = set(get_args(MediahubModelType))
+    literal_types = set(get_args(NousModelType))
     assert literal_types == db_types, (
-        f"MediahubModelType {sorted(literal_types)} disagrees with the DB CHECK "
+        f"NousModelType {sorted(literal_types)} disagrees with the DB CHECK "
         f"{sorted(db_types)}. A type the DB accepts but the Literal does not "
         f"makes every row of that type uneditable through the admin API (422 "
         f"before it reaches Postgres); the reverse turns a typo into a 500."

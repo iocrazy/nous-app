@@ -5,7 +5,7 @@ Ark exposes an OpenAI-compatible synchronous image-generation endpoint
 inline — there is no async task / polling handle. So ``generate`` returns the
 final :class:`ImageGenResult` directly and ``check_status`` is not applicable.
 
-Constructed from a resolved ``mediahub_models`` catalog row (see
+Constructed from a resolved ``nous_models`` catalog row (see
 ``db_registry.resolve_image_provider``): ``api_key`` (revealed/decrypted by the
 repository), ``base_url`` (e.g. ``https://ark.cn-beijing.volces.com/api/v3``),
 and ``default_model`` (the catalog ``actual_model``, e.g. a doubao-seedream id).

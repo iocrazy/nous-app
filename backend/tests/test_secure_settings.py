@@ -282,7 +282,7 @@ def test_byok_cross_surface_replay_blocked(real_key):
     into a user's BYOK api_key, must NOT decrypt — resolves to ''.
 
     This is the exact DB-backup-leak oracle: a stolen platform.ai_providers /
-    mediahub_models / system_settings ciphertext replayed into a BYOK slot.
+    nous_models / system_settings ciphertext replayed into a BYOK slot.
     The payload decrypts fine but carries no ``byok\\x00`` frame, so reveal
     rejects it."""
     from app.core.secure_settings import encrypt_marked

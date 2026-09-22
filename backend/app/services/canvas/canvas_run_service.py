@@ -8,7 +8,7 @@ creative generation.
 Provider mapping:
     None or ""         → DB default text model  (_default_text_model — the
                                                  first enabled ``llm`` row in
-                                                 the ``mediahub_models`` catalog,
+                                                 the ``nous_models`` catalog,
                                                  never a hardcoded slug)
     "qwen/<model>"     → <model>
     "claude/<model>"   → <model>                (e.g. claude-sonnet-4-6)
@@ -240,7 +240,7 @@ class CanvasRunService:
 
     async def _get_adapter(self, model: str):
         # DB-only credential resolution (铁律 2026-07-07): platform
-        # ``mediahub_models`` catalog → ProviderNotConfiguredError. No env.
+        # ``nous_models`` catalog → ProviderNotConfiguredError. No env.
         from app.services.ai.providers.ai_provider_helpers import resolve_db_adapter
 
         return await resolve_db_adapter(model, "canvas")
@@ -248,22 +248,22 @@ class CanvasRunService:
     async def _default_text_model(self) -> str:
         """The catalog model an empty ``provider_slug`` resolves to.
 
-        First enabled ``llm`` row in the platform ``mediahub_models`` catalog,
+        First enabled ``llm`` row in the platform ``nous_models`` catalog,
         falling back to the governed maintenance model (itself a catalog
         entry). DB-only, so the default text Run always names a model the
         platform actually has configured — the root cause of the 2026-07-12
         "default prompt won't run" report was a hardcoded ``qwen-plus`` that
         the catalog no longer carries.
         """
-        from app.repositories.mediahub_model_repository import (
-            get_mediahub_model_repository,
+        from app.repositories.nous_model_repository import (
+            get_nous_model_repository,
         )
         from app.services.ai.providers.ai_provider_helpers import (
             get_maintenance_model,
         )
 
         try:
-            rows = await get_mediahub_model_repository().list_enabled("llm")
+            rows = await get_nous_model_repository().list_enabled("llm")
         except Exception:  # noqa: BLE001 — degrade to the governed default
             logger.opt(exception=True).warning(
                 "canvas: enabled-llm catalog read failed; using maintenance model"

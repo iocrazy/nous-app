@@ -1,4 +1,4 @@
-# backend/tests/test_mediahub_model_health_poll.py
+# backend/tests/test_nous_model_health_poll.py
 """Scheduled hourly platform-model health poll: probe every enabled Nous model
 and persist the result (reusing the manual-Test probe + persistence)."""
 
@@ -11,7 +11,7 @@ import pytest
 async def test_poll_probes_only_enabled_and_persists():
     """The step probes ENABLED models only and records each result; disabled
     rows are skipped, and the summary counts ok/failed."""
-    from app.workflows.scheduled_health import probe_mediahub_models_step
+    from app.workflows.scheduled_health import probe_nous_models_step
 
     rows = [
         {"id": "1", "is_enabled": True, "type": "llm", "actual_model": "good"},
@@ -40,14 +40,14 @@ async def test_poll_probes_only_enabled_and_persists():
         }
 
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with patch(
-            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            "app.services.ai.nous_model_health.probe_nous_model",
             new=AsyncMock(side_effect=_fake_probe),
         ):
-            summary = await probe_mediahub_models_step()
+            summary = await probe_nous_models_step()
 
     assert summary == {"total": 2, "ok": 1, "failed": 1, "not_probed": 0}
     # Disabled row (id=3) never probed/persisted.
@@ -66,7 +66,7 @@ async def test_poll_logs_one_warning_per_failed_model():
     so when ``last_test_detail`` came back empty there was no second place to
     recover the reason from. Each failure now names the model and its reason;
     healthy models stay quiet."""
-    from app.workflows.scheduled_health import probe_mediahub_models_step
+    from app.workflows.scheduled_health import probe_nous_models_step
 
     rows = [
         {
@@ -100,15 +100,15 @@ async def test_poll_logs_one_warning_per_failed_model():
 
     logger = MagicMock()
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with patch(
-            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            "app.services.ai.nous_model_health.probe_nous_model",
             new=AsyncMock(side_effect=_fake_probe),
         ):
             with patch("app.workflows.scheduled_health.logger", logger):
-                await probe_mediahub_models_step()
+                await probe_nous_models_step()
 
     assert logger.warning.call_count == 1
     message = logger.warning.call_args[0][0]
@@ -122,7 +122,7 @@ async def test_poll_warning_never_blank_when_reason_missing():
     """Defence in depth: even if a probe somehow reports no reason at all, the
     log line must not trail off into nothing — a blank reason is exactly the
     signal that misled the 2026-08-14 diagnosis."""
-    from app.workflows.scheduled_health import probe_mediahub_models_step
+    from app.workflows.scheduled_health import probe_nous_models_step
 
     repo = MagicMock()
     repo.list_all = AsyncMock(
@@ -132,17 +132,17 @@ async def test_poll_warning_never_blank_when_reason_missing():
 
     logger = MagicMock()
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with patch(
-            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            "app.services.ai.nous_model_health.probe_nous_model",
             new=AsyncMock(
                 return_value={"ok": False, "detail": "", "error": "", "dims": None}
             ),
         ):
             with patch("app.workflows.scheduled_health.logger", logger):
-                await probe_mediahub_models_step()
+                await probe_nous_models_step()
 
     message = logger.warning.call_args[0][0]
     assert "mediahub-mystery" in message
@@ -164,7 +164,7 @@ def test_poll_runs_hourly():
     source = inspect.getsource(scheduled_health)
     match = re.search(
         r'@DBOS\.scheduled\("([^"]+)"\)[^@]*@DBOS\.workflow\(\)\s*'
-        r"async def mediahub_model_health_workflow",
+        r"async def nous_model_health_workflow",
         source,
     )
     assert match, "could not locate the platform-model health schedule"
@@ -174,17 +174,17 @@ def test_poll_runs_hourly():
 @pytest.mark.asyncio
 async def test_poll_no_models_is_noop():
     """No enabled models → zero probes, empty summary, no crash."""
-    from app.workflows.scheduled_health import probe_mediahub_models_step
+    from app.workflows.scheduled_health import probe_nous_models_step
 
     repo = MagicMock()
     repo.list_all = AsyncMock(return_value=[])
     repo.record_test_result = AsyncMock()
 
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
-        summary = await probe_mediahub_models_step()
+        summary = await probe_nous_models_step()
 
     assert summary == {"total": 0, "ok": 0, "failed": 0, "not_probed": 0}
     repo.record_test_result.assert_not_awaited()
@@ -200,7 +200,7 @@ async def test_poll_counts_not_probed_separately_and_stays_quiet():
     row stops reading as broken, and it logs nothing: killing that hourly noise
     is half the point of this change.
     """
-    from app.workflows.scheduled_health import probe_mediahub_models_step
+    from app.workflows.scheduled_health import probe_nous_models_step
 
     rows = [
         {
@@ -257,15 +257,15 @@ async def test_poll_counts_not_probed_separately_and_stays_quiet():
 
     logger = MagicMock()
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         return_value=repo,
     ):
         with patch(
-            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            "app.services.ai.nous_model_health.probe_nous_model",
             new=AsyncMock(side_effect=_fake_probe),
         ):
             with patch("app.workflows.scheduled_health.logger", logger):
-                summary = await probe_mediahub_models_step()
+                summary = await probe_nous_models_step()
 
     assert summary == {"total": 3, "ok": 1, "failed": 1, "not_probed": 1}
     repo.record_test_result.assert_any_await(
@@ -285,15 +285,15 @@ async def test_poll_summary_log_distinguishes_all_three_buckets():
     only non-green row was one nobody ever checked."""
     import inspect
 
-    from app.workflows.scheduled_health import mediahub_model_health_workflow
+    from app.workflows.scheduled_health import nous_model_health_workflow
 
     # Unwrap past @DBOS.scheduled + @DBOS.workflow: the decorators refuse to run
     # outside an initialized DBOS, and what is under test here is the sentence
     # the workflow body logs, not DBOS's dispatch.
-    body = inspect.unwrap(mediahub_model_health_workflow)
+    body = inspect.unwrap(nous_model_health_workflow)
     logger = MagicMock()
     with patch(
-        "app.workflows.scheduled_health.probe_mediahub_models_step",
+        "app.workflows.scheduled_health.probe_nous_models_step",
         new=AsyncMock(return_value={"total": 4, "ok": 3, "failed": 0, "not_probed": 1}),
     ):
         with patch("app.workflows.scheduled_health.logger", logger):

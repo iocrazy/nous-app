@@ -94,9 +94,9 @@ def _patch_all(monkeypatch, **overrides):
     )
     monkeypatch.setattr(
         helpers_mod,
-        "resolve_mediahub_model",
+        "resolve_nous_model",
         overrides.get(
-            "resolve_mediahub_model",
+            "resolve_nous_model",
             AsyncMock(
                 return_value=(
                     "doubao",
@@ -216,7 +216,7 @@ async def test_maintenance_ok_on_catalog_hit(monkeypatch):
 
 
 async def test_maintenance_not_configured_on_catalog_miss(monkeypatch):
-    rows = await _rows(monkeypatch, resolve_mediahub_model=AsyncMock(return_value=None))
+    rows = await _rows(monkeypatch, resolve_nous_model=AsyncMock(return_value=None))
     m = rows["maintenance"]
     assert m["status"] == "not_configured"
     # The fix path is the admin UI now, not a bare DB key.
@@ -240,7 +240,7 @@ async def test_system_row_failure_is_isolated(monkeypatch):
 async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
     from unittest.mock import MagicMock
 
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(
@@ -249,7 +249,7 @@ async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
             "last_test_detail": "HTTP 402: insufficient balance",
         }
     )
-    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
     rows = [
         {
@@ -278,12 +278,12 @@ async def test_probe_overlay_flags_failed_platform_model(monkeypatch):
 async def test_probe_overlay_flags_failed_byok_key(monkeypatch):
     from unittest.mock import MagicMock
 
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(return_value=None)
     repo.get_by_actual_model = AsyncMock(return_value=None)
-    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
     rows = [
         {
@@ -328,13 +328,13 @@ async def test_probe_overlay_never_masks_config_problems(monkeypatch):
 async def test_probe_overlay_ok_probe_stays_green(monkeypatch):
     from unittest.mock import MagicMock
 
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
 
     repo = MagicMock()
     repo.get_by_name = AsyncMock(
         return_value={"last_test_status": "ok", "last_test_detail": ""}
     )
-    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
     rows = [
         {
             "capability": "x",

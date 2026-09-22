@@ -38,11 +38,9 @@ class _FakeRepo:
 
 
 def _patch_repo(monkeypatch, rows):
-    import app.repositories.mediahub_model_repository as repo_mod
+    import app.repositories.nous_model_repository as repo_mod
 
-    monkeypatch.setattr(
-        repo_mod, "get_mediahub_model_repository", lambda: _FakeRepo(rows)
-    )
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _FakeRepo(rows))
 
 
 async def test_resolve_image_codex(monkeypatch):

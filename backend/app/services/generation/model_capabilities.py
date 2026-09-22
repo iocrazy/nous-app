@@ -44,12 +44,12 @@ async def visible_generation_rows(
     knob it was told to hide, and a bundle for a model the picker hides means a
     reference trim nobody can explain.
     """
-    from app.repositories import mediahub_model_repository as _repo_mod
+    from app.repositories import nous_model_repository as _repo_mod
     from app.services.ai.platform_model_visibility import (
         filter_platform_models_for_user,
     )
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
+    rows = await _repo_mod.get_nous_model_repository().list_enabled(
         viewer_user_id=user_id, include_actual_provider=include_actual_provider
     )
     # The user's Settings → platform-model card (master switch + per-model

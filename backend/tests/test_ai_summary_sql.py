@@ -92,7 +92,7 @@ def _fake_resolver(ai_settings: dict, agent: Any):
             helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
         ),
         patch.object(
-            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
         ),
     )
 

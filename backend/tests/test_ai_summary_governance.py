@@ -332,7 +332,7 @@ async def test_summarization_allowed_user_path_executes():
             ),
         ),
         patch.object(
-            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+            helpers_mod, "resolve_nous_model", new=AsyncMock(return_value=None)
         ),
     ):
         result = await summary_mod.load_summary_inputs(1, "user-1")

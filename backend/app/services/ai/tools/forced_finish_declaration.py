@@ -114,7 +114,7 @@ async def _resolve_agent_and_adapter(
     model.
 
     Mirrors the credential resolution ``build_agent_runner_stack`` does
-    (platform ``mediahub_models`` catalog → user BYOK) minus memory recall /
+    (platform ``nous_models`` catalog → user BYOK) minus memory recall /
     hooks / delegate wiring, none of which a declare-only call needs.
     """
     from app.services.ai.adapters.factory import (
@@ -128,7 +128,7 @@ async def _resolve_agent_and_adapter(
     )
     from app.services.ai.providers.ai_provider_helpers import (
         resolve_chat_config,
-        resolve_mediahub_model,
+        resolve_nous_model,
     )
 
     uid = UUID(str(user_id))
@@ -150,7 +150,7 @@ async def _resolve_agent_and_adapter(
     # 拿到的是一个无从追问来路的对象，于是这条路的 BYOK run 在账上与平台 run 无
     # 从区分 —— 而它带着 session 的 team_id，是真的会扣分的。
     credential_origin: Optional[str]
-    hit = await resolve_mediahub_model(model, "chat")
+    hit = await resolve_nous_model(model, "chat")
     if hit:
         actual_provider, cfg, actual_model = hit
         creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}

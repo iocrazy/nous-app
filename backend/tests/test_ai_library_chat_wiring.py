@@ -428,7 +428,7 @@ async def test_platform_catalog_hit_dispatches_on_actual_provider():
         "qwen3-6-35b",  # prefix the factory does NOT know
     )
     with patch(
-        "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
+        "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
         new=AsyncMock(return_value=hit),
     ):
         stack = await build_agent_runner_stack(
@@ -464,7 +464,7 @@ async def test_platform_catalog_unknown_provider_label_degrades_to_openai_compat
         "qwen3-6-35b",
     )
     with patch(
-        "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
+        "app.services.ai.providers.ai_provider_helpers.resolve_nous_model",
         new=AsyncMock(return_value=hit),
     ):
         stack = await build_agent_runner_stack(

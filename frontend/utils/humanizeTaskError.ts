@@ -46,7 +46,7 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
   },
   {
     // The Codex backend rejected the ORCHESTRATOR model our catalog row names
-    // (`mediahub_models.actual_model` for codex-image / codex-local-image is
+    // (`nous_models.actual_model` for codex-image / codex-local-image is
     // the model gpt-image-2-skill passes as `--model`). 2026-09-05: OpenAI
     // dropped gpt-5.4 for ChatGPT-account Codex and every canvas image run
     // failed with "HTTP 400" until that row was repointed. Retrying cannot

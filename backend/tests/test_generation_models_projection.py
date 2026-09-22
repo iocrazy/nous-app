@@ -7,7 +7,7 @@ boolean: ``is_local`` in the payload, raw provider never in the projection.
 from __future__ import annotations
 
 from app.api.canvases_router import _GENERATION_MODEL_PUBLIC_FIELDS
-from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+from app.repositories.nous_model_repository import _PUBLIC_COLS
 
 
 def test_raw_provider_stays_out_of_the_projection():

@@ -79,7 +79,7 @@ def encrypt(
     Raises SecretBoxNotConfigured if no key is configured.
 
     ``allow_dev_fallback=False`` (used by ``app.core.secure_settings`` for
-    system_settings / mediahub_models secret material) restricts key
+    system_settings / nous_models secret material) restricts key
     resolution to the REAL configured env key(s) only — the public
     ``DEV_TOKEN_ENCRYPTION_KEY`` below is never used, so a write with no
     real key configured fails LOUD instead of silently landing in the DB

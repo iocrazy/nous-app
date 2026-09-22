@@ -1,4 +1,4 @@
-"""Phase 1b — mediahub_models.api_key encrypted at rest, repo-transparent.
+"""Phase 1b — nous_models.api_key encrypted at rest, repo-transparent.
 
 create/update bind enc:v1: ciphertext (never plaintext); _row-based reads
 (get_by_name / list_all / RETURNING echoes) reveal back to plaintext so the
@@ -13,11 +13,11 @@ from typing import Any
 import pytest
 from cryptography.fernet import Fernet
 
-import app.repositories.mediahub_model_repository as mod
+import app.repositories.nous_model_repository as mod
 from app.core import secret_box
 from app.core.secure_settings import MARKER, encrypt_marked
-from app.models import MediahubModels
-from app.repositories.mediahub_model_repository import MediahubModelRepository
+from app.models import NousModels
+from app.repositories.nous_model_repository import NousModelRepository
 
 
 class _FakeScalars:
@@ -82,15 +82,15 @@ def real_key(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def repo() -> MediahubModelRepository:
-    return MediahubModelRepository()
+def repo() -> NousModelRepository:
+    return NousModelRepository()
 
 
 @pytest.mark.asyncio
 async def test_create_binds_ciphertext_not_plaintext(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
     await repo.create({"name": "m1", "api_key": "sk-raw-create"})
 
     _sql, binds = fake_session.calls[-1]
@@ -101,9 +101,9 @@ async def test_create_binds_ciphertext_not_plaintext(
 
 @pytest.mark.asyncio
 async def test_update_binds_ciphertext_not_plaintext(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
     await repo.update("1", {"api_key": "sk-raw-update", "updated_at": "now()"})
 
     _sql, binds = fake_session.calls[-1]
@@ -114,10 +114,10 @@ async def test_update_binds_ciphertext_not_plaintext(
 
 @pytest.mark.asyncio
 async def test_update_already_marked_not_double_encrypted(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
     marked = encrypt_marked("sk-x")
-    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
     await repo.update("1", {"api_key": marked})
 
     _sql, binds = fake_session.calls[-1]
@@ -126,10 +126,10 @@ async def test_update_already_marked_not_double_encrypted(
 
 @pytest.mark.asyncio
 async def test_get_by_name_reveals_api_key(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = [
-        MediahubModels(id=1, name="m1", api_key=encrypt_marked("sk-stored"))
+        NousModels(id=1, name="m1", api_key=encrypt_marked("sk-stored"))
     ]
     row = await repo.get_by_name("m1")
     assert row is not None
@@ -138,11 +138,11 @@ async def test_get_by_name_reveals_api_key(
 
 @pytest.mark.asyncio
 async def test_list_all_reveals_api_key(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
     fake_session.scalar_rows = [
-        MediahubModels(id=1, name="m1", api_key=encrypt_marked("sk-a")),
-        MediahubModels(id=2, name="m2", api_key="legacy-plain"),
+        NousModels(id=1, name="m1", api_key=encrypt_marked("sk-a")),
+        NousModels(id=2, name="m2", api_key="legacy-plain"),
     ]
     rows = await repo.list_all()
     assert rows[0]["api_key"] == "sk-a"
@@ -151,9 +151,9 @@ async def test_list_all_reveals_api_key(
 
 @pytest.mark.asyncio
 async def test_blank_api_key_untouched(
-    real_key, repo: MediahubModelRepository, fake_session: _FakeSession
+    real_key, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
-    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    fake_session.scalar_rows = [NousModels(id=1, name="m1")]
     await repo.create({"name": "m1", "api_key": ""})
     _sql, binds = fake_session.calls[-1]
     assert "" in binds.values()  # blank stays blank (no marker)
@@ -161,7 +161,7 @@ async def test_blank_api_key_untouched(
 
 @pytest.mark.asyncio
 async def test_create_raises_without_real_key(
-    monkeypatch, repo: MediahubModelRepository, fake_session: _FakeSession
+    monkeypatch, repo: NousModelRepository, fake_session: _FakeSession
 ) -> None:
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)

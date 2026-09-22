@@ -708,7 +708,7 @@ export interface NousModelPublic {
    */
   last_test_code?: string | null;
   /**
-   * 由后端 `list_enabled` 派生(`mediahub_model_repository`:provider 属于
+   * 由后端 `list_enabled` 派生(`nous_model_repository`:provider 属于
    * codex-local / jimeng-local),true = 这一行不在平台上跑,而是在**用户自己
    * 电脑**的 daemon 上。UI 据此提示本机链路的限制(纯文本、无工具调用)。
    * 缺省/absent 一律按平台模型处理——没标就不是本机的。

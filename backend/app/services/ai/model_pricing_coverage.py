@@ -8,7 +8,7 @@ Usage dashboard shows '—', the P4 budget hook never fires — so a model added
 the catalog without a price row silently drops out of cost tracking. On
 2026-09-05 that was 6 of 7 models in use for the previous 90 days.
 
-Orthogonal to the connectivity probe (``mediahub_model_health``): a model can be
+Orthogonal to the connectivity probe (``nous_model_health``): a model can be
 reachable AND unpriced, so this is its own field, never folded into
 ``last_test_status`` (the "orthogonal results report independently" rule).
 
@@ -34,7 +34,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from loguru import logger
 
-from app.services.ai.mediahub_model_health import LOCAL_ENGINE_PROVIDERS
+from app.services.ai.nous_model_health import LOCAL_ENGINE_PROVIDERS
 
 # Closed enum. The admin UI keys its tag colours off these exact strings.
 PRICE_COVERAGE = ("priced", "missing", "not_applicable", "unknown")

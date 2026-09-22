@@ -181,7 +181,7 @@ async def test_caption_fallback_models_none_or_empty_still_routes_through_chain(
 
 # ---------------------------------------------------------------------------
 # 2: fake-adapter integration test through the REAL build_fallback_llm — only
-# resolve_mediahub_model (→ no platform-catalog hit) and the adapter factory
+# resolve_nous_model (→ no platform-catalog hit) and the adapter factory
 # seam (get_adapter_for_user) are mocked, so LLMFallbackChain +
 # LLMRetryMiddleware run for real. A C1-shaped regression (build_fallback_llm
 # handing the flat provider_config straight to get_adapter_for_user instead
@@ -250,7 +250,7 @@ async def test_caption_falls_back_on_429_through_real_build_fallback_llm(
 
     with (
         patch(f"{_MOD}.PromptComposer", return_value=composer),
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", side_effect=_fake_get_adapter_for_user
         ),

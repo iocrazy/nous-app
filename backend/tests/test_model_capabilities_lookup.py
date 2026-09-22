@@ -48,7 +48,7 @@ def _catalog(monkeypatch, rows=_ROWS) -> None:
     every model to ``none()`` in production — the exact prod incident of
     2026-08-30.
     """
-    from app.repositories import mediahub_model_repository as repo_mod
+    from app.repositories import nous_model_repository as repo_mod
 
     async def _list_enabled(
         type_filter=None, viewer_user_id=None, include_actual_provider=False
@@ -64,7 +64,7 @@ def _catalog(monkeypatch, rows=_ROWS) -> None:
         return out
 
     repo = SimpleNamespace(list_enabled=_list_enabled)
-    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
 
 
 def _gate(monkeypatch, *, allowed: bool = True, disabled: frozenset = frozenset()):

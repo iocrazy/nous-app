@@ -1,4 +1,4 @@
-# backend/tests/test_mediahub_model_health_diagnosable.py
+# backend/tests/test_nous_model_health_diagnosable.py
 
 """F1 — a failed platform-model probe must always be diagnosable after the fact.
 
@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from app.services.ai.mediahub_model_health import probe_mediahub_model
+from app.services.ai.nous_model_health import probe_nous_model
 
 
 class _RaisingClient:
@@ -46,9 +46,7 @@ class _RaisingClient:
 
 def _patch_raising(exc: Exception):
     _RaisingClient._exc = exc
-    return patch(
-        "app.services.ai.mediahub_model_health.httpx.AsyncClient", _RaisingClient
-    )
+    return patch("app.services.ai.nous_model_health.httpx.AsyncClient", _RaisingClient)
 
 
 _LLM_ROW = {
@@ -79,7 +77,7 @@ def _patch_test_connection(result: dict):
     """Stub ``AIProviderFactory.test_connection`` — the asr branch's only source
     of a failure reason."""
     return patch(
-        "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+        "app.services.ai.nous_model_health.AIProviderFactory.test_connection",
         AsyncMock(return_value=result),
     )
 
@@ -103,7 +101,7 @@ async def test_empty_str_exception_still_yields_a_reason(exc: Exception) -> None
     assert str(exc) == "", "precondition: these httpx errors stringify to empty"
 
     with _patch_raising(exc):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
 
     assert out["ok"] is False
     assert out["error"], "a failed probe must never record an empty reason"
@@ -114,7 +112,7 @@ async def test_empty_str_exception_still_yields_a_reason(exc: Exception) -> None
 async def test_exception_with_a_message_keeps_it() -> None:
     """A real message is preserved (and still qualified by the type name)."""
     with _patch_raising(httpx.ConnectError("All connection attempts failed")):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
 
     assert out["ok"] is False
     assert "ConnectError" in out["error"]
@@ -125,7 +123,7 @@ async def test_exception_with_a_message_keeps_it() -> None:
 async def test_reason_is_truncated() -> None:
     """Reason still fits the 200-char ``last_test_detail`` budget."""
     with _patch_raising(RuntimeError("x" * 500)):
-        out = await probe_mediahub_model(_LLM_ROW)
+        out = await probe_nous_model(_LLM_ROW)
 
     assert len(out["error"]) <= 200
 
@@ -144,7 +142,7 @@ async def test_asr_failure_also_yields_a_reason(returned_error) -> None:
     asr models.
     """
     with _patch_test_connection({"success": False, "error": returned_error}):
-        out = await probe_mediahub_model(_ASR_ROW)
+        out = await probe_nous_model(_ASR_ROW)
 
     assert out["ok"] is False
     assert out["error"], "a failed asr probe must never record an empty reason"
@@ -154,7 +152,7 @@ async def test_asr_failure_also_yields_a_reason(returned_error) -> None:
 async def test_asr_failure_keeps_the_real_message() -> None:
     """The placeholder only fills a void — it never displaces a real reason."""
     with _patch_test_connection({"success": False, "error": "invalid app_id"}):
-        out = await probe_mediahub_model(_ASR_ROW)
+        out = await probe_nous_model(_ASR_ROW)
 
     assert out["error"] == "invalid app_id"
 
@@ -163,7 +161,7 @@ async def test_asr_failure_keeps_the_real_message() -> None:
 async def test_asr_success_records_no_error() -> None:
     """Counterpart guard: the fallback must not invent a reason on success."""
     with _patch_test_connection({"success": True}):
-        out = await probe_mediahub_model(_ASR_ROW)
+        out = await probe_nous_model(_ASR_ROW)
 
     assert out["ok"] is True
     assert out["error"] is None
@@ -177,6 +175,6 @@ async def test_probe_allows_60s(row: dict) -> None:
     a self-hosted engine routinely exceed it). A misjudged model costs far more
     than 40 extra seconds on an hourly ping."""
     with _patch_raising(httpx.ReadTimeout("")):
-        await probe_mediahub_model(row)
+        await probe_nous_model(row)
 
     assert _RaisingClient.kwargs.get("timeout") == 60.0

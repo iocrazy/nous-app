@@ -11,7 +11,7 @@ import app.services.ai.llm.fallback_wiring as fw
 async def test_platform_catalog_hit_preresolves_adapter_by_actual_provider():
     hit = ("doubao", {"api_key": "k", "base_url": "https://ark"}, "actual-model-x")
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=hit)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=hit)),
         patch.object(
             fw, "resolve_provider_key", MagicMock(return_value="doubao")
         ) as rpk,
@@ -34,7 +34,7 @@ async def test_platform_catalog_hit_preresolves_adapter_by_actual_provider():
 @pytest.mark.asyncio
 async def test_catalog_miss_falls_to_byok_factory():
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", MagicMock(return_value="BYOK_ADAPTER")
         ) as gau,
@@ -49,7 +49,7 @@ async def test_catalog_miss_falls_to_byok_factory():
 @pytest.mark.asyncio
 async def test_health_registry_absent_is_none_and_deadline_from_env(monkeypatch):
     monkeypatch.setenv("LLM_TOTAL_DEADLINE_S", "45")
-    with patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)):
+    with patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)):
         chain = await fw.build_fallback_llm(
             primary_model="m1", fallback_models=[], user_provider_config={}
         )
@@ -67,7 +67,7 @@ async def test_duplicate_models_deduped_in_preresolve():
         calls.append(m)
         return None
 
-    with patch.object(fw, "resolve_mediahub_model", AsyncMock(side_effect=_rmm)):
+    with patch.object(fw, "resolve_nous_model", AsyncMock(side_effect=_rmm)):
         await fw.build_fallback_llm(
             primary_model="m1", fallback_models=["m1", "m2"], user_provider_config={}
         )
@@ -86,7 +86,7 @@ async def test_duplicate_models_deduped_in_preresolve():
 async def test_batch_explicit_provider_key_wraps_flat_config():
     flat_cfg = {"api_key": "sk-x", "base_url": "https://ark.example", "app_id": "app-1"}
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", MagicMock(return_value="SCOPED_ADAPTER")
         ) as gau,
@@ -117,7 +117,7 @@ async def test_batch_explicit_provider_key_wraps_flat_config():
 async def test_batch_empty_provider_key_derives_from_model_prefix():
     flat_cfg = {"api_key": "sk-y", "base_url": "https://ark.example"}
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", MagicMock(return_value="DERIVED_ADAPTER")
         ) as gau,
@@ -148,7 +148,7 @@ async def test_batch_empty_provider_key_derives_from_model_prefix():
 async def test_batch_unresolvable_prefix_flat_degrades():
     flat_cfg = {"api_key": "sk-z", "base_url": "https://generic.example"}
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw,
             "get_adapter_for_user",
@@ -176,7 +176,7 @@ async def test_batch_unresolvable_prefix_flat_degrades():
 async def test_batch_get_adapter_for_user_valueerror_flat_degrades():
     flat_cfg = {"api_key": "sk-w", "base_url": "https://fallback.example"}
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", MagicMock(side_effect=ValueError("boom"))
         ),
@@ -195,9 +195,9 @@ async def test_batch_get_adapter_for_user_valueerror_flat_degrades():
 
 
 @pytest.mark.asyncio
-async def test_batch_module_kwarg_passed_to_resolve_mediahub_model():
+async def test_batch_module_kwarg_passed_to_resolve_nous_model():
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)) as rmm,
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)) as rmm,
         patch.object(fw, "get_adapter_for_user", MagicMock(return_value="ADAPTER")),
     ):
         await fw.build_fallback_llm(
@@ -215,7 +215,7 @@ async def test_batch_module_kwarg_passed_to_resolve_mediahub_model():
 async def test_user_id_reaches_get_adapter_for_key():
     hit = ("codex-local", {"api_key": "", "base_url": ""}, "")
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=hit)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=hit)),
         patch.object(fw, "resolve_provider_key", MagicMock(return_value="codex-local")),
         patch.object(fw, "get_adapter_for_key", MagicMock(return_value="LOCAL")) as gak,
         patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
@@ -244,7 +244,7 @@ async def test_local_primary_drops_paid_fallbacks():
         return ("qwen", {"api_key": "k", "base_url": "https://x/v1"}, model)
 
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(side_effect=_hit)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(side_effect=_hit)),
         patch.object(
             fw,
             "resolve_provider_key",
@@ -270,7 +270,7 @@ async def test_non_local_primary_keeps_its_fallbacks():
     with (
         patch.object(
             fw,
-            "resolve_mediahub_model",
+            "resolve_nous_model",
             AsyncMock(
                 return_value=("qwen", {"api_key": "k", "base_url": "https://x"}, "m")
             ),
@@ -299,7 +299,7 @@ async def test_local_model_only_in_fallback_pool_does_not_empty_it():
         return ("qwen", {"api_key": "k", "base_url": "https://x/v1"}, model)
 
     with (
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(side_effect=_hit)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(side_effect=_hit)),
         patch.object(
             fw,
             "resolve_provider_key",

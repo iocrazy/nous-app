@@ -113,7 +113,7 @@ async def _resolve(
             ),
         ),
         patch.object(
-            helpers, "resolve_mediahub_model", new=AsyncMock(return_value=mediahub)
+            helpers, "resolve_nous_model", new=AsyncMock(return_value=mediahub)
         ),
         patch.object(
             helpers, "resolve_platform_model", new=AsyncMock(return_value=None)
@@ -387,7 +387,7 @@ async def test_override_is_applied_before_the_platform_catalog_lookup() -> None:
             "get_ai_settings",
             new=AsyncMock(return_value={"task_assignment": {}, "ai_providers": {}}),
         ),
-        patch.object(helpers, "resolve_mediahub_model", new=_catalog),
+        patch.object(helpers, "resolve_nous_model", new=_catalog),
         patch.object(
             helpers, "resolve_platform_model", new=AsyncMock(return_value=None)
         ),

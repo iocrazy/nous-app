@@ -1,7 +1,7 @@
 """DB-catalog image/video-provider resolution.
 
 House rule (config env→DB): image/video-provider credentials live in the
-``mediahub_models`` catalog, NOT env. The in-process ``provider_registry`` ships
+``nous_models`` catalog, NOT env. The in-process ``provider_registry`` ships
 EMPTY for images, so generation resolves its provider dynamically from the DB
 here, dispatching on the row's ``actual_provider``:
 
@@ -101,11 +101,11 @@ def _pick_row(rows: list[dict], name: Optional[str], jimeng_first: bool = True) 
 
 
 async def _enabled_rows(media_type: str) -> list[dict]:
-    from app.repositories.mediahub_model_repository import (
-        get_mediahub_model_repository,
+    from app.repositories.nous_model_repository import (
+        get_nous_model_repository,
     )
 
-    repo = get_mediahub_model_repository()
+    repo = get_nous_model_repository()
     # list_all reveals api_key on every full row and is ordered by sort_order;
     # list_enabled returns public columns only (no api_key/base_url).
     rows = await repo.list_all()
@@ -154,7 +154,7 @@ def _visible_rows(
     ):
         raise RuntimeError(
             f"{kind} model {name!r} is private to another user "
-            "(mediahub_models.owner_user_id)"
+            "(nous_models.owner_user_id)"
         )
     return visible
 
@@ -192,7 +192,7 @@ async def resolve_image_provider(
     *,
     user_id: Optional[str] = None,
 ) -> Tuple[BaseImageProvider, str]:
-    """Resolve an image provider from the ``mediahub_models`` catalog or from
+    """Resolve an image provider from the ``nous_models`` catalog or from
     the calling user's own BYOK providers.
 
     Returns ``(provider, actual_model)``. Dispatches on ``actual_provider``;
@@ -217,8 +217,7 @@ async def resolve_image_provider(
     image_rows = _visible_rows([*catalog, *byok], name, user_id, "image")
     if not image_rows:
         raise RuntimeError(
-            "no image model configured (mediahub_models catalog or user "
-            "BYOK providers)"
+            "no image model configured (nous_models catalog or user " "BYOK providers)"
         )
 
     row = _pick_row(image_rows, name)
@@ -253,7 +252,7 @@ async def resolve_video_provider(
     *,
     user_id: Optional[str] = None,
 ) -> Tuple[JimengCliProvider, str]:
-    """Resolve a video provider from the ``mediahub_models`` catalog.
+    """Resolve a video provider from the ``nous_models`` catalog.
 
     Returns ``(provider, actual_model)``. Only the jimeng-cli CLI has a wired
     video path today; callers use ``provider.generate_video(...)`` directly.
@@ -267,7 +266,7 @@ async def resolve_video_provider(
     """
     video_rows = _visible_rows(await _enabled_rows("video"), name, user_id, "video")
     if not video_rows:
-        raise RuntimeError("no video model configured in mediahub_models catalog")
+        raise RuntimeError("no video model configured in nous_models catalog")
 
     row = _pick_row(video_rows, name)
     actual_provider = (row.get("actual_provider") or "").lower()

@@ -31,8 +31,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.mediahub_model_health import (
-    probe_mediahub_model,
+from app.services.ai.nous_model_health import (
+    probe_nous_model,
     probe_result_status,
 )
 
@@ -40,7 +40,7 @@ from app.services.ai.mediahub_model_health import (
 class _NetworkTouched(BaseException):
     """Escapes the probe's ``except Exception`` so a stray call fails loudly.
 
-    Same reasoning as test_mediahub_probe_not_probed.py: an ordinary Exception
+    Same reasoning as test_nous_probe_not_probed.py: an ordinary Exception
     would be swallowed and recorded as an ordinary failed probe, and the test
     would pass while the request was still going out — which is precisely the
     cost this gate exists to prevent.
@@ -55,11 +55,11 @@ class _ExplodingClient:
 def _no_network():
     return (
         patch(
-            "app.services.ai.mediahub_model_health.httpx.AsyncClient",
+            "app.services.ai.nous_model_health.httpx.AsyncClient",
             _ExplodingClient,
         ),
         patch(
-            "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+            "app.services.ai.nous_model_health.AIProviderFactory.test_connection",
             new=AsyncMock(side_effect=_NetworkTouched("probe called the provider")),
         ),
     )
@@ -156,7 +156,7 @@ def _wired(provider: Any, response: _FakeResponse, supports: bool = True):
             lambda p: _FakeProtocol(provider, supports),
         ),
         patch(
-            "app.services.ai.mediahub_model_health.httpx.AsyncClient",
+            "app.services.ai.nous_model_health.httpx.AsyncClient",
             _FakeClient(response),
         ),
     )
@@ -170,7 +170,7 @@ async def test_image_is_not_probed_without_the_explicit_opt_in() -> None:
     """The default path checks nothing and sends nothing."""
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(_row())
+        result = await probe_nous_model(_row())
 
     assert result["not_probed"] is True
     # Not a success and not a failure: nothing was attempted.
@@ -188,7 +188,7 @@ async def test_the_hourly_poll_never_opts_in() -> None:
     """End-to-end through the real poll, not by reading the call site.
 
     The poll is the caller whose behaviour costs money if it changes, so this
-    drives ``probe_mediahub_models_step`` itself with an enabled image row and a
+    drives ``probe_nous_models_step`` itself with an enabled image row and a
     transport that explodes on contact. Asserting on the source text (or on a
     mocked probe) would keep passing if someone threaded ``allow_costly=True``
     through a different route.
@@ -212,11 +212,11 @@ async def test_the_hourly_poll_never_opts_in() -> None:
         client_patch,
         provider_patch,
         patch(
-            "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+            "app.repositories.nous_model_repository.get_nous_model_repository",
             lambda: _Repo(),
         ),
     ):
-        summary = await scheduled_health.probe_mediahub_models_step()
+        summary = await scheduled_health.probe_nous_models_step()
 
     assert [r[1] for r in recorded] == ["not_probed"]
     assert summary.get("not_probed") == 1
@@ -243,7 +243,7 @@ async def test_cli_and_daemon_families_stay_not_probed_even_when_asked(
     """
     client_patch, provider_patch = _no_network()
     with client_patch, provider_patch:
-        result = await probe_mediahub_model(
+        result = await probe_nous_model(
             dict(_row(provider=provider), base_url=""), allow_costly=True
         )
 
@@ -265,7 +265,7 @@ async def test_a_generator_that_honors_the_aspect_is_ok() -> None:
     provider = _FakeProvider(_FakeResult("https://cdn.example.invalid/a.png"))
     proto_patch, client_patch = _wired(provider, _FakeResponse(_png_bytes(1280, 720)))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is True
     assert result["not_probed"] is False
@@ -289,7 +289,7 @@ async def test_a_generator_that_ignores_the_aspect_goes_red() -> None:
     provider = _FakeProvider(_FakeResult("https://cdn.example.invalid/a.png"))
     proto_patch, client_patch = _wired(provider, _FakeResponse(_png_bytes(1024, 1024)))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     # A real failure, not "didn't check" — the admin must see red here.
@@ -314,7 +314,7 @@ async def test_the_aspect_is_measured_from_the_bytes_not_from_the_request() -> N
     )
     proto_patch, client_patch = _wired(provider, _FakeResponse(_png_bytes(900, 900)))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     assert "900x900" in result["error"]
@@ -327,7 +327,7 @@ async def test_a_near_miss_within_tolerance_still_passes() -> None:
     provider = _FakeProvider(_FakeResult("https://cdn.example.invalid/a.png"))
     proto_patch, client_patch = _wired(provider, _FakeResponse(_png_bytes(1288, 720)))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is True
 
@@ -340,7 +340,7 @@ async def test_a_non_200_on_the_produced_image_is_a_classified_failure() -> None
     provider = _FakeProvider(_FakeResult("https://cdn.example.invalid/a.png"))
     proto_patch, client_patch = _wired(provider, _FakeResponse(b"", status_code=404))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     assert result["not_probed"] is False
@@ -355,7 +355,7 @@ async def test_zero_bytes_is_a_failure_not_a_pass() -> None:
     provider = _FakeProvider(_FakeResult("https://cdn.example.invalid/a.png"))
     proto_patch, client_patch = _wired(provider, _FakeResponse(b""))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     assert result["error"]
@@ -366,7 +366,7 @@ async def test_a_generation_with_no_url_is_a_bad_response() -> None:
     provider = _FakeProvider(_FakeResult(None))
     proto_patch, client_patch = _wired(provider, _FakeResponse(_png_bytes(16, 9)))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     assert result["code"] == "bad_response"
@@ -379,7 +379,7 @@ async def test_a_raising_generator_never_escapes_the_probe() -> None:
     provider = _FakeProvider(TimeoutError())
     proto_patch, client_patch = _wired(provider, _FakeResponse(b""))
     with proto_patch, client_patch:
-        result = await probe_mediahub_model(_row(), allow_costly=True)
+        result = await probe_nous_model(_row(), allow_costly=True)
 
     assert result["ok"] is False
     # Never a bare empty message: TimeoutError() stringifies to "".
@@ -444,7 +444,7 @@ async def test_the_admin_test_endpoint_opts_into_the_costly_probe() -> None:
     """
     from unittest.mock import MagicMock
 
-    from app.api.admin.mediahub_model_router import test_mediahub_model
+    from app.api.admin.nous_model_router import test_nous_model
 
     seen: dict = {}
 
@@ -458,14 +458,14 @@ async def test_the_admin_test_endpoint_opts_into_the_costly_probe() -> None:
 
     with (
         patch(
-            "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+            "app.api.admin.nous_model_router.get_nous_model_repository",
             return_value=repo,
         ),
         patch(
-            "app.api.admin.mediahub_model_router._probe_mediahub_model",
+            "app.api.admin.nous_model_router._probe_nous_model",
             new=_fake_probe,
         ),
     ):
-        await test_mediahub_model("42", MagicMock())
+        await test_nous_model("42", MagicMock())
 
     assert seen.get("allow_costly") is True

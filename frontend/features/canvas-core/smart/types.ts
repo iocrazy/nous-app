@@ -252,7 +252,7 @@ export interface PromptNodeData {
 /** Image/video generation settings on a prompt node. */
 export interface PromptGenSettings {
   kind: 'image' | 'video';
-  /** mediahub_models catalog row name ('' = catalog default). */
+  /** nous_models catalog row name ('' = catalog default). */
   model: string;
   /** Image: aspect ratio preset (e.g. '16:9'). */
   ratio?: string;
@@ -316,7 +316,7 @@ export interface MediaNodeData {
  *  INPUT text (typed or wired from prompt/llm upstream) → run → OUTPUT
  *  text shown in-node. Self-contained — it does NOT spawn output nodes. */
 export interface LlmNodeData {
-  /** mediahub_models catalog row name ('' = catalog default). */
+  /** nous_models catalog row name ('' = catalog default). */
   provider_slug: string;
   /** AI-library agent id, or null = plain runner. */
   agent_id: string | null;

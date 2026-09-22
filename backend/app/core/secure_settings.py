@@ -1,6 +1,6 @@
 """Field-level "encryption at rest" for admin-managed secret material stored
-in ``system_settings`` JSONB values — and, by extension, ``mediahub_models
-.api_key`` (see ``MediahubModelRepository``), which reuses the same
+in ``system_settings`` JSONB values — and, by extension, ``nous_models
+.api_key`` (see ``NousModelRepository``), which reuses the same
 ``enc:v1:`` marker scheme via ``encrypt_marked`` / ``reveal`` below.
 
 This sits on top of ``app.core.secret_box`` (the P7 Fernet box already used
@@ -90,7 +90,7 @@ def _encrypt_marked(value: str) -> str:
 def encrypt_marked(value: str) -> str:
     """Public strict-encrypt for callers outside system_settings that want
     the same ``enc:v1:`` marker scheme (currently:
-    ``MediahubModelRepository.api_key`` and the secrets self-heal
+    ``NousModelRepository.api_key`` and the secrets self-heal
     migration). Raises ``secret_box.SecretBoxNotConfigured`` when no real
     key is configured — fail closed, matching ``conceal_for_key``."""
     return _encrypt_marked(value)
@@ -187,7 +187,7 @@ def reveal(value: Any) -> Any:
 # ===========================================================
 # All ``enc:v1:`` surfaces share ONE Fernet key. Without binding, a
 # ciphertext stolen from ANY surface (a DB backup leak of
-# ``platform.ai_providers``, ``mediahub_models.api_key``, another user's
+# ``platform.ai_providers``, ``nous_models.api_key``, another user's
 # BYOK row, ...) could be replayed verbatim into a user's own BYOK
 # ``api_key``, and the reveal path would happily decrypt it — turning the
 # settings endpoint into a cross-tenant decryption oracle (exfiltrate via
@@ -306,7 +306,7 @@ def _reveal_byok_scalar(value: Any, user_id: str) -> Any:
       ``_reveal_str``).
     - marked + decrypts to a payload WITHOUT the ``byok`` frame → ``""`` +
       ERROR — a ciphertext replayed from a different surface
-      (platform.ai_providers / mediahub_models / system_settings flat keys).
+      (platform.ai_providers / nous_models / system_settings flat keys).
     - marked + bound to a DIFFERENT user → ``""`` + ERROR — a ciphertext
       replayed from another user's row.
     - marked + bound to THIS user → the plaintext.

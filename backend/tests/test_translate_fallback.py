@@ -153,7 +153,7 @@ async def test_translate_fallback_models_none_still_routes_through_chain() -> No
 
 # ---------------------------------------------------------------------------
 # 2: fake-adapter integration test through the REAL build_fallback_llm — only
-# PromptComposer, resolve_mediahub_model (→ no platform-catalog hit), the
+# PromptComposer, resolve_nous_model (→ no platform-catalog hit), the
 # adapter factory seam (get_adapter_for_user) and asyncio.sleep are mocked, so
 # LLMFallbackChain + LLMRetryMiddleware run for real. A C1-shaped regression
 # (build_fallback_llm handing the flat provider_config straight to
@@ -211,7 +211,7 @@ async def test_translate_falls_back_on_429_through_real_build_fallback_llm() -> 
 
     with (
         patch(f"{_MOD}.PromptComposer", return_value=composer),
-        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(fw, "resolve_nous_model", AsyncMock(return_value=None)),
         patch.object(
             fw, "get_adapter_for_user", side_effect=_fake_get_adapter_for_user
         ),

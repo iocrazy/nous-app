@@ -156,7 +156,7 @@ class ScriptAIService:
         # ComposedSystemPrompt (composer.compose() pulls it from the ai_agents
         # row), so agents declare their own provider in DB. Credentials are
         # DB-only (铁律 2026-07-07): a governed caller supplies the resolver's
-        # provider config; otherwise the platform ``mediahub_models`` catalog
+        # provider config; otherwise the platform ``nous_models`` catalog
         # resolves the agent's model — no env fallback.
         if self._provider_key and self._provider_config and model:
             from app.services.ai.adapters.factory import (

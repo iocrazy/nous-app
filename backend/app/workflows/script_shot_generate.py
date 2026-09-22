@@ -47,7 +47,7 @@ from loguru import logger
 from app.services.library.scratch_reaper import reap_scratch_dir
 
 # Default image provider/model. ``provider=None`` means "resolve from the DB
-# mediahub_models catalog" — the image ``provider_registry`` ships EMPTY, so a
+# nous_models catalog" — the image ``provider_registry`` ships EMPTY, so a
 # named provider like "openai" would only KeyError; passing None lets
 # ``ImageGenerationService.generate_image`` resolve the admin-enabled image model
 # (house rule: provider config lives in the DB, not env). A caller may still

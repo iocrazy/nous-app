@@ -118,7 +118,7 @@ export async function listGenerationCapabilities(): Promise<Record<string, Model
 
 /** An enabled `llm` catalog row for the text prompt's model picker. Same
  *  public-field contract as GenerationModel — the two come from the same
- *  `mediahub_models` table, differing only in `type`. */
+ *  `nous_models` table, differing only in `type`. */
 export interface TextModel {
   name: string;
   display_name: string;

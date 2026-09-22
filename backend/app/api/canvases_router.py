@@ -262,7 +262,7 @@ async def _visible_generation_rows(
 
 @router.get("/canvases/generation-models")
 async def list_generation_models(auth: AuthDep) -> dict:
-    """Image/video rows from the mediahub_models catalog (public columns
+    """Image/video rows from the nous_models catalog (public columns
     only — no api_key/base_url) for the composer's model picker."""
     data = [
         {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
@@ -317,16 +317,16 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
 
 @router.get("/canvases/text-models")
 async def list_text_models(auth: AuthDep) -> dict:
-    """Enabled ``llm`` rows from the mediahub_models catalog (public columns
+    """Enabled ``llm`` rows from the nous_models catalog (public columns
     only — no api_key/base_url) for the prompt node's text-model picker.
 
     Same catalog and public-field contract as ``generation-models``; the two
     endpoints differ only in the ``type`` they surface (text vs image/video),
     so the smart-canvas text prompt and the image/video composer read one
     consistent source of truth instead of a hardcoded frontend list."""
-    from app.repositories import mediahub_model_repository as _repo_mod
+    from app.repositories import nous_model_repository as _repo_mod
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
+    rows = await _repo_mod.get_nous_model_repository().list_enabled(
         "llm", viewer_user_id=auth.user_id
     )
     data = [{k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS} for r in rows]

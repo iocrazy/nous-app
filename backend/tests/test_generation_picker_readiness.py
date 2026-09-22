@@ -72,10 +72,10 @@ ROWS = [
 
 
 def _install(monkeypatch, rows, readiness: LocalReadiness):
-    from app.repositories import mediahub_model_repository as repo_mod
+    from app.repositories import nous_model_repository as repo_mod
 
     repo = SimpleNamespace(list_enabled=AsyncMock(return_value=[dict(r) for r in rows]))
-    monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+    monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
     from app.services.ai import platform_model_visibility as pmv
 
     monkeypatch.setattr(

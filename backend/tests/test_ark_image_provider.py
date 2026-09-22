@@ -158,7 +158,7 @@ async def test_resolve_picks_enabled_image_row_and_reveals_key():
         },
     ]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         MagicMock(return_value=_repo_with(rows)),
     ):
         provider, actual_model = await resolve_image_provider(None)
@@ -191,7 +191,7 @@ async def test_resolve_prefers_name_match_over_first_enabled():
         },
     ]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         MagicMock(return_value=_repo_with(rows)),
     ):
         # by catalog name
@@ -221,7 +221,7 @@ async def test_resolve_skips_disabled_and_non_image_rows():
         },
     ]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         MagicMock(return_value=_repo_with(rows)),
     ):
         _, model = await resolve_image_provider(None)
@@ -231,7 +231,7 @@ async def test_resolve_skips_disabled_and_non_image_rows():
 async def test_resolve_raises_clear_error_when_no_image_row():
     rows = [{"name": "y", "type": "llm", "is_enabled": True}]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         MagicMock(return_value=_repo_with(rows)),
     ):
         with pytest.raises(RuntimeError, match="no image model configured"):
@@ -251,7 +251,7 @@ async def test_resolve_raises_on_unsupported_provider_impl():
         }
     ]
     with patch(
-        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        "app.repositories.nous_model_repository.get_nous_model_repository",
         MagicMock(return_value=_repo_with(rows)),
     ):
         with pytest.raises(RuntimeError, match="No image provider implementation"):

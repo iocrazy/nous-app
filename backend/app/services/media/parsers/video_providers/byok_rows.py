@@ -1,5 +1,5 @@
 """The BYOK tier of image-provider resolution: a user's OWN provider config
-(Settings → AI) projected into ``mediahub_models``-shaped rows.
+(Settings → AI) projected into ``nous_models``-shaped rows.
 
 House rule: the providers page is the only model-management entry, and agents
 consume whatever it makes available. The LLM side has honoured that for a long
@@ -198,7 +198,7 @@ async def byok_image_rows(user_id: str | None) -> list[dict]:
     except Exception as exc:  # noqa: BLE001 — degrade loudly, never propagate
         logger.warning(
             "BYOK image tier unavailable for user {}: {!r}; "
-            "falling back to the mediahub_models catalog only",
+            "falling back to the nous_models catalog only",
             user_id,
             exc,
         )
