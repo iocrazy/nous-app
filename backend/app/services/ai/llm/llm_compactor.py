@@ -53,6 +53,13 @@ DEFAULT_KEEP_FLOOR_TURNS = 6
 # heuristic otherwise.
 from app.agent_framework.tokenizer import count_messages_tokens
 
+# ``<conversation_summary>`` is a frame we own (registered in OWNED_FRAMES).
+# The summary is LLM output over user-written turns — or the cached
+# session-memory doc built from the same turns — so a literal closing marker
+# in it would end the frame early and turn the rest into harness-authored
+# instruction. Defuse ours; leave everything else the model reads intact.
+from app.boundary.frame_markers import escape_frame_body
+
 
 def estimate_tokens(messages: list[dict], model: str = "") -> int:
     """Estimate prompt-side tokens for ``messages``. ``model`` selects
@@ -213,7 +220,9 @@ async def compact_messages(
     summary_message = {
         "role": "system",
         "content": (
-            "<conversation_summary>\n" f"{summary_text}\n" "</conversation_summary>"
+            "<conversation_summary>\n"
+            f"{escape_frame_body(summary_text)}\n"
+            "</conversation_summary>"
         ),
     }
     new_messages = [summary_message, *tail]
