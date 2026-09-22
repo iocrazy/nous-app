@@ -46,21 +46,15 @@ from __future__ import annotations
 import pytest
 
 from app.services.ai import provider_protocols as pp
-from app.services.ai.providers.ai_provider import AIProviderFactory
+from app.services.ai.providers.ai_provider import (
+    PROTOCOLS_WITHOUT_AI_PROVIDER,
+    AIProviderFactory,
+)
 
-# Protocol keys that deliberately have NO AIProviderFactory entry, and why.
-# Being on this list is a claim that no ASR row can ever be filed under the
-# key — which `test_no_exempt_protocol_claims_asr` re-checks against the
-# protocol's own model_types rather than trusting the comment.
-_NO_FACTORY_ENTRY = {
-    "claude": "llm-only; the llm probe uses direct httpx, never this factory",
-    "codex-local": "runs on the user's device via the daemon — no HTTP endpoint",
-    "codex": "image-only, server-side CLI subprocess",
-    "openai-images": "image-only, CLI subprocess over the Images API",
-    "jimeng-cli": "image/video-only, CLI subprocess",
-    "jimeng-local": "image/video-only, on the user's device",
-    "ark": "image/video-only, Volcengine task protocol",
-}
+# The exemption list is NOT re-declared here. It lives next to the registry
+# it describes (`PROTOCOLS_WITHOUT_AI_PROVIDER` in ai_provider.py) — a second
+# copy in the test file would be one more pair of lists that can drift, which
+# is the defect this whole area is being cleaned of.
 
 
 def _asr_protocols() -> list[str]:
@@ -126,11 +120,12 @@ def test_every_protocol_is_classified():
     unclassified = [
         p.key
         for p in pp.all_protocols()
-        if p.key not in AIProviderFactory._registry and p.key not in _NO_FACTORY_ENTRY
+        if p.key not in AIProviderFactory._registry
+        and p.key not in PROTOCOLS_WITHOUT_AI_PROVIDER
     ]
     assert not unclassified, (
         f"protocols with no AIProviderFactory entry and no exemption: "
-        f"{unclassified}. Add a registry entry, or add it to _NO_FACTORY_ENTRY "
+        f"{unclassified}. Add a registry entry, or add it to PROTOCOLS_WITHOUT_AI_PROVIDER "
         f"with the reason no ASR row can be filed under it."
     )
 
@@ -145,7 +140,7 @@ def test_no_exempt_protocol_claims_asr():
     lying = [
         p.key
         for p in pp.all_protocols()
-        if p.key in _NO_FACTORY_ENTRY and "asr" in p.model_types
+        if p.key in PROTOCOLS_WITHOUT_AI_PROVIDER and "asr" in p.model_types
     ]
     assert not lying, (
         f"{lying} declare asr but are exempted from AIProviderFactory. An ASR "
