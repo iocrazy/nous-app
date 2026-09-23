@@ -4,9 +4,9 @@ and returns at once. The result reaches the model later as an
 ``app/workflows/agent_video.py``).
 
 Why: a local-daemon video job may take ~27 min
-(``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``) while a tool call has a 600s
+(``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``) while a tool call had a 600s
 budget, so waiting in the turn abandoned a job the user's machine was still
-running. The tool now never waits on the generation.
+running. The tool now never waits on the generation (and its budget is 60s).
 """
 
 from __future__ import annotations
