@@ -4,7 +4,7 @@ Why this exists
 ---------------
 Browsers do not allow WebSocket clients to set custom headers on the
 HTTP upgrade request. The standard workaround is to encode auth into
-the connect URL's query string — which is exactly what mediahub does
+the connect URL's query string — which is exactly what nous does
 today: `ws://host/ws/task-progress?token=<JWT>`.
 
 That puts the JWT into:

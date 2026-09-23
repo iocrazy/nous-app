@@ -734,7 +734,7 @@ async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
 # Flip side of P3a's per-replica recovery isolation. A dead replica's in-flight
 # rows are NEVER reclaimed by a sibling (so no double-exec) — but they'd linger
 # forever. Detect the dead OWNER via the P1 worker_registry process heartbeat
-# (EVIDENCE, never a per-task timer — coarse mediahub steps would false-stale,
+# (EVIDENCE, never a per-task timer — coarse nous steps would false-stale,
 # #492) and free the task so Retry can re-dispatch it to a live worker.
 
 # Floor below which a freshly-claimed row is left alone, so a worker that just

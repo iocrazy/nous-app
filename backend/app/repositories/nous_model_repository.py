@@ -215,7 +215,7 @@ class NousModelRepository:
                     out.append(_parity(row))
                 return out
         except Exception as e:
-            logger.error(f"Failed to list enabled mediahub models: {e}")
+            logger.error(f"Failed to list enabled nous models: {e}")
             return []
 
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
@@ -235,11 +235,11 @@ class NousModelRepository:
                 rows = [_row(r) for r in result.scalars().all()]
                 return find_row_by_catalog_name(rows, name)
         except Exception as e:
-            logger.error(f"Failed to get mediahub model '{name}': {e}")
+            logger.error(f"Failed to get nous model '{name}': {e}")
             return None
 
     async def get_by_actual_model(self, actual_model: str) -> Optional[Dict[str, Any]]:
-        """Get a Mediahub model by ``actual_model`` (the raw upstream model id,
+        """Get a Nous model by ``actual_model`` (the raw upstream model id,
         e.g. ``doubao-seed-2-0-lite-260428``) — a fallback lookup for
         ``resolve_nous_model`` when an ``ai_agents.model`` value stores the
         raw provider id instead of the catalog ``name``. ``name`` values are
@@ -260,7 +260,7 @@ class NousModelRepository:
                 return _row(row) if row else None
         except Exception as e:
             logger.error(
-                f"Failed to get mediahub model by actual_model '{actual_model}': {e}"
+                f"Failed to get nous model by actual_model '{actual_model}': {e}"
             )
             return None
 
@@ -277,11 +277,11 @@ class NousModelRepository:
                 )
                 return [_row(r) for r in result.scalars().all()]
         except Exception as e:
-            logger.error(f"Failed to list all mediahub models: {e}")
+            logger.error(f"Failed to list all nous models: {e}")
             return []
 
     async def create(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Create a new Mediahub model. ``api_key`` is encrypted at rest
+        """Create a new Nous model. ``api_key`` is encrypted at rest
         (Phase 1b) — encryption happens BEFORE the swallow-to-None try block
         so a missing NOUS_TOKEN_ENCRYPTION_KEY fails loud (fail-closed
         write), not as an opaque None."""
@@ -294,13 +294,13 @@ class NousModelRepository:
                 row = result.scalars().first()
                 return _row(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to create mediahub model: {e}")
+            logger.error(f"Failed to create nous model: {e}")
             return None
 
     async def update(
         self, model_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Update a Mediahub model. ``api_key`` is encrypted at rest (Phase
+        """Update a Nous model. ``api_key`` is encrypted at rest (Phase
         1b); encryption runs BEFORE the swallow-to-None try block so a
         missing encryption key fails loud (see ``create``)."""
         # Drop the REST "now()" sentinel; set updated_at via SQL func.now()
@@ -321,7 +321,7 @@ class NousModelRepository:
                 row = result.scalars().first()
                 return _row(row) if row else None
         except Exception as e:
-            logger.error(f"Failed to update mediahub model {model_id}: {e}")
+            logger.error(f"Failed to update nous model {model_id}: {e}")
             return None
 
     async def record_test_result(
@@ -364,7 +364,7 @@ class NousModelRepository:
             return None
 
     async def delete(self, model_id: str) -> bool:
-        """Delete a Mediahub model."""
+        """Delete a Nous model."""
         try:
             async with write_scope() as session:
                 await session.execute(
@@ -372,7 +372,7 @@ class NousModelRepository:
                 )
             return True
         except Exception as e:
-            logger.error(f"Failed to delete mediahub model {model_id}: {e}")
+            logger.error(f"Failed to delete nous model {model_id}: {e}")
             return False
 
 

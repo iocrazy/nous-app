@@ -94,7 +94,7 @@ class Tasklet:
         Catches LLM exceptions and malformed JSON; never raises (use
         :meth:`run_or_raise` if you want exceptions).
 
-        ``settings`` is mediahub's global settings object; passed through
+        ``settings`` is nous's global settings object; passed through
         to the adapter factory.
         """
         # Defer imports so the module is cheap to import in test paths

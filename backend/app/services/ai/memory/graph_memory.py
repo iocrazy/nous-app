@@ -255,7 +255,7 @@ class GraphMemoryConfig:
         except ValueError:
             dimensions = DEFAULT_EMBEDDER_DIMENSIONS
         # If the extractor / embedder "model" is a platform-catalog name (picked
-        # from the MediaHub AI Models catalog), take its base_url / key / actual
+        # from the Nous AI Models catalog), take its base_url / key / actual
         # model from the catalog instead of the manual fields. Ungated (admin
         # config). Manual values remain the fallback for a custom endpoint.
         ext_base, ext_key, ext_model = await _apply_catalog(

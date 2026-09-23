@@ -1,7 +1,7 @@
 """AbortController — per-run cancel signal that interrupts in-flight
 LLM calls (not just hooks between turns).
 
-Today's mediahub agent_runner has cooperative cancel:
+Today's nous agent_runner has cooperative cancel:
 ``recorder.check_cancelled()`` is polled between iterations of the
 skill loop. This works for between-turns cancel but NOT during an
 in-flight LLM call. If an LLM call takes 30 seconds, the user pressing

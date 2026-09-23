@@ -17,7 +17,7 @@ NousModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
 
 
 class NousModelCreate(BaseModel):
-    """Request body for creating a Mediahub model."""
+    """Request body for creating a Nous model."""
 
     name: str
     display_name: str
@@ -37,7 +37,7 @@ class NousModelCreate(BaseModel):
 
 
 class NousModelUpdate(BaseModel):
-    """Request body for updating a Mediahub model (all fields optional)."""
+    """Request body for updating a Nous model (all fields optional)."""
 
     name: Optional[str] = None
     display_name: Optional[str] = None

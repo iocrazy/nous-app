@@ -1,6 +1,6 @@
 """Memory provider abstraction (Phase 1 — Nous/Hermes pluggable-provider model).
 
-mediahub runs two memory *slots* simultaneously:
+nous runs two memory *slots* simultaneously:
 
   L2 — user model (today Honcho): "who is this user / what do they prefer".
   L3 — knowledge graph (today Graphiti): "what facts/entities were discussed".

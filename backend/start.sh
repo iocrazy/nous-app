@@ -1,5 +1,5 @@
 #!/bin/bash
-# MediaHub Backend 启动脚本
+# Nous Backend 启动脚本
 # PR-D7 phase 3b: Celery Worker 已废弃，所有 workflow 走 DBOS（PG-backed
 # durable queues + @DBOS.scheduled cron），由 FastAPI 进程内承载。
 
@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}Starting MediaHub Backend...${NC}"
+echo -e "${GREEN}Starting Nous Backend...${NC}"
 
 # Redis 仍然需要（download progress + UnifiedProgressTracker KV state）
 if ! command -v redis-cli &> /dev/null || ! redis-cli ping &> /dev/null; then

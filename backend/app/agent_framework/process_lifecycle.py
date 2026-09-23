@@ -191,7 +191,7 @@ def bind_to_parent_death() -> bool:
          ``kill_tree.kill_process_tree(pid)`` to actually hit all
          descendants (ffmpeg → av_demux thread, yt-dlp → curl child,
          whisper → CUDA workers). Without setsid, killpg target the
-         PARENT's group → kills mediahub itself.
+         PARENT's group → kills nous itself.
 
       2. PR_SET_PDEATHSIG — kernel will SIGKILL this child when the
          parent dies, even via SIGKILL/OOM/panic. Without this,

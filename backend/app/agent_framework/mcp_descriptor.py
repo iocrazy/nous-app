@@ -3,7 +3,7 @@
 Sprint 8 primitive. The Model Context Protocol (MCP) is Anthropic's
 JSON-RPC protocol for advertising tools / resources / prompts to LLM
 clients (Claude Desktop, Claude Code, Cursor, Cline, ...). Exposing
-mediahub agents and skills over MCP would let an external Claude
+nous agents and skills over MCP would let an external Claude
 client invoke them directly without routing through the chat panel.
 
 This module is the SHAPE-ONLY layer:
