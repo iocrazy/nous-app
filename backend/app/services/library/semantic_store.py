@@ -3,9 +3,17 @@
 hybrid (``SearchService._vector_hits``), ``semantic_search`` and
 ``find_similar_media`` all read here. Since migration 494 the vectors live in
 ``resource_embeddings`` (halfvec + HNSW, one space per embedder); the legacy
-``resource_analysis.content_embedding`` column is a READ-ONLY fallback for
-the deploy window before 494 (``EmbeddingStoreMissing``) and for resources
-embedded only there, and goes away next release.
+``resource_analysis.content_embedding`` column is a READ-ONLY fallback that
+goes away next release. The two reads fall back differently:
+
+* :meth:`SemanticStore.nearest` reads the legacy column only when the new
+  store cannot be asked at all — ``EmbeddingStoreMissing`` (code deployed
+  before migration 494) or an embedder that cannot name its space. A
+  half-filled ``resource_embeddings`` is NOT topped up from the old column:
+  rows not yet backfilled simply do not match.
+* :meth:`SemanticStore.similar` falls back per source resource: when that
+  resource has no row in the current space (or the store is missing), its
+  legacy vector is used against the legacy column.
 
 When neither store is callable, :class:`EmbeddingSearchUnavailable`
 propagates: the caller must say "the vector store is missing", never "no

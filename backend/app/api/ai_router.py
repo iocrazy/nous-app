@@ -9,6 +9,7 @@ Endpoints for triggering and retrieving AI analysis results
 Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
+import time
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -25,6 +26,7 @@ from app.schemas.ai import (
     TranscriptResponse,
     VisualAnalysisResponse,
 )
+from app.schemas.search import SpaceInfo
 from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
 
@@ -1092,6 +1094,14 @@ _BACKFILL_MAX_LIMIT = 200
 _BACKFILL_ABORT_CODES = frozenset(
     {"embedder_unconfigured", "dimension_mismatch", "store_missing"}
 )
+# A provider that fails this many rows in a row is down, not flaky: stop
+# instead of spending the rest of the batch on 30s timeouts.
+_BACKFILL_MAX_PROVIDER_ERRORS = 3
+# One request embeds up to 200 rows serially; past this budget the rest are
+# left for the next run (reason ``not_attempted`` — a response-only code, not
+# an embed outcome, so it is not in EMBED_REASON_CODES).
+_BACKFILL_WALL_CLOCK_S = 60
+_backfill_clock = time.monotonic
 
 
 class BackfillEmbeddingsBody(BaseModel):
@@ -1139,15 +1149,19 @@ async def backfill_embeddings(
     landed (or was already current) NOW; ``skipped`` names batch rows that
     were attempted or refused, with a stable reason code (never provider
     text); ``remaining`` is ``total_missing`` minus what landed.
-    ``dispatched`` / ``in_flight`` are kept, always empty / 0, so readers of
-    the old shape keep parsing.
+    ``aborted_reason`` says why the batch stopped early: ``"provider_error"``
+    (3 in a row), ``"time_budget"`` (past ``_BACKFILL_WALL_CLOCK_S``; the
+    rest are skipped as ``not_attempted``), one of the process-wide codes
+    (``embedder_unconfigured`` / ``dimension_mismatch`` / ``store_missing``),
+    or null when every row was attempted. ``space.id`` is a string
+    (Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,
+    so readers of the old shape keep parsing.
     """
     from app.core.embedding_space import SEMANTIC_LAYER
     from app.repositories import embedding_space_repository as space_mod
     from app.repositories import resource_embeddings_repository as emb_mod
     from app.services.ai.providers import embedding_config
     from app.services.ai.providers import embedding_service as emb_svc_mod
-    from app.services.library import embedding_backfill
 
     opts = body or BackfillEmbeddingsBody()
     # Typed refusal, not a silent no-op.
@@ -1182,7 +1196,7 @@ async def backfill_embeddings(
 
     base = {
         "success": True,
-        "space": space,
+        "space": SpaceInfo.from_row(space).model_dump(),
         "dispatched": [],
         "in_flight": 0,
         "total_missing": total_missing,
@@ -1194,37 +1208,67 @@ async def backfill_embeddings(
             "reembedded": [r.resource_id for r in rows],
             "skipped": [],
             "remaining": total_missing,
+            "aborted_reason": None,
         }
 
-    reembedded: list[int] = []
-    skipped: list[dict] = []
-    for i, row in enumerate(rows):
-        try:
-            ok, reason = await embedding_backfill.embed_candidate(
-                row, embedder=embedder, space_id=space["id"], repo=repo
-            )
-        except Exception as e:  # one bad row must not lose the rows before it
-            logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
-            skipped.append(_skip(row.resource_id, "reembed_error"))
-            continue
-        if ok:
-            reembedded.append(row.resource_id)
-            continue
-        code = _backfill_skip_code(reason)
-        if code not in ("empty_text", "store_missing"):
-            logger.error(f"backfill: resource {row.resource_id} not embedded: {reason}")
-        skipped.append(_skip(row.resource_id, code))
-        if code in _BACKFILL_ABORT_CODES:
-            skipped.extend(_skip(r.resource_id, code) for r in rows[i + 1 :])
-            break
-
+    reembedded, skipped, aborted_reason = await _embed_backfill_rows(
+        rows, embedder=embedder, space_id=space["id"], repo=repo
+    )
     return {
         **base,
         "dry_run": False,
         "reembedded": reembedded,
         "skipped": skipped,
         "remaining": max(total_missing - len(reembedded), 0),
+        "aborted_reason": aborted_reason,
     }
+
+
+async def _embed_backfill_rows(
+    rows: list, *, embedder, space_id: int, repo
+) -> tuple[list[int], list[dict], str | None]:
+    """Embed ``rows`` in order. Returns (landed ids, skipped, aborted_reason).
+
+    Stops early — every remaining row accounted for in ``skipped`` — on a
+    process-wide failure (``_BACKFILL_ABORT_CODES``), on
+    ``_BACKFILL_MAX_PROVIDER_ERRORS`` consecutive provider errors (rest:
+    ``provider_error``), or past ``_BACKFILL_WALL_CLOCK_S`` (rest:
+    ``not_attempted``). ``aborted_reason`` names which; None = ran to the end.
+    """
+    from app.services.library import embedding_backfill
+
+    reembedded: list[int] = []
+    skipped: list[dict] = []
+    started = _backfill_clock()
+    provider_streak = 0
+    for i, row in enumerate(rows):
+        if _backfill_clock() - started >= _BACKFILL_WALL_CLOCK_S:
+            skipped.extend(_skip(r.resource_id, "not_attempted") for r in rows[i:])
+            return reembedded, skipped, "time_budget"
+        try:
+            ok, reason = await embedding_backfill.embed_candidate(
+                row, embedder=embedder, space_id=space_id, repo=repo
+            )
+        except Exception as e:  # one bad row must not lose the rows before it
+            logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
+            skipped.append(_skip(row.resource_id, "reembed_error"))
+            provider_streak = 0
+            continue
+        if ok:
+            reembedded.append(row.resource_id)
+            provider_streak = 0
+            continue
+        code = _backfill_skip_code(reason)
+        if code not in ("empty_text", "store_missing"):
+            logger.error(f"backfill: resource {row.resource_id} not embedded: {reason}")
+        skipped.append(_skip(row.resource_id, code))
+        provider_streak = provider_streak + 1 if code == "provider_error" else 0
+        if code in _BACKFILL_ABORT_CODES or (
+            provider_streak >= _BACKFILL_MAX_PROVIDER_ERRORS
+        ):
+            skipped.extend(_skip(r.resource_id, code) for r in rows[i + 1 :])
+            return reembedded, skipped, code
+    return reembedded, skipped, None
 
 
 # ------------------------------------------------------------------

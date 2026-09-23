@@ -8,9 +8,17 @@
 --   * space_id — which embedder produced it (embedding_spaces). A vector only
 --     means something next to vectors of the same space; switching models is
 --     "new space + re-embed", never "overwrite in place".
--- The old column stays for one release (readers fall back to it while the
--- new table fills); mig 490's embedding_model stamp on resource_analysis is
--- superseded for this table by space_id and left in place.
+-- The old column stays for one release, but readers only fall back to it
+-- narrowly: nearest-neighbour search reads the old column only when this
+-- table/function is missing (store_missing, i.e. code deployed ahead of the
+-- migration); find_similar falls back per source resource that has no row
+-- here yet. A half-filled table is NOT merged with the old column. mig 490's
+-- embedding_model stamp on resource_analysis is superseded for this table by
+-- space_id and left in place.
+--
+-- Requires pgvector >= 0.8 (hnsw.iterative_scan). CI runs
+-- pgvector/pgvector:pg17 and production supabase/postgres:17.6.1.084, both
+-- 0.8.x (drift DB measured 0.8.5 on 2026-09-23).
 --
 -- find_duplicate_videos now reads ONLY the new table: until the backfill
 -- fills it, the cleanup page's duplicate list is empty rather than mixing
@@ -49,8 +57,13 @@ CREATE TABLE IF NOT EXISTS public.resource_embeddings (
   CONSTRAINT resource_embeddings_pkey PRIMARY KEY (resource_id, layer, space_id),
   CONSTRAINT resource_embeddings_layer_check CHECK (layer IN ('semantic', 'transcript'))
 );
+-- source_hash today only matters in two places: analyze_l1 re-running
+-- (upsert overwrites the row) and idempotence within one backfill request.
+-- The backfill selects resources with NO row, so a changed hash (document
+-- composer version bump) does not by itself trigger a re-embed yet — see
+-- spec 2026-09-16-video-vector-layers-design.md §9.
 COMMENT ON COLUMN public.resource_embeddings.source_hash IS
-  'sha1 of the embedded document (+ composer version); unchanged hash = skip re-embed.';
+  'sha1 of the embedded document (+ composer version). Not yet used to trigger re-embeds; see spec §9.';
 
 CREATE INDEX IF NOT EXISTS resource_embeddings_embedding_hnsw
   ON public.resource_embeddings USING hnsw (embedding halfvec_cosine_ops);
@@ -68,10 +81,24 @@ CREATE POLICY "Read embeddings of owned resources" ON public.resource_embeddings
     WHERE r.id = resource_embeddings.resource_id AND r.creator_id = auth.uid()));
 DROP POLICY IF EXISTS "Read embedding spaces" ON public.embedding_spaces;
 CREATE POLICY "Read embedding spaces" ON public.embedding_spaces FOR SELECT USING (true);
+-- The policies are a second layer; the first is that the browser roles hold
+-- no privileges on these tables at all (Supabase default privileges grant
+-- anon/authenticated ALL on new public tables).
+REVOKE ALL ON TABLE public.embedding_spaces, public.resource_embeddings
+  FROM anon, authenticated;
 
 -- Nearest resources in ONE space and ONE layer. One row per resource by
 -- construction (PK), and resources <-> parsed_media is 1:1, so no DISTINCT ON:
 -- ORDER BY distance LIMIT n is exactly the shape the HNSW index serves.
+--
+-- HNSW returns only hnsw.ef_search (default 40) global neighbours and the
+-- space / layer / user / threshold filters run AFTER that, so on a multi-user
+-- library a caller can get a short or empty page while vector_leg still reads
+-- ok. iterative_scan = relaxed_order keeps walking the graph until LIMIT is
+-- satisfied (pgvector >= 0.8); relaxed order means the index output can be
+-- slightly out of order, so the hits are re-sorted by exact distance. The
+-- SETs live on the function so they apply however it is called.
+--
 -- Backend-only (direct SQL session): REVOKEd from the browser roles below
 -- (CLAUDE.md "SECURITY DEFINER" — it is not definer, but p_user_id is a plain
 -- argument and a NULL one means "every user", so it must not be reachable
@@ -97,32 +124,48 @@ RETURNS TABLE(
   created_at timestamptz,
   similarity double precision
 )
-LANGUAGE sql STABLE
+LANGUAGE plpgsql STABLE
 SET search_path TO 'public', 'pg_catalog'
+SET hnsw.iterative_scan = 'relaxed_order'
+SET hnsw.ef_search = 100
 AS $$
-  SELECT
-    re.resource_id,
-    pm.id                              AS media_id,
-    pm.platform_id::text               AS platform_id,
-    pm.title,
-    pm.description,
-    pm.cover_urls,
-    pm.author::text                    AS author,
-    COALESCE(pm.view_count, 0)::bigint AS view_count,
-    pm.created_at,
-    (1 - (re.embedding <=> query_embedding))::float AS similarity
-  FROM resource_embeddings re
-  JOIN resources r     ON r.id = re.resource_id
-  JOIN parsed_media pm ON pm.id = r.media_id
-  WHERE re.space_id = p_space_id
-    AND re.layer = p_layer
-    AND r.media_id IS NOT NULL
-    AND r.is_trashed = false
-    AND r.source_type = 'web'
-    AND (p_user_id IS NULL OR r.creator_id = p_user_id)
-    AND (1 - (re.embedding <=> query_embedding)) > match_threshold
-  ORDER BY re.embedding <=> query_embedding
-  LIMIT match_count;
+#variable_conflict use_column
+BEGIN
+  RETURN QUERY
+  WITH hits AS MATERIALIZED (
+    SELECT
+      re.resource_id,
+      pm.id                              AS media_id,
+      pm.platform_id::text               AS platform_id,
+      pm.title,
+      pm.description,
+      pm.cover_urls,
+      pm.author::text                    AS author,
+      COALESCE(pm.view_count, 0)::bigint AS view_count,
+      pm.created_at,
+      (re.embedding <=> query_embedding)::float AS distance
+    FROM resource_embeddings re
+    JOIN resources r     ON r.id = re.resource_id
+    JOIN parsed_media pm ON pm.id = r.media_id
+    WHERE re.space_id = p_space_id
+      AND re.layer = p_layer
+      AND r.media_id IS NOT NULL
+      AND r.is_trashed = false
+      AND r.source_type = 'web'
+      AND (p_user_id IS NULL OR r.creator_id = p_user_id)
+      AND (1 - (re.embedding <=> query_embedding)) > match_threshold
+    ORDER BY re.embedding <=> query_embedding
+    LIMIT match_count
+  )
+  SELECT h.resource_id, h.media_id, h.platform_id, h.title, h.description,
+         h.cover_urls, h.author, h.view_count, h.created_at,
+         (1 - h.distance)::float AS similarity
+  FROM hits h
+  -- "+ 0": PG17 carries the CTE's (index) sort order out of the CTE and
+  -- would skip this sort; relaxed_order output is only approximately sorted.
+  -- This is pgvector's documented re-sort idiom.
+  ORDER BY h.distance + 0;
+END;
 $$;
 REVOKE EXECUTE ON FUNCTION public.match_resource_embeddings(halfvec, bigint, text, double precision, integer, uuid)
   FROM PUBLIC, anon, authenticated;

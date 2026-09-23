@@ -11,9 +11,14 @@ title still gets a vector, and the backfill embeds everything in place.
 The document side is always the RAW text. The asymmetric-retrieval instruction
 (``search_service.QUERY_INSTRUCTION``) goes on queries only.
 
-``source_hash`` covers :data:`DOC_VERSION` + the text, so changing the layout
-here (bump the version) or any input re-qualifies a row, and an unchanged row
-is skipped without paying for an embedding call.
+``source_hash`` covers :data:`DOC_VERSION` + the text. Today it only takes
+effect in two places: ``analyze_l1`` re-running (the upsert overwrites the
+row) and idempotence within one backfill request (an unchanged row is
+skipped without paying for an embedding call). The backfill selects only
+resources with NO row in the space, so bumping :data:`DOC_VERSION` or a
+changed input does NOT by itself re-embed existing rows yet — "stale hash
+triggers re-embed" is deferred (spec 2026-09-16-video-vector-layers-design
+§9).
 """
 
 from __future__ import annotations

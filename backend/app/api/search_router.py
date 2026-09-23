@@ -498,9 +498,7 @@ async def vectors_status(auth: AuthDep):
         logger.error(f"Vector status: store missing (migration 494): {e}")
         return VectorsStatusResponse(space=None, status="store_missing", layers=[])
     return VectorsStatusResponse(
-        space=SpaceInfo(
-            **{**{k: space[k] for k in SpaceInfo.model_fields}, "id": str(space["id"])}
-        ),
+        space=SpaceInfo.from_row(space),
         status="ok",
         layers=_layers(covered, total),
     )

@@ -81,6 +81,10 @@ async def embed_candidate(
     if not text:
         return False, "empty_text"
     try:
+        # Only reachable for rows that got a vector after missing_for_user
+        # listed them (a concurrent analyze_l1, a repeated row): the listing
+        # itself excludes resources that already have one, so a changed hash
+        # on an existing row is not picked up here yet (spec §9).
         existing = await repo.get(row.resource_id, SEMANTIC_LAYER, space_id)
         if existing is not None and existing.get("source_hash") == source_hash:
             return True, None

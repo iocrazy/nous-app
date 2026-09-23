@@ -22,6 +22,7 @@ Gated on INTEGRATION_DATABASE_URL — skips cleanly in the unit lane:
 from __future__ import annotations
 
 import os
+import random
 import uuid
 
 import pytest
@@ -215,6 +216,139 @@ async def test_rpc_ranks_within_one_space_only(pg, fx):
         assert other_user == [], "another user's vector came back"
     finally:
         await tr.rollback()
+
+
+def _near(seed: int, noise: float) -> list[float]:
+    """Axis 0 plus seeded random noise of amplitude ``noise``. Real-looking
+    spread matters: near-duplicates (axis 0 plus one tiny orthogonal nudge)
+    make HNSW's neighbour pruning leave the graph disconnected, and then no
+    ef_search / iterative scan setting can reach the rows."""
+    rng = random.Random(seed)
+    v = [(rng.random() - 0.5) * noise for _ in range(_DIM)]
+    v[0] += 1.0
+    return v
+
+
+_BODY_SQL = (
+    "SELECT re.resource_id FROM resource_embeddings re "
+    "JOIN resources r ON r.id = re.resource_id "
+    "JOIN parsed_media pm ON pm.id = r.media_id "
+    "WHERE re.space_id = $2 AND re.layer = 'semantic' "
+    "AND r.media_id IS NOT NULL AND r.is_trashed = false "
+    "AND r.source_type = 'web' AND r.creator_id = $3 "
+    "AND (1 - (re.embedding <=> CAST($1 AS halfvec))) > 0.5 "
+    "ORDER BY re.embedding <=> CAST($1 AS halfvec) LIMIT 5"
+)
+
+
+def _index_names(plan) -> list[str]:
+    found: list[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("Node Type") == "Index Scan":
+                found.append(node.get("Index Name"))
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(plan)
+    return found
+
+
+@_skip
+async def test_rpc_fills_the_page_when_other_users_are_nearer(pg, fx):
+    """HNSW hands back only ``hnsw.ef_search`` (default 40) global neighbours
+    and the space / user / threshold filters run afterwards. With 60 closer
+    vectors belonging to someone else, a plain scan returns nothing for the
+    caller while vector_leg still reads ok. The function must scan on
+    (iterative_scan) until the caller's page is full."""
+    import json
+
+    # Rolled-back runs (this test and the ones above) leave dead entries in
+    # the HNSW graph; on a long-lived DB enough of them make live rows
+    # unreachable and the test flaky. VACUUM repairs the graph (outside any
+    # transaction, so before the one below).
+    await pg.execute("VACUUM resource_embeddings")
+    tr = pg.transaction()
+    await tr.start()
+    try:
+        other = uuid.uuid4()
+        await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", other)
+        for i in range(60):
+            rid = await _mk_resource(pg, other, f"Other Clip {i}")
+            await pg.execute(
+                "INSERT INTO resource_embeddings (resource_id, layer, space_id, "
+                "embedding, source_hash) VALUES ($1, 'semantic', $2, "
+                "CAST($3 AS halfvec), 'o')",
+                rid,
+                fx["s1"],
+                _lit(_near(i, 0.01)),
+            )
+        mine = [fx["r1"], fx["r2"]]
+        for i in range(3):
+            mine.append(await _mk_resource(pg, fx["user"], f"Mine {i}"))
+        for i, rid in enumerate(mine):
+            await pg.execute(
+                "INSERT INTO resource_embeddings (resource_id, layer, space_id, "
+                "embedding, source_hash) VALUES ($1, 'semantic', $2, "
+                "CAST($3 AS halfvec), 'm')",
+                rid,
+                fx["s1"],
+                _lit(_near(1000 + i, 0.03)),
+            )
+        # A 65-row table gives the planner cheap alternatives production does
+        # not have: start from the user's resources, then sort by distance.
+        # In production one space holds every row and a user owns thousands
+        # of resources, so it walks HNSW in distance order instead. Force that
+        # plan shape for this transaction only: no seq scan, no explicit sort.
+        await pg.execute("SET LOCAL enable_seqscan = off")
+        await pg.execute("SET LOCAL enable_sort = off")
+        plan = await pg.fetchval(
+            "EXPLAIN (FORMAT JSON) " + _BODY_SQL,
+            _lit(_unit(0)),
+            fx["s1"],
+            fx["user"],
+        )
+        names = _index_names(json.loads(plan) if isinstance(plan, str) else plan)
+        assert "resource_embeddings_embedding_hnsw" in names, names
+
+        rows = await pg.fetch(
+            "SELECT * FROM match_resource_embeddings(CAST($1 AS halfvec), $2, "
+            "'semantic', 0.5, 5, $3)",
+            _lit(_unit(0)),
+            fx["s1"],
+            fx["user"],
+        )
+        assert sorted(r["resource_id"] for r in rows) == sorted(mine)
+        sims = [r["similarity"] for r in rows]
+        assert sims == sorted(sims, reverse=True), "rows not ranked"
+    finally:
+        await tr.rollback()
+
+
+@_skip
+async def test_rpc_pins_iterative_scan_settings(pg):
+    config = await pg.fetchval(
+        "SELECT proconfig FROM pg_proc WHERE oid = to_regprocedure($1)", _RPC
+    )
+    assert "hnsw.iterative_scan=relaxed_order" in config
+    assert "hnsw.ef_search=100" in config
+
+
+@_skip
+@pytest.mark.parametrize(
+    "table", ["public.embedding_spaces", "public.resource_embeddings"]
+)
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
+async def test_browser_roles_have_no_table_privileges(pg, table, role):
+    for priv in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+        granted = await pg.fetchval(
+            "SELECT has_table_privilege($1, $2, $3)", role, table, priv
+        )
+        assert granted is False, f"{role} has {priv} on {table}"
 
 
 @_skip

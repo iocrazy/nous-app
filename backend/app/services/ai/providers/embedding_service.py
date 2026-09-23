@@ -6,8 +6,10 @@ No env reads. Embeds a group of content items (text / image / video) into one
 vector over three wire shapes, chosen by the code-declared capability table
 (``embedding_capabilities``): the plain OpenAI ``/v1/embeddings``, Volcengine
 Ark's ``/embeddings/multimodal`` and the OpenAI-compatible multimodal
-``/v1/embeddings`` of nous-engine (payloads in ``embedding_items``). When
-unconfigured, embedding is disabled.
+``/v1/embeddings`` of nous-engine (payloads in ``embedding_items``). The last
+one is wired but no table row routes to it yet: engine models stay on the
+plain text shape until that endpoint ships (see
+``engine_multimodal_capabilities``). When unconfigured, embedding is disabled.
 """
 
 from typing import List, Optional, Sequence

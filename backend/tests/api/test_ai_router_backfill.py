@@ -40,6 +40,15 @@ _SPACE = {
     "instruction_version": "en_keyword_v1",
     "created_at": "2026-09-23T00:00:00+00:00",
 }
+# What the endpoint sends: SpaceInfo, id as a string (Snowflake > 2^53).
+_SPACE_OUT = {
+    "id": "3",
+    "actual_model": "doubao-embedding-vision-251215",
+    "protocol": "ark_multimodal",
+    "dims": 2048,
+    "modalities": ["image", "text", "video"],
+    "instruction_version": "en_keyword_v1",
+}
 
 
 def _source(symbol: str) -> str:
@@ -75,7 +84,7 @@ def test_in_flight_helper_is_not_owner_filtered() -> None:
 
 
 def test_backfill_no_longer_dispatches_the_vlm() -> None:
-    source = _source("backfill_embeddings")
+    source = _source("backfill_embeddings") + _source("_embed_backfill_rows")
     assert "_dispatch_l1_analysis(" not in source
     assert "embed_candidate(" in source
     assert "missing_for_user(" in source
@@ -206,7 +215,7 @@ async def test_backfill_embeds_every_candidate_in_place() -> None:
     ]
     assert embed.await_args_list[0].kwargs["space_id"] == 3
     assert out["success"] is True and out["dry_run"] is False
-    assert out["space"] == _SPACE
+    assert out["space"] == _SPACE_OUT
     assert out["reembedded"] == [1]
     assert _reasons(out["skipped"]) == {2: "empty_text"}
     # Kept for readers of the old shape; nothing is dispatched any more.
@@ -301,7 +310,84 @@ async def test_dry_run_uses_the_same_element_shapes_as_a_real_run() -> None:
         out = await _call(BackfillEmbeddingsBody(limit=10, dry_run=True))
     embed.assert_not_awaited()
     assert out["success"] is True and out["dry_run"] is True
-    assert out["space"] == _SPACE
+    assert out["space"] == _SPACE_OUT
     assert out["reembedded"] == [1, 2]
     assert out["dispatched"] == [] and out["skipped"] == [] and out["in_flight"] == 0
     assert out["remaining"] == 9 == out["total_missing"]
+
+
+@pytest.mark.asyncio
+async def test_space_id_is_sent_as_a_string() -> None:
+    repo = _Repo([_row(1)], 1)
+    p = _patches(repo=repo)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+    assert isinstance(out["space"]["id"], str) and out["space"]["id"] == "3"
+    assert out["aborted_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_three_provider_errors_in_a_row_stop_the_batch() -> None:
+    """A dead provider must not hold one request for rows x 30s timeouts."""
+    rows = [_row(i) for i in range(1, 7)]
+    repo = _Repo(rows, 6)
+    embed = AsyncMock(
+        side_effect=[
+            (False, "provider_error: 503"),
+            (True, None),  # a success resets the streak
+            (False, "provider_error: 503"),
+            (False, "provider_error: 503"),
+            (False, "provider_error: 503"),
+            (True, None),
+        ]
+    )
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+
+    assert embed.await_count == 5
+    assert out["reembedded"] == [2]
+    assert _reasons(out["skipped"]) == {
+        1: "provider_error",
+        3: "provider_error",
+        4: "provider_error",
+        5: "provider_error",
+        6: "provider_error",
+    }
+    assert out["aborted_reason"] == "provider_error"
+    assert out["remaining"] == 5
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_budget_marks_the_rest_not_attempted() -> None:
+    from app.api import ai_router
+
+    rows = [_row(1), _row(2), _row(3)]
+    repo = _Repo(rows, 3)
+    embed = AsyncMock(return_value=(True, None))
+    # start, before row 1, before row 2 (past the budget)
+    budget = ai_router._BACKFILL_WALL_CLOCK_S
+    clock = iter([0.0, 1.0, budget + 1.0])
+    p = _patches(repo=repo, embed=embed)
+    with (
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        p[4],
+        patch.object(ai_router, "_backfill_clock", lambda: next(clock)),
+    ):
+        out = await _call()
+
+    assert budget == 60
+    assert embed.await_count == 1
+    assert out["reembedded"] == [1]
+    assert _reasons(out["skipped"]) == {2: "not_attempted", 3: "not_attempted"}
+    assert out["aborted_reason"] == "time_budget"
+    assert out["remaining"] == 2
+
+
+def test_not_attempted_is_a_response_code_not_an_embed_reason() -> None:
+    from app.services.ai.providers.embedding_service import EMBED_REASON_CODES
+
+    assert "not_attempted" not in EMBED_REASON_CODES

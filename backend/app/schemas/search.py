@@ -197,6 +197,11 @@ class SpaceInfo(BaseModel):
     modalities: List[str]
     instruction_version: str
 
+    @classmethod
+    def from_row(cls, row: Dict[str, Any]) -> "SpaceInfo":
+        """From an ``embedding_spaces`` row dict (int id, extra columns)."""
+        return cls(**{**{k: row[k] for k in cls.model_fields}, "id": str(row["id"])})
+
 
 class LayerStatus(BaseModel):
     """Coverage of one retrieval layer for the caller, in the current space."""

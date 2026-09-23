@@ -46,7 +46,31 @@ class EmbeddingCapabilities:
     instruction_style: str
 
 
-def _engine(native_dims: int) -> EmbeddingCapabilities:
+def _engine_text(native_dims: int) -> EmbeddingCapabilities:
+    """What nous-engine models accept TODAY: text over the plain OpenAI
+    ``/v1/embeddings`` (flat string input, no ``dimensions``) — the wire shape
+    they were called with before this table existed."""
+    return EmbeddingCapabilities(
+        protocol=PROTOCOL_OPENAI_TEXT,
+        modalities=_TEXT,
+        native_dims=native_dims,
+        matryoshka_dims=(),
+        max_video_frames=0,
+        instruction_style="prefix",
+    )
+
+
+def engine_multimodal_capabilities(native_dims: int) -> EmbeddingCapabilities:
+    """What nous-engine models will accept once its multimodal
+    ``/v1/embeddings`` ships (grouped content-part input + ``dimensions``;
+    docs/superpowers/specs/2026-09-16-nous-engine-multimodal-embedding-request.md).
+
+    NOT in ``_TABLE`` yet: that endpoint is not live, and sending the grouped
+    shape to today's engine turns every WeMM-configured caller into
+    provider_error. When it ships, swap ``_engine_text`` for this in the
+    ``wemm-*`` / ``qwen3-vl-*`` rows. The payload builder
+    (``build_openai_multimodal_payload``) and the service's dispatch branch
+    already exist and are tested through this factory."""
     return EmbeddingCapabilities(
         protocol=PROTOCOL_OPENAI_MULTIMODAL,
         modalities=_ALL,
@@ -67,15 +91,17 @@ _DOUBAO_VISION = EmbeddingCapabilities(
 )
 
 # (lowercase model-id prefix, capabilities); longest prefix wins.
+# Engine rows are text-only until the multimodal endpoint ships — see
+# engine_multimodal_capabilities.
 _TABLE: tuple[tuple[str, EmbeddingCapabilities], ...] = (
     ("doubao-embedding-vision", _DOUBAO_VISION),
-    ("wemm-embedding-2b", _engine(2048)),
-    ("wemm-embedding-4b", _engine(2560)),
-    ("wemm-embedding-9b", _engine(4096)),
-    ("wemm-embedding", _engine(2048)),
-    ("qwen3-vl-embedding-2b", _engine(2048)),
-    ("qwen3-vl-embedding-8b", _engine(4096)),
-    ("qwen3-vl-embedding", _engine(2048)),
+    ("wemm-embedding-2b", _engine_text(2048)),
+    ("wemm-embedding-4b", _engine_text(2560)),
+    ("wemm-embedding-9b", _engine_text(4096)),
+    ("wemm-embedding", _engine_text(2048)),
+    ("qwen3-vl-embedding-2b", _engine_text(2048)),
+    ("qwen3-vl-embedding-8b", _engine_text(4096)),
+    ("qwen3-vl-embedding", _engine_text(2048)),
 )
 
 
@@ -100,4 +126,5 @@ __all__ = [
     "PROTOCOL_OPENAI_MULTIMODAL",
     "PROTOCOL_OPENAI_TEXT",
     "capabilities_for",
+    "engine_multimodal_capabilities",
 ]

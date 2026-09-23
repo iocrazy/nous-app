@@ -193,6 +193,7 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 - 长视频（>1 h）按封顶 600 镜头会丢细节；封顶值随体量再调。
 - 精排 provider 缺失时只有向量分数排序，不做本地兜底重排。
 - 空间并存期间存储翻倍，未做自动清理。
+- `source_hash` 变化（文档版本 bump 或输入变动）目前不会触发重嵌：回填只挑「当前空间里没有行」的资源；hash 只在 `analyze_l1` 重跑（upsert 覆盖）与同一次回填内幂等两处生效。「hash 过期即重嵌」留给下一版。
 
 ## 附录 A：基准数据（2026-09-15/16）
 
