@@ -237,7 +237,7 @@ export function MemorySettings() {
           <>
             <Row
               label="Platform model"
-              hint="Pick an LLM from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+              hint="Pick an LLM from the Nous catalog (provider + key come from it), or Custom to enter a provider manually."
             >
               <Select
                 value={matched ? matched.name : '__custom__'}
@@ -316,7 +316,7 @@ export function MemorySettings() {
           <>
             <Row
               label="Platform model"
-              hint="Pick an embedding model from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+              hint="Pick an embedding model from the Nous catalog (provider + key come from it), or Custom to enter a provider manually."
             >
               <Select
                 value={matched ? matched.name : '__custom__'}
@@ -445,7 +445,7 @@ export function MemorySettings() {
       <SectionHeader
         icon={<IconRobot />}
         title="Honcho (L2) connection"
-        subtitle="How MediaHub reaches the Honcho service. After saving, click L2 Reload above to apply. (Honcho's own embedding/LLM live in its container — env-managed on the NAS.)"
+        subtitle="How Nous reaches the Honcho service. After saving, click L2 Reload above to apply. (Honcho's own embedding/LLM live in its container — env-managed on the NAS.)"
       />
       <Row label="Enabled" hint="Master toggle for the L2 user-model layer.">
         <Switch checked={hcEnabled} onChange={setHcEnabled} disabled={updateHoncho.isPending} />

@@ -337,11 +337,11 @@ export function AIGovernance() {
       {/* ── Nous master control ─────────────────────────────────────────── */}
       <SectionHeader
         icon={<IconThunderbolt />}
-        title="MediaHub Platform (user-side)"
+        title="Nous Platform (user-side)"
         subtitle="Whether users may select platform-provided models at all."
       />
       <Row
-        label="Enable MediaHub models for users"
+        label="Enable Nous models for users"
         hint="Master switch. OFF ⇒ no platform models surface anywhere. Default OFF — turn on only when you accept platform-key cost exposure."
       >
         <Switch
@@ -364,7 +364,7 @@ export function AIGovernance() {
           disabled={updateMutation.isPending}
         />
       </Row>
-      {/* "Allow MediaHub models (chat)" removed — chat resolves its model via
+      {/* "Allow Nous models (chat)" removed — chat resolves its model via
           get_adapter_for_user, never resolve_nous_model("chat"), so the toggle
           had no effect. */}
 
@@ -421,7 +421,7 @@ export function AIGovernance() {
                     disabled={updateMutation.isPending}
                   />
                 </Row>
-                <Row label="Allow MediaHub models" hint="Only effective when the master switch is on.">
+                <Row label="Allow Nous models" hint="Only effective when the master switch is on.">
                   <Switch
                     checked={m.nous_allowed}
                     onChange={(checked) => setTaskField(key, 'nous_allowed', checked)}
@@ -444,7 +444,7 @@ export function AIGovernance() {
                   <Divider style={{ margin: 0 }} />
                   <Row
                     label="Platform model"
-                    hint="Pick a model from the MediaHub catalog (provider + key come from it), or Custom to enter a provider manually."
+                    hint="Pick a model from the Nous catalog (provider + key come from it), or Custom to enter a provider manually."
                   >
                     <Select
                       value={usingCatalog ? m.model : '__custom__'}
