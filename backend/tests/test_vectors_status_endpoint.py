@@ -87,7 +87,11 @@ async def test_ok_reports_space_and_coverage(monkeypatch):
     resp = await search_router.vectors_status(_AUTH)
     body = resp.model_dump()
     assert body["status"] == "ok"
-    assert body["space"] == {k: v for k, v in _SPACE.items() if k != "created_at"}
+    # Snowflake id goes out as a string (JS precision past 2^53).
+    assert body["space"] == {
+        **{k: v for k, v in _SPACE.items() if k != "created_at"},
+        "id": str(_SPACE["id"]),
+    }
     assert body["layers"] == [
         {"layer": "semantic", "status": "ok", "covered": 12, "total": 1409},
         {"layer": "transcript", "status": "not_built", "covered": 0, "total": 1409},

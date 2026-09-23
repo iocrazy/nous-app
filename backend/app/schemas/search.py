@@ -183,9 +183,14 @@ class SearchResponse(BaseModel):
 
 
 class SpaceInfo(BaseModel):
-    """The embedding space vectors are written to and searched in."""
+    """The embedding space vectors are written to and searched in.
 
-    id: int
+    ``id`` is a Snowflake BIGINT serialised as a STRING: JS loses precision
+    past 2^53 (CLAUDE.md "Snowflake BIGINT 精度丢失"), and this id is only
+    ever echoed back, never computed on.
+    """
+
+    id: str
     actual_model: str
     protocol: str
     dims: int
