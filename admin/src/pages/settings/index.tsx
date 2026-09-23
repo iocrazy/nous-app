@@ -12,6 +12,7 @@ import { IconSettings, IconThunderbolt } from '@arco-design/web-react/icon'
 import { useSystemSettings, useUpdateSetting } from '../../api/endpoints/settings'
 import type { SystemSetting } from '../../api/endpoints/settings'
 import { SectionHeader } from './SectionHeader'
+import { AgentCostAnomaly } from './AgentCostAnomaly'
 
 const { Title } = Typography
 
@@ -129,6 +130,8 @@ export function Settings() {
     // the generic SettingRow would just render the mask, so hide it here —
     // manage via PUT /admin/settings/platform-ai-providers instead.
     'platform.',
+    // agent_cost_anomaly.* → dedicated Agent Cost Anomaly card below.
+    'agent_cost_anomaly.',
   ]
   const generic = (settings || []).filter(
     (s) => !HIDDEN_PREFIXES.some((p) => s.key.startsWith(p)),
@@ -191,6 +194,8 @@ export function Settings() {
           </div>
         ))}
       </Card>
+
+      <AgentCostAnomaly />
     </div>
   )
 }
