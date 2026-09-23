@@ -83,11 +83,6 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # side-channel shape as the 1:1 chat compactor above; cost bounded
     # by the compaction threshold, tracked separately from agent runs.
     "services/chat/conversation_memory_service.py": "conversation compaction auxiliary LLM, side-channel",
-    # Wave 5b (B4) session-memory updater: cheap-model maintenance call
-    # for the running session-memory.md document. Off-chat-path,
-    # fire-and-forget — telemetry tracked via session_memory.version
-    # bumps + last_updated_at, not RunRecorder.
-    "services/ai/runner/session_memory_runner.py": "session-memory maintenance auxiliary LLM, fire-and-forget",
     # Agent Memory Phase B (/dream): background consolidation LLM that distils
     # durable agent_memory from recent sessions. Runs in a weekly DBOS
     # scheduled workflow (off the chat path), best-effort — telemetry via the

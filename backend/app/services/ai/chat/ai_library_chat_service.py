@@ -1800,35 +1800,6 @@ class AILibraryChatService:
             add_messages=prior_count + 2,
         )
 
-        # Wave 5b (B4): fire-and-forget session-memory updater. Doesn't
-        # await — we return to the user immediately. The updater itself
-        # handles errors silently (see SessionMemoryService docstring).
-        # All-messages list = full history + new user + new assistant.
-        try:
-            import asyncio as _asyncio
-
-            from app.repositories.session_memory_repository import (
-                get_session_memory_repository,
-            )
-            from app.services.ai.runner.session_memory_runner import (
-                maybe_update_session_memory,
-            )
-
-            full_messages = user_messages + [
-                {"role": "assistant", "content": assistant_content}
-            ]
-            _asyncio.create_task(
-                maybe_update_session_memory(
-                    session_id=str(session_id),
-                    messages=full_messages,
-                    model=model,
-                    repo=get_session_memory_repository(),
-                ),
-                name=f"session-memory-update-{session_id}",
-            )
-        except Exception as sm_exc:
-            logger.warning(f"session_memory dispatch skipped (non-fatal): {sm_exc}")
-
         # Wave F (F8): fire-and-forget commitment harvester. Pre-filter
         # makes ~95% of turns skip without an LLM call. Real persistor
         # writes to agent_commitments via CommitmentRepository.
@@ -1859,14 +1830,14 @@ class AILibraryChatService:
                     # Model-assignment fix (2026-07 audit): the commitment
                     # harvester is a cheap maintenance-tier summarizer, the
                     # same class as the chat compactor (_summarizer above)
-                    # and the session/agent-memory summarizers. Route through
+                    # and the agent-memory summarizers. Route through
                     # the admin-overridable maintenance model
                     # (system_settings.maintenance_llm_model, DB-only per
                     # 铁律 2026-07-07) via resolve_db_adapter — NOT a hardcoded
                     # QwenAdapter(qwen-turbo). The old hardcode ignored the
                     # admin's maintenance-model choice AND silently no-op'd on
                     # any deployment without a DashScope key (last-mile
-                    # hardcode class; cf. session_memory_runner Audit #17).
+                    # hardcode class).
                     from app.schemas.ai_library import ComposedSystemPrompt
                     from app.services.ai.providers.ai_provider_helpers import (
                         get_maintenance_model,

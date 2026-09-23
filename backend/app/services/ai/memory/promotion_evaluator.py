@@ -22,7 +22,8 @@ async def default_promotion_evaluator(prompt: str, model: str = "") -> str:
     """Governed LLM call for the promotion classification/scrub step.
 
     Routes through ``model`` via the adapter factory (the same convention
-    as the consolidator's default_consolidator and session_memory_runner),
+    as the consolidator's default_consolidator and the retired
+    session_memory_runner),
     falling back to a cheap Qwen tier when the model is empty or its prefix
     is unrecognised by the factory.
 

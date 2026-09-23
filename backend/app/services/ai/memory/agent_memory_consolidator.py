@@ -1,7 +1,7 @@
 """Governed LLM call for agent-memory consolidation (Phase B).
 
-Mirrors session_memory_runner._default_summarizer: routes through the
-adapter factory using the global platform settings, with a cheap Qwen
+Mirrors the retired session_memory_runner._default_summarizer: routes
+through the adapter factory using the global platform settings, with a cheap Qwen
 tier as fallback. Returns "" on any error (best-effort, never raises).
 """
 
@@ -20,9 +20,9 @@ async def default_consolidator(prompt: str, model: str = "") -> str:
     """Governed LLM call for the /dream consolidation step.
 
     Routes through ``model`` via the adapter factory (the same convention
-    as the chat compactor's summarizer and session_memory_runner), falling
-    back to a cheap Qwen tier when the model is empty or its prefix is
-    unrecognised by the factory.
+    as the chat compactor's summarizer and the retired
+    session_memory_runner), falling back to a cheap Qwen tier when the
+    model is empty or its prefix is unrecognised by the factory.
 
     Returns "" on any error — consolidation is best-effort and must never
     break the caller.

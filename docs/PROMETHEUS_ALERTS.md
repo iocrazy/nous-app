@@ -127,7 +127,7 @@ Group the counters in /metrics into 5 dashboards:
 1. **Chat Throughput** — `streaming_started`, `streaming_aborted_mid`,
    `chat_mcp_registry_built`
 2. **Tool Surface** — `mcp_tool_call*`, `tool_cache_hit`, `loop_guard_*`
-3. **Memory Lifecycle** — `memory_*`, `commitment_*`, `session_memory_*`
+3. **Memory Lifecycle** — `memory_*`, `commitment_*`
 4. **Cost Discipline** — `output_budget_tightened`, `compaction_triggered`
 5. **Boundary** — `dispatch_gate_*`, `hook_aborted_run`,
    `link_injection_*`

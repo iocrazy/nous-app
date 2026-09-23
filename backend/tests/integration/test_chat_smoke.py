@@ -6,8 +6,7 @@ Goal: prove the full chain fires once a chat turn completes —
     agent runner runs through composer + adapter →
       assistant message persisted →
         session counters bumped →
-          commitment harvester dispatched (background task) →
-          session_memory updater dispatched (background task)
+          commitment harvester dispatched (background task)
 
 We mock at three boundaries:
   1. The MessageStore (a hand-rolled fake injected via the constructor —
@@ -19,8 +18,8 @@ We mock at three boundaries:
 
 What's NOT mocked (this is the integration value):
   - AILibraryChatService.chat itself
-  - Background-task dispatch (asyncio.create_task) for harvest +
-    session memory
+  - Background-task dispatch (asyncio.create_task) for the commitment
+    harvest
   - Order of operations: user msg → assistant msg → session bump →
     side-effect tasks
   - Return shape (assistant_message + run_id + tool_calls +
@@ -249,10 +248,11 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     assert store.bumps[0]["total_tokens"] == 16
     assert store.bumps[0]["message_count"] == 2
 
-    # 3. Background tasks dispatched
-    assert any(
+    # 3. Background tasks dispatched. The session-memory updater was
+    # retired with ai_session_memory (mig 488); it must not come back.
+    assert not any(
         "session-memory-update" in n for n in bg_tasks
-    ), f"session_memory updater not dispatched. bg_tasks={bg_tasks}"
+    ), f"retired session_memory updater dispatched. bg_tasks={bg_tasks}"
     assert any(
         "commitment-harvest" in n for n in bg_tasks
     ), f"commitment harvester not dispatched. bg_tasks={bg_tasks}"
