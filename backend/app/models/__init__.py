@@ -105,6 +105,10 @@ from app.models.distribution import (  # noqa: F401
     PublishTasks,
     SocialAccounts,
 )
+from app.models.embeddings import (  # noqa: F401
+    EmbeddingSpaces,
+    ResourceEmbeddings,
+)
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
@@ -331,6 +335,9 @@ __all__ = [
     "Folders",
     "GalleryItems",
     "CoverTemplateUsage",
+    # embeddings (mig 494)
+    "EmbeddingSpaces",
+    "ResourceEmbeddings",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",

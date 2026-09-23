@@ -34,6 +34,7 @@ Switching the width means changing :data:`EMBEDDING_DIM` here (the four ORM
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence
 
 # Width of every pgvector column (hotspots / topic_groups /
@@ -80,8 +81,31 @@ def spaces_compatible_sql(left: str, right: str) -> str:
     return f"({left} IS NULL OR {right} IS NULL OR {left} = {right})"
 
 
+# Retrieval layers of ``resource_embeddings`` (mig 494). One vector per
+# (resource, layer, space); the CHECK constraint on ``layer`` lists the same
+# two values.
+SEMANTIC_LAYER = "semantic"
+LAYERS: tuple[str, ...] = ("semantic", "transcript")
+
+
+@dataclass(frozen=True)
+class SpaceSpec:
+    """Identity of an embedding space, derived from the resolved embedder
+    (never typed by hand). ``(actual_model, dims)`` is the unique key of
+    ``embedding_spaces``."""
+
+    actual_model: str
+    dims: int
+    protocol: str
+    modalities: tuple[str, ...]
+    instruction_version: str = "en_keyword_v1"
+
+
 __all__ = [
     "EMBEDDING_DIM",
+    "LAYERS",
+    "SEMANTIC_LAYER",
+    "SpaceSpec",
     "EmbeddingDimensionMismatch",
     "ensure_embedding_dim",
     "spaces_compatible_sql",
