@@ -3,7 +3,8 @@
 ``agent_run_events`` was one of the rebuilt dependents; mig 487 dropped it,
 so it is no longer probed here.
 
-Tests that reference tables only present on prod (agent_memories, agent_tasks, agent_commitments, issue_messages) are skipped
+Tests that reference tables only present on prod (agent_memories, agent_tasks,
+agent_commitments, issue_messages) are skipped
 gracefully when those tables are absent from the local dev DB.  On prod
 (INTEGRATION_DATABASE_URL or SUPAVISOR_DATABASE_URL) all tables must exist,
 so the full assertion fires.
