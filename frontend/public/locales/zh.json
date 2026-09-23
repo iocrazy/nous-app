@@ -953,7 +953,28 @@
     "searchPlaceholder": "搜索标题、标签、备注...",
     "searchResultsCount": "搜索到 {{count}} 条结果",
     "searchResultsCountSingular": "搜索到 1 条结果",
-    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。"
+    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。",
+    "vectorSearch": {
+      "layer": "层",
+      "layerAll": "全部",
+      "sort": "排序",
+      "sortSimilarity": "相似度",
+      "sortDate": "日期",
+      "legs": {
+        "text": "文本",
+        "semantic": "语义",
+        "visual": "画面",
+        "camera": "镜头",
+        "transcript": "转录"
+      },
+      "badgeTitle": "标题",
+      "rerankOn": "重排已开",
+      "rerankOff": "重排未开",
+      "hitsLine": "{{count}} 条命中 · 每个视频取最佳匹配 · {{ms}} ms",
+      "hitsLineNoTime": "{{count}} 条命中 · 每个视频取最佳匹配",
+      "notBuilt": "未建立",
+      "arrivesWithPr3": "PR 3 提供"
+    }
   },
   "search": {
     "aiPlaceholder": "AI 搜索... ↵",

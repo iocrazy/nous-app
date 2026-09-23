@@ -6,6 +6,36 @@ import { apiClient } from './apiClient';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
+
+/** Retrieval layer a hit came from. Only `text` and `semantic` are built
+ *  today; `visual` / `camera` arrive with shot indexing, `transcript` with
+ *  its own phase. A result without `layer` (backend predating vector spaces)
+ *  is a `text` hit. */
+export type HitLayer = 'text' | 'semantic' | 'visual' | 'camera' | 'transcript';
+
+/** Outcome of the hybrid search's vector leg — mirrors the backend's
+ *  `VECTOR_LEG_OUTCOMES`. Anything but `ok` means the vector leg did not
+ *  contribute, even though the response otherwise looks identical. */
+export type VectorLegOutcome =
+  | 'ok'
+  | 'unconfigured'
+  | 'embed_failed'
+  | 'dimension_mismatch'
+  | 'timeout'
+  | 'unavailable'
+  | 'error'
+  | 'store_missing'
+  | 'skipped_filters'
+  | 'skipped_full_page'
+  | 'skipped_no_scope'
+  | 'skipped_no_query';
+
+/** What a card / detail panel needs to show why an item matched. */
+export interface SearchHit {
+  layer: HitLayer;
+  score: number;
+}
+
 export interface SearchResultItem {
   media_id: number;
   platform_id: string;
@@ -17,6 +47,9 @@ export interface SearchResultItem {
   tags: string[];
   view_count: number;
   created_at: string;
+  /** Layer of the best match for this video. Optional: absent on backends
+   *  that predate vector spaces. */
+  layer?: HitLayer;
 }
 
 // Type alias for backwards compatibility
@@ -33,6 +66,12 @@ export interface SearchResponse {
   query: string;
   search_type: string;
   processing_time_ms?: number;
+  /** Hybrid only. Absent / null on other search types. */
+  vector_leg?: VectorLegOutcome | null;
+  /** Hybrid only: hit count per layer. Absent on backends that predate
+   *  vector spaces — the UI draws no legs row at all in that case. */
+  legs?: Partial<Record<HitLayer, number>> | null;
+  reranked?: boolean;
 }
 
 export interface HybridSearchFilters {

@@ -6,6 +6,22 @@ import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { pickCoverFrame } from '../utils/coverSource';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
+import type { HitLayer, SearchHit } from '../services/searchService';
+
+/** Badge wording per hit layer. A text hit is a title/metadata match, so it
+ *  reads "Title" rather than the leg name. */
+const HIT_BADGE_LABELS: Record<HitLayer, { key: string; fallback: string }> = {
+  text: { key: 'library.vectorSearch.badgeTitle', fallback: 'Title' },
+  semantic: { key: 'library.vectorSearch.legs.semantic', fallback: 'Semantic' },
+  visual: { key: 'library.vectorSearch.legs.visual', fallback: 'Visual' },
+  camera: { key: 'library.vectorSearch.legs.camera', fallback: 'Camera' },
+  transcript: { key: 'library.vectorSearch.legs.transcript', fallback: 'Transcript' },
+};
+
+/** Similarity as a bar width in percent, clamped to [0, 100]. */
+const similarityPercent = (score: number): number =>
+  Math.round(Math.min(1, Math.max(0, Number.isFinite(score) ? score : 0)) * 100);
 
 const getPlatformLabel = (platform?: string): string => {
   if (!platform) return '';
@@ -40,6 +56,9 @@ interface CompactMediaCardProps {
    *  whose `resolution` the server did not record. See ResourceCard for the
    *  same contract and utils/justifiedLayout.ts for the re-layout ripple. */
   onThumbnailAspect?: (aspect: number) => void;
+  /** Search hit that surfaced this card. Only passed while a search that
+   *  tags hits with a layer is active; omitted, the card is unchanged. */
+  hit?: SearchHit;
 }
 
 // Helper to get AI status icon styling
@@ -72,8 +91,9 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId, aiStatus, aspectRatio, onThumbnailAspect }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId, aiStatus, aspectRatio, onThumbnailAspect, hit }) => {
   const { mediaToken } = useAuth();
+  const { t } = useTranslation();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -351,6 +371,17 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
                 {currentImageIndex + 1}/{images.length}
               </div>
             )}
+            {hit && (
+              <div
+                data-testid="hit-badge"
+                className="rounded px-1 text-[10px] bg-black/60 text-white whitespace-nowrap"
+              >
+                {t(HIT_BADGE_LABELS[hit.layer]?.key ?? HIT_BADGE_LABELS.text.key,
+                  HIT_BADGE_LABELS[hit.layer]?.fallback ?? HIT_BADGE_LABELS.text.fallback)}
+                {' · '}
+                {hit.score.toFixed(2)}
+              </div>
+            )}
           </div>
         )}
 
@@ -377,6 +408,17 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
           </div>
         )}
       </div>
+
+      {/* Similarity bar — search hits only, 3px under the cover. */}
+      {hit && (
+        <div className="h-[3px] w-full bg-line" aria-hidden="true">
+          <div
+            data-testid="similarity-bar"
+            className="h-full bg-ok"
+            style={{ width: `${similarityPercent(hit.score)}%` }}
+          />
+        </div>
+      )}
 
       {/* Info & Actions Section - Handles Detail View */}
       <div

@@ -45,6 +45,20 @@ const JUSTIFIED_GAP = 12;
  * wide items in the SAME row rather than by growing the row.
  */
 const JUSTIFIED_MIN_CARD_WIDTH = 190;
+
+/** Response-level summary of a vector search, kept for the legs chips. */
+interface SearchHitMeta {
+  legs: NonNullable<SearchResponse['legs']>;
+  vectorLeg: SearchResponse['vector_leg'];
+  reranked: boolean;
+  processingMs?: number;
+}
+
+/** created_at as epoch ms; unparseable / missing sorts last. */
+const createdAtMs = (iso?: string | null): number => {
+  const ms = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(ms) ? 0 : ms;
+};
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -69,7 +83,14 @@ import {
   localSearch,
   textSearch,
   type SearchField,
+  type SearchHit,
+  type SearchResponse,
 } from '../services/searchService';
+import {
+  SearchLegsChips,
+  type HitLayerFilter,
+  type HitSort,
+} from './DownloadsView/SearchLegsChips';
 import { toSearchChipFilters } from '../services/searchChipFilters';
 import {
   SearchScopePicker,
@@ -220,6 +241,23 @@ export const DownloadsView: React.FC = () => {
   const [searchError, setSearchError] = useState(false);
   /** True when the last search ran in a mode the filter chips cannot reach. */
   const [chipsIgnoredByMode, setChipsIgnoredByMode] = useState(false);
+  // ─── Vector search hits ───────────────────────────────
+  // Only filled when the response tags hits per retrieval layer (`legs` on the
+  // response = backend with vector spaces). Older backends and plain text
+  // search leave these empty, and every increment below keys off that, so
+  // the UI degrades without a trace. Not part of the restore point: a
+  // refresh or a return from the detail page drops them.
+  /** Why each hit matched, keyed by platform_id. */
+  const [searchHitMap, setSearchHitMap] = useState<Map<string, SearchHit>>(() => new Map());
+  const [searchMeta, setSearchMeta] = useState<SearchHitMeta | null>(null);
+  const [hitLayerFilter, setHitLayerFilter] = useState<HitLayerFilter>('all');
+  const [hitSort, setHitSort] = useState<HitSort>('similarity');
+  const resetSearchHits = useCallback(() => {
+    setSearchHitMap(new Map());
+    setSearchMeta(null);
+    setHitLayerFilter('all');
+    setHitSort('similarity');
+  }, []);
 
   // ─── Resource data ───────────────────────────────────
   // Need media_ids from the paginated library AND from the active search
@@ -362,11 +400,20 @@ export const DownloadsView: React.FC = () => {
       const libraryByPlatformId = new Map(
         library.map((v) => [v.platform_id, v]),
       );
-      return searchResults
-        .slice()
-        .sort(
-          (a, b) =>
-            (b.similarity_score || 0) - (a.similarity_score || 0),
+      // Layer / Sort only exist while hits are tagged (see searchHitMap).
+      const hitsTagged = searchHitMap.size > 0;
+      const byLayer =
+        hitsTagged && hitLayerFilter !== 'all'
+          ? searchResults.filter(
+              (r) => searchHitMap.get(r.platform_id)?.layer === hitLayerFilter,
+            )
+          : searchResults.slice();
+      const byDate = hitsTagged && hitSort === 'date';
+      return byLayer
+        .sort((a, b) =>
+          byDate
+            ? createdAtMs(b.created_at) - createdAtMs(a.created_at)
+            : (b.similarity_score || 0) - (a.similarity_score || 0),
         )
         .map((r): Video => {
           const existing = libraryByPlatformId.get(r.platform_id);
@@ -405,6 +452,9 @@ export const DownloadsView: React.FC = () => {
     isSearchActive,
     searchResults,
     searchVideoMap,
+    searchHitMap,
+    hitLayerFilter,
+    hitSort,
     searchQuery,
     searchScope,
     tagSearchMap,
@@ -458,7 +508,32 @@ export const DownloadsView: React.FC = () => {
     setIsSearchActive(false);
     setSearchResults([]);
     setSearchVideoMap({});
+    resetSearchHits();
     setSearchQuery(query);
+  }, [resetSearchHits]);
+
+  /** Record per-hit layers and the legs summary — only when the response
+   *  carries `legs`; otherwise clear them so no stale badge survives. */
+  const applySearchHits = useCallback((response: SearchResponse) => {
+    if (!response.legs) {
+      setSearchHitMap(new Map());
+      setSearchMeta(null);
+      return;
+    }
+    setSearchHitMap(
+      new Map(
+        response.results.map((r) => [
+          r.platform_id,
+          { layer: r.layer ?? 'text', score: r.similarity_score },
+        ]),
+      ),
+    );
+    setSearchMeta({
+      legs: response.legs,
+      vectorLeg: response.vector_leg ?? null,
+      reranked: response.reranked ?? false,
+      processingMs: response.processing_time_ms,
+    });
   }, []);
 
   const handleAISearch = useCallback(async (query: string, mode: 'hybrid' | 'semantic' | 'text' = 'text') => {
@@ -492,28 +567,32 @@ export const DownloadsView: React.FC = () => {
         if (typeof pid === 'string') hydrated[pid] = v as unknown as Video;
       }
       setSearchVideoMap(hydrated);
+      applySearchHits(response);
       setIsSearchActive(true);
       setSearchQueryText(query);
     } catch (error) {
       console.error('AI search failed:', error);
       const fallback = localSearch(query, library as any, 20);
       setSearchResults(fallback.results as any);
+      setSearchHitMap(new Map());
+      setSearchMeta(null);
       setIsSearchActive(true);
       setSearchQueryText(query);
     } finally {
       setIsAISearching(false);
     }
-  }, [library, searchScope]);
+  }, [library, searchScope, applySearchHits]);
 
   const handleSearchClear = useCallback(() => {
     setChipsIgnoredByMode(false);
     setSearchError(false);
     setSearchResults([]);
     setSearchVideoMap({});
+    resetSearchHits();
     setIsSearchActive(false);
     setSearchQueryText('');
     setSearchQuery('');
-  }, []);
+  }, [resetSearchHits]);
 
   // Quick Search auto-promotion: when the user types in keyword mode the
   // local filter only sees the paginated slice that's been loaded so far
@@ -554,6 +633,10 @@ export const DownloadsView: React.FC = () => {
           if (typeof pid === 'string') hydrated[pid] = v as unknown as Video;
         }
         setSearchVideoMap(hydrated);
+        // Plain text results replace whatever was on screen — drop any
+        // vector-search badges that belonged to the previous result set.
+        setSearchHitMap(new Map());
+        setSearchMeta(null);
         setIsSearchActive(true);
         setSearchQueryText(trimmed);
       } catch (err) {
@@ -574,6 +657,23 @@ export const DownloadsView: React.FC = () => {
   }, [searchQuery, searchScope, libraryFilterParamsKey]);
 
   const hasActiveQuery = isSearchActive || searchQuery.trim().length > 0;
+
+  // Layer / Sort / legs chips — only for a search whose response tagged hits
+  // per layer. Everything else (text search, older backend) renders nothing.
+  const searchLegsChips =
+    isSearchActive && searchMeta?.legs ? (
+      <SearchLegsChips
+        legs={searchMeta.legs}
+        vectorLeg={searchMeta.vectorLeg}
+        reranked={searchMeta.reranked}
+        layer={hitLayerFilter}
+        onLayerChange={setHitLayerFilter}
+        sort={hitSort}
+        onSortChange={setHitSort}
+        hits={filteredLibrary.length}
+        processingMs={searchMeta.processingMs}
+      />
+    ) : null;
 
   // ─── Selection state ───────────────────────────────────
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -1303,8 +1403,12 @@ export const DownloadsView: React.FC = () => {
             config={filterBarConfig}
             allTags={allTags}
             availablePlatforms={availablePlatforms}
+            trailing={searchLegsChips}
           />
         )}
+        {/* Filter bar hidden: the search increment still has to be visible
+            after a vector search, so it takes the bar's place on its own. */}
+        {!isFilterBarVisible && searchLegsChips}
       </div>
 
       {/* Mobile filter chip bar (Pixcall-style) — desktop keeps the FilterBar */}
@@ -1447,6 +1551,7 @@ export const DownloadsView: React.FC = () => {
                             resourceId={resourceIdMap[item.id]}
                             aiStatus={aiStatusMap[item.id]}
                             aspectRatio={width / row.height}
+                            hit={isSearchActive ? searchHitMap.get(item.platform_id) : undefined}
                             onThumbnailAspect={
                               needsAspectMeasurement(item)
                                 ? (measuredAr) => {
@@ -1487,6 +1592,7 @@ export const DownloadsView: React.FC = () => {
                       data={item}
                       resourceId={resourceIdMap[item.id]}
                       aiStatus={aiStatusMap[item.id]}
+                      hit={isSearchActive ? searchHitMap.get(item.platform_id) : undefined}
                       onClick={(e) => handleVideoClick(item, e)}
                       onDoubleClick={() => handleVideoDoubleClick(item)}
                       onContextMenu={handleContextMenu}

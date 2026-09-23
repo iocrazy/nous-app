@@ -953,7 +953,28 @@
     "searchPlaceholder": "Search title, tags, notes...",
     "searchResultsCount": "Found {{count}} matching items",
     "searchResultsCountSingular": "Found 1 matching item",
-    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters."
+    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters.",
+    "vectorSearch": {
+      "layer": "Layer",
+      "layerAll": "All",
+      "sort": "Sort",
+      "sortSimilarity": "Similarity",
+      "sortDate": "Date",
+      "legs": {
+        "text": "Text",
+        "semantic": "Semantic",
+        "visual": "Visual",
+        "camera": "Camera",
+        "transcript": "Transcript"
+      },
+      "badgeTitle": "Title",
+      "rerankOn": "Rerank On",
+      "rerankOff": "Rerank Off",
+      "hitsLine": "{{count}} hits · best match per video · {{ms}} ms",
+      "hitsLineNoTime": "{{count}} hits · best match per video",
+      "notBuilt": "Not built",
+      "arrivesWithPr3": "Arrives with PR 3"
+    }
   },
   "search": {
     "aiPlaceholder": "AI search... ↵",
