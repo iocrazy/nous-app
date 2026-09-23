@@ -26,8 +26,12 @@ Steps, in order:
    ``CancelHook`` already wired on issue runs stops it at the next step
    boundary with ``stop_reason="cancelled"``.
 2. Release a workflow parked on ``await_user_input``, using the stale-wait
-   reaper's and the fork's recipe: clear the marker, cancel the workflow,
-   release the execution lock.
+   reaper's and the fork's recipe: cancel the workflow, then clear the marker
+   and release the execution lock. This runs in the API process, which has a
+   DBOSClient but no DBOS singleton (defect H, 2026-09-23). If the cancel still
+   fails, the release leaves marker and lock untouched and this step only logs
+   at ERROR: the worker's minute sweeper (``reap_preempted_input_waits``)
+   finishes it.
 3. Disarm the wake-ups the agent armed on the issue (defect B), reason
    ``issue_terminal``. The fire path already drops them lazily; disarming
    now keeps the Schedules block and the pending-wake-ups chip truthful.
@@ -137,7 +141,15 @@ async def _release_if_parked(issue_id: int, row: dict[str, Any]) -> None:
             f"{status!r}, not waiting; nothing to release"
         )
         return
-    await _release_parked_workflow(workflow_id)
+    try:
+        await _release_parked_workflow(workflow_id)
+    except Exception as exc:  # noqa: BLE001 — the marker stays; the reaper retries
+        logger.error(
+            f"[cancel_live_work] issue {issue_id}: release of parked workflow "
+            f"{workflow_id} failed ({exc!r}); marker and lock left for the "
+            "worker reaper"
+        )
+        return
     logger.info(
         f"[cancel_live_work] issue {issue_id}: released parked workflow {workflow_id}"
     )
@@ -194,7 +206,23 @@ async def _load_issue(issue_id: int) -> dict[str, Any] | None:
 
 
 async def _workflow_status(workflow_id: str) -> str | None:
-    """The DBOS status of a workflow, or None when DBOS does not know it."""
+    """The DBOS status of a workflow, or None when DBOS does not know it.
+
+    Client-aware like ``workflows_router._status_read``: the cancel edge runs
+    in the API process, where the singleton read raises
+    ``DBOSException('No DBOS was created yet')``."""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        from dbos._error import DBOSNonExistentWorkflowError
+
+        try:
+            handle = await client.retrieve_workflow_async(workflow_id)
+            status = await handle.get_status()
+        except DBOSNonExistentWorkflowError:
+            return None
+        return status.status
     from dbos import DBOS
 
     status = await DBOS.get_workflow_status_async(workflow_id)

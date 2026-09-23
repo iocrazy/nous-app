@@ -46,6 +46,7 @@ def _quiet(monkeypatch, **over):
         ("recompute_monthly_budgets_step", 0),
         ("expire_orphan_inbox_step", 0),
         ("reconcile_issue_execution_state_step", 0),
+        ("reap_preempted_input_waits_step", 0),
     ):
         monkeypatch.setattr(sw, name, AsyncMock(return_value=value))
     for name, value in over.items():
@@ -96,6 +97,7 @@ STEP_NAMES = {
     "expire_orphan_inbox_step",
     "scan_idle_inbox_step",
     "recompute_monthly_budgets_step",
+    "reap_preempted_input_waits_step",
 }
 
 
@@ -224,6 +226,11 @@ def test_no_step_in_this_module_dispatches_a_workflow():
     # agent_runs 提名候选、再调 ``tree_charge.settle_tree_if_closed`` ——
     # 那条链是 ORM 读写 + PointsService RPC，**不派发任何 workflow**，所以它落在
     # 路线 C 允许的这一侧。下面那段调用名扫描会继续钉住这一点。
+    #
+    # ``reap_preempted_input_waits_step``（hotfix-2 缺陷 H）登记于此：它**取消**
+    # 已 PREEMPT issue 上挂起的 workflow（``DBOS.cancel_workflow_async``，在
+    # step 上下文里只是一次 sys 表写，不记为子 step），再清标记与锁——同样不
+    # 派发任何 workflow。
     assert {s.name for s in steps} == {
         "mark_heartbeat_lost_step",
         "reconcile_issue_execution_state_step",
@@ -231,6 +238,7 @@ def test_no_step_in_this_module_dispatches_a_workflow():
         "scan_idle_inbox_step",
         "recompute_monthly_budgets_step",
         "force_settle_stale_pending_trees_step",
+        "reap_preempted_input_waits_step",
     }
     for step in steps:
         called = {

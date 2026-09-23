@@ -5850,6 +5850,7 @@
       "not_an_issue_run": "Only issue runs can be forked",
       "run_state_unavailable": "Run state unavailable — try again in a moment",
       "dispatch_failed": "Could not start the forked run — the issue was left as it was",
+      "release_failed": "Could not release the parked run — try again",
       "not_found": "Run not found",
       "generic": "Could not fork the run"
     }

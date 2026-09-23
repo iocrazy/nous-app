@@ -169,6 +169,67 @@ async def test_a_failed_release_is_logged_not_raised(runs, release, wf_status):
     assert any("cancel failed" in str(c.args[0]) for c in err.call_args_list)
 
 
+async def test_a_failed_release_is_left_for_the_worker_reaper(runs, release, wf_status):
+    """Hotfix-2 defect H: a release that could not cancel keeps the marker, so
+    the log must say the worker reaper finishes it (not a silent strand)."""
+    release.side_effect = RuntimeError("no DBOS handle")
+    with patch.object(clw.logger, "error") as err:
+        await clw.stop_live_work_for_cancel(7, issue=PARKED)
+    msgs = [str(c.args[0]) for c in err.call_args_list]
+    assert any("no DBOS handle" in m and "reaper" in m for m in msgs), msgs
+
+
+# ── the status read in the API process (defect H) ──────────────────────────
+
+
+class _Status:
+    status = "PENDING"
+
+
+class _Handle:
+    async def get_status(self):
+        return _Status()
+
+
+class _StatusClient:
+    def __init__(self, *, missing=False):
+        self.missing = missing
+        self.asked = []
+
+    async def retrieve_workflow_async(self, workflow_id):
+        self.asked.append(workflow_id)
+        if self.missing:
+            from dbos._error import DBOSNonExistentWorkflowError
+
+            raise DBOSNonExistentWorkflowError("target", workflow_id)
+        return _Handle()
+
+
+def _api_shape(monkeypatch, client):
+    from app.services.infra import dbos_orchestrator as orch
+
+    monkeypatch.setattr(orch, "_dbos", None)
+    monkeypatch.setattr(orch, "_launched", False)
+    monkeypatch.setattr(orch, "_client", client)
+
+
+async def test_status_read_goes_through_the_client_in_the_api_process(monkeypatch):
+    from dbos._error import DBOSException
+
+    client = _StatusClient()
+    _api_shape(monkeypatch, client)
+    boom = AsyncMock(side_effect=DBOSException("No DBOS was created yet"))
+    with patch("dbos.DBOS.get_workflow_status_async", boom):
+        assert await clw._workflow_status(WF) == "PENDING"
+    assert client.asked == [WF]
+    boom.assert_not_awaited()
+
+
+async def test_status_read_of_an_unknown_workflow_is_none(monkeypatch):
+    _api_shape(monkeypatch, _StatusClient(missing=True))
+    assert await clw._workflow_status(WF) is None
+
+
 async def test_marker_stored_as_a_json_string_is_read(runs, release, wf_status):
     row = {**PARKED, "execution_state": json.dumps(PARKED["execution_state"])}
     await clw.stop_live_work_for_cancel(7, issue=row)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -36,10 +37,10 @@ _dbos = None
 # must consult `is_launched()`, never `is_enabled()` (2026-07-22 outage: worker
 # had `_dbos` set + launch failed, and every health probe stayed green).
 _launched = False
-# DBOSClient — gateway-only enqueue handle, set by `init_dbos_client`; None
-# until a later task constructs it on the gateway (dormant for now). Unlike
-# the full DBOS singleton, a client only needs DB connections to enqueue
-# workflows — it never dequeues/executes them.
+# DBOSClient — the gateway's handle, set by `init_dbos_client` (startup, or
+# lazily via `get_or_init_dbos_client`); None in worker / combined. Unlike the
+# full DBOS singleton, a client only opens DB connections (enqueue, send,
+# status, cancel) — it never dequeues/executes workflows.
 _client = None
 _routing_cache: dict[str, str] = {}
 _routing_loaded_at: float = 0.0
@@ -408,21 +409,27 @@ def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
 
 
 def get_dbos_client():
-    """Return the gateway DBOSClient handle (None until `init_dbos_client`
-    constructs it). Dormant for now — nobody constructs it yet."""
+    """Return the gateway DBOSClient handle, or None when this process has none.
+
+    The gateway (``NOUS_ROLE=gateway``, nous-backend) constructs it at startup
+    in ``startup.dbos_init``; worker / combined never do (they own the
+    launched singleton instead)."""
     return _client
 
 
 def init_dbos_client() -> None:
-    """Gateway-only constructor for a dormant DBOSClient enqueue handle.
+    """Construct the gateway DBOSClient (idempotent; no-op when already set).
 
-    Idempotent: if `_client` is already set, returns immediately. Reads the
-    DB url from `DBOS_DATABASE_URL`; if missing, logs a warning and returns
-    (clean no-op — no raise). Otherwise constructs a `DBOSClient` against the
-    same co-located `dbos` schema `init_dbos` uses, so the client enqueues
-    into the same sys tables the worker dequeues from.
-
-    NOT wired anywhere yet — a later task constructs this on the gateway.
+    Reads the DB url from ``DBOS_DATABASE_URL``; if missing, logs a warning and
+    returns (clean no-op, no raise). The system database url is taken from
+    ``_build_dbos_config`` — the SAME source ``init_dbos`` uses — so the client
+    reads and writes the co-located ``dbos`` schema the worker executes from.
+    Never pass the url positionally: that is DBOSClient's deprecated
+    ``database_url`` (an APPLICATION url), from which it derives a separate
+    ``<db>_dbos_sys`` system database that does not exist here ("database
+    postgres_dbos_sys does not exist", seen 2026-09-23). A construction failure
+    is logged at ERROR and leaves ``_client`` None, so a later
+    ``get_or_init_dbos_client`` retries it.
     """
     global _client
     if _client is not None:
@@ -436,16 +443,47 @@ def init_dbos_client() -> None:
     try:
         from dbos import DBOSClient
 
-        # Match init_dbos's co-located schema. The client only opens DB
-        # connections to enqueue; it never runs migrations or dequeues.
+        cfg = _build_dbos_config(db_url, None, 0)
+        # The client only opens DB connections; it never runs migrations or
+        # dequeues.
         _client = DBOSClient(
-            system_database_url=db_url,
+            system_database_url=cfg["system_database_url"],
             dbos_system_schema="dbos",
         )
         logger.info("[dbos] DBOSClient constructed (enqueue-only handle)")
     except Exception as exc:  # noqa: BLE001
         logger.error(f"[dbos] DBOSClient construction failed: {exc!r}")
         _client = None
+
+
+_client_init_lock = threading.Lock()
+
+
+def _is_gateway_role() -> bool:
+    from app.agent_framework.role import ProcessRole, role_from_env
+
+    return role_from_env() == ProcessRole.GATEWAY
+
+
+def get_or_init_dbos_client():
+    """The gateway's DBOSClient, built on first use; None when it cannot be
+    built or this process is not the gateway.
+
+    Only ``ProcessRole.GATEWAY`` may grow a client. ``_dbos is None`` is not
+    enough: a worker whose ``init_dbos`` bailed (no DSN) also has none. A
+    worker / combined process never grows a client, even when its launch
+    failed: a set ``_client`` flips
+    ``start_workflow_routed`` onto the enqueue path and makes ``is_launched()``
+    (and so ``/readyz``) report healthy. Construction connects to the DB, so
+    async callers run this in a thread; the lock keeps it to one client."""
+    if _client is not None:
+        return _client
+    if _dbos is not None or not _is_gateway_role():
+        return None
+    with _client_init_lock:
+        if _client is None:
+            init_dbos_client()
+    return _client
 
 
 def shutdown_dbos_client() -> None:
