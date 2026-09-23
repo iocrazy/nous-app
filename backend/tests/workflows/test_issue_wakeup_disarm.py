@@ -148,9 +148,9 @@ async def test_other_outcomes_leave_wakeups_armed(outcome, content_len):
 
 
 @pytest.mark.asyncio
-async def test_the_default_disarm_is_the_step(monkeypatch):
+async def test_the_default_disarm_is_the_module_helper(monkeypatch):
     step = AsyncMock(return_value=0)
-    monkeypatch.setattr(il, "disarm_agent_wakeups_step", step)
+    monkeypatch.setattr(il, "_disarm_agent_wakeups", step)
     await il.route_finish_outcome(
         7, "completed", None, auto_close=False, set_status=AsyncMock(), content_len=3
     )
@@ -158,7 +158,7 @@ async def test_the_default_disarm_is_the_step(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_step_logs_a_failure_instead_of_failing_the_workflow(monkeypatch):
+async def test_the_helper_logs_a_failure_instead_of_failing_the_workflow(monkeypatch):
     from app.repositories import user_schedules_repository as repo
 
     monkeypatch.setattr(
@@ -166,5 +166,17 @@ async def test_the_step_logs_a_failure_instead_of_failing_the_workflow(monkeypat
     )
     errors: list[str] = []
     monkeypatch.setattr(il.logger, "error", lambda msg, *a, **k: errors.append(msg))
-    assert await il.disarm_agent_wakeups_step(7, "issue_not_active") is None
+    assert await il._disarm_agent_wakeups(7, "issue_not_active") is None
     assert errors and "issue 7" in errors[0]
+
+
+def test_the_disarm_helper_is_not_a_dbos_step():
+    """Not a step, on purpose. Its UPDATE filters on ``enabled`` so a replay
+    is a no-op and needs no checkpoint; and a new step inside the workflow
+    body shifts every later step's recorded sequence number, so a workflow
+    recovered across the deploy would hit a step-name mismatch."""
+    import inspect
+
+    fn = il._disarm_agent_wakeups
+    assert not hasattr(fn, "dbos_function_name")
+    assert inspect.unwrap(fn) is fn

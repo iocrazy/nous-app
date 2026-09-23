@@ -5910,6 +5910,7 @@
     "empty": "No Wake-ups Scheduled",
     "fired": "Fired",
     "issueNotActive": "Stopped: Issue Not Active",
+    "issueTerminal": "Stopped: Issue Closed",
     "paused": "Paused",
     "pausedReason": "Paused: {{reason}}"
   },

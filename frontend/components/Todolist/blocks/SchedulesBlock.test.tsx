@@ -147,6 +147,19 @@ describe('SchedulesBlockView', () => {
     expect(screen.getByTestId('schedule-cancel')).toBeInTheDocument();
   });
 
+  // `issue_terminal`: the issue was cancelled or closed, so the wake-up was
+  // stopped for good (cancel hook, or the firing guard on a done issue).
+  it('a wake-up stopped because the issue is closed says so', async () => {
+    listIssueSchedules.mockResolvedValue([
+      { ...once, enabled: false, pause_reason: 'issue_terminal' },
+    ]);
+    render(<SchedulesBlockView ctx={ctx()} />);
+    const status = await screen.findByTestId('schedule-status');
+    expect(status).toHaveTextContent('Stopped: Issue Closed');
+    expect(status).not.toHaveTextContent('issue_terminal');
+    expect(screen.getByTestId('schedule-cancel')).toBeInTheDocument();
+  });
+
   it('a row paused for another reason says which', async () => {
     listIssueSchedules.mockResolvedValue([
       { ...once, enabled: false, pause_reason: 'budget' },

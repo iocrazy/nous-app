@@ -927,9 +927,14 @@ async def _mark_run_empty_output(run_id: str) -> None:
     )
 
 
-@DBOS.step()
-async def disarm_agent_wakeups_step(issue_id: int, reason: str) -> Optional[int]:
+async def _disarm_agent_wakeups(issue_id: int, reason: str) -> Optional[int]:
     """Disable the wake-ups the agent armed on this issue (defect B).
+
+    Deliberately NOT a ``@DBOS.step`` (same shape as ``_backfill_run_issue_id``):
+    the UPDATE filters on ``enabled``, so re-running it on replay is a no-op and
+    needs no checkpoint; and inserting a step into the workflow body would
+    shift every later step's recorded sequence number, so a workflow recovered
+    across the deploy would fail its step-name check.
 
     Called by ``route_finish_outcome`` when the agent declared ``completed`` or
     was capped on ``continue``: the work is handed to a person, and each agent
@@ -1012,12 +1017,13 @@ async def route_finish_outcome(
     ``liveness_state`` — see ``AgentRunsRepository.mark_empty_output``.
 
     ``completed`` and ``continue`` (capped) also disarm the wake-ups the agent
-    armed on the issue (defect B, ``disarm_agent_wakeups_step``; injectable as
-    ``disarm_wakeups`` for tests). The other outcomes leave them armed: a
-    ``needs_input`` hand-off may legitimately want its check-back, and a
-    no-declaration ``in_review`` is covered by the firing guard.
+    armed on the issue (defect B, ``_disarm_agent_wakeups``; injectable as
+    ``disarm_wakeups`` for tests). The other outcomes (``needs_input``,
+    empty output, no declaration) do not disarm here; when such a wake-up
+    comes due, the firing guard in ``scheduled_master._fire_issue_wakeup``
+    disables it according to the issue's status at that moment.
     """
-    disarm = disarm_wakeups or disarm_agent_wakeups_step
+    disarm = disarm_wakeups or _disarm_agent_wakeups
     if run_id is not None:
         await _backfill_run_issue_id(run_id, issue_id)
 

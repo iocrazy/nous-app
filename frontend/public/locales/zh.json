@@ -5910,6 +5910,7 @@
     "empty": "暂无定时唤醒",
     "fired": "已触发",
     "issueNotActive": "已停止：issue 不在进行中",
+    "issueTerminal": "已停止：issue 已关闭",
     "paused": "已暂停",
     "pausedReason": "已暂停：{{reason}}"
   },
