@@ -1,10 +1,12 @@
-"""Gallery MIME rename, step 1 of 2: accept both, keep writing the legacy value.
+"""Gallery MIME rename, step 2 of 2: accept both, write the new value.
 
 ``resources.mime_type`` is persisted, and migrations and code deploy in no
-guaranteed order, so every read / filter must accept BOTH the legacy
-``application/x-mediahub-gallery`` and the new ``application/x-nous-gallery``
-while writes stay on the legacy spelling until every open bundle accepts
-both (step 2 flips ``GALLERY_MIME_FOR_WRITE`` and migrates rows together).
+guaranteed order, so every read / filter still accepts BOTH the legacy
+``application/x-mediahub-gallery`` and the new ``application/x-nous-gallery``.
+Step 1 (#2388) shipped the accept-both reads everywhere; step 2 flips
+``GALLERY_MIME_FOR_WRITE`` to the new spelling in the same PR as the migration
+that rewrites existing rows (mig 488). A later cleanup drops the legacy value
+from ``GALLERY_MIMES``.
 """
 
 from __future__ import annotations
@@ -39,9 +41,9 @@ def test_constants_spell_new_and_legacy() -> None:
     assert LEGACY_GALLERY_MIME == OLD
 
 
-def test_step1_still_writes_the_legacy_mime() -> None:
-    # Step 2 flips this to GALLERY_MIME in the same PR as the row migration.
-    assert GALLERY_MIME_FOR_WRITE == OLD
+def test_step2_writes_the_new_mime() -> None:
+    # Flipped together with mig 488, which rewrites the existing rows.
+    assert GALLERY_MIME_FOR_WRITE == GALLERY_MIME == NEW
 
 
 def test_accept_set_holds_both_values() -> None:
@@ -171,7 +173,7 @@ async def _allow(*_a: Any, **_k: Any) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_create_gallery_writes_legacy_mime_in_step1(
+async def test_create_gallery_writes_the_new_mime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _FakeRepo()
@@ -180,7 +182,7 @@ async def test_create_gallery_writes_legacy_mime_in_step1(
     await router_mod.create_gallery(
         auth=_AUTH, scope_id="1", filename="My Gallery", folder_id=None
     )
-    assert repo.created[0]["mime_type"] == GALLERY_MIME_FOR_WRITE == OLD
+    assert repo.created[0]["mime_type"] == GALLERY_MIME_FOR_WRITE == NEW
 
 
 @pytest.mark.asyncio
