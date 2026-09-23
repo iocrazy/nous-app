@@ -37,6 +37,50 @@ pytestmark = [
     ),
 ]
 
+# ``set_status`` writes as ``SET LOCAL ROLE service_role``. On a Supabase
+# instance that role carries platform grants and BYPASSRLS; on the
+# schema-drift database (``supabase/ci_bootstrap.sql``) it is a bare NOLOGIN
+# role with neither, so every write here is ``permission denied``. Give it the
+# prod-shaped rights only where they are missing, and take back exactly what
+# this module added.
+_SERVICE_ROLE_PRIVS = ("SELECT", "UPDATE", "DELETE")
+
+
+async def _missing_service_role_rights() -> tuple[list[str], bool]:
+    missing = []
+    for priv in _SERVICE_ROLE_PRIVS:
+        row = await db_engine.fetch_one(
+            "SELECT has_table_privilege('service_role', 'public.issues', :p) AS ok",
+            {"p": priv},
+        )
+        if not (row or {}).get("ok"):
+            missing.append(priv)
+    role = await db_engine.fetch_one(
+        "SELECT rolbypassrls FROM pg_roles WHERE rolname = 'service_role'"
+    )
+    return missing, not (role or {}).get("rolbypassrls")
+
+
+@pytest.fixture(scope="module", autouse=True)
+async def _service_role_is_prod_shaped():
+    missing, needs_bypass = await _missing_service_role_rights()
+    if missing:
+        await db_engine.execute(
+            f"GRANT {', '.join(missing)} ON public.issues TO service_role"
+        )
+    if needs_bypass:
+        await db_engine.execute("ALTER ROLE service_role BYPASSRLS")
+    try:
+        yield
+    finally:
+        if needs_bypass:
+            await db_engine.execute("ALTER ROLE service_role NOBYPASSRLS")
+        if missing:
+            await db_engine.execute(
+                f"REVOKE {', '.join(missing)} ON public.issues FROM service_role"
+            )
+
+
 # Every key the OTHER writers own. If any of these goes missing after a
 # set_status call, the merge contract is broken.
 #   awaiting_input          → input_gate.mark_awaiting_input
@@ -61,14 +105,25 @@ SEED_STATE = {
 }
 
 
-async def _seed_issue() -> int:
-    """Create a throwaway issue carrying every key, return its id."""
+async def _borrow_creator() -> dict[str, Any]:
+    """A valid creator for the FK. Borrow one from an existing issue; on an
+    empty schema (the drift DB has users but no issues) fall back to any
+    ``auth.users`` row rather than skipping the whole file."""
     owner = await db_engine.fetch_one(
         "SELECT created_by_user_id, created_by_agent_id, team_id, project_id "
         "FROM public.issues WHERE created_by_user_id IS NOT NULL LIMIT 1"
     )
-    if not owner:
-        pytest.skip("no existing issue to borrow a valid creator from")
+    if owner:
+        return dict(owner)
+    user = await db_engine.fetch_one("SELECT id FROM auth.users LIMIT 1")
+    if not user:
+        pytest.skip("no issue or auth.users row to borrow a valid creator from")
+    return {"created_by_user_id": user["id"], "team_id": None, "project_id": None}
+
+
+async def _seed_issue(status: str = "blocked", *, cancelled: bool = False) -> int:
+    """Create a throwaway issue carrying every key, return its id."""
+    owner = await _borrow_creator()
 
     suffix = uuid.uuid4().hex[:8]
     # execute_returning_val, not fetch_one: fetch_* run on engine.connect()
@@ -78,20 +133,23 @@ async def _seed_issue() -> int:
         """
         INSERT INTO public.issues
             (issue_number, identifier, title, status, execution_state,
-             created_by_user_id, team_id, project_id)
+             created_by_user_id, team_id, project_id, cancelled_at)
         VALUES
-            (:num, :ident, :title, 'blocked', CAST(:state AS jsonb),
-             :uid, :team, :project)
+            (:num, :ident, :title, :status, CAST(:state AS jsonb),
+             :uid, :team, :project,
+             CASE WHEN :cancelled THEN now() ELSE NULL END)
         RETURNING id
         """,
         {
             "num": 900000 + (int(suffix, 16) % 90000),
             "ident": f"TEST-{suffix.upper()}",
             "title": "Execution state key preservation probe",
+            "status": status,
             "state": json.dumps(SEED_STATE),
             "uid": owner["created_by_user_id"],
             "team": owner.get("team_id"),
             "project": owner.get("project_id"),
+            "cancelled": cancelled,
         },
     )
     return int(issue_id)
@@ -191,3 +249,59 @@ async def test_needs_input_marker_survives_the_full_park_and_resume_cycle(issue_
     state = await _state(issue_id)
     assert state["awaiting_input"] == FOREIGN_KEYS["awaiting_input"]
     assert state["agent_outcome"] == "needs_input"
+
+
+async def _row(issue_id: int) -> dict[str, Any]:
+    row = await db_engine.fetch_one(
+        "SELECT status, cancelled_at, execution_state FROM public.issues "
+        "WHERE id = :id",
+        {"id": issue_id},
+    )
+    return dict(row)
+
+
+@pytest.fixture
+async def cancelled_issue_id():
+    iid = await _seed_issue("cancelled", cancelled=True)
+    try:
+        yield iid
+    finally:
+        await _drop_issue(iid)
+
+
+@pytest.fixture
+async def running_issue_id():
+    iid = await _seed_issue("in_progress")
+    try:
+        yield iid
+    finally:
+        await _drop_issue(iid)
+
+
+async def test_finish_does_not_overwrite_a_cancelled_issue(cancelled_issue_id):
+    """Defect C (S4): the run's own finish landed ``in_review`` over the
+    user's cancel. A lifecycle write never replaces a terminal status."""
+    from app.workflows.issue_lifecycle import set_status
+
+    before = await _row(cancelled_issue_id)
+    wrote = await set_status(cancelled_issue_id, "in_review", agent_outcome="completed")
+
+    after = await _row(cancelled_issue_id)
+    assert after["status"] == "cancelled"
+    assert after["cancelled_at"] == before["cancelled_at"]
+    assert wrote is False
+    assert "agent_outcome" not in (
+        json.loads(after["execution_state"])
+        if isinstance(after["execution_state"], str)
+        else after["execution_state"]
+    )
+
+
+async def test_finish_still_lands_on_a_running_issue(running_issue_id):
+    """Positive control: the guard only refuses terminal rows."""
+    from app.workflows.issue_lifecycle import set_status
+
+    wrote = await set_status(running_issue_id, "in_review", agent_outcome="completed")
+
+    assert (await _row(running_issue_id))["status"] == "in_review"
+    assert wrote is True

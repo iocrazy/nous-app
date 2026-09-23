@@ -709,6 +709,26 @@ async def test_request_cancel_no_match_returns_false(
     assert await _repo().request_cancel(str(run2["id"]), user_id=uuid.uuid4()) is False
 
 
+async def test_request_cancel_without_owner_is_target_authorised(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """Defect C (2026-09-23): cancelling an issue flags its root run with no
+    ``user_id`` (authorised at the issue, like ``request_pause``). Running →
+    flipped and committed; completed → still refused."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        run = await _insert_run(conn, agent_id, user_id)
+        done = await _insert_run(conn, agent_id, user_id, status="completed")
+    finally:
+        await conn.close()
+
+    assert await _repo().request_cancel(str(run["id"])) is True
+    persisted = await _fetch_run_raw(integration_db_url, run["id"])
+    assert persisted is not None and persisted["cancel_requested"] is True
+    assert await _repo().request_cancel(str(done["id"])) is False
+
+
 async def test_mark_heartbeat_lost_commits_and_counts(
     integration_db_url, patched_engine, cleanup_test_rows
 ):

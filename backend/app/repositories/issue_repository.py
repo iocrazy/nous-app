@@ -701,6 +701,12 @@ class IssueRepository:
             patch["paused_at"] = None
 
         result = await self.update(issue_id, patch)
+        # Cancel stops work (defects C/F, 2026-09-23): on the edge live →
+        # cancelled, flag the running root run and release a parked workflow.
+        # First, so the run sees the flag as early as possible. Same seam and
+        # best-effort discipline as the hooks below; ``result`` is the row
+        # just written.
+        await _fire_stop_live_work(int(issue_id), prev_status, new_status, result)
         # Post-commit sub-issue barrier hook. Placed at the repository layer (not
         # each caller) so BOTH transition_status entry points — the router's
         # /transition endpoint and project_stage_issues' stage-close — are
@@ -723,6 +729,30 @@ class IssueRepository:
         # freshly-written issue row, so its origin_kind/origin_id are current.
         await _fire_stage_node_sync(result, new_status)
         return result
+
+
+async def _fire_stop_live_work(
+    issue_id: int,
+    prev_status: str | None,
+    new_status: str,
+    issue: dict[str, Any] | None,
+) -> None:
+    """Best-effort "cancel stops work" after a status transition. Only the edge
+    live → ``cancelled`` fires (``cancel_live_work.is_cancel_edge``; never
+    ``done`` — ruling 3). Same repo → service inversion as
+    ``_fire_subissue_barrier``. The service logs its own step failures; this
+    guard catches anything else and logs it at ERROR."""
+    try:
+        from app.services.issues import cancel_live_work
+
+        if not cancel_live_work.is_cancel_edge(prev_status, new_status):
+            return
+        await cancel_live_work.stop_live_work_for_cancel(issue_id, issue=issue)
+    except Exception as exc:  # noqa: BLE001 — the transition is the primary op
+        logger.error(
+            f"[issue_repository] stop-live-work hook failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
 
 
 async def _fire_pipeline_relay(

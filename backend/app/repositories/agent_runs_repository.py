@@ -633,20 +633,27 @@ class AgentRunsRepository(AsyncpgRepository):
     # Cancel (flip flag; runner observes via RunRecorder.check_cancelled)
     # ------------------------------------------------------------------
 
-    async def request_cancel(self, run_id: str, *, user_id: UUID) -> bool:
-        """Set cancel_requested=true. Idempotent. Only acts on running, owned
-        rows. Returns True iff a row was actually updated. Committed via
-        write_scope (the old asyncpg path silently rolled this back)."""
+    async def request_cancel(self, run_id: str, *, user_id: UUID | None = None) -> bool:
+        """Set cancel_requested=true. Idempotent. Only acts on running rows.
+        Returns True iff a row was actually updated. Committed via
+        write_scope (the old asyncpg path silently rolled this back).
+
+        ``user_id`` gates on run ownership (``POST /ai-library/runs/{id}/
+        cancel``). ``None`` is for a cancel authorised at the TARGET: an issue
+        cancelled by anyone who could see it (``cancel_live_work``), the same
+        shape as ``request_pause``."""
         try:
             async with write_scope() as session:
-                result = await session.execute(
+                stmt = (
                     update(AgentRuns)
                     # agent_runs.id is BIGINT (mig 232); coerce.
                     .where(AgentRuns.id == self._bigint(run_id))
-                    .where(AgentRuns.user_id == user_id)
                     .where(AgentRuns.status == "running")
                     .values(cancel_requested=True)
                 )
+                if user_id is not None:
+                    stmt = stmt.where(AgentRuns.user_id == user_id)
+                result = await session.execute(stmt)
                 return (result.rowcount or 0) > 0
         except Exception as e:
             logger.error(f"Failed to request cancel for run {run_id}: {e}")

@@ -177,8 +177,17 @@ async def set_status(
     error_message: Optional[str] = None,
     agent_outcome: Optional[str] = None,
     outcome_reason: Optional[str] = None,
-) -> None:
+) -> bool:
     """Transition issue.status with side-effect timestamps (design Protocol 5).
+
+    **Never over a terminal status** (defect C, 2026-09-23). The UPDATE only
+    matches a row whose status is not in ``PREEMPT_STATUSES``. Production S4:
+    the user cancelled mid-run and the run's own finish wrote ``in_review``
+    over it. The lifecycle has no legitimate write over done/cancelled: the
+    UI refuses to dispatch a terminal issue (``dispatch-preview``), a reply
+    resumes only ``needs_followup``, and the barrier wakes only live parents.
+    Returns whether the row was written. A dropped write is logged and skips
+    the stage-node projection (the status it would project never landed).
 
     Spec-2: ``agent_outcome`` / ``outcome_reason`` record the agent's FinishIssue
     self-report into execution_state so the UI can distinguish "agent reports
@@ -249,10 +258,20 @@ async def set_status(
     # may write execution_state (service_role-only via issues_update_allowlist)
     async with write_scope() as session:
         await session.execute(text("SET LOCAL ROLE service_role"))
-        await session.execute(
-            update(Issues).where(Issues.id == issue_id).values(**values)
+        result = await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id, Issues.status.notin_(PREEMPT_STATUSES))
+            .values(**values)
         )
+        wrote = (result.rowcount or 0) > 0
+    if not wrote:
+        logger.info(
+            f"[set_status] issue {issue_id}: write of {status!r} dropped — the "
+            "issue is already terminal (or gone)"
+        )
+        return False
     await _project_status_onto_stage_node(issue_id, status)
+    return True
 
 
 async def _project_status_onto_stage_node(issue_id: int, status: str) -> None:
@@ -1272,6 +1291,15 @@ async def _run_dispatch_with_continuation(
             return _paused_result(issue_id, res, attempt, wait_rounds, drains)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
+        if (res or {}).get("stop_reason") == "cancelled":
+            # CancelHook stopped the run (defect C). Never continue it, drain
+            # its inbox or park it — a person asked for it to stop. Go straight
+            # to the final re-read below: an issue cancel preempts there; a
+            # run-level cancel (``/ai-library/runs/{id}/cancel``, issue still
+            # live) routes as before, because leaving the issue in_progress
+            # with no worker hands it to the stranded monitor, which would
+            # re-dispatch the cancelled work.
+            break
         if outcome == "continue" and attempt < max_continuations:
             attempt += 1
             continue
@@ -1313,6 +1341,27 @@ async def _run_dispatch_with_continuation(
             continue
         break
 
+    # Re-read before routing (defect C). A cancel that landed during the last
+    # turn — stopped by CancelHook, or after its last step boundary — must
+    # not be answered with in_review, an EMPTY_OUTPUT stamp on the interrupted
+    # run, or a barrier firing on a stale status. set_status refuses the
+    # write anyway; this also skips the rest of the routing.
+    final = await load_issue(issue_id)
+    final_status = (final or {}).get("status")
+    if final_status in PREEMPT_STATUSES:
+        logger.info(
+            f"[execute_issue] issue {issue_id} is {final_status!r} at finish "
+            f"(stop_reason={(res or {}).get('stop_reason')!r}); not routing"
+        )
+        return {
+            "issue_id": issue_id,
+            "preempted": True,
+            "preempted_status": final_status,
+            "outcome": outcome,
+            "attempts": attempt,
+            "wait_rounds": wait_rounds,
+            "inbox_drains": drains,
+        }
     content_len = len((res or {}).get("content") or "")
     await route_finish_outcome(
         issue_id,

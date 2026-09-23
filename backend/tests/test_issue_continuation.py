@@ -400,3 +400,56 @@ async def test_wait_wakeup_preempted_by_external_close():
     )
     assert result.get("preempted") is True
     assert calls["replies"] == []  # 回复回合没有跑
+
+
+# ── Defect C part 3: a cancelled stop is preemption, not an outcome ─────────
+
+
+class _StopRecorder(_Recorder):
+    """run_turn returns a fixed result dict (stop_reason + outcome)."""
+
+    def __init__(self, result: dict):
+        super().__init__([(result.get("outcome"), result.get("reason"))])
+        self._result = result
+
+    async def run_turn(self, issue_row, agent_id, user_id, *, is_continuation):
+        self.turns.append(is_continuation)
+        return dict(self._result)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stop_on_a_cancelled_issue_is_preempted_not_routed():
+    """S4: CancelHook stopped the run because the issue was cancelled. The
+    finish must not route (``in_review`` over the cancel, EMPTY_OUTPUT on an
+    interrupted run, a barrier firing on a stale status)."""
+    rec = _StopRecorder({"content": "", "stop_reason": "cancelled", "run_id": "9"})
+    out = await _run(rec, load_issue=_scripted_load_issue(["in_progress", "cancelled"]))
+    assert rec.status_calls == []
+    assert out["preempted"] is True
+    assert out["preempted_status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_run_level_cancel_on_a_live_issue_still_routes():
+    """``POST /ai-library/runs/{id}/cancel`` stops the run without touching
+    the issue. Leaving it ``in_progress`` with no worker would hand it to the
+    stranded monitor, which re-dispatches — restarting cancelled work. So it
+    routes as before, once, without continuing."""
+    rec = _StopRecorder(
+        {"content": "x", "outcome": "continue", "stop_reason": "cancelled"}
+    )
+    out = await _run(rec, load_issue=_const_load_issue("in_progress"))
+    assert rec.turns == [False]
+    assert len(rec.status_calls) == 1
+    assert out.get("preempted") is not True
+
+
+@pytest.mark.asyncio
+async def test_issue_cancelled_during_the_last_turn_is_not_routed():
+    """The cancel lands after the last step boundary (no CancelHook stop):
+    the final route re-reads the issue first and writes nothing."""
+    rec = _Recorder([("completed", "all done")])
+    out = await _run(rec, load_issue=_scripted_load_issue(["in_progress", "cancelled"]))
+    assert rec.status_calls == []
+    assert out["preempted"] is True
+    assert out["preempted_status"] == "cancelled"

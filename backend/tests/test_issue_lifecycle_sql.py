@@ -439,7 +439,7 @@ async def test_set_status_in_review_projects_onto_stage_node(monkeypatch):
 
     fired = {}
     row = {"id": 7, "origin_kind": "project_stage", "origin_id": "ps:1:2"}
-    session = _FakeSession([_FakeResult(), _FakeResult(rows=[row])])
+    session = _FakeSession([_FakeResult(rowcount=1), _FakeResult(rows=[row])])
     _patch_scopes(monkeypatch, session)
 
     async def fake_sync(issue, new_status, *, enqueue_autopilot=True):
@@ -483,7 +483,7 @@ async def test_set_status_survives_a_failing_stage_node_projection(monkeypatch):
     import app.workflows.issue_lifecycle as il
 
     row = {"id": 7, "origin_kind": "project_stage", "origin_id": "ps:1:2"}
-    session = _FakeSession([_FakeResult(), _FakeResult(rows=[row])])
+    session = _FakeSession([_FakeResult(rowcount=1), _FakeResult(rows=[row])])
     _patch_scopes(monkeypatch, session)
 
     async def boom(issue, new_status, *, enqueue_autopilot=True):
@@ -515,3 +515,33 @@ async def test_set_status_non_terminal_leaves_paused_at_alone(monkeypatch):
     await il.set_status(7, "in_progress")
     sql, _ = _last_update_call(session)
     assert "paused_at" not in sql
+
+
+async def test_set_status_never_writes_over_a_terminal_status(monkeypatch):
+    """Defect C (S4): the UPDATE carries ``status NOT IN (PREEMPT_STATUSES)``
+    for every target, so a finish landing after a cancel matches no row."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession([_FakeResult(rowcount=1)])
+    _patch_scopes(monkeypatch, session)
+
+    assert await il.set_status(7, "in_review") is True
+
+    sql, binds = _last_update_call(session)
+    assert "public.issues.status NOT IN" in sql
+    guarded = [sorted(v) for v in binds.values() if isinstance(v, (list, tuple))]
+    assert guarded == [sorted(il.PREEMPT_STATUSES)]
+
+
+async def test_set_status_dropped_write_returns_false_and_skips_projection(
+    monkeypatch,
+):
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession([_FakeResult(rowcount=0)])
+    _patch_scopes(monkeypatch, session)
+
+    with patch("app.repositories.issue_repository.fire_stage_node_sync") as sync:
+        assert await il.set_status(7, "in_review") is False
+        sync.assert_not_called()
+    assert not any(sql.startswith("SELECT") for sql, _ in session.calls)
