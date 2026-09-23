@@ -2256,8 +2256,13 @@ export interface UsageDailySummary {
  * One run's money line — `GET /api/v1/ai-library/runs/costs` (3c §4.2).
  *
  * Mirror of `backend/app/schemas/efficiency.py::RunCostRow`. Three fields are
- * nullable and each null means something a 0 would lie about:
- *   `cost_cents`     — no recorded cost, not a free run
+ * nullable, but `cost_cents` is no longer "0 would lie":
+ *   `cost_cents`     — since mig 479 this sums `own_cost_cents`, written on
+ *                      every mirror and backfilled for old rows. `0` here is
+ *                      a fact (zero spend), not "cost unknown". `null` only
+ *                      happens on other sources merged into this same shape
+ *                      elsewhere in the frontend (WS done frame, issue rollup
+ *                      rows) when the field is genuinely absent there.
  *   `charged_points` — **nobody billed this run** (BYOK, billing off, or the
  *                      charge never landed), not «charged zero»
  *   `status`         — the row never recorded one
@@ -2272,7 +2277,8 @@ export interface RunCost {
   /** 两列**可选**：只有 `/ai-library/runs/costs` 给得出它们，议题 rollup 的
    *  `runs[]` 没有这两列。缺席必须读作「不知道」—— `RunCostTail` 靠
    *  `undefined` 把整行浮层省掉，填 0 会把「没这个数」说成「一个 token 都没烧」
-   *  （同该组件「两个都没有读作 —，不是 ¢0.00」那条纪律）。 */
+   *  （同 `RunCostTail` 「`costCents` 为 0 是零花费的事实，`null` 才是真缺席」
+   *  那条纪律同源：0 与「没有」永远是两个答案，不分字段）。 */
   prompt_tokens?: number;
   completion_tokens?: number;
 }

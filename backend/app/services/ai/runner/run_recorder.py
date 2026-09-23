@@ -381,10 +381,10 @@ class RunRecorder:
             tier_str = getattr(tier, "value", None) or str(tier or "")
         except Exception:  # noqa: BLE001 — never break a run over telemetry
             return
-        used = getattr(stats, "tokens_before", None)
-        window = getattr(stats, "window", None)
-        if isinstance(used, int) and isinstance(window, int) and window > 0:
-            self.measure_context(used, window)
+        # No context-gauge feed here: ``CompactionStats`` has no window field
+        # (an old read of one was a dead branch), and ``tokens_before`` is the
+        # PRE-compaction size. The gauge is fed per model call from the prompt
+        # the model actually held (agent_runner ``measure_context``).
         if not tier_str or saved <= 0:
             return
         # metadata.compaction.{tier_str}_count + total_tokens_saved

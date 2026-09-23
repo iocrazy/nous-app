@@ -451,7 +451,7 @@ async def _system_capability_rows(
         logger.exception("[ai_health] embedding resolution failed")
         rows.append(_error_row("embedding", "Embedding (search/memory)"))
 
-    # ── maintenance tier — compaction / session-memory / distillation ───
+    # ── maintenance tier — compaction / distillation ──────────────────
     try:
         from app.services.ai.providers.ai_provider_helpers import (
             get_maintenance_model,

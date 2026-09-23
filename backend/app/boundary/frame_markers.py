@@ -46,8 +46,8 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "available_skills",
         "available_workers",
         "agent_memory",
-        # 聊天路径压缩器（llm_compactor）把 LLM 摘要 / session memory 文档包在
-        # 这个框里；两者都源自用户可控的对话内容。
+        # 压缩摘要：唯一渲染方是 app/boundary/summary_frame.py（压缩器与
+        # replay 共用）。摘要源自用户可控的对话，正文必须 escape_frame_body。
         "conversation_summary",
         "graph_facts",
         # harness p4 §1-③: a claimed inbox item injected at a step boundary

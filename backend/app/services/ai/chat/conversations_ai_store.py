@@ -581,9 +581,25 @@ class ConversationsAiStore:
         }
 
     async def get_messages(
-        self, *, session_id: int, limit: int = 200
+        self, *, session_id: int, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
-        """Chronological (seq ASC), non-deleted messages for a conversation."""
+        """Non-deleted messages for a conversation, always returned seq ASC.
+
+        Two windows over the same ascending result:
+
+        - ``newest=False`` (default): the OLDEST ``limit`` messages
+          (``ORDER BY seq ASC LIMIT n``). Kept for callers that read from the
+          start of the conversation: the issue message list, issue fork's
+          origin-message cutoff scan, and the session-view endpoint.
+        - ``newest=True``: the NEWEST ``limit`` messages
+          (``ORDER BY seq DESC LIMIT n``, reversed here so the return is still
+          ascending). Used by the chat turn path
+          (``AILibraryChatService._run_session_turn_inner``) — the model must
+          see the most recent context of a long conversation, not its first
+          ``limit`` messages — and by the sub-issue barrier helpers
+          (``subissue_barrier``), which read the last message and check for an
+          already-written report.
+        """
         from sqlalchemy import select
 
         from app.db.session import read_scope
@@ -608,14 +624,15 @@ class ConversationsAiStore:
                             Messages.conversation_id == _bigint(session_id),
                             Messages.deleted_at.is_(None),
                         )
-                        .order_by(Messages.seq.asc())
+                        .order_by(Messages.seq.desc() if newest else Messages.seq.asc())
                         .limit(limit)
                     )
                 )
                 .mappings()
                 .all()
             )
-        return [self._to_legacy_message_shape(dict(r)) for r in rows]
+        ordered = list(reversed(rows)) if newest else rows
+        return [self._to_legacy_message_shape(dict(r)) for r in ordered]
 
     @staticmethod
     def display_attachments(

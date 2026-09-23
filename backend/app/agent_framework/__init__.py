@@ -182,22 +182,6 @@ from app.agent_framework.prometheus_pusher import from_env as prometheus_pusher_
 from app.agent_framework.role import ProcessRole, role_from_env
 from app.agent_framework.root_abort_registry import RootAbortRegistry
 from app.agent_framework.rotating_adapter import RotatingAdapter
-from app.agent_framework.session_memory import (
-    SECTION_ORDER,
-    SessionMemoryService,
-    SessionMemoryTrigger,
-    SessionMetrics,
-)
-from app.agent_framework.session_memory import (
-    build_update_prompt as build_session_memory_update_prompt,
-)
-from app.agent_framework.session_memory import (
-    compute_metrics as compute_session_metrics,
-)
-from app.agent_framework.session_memory import (
-    parse_md_sections as parse_session_memory_sections,
-)
-from app.agent_framework.session_memory import render_md as render_session_memory
 from app.agent_framework.subprocess_registry import (
     cancel_workflow_subprocesses,
     register_subprocess,
@@ -287,10 +271,6 @@ __all__ = [
     "RootAbortRegistry",
     "RotatingAdapter",
     "RunAborted",
-    "SECTION_ORDER",
-    "SessionMemoryService",
-    "SessionMemoryTrigger",
-    "SessionMetrics",
     "Tool",
     "ToolCallLoopGuard",
     "TruncationOutcome",
@@ -299,21 +279,17 @@ __all__ = [
     "TriggerType",
     "age_old_tool_results",
     "agent_to_tool",
-    "build_session_memory_update_prompt",
     "cap_message_tokens",
     "cap_messages_tokens",
-    "compute_session_metrics",
     "count_messages_tokens",
     "count_tokens",
     "dedupe_tool_results",
     "derive_output_budget",
-    "parse_session_memory_sections",
     "inventory_agent_slugs",
     "inventory_providers",
     "inventory_workflow_names",
     "merge_lane_capacity",
     "prune_tool_results",
-    "render_session_memory",
     "role_from_env",
     "wrap_legacy_post",
     "wrap_legacy_pre",

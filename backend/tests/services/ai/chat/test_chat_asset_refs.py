@@ -104,7 +104,7 @@ class _FakeStore:
         return None
 
     async def get_messages(
-        self, *, session_id: Any, limit: int = 200
+        self, *, session_id: Any, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
         return []
 
@@ -231,9 +231,6 @@ async def _run_turn(
             svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
         ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(
-            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
             new=AsyncMock(return_value=stack),

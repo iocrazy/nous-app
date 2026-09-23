@@ -17,6 +17,7 @@ from app.repositories.agent_memory_promotion_repository import (
 )
 from app.repositories.agent_memory_repository import get_memory_stats
 from app.schemas.admin import (
+    AgentCostAnomalyConfig,
     AIGovernanceResponse,
     AIGovernanceUpdate,
     ChatModuleGovernanceResponse,
@@ -78,6 +79,10 @@ from app.services.topics.scoring import (
     merge_scoring_config,
 )
 from app.utils.admin_helpers import create_audit_log
+from app.workflows.agent_cost_anomaly import (
+    MIN_HOUR_COST_SETTING_KEY,
+    read_min_hour_cost_cents,
+)
 
 router = APIRouter()
 
@@ -268,6 +273,33 @@ async def update_topics_content_fetch_config(
         details={"value": payload},
     )
     return TopicContentFetchConfigResponse(**payload)
+
+
+@router.get("/agent-cost-anomaly", response_model=AgentCostAnomalyConfig)
+async def get_agent_cost_anomaly_config(auth: AdminAuthDep):
+    """Current agent cost anomaly floor (admin setting, else code default)."""
+    return AgentCostAnomalyConfig(min_hour_cost_cents=await read_min_hour_cost_cents())
+
+
+@router.put("/agent-cost-anomaly", response_model=AgentCostAnomalyConfig)
+async def update_agent_cost_anomaly_config(
+    body: AgentCostAnomalyConfig,
+    auth: AdminAuthDep,
+):
+    """Persist the floor to ``system_settings['agent_cost_anomaly.min_hour_cost_cents']``.
+    Upsert, so no seed row is needed; the hourly detector reads it each tick."""
+    repo = get_system_settings_repository()
+    await repo.upsert_setting(
+        MIN_HOUR_COST_SETTING_KEY, body.min_hour_cost_cents, auth.user_id
+    )
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="update_agent_cost_anomaly_config",
+        target_type="system_setting",
+        target_id=MIN_HOUR_COST_SETTING_KEY,
+        details={"value": body.min_hour_cost_cents},
+    )
+    return body
 
 
 @router.get("", response_model=list[SystemSettingResponse])

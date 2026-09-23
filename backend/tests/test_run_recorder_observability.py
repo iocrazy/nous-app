@@ -321,3 +321,36 @@ async def test_start_both_attempts_fail_degrades_gracefully(monkeypatch):
     assert out is rec
     assert rec.run_id is None
     assert rec._heartbeat_task is None
+
+
+def test_note_compaction_reads_only_real_compaction_stats_fields():
+    """``note_compaction`` once read ``stats.window`` — a field
+    ``CompactionStats`` never had, so the branch behind it was dead. Pin every
+    attribute it reads to a real dataclass field."""
+    import dataclasses
+    import inspect
+    import re
+
+    from app.services.ai.runner.run_recorder import RunRecorder
+
+    src = inspect.getsource(RunRecorder.note_compaction)
+    read = set(re.findall(r'getattr\(\s*stats,\s*"(\w+)"', src)) | set(
+        re.findall(r"\bstats\.(\w+)", src)
+    )
+    fields = {f.name for f in dataclasses.fields(CompactionStats)}
+    assert read, "note_compaction reads nothing from stats?"
+    assert read <= fields, f"not CompactionStats fields: {read - fields}"
+
+
+def test_note_compaction_with_real_stats_counts_the_tier():
+    rec = _make_recorder()
+    rec.note_compaction(
+        CompactionStats(
+            tier=CompactionTier.RED,
+            tokens_before=5000,
+            tokens_after=2000,
+            tokens_saved=3000,
+            notes=("compacted via LLM head summary",),
+        )
+    )
+    assert rec.metadata["compaction"] == {"red_count": 1, "total_tokens_saved": 3000}

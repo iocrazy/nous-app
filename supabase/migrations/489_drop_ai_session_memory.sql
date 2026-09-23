@@ -1,0 +1,30 @@
+-- 489: retire ai_session_memory (Wave 5b session notes).
+--
+-- Why it goes:
+--   * Zero readers. The only reader was the loader closure inside the chat
+--     service's `_maybe_compact`, which was deleted when chat compaction moved
+--     onto the runner's ContextCompactor (3d batch 2, Task 6). Nothing in
+--     frontend/ or admin/ ever queried the table directly (see mig 333).
+--   * Its writer had frozen anyway. The chat service handed the updater the
+--     POST-compaction message list (ai_library_chat_service.py, the
+--     `full_messages = user_messages + [assistant]` dispatch after
+--     bump_counters). After the first compaction, compute_metrics' total_tokens
+--     falls far below the stored tokens_at_last_update baseline, and chat
+--     history carries no tool_calls, so SessionMemoryTrigger.should_update
+--     (agent_framework/session_memory.py) returned False forever. The
+--     document froze at its pre-compaction snapshot.
+--   * Write-only + frozen = pure cost (maintenance-LLM calls until the freeze,
+--     plus a fire-and-forget task per turn) with no consumer.
+--
+-- History: created in mig 187; FK to ai_sessions dropped in mig 332 (so the
+-- same BIGINT key space served conversations.id); RLS policy
+-- own_session_memory_readable dropped in mig 333. No FK points AT this
+-- table, so no CASCADE is needed. The code, ORM model (AiSessionMemory),
+-- bootstrap schema probe entry and session_memory_* telemetry counters are
+-- removed in the same PR — schema-drift is two-way zero tolerance.
+--
+-- Deploy order is not guaranteed (migration may land before or after the
+-- code). Both orders are safe: the new code never touches the table, and the
+-- old code's repository catches load/upsert failures and returns None.
+
+DROP TABLE IF EXISTS public.ai_session_memory;

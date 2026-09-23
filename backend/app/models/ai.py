@@ -1,11 +1,11 @@
-"""AI agents, session memory, skills, and pricing models.
+"""AI agents, skills, and pricing models.
 
 Legacy ai_sessions / ai_messages tables (and their ORM models) were retired in
 migration 333 (Phase 3 Wave 2) — all chat traffic now lives on the
 conversations/messages tables (raw-SQL repositories, not yet ORM-mapped; see
-app.repositories.conversation_repository). ai_session_memory survives: mig
-332 repurposed it to key off either store's id (see its class docstring
-below).
+app.repositories.conversation_repository). ai_session_memory outlived them
+until migration 489 dropped it (write-only and frozen once chat compaction
+moved onto the runner's ContextCompactor).
 """
 
 from __future__ import annotations
@@ -296,59 +296,6 @@ class AiAgentVersions(Base):
     max_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     notes: Mapped[Optional[str]] = mapped_column(Text)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
-
-
-class AiSessionMemory(Base):
-    __tablename__ = "ai_session_memory"
-    __table_args__ = (
-        PrimaryKeyConstraint("session_id", name="ai_session_memory_pkey"),
-        {
-            "comment": (
-                "Wave 5b: continuously-maintained session notes with fixed schema. "
-                "Replaces compactor's one-shot summary at compaction time. "
-                "session_id is a plain BIGINT (no FK, since mig 332): it holds a "
-                "legacy ai_sessions.id for old rows or a conversations.id for "
-                "new-store rows — the same sidecar key space is reused across "
-                "both stores post-Phase-3 (mig 333 drops ai_sessions itself)."
-            ),
-            "schema": "public",
-        },
-    )
-
-    body_md: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("''::text"),
-        comment="Markdown source of truth. Updated by background updater on dual-threshold trigger.",
-    )
-    sections_json: Mapped[dict] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-        comment=(
-            "Parsed-out sections for query/admin: "
-            "{title, current_state, task_spec, key_files, workflow_steps, errors_and_fixes}."
-        ),
-    )
-    version: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        server_default=text("1"),
-        comment="Optimistic concurrency: bumped on each successful update.",
-    )
-    last_updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True), nullable=False, server_default=text("now()")
-    )
-    tokens_at_last_update: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    tool_calls_at_last_update: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    turns_at_last_update: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    session_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
 
 class NousModels(Base):

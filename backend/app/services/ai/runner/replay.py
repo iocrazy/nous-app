@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from typing import Any
 
+# The persisted ``compaction_summary`` payload holds the RAW summary text;
+# ``render_summary_message`` frames + escapes it exactly as the live
+# compactor does, so a replayed history is byte-identical to the original.
+from app.boundary.summary_frame import SUMMARY_PREFIX, render_summary_message
+
 BOUNDARY_TYPES = ("step_start", "turn_end")
-# Mirrors ContextCompactor._compact_with_summary's system message verbatim.
-SUMMARY_PREFIX = "[Earlier conversation summary]\n"
 
 
 def events_upto(events: list[dict[str, Any]], at_seq: int) -> list[dict[str, Any]]:
@@ -35,7 +38,7 @@ def messages_from_events(events: list[dict[str, Any]]) -> list[dict[str, str]]:
         if t == "compaction_summary":
             summary = str(p.get("summary") or "").strip()
             if summary:
-                out = [{"role": "system", "content": SUMMARY_PREFIX + summary}]
+                out = [render_summary_message(summary)]
             continue
         if t in ("user", "assistant"):
             # 3c §4.1: a ``partial`` assistant row is the narration the model

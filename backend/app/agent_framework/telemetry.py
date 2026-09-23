@@ -6,7 +6,6 @@ so admin / debug / health endpoints can answer:
   - How many compactions ran this hour?
   - How many tool-call loops did the loop_guard catch?
   - What's the commitment harvest hit rate?
-  - How often does session_memory updater actually fire?
 
 Lightweight by design — no Prometheus client dep, no histograms, no
 labels with cardinality risk. Just per-process atomic counters that
@@ -29,9 +28,6 @@ from typing import Any
 COUNTER_NAMES: tuple[str, ...] = (
     # Compaction
     "compaction_triggered",
-    "compaction_used_session_memory",
-    "compaction_used_fresh_summarizer",
-    "compaction_pre_pass_pruned",
     # Loop guard
     "loop_guard_observed",
     "loop_guard_tripped",
@@ -43,10 +39,6 @@ COUNTER_NAMES: tuple[str, ...] = (
     "commitment_harvest_persisted",
     "commitment_sweeper_fired",
     "commitment_sweeper_expired",
-    # Session memory
-    "session_memory_update_attempted",
-    "session_memory_update_persisted",
-    "session_memory_update_skipped_no_trigger",
     # Memory M2
     "memory_archived",
     "memory_consolidated",

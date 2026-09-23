@@ -1,5 +1,6 @@
 /** 3c §4.2：尾部「共消耗」一行。积分是**真的扣了的那个数**，¢ 只是没扣成时的兜底；
- *  两个都没有读作 `—`，编出来的 0 会把「没算出价」说成「免费」（同 `fmtChildCents`）。 */
+ *  `costCents` 为 `0` 渲染 `¢0.00`——`/ai-library/runs/costs` 自 mig 479 起 0 就是
+ *  零花费的事实。两个都是 `null` 才读作 `—`，那才是真缺席（同 `fmtChildCents`）。 */
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,9 +34,19 @@ describe('RunCostTail', () => {
     expect(text()).toBe('¢0.82 · doubao-seed-2-0-lite');
   });
 
-  it('两个都没有读作 —，不是 ¢0.00', () => {
+  it('两个都是 null 才读作 —，不是 ¢0.00', () => {
     render(<RunCostTail {...base} costCents={null} />);
     expect(text()).toBe('— · doubao-seed-2-0-lite');
+  });
+
+  it('costCents=0 渲染 ¢0.00，不是 ———0 是零花费的事实', () => {
+    render(<RunCostTail {...base} costCents={0} />);
+    expect(text()).toBe('¢0.00 · doubao-seed-2-0-lite');
+  });
+
+  it('运行中的 costCents=0 也加 …', () => {
+    render(<RunCostTail {...base} costCents={0} live />);
+    expect(text()).toBe('¢0.00… · doubao-seed-2-0-lite');
   });
 
   it('模型未知时只留数字，不拼一个空的 ·', () => {

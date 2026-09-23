@@ -38,12 +38,11 @@ async def _bg_schema_probe() -> None:
         from sqlalchemy import literal, select
 
         from app.db.session import read_scope
-        from app.models import AgentCommitments, AiSessionMemory, UserMcpServers
+        from app.models import AgentCommitments, UserMcpServers
 
         # extend on each migration that adds a hard-required table
         required = [
             AgentCommitments,  # mig 186
-            AiSessionMemory,  # mig 187
             UserMcpServers,  # mig 194
         ]
         # ``SELECT 1 FROM <table> LIMIT 0`` — table-existence probe only (no

@@ -29,7 +29,7 @@ from app.agent_framework.commitments import (
 )
 from app.repositories.commitment_repository import CommitmentRepository
 
-# ─── Fake ORM session plumbing (mirrors test_session_memory_repository.py) ──
+# ─── Fake ORM session plumbing ──
 
 
 class _FakeRow:

@@ -77,6 +77,19 @@ MAX_TOOL_ITERATIONS = 10
 # object on the agent's hot path.
 _DEFAULT_COMPACTOR = ContextCompactor()
 
+
+def _compaction_user_id(recorder: Any, fallback: Any = None) -> str | None:
+    """The run's user as a string, for compaction's legacy-summary routing.
+
+    The recorder's user wins; ``fallback`` is the caller-supplied ``user_id``
+    for turns that run without a recorder (``stream_turn`` with
+    ``auto_recorder=False``) — without it that user was silently dropped.
+    """
+    user_id = getattr(recorder, "user_id", None) if recorder is not None else None
+    user_id = user_id or fallback
+    return str(user_id) if user_id else None
+
+
 # Tool names recognised by the runner. Anything else is silently ignored
 # (forward-compat with future caller-provided tools).
 # Q5: MCP-routed tools are matched by ``"." in name`` separately — they
@@ -467,6 +480,7 @@ class AgentRunner:
                     user_messages,
                     recorder=recorder,
                     abort=abort,
+                    user_id=user_id,
                 ):
                     if getattr(_chunk, "finish_reason", None):
                         _last_terminal = _chunk
@@ -491,6 +505,7 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder],
         abort: Optional["AbortController"],
+        user_id: Optional["UUID"] = None,
     ):
         """R4: extracted inner generator so stream_turn can wrap us in
         an optional RunRecorder context without nesting concerns."""
@@ -504,7 +519,7 @@ class AgentRunner:
         # model window mid-stream and surface a cryptic provider error. On
         # budget rejection, emit one clean terminal chunk and stop.
         user_messages, preflight_err = await self._preflight_compact_and_budget(
-            composed, user_messages, recorder
+            composed, user_messages, recorder, user_id=user_id
         )
         if preflight_err is not None:
             yield StreamChunk(
@@ -539,6 +554,9 @@ class AgentRunner:
                 recorder=recorder,
                 abort=abort,
                 _emit_turn_end=False,  # stream_turn classifies this turn
+                # The preflight above already compacted + budget-checked
+                # these messages; a second pass would compact twice per turn.
+                _preflight_done=True,
             )
             if result.get("cancelled"):
                 return
@@ -1576,6 +1594,8 @@ class AgentRunner:
         composed: ComposedSystemPrompt,
         user_messages: list[dict],
         recorder: Optional[RunRecorder],
+        *,
+        user_id: Any = None,
     ) -> tuple[list[dict], Optional[dict[str, Any]]]:
         """Shared pre-flight for run_turn AND stream_turn.
 
@@ -1602,6 +1622,10 @@ class AgentRunner:
             # Phase 2: the compaction bracket (start/summary/end) lands in the
             # run transcript so a crash mid-summary is visible as an orphan.
             recorder=recorder,
+            # The legacy maintenance-model summary needs the user as routing
+            # context (codex-local runs on the user's own machine). The
+            # caller's ``user_id`` covers recorder-less turns.
+            user_id=_compaction_user_id(recorder, user_id),
         )
         if (
             recorder is not None
@@ -1634,6 +1658,7 @@ class AgentRunner:
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
         _emit_turn_end: bool = True,
+        _preflight_done: bool = False,
     ) -> dict[str, Any]:
         """Run one turn, with retry telemetry attached for its duration.
 
@@ -1641,6 +1666,10 @@ class AgentRunner:
         that path delegates here and then classifies the turn itself from
         the terminal chunk — two wrappers each filing a ``turn_end`` would
         double-count every buffered turn.
+
+        ``_preflight_done=True`` is for the same caller: stream_turn has
+        already run ``_preflight_compact_and_budget`` on these messages, so
+        running it again would compact (and summarise) twice per turn.
 
         W1: the adapter is built during wiring, before this run exists, so a
         recorder cannot be constructor-injected into the retry middleware.
@@ -1673,7 +1702,11 @@ class AgentRunner:
 
         try:
             result = await self._run_turn_inner(
-                composed, user_messages, recorder=recorder, abort=abort
+                composed,
+                user_messages,
+                recorder=recorder,
+                abort=abort,
+                preflight_done=_preflight_done,
             )
         except BaseException as exc:
             if _emit_turn_end:
@@ -1754,6 +1787,7 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
+        preflight_done: bool = False,
     ) -> dict[str, Any]:
         """Run one turn of the agent loop.
 
@@ -1769,11 +1803,13 @@ class AgentRunner:
         # _preflight_compact_and_budget so the two paths can never again
         # diverge on these protections. On green compaction is ~free; the
         # budget guard rejects a turn that wouldn't fit even after pruning.
-        user_messages, preflight_err = await self._preflight_compact_and_budget(
-            composed, user_messages, recorder
-        )
-        if preflight_err is not None:
-            return {"content": "", "raw": None, **preflight_err}
+        # ``preflight_done``: stream_turn's buffered fallback already ran it.
+        if not preflight_done:
+            user_messages, preflight_err = await self._preflight_compact_and_budget(
+                composed, user_messages, recorder
+            )
+            if preflight_err is not None:
+                return {"content": "", "raw": None, **preflight_err}
 
         self._bind_turn_recorder(recorder)
 

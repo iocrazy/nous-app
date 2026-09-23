@@ -142,7 +142,7 @@ async def test_start_lands_before_the_summarizer_is_awaited():
             order.append(event_type)
             await super().record_event(event_type, payload)
 
-    async def _summarize(_head):
+    async def _summarize(_head, **_routing):
         order.append("summarize")
         return "short summary"
 

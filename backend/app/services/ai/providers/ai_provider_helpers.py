@@ -306,7 +306,7 @@ async def resolve_embedding_ai_config() -> ResolvedAIConfig:
     )
 
 
-# Built-in maintenance calls (context compaction, session-memory notes,
+# Built-in maintenance calls (context compaction,
 # agent-memory promotion/consolidation) need a cheap default model when the
 # primary path gives them nothing. Credentials are DB-only, so this default
 # MUST name a platform catalog entry — the old hardcoded "qwen-turbo" /
