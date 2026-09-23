@@ -6,16 +6,27 @@ from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.core.embedding_space import EmbeddingDimensionMismatch
+from app.core.embedding_space import SEMANTIC_LAYER, EmbeddingDimensionMismatch
 from app.repositories.analysis_repository import EmbeddingSearchUnavailable
+from app.repositories.embedding_space_repository import (
+    get_embedding_space_repository,
+)
+from app.repositories.resource_embeddings_repository import (
+    EmbeddingStoreMissing,
+    get_resource_embeddings_repository,
+)
 from app.schemas.search import (
     HybridSearchRequest,
+    LayerStatus,
     SearchResponse,
     SearchResultItem,
     SemanticSearchRequest,
+    SpaceInfo,
     TextSearchRequest,
+    VectorsStatusResponse,
 )
 from app.schemas.unified_search import UnifiedSearchResponse
+from app.services.ai.providers.embedding_service import EmbeddingService
 from app.services.library.like_escape import escape_like
 from app.services.library.search_service import (
     SearchFiltersUnavailable,
@@ -212,6 +223,7 @@ async def semantic_search(
                     author=r.author,
                     view_count=r.view_count,
                     created_at=r.created_at,
+                    layer=r.layer,
                 )
                 for r in ranked_results
             ],
@@ -292,6 +304,7 @@ async def hybrid_search(
                     author=r.author,
                     view_count=r.view_count,
                     created_at=r.created_at,
+                    layer=r.layer,
                 )
                 for r in response.results
             ],
@@ -300,6 +313,8 @@ async def hybrid_search(
             query=response.query,
             search_type=response.search_type,
             vector_leg=response.vector_leg,
+            legs=response.legs,
+            reranked=response.reranked,
         )
 
     except Exception as e:
@@ -433,6 +448,62 @@ async def text_search(
     )
 
 
+# ``embedding_spaces.id`` is a positive Snowflake, never 0: counting coverage
+# against 0 yields "covered 0 of the caller's total" without any space.
+NO_SPACE_ID = 0
+
+
+def _layers(covered: int, total: int) -> List[LayerStatus]:
+    return [
+        LayerStatus(
+            layer="semantic",
+            status="ok" if covered else "not_built",
+            covered=covered,
+            total=total,
+        ),
+        # Enum slot only until the transcript layer ships.
+        LayerStatus(layer="transcript", status="not_built", covered=0, total=total),
+    ]
+
+
+@router.get("/vectors/status", response_model=VectorsStatusResponse)
+async def vectors_status(auth: AuthDep):
+    """How much of the caller's library has a vector, per retrieval layer, in
+    the CURRENT embedding space (the admin-configured embedder).
+
+    ``status`` is "ok", "unconfigured" (no embedder: ``space`` null, coverage
+    0 of the caller's total) or "store_missing" (migration 499 not applied:
+    ``space`` null, ``layers`` empty). A typed answer in every case, never a
+    500 — the UI shows it next to the search box.
+    """
+    embedder = EmbeddingService()
+    spec = await embedder.space_spec()
+    repo = get_resource_embeddings_repository()
+    if spec is None:
+        try:
+            _, total = await repo.coverage(
+                user_id=auth.user_id, space_id=NO_SPACE_ID, layer=SEMANTIC_LAYER
+            )
+        except EmbeddingStoreMissing:
+            return VectorsStatusResponse(space=None, status="unconfigured", layers=[])
+        return VectorsStatusResponse(
+            space=None, status="unconfigured", layers=_layers(0, total)
+        )
+    try:
+        space = await get_embedding_space_repository().get_or_create(spec)
+        covered, total = await repo.coverage(
+            user_id=auth.user_id, space_id=space["id"], layer=SEMANTIC_LAYER
+        )
+    except EmbeddingStoreMissing as e:
+        logger.error(f"Vector status: store missing (migration 499): {e}")
+        return VectorsStatusResponse(space=None, status="store_missing", layers=[])
+    return VectorsStatusResponse(
+        space=SpaceInfo.from_row(space),
+        status="ok",
+        layers=_layers(covered, total),
+    )
+
+
 @router.get("/similar/{media_id}", response_model=SearchResponse)
 async def find_similar_media(
     auth: AuthDep,
@@ -458,24 +529,14 @@ async def find_similar_media(
             threshold=threshold,
         )
 
-        if response.total == 0:
-            # Check if media exists and has embedding
-            from app.repositories.analysis_repository import get_analysis_repository
-
-            analysis_repo = get_analysis_repository()
-            analysis = await analysis_repo.get_analysis(media_id)
-
-            if not analysis:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Media not found or not analyzed yet. Run L1 analysis first.",
-                )
-
-            if not analysis.get("content_embedding"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Media has no embedding. Analysis may be incomplete.",
-                )
+        if response.source_embedded is False:
+            # Nothing to compare with — not "no neighbours". The service
+            # looked in resource_embeddings (current space) and the legacy
+            # column; a resource without a vector gets one from the backfill.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Media has no embedding yet. Run the embedding backfill first.",
+            )
 
         return SearchResponse(
             results=[
@@ -490,6 +551,7 @@ async def find_similar_media(
                     author=r.author,
                     view_count=r.view_count,
                     created_at=r.created_at,
+                    layer=r.layer,
                 )
                 for r in response.results
             ],

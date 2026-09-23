@@ -9,6 +9,7 @@ Endpoints for triggering and retrieving AI analysis results
 Supports both platform_id-based (legacy) and resource_id-based triggers.
 """
 
+import time
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -25,6 +26,7 @@ from app.schemas.ai import (
     TranscriptResponse,
     VisualAnalysisResponse,
 )
+from app.schemas.search import SpaceInfo
 from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
 
@@ -1084,13 +1086,22 @@ async def _dispatch_l1_analysis(
     return wf_id
 
 
-# The candidate window is over-fetched so rows already in flight (vector
-# still NULL, but a run is queued) cannot eat a whole batch on a second call
-# minutes later. Sized against ``BackfillEmbeddingsBody.limit``'s ceiling so
-# the headroom survives at the top of the range too.
+# Ceiling of one backfill batch; each row is one embedding call.
 _BACKFILL_MAX_LIMIT = 200
-_BACKFILL_OVERFETCH_FACTOR = 3
-_BACKFILL_MAX_SCAN = _BACKFILL_MAX_LIMIT * (_BACKFILL_OVERFETCH_FACTOR + 1)
+
+# Reasons that are about the embedder or the store, not the row: every later
+# row would end the same way, so the batch stops and accounts for the rest.
+_BACKFILL_ABORT_CODES = frozenset(
+    {"embedder_unconfigured", "dimension_mismatch", "store_missing"}
+)
+# A provider that fails this many rows in a row is down, not flaky: stop
+# instead of spending the rest of the batch on 30s timeouts.
+_BACKFILL_MAX_PROVIDER_ERRORS = 3
+# One request embeds up to 200 rows serially; past this budget the rest are
+# left for the next run (reason ``not_attempted`` — a response-only code, not
+# an embed outcome, so it is not in EMBED_REASON_CODES).
+_BACKFILL_WALL_CLOCK_S = 60
+_backfill_clock = time.monotonic
 
 
 class BackfillEmbeddingsBody(BaseModel):
@@ -1102,145 +1113,162 @@ def _skip(resource_id: int, reason: str) -> dict:
     return {"resource_id": resource_id, "reason": reason}
 
 
+def _backfill_skip_code(reason: str | None) -> str:
+    from app.services.ai.providers.embedding_service import classify_embed_reason
+
+    if reason == "unconfigured":
+        return "embedder_unconfigured"  # one spelling, same as the 409
+    return classify_embed_reason(reason) or "provider_error"
+
+
+_EMBEDDER_UNCONFIGURED = {
+    "code": "embedder_unconfigured",
+    "message": "No embedding model configured (ai_module.embedding); "
+    "set one in Admin → AI Models before backfilling.",
+}
+
+
 @router.post("/analyze/backfill-embeddings")
 async def backfill_embeddings(
     auth: AuthDep, _scope: ScopedRequestDep, body: BackfillEmbeddingsBody | None = None
 ):
-    """Backfill ``content_embedding`` for the caller's downloads that lack it.
+    """Backfill the semantic layer of ``resource_embeddings`` for the
+    caller's downloads that have no vector in the CURRENT embedding space.
 
-    Cheapest first: rows that already have a VLM analysis are re-embedded
-    inline (one embedding call each, no Task Center row). Rows with no
-    analysis get a full ``analyze_l1`` dispatch each (VLM + embed). Both are
-    capped by ``limit`` together so a first run of 20 can be inspected
-    before the rest (``total_missing`` in the response) is released.
-    ``dry_run`` only reports, with the same element shapes as a real run.
+    Every candidate is embedded in place: one embedding call each, no Task
+    Center row. This endpoint used to dispatch a full ``analyze_l1`` (VLM +
+    embed) for rows without a visual analysis, because the document was made
+    of the VLM fields. The semantic document (``embedding_document``) now
+    uses whatever the resource has — title, description, tags, summary,
+    transcript excerpt, and the analysis when present — so there is nothing
+    to wait for and nothing to pay the VLM for. ``limit`` caps the batch so
+    a first run of 20 can be inspected before the rest (``total_missing``) is
+    released. ``dry_run`` only reports, with the same shapes as a real run.
 
-    Response fields are orthogonal on purpose: ``reembedded`` landed a
-    vector NOW; ``dispatched`` started a workflow whose vector has NOT
-    landed yet; ``skipped`` names batch rows that were attempted or
-    refused, with a stable reason code (never provider text); ``in_flight``
-    counts owner rows a run already covers; ``remaining`` is
-    ``total_missing`` minus only what actually landed.
+    Response: ``space`` names the space the vectors land in; ``reembedded``
+    landed (or was already current) NOW; ``skipped`` names batch rows that
+    were attempted or refused, with a stable reason code (never provider
+    text); ``remaining`` is ``total_missing`` minus what landed.
+    ``aborted_reason`` says why the batch stopped early: ``"provider_error"``
+    (3 in a row), ``"time_budget"`` (past ``_BACKFILL_WALL_CLOCK_S``; the
+    rest are skipped as ``not_attempted``), one of the process-wide codes
+    (``embedder_unconfigured`` / ``dimension_mismatch`` / ``store_missing``),
+    or null when every row was attempted. ``space.id`` is a string
+    (Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,
+    so readers of the old shape keep parsing.
     """
-    from app.repositories.tags_repository import get_tags_repository
-    from app.services.ai.providers.embedding_config import resolve_embedding_config
-    from app.services.ai.providers.embedding_service import (
-        EmbeddingService,
-        classify_embed_reason,
-    )
-    from app.services.library.embedding_backfill import (
-        list_candidates,
-        partition,
-        reembed_existing,
-        undispatchable,
-    )
+    from app.core.embedding_space import SEMANTIC_LAYER
+    from app.repositories import embedding_space_repository as space_mod
+    from app.repositories import resource_embeddings_repository as emb_mod
+    from app.services.ai.providers import embedding_config
+    from app.services.ai.providers import embedding_service as emb_svc_mod
 
     opts = body or BackfillEmbeddingsBody()
-    # Typed refusal, not a silent no-op: with no embedder every dispatched
-    # analyze_l1 would spend VLM money and still land no vector (the exact
-    # failure this backfill exists to repair).
-    if await resolve_embedding_config() is None:
+    # Typed refusal, not a silent no-op.
+    if await embedding_config.resolve_embedding_config() is None:
+        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+    embedder = emb_svc_mod.EmbeddingService()
+    spec = await embedder.space_spec()
+    if spec is None:
+        # Configured but no client could be built (bad base_url etc.); the
+        # ERROR log has the provider detail.
+        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+
+    repo = emb_mod.get_resource_embeddings_repository()
+    try:
+        space = await space_mod.get_embedding_space_repository().get_or_create(spec)
+        rows, total_missing = await repo.missing_for_user(
+            user_id=auth.user_id,
+            space_id=space["id"],
+            layer=SEMANTIC_LAYER,
+            limit=opts.limit,
+        )
+    except emb_mod.EmbeddingStoreMissing as e:
+        logger.error(f"backfill: vector store missing: {e}")
         raise HTTPException(
-            status_code=409,
+            status_code=503,
             detail={
-                "code": "embedder_unconfigured",
-                "message": "No embedding model configured (ai_module.embedding); "
-                "set one in Admin → AI Models before backfilling.",
+                "code": "vector_store_missing",
+                "message": "The vector store is not ready yet (a database "
+                "update is still rolling out). Try again shortly.",
             },
         )
-    scan = min(opts.limit * _BACKFILL_OVERFETCH_FACTOR, _BACKFILL_MAX_SCAN)
-    fetched, total_missing = await list_candidates(auth.user_id, scan)
-    in_flight = await _resources_with_active_l1([str(c.resource_id) for c in fetched])
-    candidates = [c for c in fetched if str(c.resource_id) not in in_flight]
-    reembed, dispatch = partition(candidates, opts.limit)
-    # The SQL already excludes cover-less rows; if one slips through anyway
-    # it is reported, never silently dropped from every list.
-    skipped: list[dict] = [
-        _skip(c.resource_id, "no_cover_url") for c in undispatchable(candidates)
-    ]
 
-    if opts.dry_run:
-        return {
-            "success": True,
-            "dry_run": True,
-            "reembedded": [c.resource_id for c in reembed],
-            "dispatched": [{"resource_id": c.resource_id} for c in dispatch],
-            "skipped": skipped,
-            "in_flight": len(in_flight),
-            "remaining": total_missing,
-            "total_missing": total_missing,
-        }
-
-    embedder = EmbeddingService()
-    analysis_repo = get_analysis_repository()
-    tags_repo = get_tags_repository()
-
-    reembedded: list[int] = []
-    aborted = False
-    for i, cand in enumerate(reembed):
-        try:
-            ok, reason = await reembed_existing(
-                cand, embedder, analysis_repo, tags_repo
-            )
-        except Exception as e:  # one bad row must not lose the rows before it
-            logger.error(
-                f"backfill: re-embed failed for resource {cand.resource_id}: {e}"
-            )
-            skipped.append(_skip(cand.resource_id, "reembed_error"))
-            continue
-        if ok:
-            reembedded.append(cand.resource_id)
-            continue
-        if reason == "unconfigured":
-            code = "embedder_unconfigured"  # one spelling, same as the 409
-        elif reason == "analysis_row_missing":
-            code = reason
-        else:
-            code = classify_embed_reason(reason) or "provider_error"
-        skipped.append(_skip(cand.resource_id, code))
-        if code in ("embedder_unconfigured", "dimension_mismatch"):
-            # Process-wide, not per-row: every later re-embed AND every
-            # dispatched VLM run would end the same way (a mismatched
-            # embedder returns the wrong width for every text, so a
-            # dispatched analyze_l1 would pay for the VLM and still land no
-            # vector). Account for the rows this abort leaves untouched
-            # instead of dropping them.
-            aborted = True
-            skipped.extend(_skip(c.resource_id, code) for c in reembed[i + 1 :])
-            skipped.extend(_skip(c.resource_id, code) for c in dispatch)
-            break
-
-    dispatched: list[dict] = []
-    for cand in [] if aborted else dispatch:
-        try:
-            task_id = await _dispatch_l1_analysis(
-                user_id=auth.user_id,
-                resource_id=str(cand.resource_id),
-                platform_id=cand.platform_id,
-                media_pk=cand.media_id,
-                cover_url=cand.cover_url or "",
-                title=cand.title,
-                description=cand.description,
-                display_name=cand.title or cand.platform_id,
-            )
-        except Exception as e:  # one bad row must not abort the batch
-            logger.error(
-                f"backfill: dispatch failed for resource {cand.resource_id}: {e}"
-            )
-            skipped.append(_skip(cand.resource_id, "dispatch_error"))
-            continue
-        dispatched.append({"resource_id": cand.resource_id, "task_id": task_id})
-
-    return {
+    base = {
         "success": True,
-        "dry_run": False,
-        "reembedded": reembedded,
-        "dispatched": dispatched,
-        "skipped": skipped,
-        "in_flight": len(in_flight) + len(dispatched),
-        "remaining": max(total_missing - len(reembedded), 0),
+        "space": SpaceInfo.from_row(space).model_dump(),
+        "dispatched": [],
+        "in_flight": 0,
         "total_missing": total_missing,
     }
+    if opts.dry_run:
+        return {
+            **base,
+            "dry_run": True,
+            "reembedded": [r.resource_id for r in rows],
+            "skipped": [],
+            "remaining": total_missing,
+            "aborted_reason": None,
+        }
+
+    reembedded, skipped, aborted_reason = await _embed_backfill_rows(
+        rows, embedder=embedder, space_id=space["id"], repo=repo
+    )
+    return {
+        **base,
+        "dry_run": False,
+        "reembedded": reembedded,
+        "skipped": skipped,
+        "remaining": max(total_missing - len(reembedded), 0),
+        "aborted_reason": aborted_reason,
+    }
+
+
+async def _embed_backfill_rows(
+    rows: list, *, embedder, space_id: int, repo
+) -> tuple[list[int], list[dict], str | None]:
+    """Embed ``rows`` in order. Returns (landed ids, skipped, aborted_reason).
+
+    Stops early — every remaining row accounted for in ``skipped`` — on a
+    process-wide failure (``_BACKFILL_ABORT_CODES``), on
+    ``_BACKFILL_MAX_PROVIDER_ERRORS`` consecutive provider errors (rest:
+    ``provider_error``), or past ``_BACKFILL_WALL_CLOCK_S`` (rest:
+    ``not_attempted``). ``aborted_reason`` names which; None = ran to the end.
+    """
+    from app.services.library import embedding_backfill
+
+    reembedded: list[int] = []
+    skipped: list[dict] = []
+    started = _backfill_clock()
+    provider_streak = 0
+    for i, row in enumerate(rows):
+        if _backfill_clock() - started >= _BACKFILL_WALL_CLOCK_S:
+            skipped.extend(_skip(r.resource_id, "not_attempted") for r in rows[i:])
+            return reembedded, skipped, "time_budget"
+        try:
+            ok, reason = await embedding_backfill.embed_candidate(
+                row, embedder=embedder, space_id=space_id, repo=repo
+            )
+        except Exception as e:  # one bad row must not lose the rows before it
+            logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
+            skipped.append(_skip(row.resource_id, "reembed_error"))
+            provider_streak = 0
+            continue
+        if ok:
+            reembedded.append(row.resource_id)
+            provider_streak = 0
+            continue
+        code = _backfill_skip_code(reason)
+        if code not in ("empty_text", "store_missing"):
+            logger.error(f"backfill: resource {row.resource_id} not embedded: {reason}")
+        skipped.append(_skip(row.resource_id, code))
+        provider_streak = provider_streak + 1 if code == "provider_error" else 0
+        if code in _BACKFILL_ABORT_CODES or (
+            provider_streak >= _BACKFILL_MAX_PROVIDER_ERRORS
+        ):
+            skipped.extend(_skip(r.resource_id, code) for r in rows[i + 1 :])
+            return reembedded, skipped, code
+    return reembedded, skipped, None
 
 
 # ------------------------------------------------------------------

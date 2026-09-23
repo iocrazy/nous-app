@@ -2,15 +2,53 @@
 
 Same contract as ``test_resources_ai_router_dispatch.py``: a DBOS-dispatch
 site must pre-create its task_tracking row with ``dbos_workflow_id=wf_id``
-and pass the SAME ``workflow_id=wf_id`` to ``start_workflow_routed``. The
-backfill endpoint dispatches per resource, so it has to go through the one
-helper that honours that — not re-inline it.
+and pass the SAME ``workflow_id=wf_id`` to ``start_workflow_routed``.
+
+Since PR 2 (mig 499) the backfill no longer dispatches analyze_l1: the
+semantic document does not need the VLM, so every candidate is embedded in
+place into ``resource_embeddings`` (``embedding_backfill.embed_candidate``).
 """
 
 from __future__ import annotations
 
 import importlib
 import inspect
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi import HTTPException
+
+from app.core.embedding_space import SEMANTIC_LAYER, SpaceSpec
+from app.repositories.resource_embeddings_repository import (
+    BackfillRow,
+    EmbeddingStoreMissing,
+)
+
+_SPEC = SpaceSpec(
+    actual_model="doubao-embedding-vision-251215",
+    dims=2048,
+    protocol="ark_multimodal",
+    modalities=("image", "text", "video"),
+)
+_SPACE = {
+    "id": 3,
+    "actual_model": "doubao-embedding-vision-251215",
+    "protocol": "ark_multimodal",
+    "dims": 2048,
+    "modalities": ["image", "text", "video"],
+    "instruction_version": "en_keyword_v1",
+    "created_at": "2026-09-23T00:00:00+00:00",
+}
+# What the endpoint sends: SpaceInfo, id as a string (Snowflake > 2^53).
+_SPACE_OUT = {
+    "id": "3",
+    "actual_model": "doubao-embedding-vision-251215",
+    "protocol": "ark_multimodal",
+    "dims": 2048,
+    "modalities": ["image", "text", "video"],
+    "instruction_version": "en_keyword_v1",
+}
 
 
 def _source(symbol: str) -> str:
@@ -35,13 +73,7 @@ def test_single_trigger_routes_through_the_helper() -> None:
     assert "_resources_with_active_l1(" in source
 
 
-def test_backfill_skips_rows_already_in_flight() -> None:
-    """A second call minutes later must not re-dispatch the same 20: the
-    vector is still NULL, but a run is queued. Both entry points share the
-    same in-flight check so they cannot disagree."""
-    source = _source("backfill_embeddings")
-    assert "_resources_with_active_l1(" in source
-    assert '"in_flight"' in source
+def test_in_flight_helper_is_not_owner_filtered() -> None:
     helper = _source("_resources_with_active_l1")
     # NOT owner-filtered on purpose: the active-per-(resource_id, task_type)
     # unique index ignores who started the run, so a teammate's task must be
@@ -51,18 +83,14 @@ def test_backfill_skips_rows_already_in_flight() -> None:
     assert "resource_id.in_(" in helper
 
 
-def test_backfill_endpoint_stages_cheap_then_expensive_and_reports() -> None:
-    source = _source("backfill_embeddings")
-    assert "list_candidates(" in source
-    assert "partition(" in source
-    assert "reembed_existing(" in source
-    assert "_dispatch_l1_analysis(" in source
-    assert "embedder_unconfigured" in source, "an abort accounts for every row"
-    assert "undispatchable(" in source, "a cover-less row is reported, not dropped"
-    assert "reembed_error" in source, "one bad re-embed must not lose the batch"
-    for key in ("reembedded", "dispatched", "skipped", "remaining"):
-        assert f'"{key}"' in source
-    assert "dry_run" in source
+def test_backfill_no_longer_dispatches_the_vlm() -> None:
+    source = _source("backfill_embeddings") + _source("_embed_backfill_rows")
+    assert "_dispatch_l1_analysis(" not in source
+    assert "embed_candidate(" in source
+    assert "missing_for_user(" in source
+    mod = importlib.import_module("app.api.ai_router")
+    assert not hasattr(mod, "_BACKFILL_OVERFETCH_FACTOR")
+    assert not hasattr(mod, "_BACKFILL_MAX_SCAN")
 
 
 def test_backfill_body_caps_the_batch() -> None:
@@ -75,26 +103,24 @@ def test_backfill_body_caps_the_batch() -> None:
     assert bounds["Ge"].ge == 1 and bounds["Le"].le == 200
 
 
+@pytest.mark.asyncio
+async def test_resources_with_active_l1_short_circuits_on_an_empty_list() -> None:
+    from app.api.ai_router import _resources_with_active_l1
+
+    assert await _resources_with_active_l1([]) == set()
+
+
 # ---------------------------------------------------------------------------
-# behaviour of the endpoint body (the source pins above only prove wiring)
+# behaviour of the endpoint body
 # ---------------------------------------------------------------------------
-from types import SimpleNamespace  # noqa: E402
-from unittest.mock import AsyncMock, patch  # noqa: E402
-
-import pytest  # noqa: E402
-
-from app.services.library.embedding_backfill import BackfillCandidate  # noqa: E402
-
-
-def _cand(rid: int, *, has_analysis: bool, cover: str | None = "http://c") -> object:
-    return BackfillCandidate(
+def _row(rid: int) -> BackfillRow:
+    return BackfillRow(
         resource_id=rid,
         media_id=rid * 10,
         platform_id=f"p{rid}",
         title=f"t{rid}",
         description="",
-        cover_url=cover,
-        has_analysis=has_analysis,
+        has_analysis=False,
     )
 
 
@@ -102,184 +128,266 @@ def _reasons(skipped: list[dict]) -> dict[int, str]:
     return {s["resource_id"]: s["reason"] for s in skipped}
 
 
+class _Repo:
+    def __init__(self, rows, total, fail: Exception | None = None):
+        self.rows, self.total, self.fail = rows, total, fail
+        self.calls: list[dict] = []
+
+    async def missing_for_user(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail is not None:
+            raise self.fail
+        return self.rows, self.total
+
+
+class _SpaceRepo:
+    def __init__(self, fail: Exception | None = None):
+        self.fail = fail
+        self.specs: list = []
+
+    async def get_or_create(self, spec):
+        self.specs.append(spec)
+        if self.fail is not None:
+            raise self.fail
+        return _SPACE
+
+
+class _Embedder:
+    def __init__(self, spec=_SPEC):
+        self.spec = spec
+
+    async def space_spec(self):
+        return self.spec
+
+
+def _patches(
+    *,
+    repo: _Repo,
+    space_repo: _SpaceRepo | None = None,
+    embed=None,
+    embedder: _Embedder | None = None,
+    configured: bool = True,
+):
+    return (
+        patch(
+            "app.services.ai.providers.embedding_config.resolve_embedding_config",
+            AsyncMock(return_value=object() if configured else None),
+        ),
+        patch(
+            "app.services.ai.providers.embedding_service.EmbeddingService",
+            lambda: embedder or _Embedder(),
+        ),
+        patch(
+            "app.repositories.resource_embeddings_repository"
+            ".get_resource_embeddings_repository",
+            lambda: repo,
+        ),
+        patch(
+            "app.repositories.embedding_space_repository"
+            ".get_embedding_space_repository",
+            lambda: space_repo or _SpaceRepo(),
+        ),
+        patch(
+            "app.services.library.embedding_backfill.embed_candidate",
+            embed or AsyncMock(return_value=(True, None)),
+        ),
+    )
+
+
+async def _call(body=None):
+    from app.api.ai_router import backfill_embeddings
+
+    return await backfill_embeddings(SimpleNamespace(user_id="u-1"), None, body)
+
+
 @pytest.mark.asyncio
-async def test_resources_with_active_l1_short_circuits_on_an_empty_list() -> None:
-    """Called with nothing to check it must not open a session at all — the
-    backfill hits this on every empty page."""
-    from app.api.ai_router import _resources_with_active_l1
+async def test_backfill_embeds_every_candidate_in_place() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
 
-    assert await _resources_with_active_l1([]) == set()
+    repo = _Repo([_row(1), _row(2)], 9)
+    embed = AsyncMock(side_effect=[(True, None), (False, "empty_text")])
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call(BackfillEmbeddingsBody(limit=5))
 
-
-@pytest.mark.asyncio
-async def test_backfill_stops_reembedding_after_an_unconfigured_embedder() -> None:
-    """``unconfigured`` is not a per-row problem: every later row would fail
-    identically, so the loop breaks instead of burning the whole batch. The
-    in-flight row and the cover-less row are REPORTED, not dropped."""
-    from app.api.ai_router import BackfillEmbeddingsBody, backfill_embeddings
-
-    fetched = [
-        _cand(1, has_analysis=True),
-        _cand(2, has_analysis=True),
-        _cand(3, has_analysis=False, cover=None),
-        _cand(9, has_analysis=True),
+    assert repo.calls == [
+        {"user_id": "u-1", "space_id": 3, "layer": SEMANTIC_LAYER, "limit": 5}
     ]
-    reembed = AsyncMock(return_value=(False, "unconfigured"))
-
-    with (
-        patch(
-            "app.services.ai.providers.embedding_config.resolve_embedding_config",
-            AsyncMock(return_value=object()),
-        ),
-        patch(
-            "app.services.library.embedding_backfill.list_candidates",
-            AsyncMock(return_value=(fetched, 100)),
-        ),
-        patch(
-            "app.api.ai_router._resources_with_active_l1",
-            AsyncMock(return_value={"9"}),
-        ),
-        patch("app.services.library.embedding_backfill.reembed_existing", reembed),
-        patch("app.services.ai.providers.embedding_service.EmbeddingService"),
-        patch("app.api.ai_router.get_analysis_repository"),
-        patch("app.repositories.tags_repository.get_tags_repository"),
-    ):
-        out = await backfill_embeddings(
-            SimpleNamespace(user_id="u-1"), None, BackfillEmbeddingsBody(limit=10)
-        )
-
-    assert reembed.await_count == 1, "the second row must not be attempted"
-    assert out["reembedded"] == []
-    assert out["dispatched"] == []
-    # Row 1 failed; row 2 was never attempted but is still accounted for.
-    # Row 3 (no analysis, no cover) is normally filtered by the SQL; when
-    # one reaches the endpoint anyway it is reported, not dropped. Row 9
-    # (in flight) is only counted, never listed.
-    assert _reasons(out["skipped"]) == {
-        1: "embedder_unconfigured",
-        2: "embedder_unconfigured",
-        3: "no_cover_url",
-    }
-    assert out["in_flight"] == 1
-    assert out["remaining"] == 100 and out["total_missing"] == 100
-    assert out["success"] is True
+    assert embed.await_args_list[0].kwargs["space_id"] == 3
+    assert out["success"] is True and out["dry_run"] is False
+    assert out["space"] == _SPACE_OUT
+    assert out["reembedded"] == [1]
+    assert _reasons(out["skipped"]) == {2: "empty_text"}
+    # Kept for readers of the old shape; nothing is dispatched any more.
+    assert out["dispatched"] == [] and out["in_flight"] == 0
+    assert out["remaining"] == 8 and out["total_missing"] == 9
 
 
 @pytest.mark.asyncio
-async def test_backfill_keeps_going_when_one_dispatch_blows_up() -> None:
-    """One bad row must not abort the batch; it is reported with its reason
-    and ``remaining`` counts only what actually got done."""
-    from app.api.ai_router import BackfillEmbeddingsBody, backfill_embeddings
+@pytest.mark.parametrize(
+    "reason, code",
+    [
+        ("unconfigured", "embedder_unconfigured"),
+        ("dimension_mismatch: 2560 != 2048", "dimension_mismatch"),
+        ("store_missing", "store_missing"),
+    ],
+)
+async def test_process_wide_failures_stop_the_batch_and_account_for_every_row(
+    reason, code
+) -> None:
+    repo = _Repo([_row(1), _row(2), _row(3)], 3)
+    embed = AsyncMock(return_value=(False, reason))
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
 
-    fetched = [_cand(1, has_analysis=False), _cand(2, has_analysis=False)]
+    assert embed.await_count == 1, "every later row would fail identically"
+    assert _reasons(out["skipped"]) == {1: code, 2: code, 3: code}
+    assert out["remaining"] == 3
 
-    with (
-        patch(
-            "app.services.ai.providers.embedding_config.resolve_embedding_config",
-            AsyncMock(return_value=object()),
-        ),
-        patch(
-            "app.services.library.embedding_backfill.list_candidates",
-            AsyncMock(return_value=(fetched, 7)),
-        ),
-        patch(
-            "app.api.ai_router._resources_with_active_l1",
-            AsyncMock(return_value=set()),
-        ),
-        patch(
-            "app.api.ai_router._dispatch_l1_analysis",
-            AsyncMock(side_effect=[RuntimeError("dbos down"), "wf-2"]),
-        ),
-        patch("app.services.ai.providers.embedding_service.EmbeddingService"),
-        patch("app.api.ai_router.get_analysis_repository"),
-        patch("app.repositories.tags_repository.get_tags_repository"),
-    ):
-        out = await backfill_embeddings(
-            SimpleNamespace(user_id="u-1"), None, BackfillEmbeddingsBody(limit=10)
-        )
 
-    assert out["dispatched"] == [{"resource_id": 2, "task_id": "wf-2"}]
-    # Stable code only — the raw "dbos down" stays in the log, never in a
-    # 200 body (the 5xx scrubber cannot see a 200).
-    assert _reasons(out["skipped"]) == {1: "dispatch_error"}
-    # A dispatched row has NOT landed a vector yet: it is in flight, not done.
-    assert out["remaining"] == 7 and out["in_flight"] == 1
+@pytest.mark.asyncio
+async def test_one_bad_row_does_not_lose_the_batch() -> None:
+    repo = _Repo([_row(1), _row(2)], 2)
+    embed = AsyncMock(
+        side_effect=[RuntimeError("boom https://secret"), (False, "provider_error: x")]
+    )
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+    # Stable codes only — provider text stays in the log.
+    assert _reasons(out["skipped"]) == {1: "reembed_error", 2: "provider_error"}
 
 
 @pytest.mark.asyncio
 async def test_backfill_refuses_up_front_when_no_embedder_is_configured() -> None:
-    """A typed 409, not a silent no-op: with no embedder every dispatched
-    analyze_l1 would spend VLM money and still land no vector — the exact
-    failure this backfill exists to repair. The refusal must happen BEFORE
-    any candidate is listed or dispatched.
-
-    ``details.code`` is what the frontend reads (the production error body is
-    the ``ErrorResponse`` envelope, not FastAPI's bare ``{detail}``).
-    """
-    from fastapi import HTTPException
-
-    from app.api.ai_router import backfill_embeddings
-
-    listed = AsyncMock(return_value=([], 0))
-    with (
-        patch(
-            "app.services.ai.providers.embedding_config.resolve_embedding_config",
-            AsyncMock(return_value=None),
-        ),
-        patch("app.services.library.embedding_backfill.list_candidates", listed),
-    ):
+    """``details.code`` is what the frontend reads (the production error body is
+    the ``ErrorResponse`` envelope, not FastAPI's bare ``{detail}``)."""
+    repo = _Repo([], 0)
+    p = _patches(repo=repo, configured=False)
+    with p[0], p[1], p[2], p[3], p[4]:
         with pytest.raises(HTTPException) as exc:
-            await backfill_embeddings(SimpleNamespace(user_id="u-1"), None, None)
-
+            await _call()
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "embedder_unconfigured"
-    listed.assert_not_awaited()
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_backfill_refuses_when_the_embedder_cannot_name_its_space() -> None:
+    repo = _Repo([], 0)
+    p = _patches(repo=repo, embedder=_Embedder(spec=None))
+    with p[0], p[1], p[2], p[3], p[4]:
+        with pytest.raises(HTTPException) as exc:
+            await _call()
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "embedder_unconfigured"
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["space", "listing"])
+async def test_missing_vector_store_is_a_typed_503(where) -> None:
+    missing = EmbeddingStoreMissing("migration 499 not applied")
+    repo = _Repo([], 0, fail=missing if where == "listing" else None)
+    space_repo = _SpaceRepo(fail=missing if where == "space" else None)
+    p = _patches(repo=repo, space_repo=space_repo)
+    with p[0], p[1], p[2], p[3], p[4]:
+        with pytest.raises(HTTPException) as exc:
+            await _call()
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "vector_store_missing"
 
 
 @pytest.mark.asyncio
 async def test_dry_run_uses_the_same_element_shapes_as_a_real_run() -> None:
-    """A preview that parses differently from the real call is not a preview.
-    ``dispatched`` elements are objects in both branches; the real run adds
-    ``task_id``."""
-    from app.api.ai_router import BackfillEmbeddingsBody, backfill_embeddings
+    from app.api.ai_router import BackfillEmbeddingsBody
 
-    fetched = [_cand(1, has_analysis=True), _cand(2, has_analysis=False)]
-    with (
-        patch(
-            "app.services.library.embedding_backfill.list_candidates",
-            AsyncMock(return_value=(fetched, 9)),
-        ),
-        patch(
-            "app.api.ai_router._resources_with_active_l1",
-            AsyncMock(return_value=set()),
-        ),
-        patch(
-            "app.services.ai.providers.embedding_config.resolve_embedding_config",
-            AsyncMock(return_value=object()),
-        ),
-    ):
-        out = await backfill_embeddings(
-            SimpleNamespace(user_id="u-1"),
-            None,
-            BackfillEmbeddingsBody(limit=10, dry_run=True),
-        )
+    repo = _Repo([_row(1), _row(2)], 9)
+    embed = AsyncMock()
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call(BackfillEmbeddingsBody(limit=10, dry_run=True))
+    embed.assert_not_awaited()
     assert out["success"] is True and out["dry_run"] is True
-    assert out["reembedded"] == [1]
-    assert out["dispatched"] == [{"resource_id": 2}]
-    assert out["skipped"] == [] and out["in_flight"] == 0
+    assert out["space"] == _SPACE_OUT
+    assert out["reembedded"] == [1, 2]
+    assert out["dispatched"] == [] and out["skipped"] == [] and out["in_flight"] == 0
     assert out["remaining"] == 9 == out["total_missing"]
 
 
-def test_scan_window_keeps_headroom_at_the_top_of_the_limit_range() -> None:
-    """At limit=200 the over-fetch must still leave room for in-flight rows,
-    or a second call at the top of the range could stall on the same batch."""
-    from app.api.ai_router import (
-        _BACKFILL_MAX_LIMIT,
-        _BACKFILL_MAX_SCAN,
-        _BACKFILL_OVERFETCH_FACTOR,
-    )
+@pytest.mark.asyncio
+async def test_space_id_is_sent_as_a_string() -> None:
+    repo = _Repo([_row(1)], 1)
+    p = _patches(repo=repo)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+    assert isinstance(out["space"]["id"], str) and out["space"]["id"] == "3"
+    assert out["aborted_reason"] is None
 
-    assert _BACKFILL_MAX_SCAN > _BACKFILL_MAX_LIMIT
-    assert min(_BACKFILL_MAX_LIMIT * _BACKFILL_OVERFETCH_FACTOR, _BACKFILL_MAX_SCAN) > (
-        _BACKFILL_MAX_LIMIT
+
+@pytest.mark.asyncio
+async def test_three_provider_errors_in_a_row_stop_the_batch() -> None:
+    """A dead provider must not hold one request for rows x 30s timeouts."""
+    rows = [_row(i) for i in range(1, 7)]
+    repo = _Repo(rows, 6)
+    embed = AsyncMock(
+        side_effect=[
+            (False, "provider_error: 503"),
+            (True, None),  # a success resets the streak
+            (False, "provider_error: 503"),
+            (False, "provider_error: 503"),
+            (False, "provider_error: 503"),
+            (True, None),
+        ]
     )
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+
+    assert embed.await_count == 5
+    assert out["reembedded"] == [2]
+    assert _reasons(out["skipped"]) == {
+        1: "provider_error",
+        3: "provider_error",
+        4: "provider_error",
+        5: "provider_error",
+        6: "provider_error",
+    }
+    assert out["aborted_reason"] == "provider_error"
+    assert out["remaining"] == 5
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_budget_marks_the_rest_not_attempted() -> None:
+    from app.api import ai_router
+
+    rows = [_row(1), _row(2), _row(3)]
+    repo = _Repo(rows, 3)
+    embed = AsyncMock(return_value=(True, None))
+    # start, before row 1, before row 2 (past the budget)
+    budget = ai_router._BACKFILL_WALL_CLOCK_S
+    clock = iter([0.0, 1.0, budget + 1.0])
+    p = _patches(repo=repo, embed=embed)
+    with (
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        p[4],
+        patch.object(ai_router, "_backfill_clock", lambda: next(clock)),
+    ):
+        out = await _call()
+
+    assert budget == 60
+    assert embed.await_count == 1
+    assert out["reembedded"] == [1]
+    assert _reasons(out["skipped"]) == {2: "not_attempted", 3: "not_attempted"}
+    assert out["aborted_reason"] == "time_budget"
+    assert out["remaining"] == 2
+
+
+def test_not_attempted_is_a_response_code_not_an_embed_reason() -> None:
+    from app.services.ai.providers.embedding_service import EMBED_REASON_CODES
+
+    assert "not_attempted" not in EMBED_REASON_CODES

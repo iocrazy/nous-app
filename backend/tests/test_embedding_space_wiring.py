@@ -124,95 +124,10 @@ async def test_search_by_embedding_falls_back_to_4_args_before_mig_490(
     assert "m" not in session.calls[1]["params"]
 
 
-# ---------------------------------------------------------------------------
-# analyze_l1 + backfill: writers
-# ---------------------------------------------------------------------------
-def test_analyze_l1_passes_the_space_to_the_writer() -> None:
-    import inspect
-
-    import app.workflows.analyze_l1 as mod
-
-    src = inspect.getsource(mod)
-    assert "embedding_model=embedding_service.model" in src
-
-
-@pytest.mark.asyncio
-async def test_backfill_reembed_stamps_the_space() -> None:
-    from app.services.library import embedding_backfill as bf
-
-    class _Repo:
-        def __init__(self):
-            self.kwargs: Dict[str, Any] = {}
-
-        async def get_analysis(self, rid, analysis_level=None):
-            return {"visual_description": "x"}
-
-        async def update_embedding(self, rid, vec, text, **kw):
-            self.kwargs = kw
-            return {"resource_id": rid}
-
-    class _Tags:
-        async def get_resource_tags(self, rid):
-            return []
-
-    class _Emb:
-        model = "m-9"
-
-        def build_embedding_text(self, **kw):
-            return "t"
-
-        async def try_embed(self, text):
-            return [0.1], None
-
-    repo = _Repo()
-    cand = bf.BackfillCandidate(1, 10, "p", "T", "", "u", has_analysis=True)
-    ok, _ = await bf.reembed_existing(cand, _Emb(), repo, _Tags())
-    assert ok and repo.kwargs["embedding_model"] == "m-9"
-
-
-@pytest.mark.asyncio
-async def test_backfill_endpoint_stops_and_reports_a_dimension_mismatch() -> None:
-    """Every later row — and every dispatched VLM run — would end the same
-    way, so the batch stops and every untouched row says why."""
-    from app.api.ai_router import BackfillEmbeddingsBody, backfill_embeddings
-    from app.services.library.embedding_backfill import BackfillCandidate
-
-    def _cand(rid, has_analysis=True):
-        return BackfillCandidate(rid, rid * 10, f"p{rid}", "t", "", "c", has_analysis)
-
-    fetched = [_cand(1), _cand(2), _cand(3, has_analysis=False)]
-    reembed = AsyncMock(return_value=(False, "dimension_mismatch: 2560 != 2048"))
-    dispatch = AsyncMock()
-    with (
-        patch(
-            "app.services.ai.providers.embedding_config.resolve_embedding_config",
-            AsyncMock(return_value=object()),
-        ),
-        patch(
-            "app.services.library.embedding_backfill.list_candidates",
-            AsyncMock(return_value=(fetched, 3)),
-        ),
-        patch(
-            "app.api.ai_router._resources_with_active_l1",
-            AsyncMock(return_value=set()),
-        ),
-        patch("app.services.library.embedding_backfill.reembed_existing", reembed),
-        patch("app.api.ai_router._dispatch_l1_analysis", dispatch),
-        patch("app.services.ai.providers.embedding_service.EmbeddingService"),
-        patch("app.api.ai_router.get_analysis_repository"),
-        patch("app.repositories.tags_repository.get_tags_repository"),
-    ):
-        out = await backfill_embeddings(
-            SimpleNamespace(user_id="u-1"), None, BackfillEmbeddingsBody(limit=10)
-        )
-
-    assert reembed.await_count == 1
-    dispatch.assert_not_awaited()
-    assert {s["resource_id"]: s["reason"] for s in out["skipped"]} == {
-        1: "dimension_mismatch",
-        2: "dimension_mismatch",
-        3: "dimension_mismatch",
-    }
+# analyze_l1 + the backfill write ``resource_embeddings`` (mig 499), where
+# the space is a column (space_id); their pins live in
+# tests/workflows/test_analyze_l1_semantic_embedding.py and
+# tests/services/library/test_embedding_backfill.py.
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +398,11 @@ async def test_hybrid_vector_leg_sends_the_query_space() -> None:
 
     svc = SearchService()
     svc.embedding_service = SimpleNamespace(
-        try_embed=AsyncMock(return_value=([0.1], None)), model="m-5"
+        try_embed=AsyncMock(return_value=([0.1], None)),
+        # No space → the legacy RPC (the path this pin is about; the
+        # resource_embeddings path is pinned in test_search_vector_leg_store).
+        space_spec=AsyncMock(return_value=None),
+        model="m-5",
     )
     repo = SimpleNamespace(search_by_embedding=AsyncMock(return_value=[]))
     svc.analysis_repo = repo
@@ -497,7 +416,9 @@ async def test_semantic_search_sends_the_query_space() -> None:
 
     svc = SearchService()
     svc.embedding_service = SimpleNamespace(
-        generate_embedding=AsyncMock(return_value=[0.1]), model="m-6"
+        generate_embedding=AsyncMock(return_value=[0.1]),
+        space_spec=AsyncMock(return_value=None),
+        model="m-6",
     )
     repo = SimpleNamespace(search_by_embedding=AsyncMock(return_value=[]))
     svc.analysis_repo = repo
@@ -517,6 +438,9 @@ async def test_find_similar_media_compares_within_the_source_space() -> None:
         search_by_embedding=AsyncMock(return_value=[]),
     )
     svc.analysis_repo = repo
+    svc.embedding_service = SimpleNamespace(
+        space_spec=AsyncMock(return_value=None), model=""
+    )
     await svc.find_similar_media(media_id=1, user_id="u-1")
     assert repo.search_by_embedding.await_args.kwargs["embedding_model"] == "m-8"
 

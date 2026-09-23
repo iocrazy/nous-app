@@ -9,7 +9,7 @@ nous 拒绝（未授权、忙）就直接报错，不悄悄换即梦跑——那
 
 | 字段 | 值 |
 |---|---|
-| `name` | `nous-studio-upscale`（mig 497 从已有 nous 平台行复制 key 与 base_url） |
+| `name` | `nous-studio-upscale`（mig 499 从已有 nous 平台行复制 key 与 base_url） |
 | `actual_provider` | `nous` |
 | `actual_model` | `studio-upscale`（nous-engine 已发布服务名） |
 | `base_url` | 同其他 nous 行，如 `http://host.docker.internal:8000/v1` |

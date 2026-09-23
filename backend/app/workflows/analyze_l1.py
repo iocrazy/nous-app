@@ -305,36 +305,16 @@ async def call_analyze_l1(
                 source="ai",
             )
 
-    media_tags = await tags_repo.get_resource_tags(resource_id)
-    tag_names = [t["tags"]["name"] for t in media_tags if t.get("tags")]
-
-    embedding_text = embedding_service.build_embedding_text(
-        title=title,
-        description=description,
-        tags=tag_names,
-        visual_description=result.visual_description,
-        detected_objects=result.detected_objects,
-        detected_scenes=result.detected_scenes,
-        detected_text=result.detected_text,
-    )
     # Orthogonal outcome, reported on its own (CLAUDE.md 防御模式): the
     # analysis succeeded and was paid for regardless of whether the vector
-    # landed. A missing vector is NOT a reason to fail the run — but it was
-    # never a reason to stay silent either. ``generate_embedding`` returned a
-    # bare None for "unconfigured", "empty text" and "provider error" alike,
-    # and ``if embedding:`` swallowed all three: content_embedding sat at zero
-    # rows for months while every run reported success. Now the reason is
-    # logged at ERROR (so the post-release drift funnel sees it) and carried
-    # in the digest for the workflow to stamp onto task_tracking.
-    embedding, embed_error = await embedding_service.try_embed(embedding_text)
-    if embedding:
-        await analysis_repo.update_embedding(
-            resource_id,
-            embedding,
-            embedding_text,
-            embedding_model=embedding_service.model,
-        )
-    else:
+    # landed. A missing vector is NOT a reason to fail the run — but it is
+    # never silent either: the reason is logged at ERROR (the post-release
+    # drift funnel sees it) and carried in the digest for the workflow to
+    # stamp onto task_tracking. The vector goes to resource_embeddings
+    # (semantic layer, mig 499); the legacy resource_analysis column is no
+    # longer written.
+    embedded, embed_error = await _embed_semantic_layer(resource_id, embedding_service)
+    if not embedded:
         logger.error(
             f"[analyze_l1] resource {resource_id}: analysis saved but embedding "
             f"NOT written — {embed_error}"
@@ -347,11 +327,70 @@ async def call_analyze_l1(
         "media_id": media_id,
         "category": result.category,
         "cost": result.cost,
-        "embedded": embedding is not None,
+        "embedded": embedded,
         # Classified, not raw: this dict is checkpointed as DBOS step output
         # and the raw provider text already went to the ERROR log above.
         "embed_error": classify_embed_reason(embed_error),
     }
+
+
+async def _embed_semantic_layer(
+    resource_id: int, embedding_service: Any
+) -> tuple[bool, Optional[str]]:
+    """Compose the resource's semantic document, embed it, and write it into
+    the embedder's space in ``resource_embeddings``. Returns ``(True, None)``
+    or ``(False, reason)`` (a ``try_embed`` reason, or ``"store_missing: ..."``
+    when migration 499 has not run). Never raises for those shapes.
+
+    Embeds first and names the space after: ``try_embed`` is what says WHY
+    there is no vector; ``space_spec()`` only says that there is none.
+
+    ``load_semantic_inputs`` reads ``resources`` (UserScoped) and a DBOS step
+    has no request scope, so the read runs under SYSTEM scope when the
+    resources gate is on — load-bearing in production, where it is.
+    """
+    from app.core.embedding_space import SEMANTIC_LAYER
+    from app.repositories.embedding_space_repository import (
+        get_embedding_space_repository,
+    )
+    from app.repositories.resource_embeddings_repository import (
+        EmbeddingStoreMissing,
+        get_resource_embeddings_repository,
+    )
+    from app.services.library.embedding_document import (
+        compose_semantic_document,
+        load_semantic_inputs,
+    )
+
+    scope_cm = (
+        system_request_scope(
+            reason="analyze_l1 workflow: read semantic document inputs"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        inputs = await load_semantic_inputs(resource_id)
+    text, source_hash = compose_semantic_document(**inputs)
+    embedding, reason = await embedding_service.try_embed(text)
+    if embedding is None:
+        return False, reason
+    spec = await embedding_service.space_spec()
+    if spec is None:
+        return False, "unconfigured"
+    try:
+        space = await get_embedding_space_repository().get_or_create(spec)
+        await get_resource_embeddings_repository().upsert(
+            resource_id=resource_id,
+            layer=SEMANTIC_LAYER,
+            space_id=space["id"],
+            embedding=embedding,
+            source_hash=source_hash,
+            source_text=text,
+        )
+    except EmbeddingStoreMissing as e:
+        return False, f"store_missing: {e}"
+    return True, None
 
 
 @DBOS.workflow()
