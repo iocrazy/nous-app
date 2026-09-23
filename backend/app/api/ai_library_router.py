@@ -3253,7 +3253,10 @@ async def get_chat_session(session_id: str, auth: AuthDep) -> Dict[str, Any]:
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
     session = await svc.get_session(session_id, user_id=user_uuid)
-    messages = await svc.get_messages(session_id, user_id=user_uuid)
+    # Newest window: opening a chat means seeing where it left off. The
+    # oldest-first default showed a >200-message conversation from its start
+    # and made the latest turns unreachable. Paging back is a separate ticket.
+    messages = await svc.get_messages(session_id, user_id=user_uuid, newest=True)
     return {**session, "messages": messages}
 
 

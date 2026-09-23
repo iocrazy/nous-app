@@ -235,9 +235,9 @@ class AILibraryChatService:
         """Fetch messages for a session in chronological order.
 
         ``newest`` picks which ``limit``-sized window (see
-        ``ConversationsAiStore.get_messages``): the session-view endpoint
-        uses the default oldest-first window; the turn path passes
-        ``newest=True``.
+        ``ConversationsAiStore.get_messages``): the turn path and the
+        session-view endpoint pass ``newest=True``; oldest-first callers
+        (issue message list, fork's origin scan) keep the default.
         """
         await self.get_session(session_id, user_id=user_id)
         return await self._store.get_messages(
