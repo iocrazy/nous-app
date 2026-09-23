@@ -224,6 +224,9 @@ on:
       # mig 491：后端专用 SECURITY DEFINER 函数对浏览器角色的执行权 —— 权限只有
       # Postgres 自己答得出，单测走后端会话，永远看不见 PostgREST 那条路。
       - 'backend/tests/db/test_migration_491_revoke_definer_rpcs_integration.py'
+      # mig 496：被 RLS 策略引用的 4 个 definer 身份助手只替调用者自己回答 —— 守卫读
+      # role GUC 与 JWT claims，只有真库在 anon / authenticated 角色下才测得出来。
+      - 'backend/tests/db/test_migration_496_rls_helper_identity_guard_integration.py'
       # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
       # / 按议题 / 按 agent 求和给同一个数」只有在一棵真树上才成立得了：三条语句的
       # WHERE 与 GROUP BY 毫无共同之处，而桩 session 按调用顺序发牌，三条都写错成
@@ -246,15 +249,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-eight, so it has to
+      # to it changes what "green" means for all thirty-nine, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-seven below was counted with this command, not derived
-      # from the thirty-six it replaced):
+      # (the thirty-nine below was counted with this command, not derived
+      # from the thirty-eight it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1027,3 +1030,14 @@ jobs:
           # get_user_tag_counts、rpc_reorder_storyboard_frames）：anon / authenticated
           # 必须没有 EXECUTE，postgres 必须保留（负向对照：全收回会让扣分静默断掉）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_491_revoke_definer_rpcs_integration.py -v
+
+      - name: Assert mig 496 made the RLS identity helpers answer only for the caller
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # is_conversation_member / conversation_member_joined_at / get_user_team_ids(_text)：
+          # anon（带 / 不带 JWT）与 authenticated 替别人问一律拿空；自己问、postgres 与
+          # service_role 拿真答案（负向对照）；引用它们的策略仍只放行调用者自己的行。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_496_rls_helper_identity_guard_integration.py -v
