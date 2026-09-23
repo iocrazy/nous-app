@@ -7,7 +7,10 @@
  * 终审 I2 修正）：扣费逐 run 发生（每条各 ceil 一次自身花费），而读者问的是这次回合。
  * 浮层里那句 `incl. sub-agents` 就是在说这件事——数字比 root 那一行大不是 bug。
  *
- * 两个都没有读作 `—`，不是 `¢0.00`：0 会把「没算出价」说成「这次免费」，而那是两个答案。
+ * `costCents` 为 `0` 就渲染 `¢0.00`，不是 `—`：`/ai-library/runs/costs` 的 `cost_cents`
+ * 自 mig 479 起来自 `Σ own_cost_cents`（每次镜像都写、存量已回填），0 就是零花费的
+ * 事实，不是「没算出价」。`null` 只可能来自其他来源（done 帧 / rollup 行）在字段
+ * 缺席时——那才是真缺席，读作 `—`。
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -38,8 +41,8 @@ export const RunCostTail: React.FC<RunCostTailProps> = ({
     chargedPoints !== null
       ? `◇ ${chargedPoints.toFixed(2)}`
       : costCents !== null
-        ? `¢${costCents.toFixed(2)}`
-        : '—';
+        ? `¢${costCents.toFixed(2)}` // 含 0——零花费不是缺席
+        : '—'; // 真缺席（done 帧 / rollup 行没这一列）才落到这里
   // `—` 不加 `…`：一个不存在的数字「还会变」是句废话。
   const head = live && amount !== '—' ? `${amount}…` : amount;
   const title = [
