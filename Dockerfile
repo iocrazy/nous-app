@@ -192,9 +192,10 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
     && dreamina --help >/dev/null
 
 # ── gpt-image-2-skill (Codex / GPT Image 2) CLI ──────────────────────────
-# CodexCliProvider drives this binary as a subprocess for image generation
-# over the local Codex OAuth session (bind-mounted read-write at /app/.codex,
-# see docs/runbook/codex-image.md). The npm package is only a JS launcher; the
+# CodexCliProvider drives this binary as a subprocess for the openai-images
+# protocol (`--provider openai`, the catalog row's API key; the server-side
+# Codex subscription path was retired 2026-09-23, see
+# docs/runbook/codex-image.md). The npm package is only a JS launcher; the
 # real program is a single static Rust binary shipped in the
 # `…-linux-x64-static` platform package, so we pull that tarball straight from
 # the registry and skip node/npm entirely. Pinned by version + sha256 —
@@ -204,8 +205,8 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
 # tarball is byte-identical, the sha256 pin still holds).
 # NB: the CLI's -V/--help exit non-zero by design (--help exits 2), so both
 # sanity checks pipe to grep and never trust the exit code.
-# The second check pins the --quality enum, not just the version: every codex
-# generation sends `--quality high` and the 2.5 rows advertise `xhigh`/`max`
+# The second check pins the --quality enum, not just the version: generations
+# send `--quality high` by default and the 2.5 rows advertise `xhigh`/`max`
 # (see IMAGE_25_QUALITY_TIERS), so a silent enum change upstream would surface
 # as a runtime argument-parse failure on every image instead of a build break.
 # The check is scoped to the `--quality` option's own `[possible values: …]`

@@ -246,7 +246,7 @@ async def _probe_image_model(row: Dict[str, Any], prov: str) -> Dict[str, Any]:
     protocol = resolve_generation_protocol(prov)
     if protocol is None or not protocol.supports_http_image_probe:
         # Not a failure: there is no HTTP endpoint to reach. CLI-backed
-        # (``codex``, ``jimeng-cli``) and daemon-backed families live outside
+        # (``openai-images``, ``jimeng-cli``) and daemon-backed families live outside
         # this process entirely. Names the provider and nothing else.
         return {
             "ok": False,

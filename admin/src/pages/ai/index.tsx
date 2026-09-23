@@ -5,7 +5,6 @@ import {
 } from '@arco-design/web-react'
 import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
-import { CodexAuthCard } from './CodexAuthCard'
 import { JimengAuthCard } from './JimengAuthCard'
 
 const { Title, Text } = Typography
@@ -736,7 +735,6 @@ export function AIModelsPage() {
       </div>
 
       <JimengAuthCard />
-      <CodexAuthCard />
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>
@@ -761,8 +759,8 @@ export function AIModelsPage() {
                     />
                     {/* The protocol's own label, with the dispatch key kept
                         visible next to it. Rendering the raw `actual_provider`
-                        alone left an admin staring at `codex` / `codex-local` /
-                        `openai-images` — three cards driving ONE binary, told
+                        alone left an admin staring at `codex-local` /
+                        `openai-images` — cards driving ONE binary, told
                         apart by nothing on screen. The label and description
                         were already in the /protocols payload this page
                         fetches; they were simply never used outside the Add

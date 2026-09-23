@@ -1,13 +1,21 @@
 # Codex / OpenAI 出图链（`gpt-image-2-skill`）— 运维手册
 
-同一个 CLI 二进制的两条路径：**Codex 订阅会话**（`--provider codex`，下文
-「架构事实」起）与 **OpenAI API key**（`--provider openai`，见「API-key 路径」）。
+同一个 CLI 二进制今天只剩两条在用的路径：
+
+- **OpenAI API key**（`openai-images` 协议，服务端容器里跑 `--provider openai`，见「API-key 路径」）
+- **用户本机 daemon**（`codex-local` 协议，用户自己机器上的 Codex 订阅会话，见 `tools/codex-daemon/README.md`）
+
 两者的凭证、计费和能力都不一样，别把一条路径的结论搬到另一条上。
 
+> **服务端 Codex 订阅路径已于 2026-09-23 下线。** 那条路径是 `codex` 协议 + 目录行
+> `codex-image`，凭证是 gpupc 宿主机 heygo 的 Codex OAuth 会话（bind-mount 进容器）。
+> 协议、目录行（mig 498 删除）、Admin 上的 Codex 登录状态卡、`/api/v1/admin/codex/status`
+> 与 `/api/v1/codex-cli/status` 同批删除。ChatGPT 订阅出图现在只走用户自己的 daemon。
+> 本文件里「订阅会话」相关的事实（编排模型、`xhigh` 被降级）对 daemon 路径仍然成立，
+> 因为 daemon 跑的是同一个二进制的 `--provider codex`。
+
 CodexCliProvider（`backend/app/services/media/parsers/video_providers/codex_cli.py`）
-以 subprocess 调 `gpt-image-2-skill` CLI 生图。凭证是 **gpupc 宿主机 heygo 用户的
-Codex OAuth 会话**（`/home/heygo/.codex/auth.json`），不是 API Key——消耗的是
-ChatGPT 订阅额度。catalog 行 `codex-image`（`mediahub_models`，migration 430）。
+是服务端对这个二进制的封装，现在只被 `openai-images` 使用（`provider_kind="openai"`）。
 
 ## 架构事实
 
@@ -26,11 +34,11 @@ ChatGPT 订阅额度。catalog 行 `codex-image`（`mediahub_models`，migration
   `CodexCliError.stderr`、参与分类——流里全是模型可控文本，让它参与判定等于允许模型
   伪造一个 auth 失败，把用户支去重新登录。拒绝走 `code="content_refused"`，模型原话
   走 `detail`（再经 workflow 落 `task_tracking.metadata.failure`，jsonb 才存得住中文）。
-- 上游端点：`chatgpt.com/backend-api/codex/responses`（ChatGPT 私有后端）。这是
-  ToS 灰色地带，账号风控风险自担——正因如此该 provider 是 owner 私有的，不开放
-  给全站用户。
-- 挂载：compose 把 `/home/heygo/.codex` **读写** bind-mount 到 backend/worker 的
-  `/app/.codex`（CLI 会把刷新后的 access_token 写回 auth.json）。
+- 订阅路径的上游端点：`chatgpt.com/backend-api/codex/responses`（ChatGPT 私有后端，
+  ToS 灰色地带）。服务端不再走它；daemon 路径在用户自己机器上走，风险由用户自担。
+- 遗留挂载：compose 仍把 `/home/heygo/.codex` bind-mount 到 backend/worker 的
+  `/app/.codex` 并设 `CODEX_AUTH_FILE`。服务端已无代码读它（`openai-images` 走 key），
+  摘除属于部署配置改动，单独做。
 - 超时：`CODEX_CLI_TIMEOUT`（秒，默认 900，clamp 30–3600）。
 
 ## 编排模型是目录里的 `actual_model`，不是 skill 的默认值（2026-09-05 血泪）
@@ -40,7 +48,7 @@ Codex 出图走的是 Responses API：一个**编排模型**（LLM）决定是�
 改的是**编排模型**（实测：`-m gpt-6-astra` 返回体 `request.model=gpt-6-astra`、
 `delegated_image_model=gpt-image-2`）。
 
-- 服务端路径：`mediahub_models.codex-image.actual_model` → `codex_cli.py` 的 `--model`
+- ~~服务端路径：`codex-image.actual_model` → `codex_cli.py` 的 `--model`~~（2026-09-23 下线）
 - daemon 路径：`mediahub_models.codex-local-image.actual_model` → payload.model → daemon 的 `--model`
 - 两者都为空时 skill 用**写死**的默认 `gpt-5.4`（0.7.3 二进制里硬编码，无配置项、无环境变量可改）
 
@@ -69,7 +77,7 @@ Codex 会话互不相干。协议实现在
 `backend/app/services/ai/provider_protocols/openai_images.py`。
 
 目录行（migration 465，两行都**默认 disabled**，`owner_user_id` 为 NULL 即平台级，
-不像 codex 行绑定 owner）：
+不像当年的服务端 codex 行绑定 owner）：
 
 | `name` | `actual_model` | 画布里显示 |
 |---|---|---|
@@ -106,7 +114,7 @@ docker exec nous-worker sh -c \
 
 **两条路径的能力不一样，结论不许互相搬运**：
 
-| | API-key（`openai-images`） | Codex 订阅（`codex` / `codex-local`） |
+| | API-key（`openai-images`） | Codex 订阅（`codex-local`，daemon） |
 |---|---|---|
 | 尺寸 | `--size` 按写的来 | 只有三档，catalog aspect 就近映射 |
 | quality | 多 `xhigh` / `max` 两档 | 仅 low/medium/high；`xhigh` 被**静默降级成 medium**（2026-09-09 实测） |
@@ -124,56 +132,21 @@ docker exec nous-worker sh -c \
 `xhigh` 的尾巴），光看字符串会误判 `high` 已被删。**Dockerfile 的安装层现在把这条
 断言钉死了** —— 除了校验版本号，还要 `--help` 的输出里同时出现 `xhigh` 和独立的
 `high`，任何一个消失就是 build 失败，而不是等到用户每次出图都撞参数解析错误
-（codex 路径每次都发 `--quality high`）。升级二进制时如果这层红了，先把下面的枚举
+（订阅路径每次都发 `--quality high`）。升级二进制时如果这层红了，先把下面的枚举
 打出来，再决定怎么改代码里的 tier 表（`IMAGE_25_QUALITY_TIERS` / `LEGACY_QUALITY_TIERS`）：
 
 ```bash
 docker exec nous-worker gpt-image-2-skill images generate --help 2>&1 | grep -o '\[possible values[^]]*\]'
 ```
 
-## 一次性安装 / 登录（宿主机）
-
-宿主机已有 codex CLI（linuxbrew）。若重装：
-
-```bash
-curl -fsSL https://chatgpt.com/codex/install.sh | sh   # 或 npm i -g @openai/codex
-codex login                                            # 浏览器 OAuth,写 ~/.codex/auth.json
-```
-
-容器 uid=1031 ≠ heygo(1000)，用 ACL 授权，**不要 chown/chgrp**（宿主机 codex CLI
-还在用这个目录）。⚠️ `~/.codex` 是 symlink → `~/.config/codex`，`setfacl -R` 不跟
-符号链接递归，必须打在真实目录上（2026-08-17 实测：打在 symlink 上只有目录本身
-拿到 ACL，auth.json 仍 Permission denied）：
-
-```bash
-setfacl -R -m u:1031:rwX -m d:u:1031:rwX /home/heygo/.config/codex
-```
-
-（docker bind mount 会解析 symlink，compose 里写 `/home/heygo/.codex` 不受影响。）
-已于 2026-08-17 在 gpupc 执行并用 `docker run -u 1031:100` 写入探针验证 PROBE-OK。
-
-## 部署验收（读正常 ≠ 服务正常）
-
-```bash
-# 1) 容器内二进制 + 登录态探针(access_token_present 必须为 true)
-docker exec nous-worker gpt-image-2-skill --json doctor | head -40
-
-# 2) 写入探针 —— auth.json 必须可写(token 刷新要写回),只读挂载是静默断裂
-docker exec nous-worker sh -c 'touch /app/.codex/.wprobe && rm /app/.codex/.wprobe' \
-  && echo OK-writable || echo FAIL-readonly
-
-# 3) 端到端业务冒烟:用 owner 账号在 UI 里真生成一张图(codex-image 模型)
-```
-
-⚠️ `doctor` 的 `access_token_present: true` 只证明文件里有 token，不证明 token
-有效（不可证伪信号）——真验收必须走一次 3)。
-
 ## 排障
+
+服务端（`openai-images`）：
 
 | 症状（错误 code） | 含义 | 处置 |
 |---|---|---|
-| `not_logged_in` | auth.json 缺失/过期/被吊销 | 宿主机 `codex login` 重登；确认 ACL 仍在（`getfacl /home/heygo/.codex`） |
-| `no_credit` | 订阅额度耗尽 / 限流 | 等额度窗口刷新，或暂停使用 |
+| 类型化 not-configured 拒绝 | 目录行没有 api_key | Admin → AI Models 给该行粘 key |
+| `no_credit` | OpenAI 组织额度耗尽 / 限流 | 去 OpenAI 平台充值或等限流窗口 |
 | `cli_missing` | 镜像里没有二进制 | Dockerfile 安装层被跳过/失败，重新 build |
 | `timeout` | 生成超时（高质量约 3–10 分钟） | 调大 `CODEX_CLI_TIMEOUT`；检查网络 |
 | `generation_failed` | 上游拒绝/内容策略/其他 | 看 `application_logs` 里 `[codex-cli]` 的 stderr 全文 |
@@ -181,9 +154,8 @@ docker exec nous-worker sh -c 'touch /app/.codex/.wprobe && rm /app/.codex/.wpro
 ## 已知边界
 
 - **仅生图**（`images generate`；有本地参考图时走 `images edit`）。远程 URL 参考图
-  会被丢弃并记 warning（`_CodexImageAdapter`）——CLI 的 `--ref-image` 只吃本地文件。
-- 尺寸只有三档：`1024x1024` / `1536x1024` / `1024x1536`，catalog aspect 就近映射。
-- 宿主机 codex CLI 与容器共用同一份 auth.json（刻意如此：refresh token 轮换时
-  两边各持一份副本会互相踢下线）。
+  会被丢弃并记 warning（`_CodexImageAdapter`，现在住在 `openai_images.py`）——CLI 的
+  `--ref-image` 只吃本地文件。
+- 订阅路径（daemon）尺寸只有三档：`1024x1024` / `1536x1024` / `1024x1536`，catalog aspect 就近映射。
 - 升级二进制：改 Dockerfile 的 `GPT_IMAGE_2_SKILL_VERSION` + `…_SHA256` 两个 ARG
   （新 sha 用 `curl <tarball> | sha256sum` 取），走正常 PR review。
