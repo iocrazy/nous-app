@@ -29,9 +29,9 @@ from typing import Any, Dict, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.services.generation.local_dispatch import (
+from app.services.generation.local_dispatch import (  # noqa: F401 - re-exported for callers/tests
     LOCAL_ENGINES,
-    NON_RETRYABLE_FAILURE_CODES,  # noqa: F401 - re-exported for callers/tests
+    NON_RETRYABLE_FAILURE_CODES,
     capabilities_for,
     dispatch_local_generation,
     patch_task_metadata,
