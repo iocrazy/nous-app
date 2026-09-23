@@ -14,9 +14,9 @@ import pytest
 
 from app.services.ai.runner import agent_runner as ar
 from tests.runner.test_turn_end_reasons import (
+    _composed,
     _NoStreamAdapter,
     _Rec,
-    _composed,
     _runner,
 )
 
