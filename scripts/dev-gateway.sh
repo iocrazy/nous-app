@@ -16,7 +16,7 @@
 # Combined-mode dev (single process for both) still works via the
 # original scripts/dev-backend.sh — keep that as the lightweight default.
 
-export MEDIAHUB_ROLE="gateway"
+export NOUS_ROLE="gateway"
 export BACKEND_PORT="${BACKEND_PORT:-8082}"
 export SUPERVISOR_TAG="dev-gateway"
 export BACKEND_LOG="${BACKEND_LOG:-/tmp/dev-gateway.log}"

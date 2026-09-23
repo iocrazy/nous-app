@@ -2,7 +2,7 @@
 """Idempotent rotate/backfill runner for at-rest encrypted secret columns.
 
 Every column this touches stores a secret that must live encrypted under the
-Fernet key in ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` (see ``app.core.secret_box``).
+Fernet key in ``NOUS_TOKEN_ENCRYPTION_KEY`` (see ``app.core.secret_box``).
 Rows arrive in three shapes during the migration window:
 
   * ``NULL``            → nothing to do (skipped).
@@ -225,7 +225,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = _parse_args(argv)
     if not secret_box.is_configured():
         logger.warning(
-            "MEDIAHUB_TOKEN_ENCRYPTION_KEY not set — running on the dev "
+            "NOUS_TOKEN_ENCRYPTION_KEY (or legacy MEDIAHUB_TOKEN_ENCRYPTION_KEY) "
+            "not set — running on the dev "
             "fallback key. Do NOT use this to rotate production secrets."
         )
     asyncio.run(run(args.target, dry_run=args.dry_run))

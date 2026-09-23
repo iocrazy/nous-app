@@ -331,7 +331,7 @@ async def _bg_memory_warmup() -> None:
 async def _bg_secrets_selfheal() -> None:
     """Secret-at-rest self-heal (see app.services.infra.secrets_selfheal).
 
-    When NO real MEDIAHUB_TOKEN_ENCRYPTION_KEY is configured this is where
+    When NO real NOUS_TOKEN_ENCRYPTION_KEY is configured this is where
     the long-promised boot warning fires (secret_box's docstring promised it
     since P7 but it was never wired — is_configured() had zero non-test
     callers): MCP bearer tokens fall back to the PUBLIC committed dev key
@@ -344,11 +344,12 @@ async def _bg_secrets_selfheal() -> None:
 
         if not secret_box.is_configured():
             logger.warning(
-                "MEDIAHUB_TOKEN_ENCRYPTION_KEY is NOT set — MCP bearer tokens "
+                "NOUS_TOKEN_ENCRYPTION_KEY (or legacy "
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY) is NOT set — MCP bearer tokens "
                 "fall back to the PUBLIC dev key committed in this repo and "
                 "settings secrets are NOT protected at rest. Set "
-                "MEDIAHUB_TOKEN_ENCRYPTION_KEY (keep the old key as "
-                "MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD during rotation)."
+                "NOUS_TOKEN_ENCRYPTION_KEY (keep the old key as "
+                "NOUS_TOKEN_ENCRYPTION_KEY_OLD during rotation)."
             )
             return
         from app.services.infra.secrets_selfheal import run_secrets_selfheal

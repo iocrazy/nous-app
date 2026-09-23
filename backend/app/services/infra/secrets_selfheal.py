@@ -2,7 +2,7 @@
 
 Runs at startup (``app.startup.bootstrap``) and on demand via
 ``POST /admin/settings/encrypt-secrets``. ONLY when ``secret_box
-.is_configured()`` — i.e. a REAL ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` env key
+.is_configured()`` — i.e. a REAL ``NOUS_TOKEN_ENCRYPTION_KEY`` env key
 is present (never the public committed dev fallback). It rewrites secret
 material that is either:
 
@@ -410,8 +410,9 @@ async def run_secrets_selfheal() -> Dict[str, Any]:
     """
     if not secret_box.is_configured():
         logger.warning(
-            "[secrets-selfheal] skipped — MEDIAHUB_TOKEN_ENCRYPTION_KEY not "
-            "set; secrets remain unprotected"
+            "[secrets-selfheal] skipped — NOUS_TOKEN_ENCRYPTION_KEY (or "
+            "legacy MEDIAHUB_TOKEN_ENCRYPTION_KEY) not set; secrets remain "
+            "unprotected"
         )
         return {"ok": False, "reason": "encryption_key_not_configured"}
 

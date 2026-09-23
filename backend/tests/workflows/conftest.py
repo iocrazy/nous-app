@@ -156,13 +156,14 @@ def _restore_workflow_module_identity():
     """
     before = snapshot_modules()
     registry_snapshot = _snapshot_registry()
-    role_before = os.environ.get("MEDIAHUB_ROLE")
+    roles_before = {k: os.environ.get(k) for k in ("MEDIAHUB_ROLE", "NOUS_ROLE")}
     try:
         yield
     finally:
         restore_modules(before)
         _restore_registry(registry_snapshot)
-        if role_before is None:
-            os.environ.pop("MEDIAHUB_ROLE", None)
-        else:
-            os.environ["MEDIAHUB_ROLE"] = role_before
+        for name, before in roles_before.items():
+            if before is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = before

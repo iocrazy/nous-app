@@ -737,7 +737,8 @@ async def encrypt_secrets(auth: AdminAuthDep):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "MEDIAHUB_TOKEN_ENCRYPTION_KEY is not configured — set a real "
+                "NOUS_TOKEN_ENCRYPTION_KEY (or legacy "
+                "MEDIAHUB_TOKEN_ENCRYPTION_KEY) is not configured — set a real "
                 "encryption key before running the self-heal sweep"
             ),
         )

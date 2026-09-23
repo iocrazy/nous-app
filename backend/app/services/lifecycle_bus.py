@@ -64,6 +64,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from loguru import logger
 
+from app.core.env_names import env_alias
+
 REDIS_CHANNEL = "mediahub:lifecycle"
 
 
@@ -118,7 +120,7 @@ class LifecycleBus:
     @staticmethod
     def _compute_source() -> str:
         host = socket.gethostname()
-        role = os.environ.get("MEDIAHUB_ROLE", "combined")
+        role = env_alias("ROLE") or "combined"
         return f"{role}:{host}-pid{os.getpid()}"
 
     # ── Subscription ────────────────────────────────────────────────

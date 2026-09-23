@@ -43,6 +43,50 @@ def test_unknown_falls_back_to_combined(capsys):
 
 
 @pytest.mark.unit
+def test_nous_role_name_is_read():
+    assert role_from_env({"NOUS_ROLE": "worker"}) == ProcessRole.WORKER
+    assert role_from_env({"NOUS_ROLE": "gateway"}) == ProcessRole.GATEWAY
+
+
+@pytest.mark.unit
+def test_legacy_mediahub_role_still_read():
+    """Retired NAS stack + un-renamed env still say MEDIAHUB_ROLE."""
+    assert role_from_env({"MEDIAHUB_ROLE": "worker"}) == ProcessRole.WORKER
+
+
+@pytest.mark.unit
+def test_nous_role_wins_over_legacy():
+    env = {"NOUS_ROLE": "gateway", "MEDIAHUB_ROLE": "worker"}
+    assert role_from_env(env) == ProcessRole.GATEWAY
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value, expected",
+    [("gateway", ProcessRole.GATEWAY), ("worker", ProcessRole.WORKER)],
+)
+def test_both_names_equal_as_in_gpu_compose_no_warning(value, expected, caplog):
+    """deploy/gpu-server compose sets both names (legacy one keeps a
+    `:rollback` image on its role). Equal values must not warn."""
+    import logging
+
+    from app.core import env_names
+
+    env_names._reset_warned_for_tests()
+    with caplog.at_level(logging.WARNING, logger="app.core.env_names"):
+        role = role_from_env({"NOUS_ROLE": value, "MEDIAHUB_ROLE": value})
+    assert role == expected
+    assert caplog.records == []
+
+
+@pytest.mark.unit
+def test_unknown_nous_role_warns_with_new_name(capsys):
+    assert role_from_env({"NOUS_ROLE": "wrker"}) == ProcessRole.COMBINED
+    err = capsys.readouterr().err
+    assert "wrker" in err and "NOUS_ROLE" in err
+
+
+@pytest.mark.unit
 def test_capabilities_per_role():
     """Each role's behavior gates on these properties — lock them in."""
     assert ProcessRole.GATEWAY.serves_http_api is True

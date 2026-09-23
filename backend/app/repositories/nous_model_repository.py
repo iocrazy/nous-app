@@ -120,7 +120,7 @@ def _conceal_api_key(values: Dict[str, Any]) -> Dict[str, Any]:
     already-encrypted value never double-encrypts. Returns a NEW dict.
 
     STRICT — no dev-key fallback: raises ``SecretBoxNotConfigured`` when
-    ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` isn't set, so a platform-model key
+    ``NOUS_TOKEN_ENCRYPTION_KEY`` isn't set, so a platform-model key
     write fails loud instead of landing under the public committed dev key.
     ``app_id`` (a provider app identifier, not a credential per the scout
     design) stays plaintext."""
@@ -274,7 +274,7 @@ class NousModelRepository:
     async def create(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Create a new Mediahub model. ``api_key`` is encrypted at rest
         (Phase 1b) — encryption happens BEFORE the swallow-to-None try block
-        so a missing MEDIAHUB_TOKEN_ENCRYPTION_KEY fails loud (fail-closed
+        so a missing NOUS_TOKEN_ENCRYPTION_KEY fails loud (fail-closed
         write), not as an opaque None."""
         values = _conceal_api_key({k: v for k, v in data.items() if k in _NOUS_ATTRS})
         try:

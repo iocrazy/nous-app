@@ -286,7 +286,7 @@ register_provider_error_handlers(app)
 
 # Role-aware router mount (Sprint 5 D10-A wired up here).
 #
-# MEDIAHUB_ROLE controls what HTTP surface this process exposes:
+# NOUS_ROLE (legacy MEDIAHUB_ROLE) controls what HTTP surface this process exposes:
 #   gateway/combined → full /api/v1 + /ws (HTTP API + websocket)
 #   worker           → only /api/v1/healthz + /api/v1/readyz (probes)
 #

@@ -137,7 +137,7 @@ def run_isolated(
     # The child entry (`python -m app.run_isolated`) does NOT import
     # app.main, so the lifespan startup chain (DBOS.launch, workforce
     # scheduler, route mounts) never fires. We intentionally don't set
-    # MEDIAHUB_ROLE in the child — there's nothing to gate.
+    # NOUS_ROLE in the child — there's nothing to gate.
     if env_overrides:
         env.update(env_overrides)
 
