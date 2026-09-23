@@ -1,11 +1,9 @@
 import React, { useRef, useCallback, useState } from 'react';
 import { File, Film, Image, Images, Music, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical, Loader2 } from 'lucide-react';
-
-/** Mime type marking a resource as a first-class gallery entity (PR-A). */
-const GALLERY_MIME = 'application/x-mediahub-gallery';
 import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
+import { isGalleryMime } from '../utils/galleryMime';
 import { formatDateShort } from '../utils/formatDate';
 import { PromptBadge } from './resources/PromptBadge';
 
@@ -81,7 +79,7 @@ function formatDuration(seconds: number): string {
 
 function getFileIcon(mimeType: string | null | undefined) {
   if (!mimeType) return { icon: File, color: 'text-ink-400', bg: 'bg-ink-500/20' };
-  if (mimeType === GALLERY_MIME) return { icon: Images, color: 'text-pink-400', bg: 'bg-pink-500/20' };
+  if (isGalleryMime(mimeType)) return { icon: Images, color: 'text-pink-400', bg: 'bg-pink-500/20' };
   if (mimeType.startsWith('video/')) return { icon: Film, color: 'text-purple-400', bg: 'bg-purple-500/20' };
   if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-green-400', bg: 'bg-green-500/20' };
   if (mimeType.startsWith('audio/')) return { icon: Music, color: 'text-cyan-400', bg: 'bg-cyan-500/20' };
@@ -448,7 +446,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           </div>
         )}
         {/* Gallery entity badge — a stacked-images glyph + child count. */}
-        {mimeType === GALLERY_MIME && (
+        {isGalleryMime(mimeType) && (
           <span className="absolute top-1.5 left-1.5 flex items-center gap-1 bg-black/70 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums">
             <Images size={12} className="text-pink-300" />
             {resource?.gallery_count ?? 0}

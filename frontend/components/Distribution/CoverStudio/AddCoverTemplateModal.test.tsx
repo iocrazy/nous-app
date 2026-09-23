@@ -50,6 +50,14 @@ const GALLERY_ROW = {
   mime_type: 'application/x-mediahub-gallery',
   gallery_count: 9,
 };
+// Same entity written after the MIME rename — must be filtered out too.
+const NEW_GALLERY_ROW = {
+  id: '889',
+  filename: 'My new album',
+  thumbnail_url: null,
+  mime_type: 'application/x-nous-gallery',
+  gallery_count: 2,
+};
 
 const SAVED = {
   resource_id: '777',
@@ -89,7 +97,7 @@ function dropFile(file: File) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  listLibraryMediaOrThrow.mockResolvedValue([IMAGE_ROW, GALLERY_ROW]);
+  listLibraryMediaOrThrow.mockResolvedValue([IMAGE_ROW, GALLERY_ROW, NEW_GALLERY_ROW]);
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:preview'),
@@ -102,6 +110,7 @@ describe('AddCoverTemplateModal', () => {
     renderModal();
     expect(await screen.findByTitle('reference.png')).toBeTruthy();
     expect(screen.queryByTitle('My album')).toBeNull();
+    expect(screen.queryByTitle('My new album')).toBeNull();
   });
 
   it('cannot save until a picture is picked, and has no name field', async () => {

@@ -25,12 +25,13 @@ import {
   type CoverTemplate,
 } from '../../../services/coverTemplateService';
 import type { LibraryVideo } from '../../../types';
+import { isGalleryMime } from '../../../utils/galleryMime';
 import './cover-studio.css';
 
 // A gallery is a container of images, not an image. Handing one to the model
 // as a single reference is meaningless, and `listLibraryMedia` includes them
 // in image mode on purpose for the publish picker, which CAN post a gallery.
-const GALLERY_MIME = 'application/x-mediahub-gallery';
+// So library rows are filtered with `isGalleryMime` (both mime spellings).
 
 interface Props {
   open: boolean;
@@ -67,7 +68,7 @@ export function AddCoverTemplateModal({
     setLoadError(false);
     try {
       const rows = await listLibraryMediaOrThrow(scopeId, { mediaType: 'image' });
-      setLibrary(rows.filter((r) => r.mime_type !== GALLERY_MIME));
+      setLibrary(rows.filter((r) => !isGalleryMime(r.mime_type)));
     } catch (err) {
       console.error('[AddCoverTemplateModal] library load failed:', err);
       setLoadError(true);

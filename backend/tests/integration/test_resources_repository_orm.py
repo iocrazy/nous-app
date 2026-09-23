@@ -343,6 +343,45 @@ async def test_get_resource_items_nested_resource_is_dict(
         assert "i_updated_at" not in match
 
 
+async def test_gallery_type_filter_returns_both_mime_spellings(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """Gallery MIME rename step 1: rows written before the rename
+    (x-mediahub-gallery) and after (x-nous-gallery) both list under
+    ``types=["gallery"]`` and neither leaks into ``types=["other"]``. This is
+    the real-Postgres check that ``ANY(:gallery_mimes)`` binds as a text[]."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        user_id, team_id = await _real_ids(conn)
+        ids = {}
+        for mime in ("application/x-mediahub-gallery", "application/x-nous-gallery"):
+            rid = await conn.fetchval(
+                "INSERT INTO resources (creator_id, source_type, filename, "
+                "file_type, mime_type) VALUES ($1, 'upload', $2, 'gallery', $3) "
+                "RETURNING id",
+                user_id,
+                f"{_FILE_PREFIX}{mime.rsplit('/', 1)[1]}",
+                mime,
+            )
+            await conn.execute(
+                "INSERT INTO resource_items (resource_id, scope_id, added_by) "
+                "VALUES ($1, $2, $3)",
+                rid,
+                team_id,
+                user_id,
+            )
+            ids[mime] = rid
+    finally:
+        await conn.close()
+
+    galleries = await _repo().get_resource_items(str(team_id), types=["gallery"])
+    got = {int(r["resource_id"]) for r in galleries}
+    assert set(ids.values()) <= got
+
+    others = await _repo().get_resource_items(str(team_id), types=["other"])
+    assert not {int(r["resource_id"]) for r in others} & set(ids.values())
+
+
 # ─── Writes (committing — fixes the P0) ─────────────────────────────────
 
 

@@ -820,7 +820,7 @@ export const listLibraryMediaOrThrow = async (
     // `types` maps to the backend mime filter: 'video' → mime LIKE 'video/%',
     // 'image' → mime LIKE 'image/%'. Defaults to video for back-compat.
     // In images mode we ALSO request `gallery` so first-class gallery entities
-    // (mime 'application/x-mediahub-gallery') surface as their own picker rows
+    // (a gallery mime, see utils/galleryMime.ts) surface as their own picker rows
     // — FastAPI reads repeated keys as a List, so each value is its own param.
     const mediaType = opts?.mediaType ?? 'video';
     const typeFilter = mediaType === 'image'

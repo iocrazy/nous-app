@@ -265,7 +265,8 @@ async def test_validate_scope_image_ids_maps_back_to_input(
 
 def test_build_mime_sql_gallery_category() -> None:
     expr = ResourcesRepository._build_mime_sql(["gallery"])
-    assert expr == "(r.mime_type = 'application/x-mediahub-gallery')"
+    # Both gallery spellings are bound as one array param (see gallery_mime).
+    assert expr == "(r.mime_type = ANY(:gallery_mimes))"
 
 
 def test_build_mime_sql_other_excludes_gallery_mime() -> None:
@@ -273,4 +274,4 @@ def test_build_mime_sql_other_excludes_gallery_mime() -> None:
     prefix so galleries never leak into the 'other' bucket."""
     expr = ResourcesRepository._build_mime_sql(["other"])
     assert expr is not None
-    assert "r.mime_type = 'application/x-mediahub-gallery'" in expr
+    assert "r.mime_type = ANY(:gallery_mimes)" in expr

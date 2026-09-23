@@ -1,16 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// Keep the helper's import of resourceService cheap — we only need the mime
-// constant, not the whole (supabase-pulling) service module.
-vi.mock('../../services/resourceService', () => ({
-  GALLERY_MIME: 'application/x-mediahub-gallery',
-}));
+import { describe, expect, it } from 'vitest';
 
 import { shouldSuppressFileArrowNav } from './fileArrowNav';
 
 describe('shouldSuppressFileArrowNav', () => {
   it('suppresses file-level ← / → for galleries (GalleryViewer owns the keys)', () => {
+    // Both spellings: legacy rows keep x-mediahub until the data migration.
     expect(shouldSuppressFileArrowNav('application/x-mediahub-gallery')).toBe(true);
+    expect(shouldSuppressFileArrowNav('application/x-nous-gallery')).toBe(true);
   });
 
   it('suppresses for video (VideoPlayer seeks with arrows)', () => {
