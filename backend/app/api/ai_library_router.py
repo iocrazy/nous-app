@@ -2538,7 +2538,7 @@ async def list_run_events(
     types: str = "",
     upto_seq: Optional[int] = Query(default=None, ge=0),
 ) -> Dict[str, Any]:
-    """Ordered agent_run_events for the Runs detail Transcript section.
+    """Ordered transcript events for the Runs detail Transcript section.
 
     Ownership enforced the same way as the run detail (a foreign run_id
     reads as 404). ``after_seq`` supports incremental polling while the
@@ -2559,9 +2559,10 @@ async def list_run_events(
         raise HTTPException(status_code=404, detail="run not found")
 
     # agent_run_transcript_events (mig 397, ORM AgentRunTranscriptEvents).
-    # NOT `agent_run_events` — that name is the mig-155 cost-audit log; mig
-    # 285's attempt to reuse it no-oped on IF NOT EXISTS, which is why this
-    # endpoint 500'd with `column "seq" does not exist` until 397.
+    # NOT `agent_run_events` — that name was the mig-155 cost-audit log
+    # (dropped in mig 487); mig 285's attempt to reuse it no-oped on IF NOT
+    # EXISTS, which is why this endpoint 500'd with `column "seq" does not
+    # exist` until 397.
     from sqlalchemy import select
 
     from app.db.session import read_scope

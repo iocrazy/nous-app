@@ -11,8 +11,7 @@ Design notes:
   每个工具调用一行审计的 CostAuditor 已于 3c §3.2 摘除——它写的
   agent_run_events 零个读方，delta 还靠进程内 LRU 算（多 worker 下必然
   偏大）。同样的原料现在走 tool_call 事件的 duration_ms / error_code，
-  折进 agent_runs 的五列。表本身不动（DROP 走单独迁移，等一个发布周期
-  确认无人读）。
+  折进 agent_runs 的五列。那张表已于 mig 487 DROP。
 - Memory recall (Graphiti graph facts + Honcho user context) happens
   BEFORE prompt composition so it flows into ComposerInput. Recall failure
   degrades to "no memories this turn" — never breaks the chat.

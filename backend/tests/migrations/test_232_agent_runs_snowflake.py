@@ -1,7 +1,10 @@
 """Verify mig 232: agent_runs.id is BIGINT Snowflake, all 7 FK dependents rebuilt.
 
-Tests that reference tables only present on prod (agent_run_events,
-agent_memories, agent_tasks, agent_commitments, issue_messages) are skipped
+``agent_run_events`` was one of the rebuilt dependents; mig 487 dropped it,
+so it is no longer probed here.
+
+Tests that reference tables only present on prod (agent_memories, agent_tasks,
+agent_commitments, issue_messages) are skipped
 gracefully when those tables are absent from the local dev DB.  On prod
 (INTEGRATION_DATABASE_URL or SUPAVISOR_DATABASE_URL) all tables must exist,
 so the full assertion fires.
@@ -78,7 +81,6 @@ async def test_agent_runs_self_fk_columns_are_bigint():
 async def test_fk_dependent_columns_are_bigint():
     """All 5 external FK columns must be BIGINT after migration. Skip absent tables."""
     targets = [
-        ("agent_run_events", "run_id"),
         ("agent_memories", "run_id"),
         ("agent_tasks", "current_run_id"),
         ("agent_commitments", "fulfillment_run_id"),
@@ -141,7 +143,6 @@ async def test_external_fk_constraints_rebuilt():
     always_present: set[str] = set()
 
     conditional = {
-        "agent_run_events": "agent_run_events_run_id_fkey",
         "agent_memories": "agent_memories_run_id_fkey",
         "agent_tasks": "agent_tasks_current_run_id_fkey",
         "agent_commitments": "agent_commitments_fulfillment_run_id_fkey",
@@ -160,7 +161,6 @@ async def test_external_fk_constraints_rebuilt():
     rows = await db_engine.fetch_all(
         "SELECT conname FROM pg_constraint "
         "WHERE contype = 'f' AND conname IN ("
-        "  'agent_run_events_run_id_fkey',"
         "  'agent_memories_run_id_fkey',"
         "  'agent_tasks_current_run_id_fkey',"
         "  'agent_commitments_fulfillment_run_id_fkey',"
