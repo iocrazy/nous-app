@@ -150,6 +150,8 @@ class SearchResultItem(BaseModel):
     author: Optional[str] = None
     view_count: int = 0
     created_at: Optional[str] = None
+    #: Which leg produced the hit: "text" (ILIKE) or "semantic" (vector).
+    layer: Literal["text", "semantic"] = "text"
 
 
 class SearchResponse(BaseModel):
@@ -165,13 +167,54 @@ class SearchResponse(BaseModel):
     total: int
     query: str
     search_type: str  # "semantic", "hybrid", "similar"
-    # Hybrid only — what the vector leg did: "ok" | "unconfigured" |
-    # "embed_failed" | "dimension_mismatch" | "timeout" | "unavailable" |
-    # "error" | "skipped_filters" |
-    # "skipped_no_scope" | "skipped_no_query" |
-    # "skipped_full_page". Absent on other search types. Lets a UI say
-    # "keyword results only" and a probe fire when the leg degrades.
+    # Hybrid only — what the vector leg did: one of
+    # ``search_service.VECTOR_LEG_OUTCOMES`` ("ok" | "unconfigured" |
+    # "embed_failed" | "dimension_mismatch" | "timeout" | "store_missing" |
+    # "error" | "skipped_filters" | "skipped_no_scope" | "skipped_no_query" |
+    # "skipped_full_page"; "unavailable" is a legacy spelling no longer
+    # emitted). Absent on other search types. Lets a UI say "keyword results
+    # only" and a probe fire when the leg degrades.
     vector_leg: Optional[str] = None
+    #: Hybrid only — how many of ``results`` each leg contributed after the
+    #: merge (``{"text": n, "semantic": m}``).
+    legs: Optional[Dict[str, int]] = None
+    #: Whether a reranker reordered the merged list (none yet: always false).
+    reranked: bool = False
+
+
+class SpaceInfo(BaseModel):
+    """The embedding space vectors are written to and searched in."""
+
+    id: int
+    actual_model: str
+    protocol: str
+    dims: int
+    modalities: List[str]
+    instruction_version: str
+
+
+class LayerStatus(BaseModel):
+    """Coverage of one retrieval layer for the caller, in the current space."""
+
+    layer: Literal["semantic", "transcript"]
+    status: Literal["ok", "not_built"]
+    covered: int
+    total: int
+
+
+class VectorsStatusResponse(BaseModel):
+    """``GET /search/vectors/status``.
+
+    ``status``: "ok" (space resolved, coverage counted) | "unconfigured" (no
+    embedding model; ``space`` null, coverage 0 of the caller's total) |
+    "store_missing" (migration 494 not applied; ``space`` null, ``layers``
+    empty). A layer is "not_built" until it holds at least one vector;
+    ``transcript`` is always "not_built" until that layer ships.
+    """
+
+    space: Optional[SpaceInfo] = None
+    status: Literal["ok", "unconfigured", "store_missing"]
+    layers: List[LayerStatus]
 
 
 class SimilarMediaRequest(BaseModel):

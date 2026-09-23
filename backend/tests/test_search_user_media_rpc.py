@@ -645,6 +645,11 @@ async def test_similar_router_scopes_the_search_to_the_caller(monkeypatch) -> No
 # ---------------------------------------------------------------------------
 # Service → repository ownership wiring
 # ---------------------------------------------------------------------------
+async def _no_space():
+    """No embedding space → the legacy RPC path (the one these tests pin)."""
+    return None
+
+
 class _FakeAnalysisRepo:
     """Captures ``search_by_embedding`` kwargs; serves one analysis row."""
 
@@ -667,6 +672,7 @@ async def test_semantic_search_forwards_user_id_to_the_embedding_repo(
     svc = SearchService()
     repo = _FakeAnalysisRepo()
     svc.analysis_repo = repo
+    monkeypatch.setattr(svc.embedding_service, "space_spec", _no_space)
 
     async def _fake_embed(_query):
         return [0.1, 0.2]
@@ -679,10 +685,13 @@ async def test_semantic_search_forwards_user_id_to_the_embedding_repo(
 
 
 @pytest.mark.asyncio
-async def test_find_similar_media_forwards_user_id_to_the_embedding_repo() -> None:
+async def test_find_similar_media_forwards_user_id_to_the_embedding_repo(
+    monkeypatch,
+) -> None:
     svc = SearchService()
     repo = _FakeAnalysisRepo({"content_embedding": "[0.1, 0.2]"})
     svc.analysis_repo = repo
+    monkeypatch.setattr(svc.embedding_service, "space_spec", _no_space)
 
     await svc.find_similar_media(media_id=1, limit=5, threshold=0.6, user_id="u-6")
 
@@ -870,7 +879,14 @@ def _hybrid_svc_with(
         return vector_rows
 
     monkeypatch.setattr(svc, "search_user_media_text", _fake_text)
+
+    async def _no_space():
+        # No space → the legacy RPC answers; these tests pin the merge, the
+        # space-aware store has its own file (test_search_vector_leg_store).
+        return None
+
     monkeypatch.setattr(svc.embedding_service, "try_embed", _fake_try_embed)
+    monkeypatch.setattr(svc.embedding_service, "space_spec", _no_space)
     monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _fake_vec)
     return svc
 
@@ -1191,9 +1207,11 @@ async def test_hybrid_goes_text_only_when_the_embedder_is_slow(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_hybrid_reports_unavailable_engine_as_its_own_outcome(
+async def test_hybrid_reports_a_missing_vector_store_as_its_own_outcome(
     monkeypatch,
 ) -> None:
+    """Neither resource_embeddings nor the legacy RPC: ``store_missing``
+    (spelled ``unavailable`` before mig 494), never an empty "no match"."""
     from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 
     async def _missing(**_kw):
@@ -1207,7 +1225,7 @@ async def test_hybrid_reports_unavailable_engine_as_its_own_outcome(
     )
     monkeypatch.setattr(svc.analysis_repo, "search_by_embedding", _missing)
     resp = await svc.hybrid_search(query="cat", user_id="u-1", limit=10)
-    assert resp.vector_leg == "unavailable"
+    assert resp.vector_leg == "store_missing"
 
 
 def test_merge_does_not_mutate_the_callers_text_hits() -> None:

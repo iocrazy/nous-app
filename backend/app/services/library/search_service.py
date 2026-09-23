@@ -14,12 +14,19 @@ from app.repositories.analysis_repository import (
     EmbeddingSearchUnavailable,
     get_analysis_repository,
 )
+from app.repositories.embedding_space_repository import (
+    get_embedding_space_repository,
+)
+from app.repositories.resource_embeddings_repository import (
+    get_resource_embeddings_repository,
+)
 from app.schemas.search import DEFAULT_SEARCH_FIELDS, LibraryChipFilters
 from app.services.ai.providers.embedding_service import (
     EmbeddingService,
     classify_embed_reason,
 )
 from app.services.library.like_escape import escape_like
+from app.services.library.semantic_store import SemanticStore
 
 
 @dataclass
@@ -36,6 +43,8 @@ class SearchResult:
     author: Optional[str] = None
     view_count: int = 0
     created_at: Optional[str] = None
+    # Which leg produced the hit: "text" (ILIKE) or "semantic" (vector).
+    layer: str = "text"
 
 
 @dataclass
@@ -51,6 +60,16 @@ class SearchResponse:
     # byte-identical to a healthy one, and "never ran" must not read as
     # "matched nothing".
     vector_leg: Optional[str] = None
+    # Hybrid only: how many of ``results`` each leg contributed, after the
+    # merge's dedup and limit — i.e. what the user sees.
+    legs: Optional[Dict[str, int]] = None
+    # Whether a reranker reordered the merged list. No reranker yet: always
+    # False; the field exists so the UI contract does not change when one
+    # lands.
+    reranked: bool = False
+    # find_similar_media only: whether the source resource has a vector at
+    # all (False = "nothing to compare with", not "no neighbours").
+    source_embedded: Optional[bool] = None
 
 
 VECTOR_LEG_OUTCOMES = (
@@ -61,7 +80,12 @@ VECTOR_LEG_OUTCOMES = (
     # (app.core.embedding_space): misconfigured, not a miss.
     "dimension_mismatch",
     "timeout",
+    # Legacy spelling of store_missing (the pre-494 RPC was missing); no
+    # longer emitted, kept so existing readers keep matching.
     "unavailable",
+    # Neither resource_embeddings (mig 494) nor the legacy
+    # resource_analysis RPC is callable: the vector store is not there.
+    "store_missing",
     "error",
     "skipped_filters",
     "skipped_full_page",
@@ -107,13 +131,21 @@ def _chip_filters_active(filters: Optional[LibraryChipFilters]) -> bool:
     return False
 
 
+def _leg_counts(results: List[SearchResult]) -> Dict[str, int]:
+    counts = {"text": 0, "semantic": 0}
+    for r in results:
+        counts[r.layer] = counts.get(r.layer, 0) + 1
+    return counts
+
+
 def query_text(query: str) -> str:
     """Text to embed for a SEARCH query (never for a document)."""
     return QUERY_INSTRUCTION + query.strip()
 
 
 def _row_to_result(r: Dict[str, Any]) -> SearchResult:
-    """One mapping for every ``search_by_embedding`` row consumer."""
+    """One mapping for every vector-search row consumer (new store and the
+    legacy RPC return the same columns; the new one adds resource_id)."""
     return SearchResult(
         media_id=int(r["media_id"]),
         platform_id=r.get("platform_id", ""),
@@ -124,6 +156,7 @@ def _row_to_result(r: Dict[str, Any]) -> SearchResult:
         author=r.get("author"),
         view_count=r.get("view_count", 0),
         created_at=r.get("created_at"),
+        layer="semantic",
     )
 
 
@@ -142,9 +175,30 @@ class SearchFiltersUnavailable(RuntimeError):
 class SearchService:
     """Service for semantic and hybrid video search (async optimized)."""
 
-    def __init__(self):
+    def __init__(self, *, space_repo: Any = None, embeddings_repo: Any = None):
         self.embedding_service = EmbeddingService()
+        # Legacy store: read-only fallback for the deploy window before
+        # migration 494, and the source of get_analysis.
         self.analysis_repo = get_analysis_repository()
+        self.space_repo = space_repo or get_embedding_space_repository()
+        self.embeddings_repo = embeddings_repo or get_resource_embeddings_repository()
+
+    def _store(self) -> SemanticStore:
+        # Built per call: tests (and callers) swap these attributes after
+        # construction, and the store must see what the service holds now.
+        return SemanticStore(
+            embedding_service=self.embedding_service,
+            analysis_repo=self.analysis_repo,
+            space_repo=self.space_repo,
+            embeddings_repo=self.embeddings_repo,
+        )
+
+    async def _semantic_rows(
+        self, vec: List[float], *, user_id: str, limit: int, threshold: float
+    ) -> List[Dict[str, Any]]:
+        return await self._store().nearest(
+            vec, user_id=user_id, limit=limit, threshold=threshold
+        )
 
     async def search_user_media_text(
         self,
@@ -324,12 +378,8 @@ class SearchService:
                 results=[], total=0, query=query, search_type="semantic"
             )
 
-        raw_results = await self.analysis_repo.search_by_embedding(
-            embedding=query_embedding,
-            user_id=user_id,
-            limit=limit,
-            threshold=threshold,
-            embedding_model=self.embedding_service.model or None,
+        raw_results = await self._semantic_rows(
+            query_embedding, user_id=user_id, limit=limit, threshold=threshold
         )
 
         results = [
@@ -376,16 +426,12 @@ class SearchService:
                 return [], "dimension_mismatch"
             return [], "embed_failed"
         try:
-            rows = await self.analysis_repo.search_by_embedding(
-                embedding=vec,
-                user_id=user_id,
-                limit=limit,
-                threshold=threshold,
-                embedding_model=self.embedding_service.model or None,
+            rows = await self._semantic_rows(
+                vec, user_id=user_id, limit=limit, threshold=threshold
             )
         except EmbeddingSearchUnavailable as e:
-            logger.error(f"[hybrid] vector engine unavailable, text-only: {e}")
-            return [], "unavailable"
+            logger.error(f"[hybrid] vector store missing, text-only: {e}")
+            return [], "store_missing"
         except Exception as e:  # noqa: BLE001 — the text half is still the answer
             logger.error(f"[hybrid] vector leg failed, text-only: {e}")
             return [], "error"
@@ -405,7 +451,7 @@ class SearchService:
             if h.media_id in seen:
                 continue
             seen.add(h.media_id)
-            merged.append(replace(h, similarity=1.0))
+            merged.append(replace(h, similarity=1.0, layer="text"))
         extra = sorted(vector_hits, key=lambda h: h.similarity, reverse=True)
         for h in extra:
             # The engine returns one row per analysis row, so a media can
@@ -413,7 +459,7 @@ class SearchService:
             if h.media_id in seen:
                 continue
             seen.add(h.media_id)
-            merged.append(h)
+            merged.append(replace(h, layer="semantic"))
         return merged[:limit]
 
     async def hybrid_search(
@@ -585,6 +631,7 @@ class SearchService:
                 query=query,
                 search_type="hybrid",
                 vector_leg=vector_leg,
+                legs=_leg_counts(results),
             )
 
         # No query: filter-only path (match-all pattern + AND filters).
@@ -620,6 +667,7 @@ class SearchService:
             query=query or "",
             search_type="hybrid",
             vector_leg="skipped_no_query",
+            legs=_leg_counts(results),
         )
 
     async def find_similar_media(
@@ -629,105 +677,40 @@ class SearchService:
         limit: int = 10,
         threshold: float = 0.6,
     ) -> SearchResponse:
-        """
-        Find media similar to a given media item.
+        """Resources similar to one resource, by its semantic-layer vector.
 
-        Uses the media's embedding to find semantically similar content.
+        ``media_id`` is keyed like ``resource_analysis`` (a resources.id) —
+        the historic name of this parameter. The source vector comes from
+        ``resource_embeddings`` in the embedder's space; before migration 494,
+        or for a resource embedded only into the legacy column, the legacy
+        ``resource_analysis.content_embedding`` path answers. The source is
+        excluded from the results. ``source_embedded`` says whether there was
+        a vector to compare with at all.
         """
-        # Get the source media's embedding
-        analysis = await self.analysis_repo.get_analysis(media_id)
-
-        if not analysis or not analysis.get("content_embedding"):
+        query = f"similar to media {media_id}"
+        rows = await self._store().similar(
+            media_id, user_id=user_id, limit=limit, threshold=threshold
+        )
+        if rows is None:
             logger.warning(f"No embedding found for media {media_id}")
             return SearchResponse(
                 results=[],
                 total=0,
-                query=f"similar to media {media_id}",
+                query=query,
                 search_type="similar",
+                source_embedded=False,
             )
-
-        # Parse embedding from string format
-        embedding = self._parse_embedding(analysis["content_embedding"])
-
-        if not embedding:
-            return SearchResponse(
-                results=[],
-                total=0,
-                query=f"similar to media {media_id}",
-                search_type="similar",
-            )
-
-        # Search for similar media (excluding the source), within the source
-        # vector's embedding space (None = legacy, compatible with all).
-        raw_results = await self.analysis_repo.search_by_embedding(
-            embedding=embedding,
-            user_id=user_id,
-            limit=limit + 1,  # +1 to account for self-match
-            threshold=threshold,
-            embedding_model=analysis.get("embedding_model"),
-        )
-
-        # Filter out the source media and transform results
-        results = []
-        for r in raw_results:
-            if r["media_id"] != media_id:
-                results.append(
-                    SearchResult(
-                        media_id=r["media_id"],
-                        platform_id=r.get("platform_id", ""),
-                        title=r.get("title", ""),
-                        description=r.get("description"),
-                        cover_url=(r.get("cover_urls") or [None])[0],
-                        similarity=r.get("similarity", 0),
-                        author=r.get("author"),
-                        view_count=r.get("view_count", 0),
-                        created_at=r.get("created_at"),
-                    )
-                )
-
-        results = results[:limit]
-
+        results = [
+            _row_to_result(r)
+            for r in rows
+            if r.get("media_id") is not None
+            and r.get("resource_id", r.get("media_id")) != media_id
+            and r.get("media_id") != media_id
+        ][:limit]
         return SearchResponse(
             results=results,
             total=len(results),
-            query=f"similar to media {media_id}",
+            query=query,
             search_type="similar",
+            source_embedded=True,
         )
-
-    def _calculate_similarity(
-        self, embedding1: List[float], embedding2_str: str
-    ) -> float:
-        """Calculate cosine similarity between embeddings."""
-        try:
-            embedding2 = self._parse_embedding(embedding2_str)
-            if not embedding2:
-                return 0.0
-
-            # Cosine similarity
-            dot_product = sum(a * b for a, b in zip(embedding1, embedding2))
-            norm1 = sum(a * a for a in embedding1) ** 0.5
-            norm2 = sum(b * b for b in embedding2) ** 0.5
-
-            if norm1 == 0 or norm2 == 0:
-                return 0.0
-
-            return dot_product / (norm1 * norm2)
-
-        except Exception as e:
-            logger.error(f"Error calculating similarity: {e}")
-            return 0.0
-
-    def _parse_embedding(self, embedding_str: str) -> Optional[List[float]]:
-        """Parse embedding from PostgreSQL vector string format."""
-        try:
-            if isinstance(embedding_str, list):
-                return embedding_str
-
-            # Remove brackets and split
-            clean_str = embedding_str.strip("[]")
-            values = [float(x.strip()) for x in clean_str.split(",")]
-            return values
-
-        except Exception as e:
-            logger.error(f"Error parsing embedding: {e}")
-            return None

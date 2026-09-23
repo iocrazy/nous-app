@@ -398,7 +398,11 @@ async def test_hybrid_vector_leg_sends_the_query_space() -> None:
 
     svc = SearchService()
     svc.embedding_service = SimpleNamespace(
-        try_embed=AsyncMock(return_value=([0.1], None)), model="m-5"
+        try_embed=AsyncMock(return_value=([0.1], None)),
+        # No space → the legacy RPC (the path this pin is about; the
+        # resource_embeddings path is pinned in test_search_vector_leg_store).
+        space_spec=AsyncMock(return_value=None),
+        model="m-5",
     )
     repo = SimpleNamespace(search_by_embedding=AsyncMock(return_value=[]))
     svc.analysis_repo = repo
@@ -412,7 +416,9 @@ async def test_semantic_search_sends_the_query_space() -> None:
 
     svc = SearchService()
     svc.embedding_service = SimpleNamespace(
-        generate_embedding=AsyncMock(return_value=[0.1]), model="m-6"
+        generate_embedding=AsyncMock(return_value=[0.1]),
+        space_spec=AsyncMock(return_value=None),
+        model="m-6",
     )
     repo = SimpleNamespace(search_by_embedding=AsyncMock(return_value=[]))
     svc.analysis_repo = repo
@@ -432,6 +438,9 @@ async def test_find_similar_media_compares_within_the_source_space() -> None:
         search_by_embedding=AsyncMock(return_value=[]),
     )
     svc.analysis_repo = repo
+    svc.embedding_service = SimpleNamespace(
+        space_spec=AsyncMock(return_value=None), model=""
+    )
     await svc.find_similar_media(media_id=1, user_id="u-1")
     assert repo.search_by_embedding.await_args.kwargs["embedding_model"] == "m-8"
 

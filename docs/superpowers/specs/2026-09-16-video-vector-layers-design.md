@@ -67,6 +67,7 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 
 - 语义层过渡：PR 1 继续写 `resource_analysis.content_embedding`；PR 2 建 `resource_embeddings` 并把回填改指它，`match_videos_by_embedding` 改读新表，旧列保留一版后删。
 - 语义层文档侧扩为：标题 + 简介 + 摘要（`resource_summaries`）+ 转录全文前 N 字。文档不带指令。
+- 语义层不依赖 VLM 字段，有什么嵌什么（标题 / 简介 / 标签 / 摘要 / 转录前 2000 字 / 有 L1 分析时再加 VLM 描述），所以回填就地嵌入、不再派 `analyze_l1`（PR 2 实现：`app/services/library/embedding_document.py`）。
 - 命中帧缩略图不落库，按时间码用 ffmpeg 现切（`/resources/{id}/frame?ms=`）。
 
 ### 4.3 切镜与嵌入管线（DBOS workflow `index_video_shots`）
@@ -172,7 +173,7 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 | 期 | 内容 | 状态 |
 |---|---|---|
 | PR 1 | 嵌入失败可见、回填端点、向量腿并入混合搜索、查询指令 | 已完成待推 |
-| PR 2 | `embedding_spaces` + `resource_embeddings`（halfvec + HNSW）+ 多模态协议适配器 + 能力声明 + 语义层文档扩写 | — |
+| PR 2 | `embedding_spaces` + `resource_embeddings`（halfvec + HNSW）+ 多模态协议适配器 + 能力声明 + 语义层文档扩写 | 已实现（本 PR，mig 494） |
 | PR 3 | 切镜 workflow + `video_shots` + `frame` 向量 + 画面腿 + backfill-shots | 依赖 nous-engine 多模态端点 |
 | PR 4 | `clip` 向量 + 镜头语言腿 + 簇 + 精排 | 依赖 nous-engine reranker |
 | PR 5 | agent 工具 + `library-search` skill | — |
