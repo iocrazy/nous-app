@@ -369,3 +369,242 @@ async def test_try_embed_turns_a_client_init_failure_into_a_reason() -> None:
         vec, reason = await EmbeddingService().try_embed("hello")
     assert vec is None
     assert reason is not None and reason.startswith("provider_error")
+
+
+# --- try_embed_items / space_spec -----------------------------------------
+
+
+def _recording_client(posted: dict, body: dict):
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return body
+
+    class _Client:
+        def __init__(self, *a, **k):
+            posted["client_kwargs"] = k
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            posted["url"] = url
+            posted["json"] = json
+            posted["headers"] = headers
+            return _Resp()
+
+    return _Client
+
+
+def _patch_cfg(cfg):
+    return patch(
+        "app.services.ai.providers.embedding_service.resolve_embedding_config",
+        AsyncMock(return_value=cfg),
+    )
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_ark_posts_typed_parts_and_returns_vector() -> None:
+    from app.services.ai.providers.embedding_items import ImageUrlItem, TextItem
+
+    cfg = EmbeddingConfig(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="sk-doubao",
+        model="doubao-embedding-vision-251215",
+        dimensions=0,
+        multimodal=True,
+    )
+    posted: dict = {}
+    client = _recording_client(posted, {"data": {"embedding": [0.5] * EMBEDDING_DIM}})
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+    ):
+        vec, reason = await EmbeddingService().try_embed_items(
+            [TextItem("title"), ImageUrlItem("data:image/jpeg;base64,AAA")]
+        )
+
+    assert reason is None and vec == [0.5] * EMBEDDING_DIM
+    assert posted["url"] == (
+        "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
+    )
+    assert posted["json"] == {
+        "model": "doubao-embedding-vision-251215",
+        "input": [
+            {"type": "text", "text": "title"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAA"}},
+        ],
+    }
+    assert posted["headers"]["Authorization"] == "Bearer sk-doubao"
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_openai_multimodal_posts_one_group_with_dims() -> None:
+    from app.services.ai.providers.embedding_items import TextItem, VideoFramesItem
+
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1/",
+        api_key="sk-engine",
+        model="wemm-embedding-2b",
+        dimensions=0,
+    )
+    posted: dict = {}
+    client = _recording_client(
+        posted, {"data": [{"index": 0, "embedding": [0.25] * EMBEDDING_DIM}]}
+    )
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+        patch("app.services.ai.providers.embedding_service.AsyncOpenAI") as mk_openai,
+    ):
+        vec, reason = await EmbeddingService().try_embed_items(
+            [TextItem("shot"), VideoFramesItem(("data:1", "data:2"))]
+        )
+
+    assert reason is None and vec == [0.25] * EMBEDDING_DIM
+    assert posted["url"] == "http://nous-engine:8000/v1/embeddings"
+    assert posted["json"]["dimensions"] == EMBEDDING_DIM
+    assert posted["json"]["input"] == [
+        [
+            {"type": "text", "text": "shot"},
+            {
+                "type": "video_frames",
+                "frames": [
+                    {"image_url": {"url": "data:1"}},
+                    {"image_url": {"url": "data:2"}},
+                ],
+            },
+        ]
+    ]
+    assert posted["headers"]["Authorization"] == "Bearer sk-engine"
+    mk_openai.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_openai_multimodal_count_mismatch_is_provider_error() -> (
+    None
+):
+    from app.services.ai.providers.embedding_items import TextItem
+
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="k",
+        model="wemm-embedding-2b",
+        dimensions=0,
+    )
+    client = _recording_client({}, {"data": []})
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+    ):
+        vec, reason = await EmbeddingService().try_embed_items([TextItem("x")])
+
+    assert vec is None and reason.startswith("provider_error:")
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_rejects_unsupported_modality_without_network() -> None:
+    from app.services.ai.providers.embedding_items import ImageUrlItem, TextItem
+
+    cfg = EmbeddingConfig(
+        base_url="https://api.openai.com/v1",
+        api_key="sk-x",
+        model="text-embedding-3-large",
+        dimensions=0,
+    )
+    fake_client = MagicMock()
+    fake_client.embeddings.create = AsyncMock()
+    with (
+        _patch_cfg(cfg),
+        patch(
+            "app.services.ai.providers.embedding_service.AsyncOpenAI",
+            return_value=fake_client,
+        ),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient") as mk,
+    ):
+        vec, reason = await EmbeddingService().try_embed_items(
+            [TextItem("a"), ImageUrlItem("data:x")]
+        )
+
+    assert (vec, reason) == (None, "modality_unsupported: image")
+    mk.assert_not_called()
+    fake_client.embeddings.create.assert_not_called()
+
+    from app.services.ai.providers.embedding_service import classify_embed_reason
+
+    assert classify_embed_reason(reason) == "modality_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_reports_empty_and_unconfigured() -> None:
+    from app.services.ai.providers.embedding_items import TextItem
+
+    with _patch_cfg(None):
+        assert await EmbeddingService().try_embed_items([TextItem("a")]) == (
+            None,
+            "unconfigured",
+        )
+
+    cfg = EmbeddingConfig(
+        base_url="http://x/v1", api_key="k", model="qwen3-embedding-8b", dimensions=0
+    )
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.AsyncOpenAI"),
+    ):
+        svc = EmbeddingService()
+        assert await svc.try_embed_items([]) == (None, "empty_text")
+        assert await svc.try_embed_items([TextItem("  ")]) == (None, "empty_text")
+
+
+@pytest.mark.asyncio
+async def test_try_embed_items_translates_dimension_mismatch() -> None:
+    from app.services.ai.providers.embedding_items import TextItem
+
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="k",
+        model="wemm-embedding-4b",
+        dimensions=0,
+    )
+    client = _recording_client({}, {"data": [{"index": 0, "embedding": [0.1] * 2560}]})
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+    ):
+        vec, reason = await EmbeddingService().try_embed_items([TextItem("x")])
+
+    assert vec is None and reason.startswith("dimension_mismatch:")
+
+
+@pytest.mark.asyncio
+async def test_space_spec_none_when_unconfigured() -> None:
+    with _patch_cfg(None):
+        assert await EmbeddingService().space_spec() is None
+
+
+@pytest.mark.asyncio
+async def test_space_spec_reports_ark_protocol_for_doubao() -> None:
+    from app.core.embedding_space import SpaceSpec
+
+    cfg = EmbeddingConfig(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="k",
+        model="doubao-embedding-vision-251215",
+        dimensions=0,
+        multimodal=True,
+    )
+    with _patch_cfg(cfg):
+        spec = await EmbeddingService().space_spec()
+
+    assert spec == SpaceSpec(
+        actual_model="doubao-embedding-vision-251215",
+        dims=EMBEDDING_DIM,
+        protocol="ark-multimodal",
+        modalities=("image", "text", "video"),
+    )
