@@ -1091,6 +1091,8 @@
       "instruction": "Instruction",
       "unconfigured": "No embedding model configured. Set one in Admin → AI Models.",
       "storeMissing": "Vector store not migrated yet (migration 494).",
+      "statusUnavailable": "Vector status endpoint not available yet",
+      "backfillDisabledHint": "Configure an embedding model first",
       "loading": "Loading…",
       "loadFailed": "Could not load vector status",
       "layersTitle": "Retrieval Layers",

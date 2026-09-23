@@ -76,6 +76,60 @@ describe('VectorsPanel', () => {
     expect(screen.getByRole('button', { name: 'Run 20' })).toBeDisabled();
   });
 
+  it('disabled backfill buttons explain why on hover', async () => {
+    getVectorsStatusMock.mockResolvedValue({
+      status: 'unconfigured',
+      space: null,
+      layers: [{ layer: 'semantic', status: 'not_built', covered: 0, total: 1409 }],
+    });
+    render(<VectorsPanel />);
+    const dry = await screen.findByRole('button', { name: 'Dry Run' });
+    expect(dry).toHaveAttribute('title', 'Configure an embedding model first');
+    expect(screen.getByRole('button', { name: 'Run 20' })).toHaveAttribute(
+      'title',
+      'Configure an embedding model first',
+    );
+  });
+
+  it('enabled backfill buttons carry no disabled hint', async () => {
+    getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+    render(<VectorsPanel />);
+    const dry = await screen.findByRole('button', { name: 'Dry Run' });
+    expect(dry).not.toHaveAttribute('title');
+  });
+
+  it('a backend without /vectors/status (404) still renders the table and keeps backfill usable', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Production envelope for an unknown route: ErrorResponse with code http_404.
+    getVectorsStatusMock.mockRejectedValue(
+      new ApiError('Not Found', 404, { code: 'http_404', details: null }),
+    );
+    render(<VectorsPanel />);
+    expect(
+      await screen.findByText('Vector status endpoint not available yet'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Could not load vector status')).toBeNull();
+    expect(screen.getByTestId('vector-layer-semantic')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dry Run' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Run 20' })).toBeEnabled();
+
+    backfillMock.mockResolvedValueOnce({
+      success: true, dry_run: true, reembedded: [1], dispatched: [], skipped: [],
+      in_flight: 0, remaining: 10, total_missing: 10,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
+    expect(await screen.findByText('1 would be embedded · 10 remaining')).toBeInTheDocument();
+    spy.mockRestore();
+  });
+
+  it('a non-404 status failure is still a load failure', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getVectorsStatusMock.mockRejectedValue(new ApiError('Server Error', 500, { code: 'http_500' }));
+    render(<VectorsPanel />);
+    expect(await screen.findByText('Could not load vector status')).toBeInTheDocument();
+    spy.mockRestore();
+  });
+
   it('store_missing status shows the migration hint', async () => {
     getVectorsStatusMock.mockResolvedValue({ status: 'store_missing', space: null, layers: [] });
     render(<VectorsPanel />);

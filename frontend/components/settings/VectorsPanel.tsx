@@ -74,6 +74,9 @@ function formatBackfillResult(r: BackfillResult, t: TFn): string {
 export function VectorsPanel() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<VectorsStatus | null>(null);
+  // True when the backend predates GET /search/vectors/status (404): the space
+  // is unknown, but the backfill endpoint has shipped longer and still works.
+  const [statusEndpointMissing, setStatusEndpointMissing] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<BackfillResult | null>(null);
@@ -83,11 +86,18 @@ export function VectorsPanel() {
     try {
       const next = await getVectorsStatus();
       setStatus(next);
+      setStatusEndpointMissing(false);
       setLoadState('ready');
     } catch (err) {
       console.error('VectorsPanel: failed to load vector status', err);
       if (typedErrorCode(err) === 'vector_store_missing') {
         setStatus({ status: 'store_missing', space: null, layers: [] });
+        setLoadState('ready');
+        return;
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        setStatus({ status: 'unconfigured', space: null, layers: [] });
+        setStatusEndpointMissing(true);
         setLoadState('ready');
         return;
       }
@@ -123,9 +133,10 @@ export function VectorsPanel() {
 
   return (
     <div className="space-y-6" data-testid="vectors-panel">
-      <SpaceSection status={status} t={t} />
+      <SpaceSection status={status} t={t} endpointMissing={statusEndpointMissing} />
       <LayersSection
         status={status}
+        endpointMissing={statusEndpointMissing}
         t={t}
         busy={busy}
         onBackfill={runBackfill}
@@ -136,7 +147,13 @@ export function VectorsPanel() {
   );
 }
 
-function SpaceSection({ status, t }: { status: VectorsStatus; t: TFn }) {
+interface SpaceSectionProps {
+  status: VectorsStatus;
+  t: TFn;
+  endpointMissing: boolean;
+}
+
+function SpaceSection({ status, t, endpointMissing }: SpaceSectionProps) {
   const space = status.space;
   return (
     <section className="rounded-xl border border-ink-800 bg-ink-900/40 p-4 space-y-3">
@@ -155,7 +172,10 @@ function SpaceSection({ status, t }: { status: VectorsStatus; t: TFn }) {
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-ink-500">
           {t('settings.vectors.currentSpace')}
         </p>
-        {status.status === 'unconfigured' && (
+        {endpointMissing && (
+          <p className="text-sm text-warn">{t('settings.vectors.statusUnavailable')}</p>
+        )}
+        {!endpointMissing && status.status === 'unconfigured' && (
           <p className="text-sm text-warn">{t('settings.vectors.unconfigured')}</p>
         )}
         {status.status === 'store_missing' && (
@@ -200,6 +220,7 @@ function SpaceRow({ label, children }: { label: string; children: ReactNode }) {
 
 interface LayersSectionProps {
   status: VectorsStatus;
+  endpointMissing: boolean;
   t: TFn;
   busy: boolean;
   onBackfill: (dryRun: boolean) => void;
@@ -207,12 +228,24 @@ interface LayersSectionProps {
   backfillError: string | null;
 }
 
-function LayersSection({ status, t, busy, onBackfill, lastResult, backfillError }: LayersSectionProps) {
+function LayersSection({
+  status,
+  endpointMissing,
+  t,
+  busy,
+  onBackfill,
+  lastResult,
+  backfillError,
+}: LayersSectionProps) {
   const semantic = status.layers.find((l) => l.layer === 'semantic');
   const transcript = status.layers.find((l) => l.layer === 'transcript');
   const total = semantic?.total ?? transcript?.total;
   const totalText = total === undefined ? '—' : NUM.format(total);
-  const canBackfill = status.status === 'ok' && !busy;
+  // Unknown status (endpoint missing) is not a reason to block: the backfill
+  // endpoint answers with a typed error if the embedder really is missing.
+  const spaceReady = status.status === 'ok' || endpointMissing;
+  const canBackfill = spaceReady && !busy;
+  const disabledHint = spaceReady ? undefined : t('settings.vectors.backfillDisabledHint');
   const btn =
     'rounded-lg border border-ink-700 px-2 py-0.5 text-xs text-ink-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -245,10 +278,22 @@ function LayersSection({ status, t, busy, onBackfill, lastResult, backfillError 
               <td className="py-2 pr-3 text-xs text-ink-400">{t('settings.vectors.semanticSource')}</td>
               <td className="py-2">
                 <span className="flex gap-1.5">
-                  <button type="button" className={btn} disabled={!canBackfill} onClick={() => onBackfill(true)}>
+                  <button
+                    type="button"
+                    className={btn}
+                    disabled={!canBackfill}
+                    title={disabledHint}
+                    onClick={() => onBackfill(true)}
+                  >
                     {t('settings.vectors.dryRun')}
                   </button>
-                  <button type="button" className={btn} disabled={!canBackfill} onClick={() => onBackfill(false)}>
+                  <button
+                    type="button"
+                    className={btn}
+                    disabled={!canBackfill}
+                    title={disabledHint}
+                    onClick={() => onBackfill(false)}
+                  >
                     {t('settings.vectors.run20')}
                   </button>
                 </span>

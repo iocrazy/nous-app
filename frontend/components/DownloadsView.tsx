@@ -46,19 +46,6 @@ const JUSTIFIED_GAP = 12;
  */
 const JUSTIFIED_MIN_CARD_WIDTH = 190;
 
-/** Response-level summary of a vector search, kept for the legs chips. */
-interface SearchHitMeta {
-  legs: NonNullable<SearchResponse['legs']>;
-  vectorLeg: SearchResponse['vector_leg'];
-  reranked: boolean;
-  processingMs?: number;
-}
-
-/** created_at as epoch ms; unparseable / missing sorts last. */
-const createdAtMs = (iso?: string | null): number => {
-  const ms = iso ? new Date(iso).getTime() : NaN;
-  return Number.isNaN(ms) ? 0 : ms;
-};
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -126,6 +113,20 @@ import {
   useAllTags,
   useSelectedVideoTags,
 } from './DownloadsView/useDownloadsData';
+
+/** Response-level summary of a vector search, kept for the legs chips. */
+interface SearchHitMeta {
+  legs: NonNullable<SearchResponse['legs']>;
+  vectorLeg: SearchResponse['vector_leg'];
+  reranked: boolean;
+  processingMs?: number;
+}
+
+/** created_at as epoch ms; unparseable / missing sorts last. */
+const createdAtMs = (iso?: string | null): number => {
+  const ms = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(ms) ? 0 : ms;
+};
 
 export const DownloadsView: React.FC = () => {
   const { t } = useTranslation();
@@ -520,6 +521,10 @@ export const DownloadsView: React.FC = () => {
       setSearchMeta(null);
       return;
     }
+    // A new query is a new result set: a Layer / Sort picked for the previous
+    // one would silently hide or reorder hits it never saw.
+    setHitLayerFilter('all');
+    setHitSort('similarity');
     setSearchHitMap(
       new Map(
         response.results.map((r) => [

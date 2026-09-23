@@ -58,6 +58,8 @@ const video = {
 } as unknown as Video;
 
 const audio = { ...video, media_type: 'audio' } as unknown as Video;
+// parsed_media album / image post: media_type is the wire string 'carousel'.
+const album = { ...video, media_type: 'carousel' } as unknown as Video;
 
 const tabNames = () =>
   Array.from(screen.getByTestId('detail-tabs').querySelectorAll('button[data-tab]')).map(
@@ -75,6 +77,19 @@ describe('VideoDetailPanel — big tabs', () => {
 
     render(<VideoDetailPanel video={audio} onClose={() => {}} />);
     expect(tabNames()).toEqual(['overview', 'lyrics']);
+  });
+
+  it('an album / image item has no Shots tab and its Search Hit card no Open Shots', () => {
+    render(
+      <VideoDetailPanel
+        video={album}
+        onClose={() => {}}
+        searchHit={{ layer: 'semantic', score: 0.6 }}
+      />,
+    );
+    expect(tabNames()).not.toContain('shots');
+    expect(screen.getByTestId('search-hit-card')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Shots' })).toBeNull();
   });
 
   it('AI tab hosts Transcript / Summary / Visual sub tabs, default Transcript', async () => {
@@ -177,5 +192,15 @@ describe('VideoDetailPanel — big tabs', () => {
     );
     expect(aiTab().querySelector('.bg-ok')).not.toBeNull();
     expect(aiTab().querySelector('.animate-pulse')).toBeNull();
+  });
+
+  it('status dot on the AI tab also reflects visual_analysis_status', () => {
+    render(
+      <VideoDetailPanel
+        video={{ ...video, transcript_status: 'completed', visual_analysis_status: 'processing' } as Video}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'AI' }).querySelector('.animate-pulse')).not.toBeNull();
   });
 });

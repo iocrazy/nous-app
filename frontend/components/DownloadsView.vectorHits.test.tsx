@@ -330,13 +330,34 @@ describe('DownloadsView — vector search hits', () => {
     expect(cards(container).map((c) => c.title)).toEqual(['A', 'B']);
   });
 
+  it('a second search without clearing resets Layer / Sort', async () => {
+    const { container } = render(<DownloadsView />);
+    await runSmartSearch();
+    fireEvent.click(screen.getByRole('button', { name: /Layer · All/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Semantic' }));
+    fireEvent.click(screen.getByRole('button', { name: /Sort · Similarity/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Date' }));
+    expect(cards(container).map((c) => c.title)).toEqual(['B']);
+
+    // New query straight away — no Clear in between.
+    await runSmartSearch();
+
+    expect(screen.getByRole('button', { name: /Layer · All/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sort · Similarity/ })).toBeInTheDocument();
+    expect(cards(container).map((c) => c.title)).toEqual(['A', 'B']);
+  });
+
   it('opening a hit carries its search hit into the detail page', async () => {
     // Backend-hydrated `videos` carry resource_id — the row the detail route needs.
+    // Real wire shape (search_router._hydrate_media_by_platform_ids): `id` is
+    // the parsed_media BIGINT straight off `_pm_card_dict` (JSON number), while
+    // `resource_id` is `str(row["id"])` from `_fetch_user_resources_by_media_id`
+    // (JSON string).
     hybridSearchMock.mockReset().mockResolvedValue({
       ...HYBRID_RESPONSE,
       videos: [
-        { id: '1', platform_id: 'a', title: 'A', resource_id: 7001 },
-        { id: '2', platform_id: 'b', title: 'B', resource_id: 7002 },
+        { id: 1, platform_id: 'a', title: 'A', resource_id: '7001' },
+        { id: 2, platform_id: 'b', title: 'B', resource_id: '7002' },
       ],
     });
     navigateMock.mockReset();

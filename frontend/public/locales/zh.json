@@ -1091,6 +1091,8 @@
       "instruction": "指令",
       "unconfigured": "尚未配置向量模型。请在 Admin → AI Models 中设置。",
       "storeMissing": "向量存储尚未迁移（migration 494）。",
+      "statusUnavailable": "向量状态接口尚未上线",
+      "backfillDisabledHint": "请先配置向量模型",
       "loading": "加载中…",
       "loadFailed": "无法加载向量状态",
       "layersTitle": "检索层",

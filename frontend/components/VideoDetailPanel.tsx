@@ -11,7 +11,7 @@ import { MediaCard } from './MediaCard';
 import SodaLyricsTab from './SodaLyricsTab';
 import { SpeakerChip } from './SpeakerChip';
 import type { SodaTheme } from '../utils/sodaTheme';
-import { isAudioType } from '../utils/awemeType';
+import { isAudioType, isVideoType } from '../utils/awemeType';
 import {
   triggerTranscription, triggerTranscriptionByResource,
   getTranscript, getTranscriptByResource,
@@ -490,6 +490,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   };
 
   const isAudio = isAudioType(video.media_type);
+  // Shots are cut from a video timeline — albums / images have none (same rule
+  // as ResourceInspectorTabs' `visibleInspectorTabs`).
+  const isVideo = isVideoType(video.media_type);
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: 'overview', label: t('detail.tabs.overview', 'Overview'), icon: <Eye size={16} /> },
@@ -499,10 +502,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   ];
 
   // Audio items show only Overview + Lyrics (no AI / shots).
-  // Non-audio items keep the original tabs and never show a Lyrics tab.
+  // Non-audio items never show a Lyrics tab; only videos show Shots.
   const visibleTabs = isAudio
     ? tabs.filter((t) => t.key === 'overview' || t.key === 'lyrics')
-    : tabs.filter((t) => t.key !== 'lyrics');
+    : tabs.filter((t) => t.key !== 'lyrics' && (t.key !== 'shots' || isVideo));
 
   // Guard: if the active tab is no longer visible (e.g. switching to an audio
   // item while on 'ai'), fall back to 'overview' so nothing renders blank.
@@ -510,7 +513,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
     if (!visibleTabs.some((t) => t.key === activeTab)) {
       setActiveTab('overview');
     }
-  }, [isAudio]);
+  }, [isAudio, isVideo]);
 
   const getStatusIndicator = (status?: string) => {
     switch (status) {
@@ -531,7 +534,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
       <div data-testid="detail-tabs" className={`flex border-b ${cBorder800} mb-4 shrink-0`}>
         {visibleTabs.map((tab) => {
           const status = tab.key === 'ai'
-            ? busiestStatus(video.transcript_status, video.summary_status)
+            ? busiestStatus(video.transcript_status, video.summary_status, video.visual_analysis_status)
             : undefined;
 
           return (
@@ -591,7 +594,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   })}
                 </button>
               )}
-              {!isAudio && (
+              {isVideo && (
                 <button
                   type="button"
                   onClick={() => setActiveTab('shots')}
