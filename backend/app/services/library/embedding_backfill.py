@@ -51,6 +51,8 @@ class _AnalysisRepo(Protocol):
         embedding: List[float],
         full_text: str,
         analysis_level: Optional[str] = None,
+        *,
+        embedding_model: Optional[str] = None,
     ) -> Any: ...
 
 
@@ -59,6 +61,10 @@ class _TagsRepo(Protocol):
 
 
 class _Embedder(Protocol):
+    # The model that produced the last vector — its space
+    # (app.core.embedding_space), stored next to it.
+    model: str
+
     def build_embedding_text(self, **kwargs: Any) -> str: ...
 
     async def try_embed(
@@ -137,7 +143,11 @@ async def reembed_existing(
         return False, reason or "provider_error: empty result"
 
     written = await analysis_repo.update_embedding(
-        cand.resource_id, vector, text, analysis_level=ANALYSIS_LEVEL
+        cand.resource_id,
+        vector,
+        text,
+        analysis_level=ANALYSIS_LEVEL,
+        embedding_model=embedding_service.model,
     )
     if written is None:
         # The row vanished between the read and the write; nothing landed.

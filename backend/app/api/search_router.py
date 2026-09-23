@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.embedding_space import EmbeddingDimensionMismatch
 from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 from app.schemas.search import (
     HybridSearchRequest,
@@ -23,6 +24,15 @@ from app.services.library.search_service import (
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 
 router = APIRouter(prefix="/search", tags=["Search"])
+
+# The embedder is configured with a model whose vectors do not fit the columns
+# (app.core.embedding_space). Typed so a client / probe can tell "semantic
+# search is misconfigured" from "the engine is briefly unavailable".
+_DIMENSION_MISMATCH_DETAIL = {
+    "code": "embedding_dimension_mismatch",
+    "message": "Semantic search is unavailable: the embedding model does not "
+    "match the vector store.",
+}
 
 
 async def _fetch_user_resources_by_media_id(
@@ -211,6 +221,11 @@ async def semantic_search(
             search_type=response.search_type,
         )
 
+    except EmbeddingDimensionMismatch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_DIMENSION_MISMATCH_DETAIL,
+        )
     except EmbeddingSearchUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -485,6 +500,11 @@ async def find_similar_media(
 
     except HTTPException:
         raise
+    except EmbeddingDimensionMismatch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_DIMENSION_MISMATCH_DETAIL,
+        )
     except EmbeddingSearchUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -543,6 +563,11 @@ async def quick_search(
             "total": len(results),
         }
 
+    except EmbeddingDimensionMismatch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_DIMENSION_MISMATCH_DETAIL,
+        )
     except EmbeddingSearchUnavailable:
         # The engine cannot answer. Saying "0 results" here would be a wrong
         # answer dressed as a right one — the caller cannot tell it apart from

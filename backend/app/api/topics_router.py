@@ -4,11 +4,13 @@ import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
 
 from app.core.deps import (  # noqa: F401 — get_auth re-exported for test override
     AuthDep,
     get_auth,
 )
+from app.core.embedding_space import EmbeddingDimensionMismatch
 from app.repositories.hotspot_user_state_repository import (
     HotspotUserStateRepository,
 )
@@ -258,13 +260,28 @@ async def set_interest(body: InterestRequest, auth: AuthDep):
     until an embedding exists."""
     text = (body.interest_text or "").strip()
     vec = None
+    model = None
+    embed_error = None
     if text:
-        embedding = await TopicEmbeddingService().embed_text(text)
+        embedder = TopicEmbeddingService()
+        try:
+            embedding = await embedder.embed_text(text)
+        except EmbeddingDimensionMismatch as e:
+            # The text is still saved (the keyword filter works without a
+            # vector); the response says why there is no vector.
+            logger.error(f"interest embedding refused for {auth.user_id}: {e}")
+            embedding = None
+            embed_error = "dimension_mismatch"
         if embedding:
             vec = "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+            model = embedder.model
     repo = UserTopicInterestRepository()
-    await repo.set_interest(auth.user_id, interest_text=text, vec=vec)
-    return InterestResponse(interest_text=text, has_embedding=vec is not None)
+    await repo.set_interest(
+        auth.user_id, interest_text=text, vec=vec, embedding_model=model
+    )
+    return InterestResponse(
+        interest_text=text, has_embedding=vec is not None, embed_error=embed_error
+    )
 
 
 @router.patch("/{hotspot_id}/state", response_model=HotspotStateResponse)

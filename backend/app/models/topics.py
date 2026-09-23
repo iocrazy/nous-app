@@ -39,6 +39,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.embedding_space import EMBEDDING_DIM
 from app.db.orm_base import Base
 
 
@@ -78,7 +79,9 @@ class TopicGroups(Base):
     # ``ValueError: expected 1536 dimensions, not 2048`` on every ORM write —
     # it only stayed latent because topic_groups_repository inserts via raw
     # SQL. Pinned by tests/test_topics_orm_vector_dims.py.
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    # Which model produced ``embedding`` (mig 490); NULL = legacy, same space.
+    embedding_model: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
@@ -147,7 +150,9 @@ class Hotspots(Base):
         DateTime(True), nullable=False, server_default=text("now()")
     )
     heat: Mapped[float | None] = mapped_column(Numeric)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    # Which model produced ``embedding`` (mig 490); NULL = legacy, same space.
+    embedding_model: Mapped[str | None] = mapped_column(Text)
     score_dims: Mapped[dict | None] = mapped_column(JSONB)
 
 
@@ -217,7 +222,9 @@ class UserTopicInterests(Base):
     interest_text: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''::text")
     )
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    # Which model produced ``embedding`` (mig 490); NULL = legacy, same space.
+    embedding_model: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

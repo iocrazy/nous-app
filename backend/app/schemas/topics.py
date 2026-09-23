@@ -83,6 +83,10 @@ class InterestResponse(BaseModel):
     interest_text: str = ""
     # True once the interest has an embedding (the "For You" view needs it).
     has_embedding: bool = False
+    # Why there is no embedding when the embedder answered but could not be
+    # used: "dimension_mismatch" (embedder misconfigured for the vector
+    # columns). None otherwise — including "provider unconfigured".
+    embed_error: Optional[str] = None
 
 
 class SourceHealthOut(BaseModel):
