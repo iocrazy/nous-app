@@ -6,7 +6,8 @@ to JSONB via :func:`dataclasses.asdict`. The caller is responsible for:
 - Fetching the effective rate row from ``provider_effective_rate`` view
   (migration 165). compute_cost takes the resolved rate as input.
 - Fetching the FX rate from ``fx_rates``.
-- Persisting the resulting CostSnapshot into ``agent_run_events.cost_snapshot``.
+- Persisting the resulting CostSnapshot wherever it is recorded (it used to
+  go into ``agent_run_events.cost_snapshot``; that table was dropped in mig 487).
 
 Design: keep this module pure / sync / no DB / no I/O. Easy to unit-test;
 easy to call from a thin async wrapper.
@@ -185,7 +186,8 @@ class SnapshotMetadata:
 
 @dataclass(frozen=True)
 class CostSnapshot:
-    """Full per-call cost record. JSONB-serialised into agent_run_events."""
+    """Full per-call cost record, JSONB-serialisable (formerly stored in the
+    since-dropped ``agent_run_events``, mig 487)."""
 
     # Identity / OTel-aligned top-level fields
     provider_slug: str

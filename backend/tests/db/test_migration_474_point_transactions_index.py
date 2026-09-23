@@ -99,8 +99,10 @@ def test_the_index_predicate_and_the_query_agree_on_both_equalities():
 
 
 def test_it_is_not_unique():
-    """同一次 run 允许有多行流水（重试、补扣）——``charged_points_for_references``
-    求和正是为此。建成 UNIQUE 会让第二次扣分直接写不进去。"""
+    """474 这个文件本身建的是普通索引（当时的考虑是同一次 run 可能有多行流水）。
+    2026-09-22 用户裁定「一树一扣」之后，mig 486 把它升成了 UNIQUE ——
+    那一步由 ``test_migration_486_consume_unique.py`` 钉住；这里只证 474 的
+    文件没被改写（已发布的迁移不回头改）。"""
     assert "CREATE UNIQUE INDEX" not in _SQUEEZED.upper()
 
 
@@ -122,7 +124,8 @@ def test_the_orm_mirrors_the_index_as_partial():
     对「这条查询走不走索引」产生一个错误的、无法证伪的印象。"""
     ix = _declared(INDEX)
     assert [c.name for c in ix.columns] == ["reference_id"]
-    assert ix.unique is not True
+    # mig 486 升 UNIQUE（同一 run 只许一条 consume）；ORM 与库同批。
+    assert ix.unique is True
     where = ix.dialect_options["postgresql"].get("where")
     assert where is not None, "少了 postgresql_where，这条声明会在部分索引轴上漂移"
     assert "consume" in str(where) and "agent_run" in str(where)

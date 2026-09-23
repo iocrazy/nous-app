@@ -269,8 +269,9 @@ async def _register_write(
     还没提交的事务一起弄废**，退出时连分镜/场次的写入一起回滚。best-effort
     吞得掉那个异常，吞不掉已经作废的事务。
 
-    同族先例见 ``caller_scope`` 的 docstring：``agent_run_events`` 的
-    best-effort 审计写入同样必须跑在 postgres 上。
+    同族先例见 ``caller_scope`` 的 docstring：scope resolver 的 best-effort
+    审计写入（mig 487 之前落 ``agent_run_events``，现在 denied 落
+    ``alert_history``）同样必须跑在 postgres 上。
     """
     await register_deliverable_best_effort(
         run_id=scope.run_id,

@@ -2,16 +2,19 @@
 (A2 — screenwriting agent layer, single choke point).
 
 Unit suite (no DSN) — mirrors ``tests/test_script_scene_repository.py``'s
-fake-session style. Two DB round trips happen per resolver call (the join
-SELECT via ``read_scope``, then the audit INSERT via ``write_scope``); both
-are patched onto a SHARED capturing session so a single test can assert on
-both the resolution outcome and the audit row it produced.
+fake-session style. The join SELECT runs via ``read_scope``; a DENIED
+attempt then adds one ``alert_history`` INSERT via ``write_scope`` (grants
+write nothing since mig 487 dropped ``agent_run_events``). Both scopes are
+patched onto a SHARED capturing session so a single test can assert on both
+the resolution outcome and the audit row it produced. The anchor-rule
+get-or-create is stubbed here; it has its own tests in
+``tests/services/alerting/test_anchor_rule.py``.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -40,6 +43,7 @@ _PROJECT_B = 900100000000000002  # a DIFFERENT project — cross-tenant target
 _TEAM_A = 900100000000000003
 _EPISODE_A = 900100000000000005
 _EPISODE_B = 900100000000000006
+_ANCHOR_RULE_ID = 4242
 
 
 class _FakeResult:
@@ -110,19 +114,24 @@ def _episode_row(project_id):
     )
 
 
-def _patched(session):
+def _patched(session, anchor=None):
     return patch.multiple(
         resolver_mod,
         read_scope=lambda: _ScopeCtx(session),
         write_scope=lambda: _ScopeCtx(session),
+        ensure_anchor_rule=anchor or AsyncMock(return_value=_ANCHOR_RULE_ID),
     )
 
 
-def _hook_decisions(stmt):
-    """Pull the bound ``hook_decisions`` value out of an INSERT(AgentRunEvents)
-    statement's compiled parameters."""
+def _alert_row(stmt):
+    """The bound values of the denied audit's INSERT(alert_history)."""
+    assert stmt.table.name == "alert_history", stmt
     compiled = stmt.compile(dialect=postgresql.dialect())
-    return compiled.params["hook_decisions"]
+    return compiled.params
+
+
+def _inserts(session):
+    return [s for s in session.statements if s.is_dml and s.is_insert]
 
 
 # ======================================================================
@@ -140,14 +149,9 @@ async def test_resolve_scene_granted_when_project_matches():
     assert isinstance(result, ResolvedScene)
     assert result.id == _SCENE_ID
     assert result.project_id == _PROJECT_A
-    # Audit row written for the grant too (spec: every invocation, not just denials).
-    assert len(session.statements) == 2
-    decisions = _hook_decisions(session.statements[1])
-    assert decisions["decision"] == "granted"
-    # A2 review (minor #5): the plan asks for (agent / actual user / scope /
-    # ids touched) explicitly — user_id must be directly on the audit row,
-    # not only reachable via a join back to agent_runs.
-    assert decisions["user_id"] == _USER_ID
+    # Grants are no longer recorded (mig 487): only the SELECT ran.
+    assert len(session.statements) == 1
+    assert _inserts(session) == []
 
 
 # ======================================================================
@@ -173,12 +177,23 @@ async def test_cross_tenant_scene_id_denied_and_audited():
     assert "project" not in result.reason.lower()
     assert "PROJECT_B" not in result.reason
 
-    # The attempt is audited with the DETAILED reason (audit-only).
+    # The attempt is audited on the admin Alerts page with the DETAILED
+    # reason (audit-only) plus agent run / actual user / ids touched.
     assert len(session.statements) == 2
-    decisions = _hook_decisions(session.statements[1])
-    assert decisions["decision"] == "denied"
-    assert decisions["requested_id"] == str(_SCENE_ID)
-    assert decisions["scope"]["project_id"] == _PROJECT_A
+    row = _alert_row(session.statements[1])
+    assert row["rule_id"] == _ANCHOR_RULE_ID
+    assert row["rule_name"] == "Scope denied (system)"
+    assert row["metric_type"] == "scope_denied"
+    assert row["metric_value"] == 1.0
+    assert row["threshold"] == 0.0
+    assert row["condition"] == "gte"
+    assert row["notified"] is False
+    msg = row["message"]
+    assert "scene" in msg
+    assert str(_SCENE_ID) in msg
+    assert "project_mismatch" in msg
+    assert _USER_ID in msg
+    assert _RUN_ID in msg
 
 
 @pytest.mark.asyncio
@@ -214,8 +229,7 @@ async def test_scene_not_found_denied_with_generic_reason():
         result = await resolve_scene(_SCENE_ID, scope)
 
     assert isinstance(result, Denied)
-    decisions = _hook_decisions(session.statements[1])
-    assert decisions["decision"] == "denied"
+    assert "not_found" in _alert_row(session.statements[1])["message"]
 
 
 @pytest.mark.asyncio
@@ -293,14 +307,77 @@ async def test_episode_scope_dimension_is_additive_and_enforced_once_populated()
 
 @pytest.mark.asyncio
 async def test_sentinel_run_id_skips_audit_write():
+    """Even a denial writes nothing under the ``run_id == 0`` sentinel."""
     scope = AgentRunScope(run_id="0", user_id=_USER_ID, project_id=_PROJECT_A)
-    session = _CaptureSession([_FakeResult(first_row=_scene_row(_PROJECT_A))])
-    with _patched(session):
+    session = _CaptureSession([_FakeResult(first_row=_scene_row(_PROJECT_B))])
+    anchor = AsyncMock(return_value=_ANCHOR_RULE_ID)
+    with _patched(session, anchor):
         result = await resolve_scene(_SCENE_ID, scope)
 
-    assert isinstance(result, ResolvedScene)
+    assert isinstance(result, Denied)
     # Only the SELECT ran — the audit INSERT was skipped for the sentinel.
     assert len(session.statements) == 1
+    anchor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_granted_never_touches_the_anchor_rule():
+    scope = AgentRunScope(run_id=_RUN_ID, user_id=_USER_ID, project_id=_PROJECT_A)
+    session = _CaptureSession([_FakeResult(first_row=_shot_row(_PROJECT_A))])
+    anchor = AsyncMock(return_value=_ANCHOR_RULE_ID)
+    with _patched(session, anchor):
+        result = await resolve_shot(_SHOT_ID, scope)
+
+    assert isinstance(result, ResolvedShot)
+    assert _inserts(session) == []
+    anchor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_denied_audit_anchors_to_the_scope_denied_rule():
+    scope = AgentRunScope(run_id=_RUN_ID, user_id=_USER_ID, project_id=_PROJECT_A)
+    session = _CaptureSession([_FakeResult(first_row=_episode_row(_PROJECT_B))])
+    anchor = AsyncMock(return_value=_ANCHOR_RULE_ID)
+    with _patched(session, anchor):
+        result = await resolve_episode(_EPISODE_ID, scope)
+
+    assert isinstance(result, Denied)
+    anchor.assert_awaited_once()
+    kwargs = anchor.await_args.kwargs
+    assert kwargs["name"] == "Scope denied (system)"
+    assert kwargs["metric_type"] == "scope_denied"
+    [insert_stmt] = _inserts(session)
+    row = _alert_row(insert_stmt)
+    assert "episode" in row["message"]
+    assert str(_EPISODE_ID) in row["message"]
+
+
+@pytest.mark.asyncio
+async def test_audit_resolution_direct_caller_denied_element_id():
+    """``script_selection`` calls ``audit_resolution`` directly for element
+    ids; its denial lands on the same Alerts rule."""
+    scope = AgentRunScope(run_id=_RUN_ID, user_id=_USER_ID, project_id=_PROJECT_A)
+    session = _CaptureSession([])
+    with _patched(session):
+        await resolver_mod.audit_resolution(
+            scope,
+            "script_element",
+            "el-foreign-1",
+            granted=False,
+            detail_code="element_not_in_scene",
+        )
+        await resolver_mod.audit_resolution(
+            scope,
+            "script_element",
+            "el-own-1",
+            granted=True,
+            detail_code="ok",
+        )
+
+    [insert_stmt] = _inserts(session)
+    msg = _alert_row(insert_stmt)["message"]
+    assert "el-foreign-1" in msg
+    assert "element_not_in_scene" in msg
 
 
 # ======================================================================
@@ -429,9 +506,22 @@ async def test_audit_write_failure_is_swallowed():
                 raise RuntimeError("db is on fire")
             return await super().execute(stmt)
 
-    session = _BoomSession([_FakeResult(first_row=_scene_row(_PROJECT_A))])
+    session = _BoomSession([_FakeResult(first_row=_scene_row(_PROJECT_B))])
     with _patched(session):
         result = await resolve_scene(_SCENE_ID, scope)
 
-    # The resolution itself must still succeed even though the audit write blew up.
-    assert isinstance(result, ResolvedScene)
+    # The decision stands even though the audit INSERT blew up.
+    assert isinstance(result, Denied)
+    assert len(session.statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_anchor_rule_failure_is_swallowed():
+    scope = AgentRunScope(run_id=_RUN_ID, user_id=_USER_ID, project_id=_PROJECT_A)
+    session = _CaptureSession([_FakeResult(first_row=_scene_row(_PROJECT_B))])
+    anchor = AsyncMock(side_effect=RuntimeError("alert_rules unreachable"))
+    with _patched(session, anchor):
+        result = await resolve_scene(_SCENE_ID, scope)
+
+    assert isinstance(result, Denied)
+    assert _inserts(session) == []

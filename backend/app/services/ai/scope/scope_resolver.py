@@ -30,12 +30,12 @@ Contract:
       avoid leaking existence"). A tool that echoes ``Denied.reason`` back
       into the model's context must not leak which project a scene actually
       belongs to. The MORE detailed internal reason (``detail_code``) is
-      audit-only — it lands in ``agent_run_events.error_message``, never in
-      anything handed back to the model.
-    - Every call — granted or denied — is audited (spec: "每次工具调用记
-      (agent / 实际用户 / scope / 触及的 id)"). See ``_audit`` below for why
-      that lands in ``agent_run_events`` rather than
-      ``agent_run_transcript_events``.
+      audit-only — it lands in the denied audit's ``alert_history.message``,
+      never in anything handed back to the model.
+    - Every DENIED call is audited into ``alert_history`` (the admin Alerts
+      page). Grants are not recorded: until mig 487 both went to
+      ``agent_run_events``, which in seven weeks had 28 granted rows, 0
+      denied and zero readers. See ``_audit`` below.
 """
 
 from __future__ import annotations
@@ -48,12 +48,13 @@ from sqlalchemy import insert, select
 
 from app.db.session import read_scope, write_scope
 from app.models import (
-    AgentRunEvents,
+    AlertHistory,
     Episodes,
     ScriptProjects,
     ScriptScenes,
     ScriptShots,
 )
+from app.services.alerting.anchor_rule import ensure_anchor_rule
 
 from .agent_run_scope import AgentRunScope
 
@@ -360,7 +361,7 @@ async def _resolve_episode_inner(episode_id: Any, scope: AgentRunScope):
 
 
 # ---------------------------------------------------------------------- #
-# Audit — every resolution attempt, granted or denied.
+# Audit — denied resolution attempts land on the admin Alerts page.
 # ---------------------------------------------------------------------- #
 
 
@@ -371,30 +372,16 @@ async def _audit(
     result: Union[ResolvedScene, ResolvedShot, ResolvedEpisode, Denied],
     detail_code: str,
 ) -> None:
-    """One row per resolution attempt into ``agent_run_events`` (mig 155).
+    """Record a resolution attempt — see ``audit_resolution`` for what is kept.
 
-    That table — NOT ``agent_run_transcript_events`` (mig 397) — is the
-    right fit both semantically and mechanically:
-      - Semantically: its own migration comment already designates it for
-        "Hook outcomes (which hooks fired, what they decided)" — a scope
-        resolution decision is exactly a hook-shaped outcome
-        (``CostAuditorHook`` used to write to this same table; it was
-        retired in 3c §3.2, but the table's purpose is unchanged).
-      - Mechanically: its PK is ``gen_random_uuid()`` (no per-run sequence
-        counter to collide with). ``agent_run_transcript_events`` uses a
-        UNIQUE(run_id, seq) tracked by ``RunRecorder``'s in-memory
-        ``_event_seq`` counter — a second, independent writer computing its
-        own seq is exactly the class of bug migration 397 documents (mig
-        285 collided with this same table under a different name and
-        silently no-op'd for every environment until 397 gave the
-        transcript stream its own table). Reusing agent_run_events's
-        UUID-PK shape sidesteps that class of bug entirely instead of
-        re-creating it.
-
-    Best-effort like every other telemetry write in this codebase (see
-    ``cost_auditor.py`` / ``run_recorder.py``): a failed insert is logged
-    and swallowed, never raised — an audit-write outage must not block (or
-    break) a resolution decision that has already been made.
+    History: until mig 487 every attempt, granted or denied, was one row in
+    ``agent_run_events`` (mig 155, the retired CostAuditorHook's table). That
+    table was dropped with zero readers; the denied half of the audit moved
+    to ``alert_history`` because the admin Alerts page is the one audit
+    surface anyone actually reads. ``agent_run_transcript_events`` was never
+    an option: its UNIQUE(run_id, seq) is owned by ``RunRecorder``'s
+    in-memory counter, and a second writer computing its own seq is the bug
+    class mig 397 documents.
     """
     await audit_resolution(
         scope,
@@ -405,6 +392,10 @@ async def _audit(
     )
 
 
+_DENIED_RULE_NAME = "Scope denied (system)"
+_DENIED_METRIC = "scope_denied"
+
+
 async def audit_resolution(
     scope: AgentRunScope,
     resource_type: str,
@@ -413,17 +404,26 @@ async def audit_resolution(
     granted: bool,
     detail_code: str,
 ) -> None:
-    """The audit row itself, callable by resolution steps that are NOT one of
+    """The audit itself, callable by resolution steps that are NOT one of
     the three id resolvers above.
 
     A5's ``script_selection.resolve_selection`` is the first such caller: a
     selection is resolved in two stages — the scene id (audited by
     ``resolve_scene``) and then the ELEMENT ids inside it, which no id
     resolver covers because they are not rows. A foreign or fabricated
-    element id is exactly the kind of attempt the plan wants on the record
-    ("malformed / foreign / stale element ids → rejected … audited"), so it
-    gets a row here rather than a second, differently-shaped audit path.
-    See ``_audit`` above for why this table and not the transcript one."""
+    element id is exactly the kind of attempt the plan wants on the record,
+    so it goes through here rather than a second, differently-shaped path.
+
+    - ``granted=True`` writes nothing.
+    - ``granted=False`` logs a WARNING and adds one ``alert_history`` row
+      under the ``Scope denied (system)`` anchor rule, created on the first
+      denial (not at startup). The message carries the detailed
+      ``detail_code`` — audit-only, never handed back to the model.
+
+    Best-effort like every other telemetry write in this codebase: a failed
+    write is logged and swallowed, never raised — an audit outage must not
+    break a resolution decision that has already been made.
+    """
     try:
         rid = int(str(scope.run_id))
     except (TypeError, ValueError, AttributeError):
@@ -432,34 +432,36 @@ async def audit_resolution(
         # Sentinel run_id used in test paths without a real RunRecorder
         # (the convention came from CostAuditorHook, retired in 3c §3.2).
         return
+    if granted:
+        return
 
-    payload = {
-        "run_id": rid,
-        "iteration": 0,  # not a tool-loop iteration — a resolver-level audit row
-        "tool_name": f"scope_resolver:{resource_type}",
-        "tool_args_summary": f"{resource_type}_id={requested_id}",
-        "hook_decisions": {
-            "decision": "granted" if granted else "denied",
-            "resource_type": resource_type,
-            "requested_id": requested_id,
-            # A2 review (minor #5): the plan asks for (agent / actual user /
-            # scope / ids touched) explicitly — user_id was previously only
-            # reachable transitively via a join back to agent_runs.user_id.
-            # It's already sitting right here on the scope; record it
-            # directly so an audit query never needs that join.
-            "user_id": scope.user_id,
-            "scope": {
-                "project_id": scope.project_id,
-                "team_id": scope.team_id,
-                "episode_id": scope.episode_id,
-            },
-        },
-        "error_code": None if granted else "SCOPE_DENIED",
-        "error_message": None if granted else detail_code,
-    }
+    message = (
+        f"Scope denied: {resource_type} id={requested_id} "
+        f"user={scope.user_id} run={rid} reason={detail_code} "
+        f"(scope project={scope.project_id} team={scope.team_id} "
+        f"episode={scope.episode_id})"
+    )
+    logger.warning("[scope_resolver] %s", message)
     try:
+        rule_id = await ensure_anchor_rule(
+            name=_DENIED_RULE_NAME,
+            metric_type=_DENIED_METRIC,
+            threshold=0.0,
+            is_active=True,
+        )
         async with write_scope() as session:
-            await session.execute(insert(AgentRunEvents).values(payload))
+            await session.execute(
+                insert(AlertHistory).values(
+                    rule_id=rule_id,
+                    rule_name=_DENIED_RULE_NAME,
+                    metric_type=_DENIED_METRIC,
+                    metric_value=1.0,
+                    threshold=0.0,
+                    condition="gte",
+                    message=message,
+                    notified=False,
+                )
+            )
     except Exception:  # noqa: BLE001
         logger.exception(
             "[scope_resolver] audit write failed (run=%s resource=%s id=%s)",

@@ -5,8 +5,8 @@ Phase 0.5-C of Canvas + AI Infrastructure 17-week upgrade plan.
 Public surface:
 - :class:`TokenUsage` — input shape (one per LLM call)
 - :func:`compute_cost` — main entry. Takes provider + model + usage + flags;
-  returns a fully-populated :class:`CostSnapshot` ready to JSONB-serialise into
-  ``agent_run_events.cost_snapshot``.
+  returns a fully-populated :class:`CostSnapshot` ready to JSONB-serialise
+  (the old ``agent_run_events.cost_snapshot`` sink was dropped in mig 487).
 - :class:`CostSnapshot` — output shape, mirrors the schema documented in
   migration 166 header and the OpenTelemetry GenAI Semantic Conventions.
 

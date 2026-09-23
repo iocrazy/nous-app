@@ -106,7 +106,7 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     # (qwen-turbo by default) for title gen / intent / tagging / etc.
     # Side-channel from the main agent run — per the upgrade plan v1.2,
     # tasklet invocations are recorded into ai_messages.tasklet_calls
-    # JSONB (separate accounting path), not agent_run_events.
+    # JSONB (separate accounting path), not the since-dropped agent_run_events.
     "services/ai/tasklets/base.py": "tasklet cheap-model auxiliary LLM, recorded in ai_messages.tasklet_calls",
     # Phase 2 smart-canvas prompt runner: single-turn creative
     # generation invoked from the React Flow surface. NOT a chat

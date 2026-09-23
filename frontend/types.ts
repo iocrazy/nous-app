@@ -2004,7 +2004,7 @@ export interface LiveAgentRun {
   agent_icon?: string | null;
 }
 
-/** One transcript event of a run (mig 285 agent_run_events). */
+/** One transcript event of a run (agent_run_transcript_events, mig 397; mig 285 had aimed for the old agent_run_events name). */
 /** Every event type the backend CHECK allows (mig 285 / 436 / 443 / 453).
  * The union is open-ended on purpose: `foldEvents` ignores what it does not
  * know, so a new backend type never breaks an old client. */

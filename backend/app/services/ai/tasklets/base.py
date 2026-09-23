@@ -29,7 +29,7 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 # Sentinel agent_id for tasklets — distinguishes from real agent UUIDs in
-# RunRecorder / agent_run_events queries.
+# RunRecorder queries (and, until mig 487 dropped it, agent_run_events).
 _TASKLET_AGENT_ID = UUID(int=0)
 
 

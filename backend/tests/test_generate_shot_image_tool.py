@@ -247,6 +247,7 @@ async def test_shot_outside_scope_is_denied_audited_and_never_dispatched():
             resolver_mod,
             read_scope=lambda: _ScopeCtx(session),
             write_scope=lambda: _ScopeCtx(session),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
         patch(
@@ -264,7 +265,9 @@ async def test_shot_outside_scope_is_denied_audited_and_never_dispatched():
     assert result["ok"] is False
     assert result["error_code"] == "scope_denied"
     assert "not accessible in this run" in result["error"]
-    assert _audit_inserts(session), "a denied resolution wrote no audit row"
+    inserts = _audit_inserts(session)
+    assert inserts, "a denied resolution wrote no audit row"
+    assert all(s.table.name == "alert_history" for s in inserts)
     mock_dispatch.assert_not_called()
     mock_get_mgr.assert_not_called()
 

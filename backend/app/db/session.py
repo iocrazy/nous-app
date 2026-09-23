@@ -234,8 +234,9 @@ async def caller_scope(user_id: str) -> AsyncIterator[AsyncSession]:
 
     3. **Wrap ONLY the tenant-scoped data access.** Infra queries that read
        ``agent_runs`` etc. to DERIVE the scope — AND the scope resolvers, which
-       additionally write best-effort audit rows to ``agent_run_events``
-       (``authenticated`` has no RLS grant there) — must run as ``postgres``
+       additionally write best-effort denied-audit rows to ``alert_history``
+       (``agent_run_events`` until mig 487; ``authenticated`` has no RLS grant
+       on either) — must run as ``postgres``
        (they need to see rows RLS would hide from ``authenticated``); resolve
        the scope / ``user_id`` and authorize the ids FIRST on the normal
        connection, THEN enter ``caller_scope`` for the scene/shot reads+writes.

@@ -126,7 +126,7 @@ async def test_post_hooks_include_memory_harvester_and_no_cost_auditor():
 
     post_names = [e.name for e in stack.runner.hooks.get_post_hooks()]
     assert "memory_harvester" in post_names
-    # 3c §3.2：摘除后不许悄悄回来——它是 agent_run_events 的唯一写方。
+    # 3c §3.2：摘除后不许悄悄回来——它曾是 agent_run_events（mig 487 已 DROP）的唯一写方。
     assert "cost_auditor" not in post_names
 
 

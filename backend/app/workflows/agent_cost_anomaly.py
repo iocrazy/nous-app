@@ -125,39 +125,14 @@ def _findings_stmt(min_hours: int, z: float, min_cost: float):
 
 async def _ensure_anchor_rule() -> int:
     """Get-or-create the inactive system rule alert_history rows hang off."""
-    from sqlalchemy import insert, select
+    from app.services.alerting.anchor_rule import ensure_anchor_rule
 
-    from app.db.session import read_scope, write_scope
-    from app.models import AlertRules
-
-    async with read_scope() as session:
-        rule_id = (
-            await session.execute(
-                select(AlertRules.id)
-                .where(AlertRules.name == _ANCHOR_RULE_NAME)
-                .limit(1)
-            )
-        ).scalar()
-    if rule_id is not None:
-        return int(rule_id)
-
-    async with write_scope() as session:
-        created = (
-            await session.execute(
-                insert(AlertRules)
-                .values(
-                    name=_ANCHOR_RULE_NAME,
-                    metric_type="agent_cost_zscore",
-                    condition="gte",
-                    threshold=Z_THRESHOLD,
-                    window_minutes=60,
-                    notification_channel="discord",
-                    is_active=False,
-                )
-                .returning(AlertRules.id)
-            )
-        ).scalar()
-    return int(created)
+    return await ensure_anchor_rule(
+        name=_ANCHOR_RULE_NAME,
+        metric_type="agent_cost_zscore",
+        threshold=Z_THRESHOLD,
+        is_active=False,
+    )
 
 
 @DBOS.step()

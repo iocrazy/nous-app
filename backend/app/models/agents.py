@@ -470,74 +470,14 @@ class AgentSkills(Base):
     )
 
 
-class AgentRunEvents(Base):
-    __tablename__ = "agent_run_events"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["public.agent_runs.id"],
-            ondelete="CASCADE",
-            name="agent_run_events_run_id_fkey",
-        ),
-        PrimaryKeyConstraint("id", name="agent_run_events_pkey"),
-        Index("idx_agent_run_events_created", "created_at"),
-        Index("idx_agent_run_events_run", "run_id", "iteration"),
-        {"schema": "public"},
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    iteration: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    prompt_tokens_delta: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    completion_tokens_delta: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    cost_cents_delta: Mapped[decimal.Decimal] = mapped_column(
-        Numeric(10, 6),
-        nullable=False,
-        server_default=text("0"),
-    )
-    hook_decisions: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    metadata_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    tool_name: Mapped[Optional[str]] = mapped_column(Text)
-    tool_args_summary: Mapped[Optional[str]] = mapped_column(Text)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
-    model: Mapped[Optional[str]] = mapped_column(Text)
-    provider: Mapped[Optional[str]] = mapped_column(Text)
-    error_code: Mapped[Optional[str]] = mapped_column(Text)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    cost_snapshot: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
-        comment="Pricing inputs frozen at event time, so later price changes cannot rewrite history.",
-    )
-    byok_key_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        comment="provider_byok_keys row this event billed against. NULL = platform key.",
-    )
-    parent_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
-
-
 class AgentRunTranscriptEvents(Base):
     """Per-run transcript stream (mig 397).
 
-    NOT the same thing as ``AgentRunEvents`` above: that table is the
-    mig-155 cost-audit log (iteration / token deltas, written by
-    cost_auditor). Mig 285 tried to create THIS shape under that name and
-    silently no-oped on IF NOT EXISTS — the transcript stream lives here
-    instead. Writer: RunRecorder.record_event; reader:
+    NOT the same thing as the old ``agent_run_events`` table: that was the
+    mig-155 cost-audit log (iteration / token deltas, written by the retired
+    cost_auditor), dropped in mig 487. Mig 285 tried to create THIS shape
+    under that name and silently no-oped on IF NOT EXISTS — the transcript
+    stream lives here instead. Writer: RunRecorder.record_event; reader:
     GET /ai-library/runs/{id}/events.
     """
 

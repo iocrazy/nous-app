@@ -433,6 +433,7 @@ async def test_id_outside_the_runs_scope_is_denied_and_audited(
             resolver_mod,
             read_scope=lambda: _ScopeCtx(session),
             write_scope=lambda: _ScopeCtx(session),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
     ):
@@ -442,8 +443,11 @@ async def test_id_outside_the_runs_scope_is_denied_and_audited(
     assert result["error_code"] == "scope_denied"
     # Visible, not a silent empty success: the model is told the id failed.
     assert "not accessible in this run" in result["error"]
-    # ...and the attempt left a trail.
-    assert _audit_inserts(session), "a denied resolution wrote no audit row"
+    # ...and the attempt left a trail on the admin Alerts page (mig 487
+    # moved the denied audit from agent_run_events to alert_history).
+    inserts = _audit_inserts(session)
+    assert inserts, "a denied resolution wrote no audit row"
+    assert all(s.table.name == "alert_history" for s in inserts)
 
 
 @pytest.mark.asyncio
@@ -456,6 +460,7 @@ async def test_denial_does_not_leak_which_project_owns_the_id():
             resolver_mod,
             read_scope=lambda: _ScopeCtx(session),
             write_scope=lambda: _ScopeCtx(session),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
     ):
@@ -469,6 +474,7 @@ async def test_denial_does_not_leak_which_project_owns_the_id():
             resolver_mod,
             read_scope=lambda: _ScopeCtx(missing),
             write_scope=lambda: _ScopeCtx(missing),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
     ):
@@ -505,6 +511,7 @@ async def test_scope_bound_to_a_project_but_scene_in_same_team_is_still_denied()
             resolver_mod,
             read_scope=lambda: _ScopeCtx(session),
             write_scope=lambda: _ScopeCtx(session),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
     ):
@@ -528,6 +535,7 @@ async def test_episode_scoped_run_denies_a_scene_from_another_episode():
             resolver_mod,
             read_scope=lambda: _ScopeCtx(session),
             write_scope=lambda: _ScopeCtx(session),
+            ensure_anchor_rule=AsyncMock(return_value=1),
         ),
         patch.object(
             tools_mod,
@@ -954,8 +962,8 @@ async def test_scope_is_resolved_on_postgres_before_caller_scope_is_entered():
 
 @pytest.mark.asyncio
 async def test_apply_edit_runs_the_ops_write_inside_caller_scope():
-    """The write path's boundary: resolve_selection (which also writes audit
-    rows to agent_run_events — infra) runs on postgres, and the ops-channel
+    """The write path's boundary: resolve_selection (which also writes denied
+    audit rows to alert_history — infra; agent_run_events until mig 487) runs on postgres, and the ops-channel
     write runs inside caller_scope so mig-408's WITH CHECK enforces tenancy."""
     from contextlib import asynccontextmanager
 

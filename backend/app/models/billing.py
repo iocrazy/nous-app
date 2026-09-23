@@ -210,6 +210,9 @@ class PointTransactions(Base):
             # test_agent_run_reference.py）钉住两者逐字一致。与 mig 474 同样必须
             # 逐字一致：谓词对不上，planner 就悄悄改走顺扫，没有任何东西会说出来。
             postgresql_where=text("type = 'consume' AND reference_type = 'agent_run'"),
+            # mig 486 升 UNIQUE：同一 run 只许一条 consume。tree_charge 的 CAS
+            # 是主闸门，这是 DB 级第二道（戳被外力抹掉时仍拦得住）。
+            unique=True,
         ),
         # mig 477 —— 同一次轮询的**第二条腿**。终审 I6 之后
         # charged_points_for_references 报的是净扣（扣 − 退），于是它按 type 拆成
