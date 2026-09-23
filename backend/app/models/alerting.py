@@ -38,7 +38,7 @@ class AlertRules(Base):
     __tablename__ = "alert_rules"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="alert_rules_pkey"),
-        # mig 490: system anchor rows (created_by IS NULL, see
+        # mig 495: system anchor rows (created_by IS NULL, see
         # services/alerting/anchor_rule.py) are keyed by name; this is the
         # arbiter its ON CONFLICT targets. User-created rules name freely.
         Index(

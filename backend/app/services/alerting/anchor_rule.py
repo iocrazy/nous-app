@@ -10,11 +10,11 @@ know, so an *active* anchor rule is never evaluated as a threshold rule — the
 flag only decides how the rule reads on the Alerts page.
 
 Anchor rows are the ones with ``created_by IS NULL`` (this helper never sets
-it; the admin create endpoint always stamps the calling admin). Migration 490
+it; the admin create endpoint always stamps the calling admin). Migration 495
 makes them unique by name with a partial UNIQUE index, and the insert here is
 ``ON CONFLICT (name) WHERE created_by IS NULL DO NOTHING``: when two first-ever
 writers race, the loser's insert returns no row and it re-selects the
-winner's id. Before 490 this was a plain get-then-insert that could create
+winner's id. Before 495 this was a plain get-then-insert that could create
 duplicate anchors under a race.
 """
 

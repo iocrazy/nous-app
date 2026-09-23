@@ -1,4 +1,4 @@
--- 490: system anchor alert_rules rows are unique by name.
+-- 495: system anchor alert_rules rows are unique by name.
 --
 -- System alert_history writers (the hourly agent-cost anomaly sweep, the
 -- scope resolver's denied audit) hang their history rows off an "anchor" rule

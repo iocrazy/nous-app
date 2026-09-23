@@ -203,7 +203,7 @@ async def test_resolve_history_commits(
     assert resolved is True
 
 
-# ─── System anchor rules (mig 490) ──────────────────────────────────────
+# ─── System anchor rules (mig 495) ──────────────────────────────────────
 
 
 async def test_concurrent_anchor_creation_yields_one_row(
@@ -211,7 +211,7 @@ async def test_concurrent_anchor_creation_yields_one_row(
 ):
     """Two first-ever writers for the same anchor name: both miss the initial
     read (a barrier holds them until both have), both insert, and the partial
-    UNIQUE index from mig 490 plus ON CONFLICT DO NOTHING leave one row that
+    UNIQUE index from mig 495 plus ON CONFLICT DO NOTHING leave one row that
     both callers return."""
     import asyncio
     from contextlib import asynccontextmanager
