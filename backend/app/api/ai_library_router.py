@@ -263,7 +263,7 @@ def _scoped_team_id(request: Request, user_team_ids: List[int]) -> Optional[int]
 
     Returns ``None`` when the header is absent, unparseable, or the user is
     not a member (silently falling back to "no team scoping"). That matches
-    MediaHub's existing X-Team-Id convention — the header is a hint, not an
+    Nous's existing X-Team-Id convention — the header is a hint, not an
     authorization boundary. The underlying resource RLS is still enforced
     via ``team_ids`` / ``project_ids``, so a bogus header can only *narrow*
     the visible set, never expand it.

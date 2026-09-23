@@ -1,4 +1,4 @@
-"""Stubbed-session pins for the two mig-497 repositories.
+"""Stubbed-session pins for the two mig-499 repositories.
 
 What only a stub can pin cheaply: the statement SHAPE (CAST binds, ON
 CONFLICT target, RPC name) and the error CLASSIFICATION (a missing table /

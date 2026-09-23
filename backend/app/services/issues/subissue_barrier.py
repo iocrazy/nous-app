@@ -1,4 +1,4 @@
-"""Sub-issue completion barrier — a MediaHub port of multica's fan-in wake.
+"""Sub-issue completion barrier — a Nous port of multica's fan-in wake.
 
 When every sub-issue of a parent reaches a terminal status, the parent is
 "unblocked": we (a) write ONE roll-up report into the parent's timeline and
@@ -291,8 +291,19 @@ class BarrierGateway:
         from app.services.issues.issue_reply_dispatch import (
             dispatch_respond_to_issue_reply,
         )
+        from app.workflows.issue_lifecycle import SUBISSUE_BARRIER_SOURCE_KIND
 
-        dispatch_respond_to_issue_reply(int(parent_id), str(owner_id), body, None, key)
+        # The source is what makes the parent's reply turn a ROUTED one
+        # (defect G): without it the parent's FinishIssue(completed) after the
+        # roll-up is dropped and the parent never leaves todo / in_progress.
+        dispatch_respond_to_issue_reply(
+            int(parent_id),
+            str(owner_id),
+            body,
+            None,
+            key,
+            source={"kind": SUBISSUE_BARRIER_SOURCE_KIND, "barrier_key": key},
+        )
 
 
 async def on_child_issue_terminal(

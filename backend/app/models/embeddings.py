@@ -1,4 +1,4 @@
-"""embedding_spaces / resource_embeddings ORM models (migration 497).
+"""embedding_spaces / resource_embeddings ORM models (migration 499).
 
 Vector width comes from ``app.core.embedding_space.EMBEDDING_DIM`` (one
 source); the column is ``halfvec`` so HNSW can index 2048 dims (``vector``

@@ -141,8 +141,9 @@ class ProviderProtocol:
     #                    it is not "user_device" — and there is no vendor key
     #                    or quota, so it is not "api_key" either
     #
-    # This is the ONLY thing separating the three gpt-image cards in Admin →
-    # AI Models (codex / codex-local / openai-images) and the two dreamina
+    # This is the ONLY thing separating the two gpt-image cards in Admin →
+    # AI Models (codex-local / openai-images; the server ``codex`` card was
+    # retired 2026-09-23) and the two dreamina
     # cards (jimeng-cli / jimeng-local). They drive the same binaries and
     # cannot be merged — sharing a generation_family would let db_registry
     # build a server-side provider for a row meant to run on the user's
@@ -175,8 +176,8 @@ class ProviderProtocol:
     # Whether image generation for this family is an HTTP call made BY THIS
     # PROCESS — the only shape a server-side health probe can reach.
     #
-    # False for every CLI/daemon-backed family: ``codex`` and ``jimeng-cli``
-    # shell out to a local binary, ``codex-local`` dials the user's own paired
+    # False for every CLI/daemon-backed family: ``openai-images`` and
+    # ``jimeng-cli`` shell out to a local binary, ``codex-local`` dials the user's own paired
     # device. Their catalog rows carry an empty ``base_url`` precisely because
     # there is no endpoint, so a probe would not be "failing" — it would be
     # inapplicable, which is what ``not_probed`` already means.
@@ -192,6 +193,22 @@ class ProviderProtocol:
     # protocol that forgets to declare fails loudly rather than promising
     # knobs it will silently discard.
     capabilities: ProviderCapabilities = _NONE
+
+    # Two independent image axes, both properties of the implementation:
+    #
+    #   text_to_image   rows of this family may serve an ordinary prompt →
+    #                   picture request (the canvas picker, the agent image
+    #                   tool, resolve_image_provider's default pick).
+    #   upscale_capable build_upscale_provider() returns an object with
+    #                   ``upscale_image`` — the canvas 放大 route resolves
+    #                   over these rows only.
+    #
+    # ``nous`` is the one family where they differ: its image rows are
+    # nous-engine super-resolution services that REQUIRE an input image, so
+    # listing them as text-to-image models would put an entry in the picker
+    # that fails on every prompt.
+    text_to_image: bool = True
+    upscale_capable: bool = False
 
     # ---- capability hooks (default: unsupported) --------------------
     def build_chat_adapter(
@@ -210,6 +227,11 @@ class ProviderProtocol:
     def build_image_provider(self, row: dict[str, Any]) -> Any:
         """Build ``(BaseImageProvider, actual_model)`` from a catalog row."""
         raise ProtocolCapabilityError(self.key, "image")
+
+    def build_upscale_provider(self, row: dict[str, Any]) -> Any:
+        """Build ``(provider_with_upscale_image, actual_model)`` from a row.
+        Only protocols with ``upscale_capable = True`` override this."""
+        raise ProtocolCapabilityError(self.key, "upscale")
 
     def build_video_provider(self, row: dict[str, Any]) -> Any:
         """Build ``(provider, actual_model)`` from a catalog row."""

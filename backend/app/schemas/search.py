@@ -217,7 +217,7 @@ class VectorsStatusResponse(BaseModel):
 
     ``status``: "ok" (space resolved, coverage counted) | "unconfigured" (no
     embedding model; ``space`` null, coverage 0 of the caller's total) |
-    "store_missing" (migration 497 not applied; ``space`` null, ``layers``
+    "store_missing" (migration 499 not applied; ``space`` null, ``layers``
     empty). A layer is "not_built" until it holds at least one vector;
     ``transcript`` is always "not_built" until that layer ships.
     """

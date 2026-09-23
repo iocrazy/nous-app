@@ -80,10 +80,10 @@ VECTOR_LEG_OUTCOMES = (
     # (app.core.embedding_space): misconfigured, not a miss.
     "dimension_mismatch",
     "timeout",
-    # Legacy spelling of store_missing (the pre-497 RPC was missing); no
+    # Legacy spelling of store_missing (the pre-499 RPC was missing); no
     # longer emitted, kept so existing readers keep matching.
     "unavailable",
-    # Neither resource_embeddings (mig 497) nor the legacy
+    # Neither resource_embeddings (mig 499) nor the legacy
     # resource_analysis RPC is callable: the vector store is not there.
     "store_missing",
     "error",
@@ -178,7 +178,7 @@ class SearchService:
     def __init__(self, *, space_repo: Any = None, embeddings_repo: Any = None):
         self.embedding_service = EmbeddingService()
         # Legacy store: read-only fallback for the deploy window before
-        # migration 497, and the source of get_analysis.
+        # migration 499, and the source of get_analysis.
         self.analysis_repo = get_analysis_repository()
         self.space_repo = space_repo or get_embedding_space_repository()
         self.embeddings_repo = embeddings_repo or get_resource_embeddings_repository()
@@ -681,7 +681,7 @@ class SearchService:
 
         ``media_id`` is keyed like ``resource_analysis`` (a resources.id) —
         the historic name of this parameter. The source vector comes from
-        ``resource_embeddings`` in the embedder's space; before migration 497,
+        ``resource_embeddings`` in the embedder's space; before migration 499,
         or for a resource embedded only into the legacy column, the legacy
         ``resource_analysis.content_embedding`` path answers. The source is
         excluded from the results. ``source_embedded`` says whether there was

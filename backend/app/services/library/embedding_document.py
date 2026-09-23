@@ -1,5 +1,5 @@
 """The semantic-layer document: what ``resource_embeddings`` layer
-``semantic`` embeds for one resource (migration 497).
+``semantic`` embeds for one resource (migration 499).
 
 Title + description + tags + summary + a transcript excerpt + the L1 visual
 analysis — each line only when there is something to put on it. Before PR 2

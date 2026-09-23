@@ -28,6 +28,22 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 
+# 5xx HTTPException codes whose dict ``detail`` is passed through to the client
+# instead of being scrubbed to "Internal server error".
+#
+# ⚠️ A code may join this list ONLY if every detail raised with it is built
+# entirely by us — fixed codes, catalog names, upstream status ints and
+# upstream error codes — and NEVER carries ``str(exception)``, file paths,
+# SQL, or anything else the scrub exists to hide. Put the raw exception text
+# in the server log instead.
+TYPED_5XX_CODES: frozenset[str] = frozenset(
+    {
+        "MODULE_DISABLED",  # module gate 503: code + module id from the registry
+        "upscale_backend_failed",  # canvas 放大 502: provider row + upstream code
+        "upscale_unavailable",  # canvas 放大 503: no enabled upscale backend
+    }
+)
+
 
 class ErrorResponse(BaseModel):
     success: bool = False
@@ -235,16 +251,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         # Replace the user-facing message with a generic string and put
         # the original detail in server logs (with request id) for
         # operators to correlate.
-        # Exception: the module gate's 503. Its body is entirely of our own
-        # construction — a fixed code plus a module id from the registry, no
-        # exception text — so generalizing it leaks nothing and only destroys
-        # the typed contract the frontend needs to tell "feature switched off"
-        # apart from "server broke".
-        is_module_disabled = (
-            isinstance(exc.detail, dict) and exc.detail.get("code") == "MODULE_DISABLED"
+        # Exception: a dict detail whose code is in TYPED_5XX_CODES. Those
+        # bodies are entirely of our own construction, so generalizing them
+        # leaks nothing and only destroys the typed contract the frontend
+        # needs (e.g. "feature switched off" vs "server broke").
+        is_typed_5xx = (
+            isinstance(exc.detail, dict) and exc.detail.get("code") in TYPED_5XX_CODES
         )
 
-        if exc.status_code >= 500 and not is_module_disabled:
+        if exc.status_code >= 500 and not is_typed_5xx:
             logger.warning(
                 f"[5xx] {request.method} {request.url.path} "
                 f"({exc.status_code}) detail={detail!r} "

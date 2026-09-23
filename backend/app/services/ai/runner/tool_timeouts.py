@@ -25,7 +25,11 @@ DEFAULTS: dict[str, Optional[float]] = {
     "AskUser": None,
     "ResourceFetch": 200,
     "GenerateImage": 600,
-    "GenerateVideo": 600,
+    # Submit-only since #2398: validate, file a task, start the workflow —
+    # seconds. The render outlives the turn, so a hung submit must fail fast
+    # instead of holding the turn; same bound as the other dispatch-only
+    # tools (GenerateShotImage, Task), which fall through to FALLBACK.
+    "GenerateVideo": 60,
     "Delegate": 900,
 }
 # MCP-advertised names: ``skill.<x>`` / ``agent.<x>`` are our own skills and

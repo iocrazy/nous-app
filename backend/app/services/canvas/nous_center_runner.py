@@ -10,7 +10,7 @@ fast-forward without actually sleeping. Real callers get
 
 Configuration:
     NOUS_CENTER_BASE_URL   — e.g. https://nous.internal:8443
-    NOUS_CENTER_TOKEN      — bearer token mediahub uses to authenticate
+    NOUS_CENTER_TOKEN      — bearer token nous-app uses to authenticate
                              outgoing calls
     NOUS_CENTER_POLL_MS    — initial poll interval (default 500)
     NOUS_CENTER_MAX_WAIT_S — overall ceiling (default 120)

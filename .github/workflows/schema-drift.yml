@@ -227,12 +227,15 @@ on:
       # mig 496：被 RLS 策略引用的 4 个 definer 身份助手只替调用者自己回答 —— 守卫读
       # role GUC 与 JWT claims，只有真库在 anon / authenticated 角色下才测得出来。
       - 'backend/tests/db/test_migration_496_rls_helper_identity_guard_integration.py'
-      # mig 497：resource_embeddings（halfvec 2048 + HNSW）与两个 repository。
+      # mig 499：resource_embeddings（halfvec 2048 + HNSW）与两个 repository。
       # halfvec 的 bind、ON CONFLICT 的目标、「同一空间才比」的 RPC、浏览器角色没有
       # EXECUTE —— 单测的 session 是桩的，这些只有 Postgres 答得出。
-      - 'backend/tests/db/test_migration_497_resource_embeddings_integration.py'
+      - 'backend/tests/db/test_migration_499_resource_embeddings_integration.py'
       - 'backend/app/repositories/resource_embeddings_repository.py'
       - 'backend/app/repositories/embedding_space_repository.py'
+      # ci_bootstrap.sql 的 auth.uid/role/jwt 桩与 gotrue 上游逐字一致 —— 上面每个
+      # RLS 测试都站在这几个桩上，桩和生产不一样，那些测试绿了也不说明生产。
+      - 'backend/tests/db/test_ci_bootstrap_auth_stubs_integration.py'
       # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
       # / 按议题 / 按 agent 求和给同一个数」只有在一棵真树上才成立得了：三条语句的
       # WHERE 与 GROUP BY 毫无共同之处，而桩 session 按调用顺序发牌，三条都写错成
@@ -255,15 +258,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all forty, so it has to
+      # to it changes what "green" means for all forty-one, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-nine below was counted with this command, not derived
-      # from the thirty-eight it replaced):
+      # (the forty above was counted with this command, not derived
+      # from the thirty-nine it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -1048,7 +1051,7 @@ jobs:
           # service_role 拿真答案（负向对照）；引用它们的策略仍只放行调用者自己的行。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_496_rls_helper_identity_guard_integration.py -v
 
-      - name: Assert mig 497's resource_embeddings (halfvec + HNSW) and its repositories
+      - name: Assert mig 499's resource_embeddings (halfvec + HNSW) and its repositories
         working-directory: backend
         env:
           INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
@@ -1057,4 +1060,17 @@ jobs:
           # 列真是 halfvec(2048)、HNSW 用 halfvec_cosine_ops、RPC 只在一个空间里排序、
           # anon / authenticated 没有 EXECUTE；再经真 ORM 引擎跑两个 repository
           # （upsert 原地替换、insert-or-ignore 的空间键、coverage 与缺行反连接）。
-          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_497_resource_embeddings_integration.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_499_resource_embeddings_integration.py -v
+
+      - name: Assert the CI auth.uid/role/jwt stubs behave exactly like gotrue's
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 这条链上每个 RLS 测试读的 auth.uid() 都是 ci_bootstrap.sql 的桩，不是 gotrue 的。
+          # 桩曾只读 request.jwt.claim.sub，而生产（与后端 caller_scope）走的是
+          # request.jwt.claims ->> 'sub' 兜底 —— 按生产方式设 claims 的测试在 CI 里拿 NULL。
+          # 钉住：只设 claim.sub / 只设 claims / 两者都设（claim.sub 赢）/ 全空 → NULL /
+          # 非 JSON 的 claims 与非 uuid 的 sub 照上游一样报错（桩不许比生产宽）。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_ci_bootstrap_auth_stubs_integration.py -v

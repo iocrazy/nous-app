@@ -1,11 +1,11 @@
-"""Data access for ``resource_embeddings`` (migration 497).
+"""Data access for ``resource_embeddings`` (migration 499).
 
 One ``halfvec(2048)`` per (resource, layer, space), HNSW-indexed. Readers and
 writers always name the space and the layer: a vector is only comparable to
 vectors of the same space (``app.core.embedding_space``).
 
 Deploy-order window. Migrations and code ship on independent triggers, so
-this code can reach a database where 497 has not run. A missing table
+this code can reach a database where 499 has not run. A missing table
 (SQLSTATE 42P01) or function (42883) raises the typed
 :class:`EmbeddingStoreMissing` — never ``[]`` / ``None``, because "the store
 does not exist yet" and "nothing matched" would otherwise be byte identical
@@ -31,7 +31,7 @@ from sqlalchemy.exc import ProgrammingError
 from app.db.session import read_scope, write_scope
 from app.models import ParsedMedia, ResourceAnalysis, ResourceEmbeddings, Resources
 
-# SQLSTATEs that mean "migration 497 has not run on this database".
+# SQLSTATEs that mean "migration 499 has not run on this database".
 _UNDEFINED_TABLE = "42P01"
 _UNDEFINED_FUNCTION = "42883"
 _STORE_MISSING_STATES = frozenset({_UNDEFINED_TABLE, _UNDEFINED_FUNCTION})
@@ -42,7 +42,7 @@ _ANALYSIS_LEVEL = "L1"
 
 class EmbeddingStoreMissing(RuntimeError):
     """``resource_embeddings`` / ``embedding_spaces`` / the RPC does not exist
-    in this database (migration 497 not applied yet). Callers map it to the
+    in this database (migration 499 not applied yet). Callers map it to the
     typed reason ``store_missing``; readers fall back to the legacy store."""
 
 
@@ -67,7 +67,7 @@ def is_store_missing(exc: ProgrammingError) -> bool:
 
 def _store_missing(what: str) -> EmbeddingStoreMissing:
     return EmbeddingStoreMissing(
-        f"{what} does not exist in this database (migration 497 not applied)"
+        f"{what} does not exist in this database (migration 499 not applied)"
     )
 
 

@@ -50,6 +50,15 @@ def test_no_runner_module_but_the_emitter_passes_the_literal_to_emit():
         ("a string result", None),
         # 「没有 error 键」是成功；「error 键是 None」是调用方在说这里该有个错。
         ({"error_code": None, "error": None}, "tool_error"),
+        # FinishIssue 的受理回执：``outcome`` 是模型声明的 issue 结局，不是失败码
+        # （2026-09-23 真栈 S1：每次 FinishIssue 都被计进 tool_errors）。
+        ({"acknowledged": True, "outcome": "completed", "reason": "x"}, None),
+        ({"acknowledged": True, "outcome": "needs_input", "reason": "x"}, None),
+        ({"acknowledged": True, "outcome": "continue", "reason": "x"}, None),
+        # 被拒的 FinishIssue（非法 outcome）仍然是工具错误。
+        ({"error": "Invalid outcome 'x'. Must be one of [...]"}, "tool_error"),
+        # 不是 ``True`` 本身就不算受理回执，outcome 规则照旧生效。
+        ({"acknowledged": "yes", "outcome": "denied"}, "denied"),
     ],
 )
 def test_tool_error_code_reads_the_three_shapes(result, expected):

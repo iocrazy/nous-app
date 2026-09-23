@@ -1,7 +1,7 @@
 """kill_tree — graceful SIGTERM → grace → SIGKILL with Unix process
 group handling.
 
-When DBOS workflow cancel fires, mediahub spawns subprocesses (yt-dlp,
+When DBOS workflow cancel fires, nous spawns subprocesses (yt-dlp,
 whisper, ffmpeg) that need to be killed too. Otherwise the workflow
 "completes cancel" but the subprocess keeps running, holding the GPU
 or filesystem locks.
@@ -13,12 +13,12 @@ The full kill sequence:
   4. Swallow OSError on already-dead PID (race condition is normal)
 
 Mirrors OpenClaw ``process/kill-tree.ts`` (Unix branch). Windows path
-not implemented — mediahub deploys on NAS Linux only.
+not implemented — nous deploys on Linux only.
 
 Subprocesses MUST be spawned with ``preexec_fn=os.setsid`` (or its
 equivalent ``start_new_session=True``) so they get their own process
 group. Otherwise SIGTERM to the group hits us too. Existing subprocess
-spawn sites in mediahub need a small audit; the helper itself handles
+spawn sites in nous need a small audit; the helper itself handles
 either case (will just SIGTERM the single PID if no group exists).
 """
 

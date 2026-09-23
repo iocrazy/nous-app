@@ -81,7 +81,7 @@ def spaces_compatible_sql(left: str, right: str) -> str:
     return f"({left} IS NULL OR {right} IS NULL OR {left} = {right})"
 
 
-# Retrieval layers of ``resource_embeddings`` (mig 497). One vector per
+# Retrieval layers of ``resource_embeddings`` (mig 499). One vector per
 # (resource, layer, space); the CHECK constraint on ``layer`` lists the same
 # two values.
 SEMANTIC_LAYER = "semantic"

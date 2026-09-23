@@ -4,7 +4,7 @@ Same contract as ``test_resources_ai_router_dispatch.py``: a DBOS-dispatch
 site must pre-create its task_tracking row with ``dbos_workflow_id=wf_id``
 and pass the SAME ``workflow_id=wf_id`` to ``start_workflow_routed``.
 
-Since PR 2 (mig 497) the backfill no longer dispatches analyze_l1: the
+Since PR 2 (mig 499) the backfill no longer dispatches analyze_l1: the
 semantic document does not need the VLM, so every candidate is embedded in
 place into ``resource_embeddings`` (``embedding_backfill.embed_candidate``).
 """
@@ -288,7 +288,7 @@ async def test_backfill_refuses_when_the_embedder_cannot_name_its_space() -> Non
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["space", "listing"])
 async def test_missing_vector_store_is_a_typed_503(where) -> None:
-    missing = EmbeddingStoreMissing("migration 497 not applied")
+    missing = EmbeddingStoreMissing("migration 499 not applied")
     repo = _Repo([], 0, fail=missing if where == "listing" else None)
     space_repo = _SpaceRepo(fail=missing if where == "space" else None)
     p = _patches(repo=repo, space_repo=space_repo)

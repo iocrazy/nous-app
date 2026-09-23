@@ -295,11 +295,11 @@ async def test_load_skill_subfiles_preserves_user_files(tmp_path: Path) -> None:
 
 
 def test_extract_description_from_identity_em_dash() -> None:
-    """Standard ``I am the MediaHub X AI — <description>.`` shape."""
+    """Standard ``I am the Nous X AI — <description>.`` shape."""
     from app.services.ai.runner.seed_loader import _extract_description_from_identity
 
     body = (
-        "I am the MediaHub Visual Analyze AI — a multimodal vision analyst.\n"
+        "I am the Nous Visual Analyze AI — a multimodal vision analyst.\n"
         "Second line shouldn't leak into the description."
     )
     assert _extract_description_from_identity(body) == "a multimodal vision analyst"

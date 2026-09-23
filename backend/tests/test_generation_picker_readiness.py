@@ -8,7 +8,8 @@ picker / capabilities / asset bundle stay row-for-row equal):
 * a LOCAL row (codex-local / jimeng-local) is shown only while the user's
   daemon is online and its env_report says that engine is ready;
 * when a local twin is shown, the SERVER row of the same engine is hidden
-  ("GPT 只显示 local" — it is the same ChatGPT account either way);
+  (same account either way). Since 2026-09-23 only Dreamina has a server
+  twin — the server codex row was retired (mig 498), GPT image is local-only;
 * a row whose last probe failed is hidden.
 """
 
@@ -33,13 +34,6 @@ canvases_router = sys.modules.get("app.api.canvases_router") or __import__(
 )
 
 ROWS = [
-    {
-        "name": "codex-image",
-        "display_name": "GPT Image 2 (Codex)",
-        "type": "image",
-        "actual_provider": "codex",
-        "is_local": False,
-    },
     {
         "name": "codex-local-image",
         "display_name": "GPT Image 2 (Local)",
@@ -94,15 +88,17 @@ async def test_no_daemon_online_hides_local_rows_and_keeps_server_rows(monkeypat
     _install(monkeypatch, ROWS, LocalReadiness(codex=False, dreamina=False))
     names = await _names()
     assert "codex-local-image" not in names and "jimeng-local-image" not in names
-    assert "codex-image" in names and "jimeng-cli-image" in names
+    assert "jimeng-cli-image" in names
 
 
 @pytest.mark.asyncio
-async def test_ready_local_codex_replaces_its_server_twin(monkeypatch):
+async def test_ready_local_codex_is_shown_and_has_no_server_twin(monkeypatch):
+    # The server-side codex twin was retired 2026-09-23 (mig 498): GPT image
+    # is local-only, so there is nothing left for the local row to replace.
+    assert "codex" not in lr.SERVER_TWIN_OF
     _install(monkeypatch, ROWS, LocalReadiness(codex=True, dreamina=False))
     names = await _names()
     assert "codex-local-image" in names
-    assert "codex-image" not in names, "GPT 只显示 local"
     # dreamina not ready locally → its server row stays, local hidden
     assert "jimeng-cli-image" in names and "jimeng-local-image" not in names
 
@@ -111,14 +107,14 @@ async def test_ready_local_codex_replaces_its_server_twin(monkeypatch):
 async def test_both_ready_hides_both_server_twins(monkeypatch):
     _install(monkeypatch, ROWS, LocalReadiness(codex=True, dreamina=True))
     names = await _names()
-    assert names.count("codex-local-image") == 1 and "codex-image" not in names
+    assert names.count("codex-local-image") == 1
     assert names.count("jimeng-local-image") == 1 and "jimeng-cli-image" not in names
 
 
 @pytest.mark.asyncio
 async def test_a_row_whose_last_probe_failed_is_hidden(monkeypatch):
     rows = [dict(r) for r in ROWS]
-    rows[4]["last_test_status"] = "failed"
+    rows[3]["last_test_status"] = "failed"
     _install(monkeypatch, rows, LocalReadiness(codex=False, dreamina=False))
     assert "mediahub-doubao-seedream-t2i" not in await _names()
 

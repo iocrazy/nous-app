@@ -1,6 +1,6 @@
 #!/bin/bash
 # ===========================================
-# MediaHub Worktree Manager
+# Nous Worktree Manager
 # ===========================================
 # Manages port isolation for multiple git worktrees
 #
@@ -293,7 +293,7 @@ cmd_init() {
 }
 
 cmd_list() {
-    echo -e "${BLUE}========== MediaHub Worktree Port Allocation ==========${NC}"
+    echo -e "${BLUE}========== Nous Worktree Port Allocation ==========${NC}"
     echo ""
     printf "  %-40s %-10s %-10s %-10s\n" "WORKTREE" "FRONTEND" "BACKEND" "REDIS_DB"
     printf "  %-40s %-10s %-10s %-10s\n" "────────" "────────" "───────" "────────"
@@ -373,7 +373,7 @@ case "${1:-list}" in
         cmd_init
         ;;
     *)
-        echo "MediaHub Worktree Manager"
+        echo "Nous Worktree Manager"
         echo ""
         echo "Usage: $0 {create|destroy|list|init}"
         echo ""

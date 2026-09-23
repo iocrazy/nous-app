@@ -349,3 +349,137 @@ async def test_non_resume_reply_never_fires_subissue_barrier():
         )
 
     barrier.assert_not_awaited()
+
+
+# ── Defect G: a sub-issue barrier wake is a routed turn ────────────────────
+
+
+def _barrier_harness(status, *, set_status_returns=None, outcome="completed"):
+    calls: list[str] = []
+    turns: list[dict] = []
+
+    async def fake_set_status(issue_id, new_status, **kw):
+        calls.append(new_status)
+        return set_status_returns
+
+    async def fake_load_issue(issue_id):
+        return {"id": issue_id, "status": status, "execution_state": None}
+
+    async def fake_run_turn(**kw):
+        turns.append(kw)
+        return {"content": "all merged", "outcome": outcome, "reason": None}
+
+    return calls, turns, fake_set_status, fake_load_issue, fake_run_turn
+
+
+async def _run_barrier_reply(status, *, routes_outcome=True, **harness_kw):
+    calls, turns, set_status, load_issue, run_turn = _barrier_harness(
+        status, **harness_kw
+    )
+    barrier = AsyncMock()
+    kwargs = {"routes_outcome": True} if routes_outcome else {}
+    with patch("app.workflows.issue_lifecycle._maybe_fire_subissue_barrier", barrier):
+        out = await _run_reply_turns(
+            11,
+            "u",
+            "roll-up",
+            session_id="s",
+            acquire=AsyncMock(return_value=True),
+            run_turn=run_turn,
+            release=AsyncMock(),
+            sleep=AsyncMock(),
+            load_issue=load_issue,
+            set_status=set_status,
+            auto_close=False,
+            **kwargs,
+        )
+    return out, calls, turns, barrier
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["todo", "in_progress", "in_review", "blocked"])
+async def test_barrier_wake_on_live_parent_resumes_and_routes_finish(status):
+    """S8: the child closed, the parent woke and said FinishIssue(completed) —
+    and stayed where it was, because only a needs_input resume was routed.
+    A barrier wake now takes the resuming branch: in_progress before the turn,
+    the turn's own outcome after it, and the parent's own barrier fires so a
+    grandparent hears about it."""
+    out, calls, turns, barrier = await _run_barrier_reply(status)
+
+    assert calls == ["in_progress", "in_review"]
+    assert len(turns) == 1 and out["executed"] is True
+    barrier.assert_awaited_once_with(11)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["cancelled", "done", "closed", "backlog"])
+async def test_barrier_wake_on_terminal_or_backlog_parent_writes_nothing(status):
+    """A parent cancelled (or closed, or parked in backlog) between the gate
+    and the turn keeps its status: no in_progress, no routed outcome."""
+    out, calls, turns, barrier = await _run_barrier_reply(status)
+
+    assert calls == []
+    barrier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plain_reply_on_todo_parent_is_unchanged():
+    """Control: without the barrier flag a reply on a todo issue never
+    touches status (Spec-1b, byte-identical for ordinary comments)."""
+    out, calls, turns, barrier = await _run_barrier_reply("todo", routes_outcome=False)
+
+    assert calls == []
+    assert len(turns) == 1
+    barrier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_the_turn_when_the_in_progress_write_is_refused():
+    """A cancel landing between the status read and the in_progress write
+    makes ``set_status`` return False (it refuses to overwrite a terminal
+    status). Running the turn anyway would do — and bill — work on an issue
+    the user just cancelled."""
+    out, calls, turns, barrier = await _run_barrier_reply(
+        "todo", set_status_returns=False
+    )
+
+    assert calls == ["in_progress"]
+    assert turns == []
+    assert out.get("executed") is not True
+    barrier.assert_not_awaited()
+
+
+def _capture_reply_turns(monkeypatch):
+    from app.workflows import issue_lifecycle as m
+
+    seen: dict = {}
+
+    async def _fake_turns(*a, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(m, "clear_dispatch_marker_step", AsyncMock())
+    monkeypatch.setattr(m, "ensure_issue_session_step", AsyncMock(return_value="55"))
+    monkeypatch.setattr(m, "load_auto_close_flag", AsyncMock(return_value=False))
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(m, "_run_reply_turns", _fake_turns)
+    return m.respond_to_issue_reply.__wrapped__.__wrapped__, seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ({"kind": "subissue_barrier", "barrier_key": "subwake:1:2"}, True),
+        ({"kind": "schedule", "schedule_id": "x"}, False),
+        (None, False),
+    ],
+)
+async def test_respond_to_issue_reply_routes_only_barrier_sources(
+    monkeypatch, source, expected
+):
+    raw, seen = _capture_reply_turns(monkeypatch)
+
+    await raw(1, "u", "hi", None, source)
+
+    assert seen["routes_outcome"] is expected

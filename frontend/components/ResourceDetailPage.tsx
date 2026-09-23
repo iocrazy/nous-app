@@ -38,6 +38,9 @@ import {
   AlignLeft,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ResourceInspectorTabs, visibleInspectorTabs, type InspectorTab } from './resources/ResourceInspectorTabs';
+import { AiSubTabs, AI_SUB_TABS, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
+import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
 import {
   fetchResourceById,
@@ -313,7 +316,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Review state
-  const [rightTab, setRightTab] = useState<'info' | 'review' | 'transcript' | 'analysis' | 'lyrics'>('info');
+  const [rightTab, setRightTab] = useState<InspectorTab>('info');
+  const [aiSubTab, setAiSubTab] = useState<AiSubTab>('transcript');
   const [lyrics, setLyrics] = useState<{ lrc: string; lines: Array<{ text: string; line_start_ms: number | null }> } | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
   // Island audio capsule stage: playback position drives the synced lyrics
@@ -807,13 +811,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   // ─── AI: load existing transcript/summary on tab switch ───
   // Always try to load when switching to transcript tab (don't rely solely on transcript_status)
   useEffect(() => {
-    if (rightTab === 'transcript' && !transcript && !transcriptLoading) {
+    if (rightTab !== 'ai') return;
+    if (aiSubTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (rightTab === 'analysis' && !summary && !summaryLoading) {
+    if (aiSubTab !== 'transcript' && !summary && !summaryLoading) {
       loadSummary();
     }
-  }, [rightTab]);
+  }, [rightTab, aiSubTab]);
 
   // ─── Load lyrics for uploaded audio — on tab switch (classic) OR up front
   //     when the island audio capsule stage shows its synced lyrics column. ───
@@ -1599,72 +1604,18 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           className={islandDesktop ? 'h-full flex flex-col min-h-0' : 'w-full md:w-auto border-t md:border-t-0 border-ink-800 flex flex-col shrink-0'}
           style={islandDesktop ? undefined : (isDesktop ? { width: panelWidth } : undefined)}
         >
-          {/* Tab bar */}
-          <div className={`flex border-b ${cBorder800} shrink-0`}>
-            <button
-              onClick={() => setRightTab('info')}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                rightTab === 'info'
-                  ? 'border-indigo-500 text-[var(--accent-text)]'
-                  : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
-              }`}
-            >
-              <Eye size={16} />
-              Overview
-            </button>
-            {!isUploadedAudio && (
-              <button
-                onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                  rightTab === 'review'
-                    ? 'border-indigo-500 text-[var(--accent-text)]'
-                    : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
-                }`}
-              >
-                <Pencil size={16} />
-                Review
-              </button>
-            )}
-            {isUploadedAudio && (
-              <button
-                onClick={() => setRightTab('lyrics')}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                  rightTab === 'lyrics' ? 'border-indigo-500 text-[var(--accent-text)]'
-                    : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`}`}
-              >
-                <Music size={16} />
-                {t('resources.detail.lyrics', 'Lyrics')}
-              </button>
-            )}
-            {!isUploadedAudio && (isVideo || isAudio) && (
-              <>
-                <button
-                  onClick={() => setRightTab('transcript')}
-                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                    rightTab === 'transcript'
-                      ? 'border-indigo-500 text-[var(--accent-text)]'
-                      : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
-                  }`}
-                >
-                  <FileText size={16} />
-                  Transcript
-                  {getAIStatusIndicator(resource.transcript_status)}
-                </button>
-                <button
-                  onClick={() => setRightTab('analysis')}
-                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                    rightTab === 'analysis'
-                      ? 'border-indigo-500 text-[var(--accent-text)]'
-                      : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
-                  }`}
-                >
-                  <Sparkles size={16} />
-                  Analysis
-                  {getAIStatusIndicator(resource.summary_status || resource.visual_analysis_status)}
-                </button>
-              </>
-            )}
-            {islandDesktop && (
+          {/* Tab bar — Overview / AI / Shots / Review / Lyrics */}
+          <ResourceInspectorTabs
+            className={`border-b ${cBorder800} shrink-0`}
+            tabs={visibleInspectorTabs({ isVideo: !!isVideo, isAudio: !!isAudio, isUploadedAudio: !!isUploadedAudio })}
+            active={rightTab}
+            onChange={(tab) => {
+              setRightTab(tab);
+              if (tab === 'review') setViewAnnotations(undefined);
+            }}
+            inactiveClass={`${cText400} ${cHover200} ${cHoverBorder700}`}
+            aiIndicator={getAIStatusIndicator(busiestStatus(resource.transcript_status, resource.summary_status, resource.visual_analysis_status))}
+            trailing={islandDesktop ? (
               <button
                 onClick={() => setInfoVisible(false)}
                 aria-label="Collapse panel"
@@ -1673,8 +1624,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               >
                 <PanelRightClose size={16} />
               </button>
-            )}
-          </div>
+            ) : null}
+          />
 
           {rightTab === 'info' ? (
           <div className={islandDesktop ? 'overflow-y-auto flex-1 p-3' : 'overflow-y-auto flex-1 bg-ink-950 md:bg-transparent p-3'}>
@@ -1776,9 +1727,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               transcriptStatus={resource.transcript_status}
               summaryStatus={resource.summary_status}
               analyzeStatus={resource.visual_analysis_status}
-              onTranscript={() => setRightTab('transcript')}
-              onSummary={() => setRightTab('analysis')}
-              onAnalyze={() => setRightTab('analysis')}
+              onTranscript={() => { setRightTab('ai'); setAiSubTab('transcript'); }}
+              onSummary={() => { setRightTab('ai'); setAiSubTab('summary'); }}
+              onAnalyze={() => { setRightTab('ai'); setAiSubTab(isVideo ? 'visual' : 'summary'); }}
             />
           )}
 
@@ -2010,7 +1961,19 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               }}
               onCommentChange={refreshCommentMarkers}
             />
-          ) : rightTab === 'transcript' ? (
+          ) : rightTab === 'shots' ? (
+            <div className="overflow-y-auto flex-1">
+              <ShotsTabPlaceholder durationSeconds={resource.duration_seconds} />
+            </div>
+          ) : rightTab === 'ai' ? (
+            <div className="flex-1 min-h-0 flex flex-col">
+            <AiSubTabs
+              className="px-4 pt-3 shrink-0"
+              active={aiSubTab}
+              onChange={setAiSubTab}
+              tabs={isVideo ? AI_SUB_TABS : AI_SUB_TABS.filter((tab) => tab !== 'visual')}
+            />
+            {aiSubTab === 'transcript' ? (
             <div className="overflow-y-auto flex-1 p-4 space-y-4 animate-in fade-in duration-300">
               {/* Processing state (from DB status or active transcription) */}
               {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
@@ -2167,9 +2130,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </div>
               )}
             </div>
-          ) : rightTab === 'analysis' ? (
+            ) : (
             <div className="overflow-y-auto flex-1 p-4 space-y-5 animate-in fade-in duration-300">
               {/* Summary Section */}
+              {aiSubTab === 'summary' && (
               <section className="space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="p-1 bg-[var(--accent-soft)] rounded text-[var(--accent-text)]">
@@ -2269,9 +2233,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   </div>
                 )}
               </section>
+              )}
 
               {/* Visual Analysis Section (video only) */}
-              {isVideo && (
+              {isVideo && aiSubTab === 'visual' && (
                 <section className="space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="p-1 bg-purple-500/10 rounded text-purple-400">
@@ -2331,6 +2296,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   )}
                 </section>
               )}
+            </div>
+            )}
             </div>
           ) : rightTab === 'lyrics' ? (
             <div className="p-4 overflow-y-auto flex-1">

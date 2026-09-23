@@ -2,7 +2,7 @@
 
 Why this exists
 ---------------
-Mediahub today couples event producers to event consumers directly:
+Nous today couples event producers to event consumers directly:
 
   * Workflow finishes → trigger UPDATE on task_tracking → Postgres
     Realtime broadcasts → Frontend WS handler decodes

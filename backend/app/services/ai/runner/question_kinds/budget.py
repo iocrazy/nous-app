@@ -15,9 +15,13 @@ twice (double-send window), so every branch is idempotent:
   and queue a steer that tells the agent to finish in one step. A repeat
   for the same question (flag already there, unconsumed) is a no-op.
 - **Cancel** — ``transition_status(issue, "cancelled")`` +
-  ``outcome_reason: budget_exhausted``. The endpoint then does NOT wake the
-  parked workflow (``_PendingAnswer.wake``), and the dispatch loop re-checks
-  ``PREEMPT_STATUSES`` after any wake anyway.
+  ``outcome_reason: budget_exhausted``. The endpoint does NOT wake the parked
+  workflow (``_PendingAnswer.wake``): a reply turn on a cancelled issue is a
+  pointless run. The transition's cancel hook
+  (``services/issues/cancel_live_work``) RELEASES it instead: clears the
+  marker, cancels the workflow, frees the execution lock. Before that hook
+  (defect F, prod S7b 2026-09-23) nothing woke it and it sat PENDING for the
+  72 h recv TTL, holding the lock.
 """
 
 from __future__ import annotations

@@ -82,7 +82,7 @@ def _extract_description_from_identity(identity_md: Optional[str]) -> Optional[s
     """Derive a UI description from an agent's IDENTITY.md first line.
 
     Convention used by all preset IDENTITY files: the opening sentence
-    reads ``I am the MediaHub <Name> AI — <one-line role>.`` We take the
+    reads ``I am the Nous <Name> AI — <one-line role>.`` We take the
     text after the em-dash (or en-dash / hyphen fallback) and strip a
     trailing period. Returns None when no separator is present so we
     surface a missing description rather than dumping the full first line.

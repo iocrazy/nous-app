@@ -97,7 +97,7 @@ async def liveness_scan_step() -> dict[str, Any]:
     from app.models import AgentRuns
 
     # Pull the candidate set in one trip (cap at 200 — in practice
-    # mediahub doesn't have hundreds of running agent_runs at once).
+    # nous doesn't have hundreds of running agent_runs at once).
     async with read_scope() as session:
         rows = (
             (

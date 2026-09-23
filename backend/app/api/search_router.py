@@ -472,7 +472,7 @@ async def vectors_status(auth: AuthDep):
     the CURRENT embedding space (the admin-configured embedder).
 
     ``status`` is "ok", "unconfigured" (no embedder: ``space`` null, coverage
-    0 of the caller's total) or "store_missing" (migration 497 not applied:
+    0 of the caller's total) or "store_missing" (migration 499 not applied:
     ``space`` null, ``layers`` empty). A typed answer in every case, never a
     500 — the UI shows it next to the search box.
     """
@@ -495,7 +495,7 @@ async def vectors_status(auth: AuthDep):
             user_id=auth.user_id, space_id=space["id"], layer=SEMANTIC_LAYER
         )
     except EmbeddingStoreMissing as e:
-        logger.error(f"Vector status: store missing (migration 497): {e}")
+        logger.error(f"Vector status: store missing (migration 499): {e}")
         return VectorsStatusResponse(space=None, status="store_missing", layers=[])
     return VectorsStatusResponse(
         space=SpaceInfo.from_row(space),

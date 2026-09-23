@@ -182,7 +182,7 @@ async def _reject_name_collision(
 
 @router.post("", response_model=NousModelResponse)
 async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
-    """Create a new Mediahub model.
+    """Create a new Nous model.
 
     Provider-card UX: a blank ``api_key`` inherits the key (and app_id) from an
     existing model on the same ``actual_provider`` + ``base_url`` — so the admin
@@ -219,13 +219,13 @@ async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
     row = await repo.create(data)
     if not row:
         raise HTTPException(status_code=500, detail="Failed to create model")
-    logger.info(f"[Admin] Created Mediahub model: {body.name}")
+    logger.info(f"[Admin] Created Nous model: {body.name}")
     return _to_response(row)
 
 
 @router.put("/{model_id}", response_model=NousModelResponse)
 async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAuthDep):
-    """Update a Mediahub model."""
+    """Update a Nous model."""
     repo = get_nous_model_repository()
     updates = body.model_dump(exclude_none=True)
     if not updates:
@@ -235,18 +235,18 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
     row = await repo.update(model_id, updates)
     if not row:
         raise HTTPException(status_code=404, detail="Model not found")
-    logger.info(f"[Admin] Updated Mediahub model: {model_id}")
+    logger.info(f"[Admin] Updated Nous model: {model_id}")
     return _to_response(row)
 
 
 @router.delete("/{model_id}")
 async def delete_nous_model(model_id: str, auth: AdminAuthDep):
-    """Delete a Mediahub model."""
+    """Delete a Nous model."""
     repo = get_nous_model_repository()
     ok = await repo.delete(model_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Model not found")
-    logger.info(f"[Admin] Deleted Mediahub model: {model_id}")
+    logger.info(f"[Admin] Deleted Nous model: {model_id}")
     return {"message": "Deleted"}
 
 

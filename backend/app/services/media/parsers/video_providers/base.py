@@ -15,6 +15,21 @@ class ImageGenResult:
 
 
 @dataclass
+class GenResult:
+    """A produced media file on the local filesystem.
+
+    The shape every file-producing provider hands back (jimeng CLI, the
+    nous-engine bridge). Lives here rather than in one provider so a caller
+    like the upscale route never has to import a specific vendor's module to
+    name the type it receives.
+    """
+
+    local_path: str
+    mime: str
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass
 class VideoGenResult:
     video_url: str
     video_path: Optional[str] = None

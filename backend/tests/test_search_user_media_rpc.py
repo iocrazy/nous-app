@@ -1211,7 +1211,7 @@ async def test_hybrid_reports_a_missing_vector_store_as_its_own_outcome(
     monkeypatch,
 ) -> None:
     """Neither resource_embeddings nor the legacy RPC: ``store_missing``
-    (spelled ``unavailable`` before mig 497), never an empty "no match"."""
+    (spelled ``unavailable`` before mig 499), never an empty "no match"."""
     from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 
     async def _missing(**_kw):

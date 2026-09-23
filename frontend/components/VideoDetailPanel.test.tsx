@@ -5,12 +5,21 @@
  * reported: Sparkles meant "Analysis" here while meaning "Summary" on the
  * card and "Prompt" on the uploads grid. Analysis is ScanEye everywhere now.
  *
+ * The big tabs are Overview / AI / Shots now; Transcript / Summary / Visual
+ * are text-only sub tabs inside AI, and Visual Analysis keeps ScanEye.
+ *
  * Overview keeps Eye deliberately — "look at the item" is a different concept
  * from "the visual-analysis pipeline", so the two don't collide.
  */
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Video } from '../types';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_k: string, def?: unknown) => (typeof def === 'string' ? def : _k),
+  }),
+}));
 
 vi.mock('../contexts/TaskManagerContext', () => ({
   useTaskManager: () => ({ tasks: [] }),
@@ -51,10 +60,10 @@ function tabIcon(label: string): string {
 }
 
 describe('VideoDetailPanel — tab icons', () => {
-  it('gives the Analysis tab ScanEye, not Sparkles', () => {
+  it('gives the AI tab Brain, not Sparkles', () => {
     render(<VideoDetailPanel video={video} onClose={() => {}} />);
-    // Sparkles is the Prompt glyph now — it must not mean Analysis here.
-    expect(tabIcon('Analysis')).toBe('lucide-scan-eye');
+    // Sparkles is the Prompt glyph now — it must not mean AI here.
+    expect(tabIcon('AI')).toBe('lucide-brain');
   });
 
   it('keeps Eye on Overview (a different concept from visual analysis)', () => {
@@ -62,9 +71,20 @@ describe('VideoDetailPanel — tab icons', () => {
     expect(tabIcon('Overview')).toBe('lucide-eye');
   });
 
-  it('keeps FileText on Transcript', () => {
+  it('gives Shots the Clapperboard', () => {
     render(<VideoDetailPanel video={video} onClose={() => {}} />);
-    expect(tabIcon('Transcript')).toBe('lucide-file-text');
+    expect(tabIcon('Shots')).toBe('lucide-clapperboard');
+  });
+
+  it('keeps ScanEye on the Visual Analysis section', async () => {
+    const { container } = render(<VideoDetailPanel video={video} onClose={() => {}} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'AI' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'Visual' }));
+    });
+    expect(container.querySelector('svg.lucide-scan-eye')).not.toBeNull();
   });
 
   it('leaves Sparkles unused in this panel (it belongs to Prompt)', () => {

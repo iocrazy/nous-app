@@ -49,14 +49,35 @@ async def visible_generation_rows(
     from app.services.ai.platform_model_visibility import (
         filter_platform_models_for_user,
     )
+    from app.services.ai.provider_protocols import resolve_generation_protocol
 
+    # actual_provider is always fetched — the upscale-only filter below needs
+    # it — and stripped again unless the caller asked for it, so the default
+    # projection stays byte-identical (the 2026-08-14 leak tripwire).
     rows = await _repo_mod.get_nous_model_repository().list_enabled(
-        viewer_user_id=user_id, include_actual_provider=include_actual_provider
+        viewer_user_id=user_id, include_actual_provider=True
     )
     # The user's Settings → platform-model card (master switch + per-model
     # blacklist) applies here too; the picker must show what Settings shows.
     rows = await filter_platform_models_for_user(user_id, rows)
-    return [r for r in rows if r.get("type") in _GENERATION_TYPES]
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        if r.get("type") not in _GENERATION_TYPES:
+            continue
+        provider = r.get("actual_provider")
+        proto = resolve_generation_protocol((provider or "").lower())
+        # Upscale-only services (nous-engine super-resolution) need an input
+        # image; a picker entry for them would fail on every prompt.
+        if (
+            r.get("type") == "image"
+            and proto is not None
+            and not getattr(proto, "text_to_image", True)
+        ):
+            continue
+        if not include_actual_provider:
+            r = {k: v for k, v in r.items() if k != "actual_provider"}
+        out.append(r)
+    return out
 
 
 async def capabilities_for_model(

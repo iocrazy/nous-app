@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any, Awaitable, Callable, Optional, Protocol, Sequence
 
 from loguru import logger
 
@@ -107,6 +107,53 @@ class CancelHook:
         return StepDecision.CONTINUE
 
 
+class IssueStatusGate:
+    """Issue runs only (hotfix-2 PR-3): read ``issues.status`` before every
+    step; a PREEMPT status (cancelled / done / closed) stops the run the same
+    way CancelHook does, with ``stop_reason="cancelled"``.
+
+    ``issues.status`` is the authoritative cancel signal (ruling 1). CancelHook
+    only sees ``agent_runs.cancel_requested``, which the cancel path can set
+    only on a run row that already exists — production R4 cancelled while the
+    turn was still queued and the run then worked for 80 s unaware.
+
+    Sub-runs that carry the issue (sync Delegate children, workforce hops) get
+    the gate too: their spend is the cancelled issue's spend.
+
+    The read is a plain select, not a DBOS step, and best-effort: an
+    unreadable status (``None``) never stops a run.
+    """
+
+    name = "issue_status"
+
+    def __init__(
+        self,
+        issue_id: int,
+        read_status: Optional[Callable[..., Awaitable[Optional[str]]]] = None,
+    ) -> None:
+        from app.services.issues.issue_status_read import read_issue_status
+
+        self._issue_id = issue_id
+        self._read_status = read_status or read_issue_status
+
+    async def before_llm_call(self, ctx: StepContext) -> StepDecision:
+        from app.services.issues.issue_status_read import PREEMPT_STATUSES
+
+        status = await self._read_status(
+            self._issue_id, purpose="the per-step issue status gate"
+        )
+        if status in PREEMPT_STATUSES:
+            logger.info(
+                "[step_hooks] issue {} is {!r}; stopping run {} before step {}",
+                self._issue_id,
+                status,
+                ctx.run_id,
+                ctx.step,
+            )
+            return ctx.stop("cancelled")
+        return StepDecision.CONTINUE
+
+
 class StepHookChain:
     def __init__(self, hooks: Sequence[StepBoundaryHook]):
         self._hooks: tuple[StepBoundaryHook, ...] = tuple(hooks)
@@ -140,6 +187,7 @@ def default_step_hooks() -> StepHookChain:
 __all__ = [
     "CancelHook",
     "HeartbeatHook",
+    "IssueStatusGate",
     "StepBoundaryHook",
     "StepContext",
     "StepDecision",

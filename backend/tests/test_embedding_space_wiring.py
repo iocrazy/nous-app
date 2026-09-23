@@ -124,7 +124,7 @@ async def test_search_by_embedding_falls_back_to_4_args_before_mig_490(
     assert "m" not in session.calls[1]["params"]
 
 
-# analyze_l1 + the backfill write ``resource_embeddings`` (mig 497), where
+# analyze_l1 + the backfill write ``resource_embeddings`` (mig 499), where
 # the space is a column (space_id); their pins live in
 # tests/workflows/test_analyze_l1_semantic_embedding.py and
 # tests/services/library/test_embedding_backfill.py.

@@ -54,13 +54,18 @@ def test_every_protocol_has_label_and_model_types():
 
 
 @pytest.mark.unit
-def test_generation_keys_for_codex():
-    assert pp.generation_keys_for("codex") == frozenset({"codex"})
+def test_server_side_codex_protocol_is_retired():
+    """The subscription-session ``codex`` protocol was removed 2026-09-23 (its
+    catalog row with it, mig 498). A row that still said ``codex`` must resolve
+    to nothing rather than to some other protocol by accident."""
+    assert all(p.key != "codex" for p in pp.all_protocols())
+    assert pp.generation_keys_for("codex") == frozenset()
+    assert pp.resolve_generation_protocol("codex") is None
 
 
 @pytest.mark.unit
-def test_codex_protocol_is_image_only_and_not_chat():
-    codex = next(p for p in pp.all_protocols() if p.key == "codex")
-    assert codex.model_types == ("image",)
-    assert codex.is_chat_key is False
-    assert pp.resolve_generation_protocol("codex") is codex
+def test_openai_images_protocol_is_image_only_and_not_chat():
+    proto = next(p for p in pp.all_protocols() if p.key == "openai-images")
+    assert proto.model_types == ("image",)
+    assert proto.is_chat_key is False
+    assert pp.resolve_generation_protocol("openai-images") is proto

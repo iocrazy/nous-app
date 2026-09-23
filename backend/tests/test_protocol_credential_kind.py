@@ -1,8 +1,9 @@
 """Every protocol declares WHOSE credential it runs on.
 
-Admin → AI Models shows one card per ``actual_provider``. Three of those cards
-drive the SAME gpt-image binary (``codex`` / ``codex-local`` / ``openai-images``)
-and two drive the same dreamina CLI (``jimeng-cli`` / ``jimeng-local``). They
+Admin → AI Models shows one card per ``actual_provider``. Two of those cards
+drive the SAME gpt-image binary (``codex-local`` / ``openai-images``; the
+server-side ``codex`` subscription card was retired 2026-09-23) and two
+drive the same dreamina CLI (``jimeng-cli`` / ``jimeng-local``). They
 cannot be merged — sharing a ``generation_family`` would let ``db_registry``
 build a SERVER-side provider for a row that is supposed to run on the user's
 machine, which is the failure the split exists to prevent — so the cards are
@@ -51,7 +52,6 @@ _EXPECTED = {
     "modelscope": "api_key",
     "ark": "api_key",
     "openai-images": "api_key",
-    "codex": "server_session",
     "jimeng-cli": "server_session",
     "codex-local": "user_device",
     "jimeng-local": "user_device",
@@ -89,17 +89,15 @@ def test_registry_matches_the_pinned_map():
 
 
 @pytest.mark.unit
-def test_the_three_gpt_image_cards_are_told_apart_by_this_field_alone():
-    """The regression this whole field exists for. These three share a binary
-    and two of them share a quality-tier set; if their credential_kind ever
-    collapses to one value the admin page is back to three cards it cannot
-    distinguish."""
+def test_the_gpt_image_cards_are_told_apart_by_this_field_alone():
+    """The regression this whole field exists for. These two share a binary;
+    if their credential_kind ever collapses to one value the admin page is
+    back to cards it cannot distinguish."""
     kinds = {
         pp.get_chat_protocol("codex-local").credential_kind,
-        next(p for p in pp.all_protocols() if p.key == "codex").credential_kind,
         next(p for p in pp.all_protocols() if p.key == "openai-images").credential_kind,
     }
-    assert len(kinds) == 3
+    assert len(kinds) == 2
 
 
 @pytest.mark.unit

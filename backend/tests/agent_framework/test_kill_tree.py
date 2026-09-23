@@ -1,7 +1,7 @@
 """kill_tree — graceful SIGTERM → grace → SIGKILL with Unix process
 group handling.
 
-When DBOS workflow cancel fires, mediahub spawns subprocesses (yt-dlp,
+When DBOS workflow cancel fires, nous spawns subprocesses (yt-dlp,
 whisper, ffmpeg) that need to be killed too. Otherwise the workflow
 "completes cancel" but the subprocess keeps running, holding the GPU
 or filesystem locks.

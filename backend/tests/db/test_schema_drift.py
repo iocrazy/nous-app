@@ -197,7 +197,7 @@ _SA_TYPE_TO_UDT: dict[str, str] = {
     # VECTOR: pgvector extension type.
     "VECTOR": "vector",
     # HALFVEC: pgvector half-precision vector (resource_embeddings.embedding,
-    # mig 497 — halfvec because HNSW caps `vector` at 2000 dims).
+    # mig 499 — halfvec because HNSW caps `vector` at 2000 dims).
     "HALFVEC": "halfvec",
     # TSVECTOR: full-text search vector (agent_memory.search_tsv, a STORED
     # generated column — Computed() does not change the reported udt).

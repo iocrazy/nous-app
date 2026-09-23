@@ -3,7 +3,7 @@
 """Normalization for the asset-classification agent output.
 
 Port of Infinite-Canvas ``normalize_asset_classification`` (main.py:4858),
-adapted to MediaHub's bilingual tag design: the agent emits
+adapted to Nous's bilingual tag design: the agent emits
 ``{"dimensions": {key: [{"en", "zh"}, ...]}}`` and this module flattens it
 into clean ``(dimension, group, en, zh)`` entries ready for the tags
 write-through (find-or-create tag + tag_group).

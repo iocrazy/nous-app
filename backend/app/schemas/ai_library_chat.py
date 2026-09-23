@@ -323,7 +323,9 @@ class ChatToolCall(BaseModel):
     # call failed. ``None`` means success. Reading ``result`` alone is NOT
     # equivalent: ``tool_error_code`` also folds in a non-``ok`` ``outcome``
     # and the bare presence of an ``error`` key, and neither of those shapes
-    # carries ``ok: false``. Optional so a client predating this field (and a
+    # carries ``ok: false``. An acknowledged FinishIssue declaration
+    # (``acknowledged: true``) is success: its ``outcome`` is the declared
+    # issue result, not a failure code. Optional so a client predating this field (and a
     # replayed trace persisted without it) still validates.
     error_code: Optional[str] = None
 

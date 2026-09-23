@@ -1,10 +1,14 @@
-"""Dispatch + BaseImageProvider adapter tests for the codex protocol."""
+"""Dispatch + BaseImageProvider adapter tests for the CLI image adapter.
+
+The adapter used to live with the server-side ``codex`` subscription protocol
+(retired 2026-09-23); its one remaining server-side user is ``openai-images``,
+so the rows here are that protocol's."""
 
 from __future__ import annotations
 
 import pytest
 
-from app.services.ai.provider_protocols.codex import _CodexImageAdapter
+from app.services.ai.provider_protocols.openai_images import _CodexImageAdapter
 from app.services.media.parsers.video_providers.codex_cli import (
     CodexCliProvider,
     GenResult,
@@ -16,11 +20,11 @@ from app.services.media.parsers.video_providers.db_registry import (
 
 def _row(**over):
     base = {
-        "name": "codex-image",
+        "name": "openai-image-flare",
         "type": "image",
-        "actual_provider": "codex",
-        "actual_model": "gpt-5.4",
-        "api_key": "",
+        "actual_provider": "openai-images",
+        "actual_model": "gpt-image-2.5-flare",
+        "api_key": "sk-test",
         "base_url": "",
         "is_enabled": True,
         "sort_order": 0,
@@ -43,21 +47,21 @@ def _patch_repo(monkeypatch, rows):
     monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: _FakeRepo(rows))
 
 
-async def test_resolve_image_codex(monkeypatch):
+async def test_resolve_image_openai_images(monkeypatch):
     _patch_repo(monkeypatch, [_row()])
-    provider, model = await resolve_image_provider("codex-image")
+    provider, model = await resolve_image_provider("openai-image-flare")
     assert isinstance(provider, _CodexImageAdapter)
-    assert model == "gpt-5.4"
+    assert model == "gpt-image-2.5-flare"
 
 
-async def test_explicit_codex_wins_over_default_jimeng_preference(monkeypatch):
+async def test_explicit_openai_images_wins_over_default_jimeng_preference(monkeypatch):
     jimeng_row = _row(
         name="jimeng-cli-image", actual_provider="jimeng-cli", actual_model="5.0"
     )
     _patch_repo(monkeypatch, [jimeng_row, _row()])
-    provider, model = await resolve_image_provider("codex-image")
+    provider, model = await resolve_image_provider("openai-image-flare")
     assert isinstance(provider, _CodexImageAdapter)
-    assert model == "gpt-5.4"
+    assert model == "gpt-image-2.5-flare"
 
 
 class _StubProvider(CodexCliProvider):
@@ -72,7 +76,7 @@ class _StubProvider(CodexCliProvider):
 
 async def test_adapter_maps_kwargs_onto_provider():
     stub = _StubProvider()
-    adapter = _CodexImageAdapter(stub)
+    adapter = _CodexImageAdapter(stub, provider_name="openai-images")
 
     result = await adapter.generate(
         "a red apple", "gpt-5.4", aspect_ratio="16:9", reference_image_url=None
@@ -80,7 +84,7 @@ async def test_adapter_maps_kwargs_onto_provider():
 
     assert result.image_path == "/tmp/x.png"
     assert result.image_url == ""
-    assert result.provider == "codex"
+    assert result.provider == "openai-images"
     assert stub.calls[0]["prompt"] == "a red apple"
     assert stub.calls[0]["aspect"] == "16:9"
     assert stub.calls[0]["model_version"] == "gpt-5.4"
@@ -91,7 +95,7 @@ async def test_adapter_passes_local_ref_path_through(tmp_path):
     ref = tmp_path / "ref.png"
     ref.write_bytes(b"\x89PNG\r\n")
     stub = _StubProvider()
-    adapter = _CodexImageAdapter(stub)
+    adapter = _CodexImageAdapter(stub, provider_name="openai-images")
 
     await adapter.generate("p", "", aspect_ratio="1:1", reference_image_url=str(ref))
 
@@ -102,7 +106,7 @@ async def test_adapter_drops_http_reference_url(tmp_path):
     # A remote URL cannot feed `images edit --ref-image` (local file contract);
     # the adapter degrades to plain generate rather than failing the shot.
     stub = _StubProvider()
-    adapter = _CodexImageAdapter(stub)
+    adapter = _CodexImageAdapter(stub, provider_name="openai-images")
 
     await adapter.generate(
         "p", "", aspect_ratio="1:1", reference_image_url="https://x/y.png"
@@ -119,22 +123,22 @@ _OWNER = "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
 
 async def test_owned_row_resolves_for_its_owner(monkeypatch):
     _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
-    provider, model = await resolve_image_provider("codex-image", user_id=_OWNER)
+    provider, model = await resolve_image_provider("openai-image-flare", user_id=_OWNER)
     assert isinstance(provider, _CodexImageAdapter)
-    assert model == "gpt-5.4"
+    assert model == "gpt-image-2.5-flare"
 
 
 async def test_owned_row_rejected_for_other_user(monkeypatch):
     _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
     with pytest.raises(RuntimeError, match="private"):
-        await resolve_image_provider("codex-image", user_id="someone-else")
+        await resolve_image_provider("openai-image-flare", user_id="someone-else")
 
 
 async def test_owned_row_rejected_without_user(monkeypatch):
     # A call path that never threads user_id must NOT reach a private provider.
     _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
     with pytest.raises(RuntimeError, match="private"):
-        await resolve_image_provider("codex-image")
+        await resolve_image_provider("openai-image-flare")
 
 
 async def test_owned_row_never_silently_falls_back(monkeypatch):
@@ -145,12 +149,12 @@ async def test_owned_row_never_silently_falls_back(monkeypatch):
     )
     _patch_repo(monkeypatch, [public, _row(owner_user_id=_OWNER)])
     with pytest.raises(RuntimeError, match="private"):
-        await resolve_image_provider("codex-image", user_id="someone-else")
+        await resolve_image_provider("openai-image-flare", user_id="someone-else")
 
 
 async def test_unowned_rows_resolve_for_anyone(monkeypatch):
     _patch_repo(monkeypatch, [_row(owner_user_id=None)])
-    provider, _ = await resolve_image_provider("codex-image", user_id="anyone")
+    provider, _ = await resolve_image_provider("openai-image-flare", user_id="anyone")
     assert isinstance(provider, _CodexImageAdapter)
 
 
@@ -202,14 +206,14 @@ async def test_image_service_threads_user_id_to_resolver(monkeypatch):
         node_id="n1",
         prompt="p",
         model="",
-        provider_name="codex-image",
+        provider_name="openai-image-flare",
         user_id=_OWNER,
     )
     assert captured["user_id"] == _OWNER
 
 
-async def test_codex_adapter_forwards_reference_paths(tmp_path):
-    from app.services.ai.provider_protocols.codex import _CodexImageAdapter
+async def test_cli_adapter_forwards_reference_paths(tmp_path):
+    from app.services.ai.provider_protocols.openai_images import _CodexImageAdapter
     from app.services.media.parsers.video_providers.codex_cli import GenResult
 
     refs = []
@@ -228,7 +232,7 @@ async def test_codex_adapter_forwards_reference_paths(tmp_path):
             return GenResult(local_path="/tmp/x.png", mime="image/png", raw={})
 
     stub = _Stub()
-    adapter = _CodexImageAdapter(stub)
+    adapter = _CodexImageAdapter(stub, provider_name="openai-images")
     await adapter.generate(
         "p",
         "gpt-5.4",

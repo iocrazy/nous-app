@@ -1,5 +1,5 @@
 #!/bin/bash
-# MediaHub Development Startup Script (Worktree-aware)
+# Nous Development Startup Script (Worktree-aware)
 # Usage: ./scripts/start-dev.sh [command]
 # Commands: start, stop, status, restart, restart-backend, logs
 
@@ -69,7 +69,7 @@ kill_port() {
 # ========== Status Command ==========
 
 status() {
-    echo -e "${BLUE}========== MediaHub [$WORKTREE_NAME] ==========${NC}"
+    echo -e "${BLUE}========== Nous [$WORKTREE_NAME] ==========${NC}"
     echo -e "  Ports: backend=$BACKEND_PORT  frontend=$FRONTEND_PORT  redis-db=$REDIS_DB"
     echo ""
 
@@ -105,7 +105,7 @@ status() {
 # ========== Start Command ==========
 
 start() {
-    echo -e "${BLUE}Starting MediaHub [$WORKTREE_NAME]...${NC}"
+    echo -e "${BLUE}Starting Nous [$WORKTREE_NAME]...${NC}"
     echo -e "  Ports: backend=$BACKEND_PORT  frontend=$FRONTEND_PORT  redis-db=$REDIS_DB"
     echo ""
 
@@ -170,7 +170,7 @@ start_frontend() {
 # ========== Stop Command ==========
 
 stop() {
-    echo -e "${BLUE}Stopping MediaHub [$WORKTREE_NAME]...${NC}"
+    echo -e "${BLUE}Stopping Nous [$WORKTREE_NAME]...${NC}"
 
     kill_port "$BACKEND_PORT" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Backend stopped" || echo -e "  ${YELLOW}-${NC} Backend was not running"
     kill_port "$FRONTEND_PORT" 2>/dev/null && echo -e "  ${GREEN}✓${NC} Frontend stopped" || echo -e "  ${YELLOW}-${NC} Frontend was not running"

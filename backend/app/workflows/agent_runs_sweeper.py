@@ -148,6 +148,18 @@ async def reconcile_issue_execution_state_step() -> int:
 
 
 @DBOS.step()
+async def reap_preempted_input_waits_step() -> int:
+    """Release workflows still parked on a question whose issue is already
+    cancelled/done/closed (hotfix-2 defect H). The cancel hook normally does
+    this at once in the API process; when its cancel fails it leaves the
+    marker, and this tick — on the worker, where the singleton is launched —
+    finishes it within a minute. Returns how many were released."""
+    from app.agent_framework.input_gate import reap_preempted_input_waits
+
+    return await reap_preempted_input_waits()
+
+
+@DBOS.step()
 async def expire_orphan_inbox_step() -> int:
     """Mark unclaimed agent_run_inbox items older than a day as expired
     (spec §1-③: an item whose run ended before the next step boundary is an
@@ -527,6 +539,7 @@ async def agent_runs_sweeper_workflow(
     expired_inbox = await expire_orphan_inbox_step()
     reconciled = await reconcile_issue_execution_state_step()
     forced_settles = await force_settle_stale_pending_trees_step()
+    preempted_waits = await reap_preempted_input_waits_step()
     if (
         heartbeat_lost
         or transitions
@@ -534,6 +547,7 @@ async def agent_runs_sweeper_workflow(
         or expired_inbox
         or reconciled
         or forced_settles
+        or preempted_waits
     ):
         logger.info(
             f"[sweeper] heartbeat_lost={heartbeat_lost} "
@@ -541,5 +555,6 @@ async def agent_runs_sweeper_workflow(
             f"inbox_drained={drain['dispatched']} inbox_busy={drain['busy']} "
             f"inbox_drain_failed={drain['failed']} "
             f"expired_inbox={expired_inbox} reconciled_issues={reconciled} "
-            f"forced_tree_settles={forced_settles}"
+            f"forced_tree_settles={forced_settles} "
+            f"preempted_waits_released={preempted_waits}"
         )

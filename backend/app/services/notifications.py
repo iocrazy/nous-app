@@ -16,6 +16,11 @@ DEDUPE: producers can double-fire across retry/mirror seams (e.g. a DBOS step
 replay). Before inserting, an identical (user_id, kind, link_kind, link_id) row
 inside a 10-minute window short-circuits the insert, so a recipient never sees
 twins for the same event.
+
+A producer whose events are distinct per task but share one link (two agent
+videos landing in one conversation — no link at all — or on one issue) passes
+``dedupe=False``: the window would merge genuinely different events. Such a
+producer must get its replay safety elsewhere (a memoized DBOS step).
 """
 
 from __future__ import annotations
@@ -74,19 +79,23 @@ async def notify(
     link_kind: Optional[NotificationLinkKind] = None,
     link_id: Optional[str] = None,
     team_id: Optional[int] = None,
+    dedupe: bool = True,
 ) -> Optional[int]:
     """Best-effort insert of a single inbox notification for one recipient.
 
     Returns the new row id, ``None`` if the insert was deduped, and ``None``
     (with a loud log) on any failure. NEVER raises — producers call this on
     their success/failure paths and must not be affected by inbox trouble.
+
+    ``dedupe=False`` skips the 10-minute window (see the module docstring);
+    the default keeps it for every existing producer.
     """
     try:
         if not user_id:
             logger.warning("notify() skipped — empty user_id (kind={})", kind)
             return None
 
-        if await _is_duplicate(user_id, kind, link_kind, link_id):
+        if dedupe and await _is_duplicate(user_id, kind, link_kind, link_id):
             logger.debug(
                 "notify() deduped — {} {}/{} for {} within {}m",
                 kind,

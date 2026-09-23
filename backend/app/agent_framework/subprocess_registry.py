@@ -1,7 +1,7 @@
 """subprocess_registry — track child PIDs per workflow_id so cancel can
 kill them.
 
-The problem: mediahub spawns yt-dlp / whisper / ffmpeg / etc. via
+The problem: nous spawns yt-dlp / whisper / ffmpeg / etc. via
 ``asyncio.create_subprocess_exec``. When DBOS workflow cancel fires,
 the asyncio task is cancelled but the SUBPROCESS keeps running until it
 finishes on its own — holding GPU, disk, network for nothing. Workflow

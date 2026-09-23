@@ -1,4 +1,4 @@
-"""Data access for ``embedding_spaces`` (migration 497).
+"""Data access for ``embedding_spaces`` (migration 499).
 
 A space is (actual provider model id, width). Rows are created on first use
 from the resolved embedder's :class:`~app.core.embedding_space.SpaceSpec`,
@@ -24,7 +24,7 @@ from app.repositories.resource_embeddings_repository import (
 )
 
 _MISSING = (
-    "embedding_spaces does not exist in this database (migration 497 not applied)"
+    "embedding_spaces does not exist in this database (migration 499 not applied)"
 )
 
 

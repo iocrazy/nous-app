@@ -10,6 +10,7 @@
 import { AISettings, AIProviderConfig, TranscriptData, SummaryData, NousModelPublic, AIGovernanceFlags } from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
+import { apiClient } from './apiClient';
 
 // --- Polling Helper ---
 
@@ -614,3 +615,28 @@ export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
   // Merge with all-allowed defaults so any absent key stays true.
   return { ...GOVERNANCE_ALL_ALLOWED, ...data };
 };
+
+// --- Embedding backfill (Settings → AI → Vectors) ---
+
+/** Real body of `POST /api/v1/ai/analyze/backfill-embeddings`. The lists are
+ *  orthogonal: `reembedded` landed a vector now, `dispatched` started a run
+ *  whose vector has not landed yet, `skipped` carries a stable reason code.
+ *  Refusals arrive as the ErrorResponse envelope with the typed code in
+ *  `details.code` (`embedder_unconfigured` 409, `vector_store_missing` 503). */
+export interface BackfillResult {
+  success: boolean;
+  dry_run: boolean;
+  space?: unknown;
+  reembedded: number[];
+  dispatched: Array<{ resource_id: number; task_id?: string }>;
+  skipped: Array<{ resource_id: number; reason: string }>;
+  in_flight: number;
+  remaining: number;
+  total_missing: number;
+}
+
+export const backfillEmbeddings = (body: {
+  limit: number;
+  dry_run: boolean;
+}): Promise<BackfillResult> =>
+  apiClient.post<BackfillResult>('/api/v1/ai/analyze/backfill-embeddings', body);

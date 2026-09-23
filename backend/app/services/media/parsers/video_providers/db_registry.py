@@ -222,9 +222,17 @@ async def resolve_image_provider(
             is private to another user, or the resolved row's
             ``actual_provider`` has no wired implementation.
     """
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
     catalog = await _enabled_rows("image")
     byok = await byok_image_rows(user_id)
-    image_rows = _visible_rows([*catalog, *byok], name, user_id, "image")
+    visible = _visible_rows([*catalog, *byok], name, user_id, "image")
+    explicit = _explicit_match(visible, name) if name else None
+    # Upscale-only rows (``text_to_image = False``) never win a DEFAULT pick —
+    # they need an input image a prompt request does not have. Named
+    # explicitly they stay in, so the refusal below names the row instead of
+    # silently substituting some other model.
+    image_rows = [r for r in visible if r is explicit or _is_text_to_image(r)]
     if not image_rows:
         raise RuntimeError(
             "no image model configured (nous_models catalog or user " "BYOK providers)"
@@ -233,13 +241,17 @@ async def resolve_image_provider(
     row = _pick_row(image_rows, name)
     actual_provider = (row.get("actual_provider") or "").lower()
 
-    from app.services.ai.provider_protocols import resolve_generation_protocol
-
     protocol = resolve_generation_protocol(actual_provider)
     if protocol is None:
         raise RuntimeError(
             f"No image provider implementation for actual_provider="
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
+        )
+    if not getattr(protocol, "text_to_image", True):
+        raise RuntimeError(
+            f"image model {row.get('name')!r} is an upscale-only service "
+            f"(actual_provider={actual_provider!r}); it cannot generate from a "
+            "prompt"
         )
     provider, actual_model = protocol.build_image_provider(row)
     _stamp_provider_key(
@@ -255,6 +267,81 @@ async def resolve_image_provider(
         actual_model,
     )
     return provider, actual_model
+
+
+def _is_text_to_image(row: dict) -> bool:
+    """Whether ``row`` may serve a prompt → picture request.
+
+    A row whose protocol does not resolve counts as text-to-image here on
+    purpose: ``resolve_image_provider`` then raises its "no implementation"
+    error naming the row, which is the existing, louder behaviour."""
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    protocol = resolve_generation_protocol((row.get("actual_provider") or "").lower())
+    return protocol is None or getattr(protocol, "text_to_image", True)
+
+
+# Upscale preference: the self-hosted engine first (our GPU, no per-call
+# vendor quota), dreamina as the fallback. Families not listed sort last and
+# only appear here if they declare ``upscale_capable``.
+_UPSCALE_FAMILY_ORDER: tuple[str, ...] = ("nous", "jimeng-cli")
+
+
+async def resolve_upscale_provider(*, user_id: Optional[str]) -> Tuple[Any, str, str]:
+    """Pick the canvas 放大 backend: ``(provider, actual_model, row_name)``.
+
+    Candidates are the enabled image rows visible to ``user_id`` (catalog +
+    BYOK, the same owner scoping as ``resolve_image_provider``) whose protocol
+    declares ``upscale_capable``. nous-engine rows win over jimeng-cli rows;
+    within a family the catalog ``sort_order`` decides.
+
+    Deliberately NOT a fallback chain at call time: if the nous row is picked
+    and the engine refuses (key not authorised, busy), the route surfaces that
+    error rather than quietly re-running on dreamina — a silent second vendor
+    would hide the misconfiguration and bill a different account.
+
+    Raises:
+        RuntimeError: no upscale-capable image model is enabled.
+    """
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    catalog = await _enabled_rows("image")
+    byok = await byok_image_rows(user_id)
+    candidates: list[tuple[int, int, dict, Any]] = []
+    for index, row in enumerate(
+        _visible_rows([*catalog, *byok], None, user_id, "image")
+    ):
+        protocol = resolve_generation_protocol(
+            (row.get("actual_provider") or "").lower()
+        )
+        if protocol is None or not getattr(protocol, "upscale_capable", False):
+            continue
+        family = protocol.generation_family or ""
+        rank = (
+            _UPSCALE_FAMILY_ORDER.index(family)
+            if family in _UPSCALE_FAMILY_ORDER
+            else len(_UPSCALE_FAMILY_ORDER)
+        )
+        candidates.append((rank, index, row, protocol))
+    if not candidates:
+        raise RuntimeError(
+            "no upscale-capable image model enabled (need an enabled nous or "
+            "jimeng-cli image row in Admin > AI Models)"
+        )
+    _, _, row, protocol = min(candidates, key=lambda c: (c[0], c[1]))
+    provider, actual_model = protocol.build_upscale_provider(row)
+    actual_provider = (row.get("actual_provider") or "").lower()
+    _stamp_provider_key(
+        provider, actual_provider, source=str(row.get("source") or "catalog")
+    )
+    row_name = str(row.get("name") or "")
+    logger.info(
+        "Resolved upscale provider: {} (row={}, model={})",
+        actual_provider,
+        row_name,
+        actual_model,
+    )
+    return provider, actual_model, row_name
 
 
 async def _pick_video_row(name: Optional[str], user_id: Optional[str]) -> dict:

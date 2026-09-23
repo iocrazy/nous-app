@@ -15,11 +15,13 @@ Scope = caller's personal team resolved via _resolve_personal_team_id.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from loguru import logger
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
@@ -42,6 +44,7 @@ from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
+from app.services.library.scratch_reaper import reap_scratch_dir
 
 router = APIRouter(prefix="/generated-media", tags=["generated-media"])
 
@@ -496,13 +499,53 @@ def _membership():
     return get_conversation_repository()
 
 
-def _upscale_provider():
-    """Seam: the jimeng CLI provider (patched in tests)."""
-    from app.services.media.parsers.video_providers.jimeng_cli import (
-        JimengCliProvider,
+async def _resolve_upscaler(user_id: str):
+    """Seam (patched in tests): ``(provider, actual_model, row_name)`` for the
+    canvas 放大 — nous-engine first, dreamina CLI as the fallback family (see
+    ``db_registry.resolve_upscale_provider``)."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        resolve_upscale_provider,
     )
 
-    return JimengCliProvider()
+    return await resolve_upscale_provider(user_id=user_id)
+
+
+def _upscale_failure_detail(row_name: str, exc: Exception) -> str:
+    """502 detail naming the backend and, when the upstream gave one, its
+    error code — "key not authorised" and "engine busy" need different fixes."""
+    code = getattr(exc, "code", None)
+    status = getattr(exc, "status", None)
+    upstream = ", ".join(
+        part
+        for part in (
+            f"status={status}" if status is not None else "",
+            f"code={code}" if code else "",
+        )
+        if part
+    )
+    suffix = f" [{upstream}]" if upstream else ""
+    return f"upscale failed via {row_name or 'unknown provider'}{suffix}: {exc}"
+
+
+# An upstream error code is echoed to the browser (TYPED_5XX_CODES), so it must
+# look like a code — a token, not prose that could carry exception text.
+_UPSTREAM_CODE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+
+
+def _upscale_failure_body(row_name: str, exc: Exception) -> dict:
+    """The typed 502 body the canvas shows. Built only from values we trust:
+    the catalog row name, an int status, and a token-shaped upstream code.
+    Never ``str(exc)`` — that goes to the log via ``_upscale_failure_detail``."""
+    status = getattr(exc, "status", None)
+    code = getattr(exc, "code", None)
+    return {
+        "code": "upscale_backend_failed",
+        "provider": row_name or None,
+        "upstream_status": status if isinstance(status, int) else None,
+        "upstream_code": (
+            code if isinstance(code, str) and _UPSTREAM_CODE_RE.match(code) else None
+        ),
+    }
 
 
 def _materialize_gen_file(gen_id: int):
@@ -542,8 +585,9 @@ class UpscaleRequest(BaseModel):
 async def upscale_generation(
     gen_id: int, payload: UpscaleRequest, auth: AuthDep
 ) -> dict:
-    """IC 放大: run jimeng ``image_upscale`` on this generation and register
-    the result as a NEW generated-media row (the source stays)."""
+    """IC 放大: super-resolve this generation and register the result as a
+    NEW generated-media row (the source stays). The backend is the first
+    enabled upscale-capable image row — nous-engine, else the dreamina CLI."""
     # Read gate on the SOURCE, then file the result where the source lives —
     # the caller's personal team is the wrong home for a team board's image
     # (the promote fix in #2212 settled the same question).
@@ -556,26 +600,47 @@ async def upscale_generation(
     ):
         raise HTTPException(status_code=404, detail="generation not found")
     scope_id = int(source["scope_id"])
+    try:
+        provider, actual_model, row_name = await _resolve_upscaler(str(auth.user_id))
+    except Exception as exc:
+        # No enabled backend (or a misconfigured row) is a server-side setup
+        # problem, not a bad request — and it must say which.
+        logger.error("upscale backend resolution failed: {}", exc)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "upscale_unavailable", "reason": "no_backend"},
+        )
     async with request_scope(Scope(user_id=str(auth.user_id))):
         async with _materialize_gen_file(gen_id) as src:
             if src is None:
                 raise HTTPException(status_code=404, detail="generation file missing")
             try:
-                result = await _upscale_provider().upscale_image(
-                    image_path=str(src), resolution=payload.resolution
+                result = await provider.upscale_image(
+                    image_path=str(src),
+                    resolution=payload.resolution,
+                    model=actual_model,
                 )
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=f"upscale failed: {exc}")
-        row = await _register_upscale_result(
-            user_id=str(auth.user_id),
-            scope_id=scope_id,
-            source_path=result.local_path,
-            mime=getattr(result, "mime", "image/png"),
-            origin_params={
-                "upscaled_from": str(gen_id),
-                "resolution": payload.resolution,
-            },
-        )
+                logger.error("{}", _upscale_failure_detail(row_name, exc))
+                raise HTTPException(
+                    status_code=502, detail=_upscale_failure_body(row_name, exc)
+                )
+        try:
+            row = await _register_upscale_result(
+                user_id=str(auth.user_id),
+                scope_id=scope_id,
+                source_path=result.local_path,
+                mime=getattr(result, "mime", "image/png"),
+                origin_params={
+                    "upscaled_from": str(gen_id),
+                    "resolution": payload.resolution,
+                    "provider": row_name,
+                },
+            )
+        finally:
+            # Registration copied the file into storage (or failed); either
+            # way the provider's scratch dir is dead weight on the worker.
+            reap_scratch_dir(result.local_path)
         new_id = row.get("id")
         if new_id is None:
             raise HTTPException(status_code=500, detail="upscale registration failed")

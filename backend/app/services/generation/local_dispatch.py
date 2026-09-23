@@ -176,8 +176,8 @@ async def reconcile_for_engine(
     Capabilities live under the catalog's actual_provider, so the engine is
     mapped back to it. Neither name a caller has in hand is that key:
     ``engine_model`` ("gpt-image-2") resolves to no protocol, and ``engine``
-    only appears to work - "codex" happens to hit the SERVER protocol, while
-    "dreamina" hits nothing. A miss collapses to ``none()``, which drops the
+    ("codex" / "dreamina") names no protocol either (the server-side ``codex``
+    protocol it used to hit by coincidence is retired). A miss collapses to ``none()``, which drops the
     ratio again.
     """
     caps = await capabilities_for(_ENGINE_PROVIDER_KEY.get(engine, engine))

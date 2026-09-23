@@ -59,7 +59,7 @@ def test_chain_order_is_heartbeat_cancel_pause_budget_inbox():
     claimed a steer it will never read."""
     src = WIRING_SRC.read_text()
     assert re.search(
-        r"HeartbeatHook\(\),\s*CancelHook\(\),\s*PauseHook\(\),\s*"
+        r"HeartbeatHook\(\),\s*CancelHook\(\),\s*(?:\*issue_gate,\s*)?PauseHook\(\),\s*"
         r"BudgetGateHook\(\),\s*InboxClaimHook\(\)",
         src,
     ), "chain must be heartbeat → cancel → pause → budget → inbox"

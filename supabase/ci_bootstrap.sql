@@ -73,20 +73,56 @@ CREATE TABLE IF NOT EXISTS auth.users (
     created_at timestamptz DEFAULT now()
 );
 
--- RLS helper functions. The bodies mirror gotrue's real implementations (read
--- the JWT claims out of the request GUCs); in CI no JWT is ever set, so they
--- return NULL. Only their existence and signature matter for DDL to apply.
+-- RLS helper functions. The bodies are COPIED VERBATIM from gotrue's own
+-- migrations (github.com/supabase/auth, migrations/):
+--   uid() / role() — 20220224000811_update_auth_functions.up.sql
+--   jwt()          — 20220531120530_add_auth_jwt_function.up.sql
+-- No later gotrue migration redefines them (all 76 checked 2026-09-23).
+--
+-- They must be the real bodies, not merely "something that returns NULL":
+-- each reads the legacy per-claim GUC (`request.jwt.claim.<x>`) first and falls
+-- back to the whole-claims GUC (`request.jwt.claims`) — which is what current
+-- PostgREST sets and what the backend's caller_scope (app/db/session.py) sets.
+-- Until 2026-09-23 this stub read ONLY `request.jwt.claim.sub`, so a DB test
+-- that set claims the production way saw auth.uid() = NULL here (found by mig
+-- 496's test, which had to set both shapes to be safe). Behaviour is pinned by
+-- backend/tests/db/test_ci_bootstrap_auth_stubs_integration.py.
+--
+-- Semantics, all inherited from upstream on purpose:
+--   * unset or '' GUC → treated as absent (missing_ok = true, nullif '')
+--   * the per-claim GUC wins over the claims GUC when both are set
+--   * jwt() is NULL — not '{}' — when neither is set
+--   * a claims GUC that is not JSON, or a sub that is not a uuid, RAISES
+--     (upstream does not guard the ::jsonb / ::uuid casts either)
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid
     LANGUAGE sql STABLE
-    AS $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    AS $$
+  select
+  coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid
+$$;
 
 CREATE OR REPLACE FUNCTION auth.role() RETURNS text
     LANGUAGE sql STABLE
-    AS $$ SELECT nullif(current_setting('request.jwt.claim.role', true), '')::text $$;
+    AS $$
+  select
+  coalesce(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+  )::text
+$$;
 
 CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb
     LANGUAGE sql STABLE
-    AS $$ SELECT coalesce(nullif(current_setting('request.jwt.claim', true), ''), '{}')::jsonb $$;
+    AS $$
+  select
+    coalesce(
+        nullif(current_setting('request.jwt.claim', true), ''),
+        nullif(current_setting('request.jwt.claims', true), '')
+    )::jsonb
+$$;
 
 -- ── 4. Realtime publication (created by the supabase-realtime container) ────
 -- 73 migrations run `ALTER PUBLICATION supabase_realtime ADD TABLE ...`.

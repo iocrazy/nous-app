@@ -21,7 +21,9 @@ def test_defaults_cover_every_built_in_tool_family():
     assert tt.resolve_timeout("Skill") == 30
     assert tt.resolve_timeout("ResourceFetch") == 200  # > frames deadline 180
     assert tt.resolve_timeout("GenerateImage") == 600
-    assert tt.resolve_timeout("GenerateVideo") == 600
+    # Submit-only since #2398: the render outlives the turn, only the
+    # validate + file + dispatch runs here.
+    assert tt.resolve_timeout("GenerateVideo") == 60
     assert tt.resolve_timeout("Delegate") == 900
     assert tt.resolve_timeout("SomethingNew") == 60
 

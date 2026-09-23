@@ -7,7 +7,7 @@ marked failed. That's wrong:
   - ai_visual_analysis at 30min is normal (60min ceiling)
 
 Per-type ceilings let the sweeper apply the right threshold per task,
-calibrated against actual mediahub workload patterns.
+calibrated against actual nous workload patterns.
 
 Mirrors OpenClaw ``cron/service/timeout-policy.ts``.
 

@@ -1,4 +1,4 @@
-"""analyze_l1 writes the semantic layer of ``resource_embeddings`` (mig 497).
+"""analyze_l1 writes the semantic layer of ``resource_embeddings`` (mig 499).
 
 The embedding half of the step lives in ``_embed_semantic_layer`` so it can be
 driven without the VLM. Pins: the vector lands in the embedder's space with

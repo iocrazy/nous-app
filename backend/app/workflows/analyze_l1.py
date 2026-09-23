@@ -311,7 +311,7 @@ async def call_analyze_l1(
     # never silent either: the reason is logged at ERROR (the post-release
     # drift funnel sees it) and carried in the digest for the workflow to
     # stamp onto task_tracking. The vector goes to resource_embeddings
-    # (semantic layer, mig 497); the legacy resource_analysis column is no
+    # (semantic layer, mig 499); the legacy resource_analysis column is no
     # longer written.
     embedded, embed_error = await _embed_semantic_layer(resource_id, embedding_service)
     if not embedded:
@@ -340,7 +340,7 @@ async def _embed_semantic_layer(
     """Compose the resource's semantic document, embed it, and write it into
     the embedder's space in ``resource_embeddings``. Returns ``(True, None)``
     or ``(False, reason)`` (a ``try_embed`` reason, or ``"store_missing: ..."``
-    when migration 497 has not run). Never raises for those shapes.
+    when migration 499 has not run). Never raises for those shapes.
 
     Embeds first and names the space after: ``try_embed`` is what says WHY
     there is no vector; ``space_spec()`` only says that there is none.
