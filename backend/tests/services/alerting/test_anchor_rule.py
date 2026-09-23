@@ -94,3 +94,43 @@ async def test_rules_are_keyed_by_name(session: _Session) -> None:
     )
     assert a != b
     assert len(session.inserts) == 2
+
+
+class _LostRaceSession(_Session):
+    """The first read misses, then another writer commits the same name before
+    our insert lands: ON CONFLICT DO NOTHING returns no row."""
+
+    def __init__(self, winner_id: int) -> None:
+        super().__init__()
+        self.winner_id = winner_id
+        self.selects = 0
+        self.insert_sql: list[str] = []
+
+    async def execute(self, stmt: Any) -> _Result:
+        if stmt.is_insert:
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            self.inserts.append(dict(compiled.params))
+            self.insert_sql.append(str(compiled))
+            return _Result(None)
+        self.selects += 1
+        return _Result(None if self.selects == 1 else self.winner_id)
+
+
+@pytest.mark.asyncio
+async def test_lost_race_reselects_the_winner(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = _LostRaceSession(winner_id=777)
+    monkeypatch.setattr(db_session, "read_scope", lambda: _CM(s))
+    monkeypatch.setattr(db_session, "write_scope", lambda: _CM(s))
+
+    rule_id = await ensure_anchor_rule(
+        name="Scope denied (system)",
+        metric_type="scope_denied",
+        threshold=0.0,
+        is_active=True,
+    )
+
+    assert rule_id == 777
+    assert len(s.inserts) == 1
+    assert s.selects == 2
+    sql = s.insert_sql[0]
+    assert "ON CONFLICT (name) WHERE created_by IS NULL DO NOTHING" in sql

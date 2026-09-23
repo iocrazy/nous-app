@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Double,
     ForeignKeyConstraint,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     String,
@@ -37,6 +38,15 @@ class AlertRules(Base):
     __tablename__ = "alert_rules"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="alert_rules_pkey"),
+        # mig 490: system anchor rows (created_by IS NULL, see
+        # services/alerting/anchor_rule.py) are keyed by name; this is the
+        # arbiter its ON CONFLICT targets. User-created rules name freely.
+        Index(
+            "idx_alert_rules_system_name",
+            "name",
+            unique=True,
+            postgresql_where="(created_by IS NULL)",
+        ),
         {"schema": "public"},
     )
 

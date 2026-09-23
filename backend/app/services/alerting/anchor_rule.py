@@ -9,17 +9,24 @@ The admin ``/alerts/check`` evaluator skips any ``metric_type`` it does not
 know, so an *active* anchor rule is never evaluated as a threshold rule — the
 flag only decides how the rule reads on the Alerts page.
 
-Get-then-insert is not atomic: two first-ever writers racing can each create
-a row. Harmless (the history rows still render, keyed by ``rule_name``) and
-the same trade-off the anomaly sweep has always made.
+Anchor rows are the ones with ``created_by IS NULL`` (this helper never sets
+it; the admin create endpoint always stamps the calling admin). Migration 490
+makes them unique by name with a partial UNIQUE index, and the insert here is
+``ON CONFLICT (name) WHERE created_by IS NULL DO NOTHING``: when two first-ever
+writers race, the loser's insert returns no row and it re-selects the
+winner's id. Before 490 this was a plain get-then-insert that could create
+duplicate anchors under a race.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import insert, select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
 
 from app.db import session as db_session
 from app.models import AlertRules
+
+_ANCHOR_PREDICATE = "created_by IS NULL"
 
 
 async def ensure_anchor_rule(
@@ -35,29 +42,36 @@ async def ensure_anchor_rule(
 
     The scopes are looked up on ``app.db.session`` at call time (not bound at
     import) so callers' tests that patch that module keep working."""
+    by_name = select(AlertRules.id).where(AlertRules.name == name).limit(1)
     async with db_session.read_scope() as session:
-        rule_id = (
-            await session.execute(
-                select(AlertRules.id).where(AlertRules.name == name).limit(1)
-            )
-        ).scalar()
+        rule_id = (await session.execute(by_name)).scalar()
     if rule_id is not None:
         return int(rule_id)
 
+    stmt = (
+        insert(AlertRules)
+        .values(
+            name=name,
+            metric_type=metric_type,
+            condition=condition,
+            threshold=threshold,
+            window_minutes=window_minutes,
+            notification_channel="discord",
+            is_active=is_active,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[AlertRules.name],
+            index_where=text(_ANCHOR_PREDICATE),
+        )
+        .returning(AlertRules.id)
+    )
     async with db_session.write_scope() as session:
-        created = (
-            await session.execute(
-                insert(AlertRules)
-                .values(
-                    name=name,
-                    metric_type=metric_type,
-                    condition=condition,
-                    threshold=threshold,
-                    window_minutes=window_minutes,
-                    notification_channel="discord",
-                    is_active=is_active,
-                )
-                .returning(AlertRules.id)
-            )
-        ).scalar()
+        created = (await session.execute(stmt)).scalar()
+        if created is None:
+            # Lost the race: the conflicting row is committed by now (ON
+            # CONFLICT waits for the other writer), so a fresh statement in
+            # this READ COMMITTED transaction sees it.
+            created = (await session.execute(by_name)).scalar()
+    if created is None:
+        raise RuntimeError(f"anchor alert rule {name!r} vanished after insert conflict")
     return int(created)
