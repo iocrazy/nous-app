@@ -42,7 +42,15 @@ async def ensure_anchor_rule(
 
     The scopes are looked up on ``app.db.session`` at call time (not bound at
     import) so callers' tests that patch that module keep working."""
-    by_name = select(AlertRules.id).where(AlertRules.name == name).limit(1)
+    # Scoped to system rows: the partial UNIQUE index deliberately lets an
+    # admin-created rule share the name, and that row must never be mistaken
+    # for the anchor (system history would attach to it and the anchor would
+    # never be created).
+    by_name = (
+        select(AlertRules.id)
+        .where(AlertRules.name == name, AlertRules.created_by.is_(None))
+        .limit(1)
+    )
     async with db_session.read_scope() as session:
         rule_id = (await session.execute(by_name)).scalar()
     if rule_id is not None:

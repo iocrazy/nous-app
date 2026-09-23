@@ -134,3 +134,38 @@ async def test_lost_race_reselects_the_winner(monkeypatch: pytest.MonkeyPatch) -
     assert s.selects == 2
     sql = s.insert_sql[0]
     assert "ON CONFLICT (name) WHERE created_by IS NULL DO NOTHING" in sql
+
+
+class _SqlSpySession(_Session):
+    """Records the compiled SQL of every SELECT so the predicate can be asserted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.selects: list[str] = []
+
+    async def execute(self, stmt: Any) -> _Result:
+        if not stmt.is_insert:
+            self.selects.append(str(stmt.compile(dialect=postgresql.dialect())))
+        return await super().execute(stmt)
+
+
+async def test_lookup_only_matches_system_anchor_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The partial UNIQUE index allows a user-created rule to share the anchor's
+    name; the lookup must therefore be scoped to ``created_by IS NULL`` on both
+    the fast path and the post-conflict re-select, or system history rows
+    would silently attach to an admin's rule and the anchor would never be
+    created."""
+    spy = _SqlSpySession()
+    monkeypatch.setattr(db_session, "read_scope", lambda: _CM(spy))
+    monkeypatch.setattr(db_session, "write_scope", lambda: _CM(spy))
+    await ensure_anchor_rule(
+        name="Scope denied (system)",
+        metric_type="scope_denied",
+        threshold=1,
+        is_active=False,
+    )
+    assert spy.selects, "expected at least one lookup"
+    for sql in spy.selects:
+        assert "created_by IS NULL" in sql, sql
