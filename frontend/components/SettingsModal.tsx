@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, GitBranch,
+  X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, GitBranch, Plug,
 } from 'lucide-react';
 import { fetchCookieStatuses, CookieStatus } from '../services/cookiesService';
 import { PersonalSettings } from './PersonalSettings';
@@ -12,7 +12,7 @@ import { VersionBadge } from './VersionBadge';
 
 declare const __APP_VERSION__: string;
 
-type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies' | 'workflow';
+type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'mcp' | 'docs' | 'cookies' | 'workflow';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -76,6 +76,7 @@ const APP_SETTINGS_SECTION: NavSection = {
     { id: 'tags', label: 'settings.nav.tags', icon: Tag },
     { id: 'workflow', label: 'settings.nav.workflow', icon: GitBranch },
     { id: 'ai', label: 'settings.nav.ai', icon: Sparkles },
+    { id: 'mcp', label: 'settings.nav.mcp', icon: Plug },
     { id: 'docs', label: 'settings.nav.docs', icon: FileText },
     { id: 'cookies', label: 'settings.nav.cookies', icon: Cookie },
   ],
@@ -91,6 +92,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   tags: 'settings.nav.tags',
   workflow: 'settings.nav.workflow',
   ai: 'settings.nav.ai',
+  mcp: 'settings.nav.mcp',
   docs: 'settings.nav.docs',
   cookies: 'settings.nav.cookies',
 };

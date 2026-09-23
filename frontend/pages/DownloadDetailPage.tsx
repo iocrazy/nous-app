@@ -8,7 +8,8 @@ import Loading from '../components/common/Loading';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { AudioHero } from '../components/AudioHero';
-import { VideoDetailPanel } from '../components/VideoDetailPanel';
+import { useLocation } from 'react-router-dom';
+import { VideoDetailPanel, type DetailSearchHit } from '../components/VideoDetailPanel';
 import { MobileAudioScreen } from '../components/MobileAudioScreen';
 import { ShareModal } from '../components/ShareModal';
 import { AudioStageIsland } from '../components/AudioStageIsland';
@@ -48,6 +49,8 @@ interface DownloadDetailPageProps {
 
 export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMediaId, preloaded }: DownloadDetailPageProps = {}) {
   const detail = useDownloadDetail({ propResourceId, propMediaId, preloaded });
+  // Opened from a My Downloads AI search → why it matched (Search Hit card).
+  const searchHit = (useLocation().state as { searchHit?: DetailSearchHit } | null)?.searchHit;
   const {
     video, isLoading, notFound, playerRef, currentTime,
     resourceId, resourceRating, resourceNotes, hlsUrl, authToken, mediaToken,
@@ -576,6 +579,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       onSeek={(seconds) => {
         if (playerRef.current) playerRef.current.currentTime = seconds;
       }}
+      searchHit={searchHit}
       sodaTheme={sodaTheme}
       compact={isMobile && isAudio}
       onClose={handleBack}

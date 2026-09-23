@@ -953,7 +953,28 @@
     "searchPlaceholder": "搜索标题、标签、备注...",
     "searchResultsCount": "搜索到 {{count}} 条结果",
     "searchResultsCountSingular": "搜索到 1 条结果",
-    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。"
+    "aiSearchIgnoresFilters": "AI 搜索按语义排序，不会应用你的筛选条件。",
+    "vectorSearch": {
+      "layer": "层",
+      "layerAll": "全部",
+      "sort": "排序",
+      "sortSimilarity": "相似度",
+      "sortDate": "日期",
+      "legs": {
+        "text": "文本",
+        "semantic": "语义",
+        "visual": "画面",
+        "camera": "镜头",
+        "transcript": "转录"
+      },
+      "badgeTitle": "标题",
+      "rerankOn": "重排已开",
+      "rerankOff": "重排未开",
+      "hitsLine": "{{count}} 条命中 · 每个视频取最佳匹配 · {{ms}} ms",
+      "hitsLineNoTime": "{{count}} 条命中 · 每个视频取最佳匹配",
+      "notBuilt": "未建立",
+      "arrivesWithPr3": "PR 3 提供"
+    }
   },
   "search": {
     "aiPlaceholder": "AI 搜索... ↵",
@@ -1054,7 +1075,54 @@
       "providers": "服务商",
       "localCli": "本地 CLI",
       "mcp": "MCP",
-      "memory": "记忆"
+      "memory": "记忆",
+      "vectors": "向量"
+    },
+    "vectors": {
+      "title": "向量空间",
+      "currentSpace": "当前空间",
+      "addSpace": "添加空间",
+      "addSpaceSoon": "空间切换上线后可用",
+      "provider": "模型",
+      "protocol": "协议",
+      "capabilities": "能力",
+      "dimensions": "维度",
+      "dimensionsValue": "{{dims}} · halfvec · HNSW",
+      "instruction": "指令",
+      "unconfigured": "尚未配置向量模型。请在 Admin → AI Models 中设置。",
+      "storeMissing": "向量存储尚未迁移（migration 494）。",
+      "statusUnavailable": "向量状态接口尚未上线",
+      "backfillDisabledHint": "请先配置向量模型",
+      "loading": "加载中…",
+      "loadFailed": "无法加载向量状态",
+      "layersTitle": "检索层",
+      "colLayer": "层",
+      "colStatus": "状态",
+      "colCoverage": "覆盖",
+      "colSource": "来源",
+      "colBackfill": "回填",
+      "layerSemantic": "语义",
+      "layerVisual": "视觉 · 帧",
+      "layerCamera": "镜头 · 片段",
+      "layerTranscript": "转录",
+      "statusOk": "正常",
+      "statusNotBuilt": "未构建",
+      "arrivesWithPr3": "PR 3 上线后可用",
+      "transcriptPhase2": "未构建 · 第二期",
+      "semanticSource": "标题 + 描述 + 标签 + 摘要 + 转录",
+      "dryRun": "预演",
+      "run20": "回填 20 条",
+      "lastBackfill": "最近一次回填",
+      "resultWouldEmbed": "将嵌入 {{count}} 条",
+      "resultWouldDispatch": "将派发 {{count}} 条",
+      "resultEmbedded": "已嵌入 {{count}} 条",
+      "resultDispatched": "已派发 {{count}} 条",
+      "resultSkipped": "跳过 {{count}} 条（{{reasons}}）",
+      "resultInFlight": "{{count}} 条进行中",
+      "resultRemaining": "剩余 {{count}} 条",
+      "errorEmbedderUnconfigured": "尚未配置向量模型。回填前请先在 Admin → AI Models 中设置。",
+      "errorStoreMissing": "向量存储尚未迁移，暂不能回填。",
+      "errorGeneric": "回填失败：{{message}}"
     },
     "localCli": {
       "modelHint": "用哪个 Codex 模型在服务商卡上设置：设置 → AI → 服务商 → Codex (Local CLI)。那里启用的模型就是 agent 和出图使用的。",
@@ -1118,7 +1186,8 @@
       "workflow": "工作流模板",
       "ai": "AI",
       "docs": "API 文档",
-      "cookies": "Cookies"
+      "cookies": "Cookies",
+      "mcp": "MCP"
     }
   },
   "points": {
@@ -6017,5 +6086,33 @@
     "citedInTitle": "被引用于",
     "citedInNoIssue": "一件没有编号的议题",
     "citedInHidden": "另有 {{n}} 条在你看不到的议题上"
+  },
+  "detail": {
+    "tabs": {
+      "overview": "概览",
+      "ai": "AI",
+      "shots": "镜头",
+      "review": "审阅",
+      "lyrics": "歌词"
+    },
+    "aiTabs": {
+      "transcript": "转录",
+      "summary": "摘要",
+      "visual": "画面"
+    },
+    "searchHit": {
+      "title": "搜索命中",
+      "playFrom": "从 {{time}} 播放",
+      "openShots": "打开镜头"
+    },
+    "shots": {
+      "placeholder": {
+        "title": "尚未建立镜头索引",
+        "estimate": "{{duration}} · 约 {{shots}} 个镜头 · 约 {{embeddings}} 条向量",
+        "index": "为此视频建立索引",
+        "arrives": "随 PR 3 上线",
+        "hint": "作为任务中心任务运行 · 可以继续浏览"
+      }
+    }
   }
 }

@@ -66,6 +66,10 @@ export interface FilterBarProps {
    *  platform or like counts). Undefined = no filtering (all chips
    *  visible). */
   allowedChips?: ReadonlyArray<ChipId>;
+  /** Extra controls mounted at the end of the chip row, after Clear all.
+   *  Used for search-only increments (vector search Layer / Sort / legs) so
+   *  they share this row instead of adding a toolbar of their own. */
+  trailing?: React.ReactNode;
 }
 
 type OpenTarget = { kind: 'chip'; id: ChipId } | { kind: 'config' } | null;
@@ -125,6 +129,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   allTags,
   availablePlatforms = [],
   allowedChips,
+  trailing,
 }) => {
   const { t } = useTranslation();
   const [openTarget, setOpenTarget] = useState<OpenTarget>(null);
@@ -431,6 +436,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </span>
         </button>
       )}
+
+      {trailing}
     </div>
   );
 };

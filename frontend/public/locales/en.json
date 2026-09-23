@@ -953,7 +953,28 @@
     "searchPlaceholder": "Search title, tags, notes...",
     "searchResultsCount": "Found {{count}} matching items",
     "searchResultsCountSingular": "Found 1 matching item",
-    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters."
+    "aiSearchIgnoresFilters": "AI Search ranks by meaning and does not apply your filters.",
+    "vectorSearch": {
+      "layer": "Layer",
+      "layerAll": "All",
+      "sort": "Sort",
+      "sortSimilarity": "Similarity",
+      "sortDate": "Date",
+      "legs": {
+        "text": "Text",
+        "semantic": "Semantic",
+        "visual": "Visual",
+        "camera": "Camera",
+        "transcript": "Transcript"
+      },
+      "badgeTitle": "Title",
+      "rerankOn": "Rerank On",
+      "rerankOff": "Rerank Off",
+      "hitsLine": "{{count}} hits · best match per video · {{ms}} ms",
+      "hitsLineNoTime": "{{count}} hits · best match per video",
+      "notBuilt": "Not built",
+      "arrivesWithPr3": "Arrives with PR 3"
+    }
   },
   "search": {
     "aiPlaceholder": "AI search... ↵",
@@ -1054,7 +1075,54 @@
       "providers": "Providers",
       "localCli": "Local CLI",
       "mcp": "MCP",
-      "memory": "Memory"
+      "memory": "Memory",
+      "vectors": "Vectors"
+    },
+    "vectors": {
+      "title": "Vector Spaces",
+      "currentSpace": "Current Space",
+      "addSpace": "Add Space",
+      "addSpaceSoon": "Arrives with space switching",
+      "provider": "Provider",
+      "protocol": "Protocol",
+      "capabilities": "Capabilities",
+      "dimensions": "Dimensions",
+      "dimensionsValue": "{{dims}} · halfvec · HNSW",
+      "instruction": "Instruction",
+      "unconfigured": "No embedding model configured. Set one in Admin → AI Models.",
+      "storeMissing": "Vector store not migrated yet (migration 494).",
+      "statusUnavailable": "Vector status endpoint not available yet",
+      "backfillDisabledHint": "Configure an embedding model first",
+      "loading": "Loading…",
+      "loadFailed": "Could not load vector status",
+      "layersTitle": "Retrieval Layers",
+      "colLayer": "Layer",
+      "colStatus": "Status",
+      "colCoverage": "Coverage",
+      "colSource": "Source",
+      "colBackfill": "Backfill",
+      "layerSemantic": "Semantic",
+      "layerVisual": "Visual · Frame",
+      "layerCamera": "Camera · Clip",
+      "layerTranscript": "Transcript",
+      "statusOk": "OK",
+      "statusNotBuilt": "Not Built",
+      "arrivesWithPr3": "Arrives with PR 3",
+      "transcriptPhase2": "Not built · Phase 2",
+      "semanticSource": "title + description + tags + summary + transcript",
+      "dryRun": "Dry Run",
+      "run20": "Run 20",
+      "lastBackfill": "Last Backfill",
+      "resultWouldEmbed": "{{count}} would be embedded",
+      "resultWouldDispatch": "{{count}} would be dispatched",
+      "resultEmbedded": "{{count}} embedded",
+      "resultDispatched": "{{count}} dispatched",
+      "resultSkipped": "{{count}} skipped ({{reasons}})",
+      "resultInFlight": "{{count}} in flight",
+      "resultRemaining": "{{count}} remaining",
+      "errorEmbedderUnconfigured": "No embedding model configured. Set one in Admin → AI Models before backfilling.",
+      "errorStoreMissing": "Vector store not migrated yet. Backfill is unavailable.",
+      "errorGeneric": "Backfill failed: {{message}}"
     },
     "localCli": {
       "modelHint": "Which Codex model runs is set on the provider card: Settings → AI → Providers → Codex (Local CLI). Its enabled models are what agents and image generation use.",
@@ -1118,7 +1186,8 @@
       "workflow": "Workflow Templates",
       "ai": "AI",
       "docs": "API Docs",
-      "cookies": "Cookies"
+      "cookies": "Cookies",
+      "mcp": "MCP"
     }
   },
   "points": {
@@ -6017,5 +6086,33 @@
     "citedInTitle": "Referenced in",
     "citedInNoIssue": "An issue with no key",
     "citedInHidden": "{{n}} hidden — on issues you cannot see"
+  },
+  "detail": {
+    "tabs": {
+      "overview": "Overview",
+      "ai": "AI",
+      "shots": "Shots",
+      "review": "Review",
+      "lyrics": "Lyrics"
+    },
+    "aiTabs": {
+      "transcript": "Transcript",
+      "summary": "Summary",
+      "visual": "Visual"
+    },
+    "searchHit": {
+      "title": "Search Hit",
+      "playFrom": "Play From {{time}}",
+      "openShots": "Open Shots"
+    },
+    "shots": {
+      "placeholder": {
+        "title": "Not Indexed Yet",
+        "estimate": "{{duration}} · ≈ {{shots}} shots · ≈ {{embeddings}} embeddings",
+        "index": "Index This Video",
+        "arrives": "Arrives with PR 3",
+        "hint": "Runs as a Task Center task · you can keep browsing"
+      }
+    }
   }
 }

@@ -2,15 +2,16 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, BookOpen, ScanEye, Eye, Loader2, Copy, Download, Check,
   Clock, Tag, ChevronRight, Brain, List, AlignLeft, ChevronDown, Music,
-  PanelRightClose,
+  PanelRightClose, Clapperboard, Search, Play,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import Loading from './common/Loading';
 import { MediaCard } from './MediaCard';
 import SodaLyricsTab from './SodaLyricsTab';
 import { SpeakerChip } from './SpeakerChip';
 import type { SodaTheme } from '../utils/sodaTheme';
-import { isAudioType } from '../utils/awemeType';
+import { isAudioType, isVideoType } from '../utils/awemeType';
 import {
   triggerTranscription, triggerTranscriptionByResource,
   getTranscript, getTranscriptByResource,
@@ -23,6 +24,14 @@ import {
 import type { VisualAnalysisData } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
 import { TaskErrorNotice } from './TaskErrorNotice';
+import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
+import { AiSubTabs, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
+import { hitLayerLabel } from './DownloadsView/SearchLegsChips';
+import type { SearchHit } from '../services/searchService';
+
+/** Why this item matched the search the user opened it from. `startMs` is
+ *  the matched shot's start — absent until shot indexing (PR 3). */
+export type DetailSearchHit = SearchHit & { startMs?: number };
 
 interface VideoDetailPanelProps {
   video: Video;
@@ -77,9 +86,18 @@ interface VideoDetailPanelProps {
   island?: boolean;
   /** Called by the in-island collapse button (island mode only). */
   onCollapse?: () => void;
+  /** The search hit this item was opened from (My Downloads AI search).
+   *  Renders the "Search Hit" card at the top of Overview. */
+  searchHit?: DetailSearchHit;
 }
 
-type TabKey = 'overview' | 'transcript' | 'analysis' | 'lyrics';
+type TabKey = 'overview' | 'ai' | 'shots' | 'lyrics';
+
+/** m:ss for the Search Hit card's "Play From" button. */
+const formatClock = (ms: number): string => {
+  const whole = Math.floor(ms / 1000);
+  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, '0')}`;
+};
 
 // Format seconds to MM:SS
 const formatTimestamp = (seconds: number): string => {
@@ -141,7 +159,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   compact = false,
   island = false,
   onCollapse,
+  searchHit,
 }) => {
+  const { t } = useTranslation();
   // Island redesign: align neutral text/border to the mock --content/--line ladder.
   // Classic (island=false) keeps the exact original ink classes for D12 byte-identical render.
   const cText200 = island ? 'text-content' : 'text-ink-200';
@@ -159,6 +179,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const cHoverSurf7 = island ? 'hover:bg-island-2' : 'hover:bg-ink-700';
 
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [aiSubTab, setAiSubTab] = useState<AiSubTab>('transcript');
   const [transcript, setTranscript] = useState<TranscriptData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysisData | null>(null);
@@ -182,16 +203,18 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
   // Load existing transcript/summary when tab changes — always try to load
   useEffect(() => {
-    if (activeTab === 'transcript' && !transcript && !transcriptLoading) {
+    if (activeTab !== 'ai') return;
+    if (aiSubTab === 'transcript' && !transcript && !transcriptLoading) {
       loadTranscript();
     }
-    if (activeTab === 'analysis' && !summary && !summaryLoading) {
+    // Summary and Visual used to share one tab and load together; keep that.
+    if (aiSubTab !== 'transcript' && !summary && !summaryLoading) {
       loadSummary();
     }
-    if (activeTab === 'analysis' && !visualAnalysis && !visualAnalysisFetching) {
+    if (aiSubTab !== 'transcript' && !visualAnalysis && !visualAnalysisFetching) {
       loadVisualAnalysis();
     }
-  }, [activeTab]);
+  }, [activeTab, aiSubTab]);
 
   const loadTranscript = useCallback(async () => {
     try {
@@ -467,27 +490,30 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   };
 
   const isAudio = isAudioType(video.media_type);
+  // Shots are cut from a video timeline — albums / images have none (same rule
+  // as ResourceInspectorTabs' `visibleInspectorTabs`).
+  const isVideo = isVideoType(video.media_type);
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-    { key: 'overview', label: 'Overview', icon: <Eye size={16} /> },
-    { key: 'transcript', label: 'Transcript', icon: <FileText size={16} /> },
-    { key: 'analysis', label: 'Analysis', icon: <ScanEye size={16} /> },
-    { key: 'lyrics', label: 'Lyrics', icon: <Music size={16} /> },
+    { key: 'overview', label: t('detail.tabs.overview', 'Overview'), icon: <Eye size={16} /> },
+    { key: 'ai', label: t('detail.tabs.ai', 'AI'), icon: <Brain size={16} /> },
+    { key: 'shots', label: t('detail.tabs.shots', 'Shots'), icon: <Clapperboard size={16} /> },
+    { key: 'lyrics', label: t('detail.tabs.lyrics', 'Lyrics'), icon: <Music size={16} /> },
   ];
 
-  // Audio items show only Overview + Lyrics (no transcript / analysis).
-  // Non-audio items keep the original tabs and never show a Lyrics tab.
+  // Audio items show only Overview + Lyrics (no AI / shots).
+  // Non-audio items never show a Lyrics tab; only videos show Shots.
   const visibleTabs = isAudio
     ? tabs.filter((t) => t.key === 'overview' || t.key === 'lyrics')
-    : tabs.filter((t) => t.key !== 'lyrics');
+    : tabs.filter((t) => t.key !== 'lyrics' && (t.key !== 'shots' || isVideo));
 
   // Guard: if the active tab is no longer visible (e.g. switching to an audio
-  // item while on 'transcript'), fall back to 'overview' so nothing renders blank.
+  // item while on 'ai'), fall back to 'overview' so nothing renders blank.
   useEffect(() => {
     if (!visibleTabs.some((t) => t.key === activeTab)) {
       setActiveTab('overview');
     }
-  }, [isAudio]);
+  }, [isAudio, isVideo]);
 
   const getStatusIndicator = (status?: string) => {
     switch (status) {
@@ -505,17 +531,16 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   return (
     <div className={island ? 'h-full flex flex-col min-h-0' : 'flex flex-col h-full'}>
       {/* Tab Navigation */}
-      <div className={`flex border-b ${cBorder800} mb-4 shrink-0`}>
+      <div data-testid="detail-tabs" className={`flex border-b ${cBorder800} mb-4 shrink-0`}>
         {visibleTabs.map((tab) => {
-          const status = tab.key === 'transcript'
-            ? video.transcript_status
-            : tab.key === 'analysis'
-            ? video.summary_status
+          const status = tab.key === 'ai'
+            ? busiestStatus(video.transcript_status, video.summary_status, video.visual_analysis_status)
             : undefined;
 
           return (
             <button
               key={tab.key}
+              data-tab={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === tab.key
@@ -543,6 +568,46 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        {/* Search Hit — why this item matched the search it was opened from */}
+        {activeTab === 'overview' && searchHit && (
+          <div
+            data-testid="search-hit-card"
+            className="mx-4 sm:mx-6 mb-3 border border-accent/30 bg-accent-soft rounded p-2 space-y-1.5"
+          >
+            <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent-text)]">
+              <Search size={12} />
+              {t('detail.searchHit.title', 'Search Hit')}
+            </div>
+            <div className={`text-xs ${cText300}`}>
+              {`${hitLayerLabel(searchHit.layer, t)} · ${searchHit.score.toFixed(2)}`}
+            </div>
+            <div className="flex items-center gap-2">
+              {searchHit.startMs != null && onSeek && (
+                <button
+                  type="button"
+                  onClick={() => onSeek(searchHit.startMs! / 1000)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-[var(--accent-text)] border border-accent/30 hover:bg-island"
+                >
+                  <Play size={10} />
+                  {t('detail.searchHit.playFrom', 'Play From {{time}}', {
+                    time: formatClock(searchHit.startMs),
+                  })}
+                </button>
+              )}
+              {isVideo && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('shots')}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-[var(--accent-text)] border border-accent/30 hover:bg-island"
+                >
+                  <Clapperboard size={10} />
+                  {t('detail.searchHit.openShots', 'Open Shots')}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <MediaCard
@@ -573,8 +638,22 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
           </div>
         )}
 
-        {/* Transcript Tab */}
-        {activeTab === 'transcript' && (
+        {/* AI Tab — Transcript / Summary / Visual sub tabs */}
+        {activeTab === 'ai' && (
+          <AiSubTabs
+            className="px-4 sm:px-6 pb-1"
+            active={aiSubTab}
+            onChange={setAiSubTab}
+          />
+        )}
+
+        {/* Shots Tab — not indexed yet (shot indexing arrives with PR 3) */}
+        {activeTab === 'shots' && (
+          <ShotsTabPlaceholder durationSeconds={video.duration ? Number(video.duration) : undefined} />
+        )}
+
+        {/* AI → Transcript */}
+        {activeTab === 'ai' && aiSubTab === 'transcript' && (
           /* `p-4 sm:p-6` mirrors what `MediaCard` brings to the Overview tab.
              The padding lives on each tab rather than on the shared scroller
              because Overview's card supplies its own — one on the wrapper
@@ -835,10 +914,11 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
           </div>
         )}
 
-        {/* Analysis Tab */}
-        {activeTab === 'analysis' && (
+        {/* AI → Summary / Visual */}
+        {activeTab === 'ai' && aiSubTab !== 'transcript' && (
           <div className="space-y-6 p-4 sm:p-6 animate-in fade-in duration-300">
             {/* Summary Section */}
+            {aiSubTab === 'summary' && (
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
@@ -962,8 +1042,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
               )}
             </section>
+            )}
 
             {/* Visual Analysis Section */}
+            {aiSubTab === 'visual' && (
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-purple-500/10 rounded-lg text-purple-400">
@@ -1086,6 +1168,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </div>
               )}
             </section>
+            )}
           </div>
         )}
       </div>
