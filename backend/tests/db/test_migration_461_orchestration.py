@@ -104,8 +104,8 @@ def test_461_frees_cron_disables_dead_task_types_and_drops_agent_tasks():
     ), "migrations must not SET ROLE (see CLAUDE.md)"
 
 
-def test_inbox_kind_orm_literal_matches_the_migration_exactly():
-    """Nothing else binds these two lists: schema-drift compares columns, not
-    CHECK bodies, and the transcript mirror test only guards the other table.
-    Either side gaining or losing a kind is drift."""
-    assert _literals(_orm_inbox_kind_sql()) == _array(1)
+def test_inbox_kind_orm_literal_keeps_every_461_kind():
+    """The exact ORM == migration comparison moved to the LATEST migration that
+    re-declares this CHECK (492, ``test_migration_492_agent_video_async``).
+    Here only the 461 half is pinned: no later edit may drop one of its kinds."""
+    assert _array(1) <= _literals(_orm_inbox_kind_sql())
