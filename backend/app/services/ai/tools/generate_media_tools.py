@@ -24,6 +24,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.services.ai.media.gen_attribution import resolved_attribution
+from app.services.ai.media.image_generation_service import LocalVideoUnsupportedError
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
@@ -245,6 +246,16 @@ class GenerateMediaTools:
                 }
             finally:
                 _reap_if_local(produced)
+        except LocalVideoUnsupportedError as exc:
+            # Typed, user-visible: the picked video model runs on the user's
+            # own machine, which this tool cannot wait on (see the error's
+            # docstring). Not a crash, and not a silent server fallback.
+            logger.warning("[genmedia] GenerateVideo refused: {}", exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_code": exc.code,
+            }
         except Exception as exc:  # noqa: BLE001
             logger.opt(exception=True).warning(
                 "[genmedia] GenerateVideo failed: {}", exc

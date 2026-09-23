@@ -14,7 +14,59 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.media.image_generation_service import ImageGenerationService
+from app.services.ai.media.image_generation_service import (
+    ImageGenerationService,
+    LocalVideoUnsupportedError,
+)
+from app.services.media.parsers.video_providers.db_registry import (
+    LocalVideoRoute,
+    ServerVideoRoute,
+)
+
+_ROUTE_TARGET = (
+    "app.services.media.parsers.video_providers.db_registry.resolve_video_route"
+)
+
+
+def _server_route(provider, actual_model: str) -> AsyncMock:
+    return AsyncMock(
+        return_value=ServerVideoRoute(
+            provider=provider, actual_model=actual_model, row_name="row"
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_local_pick_is_refused_with_a_typed_error_not_run_on_the_server():
+    """The pick decides whose machine; the agent tool cannot wait on the
+    user's daemon (see ``LocalVideoUnsupportedError``), so a local pick is a
+    typed refusal - and no server provider is built or called for it."""
+    service = ImageGenerationService()
+    with (
+        patch(
+            "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
+            side_effect=KeyError("empty registry"),
+        ),
+        patch(
+            _ROUTE_TARGET,
+            new=AsyncMock(
+                return_value=LocalVideoRoute(
+                    engine="dreamina",
+                    engine_model="seedance2.0",
+                    row_name="jimeng-local-video",
+                )
+            ),
+        ),
+    ):
+        with pytest.raises(LocalVideoUnsupportedError, match="jimeng-local-video"):
+            await service.generate_video(
+                project_id="p1",
+                node_id="n1",
+                source_image_url="/api/v1/generated-media/42/cover",
+                prompt="animate it",
+                provider_name="",
+                model="",
+            )
 
 
 def _cli_result(local_path: str = "/tmp/jimeng_x/clip.mp4"):
@@ -41,10 +93,7 @@ async def test_video_falls_back_to_db_catalog_on_empty_registry():
             "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
             side_effect=KeyError("empty registry"),
         ),
-        patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
-        ),
+        patch(_ROUTE_TARGET, new=_server_route(provider, "seedance2.0fast")),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/42/media.png"),
@@ -79,10 +128,7 @@ async def test_video_fallback_unbridgeable_source_runs_text2video():
             "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
             side_effect=KeyError("empty registry"),
         ),
-        patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
-        ),
+        patch(_ROUTE_TARGET, new=_server_route(provider, "seedance2.0fast")),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm(None),
