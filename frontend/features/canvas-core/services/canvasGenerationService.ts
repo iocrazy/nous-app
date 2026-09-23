@@ -262,15 +262,49 @@ export async function dispatchTimelineRun(
   return taskId;
 }
 
-/** IC 放大: jimeng image_upscale on a durable generation → new gen url. */
+/** Typed 5xx bodies the upscale route emits under `details` (the backend
+ * passes them through the 5xx scrub via TYPED_5XX_CODES). */
+type UpscaleFailureDetails =
+  | {
+      code: 'upscale_backend_failed';
+      provider: string | null;
+      upstream_status: number | null;
+      upstream_code: string | null;
+    }
+  | { code: 'upscale_unavailable'; reason: string };
+
+/** Turn a typed upscale refusal into a message that names the cause — "key
+ * not authorised" (model_not_found), quota, and engine-not-ready need
+ * different fixes. Anything untyped keeps the original error. */
+function upscaleError(err: unknown): unknown {
+  if (!(err instanceof ApiError)) return err;
+  const details = err.details as Partial<UpscaleFailureDetails> | null | undefined;
+  if (details?.code === 'upscale_backend_failed') {
+    const d = details as Extract<UpscaleFailureDetails, { code: 'upscale_backend_failed' }>;
+    const cause = d.upstream_code ?? `HTTP ${d.upstream_status ?? err.status}`;
+    return new Error(`${d.provider ?? 'upscale backend'}: ${cause}`);
+  }
+  if (details?.code === 'upscale_unavailable') {
+    return new Error('no upscale backend enabled');
+  }
+  return err;
+}
+
+/** IC 放大: super-resolve a durable generation (nous-engine first, dreamina
+ * CLI fallback — chosen server-side) → new gen url. */
 export async function upscaleGeneration(
   genId: string,
   resolution: '2k' | '4k' = '2k',
 ): Promise<{ id: string; url: string }> {
-  const res = await apiFetch(`/api/v1/generated-media/${genId}/upscale`, {
-    method: 'POST',
-    json: { resolution },
-  });
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/v1/generated-media/${genId}/upscale`, {
+      method: 'POST',
+      json: { resolution },
+    });
+  } catch (err) {
+    throw upscaleError(err);
+  }
   const body = (await res.json()) as { data?: { id: string; url: string } };
   if (!body.data?.url) throw new Error('upscale returned no url');
   return body.data;

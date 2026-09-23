@@ -1,6 +1,6 @@
 """回收 CLI 类 provider 写产物的临时目录（H1）。
 
-CLI provider（jimeng-cli / codex）不返回 URL，而是把文件写进自己
+CLI provider（jimeng-cli / codex）与 nous-engine 放大桥不返回 URL，而是把文件写进自己
 ``tempfile.mkdtemp(prefix=…)`` 出来的临时目录再把路径交回来。Tier-1
 ``register_generated_media(source_path=…)`` 把它拷进存储之后，那个目录就没人
 要了——不收的话 worker 的 /tmp 会无界增长。
@@ -19,7 +19,9 @@ import shutil
 #   jimeng-cli → tempfile.mkdtemp(prefix="jimeng_")
 #   codex CLI  → tempfile.mkdtemp(prefix="codeximg_")
 #     (services/media/parsers/video_providers/codex_cli.py)
-SCRATCH_DIR_PREFIXES: tuple[str, ...] = ("jimeng_", "codeximg_")
+#   nous-engine → tempfile.mkdtemp(prefix="nousimg_")
+#     (services/media/parsers/video_providers/nous_images.py)
+SCRATCH_DIR_PREFIXES: tuple[str, ...] = ("jimeng_", "codeximg_", "nousimg_")
 
 
 def reap_scratch_dir(local_path: str) -> None:

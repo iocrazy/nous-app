@@ -411,6 +411,10 @@ def test_every_generation_protocol_declares_whether_it_is_http_probeable() -> No
         # Shells out to the gpt-image-2-skill CLI (the API sits behind it) —
         # still a subprocess, so still nothing this process could dial.
         "openai-images": False,
+        # nous-engine image rows are upscalers: a probe would burn GPU minutes
+        # and needs an input image it does not have. /v1/models?type=image is
+        # the authorisation probe instead (runbook nous-engine-image-bridge).
+        "nous": False,
     }
     actual = {
         p.key: p.supports_http_image_probe

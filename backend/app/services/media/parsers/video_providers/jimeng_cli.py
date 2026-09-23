@@ -30,21 +30,12 @@ import asyncio
 import json
 import os
 import tempfile
-from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
-
-
-@dataclass
-class GenResult:
-    """A produced media file on the local filesystem."""
-
-    local_path: str
-    mime: str
-    raw: dict = field(default_factory=dict)
+from app.services.media.parsers.video_providers.base import GenResult
 
 
 def build_image_args(
