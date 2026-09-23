@@ -826,7 +826,7 @@ async def test_codex_daemon_branch_sends_ratio_model_quality_not_size_only():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),
@@ -950,7 +950,7 @@ async def test_dreamina_daemon_video_frames_mode_uses_first_and_last_placeholder
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
         ),
     ):
@@ -1008,7 +1008,7 @@ async def test_dreamina_daemon_video_multimodal_mode_hands_over_every_ref():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
         ),
     ):
@@ -1071,7 +1071,7 @@ async def test_dreamina_daemon_video_mode_dropped_when_provider_lacks_it():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(return_value=caps),
         ),
     ):
@@ -1243,7 +1243,7 @@ async def test_dreamina_daemon_image_refs_are_dropped_and_named_not_sent_dead():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
         ),
     ):

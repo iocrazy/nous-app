@@ -259,7 +259,7 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),
@@ -432,7 +432,7 @@ async def test_the_daemon_ticket_carries_a_verified_source_asset_id():
             new=fake_source_asset,
         ),
         patch(
-            "app.workflows.canvas_generation._capabilities_for",
+            "app.services.generation.local_dispatch.capabilities_for",
             new=AsyncMock(
                 return_value=ProviderCapabilities(
                     ratios=frozenset({"16:9"}),

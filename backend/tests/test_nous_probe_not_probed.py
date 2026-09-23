@@ -271,7 +271,7 @@ def test_local_engine_providers_membership_is_pinned() -> None:
 
     NOTE: sibling copies of this literal live in
     ``nous_model_repository.list_enabled`` (the picker's ``is_local`` flag)
-    and ``workflows/canvas_generation._LOCAL_ENGINES``. They are not imported
+    and ``services/generation/local_dispatch.LOCAL_ENGINES``. They are not imported
     from here yet — see the task report's follow-up item.
     """
     assert LOCAL_ENGINE_PROVIDERS == frozenset({"codex-local", "jimeng-local"})

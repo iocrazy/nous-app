@@ -12,7 +12,7 @@ class JimengLocalProtocol(ProviderProtocol):
     nous-codex daemon driving the dreamina CLI.
 
     ``jimeng-local`` has been a live ``nous_models.actual_provider`` value
-    all along (``canvas_generation._LOCAL_ENGINES`` routes it to the daemon),
+    all along (``local_dispatch.LOCAL_ENGINES`` routes it to the daemon),
     but no protocol declared it — so it resolved to None and had no place to
     hang its capabilities.
 
