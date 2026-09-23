@@ -78,17 +78,38 @@ export const LEGACY_LOCAL_PREFIXES: ReadonlyArray<readonly [string, string]> = [
   ['mediahub:todolist:attention', TODOLIST_ATTENTION_PREFIX],
 ];
 
-/** Move one key. A new value that already exists always wins. The old key is
- *  removed only after the new one is known to hold a value, so a failed write
- *  (quota) never destroys the only surviving copy. */
-function moveKey(storage: Storage, oldKey: string, newKey: string): void {
+/** Set in each storage once every legacy value has been copied. The copy runs
+ *  only while it is absent: the legacy keys are deliberately kept this release
+ *  (see below), so without the marker every boot would copy them again and
+ *  resurrect values the app removed on purpose — an invalid selected team
+ *  dropped by `useTeams`, or the one-shot `auth_expired` flag LoginPage consumes. */
+export const MIGRATION_MARKER_KEY = 'nous_storage_keys_migrated_v1';
+
+type StorageTargets = { local?: Storage | null; session?: Storage | null };
+
+/** Copy one key. An existing new value always wins; the old key is left in
+ *  place. Returns false only when the copy was needed and failed (quota). */
+function copyKey(storage: Storage, oldKey: string, newKey: string): boolean {
   try {
     const oldValue = storage.getItem(oldKey);
-    if (oldValue === null) return;
-    if (storage.getItem(newKey) === null) storage.setItem(newKey, oldValue);
-    storage.removeItem(oldKey);
+    if (oldValue !== null && storage.getItem(newKey) === null) {
+      storage.setItem(newKey, oldValue);
+    }
+    return true;
   } catch (err) {
-    console.error(`[storageKeys] failed to migrate "${oldKey}" → "${newKey}"`, err);
+    console.error(`[storageKeys] failed to copy "${oldKey}" → "${newKey}"`, err);
+    return false;
+  }
+}
+
+/** Remove the old key, but only if its value is safely held under the new key. */
+function removeLegacyKey(storage: Storage, oldKey: string, newKey: string): void {
+  try {
+    if (storage.getItem(oldKey) !== null && storage.getItem(newKey) !== null) {
+      storage.removeItem(oldKey);
+    }
+  } catch (err) {
+    console.error(`[storageKeys] failed to purge "${oldKey}"`, err);
   }
 }
 
@@ -101,26 +122,50 @@ function listKeys(storage: Storage): string[] {
   return keys;
 }
 
+/** Every (old, new) pair present in this storage: the exact map plus whatever
+ *  prefixed keys exist. Null when the storage cannot be enumerated. */
+function legacyPairs(
+  storage: Storage,
+  exact: Readonly<Record<string, string>>,
+  prefixes: ReadonlyArray<readonly [string, string]>,
+): Array<readonly [string, string]> | null {
+  const pairs: Array<readonly [string, string]> = Object.entries(exact);
+  if (prefixes.length === 0) return pairs;
+  let keys: string[];
+  try {
+    keys = listKeys(storage);
+  } catch (err) {
+    console.error('[storageKeys] failed to enumerate storage for prefix keys', err);
+    return null;
+  }
+  for (const key of keys) {
+    const hit = prefixes.find(([oldPrefix]) => key.startsWith(oldPrefix));
+    if (hit) pairs.push([key, hit[1] + key.slice(hit[0].length)]);
+  }
+  return pairs;
+}
+
 function migrateStorage(
   storage: Storage,
   exact: Readonly<Record<string, string>>,
   prefixes: ReadonlyArray<readonly [string, string]>,
 ): void {
-  for (const [oldKey, newKey] of Object.entries(exact)) moveKey(storage, oldKey, newKey);
-  if (prefixes.length === 0) return;
-  let keys: string[];
   try {
-    keys = listKeys(storage);
+    if (storage.getItem(MIGRATION_MARKER_KEY) !== null) return;
   } catch (err) {
-    console.error('[storageKeys] failed to enumerate storage for prefix migration', err);
+    console.error('[storageKeys] failed to read migration marker', err);
     return;
   }
-  for (const key of keys) {
-    for (const [oldPrefix, newPrefix] of prefixes) {
-      if (key.startsWith(oldPrefix)) {
-        moveKey(storage, key, newPrefix + key.slice(oldPrefix.length));
-        break;
-      }
+  const pairs = legacyPairs(storage, exact, prefixes);
+  if (pairs === null) return;
+  // Copy everything (no short-circuit), then mark done only if nothing failed,
+  // so a quota failure is retried on the next boot instead of being lost.
+  const results = pairs.map(([oldKey, newKey]) => copyKey(storage, oldKey, newKey));
+  if (results.every(Boolean)) {
+    try {
+      storage.setItem(MIGRATION_MARKER_KEY, '1');
+    } catch (err) {
+      console.error('[storageKeys] failed to write migration marker', err);
     }
   }
 }
@@ -135,17 +180,55 @@ function resolveStorage(pick: () => Storage): Storage | null {
   }
 }
 
-/** Move every `mediahub*` key to its `nous*` name. Synchronous, idempotent,
- *  never overwrites a new value, never throws. Must run before any reader. */
-export function migrateLegacyStorageKeys(
-  storages: { local?: Storage | null; session?: Storage | null } = {},
-): void {
+function resolveTargets(storages: StorageTargets): {
+  local: Storage | null;
+  session: Storage | null;
+} {
+  return {
+    local: storages.local ?? resolveStorage(() => window.localStorage),
+    session: storages.session ?? resolveStorage(() => window.sessionStorage),
+  };
+}
+
+/** Copy every `mediahub*` key to its `nous*` name. Runs once per storage
+ *  (guarded by MIGRATION_MARKER_KEY), never overwrites a new value, never
+ *  throws. Must run before any reader.
+ *
+ *  The legacy keys are deliberately KEPT: if this frontend is rolled back, the
+ *  previous build still finds the team selection, API key, theme, etc. under
+ *  their old names instead of logging people out of their team context. */
+export function migrateLegacyStorageKeys(storages: StorageTargets = {}): void {
   try {
-    const local = storages.local ?? resolveStorage(() => window.localStorage);
-    const session = storages.session ?? resolveStorage(() => window.sessionStorage);
+    const { local, session } = resolveTargets(storages);
     if (local) migrateStorage(local, LEGACY_LOCAL_KEYS, LEGACY_LOCAL_PREFIXES);
     if (session) migrateStorage(session, LEGACY_SESSION_KEYS, []);
   } catch (err) {
     console.error('[storageKeys] legacy key migration failed', err);
+  }
+}
+
+/** Delete the legacy `mediahub*` keys — each one only when its `nous*`
+ *  counterpart holds a value, so nothing whose copy failed is ever lost.
+ *
+ *  ⚠️ INTENTIONALLY NOT CALLED YET. Wire it in a follow-up release, once the
+ *  release that introduced `migrateLegacyStorageKeys` has shipped and will not
+ *  be rolled back: add `purgeLegacyStorageKeys();` after the migrate call in
+ *  `storageKeysBoot.ts` (a one-line change). */
+export function purgeLegacyStorageKeys(storages: StorageTargets = {}): void {
+  try {
+    const { local, session } = resolveTargets(storages);
+    const run = (
+      storage: Storage,
+      exact: Readonly<Record<string, string>>,
+      prefixes: ReadonlyArray<readonly [string, string]>,
+    ): void => {
+      const pairs = legacyPairs(storage, exact, prefixes);
+      if (pairs === null) return;
+      for (const [oldKey, newKey] of pairs) removeLegacyKey(storage, oldKey, newKey);
+    };
+    if (local) run(local, LEGACY_LOCAL_KEYS, LEGACY_LOCAL_PREFIXES);
+    if (session) run(session, LEGACY_SESSION_KEYS, []);
+  } catch (err) {
+    console.error('[storageKeys] legacy key purge failed', err);
   }
 }

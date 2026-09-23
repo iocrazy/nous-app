@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LEGACY_LOCAL_KEYS,
   LEGACY_SESSION_KEYS,
+  MIGRATION_MARKER_KEY,
   STORAGE_KEYS,
   SESSION_KEYS,
   migrateLegacyStorageKeys,
   projectEpisodeKey,
+  purgeLegacyStorageKeys,
   TODOLIST_ATTENTION_PREFIX,
   TODOLIST_COLUMNS_PREFIX,
 } from './storageKeys';
@@ -23,26 +25,46 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('migrateLegacyStorageKeys', () => {
-  it('moves every exact legacy localStorage key to its new name', () => {
+const brokenStorage = (): Storage =>
+  ({
+    get length(): number {
+      throw new Error('SecurityError');
+    },
+    key: () => {
+      throw new Error('SecurityError');
+    },
+    getItem: () => {
+      throw new Error('SecurityError');
+    },
+    setItem: () => {
+      throw new Error('SecurityError');
+    },
+    removeItem: () => {
+      throw new Error('SecurityError');
+    },
+    clear: () => {},
+  }) as unknown as Storage;
+
+describe('migrateLegacyStorageKeys (copy-only release)', () => {
+  it('copies every exact legacy localStorage key and KEEPS the old one (rollback safety)', () => {
     for (const oldKey of Object.keys(LEGACY_LOCAL_KEYS)) {
       localStorage.setItem(oldKey, `v:${oldKey}`);
     }
     migrateLegacyStorageKeys();
     for (const [oldKey, newKey] of Object.entries(LEGACY_LOCAL_KEYS)) {
       expect(localStorage.getItem(newKey)).toBe(`v:${oldKey}`);
-      expect(localStorage.getItem(oldKey)).toBeNull();
+      expect(localStorage.getItem(oldKey)).toBe(`v:${oldKey}`);
     }
   });
 
-  it('moves the sessionStorage keys too', () => {
+  it('copies the sessionStorage keys too, keeping the old ones', () => {
     for (const oldKey of Object.keys(LEGACY_SESSION_KEYS)) {
       sessionStorage.setItem(oldKey, '1');
     }
     migrateLegacyStorageKeys();
     for (const [oldKey, newKey] of Object.entries(LEGACY_SESSION_KEYS)) {
       expect(sessionStorage.getItem(newKey)).toBe('1');
-      expect(sessionStorage.getItem(oldKey)).toBeNull();
+      expect(sessionStorage.getItem(oldKey)).toBe('1');
     }
   });
 
@@ -61,18 +83,32 @@ describe('migrateLegacyStorageKeys', () => {
     localStorage.setItem(STORAGE_KEYS.selectedTeam, 'new-team');
     migrateLegacyStorageKeys();
     expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBe('new-team');
-    expect(localStorage.getItem('mediahub_selected_team')).toBeNull();
+    expect(localStorage.getItem('mediahub_selected_team')).toBe('old-team');
   });
 
   it('is idempotent', () => {
     localStorage.setItem('mediahub.theme', 'light');
     migrateLegacyStorageKeys();
+    const snapshot = JSON.stringify({ ...localStorage });
     migrateLegacyStorageKeys();
+    expect(JSON.stringify({ ...localStorage })).toBe(snapshot);
     expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe('light');
-    expect(localStorage.getItem('mediahub.theme')).toBeNull();
   });
 
-  it('migrates the prefix families (per-project episode, todolist columns / attention)', () => {
+  it('runs once: a new key the app deliberately removed is NOT resurrected from the kept old key', () => {
+    // useTeams drops an invalid selected team; LoginPage consumes auth_expired.
+    localStorage.setItem('mediahub_selected_team', 'stale-team');
+    sessionStorage.setItem('mediahub_auth_expired', '1');
+    migrateLegacyStorageKeys();
+    localStorage.removeItem(STORAGE_KEYS.selectedTeam);
+    sessionStorage.removeItem(SESSION_KEYS.authExpired);
+    migrateLegacyStorageKeys();
+    expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBeNull();
+    expect(sessionStorage.getItem(SESSION_KEYS.authExpired)).toBeNull();
+    expect(localStorage.getItem(MIGRATION_MARKER_KEY)).not.toBeNull();
+  });
+
+  it('copies the prefix families (per-project episode, todolist columns / attention)', () => {
     localStorage.setItem('mediahub.project.p1.ep', '2');
     localStorage.setItem('mediahub:todolist:columns:team:7', '["id"]');
     localStorage.setItem('mediahub:todolist:attention:me', '1');
@@ -81,11 +117,10 @@ describe('migrateLegacyStorageKeys', () => {
     expect(localStorage.getItem(projectEpisodeKey('p1'))).toBe('2');
     expect(localStorage.getItem(`${TODOLIST_COLUMNS_PREFIX}:team:7`)).toBe('["id"]');
     expect(localStorage.getItem(`${TODOLIST_ATTENTION_PREFIX}:me`)).toBe('1');
-    expect(localStorage.getItem('mediahub.project.p1.ep')).toBeNull();
-    expect(localStorage.getItem('mediahub:todolist:columns:team:7')).toBeNull();
-    expect(localStorage.getItem('mediahub:todolist:attention:me')).toBeNull();
+    expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
+    expect(localStorage.getItem('mediahub:todolist:columns:team:7')).toBe('["id"]');
+    expect(localStorage.getItem('mediahub:todolist:attention:me')).toBe('1');
     expect(localStorage.getItem('unrelated')).toBe('keep');
-    expect(localStorage.length).toBe(4);
   });
 
   it('does not overwrite an existing prefixed value either', () => {
@@ -93,46 +128,71 @@ describe('migrateLegacyStorageKeys', () => {
     localStorage.setItem(projectEpisodeKey('p1'), '3');
     migrateLegacyStorageKeys();
     expect(localStorage.getItem(projectEpisodeKey('p1'))).toBe('3');
-    expect(localStorage.getItem('mediahub.project.p1.ep')).toBeNull();
   });
 
   it('never throws when storage throws, and logs instead', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const broken = {
-      get length(): number {
-        throw new Error('SecurityError');
-      },
-      key: () => {
-        throw new Error('SecurityError');
-      },
-      getItem: () => {
-        throw new Error('SecurityError');
-      },
-      setItem: () => {
-        throw new Error('SecurityError');
-      },
-      removeItem: () => {
-        throw new Error('SecurityError');
-      },
-      clear: () => {},
-    } as unknown as Storage;
+    const broken = brokenStorage();
     expect(() => migrateLegacyStorageKeys({ local: broken, session: broken })).not.toThrow();
     expect(err).toHaveBeenCalled();
   });
 
-  it('keeps migrating the remaining keys when one write fails (quota)', () => {
+  it('a failed write (quota) keeps the old value, migrates the rest, and retries on the next boot', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     localStorage.setItem('mediahub.theme', 'light');
     localStorage.setItem('mediahub_selected_team', 'team-9');
     const real = localStorage.setItem.bind(localStorage);
-    vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
       if (k === STORAGE_KEYS.theme) throw new Error('QuotaExceededError');
       return real(k, v);
     });
     migrateLegacyStorageKeys();
     expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBe('team-9');
-    // The failed copy must NOT delete the only surviving copy of the value.
     expect(localStorage.getItem('mediahub.theme')).toBe('light');
+    // Not marked done, so the next boot tries again…
+    expect(localStorage.getItem(MIGRATION_MARKER_KEY)).toBeNull();
+    spy.mockRestore();
+    migrateLegacyStorageKeys();
+    expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe('light');
+    expect(localStorage.getItem(MIGRATION_MARKER_KEY)).not.toBeNull();
+  });
+});
+
+describe('purgeLegacyStorageKeys (NOT wired in this release)', () => {
+  it('is not called anywhere in app code yet', () => {
+    const boot = readFileSync(path.resolve(__dirname, 'storageKeysBoot.ts'), 'utf8');
+    const index = readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
+    expect(boot).not.toContain('purgeLegacyStorageKeys');
+    expect(index).not.toContain('purgeLegacyStorageKeys');
+  });
+
+  it('removes only legacy keys, and only those whose new key exists', () => {
+    localStorage.setItem('mediahub.theme', 'light');
+    localStorage.setItem('mediahub_selected_team', 'team-1');
+    localStorage.setItem('mediahub.project.p1.ep', '2');
+    sessionStorage.setItem('mediahub_error_session_id', 'abc');
+    migrateLegacyStorageKeys();
+    // This one has no new counterpart (e.g. a failed copy) — must survive purge.
+    localStorage.setItem('mediahub_volume_pref', '{"volume":0.3}');
+    localStorage.setItem('unrelated', 'keep');
+
+    purgeLegacyStorageKeys();
+
+    expect(localStorage.getItem('mediahub.theme')).toBeNull();
+    expect(localStorage.getItem('mediahub_selected_team')).toBeNull();
+    expect(localStorage.getItem('mediahub.project.p1.ep')).toBeNull();
+    expect(sessionStorage.getItem('mediahub_error_session_id')).toBeNull();
+    expect(localStorage.getItem('mediahub_volume_pref')).toBe('{"volume":0.3}');
+    expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe('light');
+    expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBe('team-1');
+    expect(localStorage.getItem(projectEpisodeKey('p1'))).toBe('2');
+    expect(localStorage.getItem('unrelated')).toBe('keep');
+  });
+
+  it('never throws when storage throws', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken = brokenStorage();
+    expect(() => purgeLegacyStorageKeys({ local: broken, session: broken })).not.toThrow();
   });
 });
 
