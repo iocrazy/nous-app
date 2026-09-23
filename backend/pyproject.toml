@@ -95,9 +95,6 @@ markers = [
     "live_douyin: real-request acceptance against douyin (opt-in, needs a cookie)",
 ]
 
-[project.scripts]
-nous = "app.main:main"
-
 [project.urls]
 Homepage = "https://github.com/iocrazy/nous-app"
 Repository = "https://github.com/iocrazy/nous-app"
