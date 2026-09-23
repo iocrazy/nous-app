@@ -448,7 +448,7 @@ async def text_search(
     )
 
 
-# ``embedding_spaces.id`` is a bigserial starting at 1: counting coverage
+# ``embedding_spaces.id`` is a positive Snowflake, never 0: counting coverage
 # against 0 yields "covered 0 of the caller's total" without any space.
 NO_SPACE_ID = 0
 
