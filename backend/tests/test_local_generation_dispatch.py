@@ -386,6 +386,9 @@ async def test_daemon_timeout_is_typed_and_not_retried():
     one may still be running and upload its product later. So a timeout is
     reported (typed, with metadata), not retried."""
     import app.workflows.canvas_generation as m
+    from app.services.media.parsers.video_providers.db_registry import (
+        LocalVideoRoute,
+    )
 
     patched: dict = {}
 
@@ -394,8 +397,17 @@ async def test_daemon_timeout_is_typed_and_not_retried():
 
     with (
         patch(
-            "app.workflows.canvas_generation._local_engine",
-            new=AsyncMock(return_value=("dreamina", "3.0")),
+            # Canvas VIDEO asks the one pick (``resolve_video_route``) whose
+            # machine runs the row; image still asks ``_local_engine``.
+            "app.services.media.parsers.video_providers.db_registry."
+            "resolve_video_route",
+            new=AsyncMock(
+                return_value=LocalVideoRoute(
+                    engine="dreamina",
+                    engine_model="3.0",
+                    row_name="jimeng-local-video",
+                )
+            ),
         ),
         patch(
             "app.services.codex.daemon_dispatch.RedisDaemonTransport",

@@ -96,6 +96,33 @@ def _patch_scope(monkeypatch, value=SCOPE):
 # ── the resolver itself ────────────────────────────────────────────────────
 
 
+def _server_video_route(provider, actual_model):
+    """``resolve_video_route`` for a server-side row: canvas VIDEO asks the one
+    pick "which row, whose machine" and reuses the provider it built."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        ServerVideoRoute,
+    )
+
+    return AsyncMock(
+        return_value=ServerVideoRoute(
+            provider=provider, actual_model=actual_model, row_name="row"
+        )
+    )
+
+
+def _local_video_route(engine, engine_model):
+    """``resolve_video_route`` for a row that runs on the user's machine."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        LocalVideoRoute,
+    )
+
+    return AsyncMock(
+        return_value=LocalVideoRoute(
+            engine=engine, engine_model=engine_model, row_name="jimeng-local-video"
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_each_shape_is_resolved_or_named(monkeypatch):
     from contextlib import AsyncExitStack
@@ -326,9 +353,8 @@ async def test_the_video_step_reports_too(monkeypatch):
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry"
-            ".resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "jimeng-3")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "jimeng-3"),
         ),
         patch(
             "app.workflows.canvas_generation._capabilities_for",

@@ -18,6 +18,7 @@ from app.services.ai.provider_protocols.base import (
     LEGACY_QUALITY_TIERS,
     ProviderCapabilities,
 )
+from app.services.generation.local_dispatch import DREAMINA_DISPATCH_TIMEOUT_S
 from app.services.generation.request import GenerationRequest
 from app.workflows.canvas_generation import (
     _actual_provider_of,
@@ -41,6 +42,33 @@ _EVERYTHING = ProviderCapabilities(
     video_modes=frozenset({"frames", "multimodal"}),
     honours_ratio="native",
 )
+
+
+def _server_video_route(provider, actual_model):
+    """``resolve_video_route`` for a server-side row: canvas VIDEO asks the one
+    pick "which row, whose machine" and reuses the provider it built."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        ServerVideoRoute,
+    )
+
+    return AsyncMock(
+        return_value=ServerVideoRoute(
+            provider=provider, actual_model=actual_model, row_name="row"
+        )
+    )
+
+
+def _local_video_route(engine, engine_model):
+    """``resolve_video_route`` for a row that runs on the user's machine."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        LocalVideoRoute,
+    )
+
+    return AsyncMock(
+        return_value=LocalVideoRoute(
+            engine=engine, engine_model=engine_model, row_name="jimeng-local-video"
+        )
+    )
 
 
 def _fake_local_path_cm(value):
@@ -119,8 +147,8 @@ async def test_video_step_bridges_source_and_runs_i2v():
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "seedance2.0fast"),
         ),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
@@ -271,8 +299,8 @@ async def test_video_step_never_sends_catalog_row_name_upstream():
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "seedance2.0fast"),
         ),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
@@ -350,8 +378,8 @@ async def test_video_step_multimodal_materializes_all_refs(monkeypatch):
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "seedance2.0fast"),
         ),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
@@ -395,8 +423,8 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "seedance2.0"),
         ),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
@@ -451,8 +479,8 @@ async def test_server_video_branch_drops_unsupported_mode_and_refs_and_reports_t
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "3.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "3.0"),
         ),
         patch(
             "app.workflows.canvas_generation._capabilities_for",
@@ -508,8 +536,8 @@ async def test_server_video_branch_keeps_refs_when_provider_has_some_video_mode(
     )
     with (
         patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "3.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "3.0"),
         ),
         patch(
             "app.workflows.canvas_generation._capabilities_for",
@@ -939,8 +967,8 @@ async def test_dreamina_daemon_video_frames_mode_uses_first_and_last_placeholder
 
     with (
         patch(
-            "app.workflows.canvas_generation._local_engine",
-            new=AsyncMock(return_value=("dreamina", "3.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_local_video_route("dreamina", "3.0"),
         ),
         patch(
             "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
@@ -997,8 +1025,8 @@ async def test_dreamina_daemon_video_multimodal_mode_hands_over_every_ref():
 
     with (
         patch(
-            "app.workflows.canvas_generation._local_engine",
-            new=AsyncMock(return_value=("dreamina", "3.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_local_video_route("dreamina", "3.0"),
         ),
         patch(
             "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
@@ -1060,8 +1088,8 @@ async def test_dreamina_daemon_video_mode_dropped_when_provider_lacks_it():
     )
     with (
         patch(
-            "app.workflows.canvas_generation._local_engine",
-            new=AsyncMock(return_value=("dreamina", "3.0")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_local_video_route("dreamina", "3.0"),
         ),
         patch(
             "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
@@ -1177,12 +1205,8 @@ async def test_server_video_path_untouched_when_no_local_engine_matches():
     )
     with (
         patch(
-            "app.workflows.canvas_generation._local_engine",
-            new=AsyncMock(return_value=None),
-        ),
-        patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_route",
+            new=_server_video_route(provider, "seedance2.0fast"),
         ),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
@@ -1336,6 +1360,118 @@ async def test_owner_scoped_local_video_row_routes_for_its_owner_only():
     # Fell through to the normal resolver and hit ITS scoped error — no new
     # error path invented here.
     assert "private to another user" in str(err.value)
+
+
+# The two Dreamina video rows as the catalog holds them. Real rows through the
+# REAL pick: the point is which row the DEFAULT pick lands on.
+_LOCAL_VIDEO_ROW = {
+    "name": "jimeng-local-video",
+    "type": "video",
+    "is_enabled": True,
+    "actual_provider": "jimeng-local",
+    "actual_model": "3.0",
+    "owner_user_id": None,
+}
+_SERVER_VIDEO_ROW = {
+    "name": "jimeng-cli-seedance",
+    "type": "video",
+    "is_enabled": True,
+    "actual_provider": "jimeng-cli",
+    "actual_model": "seedance2.0fast",
+    "owner_user_id": None,
+}
+
+
+@pytest.mark.asyncio
+async def test_empty_model_video_whose_default_pick_is_local_reaches_the_daemon():
+    """The gap: the local check only ran for a NAMED model, so an empty-model
+    video request whose default pick was a jimeng-local row fell into the
+    server resolver and raised. Canvas video now asks ``resolve_video_route``
+    - the same single pick - and the local row goes to the daemon."""
+    from app.services.media.parsers.video_providers import db_registry
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
+
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "91"}
+
+    server_run = AsyncMock()
+    with (
+        patch.object(
+            db_registry,
+            "_enabled_rows",
+            new=AsyncMock(return_value=[_LOCAL_VIDEO_ROW, _SERVER_VIDEO_ROW]),
+        ),
+        patch.object(JimengCliProvider, "generate_video", new=server_run),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="",
+            params={"aspect": "16:9"},
+            source_url="/api/v1/generated-media/1/cover",
+            user_id="u1",
+        )
+
+    server_run.assert_not_awaited()
+    assert captured["payload"]["engine"] == "dreamina"
+    assert captured["payload"]["submit_args"][0] == "image2video"
+    assert captured["payload"]["ref_urls"][0].startswith("http")
+    assert captured["timeout_s"] == DREAMINA_DISPATCH_TIMEOUT_S
+    assert out["existing_gen_id"] == "91"
+    assert out["provider"] == "dreamina-local"
+
+
+@pytest.mark.asyncio
+async def test_empty_model_video_whose_default_pick_is_server_keeps_the_server_path():
+    """The other direction: server row first in sort_order - exactly today's
+    path (the server provider runs, nothing is dispatched)."""
+    from app.services.media.parsers.video_providers import db_registry
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
+
+    dispatch = AsyncMock()
+    server_run = AsyncMock(return_value=SimpleNamespace(local_path="/tmp/jv/s.mp4"))
+    with (
+        patch.object(
+            db_registry,
+            "_enabled_rows",
+            new=AsyncMock(return_value=[_SERVER_VIDEO_ROW, _LOCAL_VIDEO_ROW]),
+        ),
+        patch.object(JimengCliProvider, "generate_video", new=server_run),
+        patch("app.services.codex.daemon_dispatch.dispatch_to_daemon", new=dispatch),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/1/media.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="",
+            params={"aspect": "16:9"},
+            source_url="/api/v1/generated-media/1/cover",
+            user_id="u1",
+        )
+
+    dispatch.assert_not_awaited()
+    call = server_run.await_args.kwargs
+    assert call["image_path"] == "/data/gen/1/media.png"
+    assert call["model_version"] == "seedance2.0fast"
+    assert out["local_path"] == "/tmp/jv/s.mp4"
+    assert out["provider"] == "jimeng-cli"
 
 
 def _real_png(width: int, height: int, tmp_path) -> str:
