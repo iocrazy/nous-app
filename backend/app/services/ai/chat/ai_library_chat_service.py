@@ -1410,10 +1410,7 @@ class AILibraryChatService:
         try:
             from app.agent_framework import cap_messages_tokens
 
-            outcomes = cap_messages_tokens(
-                user_messages,
-                model=model_for_estimate(composed) if False else "",  # noqa
-            )
+            outcomes = cap_messages_tokens(user_messages)
             # Replace the message list with possibly-truncated versions
             user_messages = [o.message for o in outcomes]
             truncated_count = sum(1 for o in outcomes if o.truncated)
@@ -1425,13 +1422,10 @@ class AILibraryChatService:
         except Exception as cap_exc:
             logger.warning(f"per-message cap skipped (non-fatal): {cap_exc}")
 
-        # M1.5 wiring: compact the message list if it has grown past the
-        # threshold. Compactor preserves tool_use/result pairs so the
-        # next API call won't 400. Failure degrades to "send full history
-        # and let the model deal with it" — never breaks the chat.
-        user_messages = await self._maybe_compact(
-            user_messages, session_id=session_id, user_id=user_id
-        )
+        # Compaction is NOT done here: the runner's preflight
+        # (``ContextCompactor`` via ``_preflight_compact_and_budget``) owns it
+        # — one compactor, one threshold, tool pairs kept intact. Compacting
+        # here too meant the runner re-compacted an already-compacted list.
 
         model = composed.model or ""
         try:
@@ -2087,120 +2081,6 @@ class AILibraryChatService:
             known.add(pid)
         return out_assets, extra_refs, failures
 
-    async def _maybe_compact(
-        self,
-        messages: List[Dict[str, Any]],
-        *,
-        session_id: Optional[Any] = None,
-        user_id: Optional[Any] = None,
-    ) -> List[Dict[str, Any]]:
-        """Compact long histories. Failure → return original messages.
-
-        Compaction calls a cheap auxiliary LLM to summarise the
-        head; degrading on failure is fine since the LLM call itself
-        will eventually 400 if context truly overflows, and the user
-        will see a clear error instead of a silent corruption.
-
-        Wave 5b (B5): when ``session_id`` is provided, looks up the
-        cached session_memory and uses it as the head summary instead
-        of calling the cheap LLM — saves a round-trip + makes the
-        summary structurally consistent (fixed schema).
-        """
-        from app.services.ai.llm.llm_compactor import (
-            DEFAULT_AUTO_COMPACTION_INPUT_TOKENS,
-            compact_messages,
-            estimate_tokens,
-        )
-
-        if estimate_tokens(messages) < DEFAULT_AUTO_COMPACTION_INPUT_TOKENS:
-            return messages
-
-        # Wave 5b (B5): build session_memory_loader closure if we have a
-        # session_id. Loader returns body_md or None; compactor decides.
-        session_memory_loader = None
-        if session_id is not None:
-            from app.repositories.session_memory_repository import (
-                get_session_memory_repository,
-            )
-
-            _sm_repo = get_session_memory_repository()
-
-            async def _load_session_memory() -> Optional[str]:
-                row = await _sm_repo.load(session_id)
-                return row.body_md if row else None
-
-            session_memory_loader = _load_session_memory
-
-        async def _summarizer(head: List[Dict[str, Any]]) -> str:
-            try:
-                # DB-only credentials (铁律 2026-07-07): the cheap summary
-                # model is the maintenance-tier catalog default (admin-
-                # overridable via system_settings.maintenance_llm_model). A
-                # catalog miss raises and the compactor falls back to its
-                # emergency cap.
-                from app.services.ai.providers.ai_provider_helpers import (
-                    get_maintenance_model,
-                    resolve_db_adapter,
-                )
-
-                cheap_model = await get_maintenance_model()
-                # Routing context (see the harvester above): a codex-local
-                # maintenance model must dial this user's own machine.
-                adapter = await resolve_db_adapter(
-                    cheap_model, "chat", user_id=str(user_id) if user_id else None
-                )
-                from uuid import UUID as _UUID
-
-                from app.schemas.ai_library import ComposedSystemPrompt
-
-                composed = ComposedSystemPrompt(
-                    agent_id=_UUID(int=0),
-                    agent_slug="compactor",
-                    model=cheap_model,
-                    temperature=0.0,
-                    max_tokens=2048,
-                    system_message=(
-                        "You summarise chat history. Capture decisions made, "
-                        "rejected options (and why), "
-                        "facts established, "
-                        "user style preferences expressed, "
-                        "and the current task state. "
-                        "Be terse. No preamble."
-                    ),
-                    tools=[],
-                    skill_manifest=[],
-                    cache_fingerprint="compactor_v1",
-                )
-                resp = await adapter.call(
-                    composed,
-                    [{"role": "user", "content": _format_history_for_summary(head)}],
-                )
-                return adapter_text(resp)
-            except Exception:
-                logger.exception(
-                    "[chat] compactor summarizer failed; using empty summary"
-                )
-                return "[history truncated for context length]"
-
-        try:
-            result = await compact_messages(
-                messages,
-                summarizer=_summarizer,
-                session_memory_loader=session_memory_loader,
-            )
-            if result.compacted:
-                logger.info(
-                    "[chat] compacted: %d → %d tokens (%d head messages summarised)",
-                    result.estimated_input_tokens_before,
-                    result.estimated_input_tokens_after,
-                    result.head_message_count,
-                )
-                return result.messages
-        except Exception:
-            logger.exception("[chat] compact_messages crashed; sending full history")
-
-        return messages
-
 
 def format_script_context_block(script_context: Optional[dict]) -> str:
     """script_context handle → <user_selection> 指令块（空/无效返回 ""）。
@@ -2283,16 +2163,3 @@ async def _surface_next_session_commitments(
     except Exception as g8_exc:  # noqa: BLE001
         logger.warning(f"next_session surface skipped (non-fatal): {g8_exc}")
         return request_instructions
-
-
-def _format_history_for_summary(messages: List[Dict[str, Any]]) -> str:
-    """Render head messages as a numbered transcript for the summariser."""
-    parts = []
-    for i, msg in enumerate(messages, start=1):
-        role = msg.get("role") or "?"
-        content = msg.get("content") or ""
-        if isinstance(content, list):
-            content = " ".join(str(p) for p in content)
-        truncated = content[:1000] + ("..." if len(content) > 1000 else "")
-        parts.append(f"[{i}] {role}: {truncated}")
-    return "\n".join(parts)

@@ -920,3 +920,121 @@ async def test_list_all_chat_sessions_endpoint_validates_and_delegates() -> None
     assert call.kwargs["search"] == "plan"
     assert call.kwargs["limit"] == 20
     assert "agent_slug" not in call.kwargs  # cross-agent list
+
+
+class _LongHistoryStore(_FakeStore):
+    """Store whose newest window is big enough to have tripped the retired
+    chat-side compactor (100k estimated tokens)."""
+
+    def __init__(self, session_row: Dict[str, Any], history: List[Dict[str, Any]]):
+        super().__init__(session_row)
+        self._history = history
+
+    async def get_messages(
+        self, *, session_id: Any, limit: int = 200, newest: bool = False
+    ) -> List[Dict[str, Any]]:
+        self.get_messages_calls.append({"limit": limit, "newest": newest})
+        return [dict(m) for m in self._history]
+
+
+@pytest.mark.asyncio
+async def test_chat_hands_the_runner_the_raw_newest_window() -> None:
+    """Compaction lives in ONE place: the runner's preflight
+    (``ContextCompactor``). The chat service used to compact first with its
+    own ``llm_compactor`` — the runner then compacted the already-compacted
+    list again, and neither result was persisted. Now the runner must receive
+    ``get_messages(newest=True)`` byte-for-byte plus the new user turn."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id = uuid4()
+    session_id = uuid4()
+    agent_id = uuid4()
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": "word " * 4000}
+        for i in range(40)
+    ]
+    store = _LongHistoryStore(
+        {
+            "id": str(session_id),
+            "user_id": str(user_id),
+            "agent_slug": "script_ai",
+            "agent_id": str(agent_id),
+            "total_tokens": 0,
+            "message_count": 40,
+            "team_id": None,
+            "project_id": None,
+        },
+        history,
+    )
+
+    composed = MagicMock()
+    composed.agent_id = agent_id
+    composed.agent_slug = "script_ai"
+    composed.model = "qwen-max"
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(return_value={"content": "ok", "raw": {}})
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 1
+    recorder.completion_tokens = 1
+
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+    agent_repo = MagicMock()
+    agent_repo.get_by_slug = AsyncMock(
+        return_value={
+            "id": str(agent_id),
+            "slug": "script_ai",
+            "model": "qwen-max",
+            "budget_per_run_cents": None,
+            "fallback_models": [],
+        }
+    )
+
+    with (
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.get_agent_repository",
+            return_value=agent_repo,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.get_maintenance_model",
+            new=AsyncMock(side_effect=AssertionError("no chat-side summary")),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder",
+            side_effect=lambda **kw: _RunRecorderCM(recorder),
+        ),
+    ):
+        svc = AILibraryChatService(store=store)
+        await svc.chat(session_id, user_id=user_id, content="Next")
+
+    assert store.get_messages_calls == [{"limit": 200, "newest": True}]
+    runner.run_turn.assert_awaited_once()
+    sent = runner.run_turn.await_args.kwargs["user_messages"]
+    assert sent == history + [{"role": "user", "content": "Next"}]
+
+
+def test_chat_side_compactor_is_gone() -> None:
+    """One compactor, one threshold: the chat-only path must not come back."""
+    import importlib
+
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    assert not hasattr(AILibraryChatService, "_maybe_compact")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.services.ai.llm.llm_compactor")

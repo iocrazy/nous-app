@@ -29,9 +29,6 @@ from typing import Any
 COUNTER_NAMES: tuple[str, ...] = (
     # Compaction
     "compaction_triggered",
-    "compaction_used_session_memory",
-    "compaction_used_fresh_summarizer",
-    "compaction_pre_pass_pruned",
     # Loop guard
     "loop_guard_observed",
     "loop_guard_tripped",

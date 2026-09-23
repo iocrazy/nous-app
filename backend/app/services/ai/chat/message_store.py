@@ -108,7 +108,8 @@ class MessageStore(Protocol):
         """Return a session's messages, chronological, capped at ``limit``.
 
         ``newest=False`` keeps the oldest ``limit`` messages; ``newest=True``
-        keeps the newest ``limit`` (the chat turn path). Both return ASC.
+        keeps the newest ``limit`` (callers that need the recent window: the
+        turn path, the sub-issue barrier). Both return ASC.
         """
         ...
 

@@ -546,6 +546,9 @@ class AgentRunner:
                 recorder=recorder,
                 abort=abort,
                 _emit_turn_end=False,  # stream_turn classifies this turn
+                # The preflight above already compacted + budget-checked
+                # these messages; a second pass would compact twice per turn.
+                _preflight_done=True,
             )
             if result.get("cancelled"):
                 return
@@ -1644,6 +1647,7 @@ class AgentRunner:
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
         _emit_turn_end: bool = True,
+        _preflight_done: bool = False,
     ) -> dict[str, Any]:
         """Run one turn, with retry telemetry attached for its duration.
 
@@ -1651,6 +1655,10 @@ class AgentRunner:
         that path delegates here and then classifies the turn itself from
         the terminal chunk — two wrappers each filing a ``turn_end`` would
         double-count every buffered turn.
+
+        ``_preflight_done=True`` is for the same caller: stream_turn has
+        already run ``_preflight_compact_and_budget`` on these messages, so
+        running it again would compact (and summarise) twice per turn.
 
         W1: the adapter is built during wiring, before this run exists, so a
         recorder cannot be constructor-injected into the retry middleware.
@@ -1683,7 +1691,11 @@ class AgentRunner:
 
         try:
             result = await self._run_turn_inner(
-                composed, user_messages, recorder=recorder, abort=abort
+                composed,
+                user_messages,
+                recorder=recorder,
+                abort=abort,
+                preflight_done=_preflight_done,
             )
         except BaseException as exc:
             if _emit_turn_end:
@@ -1764,6 +1776,7 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
+        preflight_done: bool = False,
     ) -> dict[str, Any]:
         """Run one turn of the agent loop.
 
@@ -1779,11 +1792,13 @@ class AgentRunner:
         # _preflight_compact_and_budget so the two paths can never again
         # diverge on these protections. On green compaction is ~free; the
         # budget guard rejects a turn that wouldn't fit even after pruning.
-        user_messages, preflight_err = await self._preflight_compact_and_budget(
-            composed, user_messages, recorder
-        )
-        if preflight_err is not None:
-            return {"content": "", "raw": None, **preflight_err}
+        # ``preflight_done``: stream_turn's buffered fallback already ran it.
+        if not preflight_done:
+            user_messages, preflight_err = await self._preflight_compact_and_budget(
+                composed, user_messages, recorder
+            )
+            if preflight_err is not None:
+                return {"content": "", "raw": None, **preflight_err}
 
         self._bind_turn_recorder(recorder)
 

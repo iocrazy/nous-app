@@ -590,14 +590,15 @@ class ConversationsAiStore:
         - ``newest=False`` (default): the OLDEST ``limit`` messages
           (``ORDER BY seq ASC LIMIT n``). Kept for callers that read from the
           start of the conversation: the issue message list, issue fork's
-          origin-message cutoff scan, the sub-issue barrier helpers, and the
-          session-view endpoint.
+          origin-message cutoff scan, and the session-view endpoint.
         - ``newest=True``: the NEWEST ``limit`` messages
           (``ORDER BY seq DESC LIMIT n``, reversed here so the return is still
           ascending). Used by the chat turn path
           (``AILibraryChatService._run_session_turn_inner``) — the model must
           see the most recent context of a long conversation, not its first
-          ``limit`` messages.
+          ``limit`` messages — and by the sub-issue barrier helpers
+          (``subissue_barrier``), which read the last message and check for an
+          already-written report.
         """
         from sqlalchemy import select
 

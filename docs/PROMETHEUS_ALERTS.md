@@ -72,18 +72,21 @@ groups:
         annotations:
           summary: "20%+ of streaming chats aborted — users cancelling?"
 
-      # Compactor running on every turn — context too big
+      # Compactor summarising far more often than usual — contexts too big.
+      # agent_compaction_triggered is incremented by the runner's
+      # ContextCompactor (the ONLY compactor since the chat-side one was
+      # retired), once per turn that actually compacted, on every agent path
+      # (chat, issues, sub-agents). Absolute rate on purpose: there is no
+      # per-turn counter to divide by — agent_streaming_started only counts
+      # the true-stream path, which production chat never takes (the
+      # fallback chain has no ``stream``). Tune the threshold on a baseline.
       - alert: CompactorOverActive
-        expr: |
-          rate(agent_compaction_triggered[10m])
-            / clamp_min(rate(agent_streaming_started[10m]) +
-                        rate(agent_session_memory_update_attempted[10m]),
-                        0.001) > 0.5
+        expr: increase(agent_compaction_triggered[10m]) > 20
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Compactor firing on > 50% of turns — bump per-message cap?"
+          summary: "Compactor ran > 20 times in 10m — bump per-message cap?"
 
       # Memory archive sweeper unusually quiet — sweeper crashed?
       - alert: MemoryArchivedFlatline
@@ -125,7 +128,7 @@ Group the counters in /metrics into 5 dashboards:
    `chat_mcp_registry_built`
 2. **Tool Surface** — `mcp_tool_call*`, `tool_cache_hit`, `loop_guard_*`
 3. **Memory Lifecycle** — `memory_*`, `commitment_*`, `session_memory_*`
-4. **Cost Discipline** — `output_budget_tightened`, `compaction_*`
+4. **Cost Discipline** — `output_budget_tightened`, `compaction_triggered`
 5. **Boundary** — `dispatch_gate_*`, `hook_aborted_run`,
    `link_injection_*`
 

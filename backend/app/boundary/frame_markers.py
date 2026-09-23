@@ -46,8 +46,8 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "available_skills",
         "available_workers",
         "agent_memory",
-        # 聊天路径压缩器（llm_compactor）把 LLM 摘要 / session memory 文档包在
-        # 这个框里；两者都源自用户可控的对话内容。
+        # 已退役的聊天路径压缩器曾把摘要包在这个框里；现在没有渲染方。
+        # 留着登记无害：再有人渲染它时，内容仍源自用户可控的对话。
         "conversation_summary",
         "graph_facts",
         # harness p4 §1-③: a claimed inbox item injected at a step boundary

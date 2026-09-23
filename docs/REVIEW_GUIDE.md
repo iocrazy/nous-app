@@ -97,11 +97,14 @@ git log --oneline origin/master..HEAD --grep="Memory M2\|memory consolidation\|m
 
 **Themes**:
 - B1-B5: ai_session_memory table + repo + service + chat
-  fire-and-forget + compactor swap
+  fire-and-forget
 - 6 fixed sections (title / current_state / task_spec / key_files /
   workflow_steps / errors_fixes)
 - Dual-threshold trigger (min_total + delta)
-- Compactor V2 swaps in cached body_md (zero LLM call at compaction)
+- The chat-side compactor that swapped in cached body_md
+  (`llm_compactor`) is retired: compaction happens only in the runner's
+  preflight (`backend/app/agent_framework/context_compactor.py`), once
+  per turn, and does not read session memory
 
 **Commit grep**:
 ```
@@ -116,7 +119,7 @@ git log --oneline origin/master..HEAD --grep="SessionMemory\|session_memory\|Wav
 - `backend/app/services/agent_runner.py`
 - `backend/app/services/ai_library_chat_service.py`
 - `backend/app/services/ai_library_chat_wiring.py`
-- `backend/app/services/llm_compactor.py`
+- `backend/app/agent_framework/context_compactor.py`
 - `backend/app/services/llm_fallback_chain.py`
 - `backend/app/services/skill_tool_service.py`
 - `backend/app/services/dbos_orchestrator.py`

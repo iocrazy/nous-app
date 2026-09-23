@@ -1,7 +1,7 @@
 """Token counter — model-aware estimator.
 
 Wave 5a (A1). Replaces the ``chars // 4`` heuristic that
-``llm_compactor.estimate_tokens`` has been using. The chars heuristic
+the now-retired ``llm_compactor.estimate_tokens`` used. The chars heuristic
 under-counts Chinese (1 char ≈ 1-2 tokens) and dense JSON / code
 (1 char ≈ 0.5 tokens), which has two practical consequences:
 

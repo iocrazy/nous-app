@@ -58,9 +58,6 @@ async def test_output_ref_renders_the_frame_and_never_reaches_the_binary_path():
             svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
         ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(
-            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
             new=AsyncMock(return_value=stack),
@@ -159,9 +156,6 @@ async def test_no_output_ref_leaves_the_system_message_alone():
             svc, "get_session", new=AsyncMock(return_value=_make_fake_session())
         ),
         patch.object(svc, "get_messages", new=AsyncMock(return_value=[])),
-        patch.object(
-            svc, "_maybe_compact", new=AsyncMock(side_effect=lambda msgs, **kw: msgs)
-        ),
         patch(
             "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
             new=AsyncMock(return_value=stack),
