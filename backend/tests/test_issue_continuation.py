@@ -71,7 +71,18 @@ def _scripted_load_issue(statuses: list[str]):
     return _load
 
 
+def _status_via(load_issue):
+    """The final re-read is a plain status read, not the ``load_issue`` step;
+    in tests both are served from the same scripted fake."""
+
+    async def _read(issue_id: int):
+        return (await load_issue(issue_id) or {}).get("status")
+
+    return _read
+
+
 async def _run(rec: _Recorder, max_continuations=2, auto_close=False, load_issue=None):
+    load_issue = load_issue or _const_load_issue()
     return await _run_dispatch_with_continuation(
         1,
         {"id": 1},
@@ -79,7 +90,8 @@ async def _run(rec: _Recorder, max_continuations=2, auto_close=False, load_issue
         "user-1",
         run_turn=rec.run_turn,
         set_status=rec.set_status,
-        load_issue=load_issue or _const_load_issue(),
+        load_issue=load_issue,
+        read_status=_status_via(load_issue),
         max_continuations=max_continuations,
         auto_close=auto_close,
     )
@@ -396,6 +408,7 @@ async def test_wait_wakeup_preempted_by_external_close():
         run_turn=run_turn,
         set_status=AsyncMock(),
         load_issue=load_issue,
+        read_status=_status_via(load_issue),
         **deps,
     )
     assert result.get("preempted") is True

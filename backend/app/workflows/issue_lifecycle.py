@@ -184,8 +184,10 @@ async def set_status(
     matches a row whose status is not in ``PREEMPT_STATUSES``. Production S4:
     the user cancelled mid-run and the run's own finish wrote ``in_review``
     over it. The lifecycle has no legitimate write over done/cancelled: the
-    UI refuses to dispatch a terminal issue (``dispatch-preview``), a reply
-    resumes only ``needs_followup``, and the barrier wakes only live parents.
+    UI refuses to dispatch a terminal issue (``dispatch-preview``), an ordinary
+    reply resumes only ``needs_followup`` (needs_input / empty_output), a
+    sub-issue-barrier reply may resume any live status, and the barrier wakes
+    only live parents.
     Returns whether the row was written. A dropped write is logged and skips
     the stage-node projection (the status it would project never landed).
 
@@ -1206,6 +1208,40 @@ async def _pending_inbox_count(issue_id: int) -> int:
         return 0
 
 
+async def _read_issue_status(issue_id: int) -> Optional[str]:
+    """Current ``issues.status`` read OUTSIDE any DBOS step.
+
+    Deliberately not a step (same rule as ``_disarm_agent_wakeups``): it is
+    called from the workflow BODY after the continuation loop, so wrapping it
+    would insert a new recorded step and shift every later step's sequence —
+    an in-flight workflow recovered across a deploy would replay onto the
+    wrong function and error out. Reading the live value on replay is safe:
+    a terminal status simply skips the route that was never consumed.
+
+    Best-effort: a failed read logs at ERROR and returns ``None`` so routing
+    proceeds — ``set_status`` still refuses to overwrite a terminal status, so
+    the worst case is the pre-fix behaviour, never a lost finish.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Issues
+
+    try:
+        async with read_scope() as session:
+            return (
+                await session.execute(
+                    select(Issues.status).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:  # noqa: BLE001 — logged, routing continues
+        logger.error(
+            f"[execute_issue] issue {issue_id}: final status re-read failed "
+            f"({exc!r}); routing without it (set_status still guards terminal)"
+        )
+        return None
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -1223,6 +1259,7 @@ async def _run_dispatch_with_continuation(
     run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     mark_turn: Optional[Callable[..., Awaitable[None]]] = None,
     pending_inbox: Optional[Callable[[int], Awaitable[int]]] = None,
+    read_status: Callable[[int], Awaitable[Optional[str]]] = _read_issue_status,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -1447,8 +1484,10 @@ async def _run_dispatch_with_continuation(
     # not be answered with in_review, an EMPTY_OUTPUT stamp on the interrupted
     # run, or a barrier firing on a stale status. set_status refuses the
     # write anyway; this also skips the rest of the routing.
-    final = await load_issue(issue_id)
-    final_status = (final or {}).get("status")
+    # ``read_status`` is a plain read, NOT the ``load_issue`` step: a new step
+    # call here would shift the step sequence of workflows in flight across a
+    # deploy (see ``_read_issue_status``).
+    final_status = await read_status(issue_id)
     if final_status in PREEMPT_STATUSES:
         logger.info(
             f"[execute_issue] issue {issue_id} is {final_status!r} at finish "

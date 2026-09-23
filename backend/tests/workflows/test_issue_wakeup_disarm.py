@@ -180,3 +180,22 @@ def test_the_disarm_helper_is_not_a_dbos_step():
     fn = il._disarm_agent_wakeups
     assert not hasattr(fn, "dbos_function_name")
     assert inspect.unwrap(fn) is fn
+
+
+def test_final_status_reread_is_not_a_dbos_step():
+    """The post-loop re-read before routing must stay a plain read: a step
+    there would shift the recorded step sequence of workflows recovered
+    across a deploy (final review 2026-09-23)."""
+    import inspect
+
+    from app.workflows import issue_lifecycle as il
+
+    fn = il._read_issue_status
+    assert not hasattr(fn, "dbos_function_name")
+    assert inspect.unwrap(fn) is fn
+    default = (
+        inspect.signature(il._run_dispatch_with_continuation)
+        .parameters["read_status"]
+        .default
+    )
+    assert default is fn
