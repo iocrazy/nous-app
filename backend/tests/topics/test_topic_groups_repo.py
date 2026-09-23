@@ -73,7 +73,7 @@ async def test_nearest_group_passes_vec_and_window(monkeypatch):
 
     assert out == {"id": "9", "sim": 0.9}
     call = session.calls[0]
-    assert call["params"] == {"vec": "[0.1,0.2]", "win": 48}
+    assert call["params"] == {"vec": "[0.1,0.2]", "win": 48, "model": None}
     sql = str(call["stmt"])
     # CAST(:vec AS vector), NOT :vec::vector — SQLAlchemy text() leaves a bind
     # param unbound when it's immediately followed by the :: cast operator.

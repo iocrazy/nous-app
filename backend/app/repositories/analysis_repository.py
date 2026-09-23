@@ -119,6 +119,8 @@ class AnalysisRepository:
             "full_text_for_embedding": row.full_text_for_embedding,
             # content_embedding: list[float] or None (native Vector; see parity doc)
             "content_embedding": row.content_embedding,
+            # The model that produced content_embedding (mig 490); None = legacy.
+            "embedding_model": row.embedding_model,
             "analysis_model": row.analysis_model,
             # analysis_cost: Numeric → float (see parity doc above)
             "analysis_cost": (
@@ -201,8 +203,13 @@ class AnalysisRepository:
         user_id: str,
         limit: int = 10,
         threshold: float = 0.7,
+        embedding_model: Optional[str] = None,
     ) -> List[dict]:
         """Search for similar resources via the match_videos_by_embedding RPC.
+
+        ``embedding_model`` is the space the query vector lives in
+        (``app.core.embedding_space``): the RPC only ranks rows of that space
+        or legacy NULL rows. ``None`` = unknown / legacy, compare with all.
 
         Keeps using the RPC via raw SQL executed through the ORM session.
         The vector is passed as a formatted string with an explicit CAST.
@@ -220,6 +227,7 @@ class AnalysisRepository:
         ``SearchResult.created_at`` is ``Optional[str]``.
         """
         embedding_str = f"[{','.join(map(str, embedding))}]"
+        params = {"q": embedding_str, "t": threshold, "c": limit, "u": user_id}
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -230,11 +238,39 @@ class AnalysisRepository:
                         # a syntax error the first time a real vector arrived.
                         "SELECT * FROM match_videos_by_embedding("
                         "CAST(:q AS vector), CAST(:t AS double precision), "
-                        "CAST(:c AS int), CAST(:u AS uuid))"
+                        "CAST(:c AS int), CAST(:u AS uuid), CAST(:m AS text))"
                     ),
-                    {"q": embedding_str, "t": threshold, "c": limit, "u": user_id},
+                    {**params, "m": embedding_model},
                 )
                 rows = result.mappings().all()
+        except ProgrammingError as exc:
+            if not _is_undefined_function(exc):
+                raise
+            # Code-first deploy window: migration 490 (the space argument) has
+            # not run yet. The 4-arg RPC is still right in that window — no
+            # row can carry another space before the column exists — so fall
+            # back instead of 503-ing every semantic search.
+            logger.warning(
+                "match_videos_by_embedding/5 missing (migration 490 not applied "
+                "yet); falling back to the 4-arg call without the space filter"
+            )
+            rows = await self._search_by_embedding_4arg(params)
+        return self._search_rows_out(rows)
+
+    async def _search_by_embedding_4arg(self, params: dict) -> list:
+        """The pre-490 call, on its own session (the failed statement aborted
+        the first one's transaction)."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT * FROM match_videos_by_embedding("
+                        "CAST(:q AS vector), CAST(:t AS double precision), "
+                        "CAST(:c AS int), CAST(:u AS uuid))"
+                    ),
+                    params,
+                )
+                return result.mappings().all()
         except ProgrammingError as exc:
             # Deployment-order guard. Migrations and backend code ship on
             # independent triggers (see CLAUDE.md "migration 与代码部署无顺序保证"),
@@ -257,6 +293,8 @@ class AnalysisRepository:
                 ) from exc
             raise
 
+    @staticmethod
+    def _search_rows_out(rows) -> List[dict]:
         output = []
         for row in rows:
             d = dict(row)
@@ -379,8 +417,14 @@ class AnalysisRepository:
         embedding: List[float],
         full_text: str,
         analysis_level: Optional[str] = None,
+        *,
+        embedding_model: Optional[str] = None,
     ) -> Optional[dict]:
         """Update the vector embedding for a resource.
+
+        ``embedding_model`` = the model that produced ``embedding`` (its space,
+        see ``app.core.embedding_space``), stored alongside so readers never
+        compare it with vectors of another model.
 
         Binds the native ``list[float]`` through the Vector(2048) type
         handler. Pass ``analysis_level`` to pin the row (same pick as
@@ -394,6 +438,7 @@ class AnalysisRepository:
             if row is None:
                 return None
             row.content_embedding = embedding  # list[float]; Vector type encodes
+            row.embedding_model = embedding_model
             row.full_text_for_embedding = full_text
             await session.flush()
             out = self._row_to_dict(row)

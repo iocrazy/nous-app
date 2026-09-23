@@ -14,6 +14,7 @@ from typing import Any, Optional
 from sqlalchemy import Text as SAText
 from sqlalchemy import cast, select, text
 
+from app.core.embedding_space import spaces_compatible_sql
 from app.db.session import read_scope, write_scope
 from app.models import UserTopicInterests
 
@@ -43,31 +44,49 @@ class UserTopicInterestRepository:
             return dict(row) if row else None
 
     async def set_interest(
-        self, user_id: str, *, interest_text: str, vec: Optional[str]
+        self,
+        user_id: str,
+        *,
+        interest_text: str,
+        vec: Optional[str],
+        embedding_model: Optional[str] = None,
     ) -> None:
         """Upsert the user's interest text + embedding (a pgvector text literal,
-        or None when the embedding provider is unconfigured/failed).
+        or None when the embedding provider is unconfigured/failed) + the
+        model that produced it (its space; None with a None vector).
 
-        SQL body kept: the NULL-guarded vector CAST is the semantics."""
+        SQL body kept: the vector CAST is the semantics."""
+        # Every ``vec`` bind is typed as text first. A bare ``IS NULL`` on it
+        # is untypeable for asyncpg (AmbiguousParameterError), so this upsert
+        # failed on every call until the 490 replay caught it. A NULL text
+        # casts to a NULL vector, so no CASE is needed for the vector itself.
         async with write_scope() as session:
             await session.execute(
                 text(
                     """
                     INSERT INTO public.user_topic_interests
-                        (user_id, interest_text, embedding, updated_at)
+                        (user_id, interest_text, embedding, embedding_model,
+                         updated_at)
                     VALUES (
                         :uid, :txt,
-                        CASE WHEN :vec IS NULL THEN NULL
-                             ELSE CAST(:vec AS vector) END,
+                        CAST(CAST(:vec AS text) AS vector),
+                        CASE WHEN CAST(:vec AS text) IS NULL THEN NULL
+                             ELSE CAST(:model AS text) END,
                         now()
                     )
                     ON CONFLICT (user_id) DO UPDATE SET
                         interest_text = EXCLUDED.interest_text,
                         embedding = EXCLUDED.embedding,
+                        embedding_model = EXCLUDED.embedding_model,
                         updated_at = now()
                     """
                 ),
-                {"uid": user_id, "txt": interest_text, "vec": vec},
+                {
+                    "uid": user_id,
+                    "txt": interest_text,
+                    "vec": vec,
+                    "model": embedding_model,
+                },
             )
 
     async def rank_hotspot_ids(
@@ -85,8 +104,13 @@ class UserTopicInterestRepository:
         (pure embedding/recency rank, the original behaviour). Empty list when
         nothing matches or no interest is set.
 
+        The semantic boost only compares vectors of the same embedding space
+        (``app.core.embedding_space``); a hotspot embedded by another model
+        falls back to recency instead of scoring meaninglessly.
+
         SQL body kept: the CTE + regexp keyword unnest + ``<=>`` ranking is
         genuine raw-SQL territory."""
+        same_space = spaces_compatible_sql("h.embedding_model", "me.embedding_model")
         async with read_scope() as session:
             result = await session.execute(
                 text(
@@ -94,6 +118,7 @@ class UserTopicInterestRepository:
                     WITH me AS (
                         SELECT interest_text,
                                embedding,
+                               embedding_model,
                                regexp_split_to_array(
                                    lower(trim(coalesce(interest_text, ''))), '\\s+'
                                ) AS words
@@ -122,6 +147,9 @@ class UserTopicInterestRepository:
                      ORDER BY
                        CASE
                            WHEN me.embedding IS NOT NULL AND h.embedding IS NOT NULL
+                                AND """
+                    + same_space
+                    + """
                            THEN (h.embedding <=> me.embedding)
                        END NULLS LAST,
                        h.captured_at DESC

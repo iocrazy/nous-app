@@ -74,7 +74,9 @@ class _Repo:
     async def get_analysis(self, rid: int, analysis_level=None):
         return self.analysis
 
-    async def update_embedding(self, rid: int, vec, text, analysis_level=None):
+    async def update_embedding(
+        self, rid: int, vec, text, analysis_level=None, embedding_model=None
+    ):
         self.updated.append((rid, vec, text))
         return {"resource_id": rid}
 
@@ -85,6 +87,8 @@ class _Tags:
 
 
 class _Embedder:
+    model = "test-embedder"
+
     def __init__(self, outcome) -> None:
         self.outcome = outcome
         self.texts: List[str] = []
@@ -254,7 +258,9 @@ async def test_reembed_does_not_claim_success_when_the_write_touched_no_row() ->
     the read and the write: nothing landed, so it must not count as done."""
 
     class _Gone(_Repo):
-        async def update_embedding(self, rid: int, vec, text, analysis_level=None):
+        async def update_embedding(
+            self, rid: int, vec, text, analysis_level=None, embedding_model=None
+        ):
             return None
 
     cand = bf.BackfillCandidate(7, 70, "p7", "T", "", "u", has_analysis=True)

@@ -328,7 +328,12 @@ async def call_analyze_l1(
     # in the digest for the workflow to stamp onto task_tracking.
     embedding, embed_error = await embedding_service.try_embed(embedding_text)
     if embedding:
-        await analysis_repo.update_embedding(resource_id, embedding, embedding_text)
+        await analysis_repo.update_embedding(
+            resource_id,
+            embedding,
+            embedding_text,
+            embedding_model=embedding_service.model,
+        )
     else:
         logger.error(
             f"[analyze_l1] resource {resource_id}: analysis saved but embedding "

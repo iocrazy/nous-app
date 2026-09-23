@@ -866,7 +866,7 @@ def _hybrid_svc_with(
     async def _fake_try_embed(_text):
         return embed
 
-    async def _fake_vec(*, embedding, user_id, limit, threshold):
+    async def _fake_vec(*, embedding, user_id, limit, threshold, embedding_model=None):
         return vector_rows
 
     monkeypatch.setattr(svc, "search_user_media_text", _fake_text)
@@ -1151,7 +1151,7 @@ async def test_hybrid_asks_the_engine_for_a_full_page(
 ) -> None:
     seen: List[int] = []
 
-    async def _fake_vec(*, embedding, user_id, limit, threshold):
+    async def _fake_vec(*, embedding, user_id, limit, threshold, embedding_model=None):
         seen.append(limit)
         return []
 

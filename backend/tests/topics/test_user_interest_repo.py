@@ -80,10 +80,16 @@ async def test_set_interest_binds_text_and_vec(monkeypatch):
     )
 
     call = session.calls[0]
-    assert call["params"] == {"uid": "u1", "txt": "ai chips", "vec": "[0.1,0.2]"}
+    assert call["params"] == {
+        "uid": "u1",
+        "txt": "ai chips",
+        "vec": "[0.1,0.2]",
+        "model": None,
+    }
     sql = str(call["stmt"])
-    # CAST(:vec AS vector), never :vec::vector (SQLAlchemy bind gotcha)
-    assert "CAST(:vec AS vector)" in sql
+    # CAST, never :vec::vector (SQLAlchemy bind gotcha); typed as text first
+    # so asyncpg can type the parameter at all (AmbiguousParameterError).
+    assert "CAST(CAST(:vec AS text) AS vector)" in sql
     assert ":vec::vector" not in sql
 
 

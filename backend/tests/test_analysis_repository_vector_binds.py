@@ -30,7 +30,7 @@ def test_every_rpc_argument_is_a_bound_parameter() -> None:
     sql = _rpc_sql()
     assert "match_videos_by_embedding" in sql
     assert "::" not in sql, sql
-    assert sorted(text(sql)._bindparams.keys()) == ["c", "q", "t", "u"]
+    assert sorted(text(sql)._bindparams.keys()) == ["c", "m", "q", "t", "u"]
 
 
 def test_orm_vector_dimension_matches_the_configured_embedder() -> None:

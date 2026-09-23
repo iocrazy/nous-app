@@ -386,6 +386,47 @@ class TestAnalyzeL1WorkflowReportsTheEmbeddingOutcomeSeparately:
         manager.complete.assert_not_awaited()
         manager.fail.assert_not_awaited()
 
+    async def test_a_dimension_mismatch_is_its_own_code_not_provider_error(self):
+        """A misconfigured embedder (wrong vector width) is reported as such
+        in Task Center — not folded into a transient provider_error, and
+        never "Analysis complete" with a silently missing vector."""
+        from app.workflows import analyze_l1 as m
+
+        cfg = {
+            "provider_key": "pk",
+            "provider_config": {},
+            "agent_model": "mm",
+            "agent_slug": "analyze",
+            "fallback_models": [],
+        }
+        manager = _make_manager()
+        reason = "dimension_mismatch: model 'x' returned 2560 dimensions"
+        with (
+            patch.object(m, "resolve_analyze_provider", AsyncMock(return_value=cfg)),
+            patch.object(
+                m,
+                "call_analyze_l1",
+                AsyncMock(
+                    return_value={
+                        "status": "ok",
+                        "embedded": False,
+                        "embed_error": reason,
+                    }
+                ),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+        ):
+            await inspect.unwrap(m.analyze_l1_workflow)(
+                media_id=1, cover_url="http://x", user_id="u-1"
+            )
+
+        kw = manager.update_progress.await_args.kwargs
+        assert kw["metadata_patch"] == {"embed_error": "dimension_mismatch"}
+        assert "embedding failed: dimension_mismatch" in kw["subtitle"]
+
     async def test_a_clean_run_says_only_analysis_complete(self):
         from app.workflows import analyze_l1 as m
 

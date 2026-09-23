@@ -13,6 +13,7 @@ import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 
+from app.core.embedding_space import EmbeddingDimensionMismatch, ensure_embedding_dim
 from app.services.ai.providers.embedding_config import (
     EmbeddingConfig,
     resolve_embedding_config,
@@ -25,7 +26,15 @@ EMBED_HTTP_TIMEOUT_S = 30.0
 # Stable classifiers for try_embed reasons. The part after the colon is raw
 # provider/SDK text (URLs, response bodies) that belongs in logs, not in a
 # task subtitle or an API response.
-EMBED_REASON_CODES = ("unconfigured", "empty_text", "provider_error")
+EMBED_REASON_CODES = (
+    "unconfigured",
+    "empty_text",
+    "provider_error",
+    # The provider answered with a vector of the wrong width for the columns
+    # (app.core.embedding_space). Not transient: every later call does the
+    # same, so callers that loop stop, and nobody reads it as "skip".
+    "dimension_mismatch",
+)
 
 
 def classify_embed_reason(reason: Optional[str]) -> Optional[str]:
@@ -79,8 +88,13 @@ class EmbeddingService:
         """Embed ``text`` and say WHY when there is no vector.
 
         Returns ``(vector, None)`` on success, else ``(None, reason)`` where
-        ``reason`` is one of ``"unconfigured"``, ``"empty_text"`` or
-        ``"provider_error: <message>"``. Never raises.
+        ``reason`` is one of ``"unconfigured"``, ``"empty_text"``,
+        ``"provider_error: <message>"`` or ``"dimension_mismatch: <message>"``
+        (the vector does not fit the columns — see
+        ``app.core.embedding_space``). Never raises.
+
+        On success ``self.model`` names the space the vector lives in (the
+        actual provider model id); writers store it next to the vector.
 
         ``generate_embedding`` folded all three into a bare ``None`` and every
         caller read that as "skip quietly" — which is how
@@ -91,6 +105,16 @@ class EmbeddingService:
         after ``provider_error:`` is raw exception text — log it, but
         classify it (``classify_embed_reason``) before it reaches a user.
         """
+        try:
+            return await self._embed_checked(text)
+        except EmbeddingDimensionMismatch as e:
+            return None, f"dimension_mismatch: {e}"
+
+    async def _embed_checked(
+        self, text: str
+    ) -> tuple[Optional[List[float]], Optional[str]]:
+        """:meth:`try_embed` minus the mismatch translation: raises
+        :class:`EmbeddingDimensionMismatch`, every other failure is a reason."""
         try:
             await self._ensure_client()
         except Exception as e:  # noqa: BLE001 — config read / client construction
@@ -129,17 +153,31 @@ class EmbeddingService:
             # multimodal path returns None in that case. Still a failure.
             logger.error("Embedding provider returned an empty vector")
             return None, "provider_error: empty vector in response"
+        try:
+            ensure_embedding_dim(vec, model=self.model)
+        except EmbeddingDimensionMismatch as e:
+            # Loud on purpose: before this guard the wrong width failed later,
+            # at the ORM bind / SQL CAST, and every caller swallowed it as
+            # "no vector, skip" — the column silently stopped filling.
+            logger.error(
+                f"Embedding dimension mismatch: model {e.model!r} returned "
+                f"{e.got} dimensions, the vector columns hold {e.expected}. "
+                "Nothing will be written until the embedder matches the "
+                "columns (app.core.embedding_space)."
+            )
+            raise
         logger.debug(f"Generated embedding with {len(vec)} dimensions")
         return vec, None
 
     async def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Best-effort vector for ``text``; ``None`` when disabled or failed.
 
-        Thin wrapper over :meth:`try_embed` that drops the reason, for the
-        callers that only want a vector (``semantic_search`` and the topics
-        embedder).
+        Drops the reason, for the callers that only want a vector
+        (``semantic_search`` and the topics embedder) — except a dimension
+        mismatch, which raises :class:`EmbeddingDimensionMismatch`: a
+        misconfigured embedder is not a "no vector this time".
         """
-        vec, _reason = await self.try_embed(text)
+        vec, _reason = await self._embed_checked(text)
         return vec
 
     async def _embed_multimodal(self, text: str) -> Optional[List[float]]:

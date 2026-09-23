@@ -15,7 +15,10 @@ from app.repositories.analysis_repository import (
     get_analysis_repository,
 )
 from app.schemas.search import DEFAULT_SEARCH_FIELDS, LibraryChipFilters
-from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.ai.providers.embedding_service import (
+    EmbeddingService,
+    classify_embed_reason,
+)
 from app.services.library.like_escape import escape_like
 
 
@@ -54,6 +57,9 @@ VECTOR_LEG_OUTCOMES = (
     "ok",
     "unconfigured",
     "embed_failed",
+    # The embedder answered with a vector that does not fit the columns
+    # (app.core.embedding_space): misconfigured, not a miss.
+    "dimension_mismatch",
     "timeout",
     "unavailable",
     "error",
@@ -323,6 +329,7 @@ class SearchService:
             user_id=user_id,
             limit=limit,
             threshold=threshold,
+            embedding_model=self.embedding_service.model or None,
         )
 
         results = [
@@ -365,10 +372,16 @@ class SearchService:
             if reason == "unconfigured":
                 return [], "unconfigured"
             logger.error(f"[hybrid] query embedding skipped: {reason}")
+            if classify_embed_reason(reason) == "dimension_mismatch":
+                return [], "dimension_mismatch"
             return [], "embed_failed"
         try:
             rows = await self.analysis_repo.search_by_embedding(
-                embedding=vec, user_id=user_id, limit=limit, threshold=threshold
+                embedding=vec,
+                user_id=user_id,
+                limit=limit,
+                threshold=threshold,
+                embedding_model=self.embedding_service.model or None,
             )
         except EmbeddingSearchUnavailable as e:
             logger.error(f"[hybrid] vector engine unavailable, text-only: {e}")
@@ -644,12 +657,14 @@ class SearchService:
                 search_type="similar",
             )
 
-        # Search for similar media (excluding the source)
+        # Search for similar media (excluding the source), within the source
+        # vector's embedding space (None = legacy, compatible with all).
         raw_results = await self.analysis_repo.search_by_embedding(
             embedding=embedding,
             user_id=user_id,
             limit=limit + 1,  # +1 to account for self-match
             threshold=threshold,
+            embedding_model=analysis.get("embedding_model"),
         )
 
         # Filter out the source media and transform results
