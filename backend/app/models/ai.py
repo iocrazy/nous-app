@@ -4,7 +4,7 @@ Legacy ai_sessions / ai_messages tables (and their ORM models) were retired in
 migration 333 (Phase 3 Wave 2) — all chat traffic now lives on the
 conversations/messages tables (raw-SQL repositories, not yet ORM-mapped; see
 app.repositories.conversation_repository). ai_session_memory outlived them
-until migration 488 dropped it (write-only and frozen once chat compaction
+until migration 489 dropped it (write-only and frozen once chat compaction
 moved onto the runner's ContextCompactor).
 """
 

@@ -11,7 +11,7 @@ it. There is exactly one shape, so there is exactly one right way to read it.
 
 Six call sites nonetheless read ``resp.get("content")``, which is ``None`` on
 that envelope, and four of them coerced it with ``or ""``. Ground truth
-2026-08-23: the single ``ai_session_memory`` row (table dropped in mig 488)
+2026-08-23: the single ``ai_session_memory`` row (table dropped in mig 489)
 held an empty ``body_md`` with every ``sections_json`` field ``""`` at
 ``version = 2``, written off a 39-turn / 13773-token session. It ran twice
 and stored nothing, without an exception, a log line, or a failing test —

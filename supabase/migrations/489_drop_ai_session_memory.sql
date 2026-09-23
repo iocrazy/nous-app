@@ -1,4 +1,4 @@
--- 488: retire ai_session_memory (Wave 5b session notes).
+-- 489: retire ai_session_memory (Wave 5b session notes).
 --
 -- Why it goes:
 --   * Zero readers. The only reader was the loader closure inside the chat

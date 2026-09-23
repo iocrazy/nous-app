@@ -87,7 +87,7 @@ git log --oneline origin/master..HEAD --grep="Memory M2\|memory consolidation\|m
 ---
 
 ## review/session-memory
-> Retired: the `ai_session_memory` table was dropped in mig 488 and the files
+> Retired: the `ai_session_memory` table was dropped in mig 489 and the files
 > below were removed. Kept for history only.
 
 **Focus paths**:

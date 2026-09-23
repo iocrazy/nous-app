@@ -249,7 +249,7 @@ async def test_chat_full_pipeline_fires_all_side_effects() -> None:
     assert store.bumps[0]["message_count"] == 2
 
     # 3. Background tasks dispatched. The session-memory updater was
-    # retired with ai_session_memory (mig 488); it must not come back.
+    # retired with ai_session_memory (mig 489); it must not come back.
     assert not any(
         "session-memory-update" in n for n in bg_tasks
     ), f"retired session_memory updater dispatched. bg_tasks={bg_tasks}"
