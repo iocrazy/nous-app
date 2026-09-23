@@ -17,6 +17,8 @@ from typing import Optional
 
 from loguru import logger
 
+from app.core.catalog_names import catalog_name_candidates
+
 # Cache: {(model_lower, provider_lower_or_empty): supports_vision_bool}
 _cache: dict[tuple[str, str], bool] = {}
 _cache_loaded: bool = False
@@ -219,8 +221,13 @@ async def model_supports_vision(
         if len(matching) == 1:
             return matching[0]
 
-    # 4: a catalog row whose provider runs on the user's own machine.
-    if model_lower in _local_vision_models:
+    # 4: a catalog row whose provider runs on the user's own machine. The
+    # mediahub-/nous- rename alias counts too (``app.core.catalog_names``).
+    # Deliberate simplification: this set only knows local-vision rows, so a
+    # non-local row named exactly ``model`` cannot out-rank a local-vision
+    # alias twin here. Both spellings coexisting is blocked by the admin
+    # create/update 409, so the case needs a hand-made catalog to arise.
+    if any(c in _local_vision_models for c in catalog_name_candidates(model_lower)):
         return True
 
     # 5 + 6: prefix heuristic, else False.

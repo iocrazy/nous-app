@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy import delete, func, insert, or_, select, update
 
+from app.core.catalog_names import catalog_name_candidates, find_row_by_catalog_name
 from app.core.secure_settings import MARKER, encrypt_marked, reveal
 from app.db.session import read_scope, write_scope
 from app.models import NousModels
@@ -218,14 +219,21 @@ class NousModelRepository:
             return []
 
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get a Mediahub model by name (includes all fields for backend use)."""
+        """Get a catalog model by name (includes all fields for backend use).
+
+        Tolerates the ``mediahub-`` ↔ ``nous-`` prefix rename in both
+        directions (``app.core.catalog_names``): the exact name is fetched
+        together with its alias (at most two rows — ``name`` is unique) and
+        the exact one wins; the alias only answers when no row carries the
+        exact name. A name with neither prefix queries only itself."""
+        candidates = catalog_name_candidates(name)
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(NousModels).where(NousModels.name == name).limit(1)
+                    select(NousModels).where(NousModels.name.in_(candidates))
                 )
-                row = result.scalars().first()
-                return _row(row) if row else None
+                rows = [_row(r) for r in result.scalars().all()]
+                return find_row_by_catalog_name(rows, name)
         except Exception as e:
             logger.error(f"Failed to get mediahub model '{name}': {e}")
             return None
@@ -235,10 +243,11 @@ class NousModelRepository:
         e.g. ``doubao-seed-2-0-lite-260428``) — a fallback lookup for
         ``resolve_nous_model`` when an ``ai_agents.model`` value stores the
         raw provider id instead of the catalog ``name``. ``name`` values are
-        ``mediahub-*`` prefixed and ``actual_model`` values are raw provider ids,
-        so the two namespaces never collide. Ordered by ``sort_order`` so a
-        hypothetical duplicate resolves deterministically (mirrors
-        ``get_by_name``'s ``.limit(1)`` shape)."""
+        ``nous-*`` / ``mediahub-*`` prefixed and ``actual_model`` values are
+        raw provider ids, so the two namespaces never collide. Ordered by
+        ``sort_order`` so a hypothetical duplicate resolves deterministically.
+        No prefix aliasing here: ``actual_model`` is the upstream id, which the
+        catalog rename does not touch."""
         try:
             async with read_scope() as session:
                 result = await session.execute(

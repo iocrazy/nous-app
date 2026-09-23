@@ -10,7 +10,10 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from app.core.admin_deps import AdminAuthDep
-from app.repositories.nous_model_repository import get_nous_model_repository
+from app.repositories.nous_model_repository import (
+    NousModelRepository,
+    get_nous_model_repository,
+)
 from app.schemas.ai import TestConnectionResponse
 from app.schemas.nous_model import (
     NousModelCreate,
@@ -148,6 +151,35 @@ async def probe_nous_models(body: NousModelProbeRequest, auth: AdminAuthDep):
     return TestConnectionResponse(**result)
 
 
+async def _reject_name_collision(
+    repo: NousModelRepository, name: str, own_id: str | None
+) -> None:
+    """409 when ``name`` — or its ``mediahub-`` ↔ ``nous-`` rename twin — is
+    already taken by a DIFFERENT row.
+
+    Rejected rather than allowed: a ``nous-X`` created next to a live
+    ``mediahub-X`` would make the pending rename migration collide on the
+    unique ``name`` index, and until then every by-name lookup of either
+    spelling would split between two rows depending on which one was typed.
+    ``get_by_name`` already resolves exact-then-alias, so one lookup answers
+    both questions. Renaming a row to its own twin (``own_id`` matches) is the
+    rename itself and is allowed.
+    """
+    taken = await repo.get_by_name(name)
+    if not taken or (own_id is not None and str(taken.get("id")) == str(own_id)):
+        return
+    taken_name = taken.get("name") or name
+    if taken_name == name:
+        detail = f"A model named '{name}' already exists."
+    else:
+        detail = (
+            f"'{name}' would collide with the existing model '{taken_name}' "
+            "once legacy mediahub-* names are renamed to nous-*. Edit that "
+            "model instead, or pick a different name."
+        )
+    raise HTTPException(status_code=409, detail=detail)
+
+
 @router.post("", response_model=NousModelResponse)
 async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
     """Create a new Mediahub model.
@@ -157,6 +189,7 @@ async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
     enters the key once per provider and adds more models without re-typing it.
     """
     repo = get_nous_model_repository()
+    await _reject_name_collision(repo, body.name, own_id=None)
     data = body.model_dump()
     if not (data.get("api_key") or "").strip():
         base_url = data.get("base_url") or ""
@@ -197,6 +230,8 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if updates.get("name"):
+        await _reject_name_collision(repo, updates["name"], own_id=model_id)
     row = await repo.update(model_id, updates)
     if not row:
         raise HTTPException(status_code=404, detail="Model not found")

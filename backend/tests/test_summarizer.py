@@ -74,12 +74,16 @@ async def test_default_provider_is_maintenance_model():
     """If no env override and no system_settings override, fall back to
     the maintenance-tier catalog default — a name that actually exists in
     the platform catalog (DB-only credentials; the old Haiku literal
-    resolved to nothing). Pin it so a silent default change diffs loudly."""
+    resolved to nothing). Pin it so a silent default change diffs loudly.
+
+    Spelled ``nous-`` ahead of the catalog row rename; it reaches today's
+    ``mediahub-doubao-seed-2-0-lite`` row through the by-name alias (see
+    test_catalog_name_alias_sites.py)."""
     from app.services.ai.providers.ai_provider_helpers import (
         DEFAULT_MAINTENANCE_MODEL,
     )
 
-    assert DEFAULT_MAINTENANCE_MODEL == "mediahub-doubao-seed-2-0-lite"
+    assert DEFAULT_MAINTENANCE_MODEL == "nous-doubao-seed-2-0-lite"
 
 
 async def test_env_override_wins_over_system_settings(monkeypatch):

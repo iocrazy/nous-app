@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from dbos import DBOS
 from loguru import logger
 
+from app.core.catalog_names import find_row_by_catalog_name
 from app.services.codex.daemon_dispatch import DEFAULT_TIMEOUT_S
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -120,29 +121,28 @@ async def resolve_local_engine(
         from app.services.media.parsers.video_providers import db_registry
 
         rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
-        for row in rows:
-            if str(row.get("name")) == model_name:
-                if not db_registry._visible_to(row, user_id):  # noqa: SLF001
-                    return None
-                engine = LOCAL_ENGINES.get(
-                    str(row.get("actual_provider") or "").lower()
-                )
-                if engine:
-                    actual = str(row.get("actual_model") or "")
-                    # The user's Codex provider card (Settings > AI >
-                    # Providers) names the orchestrator model; it beats the
-                    # catalog default. Codex only: dreamina has no such knob.
-                    if engine == "codex" and user_id:
-                        from app.services.codex import provider_card
+        # Exact name first, then the mediahub-/nous- rename alias.
+        row = find_row_by_catalog_name(rows, model_name)
+        if row is None:
+            return None
+        if not db_registry._visible_to(row, user_id):  # noqa: SLF001
+            return None
+        engine = LOCAL_ENGINES.get(str(row.get("actual_provider") or "").lower())
+        if not engine:
+            return None
+        actual = str(row.get("actual_model") or "")
+        # The user's Codex provider card (Settings > AI > Providers) names the
+        # orchestrator model; it beats the catalog default. Codex only:
+        # dreamina has no such knob.
+        if engine == "codex" and user_id:
+            from app.services.codex import provider_card
 
-                        actual = (
-                            await provider_card.codex_orchestrator_model(str(user_id))
-                        ) or actual
-                    return engine, actual
-                return None
+            actual = (
+                await provider_card.codex_orchestrator_model(str(user_id))
+            ) or actual
+        return engine, actual
     except Exception:
         return None
-    return None
 
 
 async def require_provider_card(engine: str, user_id: Optional[str]) -> None:
