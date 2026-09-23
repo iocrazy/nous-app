@@ -10,8 +10,10 @@ own_cost_cents (agent_runs — each row's OWN spend, descendants excluded)
 is the baseline; the last CLOSED hour is the sample. Flag when all of:
     baseline has >= MIN_BASELINE_HOURS hours with spend,
     z = (hour_cost - mean) / stddev >= Z_THRESHOLD,
-    hour_cost >= MIN_HOUR_COST_CENTS (absolute floor — tiny baselines
-    make huge z-scores out of pocket change).
+    hour_cost >= the absolute floor (tiny baselines make huge z-scores
+    out of pocket change). The floor is admin-tunable: each tick reads
+    ``system_settings['agent_cost_anomaly.min_hour_cost_cents']`` and falls
+    back to DEFAULT_MIN_HOUR_COST_CENTS when the key is missing or invalid.
 
 The anchor rule is ensured idempotently with ``is_active = FALSE`` so
 the admin's manual /check loop (which only walks active rules) never
@@ -20,6 +22,7 @@ double-evaluates it.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any
 
@@ -28,7 +31,17 @@ from loguru import logger
 
 Z_THRESHOLD = 3.0
 MIN_BASELINE_HOURS = 24
-MIN_HOUR_COST_CENTS = 50.0
+# Absolute floor (cents) on the flagged hour's own spend. Derivation: under the
+# own-spend semantics (mig 479 — the CTE sums own_cost_cents), production on
+# 2026-09-22 had 38 agent-hours with spend in the last 30 days: p50 0.15¢ /
+# p75 0.46¢ / p90 1.8¢ / max 30¢. The old value 50 was set under the folded
+# cost_cents semantics (descendants rolled into the parent row) and under
+# neither semantics did any hour ever clear it — the detector could not fire.
+# 0.5¢ sits just above p75. Admins change it at runtime via
+# system_settings['agent_cost_anomaly.min_hour_cost_cents'] (admin Settings
+# GET/PUT /api/v1/admin/settings/agent-cost-anomaly); this is only the fallback.
+DEFAULT_MIN_HOUR_COST_CENTS = 0.5
+MIN_HOUR_COST_SETTING_KEY = "agent_cost_anomaly.min_hour_cost_cents"
 
 _ANCHOR_RULE_NAME = "Agent cost anomaly (system)"
 
@@ -135,6 +148,68 @@ async def _ensure_anchor_rule() -> int:
     )
 
 
+def parse_min_hour_cost_cents(raw: Any) -> float | None:
+    """Parse a stored floor value; ``None`` when absent/blank/invalid.
+
+    ``system_settings.value`` is JSONB — may arrive as a JSON number, a decoded
+    str, or raw JSON text (``'"2"'``); strip surrounding quotes defensively
+    (same handling as ``memory.registry._read_provider_setting``). Booleans,
+    negatives and non-finite values are invalid.
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    text = str(raw).strip().strip('"').strip()
+    if not text:
+        return None
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return value
+
+
+async def read_min_hour_cost_cents() -> float:
+    """Current floor: the admin setting, else DEFAULT_MIN_HOUR_COST_CENTS.
+
+    Missing key → default silently (the normal unconfigured state). A present
+    but unparsable/negative value, or a failed read → default + WARNING, so a
+    bad admin write is visible in application_logs instead of silently
+    changing alert sensitivity.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import SystemSettings
+
+    try:
+        async with read_scope() as session:
+            raw = (
+                await session.execute(
+                    select(SystemSettings.value).where(
+                        SystemSettings.key == MIN_HOUR_COST_SETTING_KEY
+                    )
+                )
+            ).scalar()
+    except Exception as e:  # noqa: BLE001 — fall back, but say so
+        logger.warning(
+            f"[agent_cost_anomaly] reading {MIN_HOUR_COST_SETTING_KEY} failed "
+            f"({e!r}); using default {DEFAULT_MIN_HOUR_COST_CENTS}"
+        )
+        return DEFAULT_MIN_HOUR_COST_CENTS
+    if raw is None:
+        return DEFAULT_MIN_HOUR_COST_CENTS
+    parsed = parse_min_hour_cost_cents(raw)
+    if parsed is None:
+        logger.warning(
+            f"[agent_cost_anomaly] invalid {MIN_HOUR_COST_SETTING_KEY}={raw!r}; "
+            f"using default {DEFAULT_MIN_HOUR_COST_CENTS}"
+        )
+        return DEFAULT_MIN_HOUR_COST_CENTS
+    return parsed
+
+
 @DBOS.step()
 async def detect_agent_cost_anomalies_step() -> dict[str, Any]:
     """One SQL pass; findings → alert_history + WARNING logs."""
@@ -143,11 +218,12 @@ async def detect_agent_cost_anomalies_step() -> dict[str, Any]:
     from app.db.session import read_scope, write_scope
     from app.models import AlertHistory
 
+    min_cost = await read_min_hour_cost_cents()
     async with read_scope() as session:
         findings = (
             (
                 await session.execute(
-                    _findings_stmt(MIN_BASELINE_HOURS, Z_THRESHOLD, MIN_HOUR_COST_CENTS)
+                    _findings_stmt(MIN_BASELINE_HOURS, Z_THRESHOLD, min_cost)
                 )
             )
             .mappings()
@@ -159,9 +235,9 @@ async def detect_agent_cost_anomalies_step() -> dict[str, Any]:
     rule_id = await _ensure_anchor_rule()
     for f in findings:
         message = (
-            f"Agent '{f['agent_slug']}' spent {f['hour_cost_cents']:.0f}¢ "
+            f"Agent '{f['agent_slug']}' spent {f['hour_cost_cents']:.2f}¢ "
             f"last hour — z={f['zscore']:.1f} vs its 7d hourly baseline "
-            f"(mean {f['baseline_mean']:.0f}¢, sd {f['baseline_sd']:.0f}¢, "
+            f"(mean {f['baseline_mean']:.2f}¢, sd {f['baseline_sd']:.2f}¢, "
             f"n={f['baseline_hours']}h)."
         )
         logger.warning(f"[agent_cost_anomaly] {message}")

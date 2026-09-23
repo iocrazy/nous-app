@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ============================================
 # User Management Schemas
@@ -757,6 +757,19 @@ class TopicScoringConfigResponse(BaseModel):
     featured_min_score: float
     summary_max_chars: int = 0
     enabled: bool = True
+
+
+class AgentCostAnomalyConfig(BaseModel):
+    """Admin-tunable agent cost anomaly floor
+    (system_settings['agent_cost_anomaly.min_hour_cost_cents']).
+
+    min_hour_cost_cents: an agent's last-hour own spend must reach this many
+    cents before a z-score spike is alerted (0 = no floor).
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    min_hour_cost_cents: float = Field(ge=0)
 
 
 class ModuleSummaryResponse(BaseModel):
