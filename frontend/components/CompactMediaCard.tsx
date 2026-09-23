@@ -374,10 +374,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             {hit && (
               <div
                 data-testid="hit-badge"
-                className="rounded px-1 text-[10px] bg-black/60 text-white whitespace-nowrap"
+                className="rounded px-1 text-[10px] leading-4 bg-island/95 text-content border border-line-strong whitespace-nowrap tabular-nums"
               >
-                {t(HIT_BADGE_LABELS[hit.layer]?.key ?? HIT_BADGE_LABELS.text.key,
-                  HIT_BADGE_LABELS[hit.layer]?.fallback ?? HIT_BADGE_LABELS.text.fallback)}
+                <span className="font-semibold text-[var(--accent-text)]">
+                  {t(HIT_BADGE_LABELS[hit.layer]?.key ?? HIT_BADGE_LABELS.text.key,
+                    HIT_BADGE_LABELS[hit.layer]?.fallback ?? HIT_BADGE_LABELS.text.fallback)}
+                </span>
                 {' · '}
                 {hit.score.toFixed(2)}
               </div>
@@ -414,7 +416,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
         <div className="h-[3px] w-full bg-line" aria-hidden="true">
           <div
             data-testid="similarity-bar"
-            className="h-full bg-ok"
+            className="h-full bg-[var(--accent-text)]"
             style={{ width: `${similarityPercent(hit.score)}%` }}
           />
         </div>

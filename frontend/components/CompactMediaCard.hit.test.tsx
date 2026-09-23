@@ -36,7 +36,9 @@ describe('CompactMediaCard — search hit', () => {
     );
     expect(screen.getByTestId('hit-badge')).toHaveTextContent('Semantic · 0.71');
     expect(screen.getByTestId('similarity-bar')).toHaveStyle({ width: '71%' });
-    expect(screen.getByTestId('similarity-bar')).toHaveClass('bg-ok');
+    // Magnitude, not status: the bar follows the module accent, never the ok colour.
+    expect(screen.getByTestId('similarity-bar')).not.toHaveClass('bg-ok');
+    expect(screen.getByTestId('similarity-bar')).toHaveClass('bg-[var(--accent-text)]');
   });
 
   it('renders neither without hit', () => {

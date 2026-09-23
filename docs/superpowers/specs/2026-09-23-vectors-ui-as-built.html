@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vectors UI · as built (PR #2404) · design pass</title>
+<style>
+  :root{
+    --page:#F3F0E9; --island:#FCFBF8; --sub:#F6F4EE; --line:#E5E0D4; --line2:#D6D0C0;
+    --ink:#1C1B18; --ink2:#57544B; --ink3:#8C887B;
+    --accent:#14694D; --accent-soft:#E3EFE8; --accent-line:#B9D6C7;
+    --ok:#1E7A5B; --ok-soft:#E3EFE8; --warn:#A87B2B; --warn-soft:#F5EBD6; --danger:#AD5147; --danger-soft:#F4E1DE; --info:#46708E; --info-soft:#E6EDF3; --info-line:#B9CBD9;
+    --thumb-a:#3C4A55; --thumb-b:#1F262C;
+    /* settings modal keeps the ink scale (AISettings / MCP / Memory all do) */
+    --ink-950:#0d0d10; --ink-900:#15151a; --ink-800:#27272a; --ink-700:#3f3f46; --ink-600:#52525b; --ink-500:#8c8c96; --ink-400:#a3a3ad; --ink-200:#d4d4d8; --ink-100:#e7e7ea;
+  }
+  :root[data-theme="dark"]{
+    --page:#050507; --island:#15151a; --sub:#17171b; --line:rgba(255,255,255,.065); --line2:rgba(255,255,255,.12); --ink:#e7e7ea; --ink2:#a3a3ad; --ink3:#74747e;
+    --accent:#80B39C; --accent-soft:rgba(30,122,91,.14); --accent-line:rgba(30,122,91,.4);
+    --ok:#80B39C; --ok-soft:rgba(30,122,91,.14); --warn:#CEAC78; --warn-soft:rgba(168,123,43,.14); --danger:#D1948B; --danger-soft:rgba(173,81,71,.14); --info:#8DA9BE; --info-soft:rgba(70,112,142,.14); --info-line:rgba(70,112,142,.4);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;padding:16px 16px 48px}
+  .wrap{max-width:1240px;margin:0 auto;display:grid;gap:14px}
+  h1{font-size:17px;margin:0;font-weight:600}
+  h2{font-size:13px;margin:0;font-weight:600}
+  .muted{color:var(--ink3)} .dim{color:var(--ink2)} .num{font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap} .between{justify-content:space-between}
+  .switch{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .switch button{border:1px solid var(--line2);background:var(--island);color:var(--ink2);padding:6px 12px;border-radius:999px;font:inherit;cursor:pointer}
+  .switch button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  .switch button:focus-visible,.tabbar button:focus-visible,.btn:focus-visible,.fchip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .screen[hidden]{display:none}
+  .island{background:var(--island);border:1px solid var(--line);border-radius:12px}
+  .pad{padding:14px}
+
+  /* design notes: the only decorated element on the page, on purpose */
+  .notes{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;font-size:12.5px}
+  @media (max-width:800px){.notes{grid-template-columns:1fr}}
+  .notes h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--ink2)}
+  .notes ul{margin:0;padding-left:16px;display:grid;gap:3px}
+  .notes li b{font-weight:600}
+  .tag{display:inline-block;font-size:11px;border-radius:4px;padding:0 5px;border:1px solid var(--line2);color:var(--ink2);margin-left:4px}
+  .tag.change{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+  .tag.later{border-color:var(--line2);background:var(--sub);color:var(--ink3)}
+
+  /* app shell: rail · content · 380px island */
+  .shell{display:grid;grid-template-columns:52px 1fr 380px;gap:12px;min-height:600px}
+  @media (max-width:900px){.shell{grid-template-columns:52px 1fr}.shell .aside{grid-column:1/-1}}
+  .rail{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:10px;padding-block:12px}
+  .rail i{width:26px;height:26px;border-radius:7px;background:var(--sub);border:1px solid var(--line)}
+  .rail i.on{background:var(--accent-soft);border-color:var(--accent)}
+  .content{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px}
+  .toolbar .crumbs{font-weight:600}
+  .tsearch{display:flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--sub);border-radius:8px;padding:4px 8px;min-width:260px}
+  .tsearch input{border:0;background:transparent;font:inherit;color:var(--ink);flex:1;outline:none;min-width:0}
+  .mode{font-size:11px;border:1px solid var(--accent-line);color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 7px}
+  .icon{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--island);display:inline-grid;place-items:center;color:var(--ink2);font-size:13px}
+
+  /* FilterBar (real one) + the trailing slot */
+  .fbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px}
+  .fchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-size:12px;color:var(--ink2);background:var(--island);cursor:pointer}
+  .fchip.on{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+  .legs{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;color:var(--ink2);background:var(--sub)}
+  .legs .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:1px;background:var(--line2)}
+  .legs .ok .dot{background:var(--ok)} .legs .warn .dot{background:var(--warn)} .legs .bad .dot{background:var(--danger)}
+  .legs .built{color:var(--ink)} .legs .off{color:var(--ink3)}
+  .hits{font-size:12px;color:var(--ink3);white-space:nowrap}
+
+  /* CompactMediaCard */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;padding:0 12px 12px}
+  .card{background:var(--island);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .cover{aspect-ratio:9/12;position:relative;background:linear-gradient(160deg,var(--thumb-a),var(--thumb-b))}
+  .cover.p2{background:linear-gradient(160deg,#5C6B4A,#2C3324)} .cover.p3{background:linear-gradient(160deg,#6E5A4A,#2E251E)} .cover.p4{background:linear-gradient(160deg,#4A5C6E,#1E262E)} .cover.p5{background:linear-gradient(160deg,#7A6A50,#332B1F)} .cover.p6{background:linear-gradient(160deg,#5A4A6E,#251E2E)}
+  .cover .plat{position:absolute;left:6px;top:6px;width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;display:grid;place-items:center}
+  .cover .tr{position:absolute;right:6px;top:6px;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+  .cover .type{width:18px;height:18px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;display:grid;place-items:center}
+  .cover .hit{background:rgba(252,251,248,.94);color:var(--ink);font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid var(--line2);white-space:nowrap}
+  .cover .hit b{color:var(--accent);font-weight:600}
+  .cover .hit.old{background:rgba(0,0,0,.6);color:#fff;border:0}
+  .cover .ttl{position:absolute;left:0;right:0;bottom:0;padding:22px 8px 6px;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:12px;line-height:1.3}
+  .bar{height:3px;background:var(--line)} .bar i{display:block;height:100%;background:var(--accent)}
+  .cbody{padding:7px 9px;display:grid;gap:4px}
+  .irow{display:flex;gap:6px;color:var(--ink3);font-size:11px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);font-size:10.5px;color:var(--ink3)}
+  .meta{font-size:11px;color:var(--ink3)}
+
+  /* info island */
+  .aside{background:var(--island);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+  .tabbar{display:flex;border-bottom:1px solid var(--line);align-items:center}
+  .tabbar button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 12px;font:inherit;font-size:13px;font-weight:500;color:var(--ink3);cursor:pointer;display:flex;gap:6px;align-items:center}
+  .tabbar button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
+  .tabbar .sp{flex:1}
+  .tabbar .statusdot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .abody{padding:12px;display:grid;gap:12px;overflow:auto}
+  .hero{aspect-ratio:16/9;border-radius:8px;background:linear-gradient(135deg,var(--thumb-a),var(--thumb-b));position:relative;color:#fff}
+  .hero .t{position:absolute;left:10px;bottom:16px;font-size:11px}
+  .hero .pbar{position:absolute;left:10px;right:10px;bottom:8px;height:3px;background:rgba(255,255,255,.3);border-radius:2px}
+  .hero .pbar i{position:absolute;left:0;top:0;bottom:0;width:49%;background:#fff;border-radius:2px}
+  .shcard{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:6px;padding:8px;display:grid;gap:6px;font-size:12px}
+  .shcard.old{border-color:var(--info-line);background:var(--info-soft)} .shcard.old .h{color:var(--info)} .shcard.old .btn.ghost{color:var(--info);border-color:var(--info-line)}
+  .shcard .h{font-weight:600;color:var(--accent);display:flex;gap:6px;align-items:center}
+  .subtabs{display:flex;gap:4px}
+  .subtabs button{border:0;background:none;padding:4px 10px;border-radius:6px;font:inherit;font-size:12px;font-weight:500;color:var(--ink2);cursor:pointer}
+  .subtabs button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent)}
+  .empty{display:grid;place-items:center;text-align:center;gap:8px;padding:40px 16px}
+  .empty .ic{width:28px;height:28px;border-radius:6px;border:2px solid var(--ink3);opacity:.7}
+  .empty h4{margin:0;font-size:13px;font-weight:500}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--ink2)}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:5px 11px;font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent-line)}
+  .btn.quiet{background:transparent;color:var(--ink3);border:1px solid var(--line2)}
+  .btn.info{background:var(--info-soft);color:var(--info);border:1px solid var(--info-line)}
+  .btn[disabled]{opacity:.6;cursor:not-allowed}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px} .kv dt{color:var(--ink3)} .kv dd{margin:0}
+  .desc{font-size:12.5px;color:var(--ink2)}
+
+  /* settings modal (dark ink scale, like the real one) */
+  .modal{background:var(--ink-950);color:var(--ink-100);border-radius:14px;display:grid;grid-template-columns:200px 1fr;min-height:560px;overflow:hidden;border:1px solid var(--ink-800)}
+  .nav{border-right:1px solid var(--ink-800);padding:12px 8px;display:grid;gap:2px;align-content:start;font-size:13px}
+  .nav .sec{color:var(--ink-500);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:10px 8px 4px}
+  .nav a{display:block;padding:6px 10px;border-radius:7px;color:var(--ink-200);text-decoration:none}
+  .nav a.on{background:var(--ink-800);color:#fff}
+  .nav a.new{outline:1px dashed var(--ink-600)}
+  .mbody{padding:16px;display:grid;gap:14px;align-content:start}
+  .mtabs{display:flex;gap:2px;border-bottom:1px solid var(--ink-800)}
+  .mtabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;font:inherit;font-size:13px;color:var(--ink-500);cursor:pointer}
+  .mtabs button[aria-selected="true"]{color:#fff;border-bottom-color:var(--accent)}
+  .sec-card{border:1px solid var(--ink-800);background:rgba(21,21,26,.4);border-radius:12px;padding:16px;display:grid;gap:12px}
+  .sec-card h3{margin:0;font-size:14px;font-weight:600;color:var(--ink-100)}
+  .inner{border:1px solid var(--ink-800);background:rgba(13,13,16,.4);border-radius:8px;padding:12px;display:grid;gap:8px}
+  .eyebrow{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-500);font-weight:500}
+  .dkv{display:grid;grid-template-columns:8rem 1fr;gap:6px 12px;font-size:13px} .dkv dt{color:var(--ink-500)} .dkv dd{margin:0;color:var(--ink-200)}
+  .cap{display:inline-block;border:1px solid rgba(30,122,91,.4);background:rgba(30,122,91,.14);color:#80B39C;border-radius:4px;padding:0 6px;font-size:12px;margin-right:4px}
+  .dbtn{background:transparent;color:var(--ink-200);border:1px solid var(--ink-700);border-radius:7px;padding:2px 8px;font:inherit;font-size:12px;cursor:pointer}
+  .dbtn[disabled]{opacity:.5;cursor:not-allowed;color:var(--ink-500);border-color:var(--ink-800)}
+  table{width:100%;border-collapse:collapse;font-size:13px;color:var(--ink-200)}
+  th{text-align:left;font-weight:500;color:var(--ink-500);font-size:12px;padding:6px 12px 6px 0}
+  td{padding:8px 12px 8px 0;border-top:1px solid var(--ink-800);vertical-align:middle}
+  tr.ph td{color:var(--ink-500)}
+  .sdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-600);margin-right:6px;vertical-align:0}
+  .sdot.ok{background:var(--ok)}
+  .prog{height:4px;width:96px;background:var(--ink-800);border-radius:3px;overflow:hidden;margin-top:4px} .prog i{display:block;height:100%;background:var(--ok)}
+  .last{font-size:12px;color:var(--ink-400)} .last b{color:var(--ink-500);font-weight:500}
+  .err{font-size:12px;color:#D1948B}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="island pad row between">
+    <div>
+      <h1>Vectors UI · as built in PR #2404 · design pass 2026-09-23</h1>
+      <div class="muted" style="font-size:12px">Same skeleton as the 09-16 mockup: My Downloads grid · info island · Settings → AI. Each screen has a notes strip: what shipped, what this pass changes<span class="tag change">change</span>, what waits for a later PR<span class="tag later">later</span>.</div>
+    </div>
+    <div class="switch" role="tablist" aria-label="Screens">
+      <button role="tab" aria-selected="true" data-s="s1">1 · Search hits</button>
+      <button role="tab" aria-selected="false" data-s="s2">2 · Overview / AI / Shots</button>
+      <button role="tab" aria-selected="false" data-s="s3">3 · Settings → AI → Vectors</button>
+      <button type="button" id="theme" class="muted" style="margin-left:8px">dark</button>
+    </div>
+  </div>
+
+  <!-- ===================== screen 1 ===================== -->
+  <section class="screen" id="s1">
+    <div class="shell">
+      <div class="rail"><i></i><i class="on"></i><i></i><i></i><i></i></div>
+      <div class="content">
+        <div class="island toolbar">
+          <div class="crumbs">My Downloads <span class="muted num">1,409</span></div>
+          <div class="row">
+            <div class="tsearch"><span class="muted">⌕</span><input value="手持跟拍 走位" aria-label="Search"><span class="mode">Smart Search</span><span class="muted">✕</span></div>
+            <span class="icon">≡</span><span class="icon">▦</span>
+          </div>
+        </div>
+        <div class="island">
+          <div class="fbar">
+            <span class="fchip">🏷 Tags</span><span class="fchip">☆ Rating</span><span class="fchip">▤ Type</span><span class="fchip">◎ Source</span><span class="fchip">✦ AI</span><span class="fchip">▦ Date</span>
+            <span class="muted" style="font-size:12px">⋯</span>
+            <!-- trailing slot: SearchLegsChips -->
+            <span class="fchip on">⧉ Layer · All ⌄</span>
+            <span class="fchip">⇅ Sort · Similarity ⌄</span>
+            <span class="legs" title="Hover a dot for the leg outcome code">
+              <span class="ok built"><i class="dot"></i>Text 12</span>
+              <span class="ok built"><i class="dot"></i>Semantic 9</span>
+              <span class="off" title="Not built · Arrives with PR 3"><i class="dot"></i>Visual</span>
+              <span class="off" title="Not built · Arrives with PR 3"><i class="dot"></i>Camera</span>
+              <span class="off" title="Not built"><i class="dot"></i>Transcript</span>
+              <span class="off">· Rerank Off</span>
+            </span>
+            <span class="hits num">21 hits · best match per video · 412 ms</span>
+          </div>
+          <div class="grid">
+            <div class="card sel"><div class="cover"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Semantic</b> · 0.71</span></span><div class="ttl">六万多！RTX Pro 6000 Max-Q 版开箱&体验</div></div><div class="bar"><i style="width:71%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 140</span><span>💬 44</span><span>↗ 0</span><span>☆ 0</span></div><div class="meta">@硬件老王 · 2026-09-14</div></div></div>
+            <div class="card"><div class="cover p2"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Semantic</b> · 0.66</span></span><div class="ttl">海南骑行 vlog · 从三亚到万宁的三天</div></div><div class="bar"><i style="width:66%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 3.1K</span><span>💬 443</span><span>↗ 278</span><span>☆ 927</span></div><div class="meta">@RICEDO · 2026-08-30</div></div></div>
+            <div class="card"><div class="cover p4"><span class="plat">d</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Title</b> · 1.00</span></span><div class="ttl">手持跟拍怎么稳？三个不用稳定器的走位技巧</div></div><div class="bar"><i style="width:100%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 18.0K</span><span>💬 256</span><span>↗ 1.4K</span><span>☆ 2.0K</span></div><div class="meta">@早+ · 2026-07-02</div></div></div>
+            <div class="card"><div class="cover p3"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Semantic</b> · 0.41</span></span><div class="ttl">解读 EvoMap（Evolver），让 Openclaw 自我进化</div></div><div class="bar"><i style="width:41%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 20</span><span>💬 29</span><span>↗ 0</span><span>☆ 0</span></div><div class="meta">@老何说逆向 · 2026-09-10</div></div></div>
+            <div class="card"><div class="cover p5"><span class="plat">b</span><span class="tr"><span class="type">▶</span><span class="hit"><b>Semantic</b> · 0.39</span></span><div class="ttl">借着豆包工作的发布，聊一下豆包飞书整合背后的逻辑</div></div><div class="bar"><i style="width:39%"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 923</span><span>💬 47</span><span>↗ 119</span><span>☆ 790</span></div><div class="meta">@OOO实验室 · 2026-09-12</div></div></div>
+            <div class="card"><div class="cover p6"><span class="plat">d</span><span class="tr"><span class="type">▶</span><span class="hit old">Semantic · 0.35</span></span><div class="ttl">街拍 · 傍晚的海口骑楼老街</div></div><div class="bar"><i style="width:35%;background:var(--ok)"></i></div><div class="cbody"><div class="irow">▮▮ ▤ ▥ ⋈ ✦</div><div class="stats"><span>♥ 12.8M</span><span>💬 106.7K</span><span>↗ 1.6M</span><span>☆ 678.1K</span></div><div class="meta">@困困包子 · 2026-07-31 <span class="tag">before</span></div></div></div>
+          </div>
+        </div>
+      </div>
+      <aside class="aside">
+        <div class="tabbar"><button aria-selected="true">◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button>▣ Shots</button><span class="sp"></span><span class="muted" style="padding:8px">»</span></div>
+        <div class="abody">
+          <div class="hero"><div class="t">3:41 / 7:25</div><div class="pbar"><i></i></div></div>
+          <div class="shcard"><div class="h">⌕ Search Hit</div><div class="dim">Semantic · 0.71</div><div class="row"><button class="btn ghost">▣ Open Shots</button></div></div>
+          <div><div style="font-weight:600;font-size:13px">六万多！RTX Pro 6000 Max-Q 版开箱&体验</div><div class="meta">Bilibili · 7:25 · 2026-09-14</div></div>
+          <div class="desc">Description, tags, notes and the action row stay exactly as today (MediaCard).</div>
+        </div>
+      </aside>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>Shipped in #2404</h3><ul>
+        <li>Three chips ride the existing FilterBar through a new <b>trailing</b> slot; nothing new above the grid.</li>
+        <li>Legs pill shows all five layers so the shape of the feature is visible before PR 3; unbuilt ones are grey with a hover reason.</li>
+        <li>Hit badge sits under the type icon (top-right column) so it never collides with the platform badge; similarity bar is 3 px under the cover.</li>
+        <li>Everything here appears only when the response carries <b>legs</b>; clearing the search or an older backend removes it all.</li>
+      </ul></div>
+      <div><h3>This pass</h3><ul>
+        <li><b>Hit badge → paper chip</b><span class="tag change">change</span> — it was a black/60 pill identical to the duration badge, so it read as metadata, not as evidence. Now island-white with the layer word in the module accent and tabular score (last card shows the old one).</li>
+        <li><b>Similarity bar → module accent</b><span class="tag change">change</span> — it was <code>ok</code> green, a status colour standing in for a magnitude. Bar, badge and the Search Hit card now share one accent: "this is why it matched".</li>
+        <li><b>Search Hit card → accent tones</b><span class="tag change">change</span> — was steel <code>info</code>; same reason.</li>
+        <li>Hit badge on the card's own row, time-coded <b>3:41</b> prefix and <b>shots queued</b> marker<span class="tag later">PR 3</span>.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== screen 2 ===================== -->
+  <section class="screen" id="s2" hidden>
+    <div class="shell">
+      <div class="rail"><i></i><i class="on"></i><i></i><i></i><i></i></div>
+      <div class="content" style="opacity:.55"><div class="island toolbar"><div class="crumbs">My Downloads</div><div class="tsearch"><span class="muted">⌕</span><input value="手持跟拍 走位" aria-label="Search"><span class="mode">Smart Search</span></div></div><div class="island pad muted" style="min-height:420px">Grid dimmed in the mockup only.</div></div>
+      <div style="display:grid;gap:12px">
+        <aside class="aside">
+          <div class="tabbar"><button aria-selected="true">◉ Overview</button><button>◈ AI <i class="statusdot"></i></button><button>▣ Shots</button><span class="sp"></span><span class="muted" style="padding:8px">»</span></div>
+          <div class="abody">
+            <div class="hero"><div class="t">3:41 / 7:25</div><div class="pbar"><i></i></div></div>
+            <div class="shcard"><div class="h">⌕ Search Hit</div><div class="dim">Semantic · 0.71</div><div class="row"><button class="btn ghost">▶ Play From 3:41</button><button class="btn ghost">▣ Open Shots</button></div><div class="muted" style="font-size:11px">Play From appears once PR 3 sends <code>startMs</code>; Open Shots only for videos.</div></div>
+            <div><div style="font-weight:600;font-size:13px">六万多！RTX Pro 6000 Max-Q 版开箱&体验</div><div class="meta">Bilibili · 7:25 · 2026-09-14</div></div>
+          </div>
+        </aside>
+        <aside class="aside">
+          <div class="tabbar"><button>◉ Overview</button><button aria-selected="true">◈ AI <i class="statusdot"></i></button><button>▣ Shots</button><span class="sp"></span></div>
+          <div class="abody">
+            <div class="subtabs" role="tablist"><button aria-selected="true">Transcript</button><button>Summary</button><button>Visual</button></div>
+            <div class="desc">Each small tab keeps today's body and trigger buttons (Summarize / Trigger Visual Analysis). The status dot on the big tab is the busiest of transcript · summary · visual.</div>
+          </div>
+        </aside>
+        <aside class="aside">
+          <div class="tabbar"><button>◉ Overview</button><button>◈ AI</button><button aria-selected="true">▣ Shots</button><span class="sp"></span></div>
+          <div class="abody">
+            <div class="empty"><div class="ic"></div><h4>Not Indexed Yet</h4><div class="mono">7:25 · ≈ 99 shots · ≈ 198 embeddings</div><button class="btn quiet" disabled title="Arrives with PR 3">Index This Video</button><div class="muted" style="font-size:12px">Runs as a Task Center task · you can keep browsing</div></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>Shipped in #2404</h3><ul>
+        <li>Big tabs collapse to <b>Overview / AI / Shots</b>; audio keeps Overview / Lyrics; carousels and images get no Shots.</li>
+        <li>AI hosts Transcript / Summary / Visual as small pill tabs; lazy loading follows the small tab. Same bar on ResourceDetailPage (Review stays as a fourth tab).</li>
+        <li>Search Hit card carries the layer and score from the grid via router state.</li>
+        <li>Shots is an honest empty state: the estimate is real (duration ÷ 4.5 s, two vectors per shot); the button is disabled with the reason in its tooltip.</li>
+      </ul></div>
+      <div><h3>This pass</h3><ul>
+        <li><b>Index This Video → quiet button</b><span class="tag change">change</span> — was <code>info</code>-tinted, which reads as "clickable, informational". A disabled placeholder should be quiet, like Add Space in Settings.</li>
+        <li><b>Search Hit card → accent</b><span class="tag change">change</span> — matches the badge and bar on the grid.</li>
+        <li>Shot strip, clusters, shot list and the ochre hit marker on the player rail<span class="tag later">PR 3</span>.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== screen 3 ===================== -->
+  <section class="screen" id="s3" hidden>
+    <div class="modal">
+      <nav class="nav">
+        <div class="sec">Account</div><a>Personal</a>
+        <div class="sec">App settings</div><a>General</a><a>API</a><a>Logs</a><a>Tasks</a><a>Tags</a><a>Workflow templates</a><a class="on">AI</a><a class="new">MCP</a><a>API docs</a><a>Cookies</a>
+      </nav>
+      <div class="mbody">
+        <div class="mtabs" role="tablist"><button>General</button><button>Providers</button><button>Local CLI</button><button>Memory</button><button aria-selected="true">Vectors</button></div>
+        <div class="sec-card">
+          <div class="row between"><h3>Vector Spaces</h3><button class="dbtn" disabled title="Arrives with space switching">Add Space</button></div>
+          <div class="inner">
+            <div class="eyebrow">Current space</div>
+            <dl class="dkv">
+              <dt>Provider</dt><dd>doubao-embedding-vision-251215</dd>
+              <dt>Protocol</dt><dd>ark_multimodal</dd>
+              <dt>Capabilities</dt><dd><span class="cap">image</span><span class="cap">text</span><span class="cap">video</span></dd>
+              <dt>Dimensions</dt><dd>2048 · halfvec · HNSW</dd>
+              <dt>Instruction</dt><dd>en_keyword_v1</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="sec-card">
+          <h3>Retrieval Layers</h3>
+          <table>
+            <thead><tr><th>Layer</th><th>Status</th><th>Coverage</th><th>Source</th><th>Backfill</th></tr></thead>
+            <tbody>
+              <tr><td>Semantic</td><td><span class="sdot ok"></span>ok</td><td class="num">20 / 1,409<div class="prog"><i style="width:1.4%"></i></div></td><td style="font-size:12px;color:var(--ink-400)">title + description + tags + summary + transcript</td><td><button class="dbtn">Dry Run</button> <button class="dbtn">Run 20</button></td></tr>
+              <tr class="ph"><td>Visual · frame</td><td><span class="sdot"></span>Arrives with PR 3</td><td class="num">— / 1,409</td><td></td><td></td></tr>
+              <tr class="ph"><td>Camera · clip</td><td><span class="sdot"></span>Arrives with PR 3</td><td class="num">— / 1,409</td><td></td><td></td></tr>
+              <tr><td>Transcript</td><td><span class="sdot"></span>not built · Phase 2</td><td class="num">0 / 1,409<div class="prog"><i style="width:0"></i></div></td><td></td><td></td></tr>
+            </tbody>
+          </table>
+          <div class="last"><b>Last backfill ·</b> 20 embedded · 0 skipped · 1,389 remaining</div>
+          <div class="err" style="opacity:.7">embedder_unconfigured — No embedding model configured (ai_module.embedding); set one in Admin → AI Models before backfilling. <span class="tag" style="border-color:var(--ink-700);color:var(--ink-500)">error state</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="island pad notes" style="margin-top:12px">
+      <div><h3>Shipped in #2404</h3><ul>
+        <li>Vectors is the fifth AI sub tab; <b>MCP</b> moves to the left nav (dashed here), so the strip stays five wide.</li>
+        <li>Panel uses the settings modal's ink scale like AISettings / MCP / Memory, not the paper tokens of the library.</li>
+        <li>Backfill stays usable when the status endpoint 404s (PR 2 not deployed yet); 409 / 503 are one typed red line, never a toast.</li>
+        <li>Skips are listed by reason code (<code>empty_text ×2</code>), never hidden.</li>
+      </ul></div>
+      <div><h3>This pass</h3><ul>
+        <li>No visual change. The ink-scale choice is right for this modal; the eyebrow label is the one AISettings already uses.</li>
+        <li>Candidate space card, Switch to this space, Indexing policy<span class="tag later">space switching / PR 3</span>.</li>
+      </ul></div>
+    </div>
+  </section>
+</div>
+<script>
+  const tabs=[...document.querySelectorAll('.switch [data-s]')];
+  tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.setAttribute('aria-selected',x===b));document.querySelectorAll('.screen').forEach(s=>s.hidden=s.id!==b.dataset.s);}));
+  document.getElementById('theme').addEventListener('click',e=>{const r=document.documentElement;const d=r.dataset.theme==='dark';r.dataset.theme=d?'light':'dark';e.target.textContent=d?'dark':'light';});
+</script>
+</body>
+</html>

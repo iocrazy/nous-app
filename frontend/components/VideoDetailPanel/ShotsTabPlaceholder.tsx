@@ -63,7 +63,7 @@ export const ShotsTabPlaceholder: React.FC<ShotsTabPlaceholderProps> = ({ durati
         type="button"
         disabled
         title={t('detail.shots.placeholder.arrives', 'Arrives with PR 3')}
-        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-info-line bg-info-soft text-info opacity-60 cursor-not-allowed"
+        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-line-strong text-content-3 cursor-not-allowed"
       >
         {t('detail.shots.placeholder.index', 'Index This Video')}
       </button>

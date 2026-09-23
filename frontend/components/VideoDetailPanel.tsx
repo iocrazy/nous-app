@@ -572,9 +572,9 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
         {activeTab === 'overview' && searchHit && (
           <div
             data-testid="search-hit-card"
-            className="mx-4 sm:mx-6 mb-3 border border-info-line bg-info-soft rounded p-2 space-y-1.5"
+            className="mx-4 sm:mx-6 mb-3 border border-accent/30 bg-accent-soft rounded p-2 space-y-1.5"
           >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-info">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent-text)]">
               <Search size={12} />
               {t('detail.searchHit.title', 'Search Hit')}
             </div>
@@ -586,7 +586,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => onSeek(searchHit.startMs! / 1000)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-info border border-info-line hover:bg-info-soft"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-[var(--accent-text)] border border-accent/30 hover:bg-island"
                 >
                   <Play size={10} />
                   {t('detail.searchHit.playFrom', 'Play From {{time}}', {
@@ -598,7 +598,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('shots')}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-info border border-info-line hover:bg-info-soft"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-[var(--accent-text)] border border-accent/30 hover:bg-island"
                 >
                   <Clapperboard size={10} />
                   {t('detail.searchHit.openShots', 'Open Shots')}
