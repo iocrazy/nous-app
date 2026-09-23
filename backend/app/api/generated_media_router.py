@@ -15,6 +15,7 @@ Scope = caller's personal team resolved via _resolve_personal_team_id.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from typing import Optional
 
@@ -526,6 +527,27 @@ def _upscale_failure_detail(row_name: str, exc: Exception) -> str:
     return f"upscale failed via {row_name or 'unknown provider'}{suffix}: {exc}"
 
 
+# An upstream error code is echoed to the browser (TYPED_5XX_CODES), so it must
+# look like a code — a token, not prose that could carry exception text.
+_UPSTREAM_CODE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+
+
+def _upscale_failure_body(row_name: str, exc: Exception) -> dict:
+    """The typed 502 body the canvas shows. Built only from values we trust:
+    the catalog row name, an int status, and a token-shaped upstream code.
+    Never ``str(exc)`` — that goes to the log via ``_upscale_failure_detail``."""
+    status = getattr(exc, "status", None)
+    code = getattr(exc, "code", None)
+    return {
+        "code": "upscale_backend_failed",
+        "provider": row_name or None,
+        "upstream_status": status if isinstance(status, int) else None,
+        "upstream_code": (
+            code if isinstance(code, str) and _UPSTREAM_CODE_RE.match(code) else None
+        ),
+    }
+
+
 def _materialize_gen_file(gen_id: int):
     """Seam: async-context yielding a local Path for the generation file."""
     from app.services.library.generated_media_service import (
@@ -584,7 +606,10 @@ async def upscale_generation(
         # No enabled backend (or a misconfigured row) is a server-side setup
         # problem, not a bad request — and it must say which.
         logger.error("upscale backend resolution failed: {}", exc)
-        raise HTTPException(status_code=503, detail=f"upscale unavailable: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "upscale_unavailable", "reason": "no_backend"},
+        )
     async with request_scope(Scope(user_id=str(auth.user_id))):
         async with _materialize_gen_file(gen_id) as src:
             if src is None:
@@ -596,9 +621,10 @@ async def upscale_generation(
                     model=actual_model,
                 )
             except Exception as exc:
-                detail = _upscale_failure_detail(row_name, exc)
-                logger.error("{}", detail)
-                raise HTTPException(status_code=502, detail=detail)
+                logger.error("{}", _upscale_failure_detail(row_name, exc))
+                raise HTTPException(
+                    status_code=502, detail=_upscale_failure_body(row_name, exc)
+                )
         try:
             row = await _register_upscale_result(
                 user_id=str(auth.user_id),

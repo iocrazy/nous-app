@@ -234,16 +234,51 @@ async def test_upstream_failure_is_502_naming_provider_and_code(
         "/api/v1/generated-media/7/upscale", json={"resolution": "2k"}
     )
     assert resp.status_code == 502
-    # The ErrorResponse envelope scrubs every 5xx body to "Internal server
-    # error" (app/core/exceptions.py), so the detail reaches the operator via
-    # the logs; its content is pinned directly below.
-    detail = r._upscale_failure_detail(
-        "nous-studio-upscale",
-        NousEngineImageError("model not found", status=404, code="model_not_found"),
+    body = resp.json()
+    # Production envelope, typed code passed through (TYPED_5XX_CODES).
+    assert body["success"] is False
+    assert body["details"] == {
+        "code": "upscale_backend_failed",
+        "provider": "nous-studio-upscale",
+        "upstream_status": 404,
+        "upstream_code": "model_not_found",
+    }
+    # The raw exception text stays in the log, never in the body.
+    assert "studio-upscale not found" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_prose_shaped_upstream_code_is_not_echoed(monkeypatch, client, tmp_path):
+    """upstream_code reaches the browser, so only token-shaped codes pass."""
+    from app.services.media.parsers.video_providers.nous_images import (
+        NousEngineImageError,
     )
-    assert "nous-studio-upscale" in detail
-    assert "status=404" in detail
-    assert "code=model_not_found" in detail
+
+    src = tmp_path / "src.png"
+    src.write_bytes(b"\x89PNG src")
+
+    class _Weird:
+        async def upscale_image(self, **kwargs):
+            raise NousEngineImageError(
+                "boom", status=500, code="Traceback at /app/secret.py line 3"
+            )
+
+    _patch_source(
+        monkeypatch,
+        rows={7: {"id": "7", "scope_id": "99", "media_kind": "image"}},
+        teams={99},
+    )
+    _patch_upscaler(monkeypatch, _Weird(), row_name="jimeng-cli-image")
+    monkeypatch.setattr(
+        r, "_materialize_gen_file", lambda gen_id: _FakeMaterialized(src)
+    )
+
+    resp = await client.post(
+        "/api/v1/generated-media/7/upscale", json={"resolution": "2k"}
+    )
+    assert resp.status_code == 502
+    assert resp.json()["details"]["upstream_code"] is None
+    assert "secret.py" not in resp.text
 
 
 @pytest.mark.asyncio
@@ -262,6 +297,11 @@ async def test_no_upscale_backend_is_503(monkeypatch, client):
         "/api/v1/generated-media/7/upscale", json={"resolution": "2k"}
     )
     assert resp.status_code == 503
+    assert resp.json()["details"] == {
+        "code": "upscale_unavailable",
+        "reason": "no_backend",
+    }
+    assert "no upscale-capable" not in resp.text
 
 
 def test_failure_detail_without_upstream_code_still_names_the_backend():
