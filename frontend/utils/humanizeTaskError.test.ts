@@ -119,6 +119,25 @@ describe('humanizeTaskError — provider card switched off', () => {
   });
 });
 
+describe('humanizeTaskError — local daemon', () => {
+  it('says the daemon is not connected and how to start it', () => {
+    const r = humanizeTaskError(
+      'RuntimeError: [daemon_offline] Your local nous-codex daemon is not connected, so this dreamina job could not start.',
+    );
+    expect(r.message).toBe('Your local daemon is not connected.');
+    expect(r.hint ?? '').toMatch(/nous-codex/);
+  });
+
+  it('does not tell a timed-out daemon job to just retry', () => {
+    const r = humanizeTaskError(
+      'RuntimeError: [daemon_timeout] Your local dreamina job did not answer within 1620s.',
+    );
+    expect(r.message).toBe('Your local daemon did not answer in time.');
+    expect(r.hint ?? '').toMatch(/Generated/);
+    expect(r.message).not.toMatch(/retry usually works/);
+  });
+});
+
 describe('humanizeTaskError — object store write failed', () => {
   it('names the storage outage and says nothing was saved, whatever the wrapper', () => {
     for (const raw of [

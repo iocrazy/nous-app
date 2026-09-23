@@ -59,7 +59,29 @@ _UPDATE_COMMAND = (
 
 
 class DaemonOfflineError(RuntimeError):
-    """The user has no daemon connected right now."""
+    """The user has no daemon connected right now.
+
+    Typed for ``describe_generation_failure`` (``code`` / ``detail``) so a
+    generation step can record it and opt out of DBOS's retry: nobody starts
+    their daemon in the second it takes DBOS to try again. ``detail`` is empty
+    on purpose - it is the slot for a failing party's own words, and an
+    offline daemon said nothing.
+    """
+
+    code = "daemon_offline"
+    detail = ""
+
+
+class DaemonTimeoutError(TimeoutError):
+    """The daemon took the job and never answered within ``timeout_s``.
+
+    Still a ``TimeoutError`` so every existing ``except TimeoutError`` keeps
+    catching it; typed so a generation step can record it. See
+    ``services/generation/local_dispatch`` for why it is not retried.
+    """
+
+    code = "daemon_timeout"
+    detail = ""
 
 
 class DaemonUpdateRequiredError(RuntimeError):
@@ -158,7 +180,8 @@ async def dispatch_to_daemon(
 
     Raises ``DaemonOfflineError`` when nothing is connected,
     ``DaemonUpdateRequiredError`` when the connected daemon is older than this
-    job needs, ``TimeoutError`` when the daemon never answers, ``RuntimeError``
+    job needs, ``DaemonTimeoutError`` (a ``TimeoutError``) when the daemon
+    never answers, ``RuntimeError``
     when it answers with a failure (message carries the daemon's typed code).
 
     ``attribution`` is the job's generation context. It goes on the TICKET,
@@ -173,9 +196,18 @@ async def dispatch_to_daemon(
 
         mint_ticket = mint_upload_ticket
 
+    # Which engine the job was for, so the message names the thing the user
+    # actually picked. Text jobs (the codex LLM adapter) carry no engine key.
+    engine = str(payload.get("engine") or "codex")
     if not await transport.is_online(user_id):
+        # ASCII only, for the same reason as ``_UPDATE_COMMAND`` above: the
+        # em dash this used to carry made ``dbos_error_to_text`` keep only the
+        # longer half of the sentence.
         raise DaemonOfflineError(
-            "your local codex daemon is not connected — run `nous-codex run`"
+            f"[daemon_offline] Your local nous-codex daemon is not connected, so "
+            f"this {engine} job could not start. Start the daemon on your machine "
+            "(nous-codex run, or install-service to keep it running), then run "
+            "again."
         )
 
     if payload.get("engine") == "codex" and kind in ("image", "video"):
@@ -215,8 +247,10 @@ async def dispatch_to_daemon(
         await transport.send_job(user_id, job)
         result = await waiter
     except asyncio.TimeoutError as exc:
-        raise TimeoutError(
-            f"local codex daemon did not answer within {int(timeout_s)}s"
+        raise DaemonTimeoutError(
+            f"[daemon_timeout] Your local {engine} job did not answer within "
+            f"{int(timeout_s)}s. It may still finish on your machine and appear "
+            "in Generated; check there before running it again."
         ) from exc
     finally:
         if not waiter.done():

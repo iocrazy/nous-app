@@ -24,11 +24,23 @@ through the Tier-1 generated-media store which mints the durable same-origin
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 
 from dbos import DBOS
 from loguru import logger
 
+from app.services.generation.local_dispatch import (
+    LOCAL_ENGINES,
+    NON_RETRYABLE_FAILURE_CODES,  # noqa: F401 - re-exported for callers/tests
+    capabilities_for,
+    dispatch_local_generation,
+    patch_task_metadata,
+    raise_if_failed,
+    reconcile_for_engine,
+    record_failure_detail,
+    require_provider_card,
+    resolve_local_engine,
+)
 from app.services.generation.request import GenerationRequest
 from app.services.library.generated_media_service import (
     GenerationOrigin,
@@ -37,80 +49,17 @@ from app.services.library.generated_media_service import (
 from app.services.library.resources_service import _resolve_personal_team_id
 from app.services.library.scratch_reaper import reap_scratch_dir
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from app.services.ai.provider_protocols.base import ProviderCapabilities
-
 _KIND_MIME = {"image": "image/png", "video": "video/mp4"}
 _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 
 
-_LOCAL_ENGINES = {"codex-local": "codex", "jimeng-local": "dreamina"}
-
-
-async def _local_engine(
-    model_name: str, media_type: str, user_id: Optional[str] = None
-) -> tuple[str, str] | None:
-    """(engine, actual_model) when the picked catalog row runs on the user's
-    own machine via the paired daemon; None for server-side providers.
-
-    Owner scoping (migration 431) is enforced here too, with ``db_registry``'s
-    OWN predicate rather than a second copy of it — two visibility rules that
-    have to agree is how this class of bug comes back. This check used to be
-    reachable only for images and only after ``resolve_image_provider``; the
-    local check now runs first and for video as well, so a row the requester
-    cannot see must look like "not a local row at all" and fall through to the
-    normal resolver, which raises its own scoped error.
-    """
-    try:
-        from app.services.media.parsers.video_providers import db_registry
-
-        rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
-        for row in rows:
-            if str(row.get("name")) == model_name:
-                if not db_registry._visible_to(row, user_id):  # noqa: SLF001
-                    return None
-                engine = _LOCAL_ENGINES.get(
-                    str(row.get("actual_provider") or "").lower()
-                )
-                if engine:
-                    actual = str(row.get("actual_model") or "")
-                    # The user's Codex provider card (Settings → AI →
-                    # Providers) names the orchestrator model; it beats the
-                    # catalog default. Codex only: dreamina has no such knob.
-                    if engine == "codex" and user_id:
-                        from app.services.codex import provider_card
-
-                        actual = (
-                            await provider_card.codex_orchestrator_model(str(user_id))
-                        ) or actual
-                    return engine, actual
-                return None
-    except Exception:
-        return None
-    return None
-
-
-async def _require_provider_card(engine: str, user_id: Optional[str]) -> None:
-    """The Providers page is the one management entry (2026-09-06): a codex
-    run for a user whose Codex card is off is refused with a typed, actionable
-    failure — never run on the strength of the daemon merely being online.
-    Dreamina has no card yet; nothing to require."""
-    if engine != "codex" or not user_id:
-        return
-    from app.services.codex import provider_card
-
-    if not await provider_card.card_enabled(str(user_id)):
-        raise provider_card.ProviderCardDisabledError()
-
-
-async def _capabilities_for(actual_provider: str) -> "ProviderCapabilities":
-    """Capabilities of the protocol serving `actual_provider`; restrictive
-    default when unknown (drops loudly rather than ignoring quietly)."""
-    from app.services.ai.provider_protocols import resolve_generation_protocol
-    from app.services.ai.provider_protocols.base import ProviderCapabilities
-
-    proto = resolve_generation_protocol((actual_provider or "").lower())
-    return proto.capabilities if proto else ProviderCapabilities.none()
+# The local-daemon seam lives in ``services/generation/local_dispatch`` (shared
+# with every other caller that can route a row to the user's machine). The old
+# private names stay importable here; they are the same objects.
+_LOCAL_ENGINES = LOCAL_ENGINES
+_local_engine = resolve_local_engine
+_require_provider_card = require_provider_card
+_capabilities_for = capabilities_for
 
 
 def _actual_provider_of(provider: Any) -> str:
@@ -477,102 +426,10 @@ async def _resolve_reference_urls(
     return urls, dropped
 
 
-async def _dispatch_and_record_failure(**kwargs: Any) -> Dict[str, Any]:
-    """``dispatch_to_daemon``, plus the half of a daemon failure that cannot
-    ride the exception.
-
-    A content refusal is the case this exists for: the model's own words are
-    the only useful part of that failure — they name what it objected to and
-    hand back a rewrite that works — and they are its prose, so routinely
-    non-ASCII. ``task_tracking.error_msg`` is derived from the pickled
-    exception by ``public.dbos_error_to_text()`` (migration 219), which splits
-    on every byte >= 0x80 and keeps the longest chunk; a Chinese sentence
-    arrives there as a fragment. So the words go to ``metadata`` (jsonb, and
-    business decoration the workflow owns under route C §3) and the exception
-    carries one ASCII line.
-
-    Re-raised as a plain ``RuntimeError``: what crosses the DBOS boundary gets
-    pickled, and the typed error's extra fields would not survive that trip
-    anyway (see ``DaemonJobFailedError``). Failure stays a raise — returning a
-    dict here would have the mirror trigger mark the task completed.
-    """
-    from app.services.codex.daemon_dispatch import (
-        DaemonJobFailedError,
-        dispatch_to_daemon,
-    )
-
-    try:
-        return await dispatch_to_daemon(**kwargs)
-    except DaemonJobFailedError as exc:
-        # Raises for transient codes; returns {"failed": …} for deterministic
-        # ones — the caller must check for that key before reading gen_id.
-        return await _record_failure_detail(exc)
-
-
-# Failures whose second attempt is guaranteed to be the first attempt again.
-# A content refusal is the model's ANSWER to these exact words; retrying it
-# only buys a second daemon job on the user's ChatGPT quota and another
-# minute of waiting (measured 2026-09-05: every refusal ran twice, 1:43 and
-# 2:09 wall-clock for a verdict the first attempt already had).
-NON_RETRYABLE_FAILURE_CODES = frozenset({"content_refused", "provider_card_disabled"})
-
-
-async def _record_failure_detail(exc: BaseException) -> Dict[str, Any]:
-    """Persist a failed generation's explanation; return a marker or re-raise.
-
-    Both codex image paths funnel through here — the user's own daemon and
-    the in-container subprocess — because a user cannot tell which one ran
-    and neither should read differently.
-
-    Two exits, chosen by the failure code:
-
-    * **Deterministic** (``NON_RETRYABLE_FAILURE_CODES``): return
-      ``{"failed": <one ASCII line>}``. The step returns normally, so DBOS
-      does NOT retry it; ``raise_if_failed`` in the workflow turns the marker
-      into the raise that fails the task. Route C §4 forbids the WORKFLOW
-      returning a failed dict (the mirror would mark the task completed) —
-      a step returning one, with the workflow raising, is exactly how you
-      opt a deterministic failure out of step retries.
-    * **Anything else**: raise a plain ``RuntimeError`` (pickled across the
-      DBOS boundary; the typed error's extra fields would not survive
-      anyway) so the step's ``max_attempts`` still buys a second try for a
-      daemon crash or a network blip.
-    """
-    from app.services.generation.failure import describe_generation_failure
-
-    message, patch = describe_generation_failure(exc)
-    task_id = DBOS.workflow_id
-    if task_id:
-        await _patch_task_metadata(task_id, patch)
-    if patch["failure"]["code"] in NON_RETRYABLE_FAILURE_CODES:
-        return {"failed": message}
-    raise RuntimeError(message) from exc
-
-
-def raise_if_failed(media: Dict[str, Any]) -> Dict[str, Any]:
-    """The workflow-side half of ``_record_failure_detail``: a step result
-    carrying ``failed`` becomes the raise that fails the task (route C §4).
-    Anything else passes through untouched."""
-    failed = media.get("failed") if isinstance(media, dict) else None
-    if failed:
-        raise RuntimeError(str(failed))
-    return media
-
-
-async def _patch_task_metadata(task_id: str, patch: Dict[str, Any]) -> None:
-    """Write business decoration onto this run's task row (route C §3).
-
-    Deliberately swallow-and-log: this is called on the failure path, and a
-    metadata write that fails must not replace the failure the user actually
-    needs to see. Logged rather than passed, per CLAUDE.md's rule on
-    catch-swallowing.
-    """
-    from app.services.infra.unified_task_manager import get_task_manager
-
-    try:
-        await get_task_manager().patch_metadata(task_id, patch)
-    except Exception as exc:  # noqa: BLE001 - see docstring
-        logger.error("[canvas-gen] could not record failure metadata: {}", exc)
+# Failure recording moved with the daemon seam; canvas's server-side codex
+# image branch records through the same function, so both surfaces read alike.
+_record_failure_detail = record_failure_detail
+_patch_task_metadata = patch_task_metadata
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -629,84 +486,19 @@ async def generate_canvas_media_step(
     )
     if local:
         engine, engine_model = local
-        await _require_provider_card(engine, user_id)
-        # Capabilities live under the catalog's actual_provider, so map the
-        # engine back to it. Neither name in hand is that key: ``engine_model``
-        # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
-        # to work — "codex" happens to hit the SERVER protocol (same knobs
-        # today, a coincidence), while "dreamina" hits nothing. A miss
-        # collapses to ``none()``, which drops the ratio again — the very bug
-        # this branch is here to fix.
-        caps = await _capabilities_for(
-            "codex-local" if engine == "codex" else "jimeng-local"
-        )
-        eff, dropped = req.reconcile(caps)
+        media_kind = kind if kind in ("image", "video") else "image"
+        # Reconcile, payload build, dispatch and failure recording are the
+        # shared local-daemon seam (``services/generation/local_dispatch``).
+        # What stays here is canvas-specific: the scope a reference must
+        # belong to, the scope the product is filed into, and the attribution
+        # stamped on the ticket. The provider-card gate runs inside the
+        # dispatch, so it is recorded and not retried like every other
+        # deterministic failure.
+        eff, dropped = await reconcile_for_engine(engine, req)
 
         ref_urls, dropped_refs = await _resolve_reference_urls(
             eff.refs, user_id=user_id, canvas_id=canvas_id
         )
-
-        if engine == "dreamina":
-            # Build the exact dreamina argv server-side (single source of
-            # truth: the same pure builders the server provider uses). Refs
-            # become {ref:N} placeholders the daemon swaps for local paths.
-            from app.services.media.parsers.video_providers.jimeng_cli import (
-                build_image_args,
-                build_video_args,
-            )
-
-            placeholders = [f"{{ref:{i}}}" for i in range(len(ref_urls))]
-            if eff.kind == "video":
-                # Same three-way choice the server video branch makes: frames
-                # → first/last (frames2video), multimodal → every ref
-                # (multimodal2video 全能参考), otherwise the single source
-                # drives image2video / text2video. Handing every ref to
-                # ``image_paths`` regardless — what this did before — turned a
-                # first/last-frame request into a multimodal one in silence.
-                frame_kwargs: dict
-                if eff.video_mode == "frames" and len(placeholders) >= 2:
-                    frame_kwargs = {
-                        "first_frame": placeholders[0],
-                        "last_frame": placeholders[1],
-                    }
-                elif eff.video_mode == "multimodal" and placeholders:
-                    frame_kwargs = {"image_paths": placeholders}
-                else:
-                    frame_kwargs = {
-                        "image_path": placeholders[0] if placeholders else None
-                    }
-                submit_args = build_video_args(
-                    prompt=eff.prompt,
-                    aspect=eff.ratio or "",
-                    poll=90,
-                    duration=eff.duration,
-                    model_version=engine_model or None,
-                    resolution=eff.resolution,
-                    **frame_kwargs,
-                )
-            else:
-                submit_args = build_image_args(
-                    prompt=eff.prompt,
-                    aspect=eff.ratio or "",
-                    poll=60,
-                    resolution_type=eff.resolution,
-                    model_version=engine_model or None,
-                )
-            payload = {
-                "engine": "dreamina",
-                "submit_args": submit_args,
-                "media_kind": kind,
-                "ref_urls": ref_urls,
-            }
-        else:
-            # Every knob the caller picked, reconciled once and sent as one
-            # shape. It used to read ``params.get("size")`` (the frontend only
-            # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
-            # sets it) — both resolved to "" and the daemon fell back to its
-            # own default, which is why a 16:9 pick came back portrait.
-            payload = eff.to_codex_daemon_payload(
-                engine_model=engine_model, ref_urls=ref_urls
-            )
 
         # The same five identity fields ``persist_canvas_generation_step``
         # stamps on a server-side product, plus the three-part contract. It
@@ -714,7 +506,12 @@ async def generate_canvas_media_step(
         # is what creates the row. Deliberately NOT the payload: that carries
         # ref urls and the augmented prompt, and this sits in Redis.
         daemon_scope_id = await _registration_scope_id(canvas_id, user_id)
-        result = await _dispatch_and_record_failure(
+        result = await dispatch_local_generation(
+            engine=engine,
+            engine_model=engine_model,
+            media_kind=media_kind,
+            request=eff,
+            ref_urls=ref_urls,
             user_id=str(user_id),
             # The same scope ``persist_canvas_generation_step`` registers a
             # server-side product into. The daemon's upload endpoint is what
@@ -723,8 +520,6 @@ async def generate_canvas_media_step(
             # board's picture lands in would depend on which provider the run
             # happened to pick.
             scope_id=daemon_scope_id,
-            kind=kind if kind in ("image", "video") else "image",
-            payload=payload,
             attribution={
                 "canvas_id": canvas_id,
                 "node_id": node_id,
@@ -749,14 +544,12 @@ async def generate_canvas_media_step(
             },
         )
         if result.get("failed"):
-            # Deterministic failure (a refusal): no retry — see
-            # _record_failure_detail. The workflow raises on this marker.
-            return {
-                "media_kind": kind if kind in ("image", "video") else "image",
-                "failed": result["failed"],
-            }
+            # Deterministic failure (refusal, card off, daemon offline or timed
+            # out): no retry — see ``record_failure_detail``. The workflow
+            # raises on this marker.
+            return {"media_kind": media_kind, "failed": result["failed"]}
         return {
-            "media_kind": kind if kind in ("image", "video") else "image",
+            "media_kind": media_kind,
             "local_path": None,
             "remote_url": None,
             "existing_gen_id": result.get("gen_id"),

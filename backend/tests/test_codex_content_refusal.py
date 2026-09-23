@@ -225,7 +225,7 @@ async def test_the_workflow_persists_the_refusal_and_raises_a_clean_line():
             new=AsyncMock(return_value=7),
         ),
         patch(
-            "app.workflows.canvas_generation._patch_task_metadata",
+            "app.services.generation.local_dispatch.patch_task_metadata",
             new=fake_patch_metadata,
         ),
         # The step reads the task row's id off the ambient workflow, the same
@@ -301,7 +301,7 @@ async def test_the_server_side_codex_branch_records_the_refusal_too():
             new=AsyncMock(return_value=(_Provider(), "gpt-5.4")),
         ),
         patch(
-            "app.workflows.canvas_generation._patch_task_metadata",
+            "app.services.generation.local_dispatch.patch_task_metadata",
             new=fake_patch_metadata,
         ),
         patch.object(m.DBOS, "workflow_id", "wf-refusal-2", create=True),
@@ -363,7 +363,10 @@ async def test_a_transient_daemon_failure_still_raises_in_the_step():
             "app.workflows.canvas_generation._resolve_personal_team_id",
             new=AsyncMock(return_value=7),
         ),
-        patch("app.workflows.canvas_generation._patch_task_metadata", new=AsyncMock()),
+        patch(
+            "app.services.generation.local_dispatch.patch_task_metadata",
+            new=AsyncMock(),
+        ),
         patch.object(m.DBOS, "workflow_id", "wf-transient-1", create=True),
         pytest.raises(RuntimeError) as exc,
     ):
