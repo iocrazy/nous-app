@@ -566,6 +566,7 @@ async def test_space_spec_reports_ark_protocol_for_doubao(...)
   - `embedding_backfill.embed_candidate(row: BackfillRow, *, embedder, space_id:int, repo) -> tuple[bool, str|None]`
   - `GET /api/v1/search/vectors/status` → `VectorsStatusResponse{ space: {id, actual_model, protocol, dims, modalities, instruction_version} | None, status: "ok"|"unconfigured"|"store_missing", layers: [{layer:"semantic", status:"ok"|"not_built", covered:int, total:int}, {layer:"transcript", status:"not_built", covered:0, total:int}] }`
   - `VECTOR_LEG_OUTCOMES` 新增 `"store_missing"`（新表/RPC 不存在且旧路径也不可用）
+  - `SearchResult.layer: "text"|"semantic"`、`SearchResponse.legs: {text:int, semantic:int}`、`SearchResponse.reranked: bool`（hybrid 填；UI legs chip 读）
 
 - [ ] **Step 1: 文档拼装（先测后写）**
 
@@ -660,6 +661,10 @@ async def vectors_status(auth: AuthDep):
         LayerStatus(layer="transcript", status="not_built", covered=0, total=total)])
 ```
 放在 `/similar/{id}` 之前注册（路径不冲突但保持可读）。测试用 FastAPI `TestClient` + `app.dependency_overrides`，照 `tests/test_visual_analysis_read_endpoint.py` 的做法；三种 status 各一条。
+
+- [ ] **Step 5b: 命中标层与逐腿计数（给 UI PR 的 legs chip）**
+
+`app/services/library/search_service.py` 的 `SearchResult` dataclass 加 `layer: str = "text"`（`"text"` | `"semantic"`）；`_merge_text_and_vector` 里 text 命中 `replace(h, similarity=1.0, layer="text")`，向量命中 `replace(h, layer="semantic")`；`SearchResponse` 加 `legs: dict[str, int] | None = None`（`{"text": n_text, "semantic": n_vector}`，只在 hybrid 填）与 `reranked: bool = False`。`schemas/search.py` 的 pydantic `SearchResult` / `SearchResponse` 同步加这三个字段（可选、默认值同上），router 的映射处把它们带过去。测试：`tests/test_search_vector_leg_store.py` 加一条断言合并后 text 命中 layer=="text"、向量命中 layer=="semantic"、`legs == {"text": 2, "semantic": 1}`。
 
 - [ ] **Step 6: 文档**
 
