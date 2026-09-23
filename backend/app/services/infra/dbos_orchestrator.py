@@ -459,18 +459,26 @@ def init_dbos_client() -> None:
 _client_init_lock = threading.Lock()
 
 
-def get_or_init_dbos_client():
-    """The DBOSClient for a process WITHOUT the DBOS singleton, built on first
-    use; None when it cannot be built or this process owns a singleton.
+def _is_gateway_role() -> bool:
+    from app.agent_framework.role import ProcessRole, role_from_env
 
-    A singleton-role process (worker / combined: ``_dbos`` set) never grows a
-    client, even when its launch failed: a set ``_client`` flips
+    return role_from_env() == ProcessRole.GATEWAY
+
+
+def get_or_init_dbos_client():
+    """The gateway's DBOSClient, built on first use; None when it cannot be
+    built or this process is not the gateway.
+
+    Only ``ProcessRole.GATEWAY`` may grow a client. ``_dbos is None`` is not
+    enough: a worker whose ``init_dbos`` bailed (no DSN) also has none. A
+    worker / combined process never grows a client, even when its launch
+    failed: a set ``_client`` flips
     ``start_workflow_routed`` onto the enqueue path and makes ``is_launched()``
     (and so ``/readyz``) report healthy. Construction connects to the DB, so
     async callers run this in a thread; the lock keeps it to one client."""
     if _client is not None:
         return _client
-    if _dbos is not None:
+    if _dbos is not None or not _is_gateway_role():
         return None
     with _client_init_lock:
         if _client is None:

@@ -425,6 +425,13 @@ async def release_parked_workflow(workflow_id: str) -> None:
         ) from exc
     try:
         await clear_awaiting_input(workflow_id=workflow_id)
+    except Exception as exc:  # noqa: BLE001 — the release already succeeded
+        # The workflow is CANCELLED, so no reaper needs the marker any more;
+        # a residual one only mislabels the issue as waiting.
+        logger.error(
+            f"[input_gate] wf={workflow_id} is CANCELLED and its lock is being "
+            f"released, but the awaiting_input marker was left behind: {exc!r}"
+        )
     finally:
         await _clear_issue_lock(workflow_id)
 

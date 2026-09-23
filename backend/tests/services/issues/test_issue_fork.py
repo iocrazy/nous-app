@@ -195,6 +195,9 @@ async def test_a_release_that_cannot_cancel_is_a_typed_503_and_nothing_switches(
     with pytest.raises(f.ForkRejected) as exc:
         await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
     assert (exc.value.code, exc.value.status) == ("release_failed", 503)
+    # fixed copy; the internal reason goes to the log only
+    assert str(exc.value) == f.RELEASE_FAILED_MESSAGE
+    assert "DBOS" not in str(exc.value)
     kinds = [c[0] for c in d.calls]
     assert "switch" not in kinds and "dispatch" not in kinds
 

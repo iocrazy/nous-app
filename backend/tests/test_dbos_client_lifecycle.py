@@ -1,6 +1,8 @@
 """Gateway enqueue-only prep: DBOSClient lifecycle in dbos_orchestrator (dormant
 until a later task constructs it on the gateway)."""
 
+import pytest
+
 import app.services.infra.dbos_orchestrator as o
 
 
@@ -83,6 +85,7 @@ def test_get_or_init_is_idempotent(monkeypatch):
 
     monkeypatch.setattr(o, "_client", None)
     monkeypatch.setattr(o, "_dbos", None)
+    monkeypatch.setenv("NOUS_ROLE", "gateway")
     monkeypatch.setenv("DBOS_DATABASE_URL", "postgresql://u:p@h:5432/postgres")
     built = []
 
@@ -100,6 +103,19 @@ def test_get_or_init_is_idempotent(monkeypatch):
 def test_get_or_init_refuses_in_a_singleton_role_process(monkeypatch):
     monkeypatch.setattr(o, "_client", None)
     monkeypatch.setattr(o, "_dbos", object())
+    built = []
+    monkeypatch.setattr(o, "init_dbos_client", lambda: built.append(1))
+    assert o.get_or_init_dbos_client() is None
+    assert built == []
+
+
+@pytest.mark.parametrize("role", ["worker", "combined"])
+def test_get_or_init_is_gateway_only_even_without_a_singleton(monkeypatch, role):
+    """``_dbos is None`` is not enough: a worker whose ``init_dbos`` bailed
+    (no DSN) must still never grow a client."""
+    monkeypatch.setattr(o, "_client", None)
+    monkeypatch.setattr(o, "_dbos", None)
+    monkeypatch.setenv("NOUS_ROLE", role)
     built = []
     monkeypatch.setattr(o, "init_dbos_client", lambda: built.append(1))
     assert o.get_or_init_dbos_client() is None

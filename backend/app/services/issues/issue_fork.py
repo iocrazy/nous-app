@@ -43,6 +43,10 @@ ROLES = ("user", "assistant", "system")
 ORIGIN_MESSAGE_LIMIT = 5000
 
 
+#: User-facing copy for ``release_failed``; the internal reason is logged only.
+RELEASE_FAILED_MESSAGE = "Could not release the parked run; try again"
+
+
 class ForkRejected(Exception):
     """Typed refusal; the endpoint maps ``status`` / ``code`` 1:1."""
 
@@ -226,7 +230,11 @@ async def fork_run(
             # lock and the marker (hotfix-2 defect H). Switching or dispatching
             # now would run a second workflow beside it. The new session stays
             # unreferenced; the issue is exactly as it was before the fork.
-            raise ForkRejected("release_failed", 503, str(exc)) from exc
+            logger.error(
+                f"[issue_fork] issue {issue_id}: release of parked workflow "
+                f"{parked_wf} failed: {exc!r}"
+            )
+            raise ForkRejected("release_failed", 503, RELEASE_FAILED_MESSAGE) from exc
     await deps.switch_session_and_mark(int(issue_id), session_id, forked_from)
     try:
         workflow_id = await deps.dispatch(int(issue_id))

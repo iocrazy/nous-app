@@ -16,6 +16,7 @@ const COPY: Record<string, [key: string, fallback: string]> = {
   not_an_issue_run: ['fork.error.not_an_issue_run', 'Only issue runs can be forked'],
   run_state_unavailable: ['fork.error.run_state_unavailable', 'Run state unavailable — try again in a moment'],
   dispatch_failed: ['fork.error.dispatch_failed', 'Could not start the forked run — the issue was left as it was'],
+  release_failed: ['fork.error.release_failed', 'Could not release the parked run — try again'],
   http_404: ['fork.error.not_found', 'Run not found'],
   not_found: ['fork.error.not_found', 'Run not found'],
 };

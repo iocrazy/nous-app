@@ -5850,6 +5850,7 @@
       "not_an_issue_run": "只有 issue 的 run 可以分叉",
       "run_state_unavailable": "读不到 run 状态，稍后再试",
       "dispatch_failed": "分叉的 run 没能启动，issue 保持原状",
+      "release_failed": "挂起的 run 没能释放，请重试",
       "not_found": "找不到这个 run",
       "generic": "分叉失败"
     }

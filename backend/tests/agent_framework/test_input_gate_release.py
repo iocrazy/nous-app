@@ -60,7 +60,9 @@ async def test_a_failed_cancel_leaves_marker_and_lock_and_raises_typed():
     assert order == []
 
 
-async def test_the_lock_is_released_even_when_the_marker_clear_raises():
+async def test_a_failed_marker_clear_after_cancel_is_logged_not_raised():
+    """The workflow is already CANCELLED: the release succeeded. A residual
+    marker is logged at ERROR, the lock is still released, nothing raises."""
     unlock = AsyncMock()
     with (
         patch.object(g, "_cancel_workflow", AsyncMock()),
@@ -68,10 +70,12 @@ async def test_the_lock_is_released_even_when_the_marker_clear_raises():
             g, "clear_awaiting_input", AsyncMock(side_effect=RuntimeError("db"))
         ),
         patch.object(g, "_clear_issue_lock", unlock),
+        patch.object(g.logger, "error") as err,
     ):
-        with pytest.raises(RuntimeError):
-            await g.release_parked_workflow("wf-1")
+        await g.release_parked_workflow("wf-1")
     unlock.assert_awaited_once_with("wf-1")
+    msgs = [str(c.args[0]) for c in err.call_args_list]
+    assert any("CANCELLED" in m and "awaiting_input" in m for m in msgs), msgs
 
 
 # ── the API-process shape (nous-backend, NOUS_ROLE=gateway) ─────────────────
@@ -132,6 +136,7 @@ async def test_api_shape_without_any_handle_keeps_marker_and_lock(monkeypatch):
 async def test_api_shape_builds_the_client_lazily_when_startup_did_not(monkeypatch):
     """Startup construction can fail (DB blip); the first release retries it."""
     client = _FakeClient()
+    monkeypatch.setenv("NOUS_ROLE", "gateway")
     monkeypatch.setattr(orch, "_dbos", None)
     monkeypatch.setattr(orch, "_launched", False)
     monkeypatch.setattr(orch, "_client", None)
