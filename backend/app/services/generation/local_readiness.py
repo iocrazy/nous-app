@@ -36,9 +36,11 @@ class LocalReadiness:
 
 
 # Server rows that duplicate a local engine. When the local twin can run, the
-# server twin is hidden: it is the same ChatGPT / Dreamina account either way,
-# and the user asked for one entry per engine ("GPT 只显示 local").
-SERVER_TWIN_OF: dict[str, str] = {"codex": "codex-local", "jimeng-cli": "jimeng-local"}
+# server twin is hidden: it is the same Dreamina account either way, and the
+# user asked for one entry per engine. The server ``codex`` twin was retired
+# outright on 2026-09-23 (protocol + catalog row, mig 498), so only Dreamina
+# still has a server-side duplicate.
+SERVER_TWIN_OF: dict[str, str] = {"jimeng-cli": "jimeng-local"}
 
 
 async def local_engine_readiness(

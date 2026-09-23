@@ -230,14 +230,14 @@ async def test_the_hourly_poll_never_opts_in() -> None:
 # ──────────────────── 2. families with no HTTP endpoint ────────────────────
 
 
-@pytest.mark.parametrize("provider", ["codex", "jimeng-cli", "codex-local"])
+@pytest.mark.parametrize("provider", ["openai-images", "jimeng-cli", "codex-local"])
 @pytest.mark.asyncio
 async def test_cli_and_daemon_families_stay_not_probed_even_when_asked(
     provider: str,
 ) -> None:
     """Opting into a costly probe cannot conjure an endpoint that isn't there.
 
-    ``codex`` and ``jimeng-cli`` shell out to a local binary; ``codex-local``
+    ``openai-images`` and ``jimeng-cli`` shell out to a local binary; ``codex-local``
     dials the user's own paired device. All three carry an empty ``base_url``
     in the catalog because there is nothing to dial from this process.
     """
@@ -401,7 +401,6 @@ def test_every_generation_protocol_declares_whether_it_is_http_probeable() -> No
 
     expected = {
         "ark": True,  # /images/generations — a plain HTTP call from here
-        "codex": False,  # shells out to the codex CLI
         "jimeng-cli": False,  # shells out to the jimeng CLI
         # The two ``-local`` families run on the USER's own paired device, so
         # there is no endpoint this process could dial even in principle. They
@@ -409,8 +408,8 @@ def test_every_generation_protocol_declares_whether_it_is_http_probeable() -> No
         # here as well keeps the axis total rather than relying on that guard.
         "codex-local": False,
         "jimeng-local": False,
-        # Same binary as ``codex``, a different upstream behind it — still a
-        # subprocess, so still nothing this process could dial.
+        # Shells out to the gpt-image-2-skill CLI (the API sits behind it) —
+        # still a subprocess, so still nothing this process could dial.
         "openai-images": False,
     }
     actual = {

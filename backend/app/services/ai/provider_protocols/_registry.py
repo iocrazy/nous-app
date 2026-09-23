@@ -8,7 +8,6 @@ from typing import Optional
 from app.services.ai.provider_protocols.ark import ArkProtocol
 from app.services.ai.provider_protocols.base import ProviderProtocol
 from app.services.ai.provider_protocols.claude import ClaudeProtocol
-from app.services.ai.provider_protocols.codex import CodexProtocol
 from app.services.ai.provider_protocols.codex_local import CodexLocalProtocol
 from app.services.ai.provider_protocols.deepseek import DeepSeekProtocol
 from app.services.ai.provider_protocols.doubao import DoubaoProtocol
@@ -49,7 +48,6 @@ PROTOCOLS: tuple[ProviderProtocol, ...] = (
     ArkProtocol(),
     JimengProtocol(),
     JimengLocalProtocol(),
-    CodexProtocol(),
     CodexLocalProtocol(),
     OpenAIImagesProtocol(),
 )

@@ -17,11 +17,11 @@ class CodexLocalProtocol(ProviderProtocol):
     ``~/.codex/auth.json``, which nous never sees.
 
     ``generation_family`` is its own value rather than ``"codex"``: the
-    capabilities are the server protocol's, but the two must never be
-    interchangeable at the registry level. Sharing the family would let
-    ``db_registry`` build a SERVER-side CodexCliProvider for a local catalog
-    row — running the model on nous' OAuth session instead of the user's
-    machine, silently. There is no build hook here on purpose: generation
+    capabilities were the retired server protocol's (removed 2026-09-23), and
+    the two were never to be interchangeable at the registry level. Sharing a
+    family with any server-side protocol would let ``db_registry`` build a
+    SERVER-side CodexCliProvider for a local catalog row — running the model
+    on nous' credentials instead of the user's machine, silently. There is no build hook here on purpose: generation
     happens on the paired device via ``canvas_generation``'s daemon branch,
     so asking this protocol to build one raises ProtocolCapabilityError."""
 
@@ -32,9 +32,9 @@ class CodexLocalProtocol(ProviderProtocol):
     credential_kind = "user_device"
     is_chat_key = True
     generation_family = "codex-local"
-    # The server-side codex protocol's knobs — it is the same CLI, just
-    # executed on the user's machine (spec §3.2 groups them on one row), and
-    # since P3 that includes ``quality``.
+    # The subscription CLI's knobs, executed on the user's machine (spec §3.2;
+    # the server-side twin that shared them was retired 2026-09-23), and since
+    # P3 that includes ``quality``.
     #
     # ``quality=True`` here is a fact, not a promise. Two things make it one:
     # ``buildImageArgs`` in ``tools/codex-daemon/index.mjs`` appends
@@ -43,9 +43,7 @@ class CodexLocalProtocol(ProviderProtocol):
     # ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION`` refuses it with a typed
     # ``DaemonUpdateRequiredError`` that tells the user how to update. That
     # closes the path P1's honest ``False`` was reporting: a forwarded quality
-    # discarded one layer down where nobody can see it. The server path
-    # forwards it too (``codex_cli.py``'s ``--quality``), so the two codex
-    # rows agree again.
+    # discarded one layer down where nobody can see it.
     #
     # The one hole left is deliberate and narrow: a daemon whose version comes
     # back as ``None`` is let THROUGH, because ``None`` is "could not find

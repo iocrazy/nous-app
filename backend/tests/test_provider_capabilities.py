@@ -27,7 +27,13 @@ def test_all_ratios_equals_the_ui_vocabulary():
 
 
 def test_every_generation_protocol_declares_capabilities_explicitly():
-    for key in ("codex", "codex-local", "jimeng-cli", "jimeng-local", "doubao"):
+    for key in (
+        "openai-images",
+        "codex-local",
+        "jimeng-cli",
+        "jimeng-local",
+        "doubao",
+    ):
         caps = _proto(key).capabilities
         assert isinstance(caps, ProviderCapabilities)
         assert (
@@ -35,22 +41,22 @@ def test_every_generation_protocol_declares_capabilities_explicitly():
         ), f"{key} still on the restrictive default"
 
 
-def test_codex_family_matrix():
-    for key in ("codex", "codex-local"):
-        caps = _proto(key).capabilities
-        assert caps.ratios == ALL_RATIOS
-        assert caps.resolution is False  # "尺寸由模型定"
-        assert caps.max_refs == 9
-        assert caps.negative is False
-        assert caps.honours_ratio == "prompt_hint"
+def test_codex_local_matrix():
+    # The server-side ``codex`` twin was retired 2026-09-23; the subscription
+    # transport now lives only on the user's paired daemon.
+    caps = _proto("codex-local").capabilities
+    assert caps.ratios == ALL_RATIOS
+    assert caps.resolution is False  # "尺寸由模型定"
+    assert caps.max_refs == 9
+    assert caps.negative is False
+    assert caps.honours_ratio == "prompt_hint"
 
 
-def test_codex_quality_is_true_on_both_transports_now_that_the_gate_exists():
-    """Both codex rows honour ``quality``, and for codex-local that is a fact
-    rather than an intention.
+def test_codex_local_quality_is_true_now_that_the_gate_exists():
+    """codex-local honours ``quality``, and that is a fact rather than an
+    intention.
 
-    Server ``codex`` appends ``--quality`` (``codex_cli.py``). The paired
-    daemon does too from 0.4.0 (``buildImageArgs`` in
+    The paired daemon appends ``--quality`` from 0.4.0 (``buildImageArgs`` in
     ``tools/codex-daemon/index.mjs``), and a daemon below that version never
     receives such a job whenever its version can be read:
     ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION`` refuses it with a typed
@@ -65,7 +71,6 @@ def test_codex_quality_is_true_on_both_transports_now_that_the_gate_exists():
     online build reporting no version is not that case: it reads
     ``UNVERSIONED`` (``0.0.0``) and is refused.
     """
-    assert _proto("codex").capabilities.quality is True
     assert _proto("codex-local").capabilities.quality is True
 
 
@@ -90,7 +95,8 @@ def test_ark_matrix_is_honest_about_five_ratios_and_no_refs():
 def test_local_protocols_never_build_a_server_side_provider():
     """``codex-local`` / ``jimeng-local`` run on the USER's machine. They carry
     the same capability matrix as their server twins, so the tempting shortcut
-    was to make them aliases of ``codex`` / ``jimeng-cli`` — which would let
+    was to make them aliases of their server twins (``jimeng-cli``; the server
+    ``codex`` twin is retired) — which would let
     ``db_registry`` build a server-side provider for a local catalog row and
     quietly run the model on nous' own OAuth session. Distinct families keep
     that impossible; asking for a provider here fails loudly instead."""
@@ -102,7 +108,11 @@ def test_local_protocols_never_build_a_server_side_provider():
 
     # Distinct families are what db_registry's jimeng-first preference and its
     # video guard key off, so pin them apart explicitly.
-    assert _proto("codex-local").generation_family != _proto("codex").generation_family
+    assert _registry.resolve_generation_protocol("codex") is None
+    assert (
+        _proto("codex-local").generation_family
+        != _proto("openai-images").generation_family
+    )
     assert (
         _proto("jimeng-local").generation_family
         != _proto("jimeng-cli").generation_family
@@ -122,7 +132,8 @@ def test_capabilities_drive_reconcile_through_the_real_consumer():
         source_url=None,
     )
     expected = {
-        "codex": ["resolution"],
+        # The API-key path honours every knob here (exact sizes, quality).
+        "openai-images": [],
         # codex-local keeps quality since daemon 0.4.0 forwards it (older
         # daemons are refused outright, never silently degraded).
         "codex-local": ["resolution"],

@@ -101,8 +101,8 @@ def _canonical_provider(provider_key: Optional[str]) -> Optional[str]:
 
     出图链的三个 adapter 写进 ``ImageGenResult.provider`` 的都是协议自己的
     ``key``（``ark_image.py`` 写死 ``"ark"``、``jimeng.py`` 写死
-    ``"jimeng-cli"``、``codex.py`` 用构造时传进来的 ``self.key``——
-    ``codex`` 或 ``openai-images``），从来不是别名。而出视频链手上的
+    ``"jimeng-cli"``、``openai_images.py`` 用构造时传进来的 ``self.key``
+    即 ``openai-images``），从来不是别名。而出视频链手上的
     ``provider_key`` 是目录行的 ``actual_provider`` 原文，可能是别名
     （``ark.py:16`` ``doubao``、``jimeng.py:65`` ``jimeng``）。同一个 provider
     在两条链上拼法不同，按 ``(model, provider)`` 查价就会有一半落空。

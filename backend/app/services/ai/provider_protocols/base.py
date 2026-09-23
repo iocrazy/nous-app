@@ -141,8 +141,9 @@ class ProviderProtocol:
     #                    it is not "user_device" — and there is no vendor key
     #                    or quota, so it is not "api_key" either
     #
-    # This is the ONLY thing separating the three gpt-image cards in Admin →
-    # AI Models (codex / codex-local / openai-images) and the two dreamina
+    # This is the ONLY thing separating the two gpt-image cards in Admin →
+    # AI Models (codex-local / openai-images; the server ``codex`` card was
+    # retired 2026-09-23) and the two dreamina
     # cards (jimeng-cli / jimeng-local). They drive the same binaries and
     # cannot be merged — sharing a generation_family would let db_registry
     # build a server-side provider for a row meant to run on the user's
@@ -175,8 +176,8 @@ class ProviderProtocol:
     # Whether image generation for this family is an HTTP call made BY THIS
     # PROCESS — the only shape a server-side health probe can reach.
     #
-    # False for every CLI/daemon-backed family: ``codex`` and ``jimeng-cli``
-    # shell out to a local binary, ``codex-local`` dials the user's own paired
+    # False for every CLI/daemon-backed family: ``openai-images`` and
+    # ``jimeng-cli`` shell out to a local binary, ``codex-local`` dials the user's own paired
     # device. Their catalog rows carry an empty ``base_url`` precisely because
     # there is no endpoint, so a probe would not be "failing" — it would be
     # inapplicable, which is what ``not_probed`` already means.

@@ -538,7 +538,6 @@ class VolcengineAsrProvider(AIProvider):
 PROTOCOLS_WITHOUT_AI_PROVIDER = {
     "claude": "Anthropic Messages API — no AIProvider implementation exists",
     "codex-local": "runs on the user's device via the daemon; no HTTP endpoint",
-    "codex": "image-only, server-side CLI subprocess",
     "openai-images": "image-only, CLI subprocess over the Images API",
     "jimeng-cli": "image/video-only, CLI subprocess",
     "jimeng-local": "image/video-only, on the user's device",
