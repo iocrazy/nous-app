@@ -7,16 +7,21 @@
  * `application/x-nous-gallery` in two steps, because migrations and code
  * deploy in no guaranteed order:
  *
- *   1. (now) the backend writes `GALLERY_MIME`; every check here accepts
- *      `GALLERY_MIMES` (both spellings) via `isGalleryMime`.
- *   2. A migration rewrites existing rows; one release later the legacy
- *      spelling can be dropped from `GALLERY_MIMES`.
+ *   1. (now) every check here accepts `GALLERY_MIMES` (both spellings) via
+ *      `isGalleryMime`, while the backend still WRITES the legacy spelling so
+ *      bundles that predate this release never meet an unknown value.
+ *   2. Once every bundle accepts both, the backend flips its write to
+ *      `GALLERY_MIME` and a migration rewrites existing rows; one release
+ *      later the legacy spelling can be dropped from `GALLERY_MIMES`.
+ *
+ * The frontend never writes a gallery mime itself — `createGallery` only POSTs
+ * a scope + filename and the backend picks the value.
  *
  * Mirror of `backend/app/services/library/gallery_mime.py`. Never compare a
  * mime against a gallery literal elsewhere — `galleryMime.test.ts` scans for it.
  */
 
-/** The spelling written for new galleries. */
+/** The target spelling (the backend writes it from step 2 on). */
 export const GALLERY_MIME = 'application/x-nous-gallery';
 
 /** Pre-rename spelling still on existing rows until the data migration. */

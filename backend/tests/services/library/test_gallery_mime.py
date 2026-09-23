@@ -1,9 +1,10 @@
-"""Gallery MIME rename, step 1 of 2: write the new value, accept both.
+"""Gallery MIME rename, step 1 of 2: accept both, keep writing the legacy value.
 
 ``resources.mime_type`` is persisted, and migrations and code deploy in no
 guaranteed order, so every read / filter must accept BOTH the legacy
 ``application/x-mediahub-gallery`` and the new ``application/x-nous-gallery``
-while every write already uses the new one.
+while writes stay on the legacy spelling until every open bundle accepts
+both (step 2 flips ``GALLERY_MIME_FOR_WRITE`` and migrates rows together).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.repositories import resources_repository as repo_mod
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.library.gallery_mime import (
     GALLERY_MIME,
+    GALLERY_MIME_FOR_WRITE,
     GALLERY_MIMES,
     LEGACY_GALLERY_MIME,
     is_gallery_mime,
@@ -32,9 +34,14 @@ OLD = "application/x-mediahub-gallery"
 # ─── constants + predicate ────────────────────────────────────────────
 
 
-def test_write_value_is_the_new_mime() -> None:
+def test_constants_spell_new_and_legacy() -> None:
     assert GALLERY_MIME == NEW
     assert LEGACY_GALLERY_MIME == OLD
+
+
+def test_step1_still_writes_the_legacy_mime() -> None:
+    # Step 2 flips this to GALLERY_MIME in the same PR as the row migration.
+    assert GALLERY_MIME_FOR_WRITE == OLD
 
 
 def test_accept_set_holds_both_values() -> None:
@@ -164,7 +171,7 @@ async def _allow(*_a: Any, **_k: Any) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_create_gallery_writes_new_mime(
+async def test_create_gallery_writes_legacy_mime_in_step1(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _FakeRepo()
@@ -173,7 +180,7 @@ async def test_create_gallery_writes_new_mime(
     await router_mod.create_gallery(
         auth=_AUTH, scope_id="1", filename="My Gallery", folder_id=None
     )
-    assert repo.created[0]["mime_type"] == NEW
+    assert repo.created[0]["mime_type"] == GALLERY_MIME_FOR_WRITE == OLD
 
 
 @pytest.mark.asyncio
