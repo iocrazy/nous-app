@@ -85,15 +85,26 @@ export const SchedulesBlockView: React.FC<IssueBlockProps> = ({ ctx }) => {
         // a failed dispatch, it is still a live row a person may well want
         // gone — taking its ✕ away would strand it in the list with no way to
         // remove it (fix round 2).
+        //
+        // `issue_not_active`: the agent's own wake-up, stopped when its run
+        // finished or when it came due on an issue waiting for review. It
+        // keeps its ✕ like any other stopped one-shot.
+        //
+        // `issue_terminal`: stopped because the issue was cancelled or closed
+        // (cancel hook, or the firing guard on a done issue). Same ✕.
         const spent = !row.enabled && !routine && row.pause_reason === 'fired_once';
         const disabled = !row.enabled;
         const status = !disabled
           ? null
           : row.pause_reason === 'fired_once'
             ? t('schedule.fired', 'Fired')
-            : row.pause_reason
-              ? t('schedule.pausedReason', 'Paused: {{reason}}', { reason: row.pause_reason })
-              : t('schedule.paused', 'Paused');
+            : row.pause_reason === 'issue_not_active'
+              ? t('schedule.issueNotActive', 'Stopped: Issue Not Active')
+              : row.pause_reason === 'issue_terminal'
+                ? t('schedule.issueTerminal', 'Stopped: Issue Closed')
+                : row.pause_reason
+                  ? t('schedule.pausedReason', 'Paused: {{reason}}', { reason: row.pause_reason })
+                  : t('schedule.paused', 'Paused');
         return (
           <div
             key={row.id}

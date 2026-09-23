@@ -672,6 +672,17 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 _WAKEUP_TERMINAL_STATUSES = ("done", "cancelled")
 
+#: Statuses where an issue waits on a PERSON (review, an answer). An AGENT's
+#: wake-up on one would only start a billed run whose status write is skipped
+#: (defect B, prod S2: the chain kept re-arming itself on an in_review issue).
+#: A user's wake-up still fires there — spec §5 only promised "no fire once
+#: the issue has ended". ``in_progress`` is not listed: a live issue takes the
+#: wake-up into its inbox (``deliver_or_dispatch``), unchanged.
+_AGENT_WAKEUP_INACTIVE_STATUSES = ("in_review", "needs_followup")
+#: Same spelling as ``user_schedules_repository.ISSUE_NOT_ACTIVE`` (the disarm
+#: on completion writes it too), so the Schedules block shows one label.
+_WAKEUP_ISSUE_NOT_ACTIVE = "issue_not_active"
+
 
 def _as_dict(value: Any) -> Dict[str, Any]:
     """jsonb → dict. asyncpg may hand a jsonb column back as a str; a wake-up
@@ -750,7 +761,9 @@ _WAKEUP_DELIVERED = ("inbox", "dispatched")
 #: here — including a reason added later that nobody taught this function — is
 #: treated as a failure, which retries and eventually trips the breaker. The
 #: safe default has to be the one that keeps the wake-up alive.
-_WAKEUP_PROVEN_TERMINAL_REASONS = frozenset({"issue_terminal", "issue_missing"})
+_WAKEUP_PROVEN_TERMINAL_REASONS = frozenset(
+    {"issue_terminal", "issue_missing", _WAKEUP_ISSUE_NOT_ACTIVE}
+)
 
 
 def _is_delivery_failure(result_mode: str, reason: Optional[str]) -> bool:
@@ -860,7 +873,11 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     A terminal / hidden / missing issue is not a delivery failure: the target
     will never accept it, so the row is disabled and counted as skipped. A
-    wake-up that can never land, retried every minute, is pure noise."""
+    wake-up that can never land, retried every minute, is pure noise.
+
+    An AGENT's wake-up on an issue waiting on a person (in_review /
+    needs_followup) is disabled the same way, with ``issue_not_active``
+    (defect B). A user's wake-up there is delivered as before."""
     payload = _as_dict(row.get("payload"))
     issue_id = payload.get("issue_id")
     text = (payload.get("text") or "").strip()
@@ -877,6 +894,18 @@ async def _fire_issue_wakeup(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         logger.info(
             f"[scheduled_master] wakeup {row['id']} not delivered — issue "
             f"{issue_id} is gone or terminal; schedule disabled"
+        )
+        return None
+
+    if (
+        payload.get("created_by") == "agent"
+        and issue.get("status") in _AGENT_WAKEUP_INACTIVE_STATUSES
+    ):
+        await _disable_schedule(row["id"], _WAKEUP_ISSUE_NOT_ACTIVE, bump_skipped=True)
+        logger.info(
+            f"[scheduled_master] agent wakeup {row['id']} not delivered — issue "
+            f"{issue_id} is {issue.get('status')}, waiting on a person; "
+            "schedule disabled"
         )
         return None
 

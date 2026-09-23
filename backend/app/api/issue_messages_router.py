@@ -718,7 +718,9 @@ async def post_issue_message(
     )
     if answer is not None and not answer.wake:
         # The answer ended the issue (e.g. budget Cancel): record it, wake
-        # nothing — a reply turn on a cancelled issue is a pointless run.
+        # nothing — a reply turn on a cancelled issue is a pointless run. The
+        # parked workflow is not left behind: the cancel transition inside
+        # on_answer already released it (services/issues/cancel_live_work).
         await _commit_typed_answer(answer)
         return IssueMessagePostResponse(
             comment=_optimistic_comment(

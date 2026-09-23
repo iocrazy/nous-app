@@ -177,8 +177,19 @@ async def set_status(
     error_message: Optional[str] = None,
     agent_outcome: Optional[str] = None,
     outcome_reason: Optional[str] = None,
-) -> None:
+) -> bool:
     """Transition issue.status with side-effect timestamps (design Protocol 5).
+
+    **Never over a terminal status** (defect C, 2026-09-23). The UPDATE only
+    matches a row whose status is not in ``PREEMPT_STATUSES``. Production S4:
+    the user cancelled mid-run and the run's own finish wrote ``in_review``
+    over it. The lifecycle has no legitimate write over done/cancelled: the
+    UI refuses to dispatch a terminal issue (``dispatch-preview``), an ordinary
+    reply resumes only ``needs_followup`` (needs_input / empty_output), a
+    sub-issue-barrier reply may resume any live status, and the barrier wakes
+    only live parents.
+    Returns whether the row was written. A dropped write is logged and skips
+    the stage-node projection (the status it would project never landed).
 
     Spec-2: ``agent_outcome`` / ``outcome_reason`` record the agent's FinishIssue
     self-report into execution_state so the UI can distinguish "agent reports
@@ -249,10 +260,20 @@ async def set_status(
     # may write execution_state (service_role-only via issues_update_allowlist)
     async with write_scope() as session:
         await session.execute(text("SET LOCAL ROLE service_role"))
-        await session.execute(
-            update(Issues).where(Issues.id == issue_id).values(**values)
+        result = await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id, Issues.status.notin_(PREEMPT_STATUSES))
+            .values(**values)
         )
+        wrote = (result.rowcount or 0) > 0
+    if not wrote:
+        logger.info(
+            f"[set_status] issue {issue_id}: write of {status!r} dropped — the "
+            "issue is already terminal (or gone)"
+        )
+        return False
     await _project_status_onto_stage_node(issue_id, status)
+    return True
 
 
 async def _project_status_onto_stage_node(issue_id: int, status: str) -> None:
@@ -499,6 +520,26 @@ def _pending_agent_outcome(issue: dict[str, Any]) -> Optional[str]:
     return state.get("agent_outcome") if isinstance(state, dict) else None
 
 
+def _reply_resumes(issue: dict[str, Any], *, routes_outcome: bool) -> bool:
+    """Whether a reply turn resumes the issue and routes its FinishIssue.
+
+    Spec-4: a reply answering a parked needs_input / empty_output declaration.
+    Defect G: a routed reply (the sub-issue barrier's wake) on any issue that
+    is neither terminal nor backlog."""
+    status = issue.get("status")
+    if status == "needs_followup" and _pending_agent_outcome(issue) in {
+        "needs_input",
+        "empty_output",
+    }:
+        return True
+    return (
+        routes_outcome
+        and status is not None
+        and status not in PREEMPT_STATUSES
+        and status != "backlog"
+    )
+
+
 async def _run_reply_turns(
     issue_id: int,
     user_id: str,
@@ -515,6 +556,7 @@ async def _run_reply_turns(
     max_attempts: int = REPLY_LOCK_MAX_ATTEMPTS,
     wait_seconds: int = REPLY_LOCK_WAIT_SECONDS,
     attachments: Optional[list[dict]] = None,
+    routes_outcome: bool = False,
 ) -> dict[str, Any]:
     """Acquire the per-issue turn lock (waiting if a turn is in flight), run
     exactly one reply turn, then release.
@@ -527,6 +569,16 @@ async def _run_reply_turns(
     turn's own FinishIssue outcome (``route_finish_outcome``) afterward. Any
     other status is left untouched — Spec-1b's original "no status change"
     behavior for a plain reply on an in-flight/already-terminal issue.
+
+    ``routes_outcome`` (defect G) opts a reply into the same resuming branch
+    for any live status: the sub-issue barrier's wake feeds the parent the
+    children's roll-up and expects the parent's FinishIssue to move it. Before
+    this, a ``todo`` / ``in_progress`` / ``in_review`` parent's declaration was
+    discarded. It never resumes a terminal (``PREEMPT_STATUSES``) or
+    ``backlog`` issue. Default off, so an ordinary comment is unchanged.
+
+    If the ``in_progress`` write is refused (``set_status`` returns False: a
+    cancel landed between the read and the write), the turn does not run.
 
     ``load_issue`` / ``set_status`` are optional so existing callers/tests
     that don't exercise the resume path (and predate it) keep working
@@ -562,14 +614,16 @@ async def _run_reply_turns(
         resuming = False
         if load_issue is not None and set_status is not None:
             issue = await load_issue(issue_id)
-            resuming = (issue or {}).get(
-                "status"
-            ) == "needs_followup" and _pending_agent_outcome(issue or {}) in {
-                "needs_input",
-                "empty_output",
-            }
+            resuming = _reply_resumes(issue or {}, routes_outcome=routes_outcome)
             if resuming:
-                await set_status(issue_id, "in_progress")
+                # ``is False``, not falsiness: injected fakes that predate the
+                # bool return hand back None and mean "written".
+                if await set_status(issue_id, "in_progress") is False:
+                    logger.info(
+                        f"[issue_reply] issue {issue_id}: resume refused"
+                        " (issue went terminal before the turn); turn skipped"
+                    )
+                    return {"issue_id": issue_id, "preempted": True}
 
         try:
             result = await run_turn(
@@ -639,6 +693,17 @@ async def _run_reply_turns(
         await release(issue_id)
 
 
+SUBISSUE_BARRIER_SOURCE_KIND = "subissue_barrier"
+
+
+def routes_reply_outcome(source: Optional[dict[str, Any]]) -> bool:
+    """Only the sub-issue barrier's wake is a routed reply (defect G). A
+    scheduled wake-up keeps Spec-1b's one-turn, no-status-change contract."""
+    return isinstance(source, dict) and (
+        source.get("kind") == SUBISSUE_BARRIER_SOURCE_KIND
+    )
+
+
 @DBOS.workflow()
 async def respond_to_issue_reply(
     issue_id: int,
@@ -666,6 +731,10 @@ async def respond_to_issue_reply(
     the exact kwarg set, so widening it there would break fakes that have
     nothing to do with provenance. A reply with no provenance keeps handing
     over the bare step, so the ordinary path is byte-for-byte what it was.
+
+    A ``{"kind": "subissue_barrier"}`` source (defect G) also turns on
+    ``routes_outcome``: the parent's FinishIssue after the roll-up is routed
+    (``in_review`` / ``done`` / ``needs_followup``) instead of dropped.
     """
     # Defensive outer finally: whatever happened, no dispatching marker
     # outlives this workflow. ``acquire_turn_lock`` already removes it on the
@@ -698,6 +767,7 @@ async def respond_to_issue_reply(
                 set_status=set_status,
                 auto_close=auto_close,
                 attachments=attachments,
+                routes_outcome=routes_reply_outcome(source),
             )
             return turns_out
         finally:
@@ -830,6 +900,10 @@ async def run_issue_agent_step(
 # loop (set_status runs after), so it is never mistaken for an external stop.
 PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
+# Mirrors ``user_schedules_repository.ISSUE_NOT_ACTIVE``; spelled out so this
+# DBOS-registered module does not import a repository at load time.
+_WAKEUP_ISSUE_NOT_ACTIVE = "issue_not_active"
+
 
 async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
     """Belt to the creation-time braces. Phase 2b-2 §4.2 made ``issue_id`` a
@@ -855,6 +929,43 @@ async def _mark_run_empty_output(run_id: str) -> None:
     )
 
 
+async def _disarm_agent_wakeups(issue_id: int, reason: str) -> Optional[int]:
+    """Disable the wake-ups the agent armed on this issue (defect B).
+
+    Deliberately NOT a ``@DBOS.step`` (same shape as ``_backfill_run_issue_id``):
+    the UPDATE filters on ``enabled``, so re-running it on replay is a no-op and
+    needs no checkpoint; and inserting a step into the workflow body would
+    shift every later step's recorded sequence number, so a workflow recovered
+    across the deploy would fail its step-name check.
+
+    Called by ``route_finish_outcome`` when the agent declared ``completed`` or
+    was capped on ``continue``: the work is handed to a person, and each agent
+    wake-up would otherwise start another billed run on an ``in_review`` issue
+    (prod S2). The row filter lives in ``disarm_agent_wakeups``: only rows with
+    ``created_by == "agent"``; a person's wake-up is left armed.
+
+    Decoration, not routing: the status is already written, so a failure is
+    logged at ERROR and returns None instead of failing the workflow. The
+    firing guard in ``scheduled_master._fire_issue_wakeup`` still refuses
+    any agent row this missed."""
+    from app.repositories import user_schedules_repository as schedules
+
+    try:
+        n = await schedules.disarm_agent_wakeups(issue_id, reason=reason)
+    except Exception as exc:  # noqa: BLE001 — the status routing already landed
+        logger.error(
+            f"[issue_lifecycle] disarming agent wake-ups failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
+        return None
+    if n:
+        logger.info(
+            f"[issue_lifecycle] issue {issue_id}: disarmed {n} agent wake-up(s) "
+            f"({reason})"
+        )
+    return n
+
+
 async def route_finish_outcome(
     issue_id: int,
     outcome: Optional[str],
@@ -864,6 +975,7 @@ async def route_finish_outcome(
     set_status: Callable[..., Awaitable[None]],
     content_len: int = 0,
     run_id: Optional[str] = None,
+    disarm_wakeups: Optional[Callable[[int, str], Awaitable[Any]]] = None,
 ) -> None:
     """Route an agent's FinishIssue declaration (or the lack of one) to an
     issue status transition. Shared by the dispatch loop's terminal step
@@ -905,7 +1017,15 @@ async def route_finish_outcome(
     333739667136736 sat at status=completed/error_code=NULL having produced 0
     chars with no declaration). Deliberately does NOT touch
     ``liveness_state`` — see ``AgentRunsRepository.mark_empty_output``.
+
+    ``completed`` and ``continue`` (capped) also disarm the wake-ups the agent
+    armed on the issue (defect B, ``_disarm_agent_wakeups``; injectable as
+    ``disarm_wakeups`` for tests). The other outcomes (``needs_input``,
+    empty output, no declaration) do not disarm here; when such a wake-up
+    comes due, the firing guard in ``scheduled_master._fire_issue_wakeup``
+    disables it according to the issue's status at that moment.
     """
+    disarm = disarm_wakeups or _disarm_agent_wakeups
     if run_id is not None:
         await _backfill_run_issue_id(run_id, issue_id)
 
@@ -935,6 +1055,7 @@ async def route_finish_outcome(
             agent_outcome="completed",
             outcome_reason=reason,
         )
+        await disarm(issue_id, _WAKEUP_ISSUE_NOT_ACTIVE)
     elif outcome == "continue":
         # Asked for more turns past the cap — stop and hand to a human.
         await set_status(
@@ -943,6 +1064,7 @@ async def route_finish_outcome(
             agent_outcome="continue_capped",
             outcome_reason=reason,
         )
+        await disarm(issue_id, _WAKEUP_ISSUE_NOT_ACTIVE)
     else:
         # No declaration → preserve legacy behavior (park for human review).
         await set_status(issue_id, "in_review")
@@ -1086,6 +1208,40 @@ async def _pending_inbox_count(issue_id: int) -> int:
         return 0
 
 
+async def _read_issue_status(issue_id: int) -> Optional[str]:
+    """Current ``issues.status`` read OUTSIDE any DBOS step.
+
+    Deliberately not a step (same rule as ``_disarm_agent_wakeups``): it is
+    called from the workflow BODY after the continuation loop, so wrapping it
+    would insert a new recorded step and shift every later step's sequence —
+    an in-flight workflow recovered across a deploy would replay onto the
+    wrong function and error out. Reading the live value on replay is safe:
+    a terminal status simply skips the route that was never consumed.
+
+    Best-effort: a failed read logs at ERROR and returns ``None`` so routing
+    proceeds — ``set_status`` still refuses to overwrite a terminal status, so
+    the worst case is the pre-fix behaviour, never a lost finish.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Issues
+
+    try:
+        async with read_scope() as session:
+            return (
+                await session.execute(
+                    select(Issues.status).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:  # noqa: BLE001 — logged, routing continues
+        logger.error(
+            f"[execute_issue] issue {issue_id}: final status re-read failed "
+            f"({exc!r}); routing without it (set_status still guards terminal)"
+        )
+        return None
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -1103,6 +1259,7 @@ async def _run_dispatch_with_continuation(
     run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     mark_turn: Optional[Callable[..., Awaitable[None]]] = None,
     pending_inbox: Optional[Callable[[int], Awaitable[int]]] = None,
+    read_status: Callable[[int], Awaitable[Optional[str]]] = _read_issue_status,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -1272,6 +1429,15 @@ async def _run_dispatch_with_continuation(
             return _paused_result(issue_id, res, attempt, wait_rounds, drains)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
+        if (res or {}).get("stop_reason") == "cancelled":
+            # CancelHook stopped the run (defect C). Never continue it, drain
+            # its inbox or park it — a person asked for it to stop. Go straight
+            # to the final re-read below: an issue cancel preempts there; a
+            # run-level cancel (``/ai-library/runs/{id}/cancel``, issue still
+            # live) routes as before, because leaving the issue in_progress
+            # with no worker hands it to the stranded monitor, which would
+            # re-dispatch the cancelled work.
+            break
         if outcome == "continue" and attempt < max_continuations:
             attempt += 1
             continue
@@ -1313,6 +1479,29 @@ async def _run_dispatch_with_continuation(
             continue
         break
 
+    # Re-read before routing (defect C). A cancel that landed during the last
+    # turn — stopped by CancelHook, or after its last step boundary — must
+    # not be answered with in_review, an EMPTY_OUTPUT stamp on the interrupted
+    # run, or a barrier firing on a stale status. set_status refuses the
+    # write anyway; this also skips the rest of the routing.
+    # ``read_status`` is a plain read, NOT the ``load_issue`` step: a new step
+    # call here would shift the step sequence of workflows in flight across a
+    # deploy (see ``_read_issue_status``).
+    final_status = await read_status(issue_id)
+    if final_status in PREEMPT_STATUSES:
+        logger.info(
+            f"[execute_issue] issue {issue_id} is {final_status!r} at finish "
+            f"(stop_reason={(res or {}).get('stop_reason')!r}); not routing"
+        )
+        return {
+            "issue_id": issue_id,
+            "preempted": True,
+            "preempted_status": final_status,
+            "outcome": outcome,
+            "attempts": attempt,
+            "wait_rounds": wait_rounds,
+            "inbox_drains": drains,
+        }
     content_len = len((res or {}).get("content") or "")
     await route_finish_outcome(
         issue_id,

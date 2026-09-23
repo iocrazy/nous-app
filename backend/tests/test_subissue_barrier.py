@@ -429,3 +429,31 @@ async def test_already_reported_sees_barrier_key_in_newest_window(
     double-close guard lets a duplicate report through."""
     assert await BarrierGateway().already_reported({"id": 1, "ai_session_id": 42}, "k")
     assert _windowed_store.calls == [{"limit": 200, "newest": True}]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_wake_tags_the_reply_with_the_barrier_source(
+    monkeypatch,
+) -> None:
+    """Defect G: the wake is a routed turn only if the workflow can tell it
+    apart from a plain comment. The barrier says so through ``source`` — the
+    trailing argument ``dispatch_respond_to_issue_reply`` already carries."""
+    import app.services.issues.issue_reply_dispatch as dispatch_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        dispatch_mod,
+        "dispatch_respond_to_issue_reply",
+        lambda *a, **kw: calls.append((a, kw)),
+    )
+
+    await BarrierGateway().dispatch_wake(
+        parent_id=5, owner_id="owner-1", body="roll-up", key="subwake:5:2"
+    )
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[:5] == (5, "owner-1", "roll-up", None, "subwake:5:2")
+    source = kwargs.get("source", args[5] if len(args) > 5 else None)
+    assert source is not None and source["kind"] == "subissue_barrier"
+    assert source["barrier_key"] == "subwake:5:2"
