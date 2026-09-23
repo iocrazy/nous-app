@@ -849,6 +849,10 @@ async def run_issue_agent_step(
 # loop (set_status runs after), so it is never mistaken for an external stop.
 PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
+# Mirrors ``user_schedules_repository.ISSUE_NOT_ACTIVE``; spelled out so this
+# DBOS-registered module does not import a repository at load time.
+_WAKEUP_ISSUE_NOT_ACTIVE = "issue_not_active"
+
 
 async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
     """Belt to the creation-time braces. Phase 2b-2 §4.2 made ``issue_id`` a
@@ -874,6 +878,38 @@ async def _mark_run_empty_output(run_id: str) -> None:
     )
 
 
+@DBOS.step()
+async def disarm_agent_wakeups_step(issue_id: int, reason: str) -> Optional[int]:
+    """Disable the wake-ups the agent armed on this issue (defect B).
+
+    Called by ``route_finish_outcome`` when the agent declared ``completed`` or
+    was capped on ``continue``: the work is handed to a person, and each agent
+    wake-up would otherwise start another billed run on an ``in_review`` issue
+    (prod S2). The row filter lives in ``disarm_agent_wakeups``: only rows with
+    ``created_by == "agent"``; a person's wake-up is left armed.
+
+    Decoration, not routing: the status is already written, so a failure is
+    logged at ERROR and returns None instead of failing the workflow. The
+    firing guard in ``scheduled_master._fire_issue_wakeup`` still refuses
+    any agent row this missed."""
+    from app.repositories import user_schedules_repository as schedules
+
+    try:
+        n = await schedules.disarm_agent_wakeups(issue_id, reason=reason)
+    except Exception as exc:  # noqa: BLE001 — the status routing already landed
+        logger.error(
+            f"[issue_lifecycle] disarming agent wake-ups failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
+        return None
+    if n:
+        logger.info(
+            f"[issue_lifecycle] issue {issue_id}: disarmed {n} agent wake-up(s) "
+            f"({reason})"
+        )
+    return n
+
+
 async def route_finish_outcome(
     issue_id: int,
     outcome: Optional[str],
@@ -883,6 +919,7 @@ async def route_finish_outcome(
     set_status: Callable[..., Awaitable[None]],
     content_len: int = 0,
     run_id: Optional[str] = None,
+    disarm_wakeups: Optional[Callable[[int, str], Awaitable[Any]]] = None,
 ) -> None:
     """Route an agent's FinishIssue declaration (or the lack of one) to an
     issue status transition. Shared by the dispatch loop's terminal step
@@ -924,7 +961,14 @@ async def route_finish_outcome(
     333739667136736 sat at status=completed/error_code=NULL having produced 0
     chars with no declaration). Deliberately does NOT touch
     ``liveness_state`` — see ``AgentRunsRepository.mark_empty_output``.
+
+    ``completed`` and ``continue`` (capped) also disarm the wake-ups the agent
+    armed on the issue (defect B, ``disarm_agent_wakeups_step``; injectable as
+    ``disarm_wakeups`` for tests). The other outcomes leave them armed: a
+    ``needs_input`` hand-off may legitimately want its check-back, and a
+    no-declaration ``in_review`` is covered by the firing guard.
     """
+    disarm = disarm_wakeups or disarm_agent_wakeups_step
     if run_id is not None:
         await _backfill_run_issue_id(run_id, issue_id)
 
@@ -954,6 +998,7 @@ async def route_finish_outcome(
             agent_outcome="completed",
             outcome_reason=reason,
         )
+        await disarm(issue_id, _WAKEUP_ISSUE_NOT_ACTIVE)
     elif outcome == "continue":
         # Asked for more turns past the cap — stop and hand to a human.
         await set_status(
@@ -962,6 +1007,7 @@ async def route_finish_outcome(
             agent_outcome="continue_capped",
             outcome_reason=reason,
         )
+        await disarm(issue_id, _WAKEUP_ISSUE_NOT_ACTIVE)
     else:
         # No declaration → preserve legacy behavior (park for human review).
         await set_status(issue_id, "in_review")

@@ -28,6 +28,10 @@ Steps, in order:
 2. Release a workflow parked on ``await_user_input``, using the stale-wait
    reaper's and the fork's recipe: clear the marker, cancel the workflow,
    release the execution lock.
+3. Disarm the wake-ups the agent armed on the issue (defect B), reason
+   ``issue_terminal``. The fire path already drops them lazily; disarming
+   now keeps the Schedules block and the pending-wake-ups chip truthful.
+   A person's wake-up is left as is (the terminal guard stops it at fire).
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ async def stop_live_work_for_cancel(
         return
     await _best_effort("flag running run", issue_id, _flag_running_root_run, row)
     await _best_effort("release parked workflow", issue_id, _release_if_parked, row)
+    await _best_effort("disarm agent wake-ups", issue_id, _disarm_agent_wakeups, row)
 
 
 async def _best_effort(
@@ -158,6 +163,19 @@ def parked_workflow_id(row: dict[str, Any]) -> str | None:
     if not isinstance(marker, dict) or marker.get("answered_at"):
         return None
     return str(row["dbos_workflow_id"])
+
+
+# ── step 3: the agent's wake-ups (defect B) ─────────────────────────────────
+
+
+async def _disarm_agent_wakeups(issue_id: int, row: dict[str, Any]) -> None:
+    from app.repositories import user_schedules_repository as schedules
+
+    n = await schedules.disarm_agent_wakeups(issue_id, reason=schedules.ISSUE_TERMINAL)
+    if n:
+        logger.info(
+            f"[cancel_live_work] issue {issue_id}: disarmed {n} agent wake-up(s)"
+        )
 
 
 # ── seams (patched in tests) ────────────────────────────────────────────────

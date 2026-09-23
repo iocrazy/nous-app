@@ -5909,6 +5909,7 @@
     "add": "+ Later",
     "empty": "No Wake-ups Scheduled",
     "fired": "Fired",
+    "issueNotActive": "Stopped: Issue Not Active",
     "paused": "Paused",
     "pausedReason": "Paused: {{reason}}"
   },
