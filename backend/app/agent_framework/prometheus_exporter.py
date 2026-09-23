@@ -35,7 +35,7 @@ _HELP: dict[str, str] = {
     "commitment_harvest_skipped_no_cues": "Chat turns where pre-filter found no commitment language",
     "commitment_sweeper_expired": "Commitments expired by sweeper before firing",
     "commitment_sweeper_fired": "Commitments delivered by per-minute sweeper",
-    "compaction_triggered": "Times compactor crossed the threshold and ran",
+    "compaction_triggered": "Turns that ran a head summary (orange/red tiers; yellow pruning alone does not count)",
     "dispatch_gate_blocked": "Dispatch refused by bounds gate",
     "dispatch_gate_passed": "Dispatch passed bounds gate",
     "hook_aborted_run": "Runs aborted by hook",

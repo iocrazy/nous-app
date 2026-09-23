@@ -87,6 +87,9 @@ git log --oneline origin/master..HEAD --grep="Memory M2\|memory consolidation\|m
 ---
 
 ## review/session-memory
+> Retired: the `ai_session_memory` table was dropped in mig 488 and the files
+> below were removed. Kept for history only.
+
 **Focus paths**:
 - `backend/app/agent_framework/session_memory.py`
 - `backend/app/repositories/session_memory_repository.py`
