@@ -221,6 +221,9 @@ on:
       # mig 488 的数据改名（mediahub → nous）：jsonb_set 改到哪条路径、孪生行守卫、
       # text[] 重建保序、SET LOCAL replica 只压住那一条 UPDATE —— 全是服务器说了算。
       - 'backend/tests/db/test_migration_488_rename_data_integration.py'
+      # mig 491：后端专用 SECURITY DEFINER 函数对浏览器角色的执行权 —— 权限只有
+      # Postgres 自己答得出，单测走后端会话，永远看不见 PostgREST 那条路。
+      - 'backend/tests/db/test_migration_491_revoke_definer_rpcs_integration.py'
       # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
       # / 按议题 / 按 agent 求和给同一个数」只有在一棵真树上才成立得了：三条语句的
       # WHERE 与 GROUP BY 毫无共同之处，而桩 session 按调用顺序发牌，三条都写错成
@@ -1013,3 +1016,14 @@ jobs:
           # 四次突变实测各杀各的：去掉 colon 限定杀 user_settings 那条、去掉 SET LOCAL
           # replica 杀 updated_at 那条、去掉孪生守卫杀改名那组、放宽 relkind 杀两条删视图用例。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_488_rename_data_integration.py -v
+
+      - name: Assert mig 491 closed the browser path to backend-only SECURITY DEFINER RPCs
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 8 个后端专用 definer 函数（两个积分、find_duplicate_videos、三个 cleanup、
+          # get_user_tag_counts、rpc_reorder_storyboard_frames）：anon / authenticated
+          # 必须没有 EXECUTE，postgres 必须保留（负向对照：全收回会让扣分静默断掉）。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_491_revoke_definer_rpcs_integration.py -v
