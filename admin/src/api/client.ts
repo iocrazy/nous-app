@@ -76,6 +76,9 @@ apiClient.interceptors.response.use(
     const status = error.response?.status
     const message =
       error.response?.data?.message ||
+      // Production error body is the ErrorResponse envelope
+      // ({success:false, error, code, details}), not FastAPI's bare {detail}.
+      error.response?.data?.error ||
       error.response?.data?.detail ||
       'Request failed'
 
