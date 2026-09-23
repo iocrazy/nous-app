@@ -443,6 +443,7 @@ async def build_agent_runner_stack(
     from app.services.ai.runner.step_hooks import (
         CancelHook,
         HeartbeatHook,
+        IssueStatusGate,
         StepHookChain,
     )
 
@@ -451,10 +452,16 @@ async def build_agent_runner_stack(
     # claim a steer it will never read — the claim is durable, the injection
     # is not, so the steer must stay on the inbox for the resumed run. The
     # budget is checked on the spend so far, before anything is claimed.
+    # Issue runs (and the sub-runs that carry the issue) also read
+    # ``issues.status`` right after the cancel flag (hotfix-2 PR-3): the
+    # issue's status is the authoritative cancel, the run flag only speeds it
+    # up. Chat turns have no issue and get no gate.
+    issue_gate = [IssueStatusGate(issue_id)] if issue_id is not None else []
     step_hooks = StepHookChain(
         [
             HeartbeatHook(),
             CancelHook(),
+            *issue_gate,
             PauseHook(),
             BudgetGateHook(),
             InboxClaimHook(),

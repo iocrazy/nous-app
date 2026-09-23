@@ -30,6 +30,10 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_status,
 )
 from app.services.issues.issue_session import get_or_create_issue_session
+from app.services.issues.issue_status_read import (
+    PREEMPT_STATUSES,
+    read_issue_status,
+)
 
 
 def _build_user_message(issue: dict[str, Any], brief: str | None = None) -> str:
@@ -84,6 +88,48 @@ CONTINUATION_NUDGE = (
     "Continue working on this issue. When you are finished, blocked, or need "
     "another turn, call the FinishIssue tool to declare the outcome."
 )
+
+
+class IssuePreemptedBeforeTurn(Exception):
+    """The issue reached a PREEMPT status while its turn waited for a slot.
+
+    Raised by the pre-turn gate inside ``run_session_turn`` and caught in
+    ``run_issue_agent`` — never escapes this module."""
+
+    def __init__(self, status: str) -> None:
+        super().__init__(f"issue {status} before the turn started")
+        self.status = status
+
+
+def _preempted_before_turn(status: str) -> dict[str, Any]:
+    """The typed result for a turn that never started. ``stop_reason`` is
+    ``cancelled`` (the workflow never continues or routes it); no run exists,
+    so ``run_id`` is None and nothing may be stamped EMPTY_OUTPUT."""
+    return {
+        "content": "",
+        "stop_reason": "cancelled",
+        "outcome": None,
+        "reason": f"issue {status} before the turn started",
+        "preempted_status": status,
+        "run_id": None,
+    }
+
+
+def _issue_status_gate(iid: int):
+    """Build the ``pre_turn_gate`` for one issue turn (hotfix-2 PR-3).
+
+    The workflow's loop-top check runs before the turn queues for the
+    per-user slot; a cancel that lands during that wait was invisible to it
+    (production R4 ran a whole turn 52 s after the cancel). Re-read here, after
+    the wait. An unreadable status is "not preempted" — see issue_status_read.
+    """
+
+    async def _gate() -> None:
+        status = await read_issue_status(iid, purpose="the pre-turn gate")
+        if status in PREEMPT_STATUSES:
+            raise IssuePreemptedBeforeTurn(status)
+
+    return _gate
 
 
 def _read_forked_from(
@@ -207,17 +253,27 @@ async def run_issue_agent(
     result: Optional[dict[str, Any]] = None
     await publish_status(iid, "running")
     try:
-        result = await AILibraryChatService().run_session_turn(
-            session_id,
-            user_id=user_id,
-            content=content_in,
-            trigger=trigger,
-            chunk_callback=_cb,
-            attribution=attribution,
-            fork_of=fork_of,
-            fork_steer=steer_text is not None,
-            issue_id=iid,
-        )
+        try:
+            result = await AILibraryChatService().run_session_turn(
+                session_id,
+                user_id=user_id,
+                content=content_in,
+                trigger=trigger,
+                chunk_callback=_cb,
+                attribution=attribution,
+                fork_of=fork_of,
+                fork_steer=steer_text is not None,
+                issue_id=iid,
+                pre_turn_gate=_issue_status_gate(iid),
+            )
+        except IssuePreemptedBeforeTurn as stop:
+            # No run, no user message, no spend. The ``finally`` below still
+            # sends the ``done`` frame (run_id null) so the UI stops spinning.
+            logger.info(
+                f"[issue_agent] issue={iid} session={session_id} is "
+                f"{stop.status!r} after the slot wait; not starting the turn"
+            )
+            return _preempted_before_turn(stop.status)
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""

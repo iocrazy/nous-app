@@ -466,3 +466,50 @@ async def test_issue_cancelled_during_the_last_turn_is_not_routed():
     assert rec.status_calls == []
     assert out["preempted"] is True
     assert out["preempted_status"] == "cancelled"
+
+
+# ── Hotfix-2 PR-3: the turn never started (pre-run gate) ────────────────────
+
+
+def _prerun_preempted(status: str = "cancelled") -> dict:
+    """The exact shape ``run_issue_agent`` returns when the issue went
+    PREEMPT while the turn waited for its slot: no run, no content."""
+    return {
+        "content": "",
+        "stop_reason": "cancelled",
+        "outcome": None,
+        "reason": f"issue {status} before the turn started",
+        "preempted_status": status,
+        "run_id": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_read", [None, "in_progress"])
+async def test_prerun_preempt_takes_the_preempt_return_without_the_reread(
+    final_read,
+):
+    """The loop-top check saw ``in_progress`` (it ran before the cancel); the
+    turn's own gate saw ``cancelled``. Even if the final re-read fails
+    (``None``) or lags, the dispatch must preempt: routing here would stamp
+    EMPTY_OUTPUT on a run that does not exist and write ``needs_followup``
+    over nothing."""
+    rec = _StopRecorder(_prerun_preempted("cancelled"))
+
+    async def _read(issue_id: int):
+        return final_read
+
+    out = await _run_dispatch_with_continuation(
+        1,
+        {"id": 1},
+        "agent-1",
+        "user-1",
+        run_turn=rec.run_turn,
+        set_status=rec.set_status,
+        load_issue=_const_load_issue("in_progress"),
+        read_status=_read,
+    )
+    assert rec.turns == [False]  # one attempt, never continued
+    assert rec.status_calls == []  # not routed, no EMPTY_OUTPUT
+    assert out["preempted"] is True
+    assert out["preempted_status"] == "cancelled"

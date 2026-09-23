@@ -1242,6 +1242,13 @@ async def _read_issue_status(issue_id: int) -> Optional[str]:
         return None
 
 
+def _never_started(res: Optional[dict[str, Any]]) -> bool:
+    """A turn result from ``run_issue_agent``'s pre-run gate: the issue was
+    already PREEMPT when the turn got its slot, so no run row exists."""
+    r = res or {}
+    return r.get("preempted_status") in PREEMPT_STATUSES and not r.get("run_id")
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -1429,6 +1436,26 @@ async def _run_dispatch_with_continuation(
             return _paused_result(issue_id, res, attempt, wait_rounds, drains)
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
+        if (res or {}).get("stop_reason") == "cancelled" and _never_started(res):
+            # Hotfix-2 PR-3: the turn's pre-run gate found the issue PREEMPT
+            # after the slot wait — no run, no content. The gate's own read is
+            # the evidence; do not re-ask the final re-read, which may fail
+            # (None) and route this into an EMPTY_OUTPUT stamp on a run that
+            # does not exist.
+            prerun_status = (res or {}).get("preempted_status")
+            logger.info(
+                f"[execute_issue] issue {issue_id} was {prerun_status!r} before "
+                f"turn {turn_no} started; preempting"
+            )
+            return {
+                "issue_id": issue_id,
+                "preempted": True,
+                "preempted_status": prerun_status,
+                "outcome": None,
+                "attempts": attempt,
+                "wait_rounds": wait_rounds,
+                "inbox_drains": drains,
+            }
         if (res or {}).get("stop_reason") == "cancelled":
             # CancelHook stopped the run (defect C). Never continue it, drain
             # its inbox or park it — a person asked for it to stop. Go straight
