@@ -218,6 +218,9 @@ on:
       # ``?`` 与 ``->>`` 取值、把有后代的行挡在 tier 2 之外的 NOT EXISTS、以及
       # 「已经有值就不许再写」这三件，全在服务器那边。
       - 'backend/tests/db/test_migration_479_own_cost_backfill.py'
+      # mig 488 的数据改名（mediahub → nous）：jsonb_set 改到哪条路径、孪生行守卫、
+      # text[] 重建保序、SET LOCAL replica 只压住那一条 UPDATE —— 全是服务器说了算。
+      - 'backend/tests/db/test_migration_488_rename_data_integration.py'
       # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
       # / 按议题 / 按 agent 求和给同一个数」只有在一棵真树上才成立得了：三条语句的
       # WHERE 与 GROUP BY 毫无共同之处，而桩 session 按调用顺序发牌，三条都写错成
@@ -240,15 +243,15 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-six, so it has to
+      # to it changes what "green" means for all thirty-seven, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
       # were seven, "nine" when there were eight, "eleven" when there were
       # thirteen, then "thirteen" when there were fifteen — each edit trusted
       # the previous number instead of counting). Recount, do not increment
-      # (the thirty-six below was counted with this command, not derived
-      # from the thirty-five it replaced):
+      # (the thirty-seven below was counted with this command, not derived
+      # from the thirty-six it replaced):
       #   grep -cE '^\s*bash .*pytest-no-full-skip\.sh" tests/' .github/workflows/schema-drift.yml
       - '.github/scripts/pytest-no-full-skip.sh'
   push:
@@ -995,3 +998,18 @@ jobs:
           # scope 过滤杀效率页那条（35.75 变 21.75）。⚠️ 最后一次突变在 scope 列一
           # 致的夹具上**不会**转红 —— 那个不对称是必需的，别把它「整理」掉。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_own_cost_tree_invariants_integration.py -v
+
+      - name: Replay mig 488's mediahub → nous data renames on production-shaped rows
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # 迁移已在上面随「above the watermark」那步真跑过（空库上），这里在回滚事务里
+          # 用生产形状的夹具把文件本体再放两遍：7 条 mediahub-* 目录行 + 一对孪生、
+          # task_assignment 的 nous: 形态改而裸值不改（裸值改了会让 ai_router 的
+          # startswith("nous-") 开始扣费）、disabled_models 与 fallback_models 保序、
+          # 图集 MIME 改了而 updated_at 不动、第二遍什么都不变、只删 VIEW 不删同名表。
+          # 四次突变实测各杀各的：去掉 colon 限定杀 user_settings 那条、去掉 SET LOCAL
+          # replica 杀 updated_at 那条、去掉孪生守卫杀改名那组、放宽 relkind 杀两条删视图用例。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_488_rename_data_integration.py -v

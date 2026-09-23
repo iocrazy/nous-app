@@ -3,17 +3,18 @@
 A gallery is one ``resources`` row whose ``mime_type`` marks it as a gallery
 entity (child images hang off ``gallery_items``). The value is PERSISTED, and
 it is being renamed ``application/x-mediahub-gallery`` →
-``application/x-nous-gallery`` in two steps, because migrations and code
+``application/x-nous-gallery`` in steps, because migrations and code
 deploy in no guaranteed order and old frontend bundles stay open:
 
-1. (now) every read / filter accepts :data:`GALLERY_MIMES` (both values),
-   but writes still use the LEGACY value (:data:`GALLERY_MIME_FOR_WRITE`), so
-   a frontend bundle that predates this release never meets a value it does
-   not recognise.
-2. Once every deployed bundle accepts both, one PR flips
-   :data:`GALLERY_MIME_FOR_WRITE` to :data:`GALLERY_MIME` AND ships the
-   migration that rewrites existing rows. One release after that,
-   :data:`LEGACY_GALLERY_MIME` can be dropped from :data:`GALLERY_MIMES`.
+1. (#2388, shipped) every read / filter accepts :data:`GALLERY_MIMES` (both
+   values), while writes stayed on the legacy value so a frontend bundle
+   that predated that release never met a value it did not recognise.
+2. (now) :data:`GALLERY_MIME_FOR_WRITE` is :data:`GALLERY_MIME`, shipped in
+   the same PR as migration 488, which rewrites the existing rows. Reads
+   still accept both — a row written by a backend that predates this release
+   in the migration/deploy window keeps working either way.
+3. (later) drop :data:`LEGACY_GALLERY_MIME` from :data:`GALLERY_MIMES` once
+   step 2 has settled and no legacy row can be written any more.
 
 The frontend mirror lives in ``frontend/utils/galleryMime.ts``.
 """
@@ -21,20 +22,20 @@ The frontend mirror lives in ``frontend/utils/galleryMime.ts``.
 from __future__ import annotations
 
 GALLERY_MIME = "application/x-nous-gallery"
-"""The target spelling (written once step 2 flips ``GALLERY_MIME_FOR_WRITE``)."""
+"""The current spelling — what new galleries are written with."""
 
 LEGACY_GALLERY_MIME = "application/x-mediahub-gallery"
-"""Pre-rename value still present on existing rows until the data migration."""
+"""Pre-rename value. Migration 488 rewrites existing rows; reads keep accepting
+it until the step-3 cleanup."""
 
 GALLERY_MIMES: tuple[str, ...] = (GALLERY_MIME, LEGACY_GALLERY_MIME)
 """Every value a read / filter must treat as a gallery."""
 
-GALLERY_MIME_FOR_WRITE = LEGACY_GALLERY_MIME
+GALLERY_MIME_FOR_WRITE = GALLERY_MIME
 """The value written when a gallery is created.
 
-Deliberately still the legacy spelling in step 1: old frontend bundles only
-recognise it. Step 2 changes this line to ``GALLERY_MIME`` together with the
-migration that rewrites existing rows.
+The new spelling since step 2: every deployed frontend bundle accepts both
+(#2388), and migration 488 moves the existing rows over in the same PR.
 """
 
 
