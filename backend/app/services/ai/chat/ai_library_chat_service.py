@@ -628,6 +628,7 @@ class AILibraryChatService:
         issue_id: Optional[int] = None,
         message_source: Optional[dict] = None,
         run_started_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+        pre_turn_gate: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -647,10 +648,19 @@ class AILibraryChatService:
         ``{"kind": "schedule", "schedule_id": …, "created_by": …}``. It is
         written onto that one message so the thread can tell a wake-up from a
         person typing. The turn appends the message exactly once; the delivery
-        path used to append it a second time itself (defect 7)."""
+        path used to append it a second time itself (defect 7).
+
+        ``pre_turn_gate`` (hotfix-2 PR-3) is awaited AFTER the slot is held and
+        BEFORE anything is persisted, recorded or sent to a model. The slot
+        wait can be long (production R4: ~54 s behind other turns), so a check
+        the caller made before calling here can be stale by the time the turn
+        would start. The gate aborts the turn by raising; the exception
+        propagates to the caller untouched, with the slot released."""
         from app.services.ai.chat.agent_concurrency import user_slot
 
         async with user_slot(str(user_id)):
+            if pre_turn_gate is not None:
+                await pre_turn_gate()
             return await self._run_session_turn_inner(
                 session_id,
                 user_id=user_id,
