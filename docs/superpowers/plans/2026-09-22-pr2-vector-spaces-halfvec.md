@@ -75,7 +75,7 @@
   - `EmbeddingStoreMissing(RuntimeError)`：表或函数不存在（42P01 / 42883）时由 repository 抛，其余 ProgrammingError 原样再抛
   - `get_embedding_space_repository()` / `get_resource_embeddings_repository()` 单例工厂
 
-- [ ] **Step 1: 写迁移 493**
+- [ ] **Step 1: 写迁移 494**
 
 ```sql
 -- 494: resource_embeddings (halfvec 2048 + HNSW) + embedding_spaces.
