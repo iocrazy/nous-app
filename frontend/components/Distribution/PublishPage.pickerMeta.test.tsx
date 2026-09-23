@@ -114,7 +114,6 @@ vi.mock('../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `/cover/${id}`,
   getResourceFileUrl: (id: string, token?: string) =>
     `/file/${id}${token ? `?token=${token}` : ''}`,
-  GALLERY_MIME: 'application/x-mediahub-gallery',
 }));
 
 vi.mock('react-router-dom', async (orig) => ({

@@ -193,7 +193,6 @@ vi.mock('../../services/resourceService', () => ({
   // Cover frames and the derived crops are plain image resources — the picker
   // renders them through the signed file URL, same as canvas output nodes.
   getResourceFileUrl: (id: string, token?: string) => `/file/${id}?token=${token ?? ''}`,
-  GALLERY_MIME: 'application/x-mediahub-gallery',
 }));
 
 // Realtime double for the cover-frame workflow. Captures the postgres_changes

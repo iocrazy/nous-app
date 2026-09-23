@@ -12,7 +12,6 @@ vi.mock('../../services/resourceService', () => ({
   getGalleryItems,
   // Encode the child id into the URL so the test can read which image is shown.
   getResourceMediaUrl: (id: string, token?: string) => `/media/${id}?token=${token ?? ''}`,
-  GALLERY_MIME: 'application/x-mediahub-gallery',
 }));
 
 // ResourcePromptSection does its own supabase/resourceService data fetching

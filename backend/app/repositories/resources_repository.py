@@ -113,6 +113,7 @@ from app.models import (
     Teams,
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
+from app.services.library.gallery_mime import GALLERY_MIMES
 from app.utils.url_canonical import parsed_media_url_predicate as _url_matches
 
 # Working-set caps for the batch sweepers in this repo. They replace
@@ -121,6 +122,12 @@ from app.utils.url_canonical import parsed_media_url_predicate as _url_matches
 # runs instead of being clipped.
 EXPIRED_TRASH_BATCH = 5000
 UNTRANSCODED_BATCH = 2000
+
+# Gallery MIME filter for the raw listing SQL. Both spellings (legacy
+# x-mediahub + new x-nous) are BOUND as one array param, never inlined, so the
+# accept set lives only in ``app.services.library.gallery_mime``.
+_GALLERY_MIMES_PARAM = "gallery_mimes"
+_GALLERY_MIME_CLAUSE = f"r.mime_type = ANY(:{_GALLERY_MIMES_PARAM})"
 
 # AI status fields live on the `resources` table (migration 067). A resource
 # is considered "completed" for a step when the column equals this value.
@@ -1445,7 +1452,9 @@ class ResourcesRepository(AsyncpgRepository):
         """Translate type categories into a SQL ``OR`` expression. Returns
         None when no filter is needed. Values are inlined as SQL string
         literals (a fixed set of well-known LIKE patterns — no injection
-        surface)."""
+        surface), except the gallery MIMEs, which are bound: an expression
+        that references ``:gallery_mimes`` needs ``_GALLERY_MIMES_PARAM`` in
+        the caller's params (see ``get_resource_items``)."""
         if not types:
             return None
         categories = {t.strip() for t in types if t and t.strip()}
@@ -1465,7 +1474,7 @@ class ResourcesRepository(AsyncpgRepository):
             "OR r.mime_type = 'application/pdf' "
             "OR r.mime_type LIKE 'application/msword%' "
             "OR r.mime_type LIKE 'application/vnd.%' "
-            "OR r.mime_type = 'application/x-mediahub-gallery' "
+            f"OR {_GALLERY_MIME_CLAUSE} "
             "OR r.mime_type LIKE 'text/%')"
         )
 
@@ -1480,7 +1489,7 @@ class ResourcesRepository(AsyncpgRepository):
             elif category == "document":
                 clauses.append(document_clause)
             elif category == "gallery":
-                clauses.append("r.mime_type = 'application/x-mediahub-gallery'")
+                clauses.append(_GALLERY_MIME_CLAUSE)
             elif category == "other":
                 clauses.append(f"NOT {known_clause}")
             # Silently ignore unknown categories (matches legacy behaviour).
@@ -1588,6 +1597,8 @@ class ResourcesRepository(AsyncpgRepository):
             mime_sql = self._build_mime_sql(types)
             if mime_sql:
                 where.append(mime_sql)
+                if _GALLERY_MIME_CLAUSE in mime_sql:
+                    params[_GALLERY_MIMES_PARAM] = list(GALLERY_MIMES)
 
             # Provenance filter — restrict to specific resource.source_type
             # values (web / upload / generated / derived). Used by the

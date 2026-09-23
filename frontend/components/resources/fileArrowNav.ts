@@ -1,5 +1,5 @@
 // frontend/components/resources/fileArrowNav.ts
-import { GALLERY_MIME } from '../../services/resourceService';
+import { isGalleryMime } from '../../utils/galleryMime';
 
 /**
  * The resource detail page binds ← / → to previous / next FILE navigation. But
@@ -17,5 +17,5 @@ export function shouldSuppressFileArrowNav(
   mimeType: string | null | undefined,
 ): boolean {
   if (!mimeType) return false;
-  return mimeType.startsWith('video/') || mimeType === GALLERY_MIME;
+  return mimeType.startsWith('video/') || isGalleryMime(mimeType);
 }

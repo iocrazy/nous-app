@@ -407,7 +407,7 @@ export interface Resource {
   created_at: string;
   updated_at: string;
   /** Number of child images when this resource is a gallery entity
-   *  (mime_type='application/x-mediahub-gallery'). 0 / absent otherwise. */
+   *  (`isGalleryMime(mime_type)`, see utils/galleryMime.ts). 0 / absent otherwise. */
   gallery_count?: number;
   // Joined
   tags?: Tag[];
@@ -3064,7 +3064,7 @@ export interface LibraryVideo {
   filename: string;
   thumbnail_url: string | null;
   /** Resource mime type — lets the publish picker tell a gallery entity
-   *  (`application/x-mediahub-gallery`) apart from a plain image. Optional
+   *  (`isGalleryMime`, see utils/galleryMime.ts) apart from a plain image. Optional
    *  so existing video callers stay unaffected. */
   mime_type?: string | null;
   /** Child-image count when this row is a gallery entity; 0 / absent

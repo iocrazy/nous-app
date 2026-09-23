@@ -15,9 +15,10 @@ import {
   TopicSuggestion, TopicSuggestReason,
 } from '../../services/distributionService';
 import {
-  uploadResource, getGalleryItems, getResourceCoverUrl, getResourceFileUrl, GALLERY_MIME,
+  uploadResource, getGalleryItems, getResourceCoverUrl, getResourceFileUrl,
   type ResourceUploadError, type UploadFailureReason,
 } from '../../services/resourceService';
+import { isGalleryMime } from '../../utils/galleryMime';
 import { getSupabaseClient } from '../../supabaseClient';
 import {
   addResourceTag, createTag, removeResourceTag,
@@ -1710,7 +1711,7 @@ export const PublishPage: React.FC = () => {
   // downstream workflow needs zero changes. Toggle semantics: every child
   // already selected → remove the whole group; otherwise add the missing ones.
   const isGalleryRow = useCallback(
-    (v: LibraryVideo): boolean => v.mime_type === GALLERY_MIME,
+    (v: LibraryVideo): boolean => isGalleryMime(v.mime_type),
     [],
   );
 

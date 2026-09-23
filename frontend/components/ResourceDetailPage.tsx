@@ -61,11 +61,11 @@ import {
   trashResource,
   translateGenPrompt,
   classifyResource,
-  GALLERY_MIME,
   fetchResourceCanvasRefs,
   type CanvasBackRef,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
+import { isGalleryMime } from '../utils/galleryMime';
 import { createTag } from '../services/unifiedTagService';
 import { EagleTagPicker } from './EagleTagPicker';
 import { PromptSection } from './resources/PromptSection';
@@ -975,7 +975,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const { icon: FileIcon, color: iconColor, bg: iconBg } = getFileIcon(resource.mime_type);
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
-  const isGallery = resource.mime_type === GALLERY_MIME;
+  const isGallery = isGalleryMime(resource.mime_type);
   const isUploadedAudio = isAudio && resource.source_type === 'upload';
   // Island audio capsule stage (unifies uploaded audio with the download-detail
   // audio layout): cover-tinted cover-side + synced lyrics column + bottom

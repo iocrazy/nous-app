@@ -188,7 +188,6 @@ vi.mock('../../services/resourceService', () => ({
   // Cover frames and the derived crops are plain image resources — the picker
   // renders them through the signed file URL, same as canvas output nodes.
   getResourceFileUrl: (id: string, token?: string) => `/file/${id}?token=${token ?? ''}`,
-  GALLERY_MIME: 'application/x-mediahub-gallery',
 }));
 
 // Realtime double for the cover-frame workflow. Captures the postgres_changes
@@ -238,6 +237,7 @@ vi.mock('../../contexts/TeamContext', () => ({
 }));
 
 import PublishPage from './PublishPage';
+import { listLibraryMedia } from '../../services/distributionService';
 
 describe('PublishPage', () => {
   it('publishes only after content + account + title are chosen', async () => {
@@ -525,6 +525,44 @@ describe('PublishPage', () => {
     // reversed order — and the gallery entity id itself is never published.
     expect(arg.resource_ids).toEqual(['c-1', 'c-2']);
     expect(arg.resource_ids).not.toContain('gal-1');
+  });
+
+  it('treats a gallery written with the renamed mime as a gallery too', async () => {
+    // Rows created after the MIME rename carry x-nous-gallery; legacy rows keep
+    // x-mediahub-gallery until the data migration. Both must expand.
+    const original = vi.mocked(listLibraryMedia).getMockImplementation();
+    vi.mocked(listLibraryMedia).mockImplementation((_scope, opts) =>
+      Promise.resolve(
+        opts?.mediaType === 'image'
+          ? [{ id: 'gal-9', filename: 'new-gallery', thumbnail_url: null,
+              mime_type: 'application/x-nous-gallery', gallery_count: 1 }]
+          : [],
+      ),
+    );
+    getGalleryItems.mockResolvedValueOnce([
+      { id: 'c-9', filename: 'child-9.jpg', thumbnail_path: null, position: 0 },
+    ]);
+    try {
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /new-gallery/ }));
+      await waitFor(() => expect(getGalleryItems).toHaveBeenCalledWith('gal-9'));
+      fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
+      fireEvent.click(screen.getByText('HEYGO'));
+      fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+        target: { value: 'Renamed mime' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+      await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+      expect(createPublishTask.mock.calls.at(-1)?.[0].resource_ids).toEqual(['c-9']);
+    } finally {
+      vi.mocked(listLibraryMedia).mockImplementation(original!);
+    }
   });
 
   it('removes the whole gallery group on a second pick (toggle)', async () => {
