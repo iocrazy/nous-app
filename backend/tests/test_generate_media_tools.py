@@ -71,44 +71,7 @@ async def test_generate_image_provider_failure_is_clean(monkeypatch):
     assert out["ok"] is False and "error" in out
 
 
-@pytest.mark.asyncio
-async def test_generate_video_registers_and_returns_ref(monkeypatch):
-    import app.services.ai.tools.generate_media_tools as gmt
-
-    async def _fake_generate_video(**kwargs):
-        assert kwargs["prompt"] == "pan"
-        assert kwargs["source_image_url"] == "http://x/in.png"
-        # 真实 wire 形状是 asdict(VideoGenResult)：video_url / video_path
-        return {"video_url": "http://x/clip.mp4", "video_path": None}
-
-    captured = {}
-
-    async def _fake_register(**kwargs):
-        captured.update(kwargs)
-        return {"id": 555}
-
-    async def _fake_scope(uid):
-        return "42"
-
-    monkeypatch.setattr(gmt, "_resolve_personal_team_id", _fake_scope)
-    monkeypatch.setattr(gmt, "register_generated_media", _fake_register)
-    tools = gmt.GenerateMediaTools()
-    monkeypatch.setattr(
-        tools,
-        "_svc",
-        lambda: type("S", (), {"generate_video": staticmethod(_fake_generate_video)})(),
-    )
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "prov")
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_MODEL", "m1")
-
-    out = await tools.generate_video(
-        {"prompt": "pan", "source_image_url": "http://x/in.png"},
-        {"run_id": "r1", "user_id": "u-uuid", "team_id": None, "agent_id": "ag"},
-    )
-    assert out["ok"] is True and out["generated_media_id"] == 555
-    assert captured["scope_id"] == 42  # personal team fallback (team_id None)
-    assert (
-        captured["origin"].kind == "agent_run"
-        and captured["origin"].derivation_kind == "video_gen"
-        and captured["origin"].run_id == "r1"
-    )
+# GenerateVideo no longer generates in the turn: the tool only submits
+# (tests/services/ai/tools/test_generate_video_async.py) and the server path's
+# registration, attribution, coordinates and scratch reaping moved to the
+# workflow step (tests/workflows/test_agent_video_workflow.py).

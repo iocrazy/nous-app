@@ -160,6 +160,28 @@ export interface SubagentResult {
   tokensUsed: number | null;
 }
 
+/**
+ * How an async media job (GenerateVideo, backend `workflows/agent_video.py`)
+ * ended. The same shape arrives twice: as a `media_result` inbox claim and as a
+ * `media_job_done` event on the run that submitted it (usually long after that
+ * run ended). `generatedMediaId` is a Snowflake id as a string on the wire.
+ */
+export interface MediaResult {
+  status: 'completed' | 'failed';
+  mediaKind: string;
+  generatedMediaId: string | null;
+  errorCode: string | null;
+  taskId: string | null;
+}
+
+/** A `media_job_done` event: the video this run submitted has finished. */
+export interface MediaJobNode {
+  kind: 'media_job';
+  key: string;
+  at: string | null;
+  result: MediaResult;
+}
+
 export interface InboxNode {
   kind: 'inbox';
   key: string;
@@ -169,6 +191,8 @@ export interface InboxNode {
   at: string | null;
   /** Set only on `kind === 'subagent_result'`. */
   result: SubagentResult | null;
+  /** Set only on `kind === 'media_result'` (an async GenerateVideo job). */
+  media?: MediaResult | null;
   /** Set when the claimed item names its origin (a schedule, today). */
   source: InboxSource | null;
 }
@@ -231,6 +255,7 @@ export type TrajectoryNode =
   | NarrationNode
   | StepNode
   | InboxNode
+  | MediaJobNode
   | ScheduleNode
   | BudgetNode
   | TurnEndNode
@@ -275,6 +300,23 @@ const arr = (v: unknown): unknown[] => {
   return [];
 };
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
+
+/**
+ * A media job's outcome from either carrier (inbox claim content / the
+ * `media_job_done` payload). Anything but an explicit `completed` reads as
+ * failed: a missing status must never render as success. Ids are accepted as
+ * a number too, stringified — never re-parsed (Snowflake > 2^53).
+ */
+const mediaResult = (c: Record<string, unknown>): MediaResult => {
+  const id = c.generated_media_id;
+  return {
+    status: c.status === 'completed' ? 'completed' : 'failed',
+    mediaKind: str(c.media_kind) ?? 'video',
+    generatedMediaId: typeof id === 'number' ? String(id) : str(id),
+    errorCode: str(c.error_code),
+    taskId: str(c.task_id),
+  };
+};
 
 /**
  * `user.referenced_outputs` → the citations one step shows (3a T8c 缺陷 4).
@@ -658,6 +700,19 @@ export function foldEvents(events: AgentRunEvent[], opts: FoldOptions = {}): Tra
                   tokensUsed: num(content.tokens_used),
                 }
               : null,
+          media: inboxKind === 'media_result' ? mediaResult(content) : null,
+        });
+        break;
+      }
+
+      case 'media_job_done': {
+        // Written on the run that SUBMITTED the job, usually after it ended —
+        // so it is its own node, never folded into a step that has closed.
+        nodes.push({
+          kind: 'media_job',
+          key: `seq:${ev.seq}`,
+          at: ev.created_at ?? null,
+          result: mediaResult(p),
         });
         break;
       }

@@ -494,7 +494,7 @@ class AgentRunTranscriptEvents(Base):
             " 'question_asked'::text, 'question_answered'::text,"
             " 'capability_denied'::text, 'fork'::text,"
             " 'subagent_spawned'::text, 'subagent_done'::text,"
-            " 'schedule_set'::text])",
+            " 'schedule_set'::text, 'media_job_done'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(
@@ -574,7 +574,7 @@ class AgentRunInbox(Base):
         CheckConstraint(
             "kind = ANY (ARRAY['steer'::text, 'answer'::text, 'pause'::text,"
             " 'resume'::text, 'budget_reply'::text,"
-            " 'subagent_result'::text])",
+            " 'subagent_result'::text, 'media_result'::text])",
             name="agent_run_inbox_kind_check",
         ),
         ForeignKeyConstraint(

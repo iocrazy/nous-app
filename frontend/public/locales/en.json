@@ -5818,7 +5818,13 @@
     "steps": "{{count}} steps",
     "denied": "Blocked: {{tool}}",
     "inboxSubagent": "Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}",
-    "inboxWakeup": "Wake-up · set by {{who}} · read before step {{n}}"
+    "inboxWakeup": "Wake-up · set by {{who}} · read before step {{n}}",
+    "inboxMedia": "Video result · {{verdict}} · read before step {{n}}",
+    "mediaReady": "Ready",
+    "mediaFailed": "Failed · {{code}}",
+    "mediaJobReady": "Video ready",
+    "mediaJobFailed": "Video failed · {{code}}",
+    "mediaJobOpen": "Open"
   },
   "cost": {
     "tailTokens": "{{p}} prompt · {{c}} completion tokens",

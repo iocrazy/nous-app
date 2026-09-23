@@ -116,85 +116,6 @@ async def test_generate_image_no_image_keeps_error_text_and_types_it(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_generate_video_routes_cli_local_path_to_source_path(
-    monkeypatch, tmp_path
-):
-    local = _scratch(tmp_path, "jimeng_abc", "out.mp4")
-
-    async def _gen(**kwargs):
-        return {"video_url": "", "video_path": local}
-
-    captured: dict = {}
-    tools = _tools(monkeypatch, captured, 777, generate_video=_gen)
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "jimeng")
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_MODEL", "v1")
-
-    out = await tools.generate_video(
-        {"prompt": "pan", "source_image_url": "https://cdn/in.png"}, dict(_CTX)
-    )
-
-    assert out["ok"] is True
-    assert out["generated_media_id"] == 777
-    assert captured["source_path"] == local
-    assert captured.get("source_url") is None
-    # video 行在 /cover 上是 404（router: media_kind != "image" → no cover），
-    # 所以耐久 URL 走 /stream，与 script_shot_video.py 的 durable 一致。
-    assert out["url"] == "/api/v1/generated-media/777/stream"
-    assert local not in json.dumps(out)
-    assert not os.path.exists(os.path.dirname(local))
-
-
-@pytest.mark.asyncio
-async def test_generate_video_no_video_keeps_error_text_and_types_it(monkeypatch):
-    async def _gen(**kwargs):
-        return {"video_url": "", "video_path": None}
-
-    captured: dict = {}
-    tools = _tools(monkeypatch, captured, 778, generate_video=_gen)
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "jimeng")
-
-    out = await tools.generate_video(
-        {"prompt": "pan", "source_image_url": "https://cdn/in.png"}, dict(_CTX)
-    )
-
-    assert out["ok"] is False
-    assert out["error_code"] == "no_video"
-    assert out["error"] == "provider returned no video url"
-    assert captured == {}
-
-
-@pytest.mark.asyncio
-async def test_generate_video_on_a_local_row_is_a_typed_unsupported_error(
-    monkeypatch,
-):
-    """The agent tool is not a DBOS step and its 600s tool budget is shorter
-    than the daemon's own (~27 min): it cannot wait on the user's machine
-    without abandoning a paid job. A local pick is therefore refused with a
-    typed, user-visible code - never a generic crash, never a silent
-    fallback onto the server."""
-    from app.services.ai.media.image_generation_service import (
-        LocalVideoUnsupportedError,
-    )
-
-    async def _gen(**kwargs):
-        raise LocalVideoUnsupportedError("jimeng-local-video")
-
-    captured: dict = {}
-    tools = _tools(monkeypatch, captured, 779, generate_video=_gen)
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "jimeng-local-video")
-
-    out = await tools.generate_video(
-        {"prompt": "pan", "source_image_url": "/api/v1/generated-media/1/cover"},
-        dict(_CTX),
-    )
-
-    assert out["ok"] is False
-    assert out["error_code"] == "local_video_unsupported"
-    assert "not supported" in out["error"]
-    assert captured == {}
-
-
-@pytest.mark.asyncio
 async def test_reaper_failure_does_not_fail_the_tool(monkeypatch, tmp_path):
     """回收是尽力而为——它炸了不该把一次已经付过钱的生成判失败。"""
     import app.services.ai.tools.generate_media_tools as gmt
@@ -271,28 +192,7 @@ async def test_generate_image_registers_the_resolved_provider_and_model(
     assert (origin.provider, origin.model) == ("ark", "doubao-seedream-4-0")
 
 
-@pytest.mark.asyncio
-async def test_generate_video_registers_the_resolved_provider_and_model(
-    monkeypatch, tmp_path
-):
-    local = _scratch(tmp_path, "jimengvid_res", "out.mp4")
-
-    async def _gen(**kwargs):
-        return {
-            "video_url": "",
-            "video_path": local,
-            "provider": "jimeng-cli",
-            "model": "jimeng-video-3.0",
-        }
-
-    captured: dict = {}
-    tools = _tools(monkeypatch, captured, 557, generate_video=_gen)
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "nous-video")
-    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_MODEL", "")
-
-    out = await tools.generate_video(
-        {"prompt": "pan", "source_image_url": "https://cdn/in.png"}, dict(_CTX)
-    )
-    assert out["ok"] is True, out
-    origin = captured["origin"]
-    assert (origin.provider, origin.model) == ("jimeng-cli", "jimeng-video-3.0")
+# GenerateVideo no longer generates in the turn: the tool only submits
+# (tests/services/ai/tools/test_generate_video_async.py) and the server path's
+# registration, attribution, coordinates and scratch reaping moved to the
+# workflow step (tests/workflows/test_agent_video_workflow.py).

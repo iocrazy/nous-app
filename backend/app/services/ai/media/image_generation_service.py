@@ -2,11 +2,11 @@
 
 Provider-agnostic single-image and single-video generation via the platform
 provider registry / ``nous_models`` DB catalog. Extracted from
-``StoryboardAIService`` so the two LIVE consumers of that class's generic
+``StoryboardAIService`` so the LIVE consumers of that class's generic
 generation capability — ``workflows/script_shot_generate`` (script editor shot
-imagery) and ``services/ai/tools/generate_media_tools`` (the agent
-GenerateImage / GenerateVideo tools) — no longer transitively import the
-retired Storyboard Workbench stack (storyboard_service / storyboard_repository /
+imagery), ``services/ai/tools/generate_media_tools`` (the agent GenerateImage
+tool) and ``workflows/agent_video`` (the agent GenerateVideo job) — no longer
+transitively import the retired Storyboard Workbench stack (storyboard_service / storyboard_repository /
 the tombstone models). The storyboard-specific code path is being retired
 separately; this class carries only the parts those live callers actually use.
 
@@ -40,31 +40,6 @@ from app.services.media.parsers.video_providers import (
 # actual_model — a caller that passed an explicit non-default model keeps it.
 # Kept equal to script_shot_generate._DEFAULT_MODEL by contract.
 _DEFAULT_IMAGE_MODEL = "dall-e-3"
-
-
-class LocalVideoUnsupportedError(RuntimeError):
-    """The picked video row runs on the user's OWN machine, and this caller
-    cannot hand it there.
-
-    The agent GenerateVideo tool runs inside the chat turn, not in a DBOS step:
-    it has no task row to record a daemon failure on, and its per-tool budget
-    (``tool_timeouts``: 600s) is shorter than the daemon's own dreamina budget
-    (``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``, ~27 min) - waiting would
-    abandon a job the user's machine is still running and paying for. Moving
-    the tool onto a workflow is its own change; until then a local pick is a
-    typed refusal the tool turns into a user-visible error code, never a
-    silent fallback onto nous' own server session.
-    """
-
-    code = "local_video_unsupported"
-
-    def __init__(self, row_name: str) -> None:
-        self.row_name = row_name
-        super().__init__(
-            f"local video generation from the agent tool is not supported yet "
-            f"(model {row_name!r} runs on your own machine); use the canvas or "
-            "the shot video button, or pick a server-side video model"
-        )
 
 
 class ImageGenerationService:
@@ -293,7 +268,15 @@ class ImageGenerationService:
             provider_name or None, user_id=user_id
         )
         if isinstance(route, db_registry.LocalVideoRoute):
-            raise LocalVideoUnsupportedError(route.row_name)
+            # This is the SERVER path. A local row runs on the user's paired
+            # daemon through ``local_dispatch``; the one agent caller
+            # (``workflows/agent_video.py``) branches on the route before it
+            # gets here, so reaching this is a caller bug, never a fallback
+            # onto nous' own session.
+            raise RuntimeError(
+                f"video row {route.row_name!r} runs on the user's own machine; "
+                "dispatch it through local_dispatch, not the server path"
+            )
         video_provider, actual_model = route.provider, route.actual_model
         gen_model = model or actual_model
 
@@ -326,4 +309,4 @@ class ImageGenerationService:
         return asdict(result)
 
 
-__all__ = ["ImageGenerationService", "LocalVideoUnsupportedError"]
+__all__ = ["ImageGenerationService"]

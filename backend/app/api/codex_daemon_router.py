@@ -224,6 +224,13 @@ async def _outcome_for(path: str, media_kind: str, attribution: dict) -> dict:
     )
 
 
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _register_daemon_result(**kwargs: Any) -> dict:
     from app.services.library.generated_media_service import (
         GenerationOrigin,
@@ -267,6 +274,15 @@ async def _register_daemon_result(**kwargs: Any) -> dict:
             # the daemon can neither supply nor alter it. Absent for a ticket
             # minted before this field existed — ``None`` then, never a guess.
             source_asset_id=attribution.get("source_asset_id"),
+            # An agent's async job (``workflows/agent_video.py``) names the
+            # agent and the conversation, so the product is attributed to the
+            # agent run the way an in-turn generation is. Absent -> None.
+            agent_id=attribution.get("agent_id"),
+            conversation_id=_int_or_none(attribution.get("conversation_id")),
+            # Minted server-side: a job on the user's own machine and account
+            # is never a platform charge (the BYOK-free rule). Absent -> the
+            # canvas default, False.
+            byok=bool(attribution.get("byok")),
         )
     else:
         # No attribution: an older daemon, or a caller that is genuinely an
