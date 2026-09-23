@@ -36,6 +36,7 @@ _HELP: dict[str, str] = {
     "commitment_sweeper_expired": "Commitments expired by sweeper before firing",
     "commitment_sweeper_fired": "Commitments delivered by per-minute sweeper",
     "compaction_triggered": "Turns that ran a head summary (orange/red tiers; yellow pruning alone does not count)",
+    "compaction_failed": "Turns whose compactor crashed above the summary layer; the raw history was sent instead",
     "dispatch_gate_blocked": "Dispatch refused by bounds gate",
     "dispatch_gate_passed": "Dispatch passed bounds gate",
     "hook_aborted_run": "Runs aborted by hook",
