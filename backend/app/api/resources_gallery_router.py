@@ -4,7 +4,7 @@
 Resources Gallery Router
 
 Gallery-as-a-first-class-entity endpoints (PR-A). A gallery is one
-``resources`` row (file_type='gallery', mime_type in ``GALLERY_MIMES`` — see
+``resources`` row (file_type='gallery', mime_type ``GALLERY_MIME`` — see
 ``app.services.library.gallery_mime``) whose child images are ordinary
 resources linked through the ``gallery_items`` junction. Children are hidden
 from the normal library listing so a gallery reads as a single tile.
@@ -31,7 +31,7 @@ from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.resources import GallerySetItemsRequest
-from app.services.library.gallery_mime import GALLERY_MIME_FOR_WRITE, is_gallery_mime
+from app.services.library.gallery_mime import GALLERY_MIME, is_gallery_mime
 
 # All endpoints require auth (AuthDep) and are resources-dedicated → establish
 # the ambient tenant Scope at the ROUTER level (mirrors resources_upload_router).
@@ -59,7 +59,7 @@ async def create_gallery(
             "source_type": "upload",
             "filename": filename,
             "file_type": "gallery",
-            "mime_type": GALLERY_MIME_FOR_WRITE,
+            "mime_type": GALLERY_MIME,
             "current_version": 1,
         }
         gallery = await repo.create_resource(resource_data)

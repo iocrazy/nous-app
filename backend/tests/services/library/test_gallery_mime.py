@@ -1,12 +1,10 @@
-"""Gallery MIME rename, step 2 of 2: accept both, write the new value.
+"""Gallery MIME rename, step 3 (cleanup): only the new value is a gallery.
 
-``resources.mime_type`` is persisted, and migrations and code deploy in no
-guaranteed order, so every read / filter still accepts BOTH the legacy
-``application/x-mediahub-gallery`` and the new ``application/x-nous-gallery``.
-Step 1 (#2388) shipped the accept-both reads everywhere; step 2 flips
-``GALLERY_MIME_FOR_WRITE`` to the new spelling in the same PR as the migration
-that rewrites existing rows (mig 488). A later cleanup drops the legacy value
-from ``GALLERY_MIMES``.
+Step 1 (#2388) accepted both ``application/x-mediahub-gallery`` and
+``application/x-nous-gallery`` on every read; step 2 (#2391) flipped writes to
+the new value and migration 488 rewrote the existing rows (production: zero
+legacy rows left). This step drops the legacy value from the accept set, so a
+row still carrying it is treated as not-a-gallery everywhere.
 """
 
 from __future__ import annotations
@@ -21,11 +19,10 @@ from fastapi import HTTPException
 from app.api import resources_gallery_router as router_mod
 from app.repositories import resources_repository as repo_mod
 from app.repositories.resources_repository import ResourcesRepository
+from app.services.library import gallery_mime as gallery_mime_mod
 from app.services.library.gallery_mime import (
     GALLERY_MIME,
-    GALLERY_MIME_FOR_WRITE,
     GALLERY_MIMES,
-    LEGACY_GALLERY_MIME,
     is_gallery_mime,
 )
 
@@ -36,28 +33,28 @@ OLD = "application/x-mediahub-gallery"
 # ─── constants + predicate ────────────────────────────────────────────
 
 
-def test_constants_spell_new_and_legacy() -> None:
+def test_constant_spells_the_new_value() -> None:
     assert GALLERY_MIME == NEW
-    assert LEGACY_GALLERY_MIME == OLD
 
 
-def test_step2_writes_the_new_mime() -> None:
-    # Flipped together with mig 488, which rewrites the existing rows.
-    assert GALLERY_MIME_FOR_WRITE == GALLERY_MIME == NEW
+def test_accept_set_holds_only_the_new_value() -> None:
+    assert GALLERY_MIMES == (NEW,)
 
 
-def test_accept_set_holds_both_values() -> None:
-    assert set(GALLERY_MIMES) == {NEW, OLD}
-    assert GALLERY_MIMES[0] == NEW
+def test_legacy_and_step2_names_are_gone() -> None:
+    # Step 3 removes them outright so nothing can re-add the legacy value to
+    # an accept list, or write through a second "for write" name.
+    assert not hasattr(gallery_mime_mod, "LEGACY_GALLERY_MIME")
+    assert not hasattr(gallery_mime_mod, "GALLERY_MIME_FOR_WRITE")
+    assert OLD not in vars(gallery_mime_mod).values()
 
 
-@pytest.mark.parametrize("mime", [NEW, OLD])
-def test_is_gallery_mime_accepts_both(mime: str) -> None:
-    assert is_gallery_mime(mime) is True
+def test_is_gallery_mime_accepts_the_new_value() -> None:
+    assert is_gallery_mime(NEW) is True
 
 
 @pytest.mark.parametrize(
-    "mime", [None, "", "image/png", "application/x-mediahub-tag", "gallery"]
+    "mime", [OLD, None, "", "image/png", "application/x-mediahub-tag", "gallery"]
 )
 def test_is_gallery_mime_rejects_others(mime: Optional[str]) -> None:
     assert is_gallery_mime(mime) is False
@@ -89,7 +86,7 @@ async def _fake_scope(session: _CapSession):
 
 
 @pytest.mark.asyncio
-async def test_gallery_type_filter_binds_both_mimes(
+async def test_gallery_type_filter_binds_only_the_new_mime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _CapSession()
@@ -101,13 +98,13 @@ async def test_gallery_type_filter_binds_both_mimes(
     stmt, params = session.calls[-1]
     sql = str(stmt)
     assert "r.mime_type = ANY(:gallery_mimes)" in sql
-    assert set(params["gallery_mimes"]) == {NEW, OLD}
+    assert params["gallery_mimes"] == [NEW]
     # No literal gallery mime is inlined into the SQL text any more.
     assert OLD not in sql and NEW not in sql
 
 
 @pytest.mark.asyncio
-async def test_other_type_filter_excludes_both_mimes(
+async def test_other_type_filter_excludes_the_gallery_mime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _CapSession()
@@ -118,7 +115,7 @@ async def test_other_type_filter_excludes_both_mimes(
     )
     stmt, params = session.calls[-1]
     assert "r.mime_type = ANY(:gallery_mimes)" in str(stmt)
-    assert set(params["gallery_mimes"]) == {NEW, OLD}
+    assert params["gallery_mimes"] == [NEW]
 
 
 @pytest.mark.asyncio
@@ -135,7 +132,7 @@ async def test_non_gallery_filter_does_not_bind_gallery_param(
     assert "gallery_mimes" not in params
 
 
-# ─── router: write new, accept both ───────────────────────────────────
+# ─── router: write and accept the new value only ───────────────────────────────────
 
 
 class _FakeRepo:
@@ -182,15 +179,14 @@ async def test_create_gallery_writes_the_new_mime(
     await router_mod.create_gallery(
         auth=_AUTH, scope_id="1", filename="My Gallery", folder_id=None
     )
-    assert repo.created[0]["mime_type"] == GALLERY_MIME_FOR_WRITE == NEW
+    assert repo.created[0]["mime_type"] == GALLERY_MIME == NEW
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mime", [NEW, OLD])
-async def test_list_gallery_items_accepts_both_mimes(
-    monkeypatch: pytest.MonkeyPatch, mime: str
+async def test_list_gallery_items_accepts_the_new_mime(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _FakeRepo(gallery_mime=mime)
+    repo = _FakeRepo(gallery_mime=NEW)
     monkeypatch.setattr(router_mod, "ResourcesRepository", lambda: repo)
     monkeypatch.setattr(router_mod, "check_media_access", _allow)
 
@@ -199,11 +195,10 @@ async def test_list_gallery_items_accepts_both_mimes(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mime", [NEW, OLD])
-async def test_set_gallery_items_accepts_both_mimes(
-    monkeypatch: pytest.MonkeyPatch, mime: str
+async def test_set_gallery_items_accepts_the_new_mime(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _FakeRepo(gallery_mime=mime)
+    repo = _FakeRepo(gallery_mime=NEW)
     monkeypatch.setattr(router_mod, "ResourcesRepository", lambda: repo)
     monkeypatch.setattr(router_mod, "check_media_access", _allow)
 
@@ -215,10 +210,11 @@ async def test_set_gallery_items_accepts_both_mimes(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mime", ["image/png", OLD])
 async def test_non_gallery_resource_still_404s(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, mime: str
 ) -> None:
-    repo = _FakeRepo(gallery_mime="image/png")
+    repo = _FakeRepo(gallery_mime=mime)
     monkeypatch.setattr(router_mod, "ResourcesRepository", lambda: repo)
     monkeypatch.setattr(router_mod, "check_media_access", _allow)
 

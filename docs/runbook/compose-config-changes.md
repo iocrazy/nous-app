@@ -1,5 +1,10 @@
 # Deploying compose-config changes (services, env vars, volumes)
 
+> **NAS-era runbook.** The NAS / Watchtower line (`docker/docker-compose.yml`)
+> was retired 2026-07-25; production is now `deploy/gpu-server/` on gpupc,
+> whose compose sets `NOUS_ROLE` only. The `MEDIAHUB_ROLE` mentions below are
+> the historical record of that stack and are kept as-is.
+
 Watchtower keeps the **image** of running containers up to date. It does NOT
 read `docker-compose.yml` and apply config changes (new services, changed env
 vars, changed volume mounts, changed labels). When a backend PR modifies
@@ -97,7 +102,9 @@ If we ever change this calculus, the place to wire it is
 
 The gateway now launches DBOS in enqueue-only mode (consumes no user queues;
 workflows run on the worker). The DBOS executor id is derived **in code** from
-`MEDIAHUB_ROLE` (already present in each container) via `DBOSConfig`'s
+the process role env (then `MEDIAHUB_ROLE`; today `NOUS_ROLE`, with
+`MEDIAHUB_ROLE` still read as a legacy fallback — see
+`backend/app/core/env_names.py`) via `DBOSConfig`'s
 `executor_id` — gateway → `"gateway"`, worker → `"worker"`. This isolates the
 startup-recovery path (which claims pending workflows by executor_id and
 ignores `listen_queues`) with no compose env, so a normal backend deploy

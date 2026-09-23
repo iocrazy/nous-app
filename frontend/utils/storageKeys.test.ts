@@ -45,8 +45,8 @@ const brokenStorage = (): Storage =>
     clear: () => {},
   }) as unknown as Storage;
 
-describe('migrateLegacyStorageKeys (copy-only release)', () => {
-  it('copies every exact legacy localStorage key and KEEPS the old one (rollback safety)', () => {
+describe('migrateLegacyStorageKeys (copy only — deletion is the purge\'s job)', () => {
+  it('copies every exact legacy localStorage key and leaves the old one for the purge', () => {
     for (const oldKey of Object.keys(LEGACY_LOCAL_KEYS)) {
       localStorage.setItem(oldKey, `v:${oldKey}`);
     }
@@ -158,12 +158,18 @@ describe('migrateLegacyStorageKeys (copy-only release)', () => {
   });
 });
 
-describe('purgeLegacyStorageKeys (NOT wired in this release)', () => {
-  it('is not called anywhere in app code yet', () => {
-    const boot = readFileSync(path.resolve(__dirname, 'storageKeysBoot.ts'), 'utf8');
-    const index = readFileSync(path.resolve(__dirname, '../index.tsx'), 'utf8');
-    expect(boot).not.toContain('purgeLegacyStorageKeys');
-    expect(index).not.toContain('purgeLegacyStorageKeys');
+describe('purgeLegacyStorageKeys', () => {
+  it('skips a storage whose migration marker is absent (migration never finished)', () => {
+    localStorage.setItem('mediahub.theme', 'light');
+    localStorage.setItem(STORAGE_KEYS.theme, 'light');
+    sessionStorage.setItem('mediahub_error_session_id', 'abc');
+    sessionStorage.setItem(SESSION_KEYS.errorSessionId, 'abc');
+
+    purgeLegacyStorageKeys();
+
+    // Both new keys hold values, so only the marker guard can have kept these.
+    expect(localStorage.getItem('mediahub.theme')).toBe('light');
+    expect(sessionStorage.getItem('mediahub_error_session_id')).toBe('abc');
   });
 
   it('removes only legacy keys, and only those whose new key exists', () => {
@@ -217,6 +223,63 @@ describe('functional keys survive the rename end to end', () => {
     const { useGlobalChatStore } = await import('../stores/globalChatStore');
     expect(useGlobalChatStore.getState().open).toBe(true);
     expect(useGlobalChatStore.getState().width).toBe(777);
+  });
+});
+
+describe('storageKeysBoot (migrate, then purge)', () => {
+  const runBoot = async (): Promise<void> => {
+    vi.resetModules();
+    await import('./storageKeysBoot');
+  };
+
+  it('calls the purge, and only after the migration', () => {
+    const src = readFileSync(path.resolve(__dirname, 'storageKeysBoot.ts'), 'utf8');
+    const calls = src
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => /^(migrate|purge)LegacyStorageKeys\(\);$/.test(l));
+    expect(calls).toEqual(['migrateLegacyStorageKeys();', 'purgeLegacyStorageKeys();']);
+  });
+
+  it('a boot moves legacy values to the new keys and removes the old ones', async () => {
+    localStorage.setItem('mediahub_selected_team', 'team-5');
+    localStorage.setItem('mediahub.project.p1.ep', '2');
+    sessionStorage.setItem('mediahub_auth_expired', '1');
+
+    await runBoot();
+
+    expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBe('team-5');
+    expect(localStorage.getItem(projectEpisodeKey('p1'))).toBe('2');
+    expect(sessionStorage.getItem(SESSION_KEYS.authExpired)).toBe('1');
+    expect(localStorage.getItem('mediahub_selected_team')).toBeNull();
+    expect(localStorage.getItem('mediahub.project.p1.ep')).toBeNull();
+    expect(sessionStorage.getItem('mediahub_auth_expired')).toBeNull();
+  });
+
+  it('a boot whose migration fails (marker not written) purges nothing, and the next boot finishes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem('mediahub.theme', 'light');
+    localStorage.setItem('mediahub_selected_team', 'team-9');
+    const real = localStorage.setItem.bind(localStorage);
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k === STORAGE_KEYS.theme) throw new Error('QuotaExceededError');
+      return real(k, v);
+    });
+
+    await runBoot();
+
+    expect(localStorage.getItem(MIGRATION_MARKER_KEY)).toBeNull();
+    // selected_team WAS copied, yet its old key must stay: no marker, no purge.
+    expect(localStorage.getItem(STORAGE_KEYS.selectedTeam)).toBe('team-9');
+    expect(localStorage.getItem('mediahub_selected_team')).toBe('team-9');
+    expect(localStorage.getItem('mediahub.theme')).toBe('light');
+
+    spy.mockRestore();
+    await runBoot();
+
+    expect(localStorage.getItem(STORAGE_KEYS.theme)).toBe('light');
+    expect(localStorage.getItem('mediahub.theme')).toBeNull();
+    expect(localStorage.getItem('mediahub_selected_team')).toBeNull();
   });
 });
 

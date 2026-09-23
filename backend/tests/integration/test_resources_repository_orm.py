@@ -343,18 +343,20 @@ async def test_get_resource_items_nested_resource_is_dict(
         assert "i_updated_at" not in match
 
 
-async def test_gallery_type_filter_returns_both_mime_spellings(
+async def test_gallery_type_filter_returns_only_the_new_mime(
     integration_db_url, patched_engine, cleanup_test_rows
 ):
-    """Gallery MIME rename step 1: rows written before the rename
-    (x-mediahub-gallery) and after (x-nous-gallery) both list under
-    ``types=["gallery"]`` and neither leaks into ``types=["other"]``. This is
+    """Gallery MIME rename step 3: only ``x-nous-gallery`` lists under
+    ``types=["gallery"]`` (and never under ``types=["other"]``); a row still
+    carrying the retired ``x-mediahub-gallery`` is no longer a gallery. This is
     the real-Postgres check that ``ANY(:gallery_mimes)`` binds as a text[]."""
+    new_mime = "application/x-nous-gallery"
+    legacy_mime = "application/x-mediahub-gallery"
     conn = await asyncpg.connect(integration_db_url)
     try:
         user_id, team_id = await _real_ids(conn)
         ids = {}
-        for mime in ("application/x-mediahub-gallery", "application/x-nous-gallery"):
+        for mime in (legacy_mime, new_mime):
             rid = await conn.fetchval(
                 "INSERT INTO resources (creator_id, source_type, filename, "
                 "file_type, mime_type) VALUES ($1, 'upload', $2, 'gallery', $3) "
@@ -376,10 +378,11 @@ async def test_gallery_type_filter_returns_both_mime_spellings(
 
     galleries = await _repo().get_resource_items(str(team_id), types=["gallery"])
     got = {int(r["resource_id"]) for r in galleries}
-    assert set(ids.values()) <= got
+    assert ids[new_mime] in got
+    assert ids[legacy_mime] not in got
 
     others = await _repo().get_resource_items(str(team_id), types=["other"])
-    assert not {int(r["resource_id"]) for r in others} & set(ids.values())
+    assert ids[new_mime] not in {int(r["resource_id"]) for r in others}
 
 
 # ─── Writes (committing — fixes the P0) ─────────────────────────────────

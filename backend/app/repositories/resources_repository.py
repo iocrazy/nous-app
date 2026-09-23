@@ -123,9 +123,9 @@ from app.utils.url_canonical import parsed_media_url_predicate as _url_matches
 EXPIRED_TRASH_BATCH = 5000
 UNTRANSCODED_BATCH = 2000
 
-# Gallery MIME filter for the raw listing SQL. Both spellings (legacy
-# x-mediahub + new x-nous) are BOUND as one array param, never inlined, so the
-# accept set lives only in ``app.services.library.gallery_mime``.
+# Gallery MIME filter for the raw listing SQL. The accept set is BOUND as one
+# array param, never inlined, so it lives only in
+# ``app.services.library.gallery_mime``.
 _GALLERY_MIMES_PARAM = "gallery_mimes"
 _GALLERY_MIME_CLAUSE = f"r.mime_type = ANY(:{_GALLERY_MIMES_PARAM})"
 
