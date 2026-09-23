@@ -54,8 +54,14 @@ _HELP: dict[str, str] = {
     "memory_superseded_by_contradiction": "Memories marked superseded by writer-time contradiction check",
     "output_budget_tightened": "LLM calls where output budget was capped below configured max",
     "stream_turn_auto_recorder": "stream_turn invocations that auto-constructed a RunRecorder",
-    "streaming_aborted_mid": "Streaming turns aborted mid-stream",
-    "streaming_started": "Streaming turns initiated",
+    "streaming_aborted_mid": (
+        "Streaming turns aborted mid-stream (true-stream path only; "
+        "0 on the buffered fallback production chat uses)"
+    ),
+    "streaming_started": (
+        "Streaming turns initiated (true-stream path only; "
+        "0 on the buffered fallback production chat uses)"
+    ),
     "tool_cache_hit": "Tool dispatches served from idempotent-skill result cache",
 }
 

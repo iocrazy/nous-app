@@ -3,6 +3,11 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
 
+from app.api.admin.settings_validation import (
+    VALID_SLOT_PROVIDERS,
+    SettingValidationError,
+    validate_setting_value,
+)
 from app.core.admin_deps import AdminAuthDep
 from app.core.config import settings
 from app.core.secure_settings import JSONB_SECRET_KEYS, MARKER, is_secret_key
@@ -809,7 +814,18 @@ async def update_setting(
             detail=f"Setting '{key}' not found",
         )
 
-    updated = await repo.update(key, update.value, auth.user_id)
+    # Known keys get the same shape checks their typed endpoints apply (and
+    # are normalised to the shape their reader expects); unknown keys pass
+    # through unchanged. See settings_validation.
+    try:
+        value = validate_setting_value(key, update.value)
+    except SettingValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "setting_invalid", "key": exc.key, "reason": exc.reason},
+        ) from exc
+
+    updated = await repo.update(key, value, auth.user_id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -823,7 +839,7 @@ async def update_setting(
         target_type="system_setting",
         target_id=key,
         # Never write raw secret material into the audit log.
-        details={"value": "***" if is_secret_key(key) else update.value},
+        details={"value": "***" if is_secret_key(key) else value},
         ip_address=client_ip,
     )
 
@@ -833,11 +849,8 @@ async def update_setting(
 
 # ── Memory Control-Plane (Phase 2a) ──────────────────────────────────────────
 
-# Phase 1 providers only — Mem0/Hindsight (Phase 3) extend these sets.
-_VALID_SLOT_PROVIDERS: dict[str, set[str]] = {
-    "l2": {"honcho", "none"},
-    "l3": {"graphiti", "none"},
-}
+# Legal providers per slot live in settings_validation.VALID_SLOT_PROVIDERS so
+# the generic PATCH /{key} allowlist and PUT /memory/slot share one table.
 
 
 async def _build_memory_control() -> MemoryControlResponse:
@@ -865,7 +878,7 @@ async def get_memory_control(auth: AdminAuthDep):
 async def set_memory_slot(update: MemorySlotUpdate, auth: AdminAuthDep):
     """Switch a slot's provider (writes memory.<slot>_provider). Returns the
     refreshed control snapshot."""
-    allowed = _VALID_SLOT_PROVIDERS.get(update.slot, set())
+    allowed = VALID_SLOT_PROVIDERS.get(update.slot, frozenset())
     if update.provider not in allowed:
         raise HTTPException(
             status_code=400,
