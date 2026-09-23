@@ -147,3 +147,119 @@ def test_no_exempt_protocol_claims_asr():
         f"row filed under one of these raises 'Unknown provider' at probe time "
         f"and on every real transcription."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# volcengine: a speech key, not the doubao chat client
+# ─────────────────────────────────────────────────────────────────────────────
+# Until 2026-09-22 ``volcengine`` sat in a side dict pointing at DoubaoProvider,
+# described as "an alias for doubao". It is the Volcengine SPEECH product
+# (openspeech bigasr / seed-asr, api_key + app_id). Now that it is a protocol
+# declaring ``asr``, the parametrized "resolves" test above would happily bless
+# DoubaoProvider — so what it resolves TO is pinned here.
+
+
+@pytest.mark.unit
+def test_volcengine_is_asr_only_and_never_a_chat_key():
+    proto = next(p for p in pp.all_protocols() if p.key == "volcengine")
+    assert proto.model_types == ("asr",)
+    assert proto.is_chat_key is False
+    assert "volcengine" not in pp.chat_provider_keys()
+
+
+@pytest.mark.unit
+def test_volcengine_resolves_to_the_speech_provider_with_app_id():
+    from app.services.ai.providers.ai_provider import (
+        DoubaoProvider,
+        VolcengineAsrProvider,
+    )
+
+    provider = AIProviderFactory.get_provider(
+        "volcengine", {"api_key": "k", "app_id": "app-1", "model": "bigasr"}
+    )
+    assert isinstance(provider, VolcengineAsrProvider)
+    assert not isinstance(provider, DoubaoProvider)
+    # app_id is half of the old-console credential; dropping it on the way in
+    # would turn every old-console key into an auth failure at probe time.
+    assert provider.app_id == "app-1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_volcengine_transcribe_is_an_explicit_refusal():
+    """The real path is ``ai_transcription._run_volcengine_asr``: the API pulls
+    a public URL, it does not accept an upload. A provider-level transcribe
+    that "works" on a local path would be a lie; this one says where to go."""
+    provider = AIProviderFactory.get_provider("volcengine", {"api_key": "k"})
+    with pytest.raises(NotImplementedError, match="_run_volcengine_asr"):
+        await provider.transcribe("/tmp/a.wav")
+
+
+class _FakeResp:
+    def __init__(self, code: str, message: str = ""):
+        self.headers = {"X-Api-Status-Code": code, "X-Api-Message": message}
+
+
+class _FakeClient:
+    """Answers the openspeech submit probe per resource id."""
+
+    calls: list[dict] = []
+
+    def __init__(self, codes: dict[str, str], **_kw):
+        self._codes = codes
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        _FakeClient.calls.append({"url": url, "headers": dict(headers or {})})
+        code = self._codes[headers["X-Api-Resource-Id"]]
+        message = "resource not granted" if code.startswith("45") else ""
+        return _FakeResp(code, message)
+
+
+def _patch_httpx(monkeypatch, codes: dict[str, str]) -> None:
+    import httpx
+
+    _FakeClient.calls = []
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(codes, **kw))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_volcengine_test_connection_runs_the_openspeech_probe(monkeypatch):
+    """No special case in test_connection any more — it goes through the
+    provider like every other key, and the provider's list_models IS the
+    probe. Same result shape as before: the granted models."""
+    _patch_httpx(
+        monkeypatch, {"volc.seedasr.auc": "45000030", "volc.bigasr.auc": "20000000"}
+    )
+    res = await AIProviderFactory.test_connection(
+        "volcengine", {"api_key": "k", "app_id": "app-1"}
+    )
+    assert res["success"] is True
+    assert res["models"] == ["bigasr"]
+    assert all("openspeech" in c["url"] for c in _FakeClient.calls)
+    # Old console: app_id + access key headers, not X-Api-Key.
+    assert _FakeClient.calls[0]["headers"]["X-Api-App-Key"] == "app-1"
+    assert _FakeClient.calls[0]["headers"]["X-Api-Access-Key"] == "k"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_volcengine_probe_failure_and_missing_key(monkeypatch):
+    _patch_httpx(
+        monkeypatch, {"volc.seedasr.auc": "45000030", "volc.bigasr.auc": "45000030"}
+    )
+    res = await AIProviderFactory.test_connection("volcengine", {"api_key": "k"})
+    assert res["success"] is False
+    assert res["error"] == "resource not granted"
+    assert _FakeClient.calls[0]["headers"]["X-Api-Key"] == "k"
+
+    res = await AIProviderFactory.test_connection("volcengine", {"api_key": ""})
+    assert res["success"] is False
+    assert res["models"] is None
+    assert res["error"] == "API Key is required"

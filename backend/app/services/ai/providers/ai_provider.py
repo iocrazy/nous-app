@@ -4,8 +4,8 @@
 AI Provider adapter system.
 
 Provides a unified interface for multiple AI providers (OpenAI, DeepSeek, Doubao,
-MiniMax, Kimi, Qwen, Ollama, LM Studio) using the factory pattern. All
-OpenAI-compatible providers share a common base class.
+MiniMax, Kimi, Qwen, Ollama, LM Studio, Volcengine speech) using the factory
+pattern. All OpenAI-compatible providers share a common base class.
 """
 
 from abc import ABC, abstractmethod
@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 from app.services.ai.adapters import (  # noqa: F401 — backward-compat re-export
     QwenAdapter,
 )
+from app.services.ai.adapters.openai_compat import ensure_v1_base
 
 
 @dataclass
@@ -43,6 +44,13 @@ class TranscriptResult:
 
 class AIProvider(ABC):
     """Unified interface for all AI providers."""
+
+    # Config keys beyond (api_key, base_url, model) that this provider's
+    # constructor needs, forwarded by ``AIProviderFactory.get_provider``.
+    # Declared per class so a provider that needs one more credential field
+    # (Volcengine speech: ``app_id``) says so here, instead of the factory
+    # special-casing its key.
+    extra_config_keys: tuple[str, ...] = ()
 
     def __init__(self, api_key: str = "", base_url: str = "", model: str = ""):
         self.api_key = api_key
@@ -256,7 +264,8 @@ class OllamaProvider(OpenAICompatibleProvider):
     ):
         super().__init__(
             api_key=api_key or "ollama",
-            base_url=base_url or "http://localhost:11434/v1",
+            # Settings stores the root without /v1; the SDK appends /models etc.
+            base_url=ensure_v1_base(base_url or "http://localhost:11434/v1"),
             model=model,
             **kwargs,
         )
@@ -268,7 +277,8 @@ class LMStudioProvider(OpenAICompatibleProvider):
     ):
         super().__init__(
             api_key=api_key or "lm-studio",
-            base_url=base_url or "http://localhost:1234/v1",
+            # Settings stores the root without /v1; the SDK appends /models etc.
+            base_url=ensure_v1_base(base_url or "http://localhost:1234/v1"),
             model=model,
             **kwargs,
         )
@@ -404,29 +414,123 @@ class ModelScopeProvider(OpenAICompatibleProvider):
         return models
 
 
+class VolcengineAsrProvider(AIProvider):
+    """Volcengine SPEECH (openspeech bigasr / seed-asr) — the ``volcengine`` key.
+
+    Not the doubao chat client. Until 2026-09-22 this key pointed at
+    ``DoubaoProvider``, which cannot transcribe, so ``test_connection`` and
+    ``ai_transcription`` both had to catch the key before that class was used.
+
+    What lives here is what fits the ``AIProvider`` shape:
+
+    * ``list_models`` IS the connection probe: it submits a dummy job to each
+      resource and returns the models the key is granted. Auth-passed-bad-input
+      (40xxxxxx) counts as granted; 45xxxxxx is "resource not granted".
+    * ``transcribe`` refuses, by design. The openspeech API PULLS a public URL
+      rather than accepting an upload, so building the request needs the
+      resource's owner (for the signed /media token) or an object-store signed
+      URL host-swapped to the public base — workflow concerns that live in
+      ``app.workflows.ai_transcription._run_volcengine_asr`` (which calls
+      ``VolcengineASRService``). Accepting a local ``audio_path`` here would
+      promise something this layer cannot do.
+    """
+
+    extra_config_keys = ("app_id",)
+
+    # (resource id, model name) — probe order is the result order.
+    _PROBE_RESOURCES = (
+        ("volc.seedasr.auc", "seed-asr"),
+        ("volc.bigasr.auc", "bigasr"),
+    )
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "",
+        app_id: str = "",
+        **kwargs,
+    ):
+        super().__init__(api_key=api_key, base_url=base_url, model=model)
+        self.app_id = app_id or ""
+
+    async def chat(self, messages: list, model: str = None, **kwargs) -> str:
+        raise NotImplementedError(
+            "volcengine is the Volcengine speech (ASR) key, not a chat "
+            "provider — the Doubao chat key is 'doubao'"
+        )
+
+    async def transcribe(self, audio_path: str, **kwargs) -> TranscriptResult:
+        raise NotImplementedError(
+            "Volcengine ASR pulls a public audio URL; transcription runs in "
+            "app.workflows.ai_transcription._run_volcengine_asr, not through "
+            "a provider-level upload"
+        )
+
+    def _auth_headers(self) -> dict:
+        headers = {
+            "Content-Type": "application/json",
+            "X-Api-Request-Id": "test-connection",
+            "X-Api-Sequence": "-1",
+        }
+        # Old console: app_id + access key. New console: api key alone.
+        if self.app_id:
+            headers["X-Api-App-Key"] = self.app_id
+            headers["X-Api-Access-Key"] = self.api_key
+        else:
+            headers["X-Api-Key"] = self.api_key
+        return headers
+
+    async def list_models(self) -> List[str]:
+        """The granted models, or raise with the provider's own reason."""
+        import httpx
+
+        from app.services.ai.transcribe.volcengine_asr_service import SUBMIT_URL
+
+        if not self.api_key:
+            raise ValueError("API Key is required")
+
+        headers = self._auth_headers()
+        granted: List[str] = []
+        last_error = ""
+        async with httpx.AsyncClient(timeout=10) as client:
+            for resource_id, model_name in self._PROBE_RESOURCES:
+                resp = await client.post(
+                    SUBMIT_URL,
+                    headers={**headers, "X-Api-Resource-Id": resource_id},
+                    json={
+                        "user": {"uid": "test"},
+                        "audio": {
+                            "format": "mp3",
+                            "url": "https://example.com/test.mp3",
+                        },
+                        "request": {"model_name": "bigmodel"},
+                    },
+                )
+                status_code = resp.headers.get("X-Api-Status-Code", "")
+                # 20xxxxxx = success, 40xxxxxx = client error (auth passed, bad
+                # input); 45xxxxxx = resource not granted — must reject.
+                if status_code.startswith("20") or status_code.startswith("40"):
+                    granted.append(model_name)
+                else:
+                    last_error = resp.headers.get(
+                        "X-Api-Message", f"Status: {status_code}"
+                    )
+        if not granted:
+            raise RuntimeError(last_error or "No model access granted")
+        return granted
+
+
 # ---------------------------------------------------------------------------
 # The provider registry — ONE source, projected here.
 # ---------------------------------------------------------------------------
 # ``provider_protocols`` is the single source of truth: each protocol names its
-# ``AIProvider`` subclass via ``ai_provider_name``. The two dicts below are the
-# only things this module contributes, and both are explicit lists rather than
-# silence.
-
-# Keys that have an AIProvider but deliberately NO protocol. These are BYOK
-# provider cards (Settings → AI Providers), not platform-catalog protocols.
-# Promoting them would not be a refactor: it would put them into
-# ``chat_provider_keys()``, which feeds ``adapters.factory``'s dispatch ladder
-# and the admin protocol dropdown.
+# ``AIProvider`` subclass via ``ai_provider_name``. The one thing this module
+# contributes is the explicit list of protocols that have NO provider, below.
 #
-# ``volcengine`` is an alias, not a product: 火山引擎 serves the doubao LLM, and
-# the two keys have always pointed at the same class.
-BYOK_ONLY_PROVIDERS = {
-    "volcengine": DoubaoProvider,
-    "minimax": MiniMaxProvider,
-    "kimi": KimiProvider,
-    "ollama": OllamaProvider,
-    "lmstudio": LMStudioProvider,
-}
+# There used to be a second dict here too, ``BYOK_ONLY_PROVIDERS`` (volcengine,
+# minimax, kimi, ollama, lmstudio). Those are protocols now (2026-09-22), and
+# the dict is gone: test_provider_registry_is_derived fails if it comes back.
 
 # Protocols that have no AIProvider at all, and why. Being listed here is a
 # claim, and test_provider_registry_is_derived re-checks it against the
@@ -470,8 +574,8 @@ def _protocol_providers() -> dict:
 
 
 def _build_registry() -> dict:
-    """Protocol-derived entries plus the BYOK-only extras."""
-    return {**_protocol_providers(), **BYOK_ONLY_PROVIDERS}
+    """Every entry comes from a protocol — there is nothing else to add."""
+    return _protocol_providers()
 
 
 class AIProviderFactory:
@@ -483,9 +587,7 @@ class AIProviderFactory:
     # came to be missing here while being present there (PR #2375: every
     # transcription raised ``Unknown provider: nous``).
     #
-    # Pinned key-for-key against its pre-refactor contents by
-    # tests/test_provider_registry_is_derived.py, so this rewiring is provably
-    # behaviour-preserving.
+    # Pinned key-for-key by tests/test_provider_registry_is_derived.py.
     _registry = _build_registry()
 
     @classmethod
@@ -493,8 +595,10 @@ class AIProviderFactory:
         """Get provider instance by key with config.
 
         Args:
-            provider_key: One of 'openai', 'deepseek', 'doubao', 'minimax', 'kimi', 'qwen', 'ollama', 'lmstudio'.
-            config: Dict with optional keys: api_key, base_url, model.
+            provider_key: A protocol key that names an AIProvider
+                (see ``available_providers``).
+            config: Dict with optional keys: api_key, base_url, model, plus
+                whatever the provider class lists in ``extra_config_keys``.
 
         Returns:
             An AIProvider instance.
@@ -509,10 +613,12 @@ class AIProviderFactory:
                 f"Available: {', '.join(cls._registry.keys())}"
             )
         config = config or {}
+        extra = {key: config.get(key) or "" for key in provider_cls.extra_config_keys}
         return provider_cls(
             api_key=config.get("api_key", ""),
             base_url=config.get("base_url", ""),
             model=config.get("model", ""),
+            **extra,
         )
 
     @classmethod
@@ -522,10 +628,6 @@ class AIProviderFactory:
         Returns:
             Dict with keys: success (bool), models (list[str] | None), error (str | None).
         """
-        # Special handling for Volcengine ASR (not a chat provider)
-        if provider_key == "volcengine":
-            return await cls._test_volcengine(config)
-
         try:
             provider = cls.get_provider(provider_key, config)
             models = await provider.list_models()
@@ -539,72 +641,6 @@ class AIProviderFactory:
             }
         except Exception as e:
             logger.warning(f"Connection test failed for {provider_key}: {e}")
-            return {"success": False, "models": None, "error": str(e)}
-
-    @classmethod
-    async def _test_volcengine(cls, config: dict) -> dict:
-        """Test Volcengine ASR connectivity.
-
-        Supports both old console (app_id + api_key) and new console (api_key only).
-        Tests both model versions (1.0 bigasr / 2.0 seedasr) and returns available ones.
-        """
-        import httpx
-
-        app_id = config.get("app_id", "")
-        api_key = config.get("api_key", "")
-        if not api_key:
-            return {"success": False, "models": None, "error": "API Key is required"}
-
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "X-Api-Request-Id": "test-connection",
-                "X-Api-Sequence": "-1",
-            }
-            if app_id:
-                headers["X-Api-App-Key"] = app_id
-                headers["X-Api-Access-Key"] = api_key
-            else:
-                headers["X-Api-Key"] = api_key
-
-            models_available = []
-            last_error = ""
-            async with httpx.AsyncClient(timeout=10) as client:
-                for resource_id, model_name in [
-                    ("volc.seedasr.auc", "seed-asr"),
-                    ("volc.bigasr.auc", "bigasr"),
-                ]:
-                    test_headers = {**headers, "X-Api-Resource-Id": resource_id}
-                    resp = await client.post(
-                        "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
-                        headers=test_headers,
-                        json={
-                            "user": {"uid": "test"},
-                            "audio": {
-                                "format": "mp3",
-                                "url": "https://example.com/test.mp3",
-                            },
-                            "request": {"model_name": "bigmodel"},
-                        },
-                    )
-                    status_code = resp.headers.get("X-Api-Status-Code", "")
-                    # 20xxxxxx = success, 40xxxxxx = client error (auth passed, bad input)
-                    # 45xxxxxx = resource not granted (permission denied) — must reject
-                    if status_code.startswith("20") or status_code.startswith("40"):
-                        models_available.append(model_name)
-                    else:
-                        last_error = resp.headers.get(
-                            "X-Api-Message", f"Status: {status_code}"
-                        )
-
-                if models_available:
-                    return {"success": True, "models": models_available, "error": None}
-                return {
-                    "success": False,
-                    "models": None,
-                    "error": last_error or "No model access granted",
-                }
-        except Exception as e:
             return {"success": False, "models": None, "error": str(e)}
 
     @classmethod
