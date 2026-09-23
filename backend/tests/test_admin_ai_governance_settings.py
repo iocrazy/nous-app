@@ -488,7 +488,7 @@ async def test_get_governance_maintenance_model_absent_is_none():
     ):
         resp = await _read_governance_settings()
     assert resp.maintenance_llm_model is None
-    assert resp.maintenance_llm_model_default == "mediahub-doubao-seed-2-0-lite"
+    assert resp.maintenance_llm_model_default == "nous-doubao-seed-2-0-lite"
 
 
 @pytest.mark.asyncio

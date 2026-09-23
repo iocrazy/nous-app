@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from loguru import logger
 
+from app.core.catalog_names import catalog_name_alias, find_row_by_catalog_name
 from app.services.media.parsers.video_providers.byok_rows import byok_image_rows
 
 if TYPE_CHECKING:
@@ -128,8 +129,12 @@ def _explicit_match(rows: list[dict], name: str) -> Optional[dict]:
     CARD's key, which is what an agent naturally passes and which no catalog
     row is ever named — selects that user's first enabled image model on that
     card. Catalog rows have no such field, so this widens nothing for them.
+
+    Only when nothing matches exactly does the ``mediahub-`` ↔ ``nous-``
+    rename alias of ``name`` get a try, against ``name`` alone
+    (``app.core.catalog_names``) — an exact hit on any field always wins.
     """
-    return next(
+    exact = next(
         (
             r
             for r in rows
@@ -139,6 +144,10 @@ def _explicit_match(rows: list[dict], name: str) -> Optional[dict]:
         ),
         None,
     )
+    if exact is not None:
+        return exact
+    alias = catalog_name_alias(name)
+    return find_row_by_catalog_name(rows, alias) if alias else None
 
 
 def _visible_rows(

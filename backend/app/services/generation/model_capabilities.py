@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from app.core.catalog_names import find_row_by_catalog_name
 from app.services.ai.provider_protocols.base import ProviderCapabilities
 
 # Only these two catalog types can generate a picture or a clip; a chat row has
@@ -79,14 +80,15 @@ async def capabilities_for_model(
         return None
     from app.services.ai.provider_protocols import resolve_generation_protocol
 
-    for row in await visible_generation_rows(user_id, include_actual_provider=True):
-        if str(row.get("name")) != wanted:
-            continue
-        # The provider string is consumed HERE and never returned: only the
-        # derived capability values leave this function.
-        proto = resolve_generation_protocol((row.get("actual_provider") or "").lower())
-        return proto.capabilities if proto else ProviderCapabilities.none()
-    return None
+    rows = await visible_generation_rows(user_id, include_actual_provider=True)
+    # Exact name first, then the mediahub-/nous- rename alias.
+    row = find_row_by_catalog_name(rows, wanted)
+    if row is None:
+        return None
+    # The provider string is consumed HERE and never returned: only the
+    # derived capability values leave this function.
+    proto = resolve_generation_protocol((row.get("actual_provider") or "").lower())
+    return proto.capabilities if proto else ProviderCapabilities.none()
 
 
 __all__ = ["capabilities_for_model", "visible_generation_rows"]

@@ -29,6 +29,7 @@ async def test_create_inherits_sibling_key_when_blank():
     from app.api.admin.nous_model_router import create_nous_model
 
     repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=None)  # name is free
     repo.list_all = AsyncMock(
         return_value=[
             {
@@ -64,6 +65,7 @@ async def test_create_400_when_blank_key_and_no_sibling():
     from app.api.admin.nous_model_router import create_nous_model
 
     repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=None)  # name is free
     repo.list_all = AsyncMock(return_value=[])  # no sibling to inherit from
     repo.create = AsyncMock()
     fake_auth = MagicMock()
@@ -85,6 +87,7 @@ async def test_create_uses_explicit_key_without_lookup():
     from app.api.admin.nous_model_router import create_nous_model
 
     repo = MagicMock()
+    repo.get_by_name = AsyncMock(return_value=None)  # name is free
     repo.list_all = AsyncMock(return_value=[])
     created = {}
 

@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
+from app.core.catalog_names import find_row_by_catalog_name
+
 logger = logging.getLogger(__name__)
 
 _AI_SETTINGS_KEY = "ai_settings"
@@ -65,4 +67,15 @@ async def filter_platform_models_for_user(
         return rows
     if not allowed:
         return []
-    return [r for r in rows if str(r.get("name") or "") not in disabled]
+    if not disabled:
+        return rows
+    # Each persisted blacklist name is resolved to the row it means — exact
+    # name first, then the mediahub-/nous- rename alias — so a blacklist
+    # written before the rename keeps hiding the renamed row, and a name that
+    # exactly matches one row never also hides its alias twin.
+    hidden = {
+        id(hit)
+        for name in disabled
+        if (hit := find_row_by_catalog_name(rows, name)) is not None
+    }
+    return [r for r in rows if id(r) not in hidden]

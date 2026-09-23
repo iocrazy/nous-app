@@ -100,12 +100,15 @@ async def resolve_nous_model(
     lookup by ``actual_model`` (the raw upstream provider id) when the name
     lookup misses — some ``ai_agents.model`` rows store the raw Ark/provider
     model id (e.g. ``doubao-seed-2-0-lite-260428``) instead of the catalog
-    ``name`` (e.g. ``mediahub-doubao-seed-2-0-lite``); without the fallback
+    ``name`` (e.g. ``nous-doubao-seed-2-0-lite``); without the fallback
     those agents fall through to an ordinary BYOK resolution that has no env
     key configured, producing a 401 from the upstream provider. ``name`` is
     tried first (unchanged behavior for correctly-named agents); the
     ``actual_model`` fallback only engages when the name lookup misses, and
-    the two namespaces (``mediahub-*`` vs raw provider ids) never collide.
+    the two namespaces (``nous-*``/``mediahub-*`` vs raw provider ids) never
+    collide. The name lookup itself tolerates the ``mediahub-`` ↔ ``nous-``
+    prefix rename both ways, exact name first (``get_by_name`` /
+    ``app.core.catalog_names``).
     Then:
       - found + enabled + nous allowed for ``module`` → return
         ``(actual_provider, {api_key, base_url, model, app_id}, actual_model)``
@@ -310,7 +313,11 @@ async def resolve_embedding_ai_config() -> ResolvedAIConfig:
 # "claude-haiku-4-5" fallbacks resolve to nothing and silently degrade the
 # whole maintenance tier. Admin-overridable via
 # ``system_settings.maintenance_llm_model``.
-DEFAULT_MAINTENANCE_MODEL = "mediahub-doubao-seed-2-0-lite"
+#
+# Spelled with the post-rename ``nous-`` prefix: until the catalog row is
+# renamed it still resolves to ``mediahub-doubao-seed-2-0-lite`` through the
+# by-name alias (``app.core.catalog_names``), and to the renamed row after.
+DEFAULT_MAINTENANCE_MODEL = "nous-doubao-seed-2-0-lite"
 
 
 async def get_maintenance_model() -> str:

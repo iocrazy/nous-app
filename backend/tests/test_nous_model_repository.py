@@ -200,7 +200,8 @@ async def test_get_by_name_returns_full_row(
 
     sql, binds = fake_session.calls[-1]
     assert "nous_models" in sql
-    assert "nous-base" in binds.values()
+    # exact name + its mediahub- rename alias, one IN (...) expanding bind
+    assert ["nous-base", "mediahub-base"] in binds.values()
 
 
 @pytest.mark.asyncio
