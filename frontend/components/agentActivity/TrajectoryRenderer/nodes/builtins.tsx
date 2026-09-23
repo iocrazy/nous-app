@@ -10,7 +10,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Clock, FileOutput, Inbox, Mes
 
 import { schedulesService } from '../../../../services/schedulesService';
 import { fmtWhen, fmtWhenCompact } from '../../../../utils/fmtWhen';
-import { generatedMediaCoverUrl } from '../../../../services/generatedMediaService';
+import { generatedMediaCoverUrl, generatedMediaStreamUrl } from '../../../../services/generatedMediaService';
 import { useChildRun } from '../../../Todolist/childRunContext';
 import { useTrajectoryIssueKey } from '../trajectoryRunContext';
 import { useHighlightedOutput } from '../../../Todolist/outputHighlight';
@@ -20,6 +20,7 @@ import type {
   DeniedNode,
   ErrorNode,
   InboxNode,
+  MediaJobNode,
   OutputCard,
   ScheduleNode,
   StepLine,
@@ -511,8 +512,17 @@ export const InboxNodeView: React.FC<NodeProps<InboxNode>> = ({ node }) => {
   // A sub-agent result is only ever filed by the background worker (a
   // foreground child answers in-line), so the row can say so outright — and
   // its own verdict has to travel with it, exactly as on the card.
-  const failed = !!result && childState(result.status, 'async') === 'failed';
-  const label = result
+  const media = node.media ?? null;
+  const failed = (!!result && childState(result.status, 'async') === 'failed') || media?.status === 'failed';
+  const label = media
+    ? t('trajectory.inboxMedia', 'Video result · {{verdict}} · read before step {{n}}', {
+        verdict:
+          media.status === 'completed'
+            ? t('trajectory.mediaReady', 'Ready')
+            : t('trajectory.mediaFailed', 'Failed · {{code}}', { code: media.errorCode ?? 'unknown' }),
+        n: node.step ?? '?',
+      })
+    : result
     ? t('trajectory.inboxSubagent', 'Sub-agent result · {{type}} (Background) · {{verdict}} · read before step {{n}}', {
         type: result.subagentType,
         verdict: failed ? t('subagent.failed', 'Failed') : t('subagent.done', '✓ Done'),
@@ -526,7 +536,7 @@ export const InboxNodeView: React.FC<NodeProps<InboxNode>> = ({ node }) => {
       <Row className={failed ? 'text-danger' : 'text-ink-200'}>
         <Inbox size={12} className={`shrink-0 ${failed ? 'text-danger' : wakeup ? 'text-info' : 'text-ok'}`} />
         <span className="truncate">{label}</span>
-        {node.step !== null && !result && !wakeup && (
+        {node.step !== null && !result && !media && !wakeup && (
           <span className="ml-auto shrink-0 text-[11px] text-ink-600">{t('trajectory.beforeStep', { n: node.step })}</span>
         )}
       </Row>
@@ -536,6 +546,38 @@ export const InboxNodeView: React.FC<NodeProps<InboxNode>> = ({ node }) => {
         </div>
       )}
     </div>
+  );
+};
+
+/**
+ * An async video job this run submitted has finished (`media_job_done`). It
+ * lands after the run walked on, so it is its own row: ready with a link to
+ * the clip, or failed with the typed code.
+ */
+export const MediaJobNodeView: React.FC<NodeProps<MediaJobNode>> = ({ node }) => {
+  const { t } = useTranslation();
+  const { result } = node;
+  const ok = result.status === 'completed';
+  return (
+    <Row className={`rounded-md ${ok ? 'bg-ok-soft text-ink-200' : 'bg-danger-soft text-danger'}`} testId="traj-media-job">
+      <FileOutput size={12} className={`shrink-0 ${ok ? 'text-ok' : 'text-danger'}`} />
+      <span className="truncate">
+        {ok
+          ? t('trajectory.mediaJobReady', 'Video ready')
+          : t('trajectory.mediaJobFailed', 'Video failed · {{code}}', { code: result.errorCode ?? 'unknown' })}
+      </span>
+      {ok && result.generatedMediaId && (
+        <a
+          href={generatedMediaStreamUrl(result.generatedMediaId)}
+          target="_blank"
+          rel="noreferrer"
+          data-testid="traj-media-job-open"
+          className="ml-auto shrink-0 underline decoration-dotted"
+        >
+          {t('trajectory.mediaJobOpen', 'Open')}
+        </a>
+      )}
+    </Row>
   );
 };
 
@@ -655,6 +697,7 @@ export const ErrorNodeView: React.FC<NodeProps<ErrorNode>> = ({ node }) => (
 registerTrajectoryNode('user', UserNodeView);
 registerTrajectoryNode('step', StepNodeView);
 registerTrajectoryNode('inbox', InboxNodeView);
+registerTrajectoryNode('media_job', MediaJobNodeView);
 registerTrajectoryNode('schedule', ScheduleNodeView);
 registerTrajectoryNode('budget', BudgetNodeView);
 registerTrajectoryNode('turn_end', TurnEndNodeView);
