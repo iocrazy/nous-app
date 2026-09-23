@@ -56,7 +56,7 @@ class _FakeStore:
         return dict(self._session_row) if self._session_row is not None else None
 
     async def get_messages(
-        self, *, session_id: Any, limit: int = 200
+        self, *, session_id: Any, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
         return []
 

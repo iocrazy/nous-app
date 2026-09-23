@@ -837,6 +837,82 @@ async def test_get_messages_defensive_json_loads_when_body_is_str() -> None:
     assert result[0]["content"] == "raw json text"
 
 
+class _OrderHonoringSession:
+    """Fake session that actually applies the statement's seq direction and
+    LIMIT to an in-memory table — so the test proves what rows come back,
+    not just which SQL text was emitted."""
+
+    def __init__(self, table: list[dict]) -> None:
+        self._table = table
+        self.calls: list[dict] = []
+
+    async def execute(self, stmt: Any) -> Any:  # noqa: D102
+        sql, params = _compile(stmt)
+        self.calls.append({"sql": sql, "params": params})
+        desc = "ORDER BY public.messages.seq DESC" in sql
+        assert desc or "ORDER BY public.messages.seq ASC" in sql
+        ordered = sorted(self._table, key=lambda r: r["seq"], reverse=desc)
+        return _MappingResult(ordered[: params["param_1"]])
+
+
+def _seq_rows(n: int) -> list[dict]:
+    return [
+        {
+            "id": i,
+            "conversation_id": _CONV_ID,
+            "seq": i,
+            "sender_type": "user",
+            "sender_id": _USER_ID,
+            "from_agent_id": None,
+            "type": "text",
+            "body": {"text": f"m{i}"},
+            "created_at": "2026-07-03T00:00:00",
+        }
+        for i in range(1, n + 1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_newest_returns_latest_n_still_ascending() -> None:
+    """Turn-path口径: 250 rows, limit 200, newest=True -> seq 51..250 ASC."""
+    store = _store()
+    session = _OrderHonoringSession(_seq_rows(250))
+
+    with _install_scope("read_scope", session):
+        result = await store.get_messages(session_id=_CONV_ID, limit=200, newest=True)
+
+    assert [m["id"] for m in result] == list(range(51, 251))
+    assert result[-1]["content"] == "m250"
+
+
+@pytest.mark.asyncio
+async def test_get_messages_default_still_returns_oldest_n() -> None:
+    """Default口径 unchanged for every non-turn caller: seq 1..200 ASC."""
+    store = _store()
+    session = _OrderHonoringSession(_seq_rows(250))
+
+    with _install_scope("read_scope", session):
+        result = await store.get_messages(session_id=_CONV_ID, limit=200)
+
+    assert [m["id"] for m in result] == list(range(1, 201))
+
+
+@pytest.mark.asyncio
+async def test_get_messages_newest_sql_orders_by_seq_desc_with_limit() -> None:
+    store = _store()
+    session = _make_session(_MappingResult([]))
+
+    with _install_scope("read_scope", session):
+        await store.get_messages(session_id=_CONV_ID, limit=200, newest=True)
+
+    sql = session.calls[0]["sql"]
+    assert "ORDER BY public.messages.seq DESC" in sql
+    assert "ORDER BY public.messages.seq ASC" not in sql
+    assert "public.messages.deleted_at IS NULL" in sql
+    assert "LIMIT" in sql
+    assert session.calls[0]["params"]["param_1"] == 200
+
+
 # ── store_kind ───────────────────────────────────────────────────────────────
 
 
@@ -1096,3 +1172,34 @@ async def test_smoke_append_and_get_messages_round_trip(smoke_ctx: dict) -> None
         mo = MessageOut(**row)
         assert mo.id == str(row["id"])
         assert mo.session_id == str(session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_smoke_get_messages_newest_vs_oldest_window(smoke_ctx: dict) -> None:
+    """Real-DB: 25 messages, limit 20 -> newest=True gives m6..m25 ascending,
+    default gives m1..m20 (Postgres, not a fake, applies ORDER BY/LIMIT)."""
+    store = smoke_ctx["store"]
+    created = await store.create_session(
+        user_id=_SMOKE_CREATOR_ID,
+        agent_slug=smoke_ctx["agent_slug"],
+        agent_id=smoke_ctx["agent_id"],
+        title="__smoke_ai_store_newest_window__",
+        project_id=None,
+        team_id=smoke_ctx["team_id"],
+        context_type="script",
+        context_id="smoke-newest-1",
+    )
+    session_id = created["id"]
+    smoke_ctx["conv_ids"].append(session_id)
+
+    for i in range(1, 26):
+        await store.append_user_message(
+            session_id=session_id, user_id=_SMOKE_CREATOR_ID, content=f"m{i}"
+        )
+
+    newest = await store.get_messages(session_id=session_id, limit=20, newest=True)
+    assert [m["content"] for m in newest] == [f"m{i}" for i in range(6, 26)]
+
+    oldest = await store.get_messages(session_id=session_id, limit=20)
+    assert [m["content"] for m in oldest] == [f"m{i}" for i in range(1, 21)]

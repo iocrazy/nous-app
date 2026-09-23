@@ -33,13 +33,15 @@ class _FakeStore:
         self._session_row = session_row
         self.appended: List[Dict[str, Any]] = []
         self.bumps: List[Dict[str, Any]] = []
+        self.get_messages_calls: List[Dict[str, Any]] = []
 
     async def get_session(self, *, session_id: Any) -> Optional[Dict[str, Any]]:
         return dict(self._session_row) if self._session_row is not None else None
 
     async def get_messages(
-        self, *, session_id: Any, limit: int = 200
+        self, *, session_id: Any, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
+        self.get_messages_calls.append({"limit": limit, "newest": newest})
         return []
 
     async def append_user_message(
@@ -269,6 +271,28 @@ async def test_chat_persists_both_messages_and_bumps_counters() -> None:
     # carries only run_id (no tool_calls noise).
     assert out["tool_calls"] == []
     assert asst_inserts[0]["metadata_json"] == {"run_id": str(recorder.run_id)}
+
+    # The turn feeds the model the NEWEST 200 messages, not the oldest 200.
+    assert store.get_messages_calls == [{"limit": 200, "newest": True}]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_wrapper_defaults_to_oldest_first_window() -> None:
+    """The session-view endpoint (GET /ai-library/sessions/{id}) goes through
+    this wrapper without `newest` — its口径 must stay the store default."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id = uuid4()
+    store = _FakeStore({"id": "1", "user_id": str(user_id)})
+    svc = AILibraryChatService(store=store)
+
+    await svc.get_messages("1", user_id=user_id)
+    await svc.get_messages("1", user_id=user_id, limit=50, newest=True)
+
+    assert store.get_messages_calls == [
+        {"limit": 200, "newest": False},
+        {"limit": 50, "newest": True},
+    ]
 
 
 @pytest.mark.asyncio

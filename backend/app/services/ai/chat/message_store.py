@@ -103,9 +103,13 @@ class MessageStore(Protocol):
         ...
 
     async def get_messages(
-        self, *, session_id: int, limit: int = 200
+        self, *, session_id: int, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
-        """Return a session's messages, chronological, capped at ``limit``."""
+        """Return a session's messages, chronological, capped at ``limit``.
+
+        ``newest=False`` keeps the oldest ``limit`` messages; ``newest=True``
+        keeps the newest ``limit`` (the chat turn path). Both return ASC.
+        """
         ...
 
     async def append_user_message(

@@ -52,7 +52,7 @@ class _FakeStore:
         return dict(self._session_row)
 
     async def get_messages(
-        self, *, session_id: Any, limit: int = 200
+        self, *, session_id: Any, limit: int = 200, newest: bool = False
     ) -> List[Dict[str, Any]]:
         return []
 

@@ -225,11 +225,24 @@ class AILibraryChatService:
         return session
 
     async def get_messages(
-        self, session_id: str, *, user_id: UUID, limit: int = 200
+        self,
+        session_id: str,
+        *,
+        user_id: UUID,
+        limit: int = 200,
+        newest: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Fetch messages for a session in chronological order."""
+        """Fetch messages for a session in chronological order.
+
+        ``newest`` picks which ``limit``-sized window (see
+        ``ConversationsAiStore.get_messages``): the session-view endpoint
+        uses the default oldest-first window; the turn path passes
+        ``newest=True``.
+        """
         await self.get_session(session_id, user_id=user_id)
-        return await self._store.get_messages(session_id=session_id, limit=limit)
+        return await self._store.get_messages(
+            session_id=session_id, limit=limit, newest=newest
+        )
 
     async def update_session(
         self,
@@ -710,7 +723,9 @@ class AILibraryChatService:
                 detail="session has no agent_slug bound — cannot chat",
             )
 
-        history = await self.get_messages(session_id, user_id=user_id)
+        # Newest window: a conversation past 200 messages must feed the model
+        # its most recent context, not its first 200 messages.
+        history = await self.get_messages(session_id, user_id=user_id, newest=True)
 
         # Normalize attachments to dicts up front so both the persisted
         # user message (display metadata) and the S4/G2 resolution below
