@@ -15,7 +15,8 @@ HTTP for health/bounds) isolates these failure modes. Both still share
 the same DBOS PG queue, so dispatch is unchanged — only the consumer
 side moves.
 
-The ``MEDIAHUB_ROLE`` env var picks the mode:
+The ``NOUS_ROLE`` env var (legacy name ``MEDIAHUB_ROLE`` still accepted,
+see ``app.core.env_names``) picks the mode:
   - ``gateway``  — serve HTTP, do NOT launch DBOS pool (dispatch only)
   - ``worker``   — launch DBOS pool, serve minimal HTTP (/health + /internal/bounds)
   - ``combined`` — both. Default for single-process dev / single-NAS prod.
@@ -28,6 +29,8 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+
+from app.core.env_names import env_alias, env_names
 
 
 class ProcessRole(str, Enum):
@@ -60,18 +63,19 @@ class ProcessRole(str, Enum):
         return self in (ProcessRole.WORKER, ProcessRole.COMBINED)
 
 
-_ENV_VAR = "MEDIAHUB_ROLE"
+_ENV_SUFFIX = "ROLE"
+_ENV_VAR, _LEGACY_ENV_VAR = env_names(_ENV_SUFFIX)
 
 
 def role_from_env(env: dict[str, str] | None = None) -> ProcessRole:
-    """Read MEDIAHUB_ROLE. Falls back to COMBINED for unknown / unset values.
+    """Read NOUS_ROLE (legacy MEDIAHUB_ROLE). COMBINED for unknown / unset.
 
     Defensive: an unrecognized value WARN-logs but does not crash startup
     — ops typo'd config shouldn't take down the whole process. The
     returned default keeps current behavior.
     """
     src = env if env is not None else os.environ
-    raw = (src.get(_ENV_VAR) or "").strip().lower()
+    raw = (env_alias(_ENV_SUFFIX, src) or "").strip().lower()
     if not raw:
         return ProcessRole.COMBINED
     try:
@@ -82,7 +86,8 @@ def role_from_env(env: dict[str, str] | None = None) -> ProcessRole:
         import sys
 
         print(
-            f"[agent_framework.role] unrecognized {_ENV_VAR}={raw!r} — "
+            f"[agent_framework.role] unrecognized {_ENV_VAR} "
+            f"(or legacy {_LEGACY_ENV_VAR})={raw!r} — "
             f"falling back to {ProcessRole.COMBINED.value}",
             file=sys.stderr,
         )

@@ -1,7 +1,7 @@
 [project]
-name = "mediahub-backend"
+name = "nous-backend"
 version = "0.7.5"
-description = "MediaHub - Multi-source media analysis and download platform powered by FastAPI + Supabase"
+description = "Nous - Multi-source media analysis and download platform powered by FastAPI + Supabase"
 authors = [
     {name = "heygo", email = "8512939@qq.com"}
 ]
@@ -11,7 +11,7 @@ license = {text = "MIT"}
 # 一边按 3.13 格式化、一边声明支持 3.12。下限不是锁，正是它让 CI 拿 3.12
 # 跑了很久也不报错（在生产从不使用的解释器上跑绿）。
 requires-python = ">=3.13"
-keywords = ["mediahub", "video", "download", "whisper", "transcription", "yt-dlp", "fastapi", "supabase"]
+keywords = ["nous", "video", "download", "whisper", "transcription", "yt-dlp", "fastapi", "supabase"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -96,7 +96,7 @@ markers = [
 ]
 
 [project.scripts]
-mediahub = "app.main:main"
+nous = "app.main:main"
 
 [project.urls]
 Homepage = "https://github.com/iocrazy/nous-app"

@@ -47,6 +47,26 @@ def _isolate_proxy_env():
         os.environ.update(saved)
 
 
+# The NOUS_* names win over MEDIAHUB_* (app.core.env_names). Most existing
+# tests configure the legacy MEDIAHUB_* names via monkeypatch, so an inherited
+# NOUS_* value from the developer's shell or a sourced backend/.env would
+# silently shadow them. Strip them once; tests that want them set them.
+_NOUS_ALIAS_ENV_VARS = (
+    "NOUS_TOKEN_ENCRYPTION_KEY",
+    "NOUS_TOKEN_ENCRYPTION_KEY_OLD",
+    "NOUS_ROLE",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_nous_alias_env():
+    saved = {k: os.environ.pop(k) for k in _NOUS_ALIAS_ENV_VARS if k in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",

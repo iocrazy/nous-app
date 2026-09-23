@@ -450,6 +450,7 @@ async def test_encrypt_secrets_endpoint_409_without_key(monkeypatch):
             r = await c.post("/api/v1/admin/settings/encrypt-secrets")
         assert r.status_code == 409
         # exception envelope puts the message in "error", not raw "detail"
+        assert "NOUS_TOKEN_ENCRYPTION_KEY" in r.text
         assert "MEDIAHUB_TOKEN_ENCRYPTION_KEY" in r.text
     finally:
         app.dependency_overrides.pop(get_admin_auth, None)
@@ -514,7 +515,11 @@ async def test_bootstrap_warns_when_not_configured(monkeypatch, capsys):
     monkeypatch.setattr(bootstrap_mod, "logger", _CaptureLogger())
     await _bg_secrets_selfheal()
     assert any(
-        re.search(r"MEDIAHUB_TOKEN_ENCRYPTION_KEY is NOT set", w) for w in warnings
+        re.search(
+            r"NOUS_TOKEN_ENCRYPTION_KEY \(or legacy MEDIAHUB_TOKEN_ENCRYPTION_KEY\) is NOT set",
+            w,
+        )
+        for w in warnings
     )
 
 

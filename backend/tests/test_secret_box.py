@@ -99,3 +99,83 @@ def test_is_configured_reports_real_env_only(monkeypatch):
     assert secret_box.is_configured() is False
     monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", "anything-truthy")
     assert secret_box.is_configured() is True
+
+
+# ── NOUS_* / MEDIAHUB_* alias (rename without touching prod secrets) ──
+
+
+def _clear_key_env(monkeypatch):
+    for name in (
+        "NOUS_TOKEN_ENCRYPTION_KEY",
+        "NOUS_TOKEN_ENCRYPTION_KEY_OLD",
+        "MEDIAHUB_TOKEN_ENCRYPTION_KEY",
+        "MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.unit
+def test_alias_neither_set_uses_dev_fallback_only(monkeypatch):
+    _clear_key_env(monkeypatch)
+    assert secret_box.is_configured() is False
+    assert secret_box._resolve_keys(allow_dev_fallback=False) == []
+    assert secret_box._resolve_keys() == [secret_box.DEV_TOKEN_ENCRYPTION_KEY.encode()]
+
+
+@pytest.mark.unit
+def test_alias_legacy_name_only(monkeypatch):
+    from cryptography.fernet import Fernet
+
+    _clear_key_env(monkeypatch)
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", key)
+    assert secret_box.is_configured() is True
+    ct = Fernet(key.encode()).encrypt(b"legacy").decode()
+    assert secret_box.decrypt(ct, allow_dev_fallback=False) == "legacy"
+
+
+@pytest.mark.unit
+def test_alias_new_name_only(monkeypatch):
+    from cryptography.fernet import Fernet
+
+    _clear_key_env(monkeypatch)
+    key = Fernet.generate_key().decode()
+    old = Fernet.generate_key().decode()
+    monkeypatch.setenv("NOUS_TOKEN_ENCRYPTION_KEY", key)
+    monkeypatch.setenv("NOUS_TOKEN_ENCRYPTION_KEY_OLD", old)
+    assert secret_box.is_configured() is True
+    ct = Fernet(key.encode()).encrypt(b"new").decode()
+    old_ct = Fernet(old.encode()).encrypt(b"rotated").decode()
+    assert secret_box.decrypt(ct, allow_dev_fallback=False) == "new"
+    assert secret_box.decrypt(old_ct, allow_dev_fallback=False) == "rotated"
+
+
+@pytest.mark.unit
+def test_alias_both_differ_new_wins_and_warns(monkeypatch, caplog):
+    import logging
+
+    from cryptography.fernet import Fernet
+
+    from app.core import env_names
+
+    env_names._reset_warned_for_tests()
+    _clear_key_env(monkeypatch)
+    new = Fernet.generate_key().decode()
+    legacy = Fernet.generate_key().decode()
+    monkeypatch.setenv("NOUS_TOKEN_ENCRYPTION_KEY", new)
+    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", legacy)
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.core.env_names"):
+            keys = secret_box._resolve_keys(allow_dev_fallback=False)
+        assert keys == [new.encode()]
+        assert any(
+            "NOUS_TOKEN_ENCRYPTION_KEY" in r.getMessage()
+            and "MEDIAHUB_TOKEN_ENCRYPTION_KEY" in r.getMessage()
+            for r in caplog.records
+            if r.levelno == logging.WARNING
+        )
+        # A fresh encrypt lands under the NOUS key, not the legacy one.
+        ct = secret_box.encrypt("x", allow_dev_fallback=False)
+        assert Fernet(new.encode()).decrypt(ct.encode()) == b"x"
+    finally:
+        env_names._reset_warned_for_tests()

@@ -20,7 +20,8 @@
 #      kills the watchexec tree and restarts it.
 #
 # PR-D8 Phase 1 — role parameterization:
-#   MEDIAHUB_ROLE env (gateway / worker / combined) is exported into the
+#   NOUS_ROLE env (gateway / worker / combined; legacy MEDIAHUB_ROLE is
+#   still read as a fallback) is exported into the
 #   uvicorn child so app/main.py can decide whether to mount the public
 #   API and whether to launch DBOS workers. Default = combined so the
 #   single-script "everything in one process" workflow keeps working.
@@ -35,7 +36,7 @@
 set -u
 
 PORT="${BACKEND_PORT:-8082}"
-ROLE="${MEDIAHUB_ROLE:-combined}"
+ROLE="${NOUS_ROLE:-${MEDIAHUB_ROLE:-combined}}"
 TAG="${SUPERVISOR_TAG:-dev-backend}"
 HEALTH_URL="http://localhost:${PORT}/api/v1/healthz"
 LOG_FILE="${BACKEND_LOG:-/tmp/${TAG}.log}"
@@ -43,7 +44,8 @@ PROBE_INTERVAL="${PROBE_INTERVAL:-30}"
 UNHEALTHY_LIMIT="${UNHEALTHY_LIMIT:-3}"
 PROBE_TIMEOUT="${PROBE_TIMEOUT:-5}"
 
-export MEDIAHUB_ROLE="${ROLE}"
+export NOUS_ROLE="${ROLE}"
+unset MEDIAHUB_ROLE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="${SCRIPT_DIR}/../backend"
@@ -79,6 +81,11 @@ start_watchexec() {
   # shellcheck disable=SC1090
   . "${ENV_FILE}"
   set +a
+  # The role this script resolved wins over any NOUS_ROLE / MEDIAHUB_ROLE
+  # line in .env (.env.example ships NOUS_ROLE=combined, which would
+  # otherwise silently turn dev-gateway / dev-worker back into combined).
+  export NOUS_ROLE="${ROLE}"
+  unset MEDIAHUB_ROLE
   cd "${BACKEND_DIR}" || exit 1
 
   # watchexec flags:

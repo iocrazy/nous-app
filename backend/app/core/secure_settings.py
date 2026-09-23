@@ -22,7 +22,7 @@ Write side — ``conceal_for_key(key, value)``
 =============================================
 Called from ``SystemSettingsRepository.update`` / ``upsert_setting`` for
 EVERY key (cheap passthrough for the ~95% of keys that aren't secret). NO
-dev-key fallback: if ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` isn't configured,
+dev-key fallback: if ``NOUS_TOKEN_ENCRYPTION_KEY`` isn't configured,
 this RAISES (``secret_box.SecretBoxNotConfigured``) so a write of secret
 material fails LOUD instead of silently landing in the DB encrypted under
 the public, committed ``DEV_TOKEN_ENCRYPTION_KEY`` — the exact bug this PR

@@ -123,11 +123,11 @@ async def _bg_stall_detector() -> None:
                 await _send_discord(
                     f"⚠️ **Worker stall**: {queued} tasks queued, 0 running for "
                     f"~{interval * stall_ticks // 60}min. Likely worker version "
-                    f"drift or queue lock — check `mediahub-app-worker` vs "
-                    f"`mediahub-app-backend` image. Manual: `cd "
-                    f"/volume1/docker/mediahub/docker && sudo "
-                    f"/usr/local/bin/docker-compose up -d --force-recreate "
-                    f"mediahub-worker`"
+                    f"drift or queue lock — compare `nous-worker` vs "
+                    f"`nous-backend` image on gpupc (`ssh "
+                    f"heygo@100.124.149.118`, then `nous status`). Lock: "
+                    f"`nous restart worker`; drift: `gh workflow run "
+                    f"deploy-gpu.yml`"
                 )
             elif action == "recover":
                 await _send_discord(

@@ -336,7 +336,7 @@ def main() -> None:
     # The reaper reads SUPAVISOR_DATABASE_URL and resolves identity from env —
     # set BEFORE importing any app module (pydantic settings loads at import).
     os.environ["SUPAVISOR_DATABASE_URL"] = rig_url
-    os.environ["MEDIAHUB_ROLE"] = "worker"
+    os.environ["NOUS_ROLE"] = "worker"
     os.environ["FEATURE_MULTI_WORKER_ID"] = "true"
     os.environ["WORKER_REPLICA_INDEX"] = "1"  # this rig process = worker-1
     os.environ["DBOS_SWEEP_BOOT_GRACE_SECONDS"] = "0"  # don't skip on boot grace

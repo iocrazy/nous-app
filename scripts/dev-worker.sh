@@ -15,7 +15,7 @@
 #     BACKEND_LOG=/tmp/dev-worker-2.log ./scripts/dev-worker.sh
 #   ...starts a second worker process pulling from the same DBOS queue.
 
-export MEDIAHUB_ROLE="worker"
+export NOUS_ROLE="worker"
 # Default to gateway_port + 1 so both can coexist on a dev machine
 # without colliding. Override via WORKER_PORT.
 export BACKEND_PORT="${WORKER_PORT:-8083}"

@@ -119,7 +119,7 @@ class SystemSettingsRepository:
         ``app.core.secure_settings``) it is encrypted (``enc:v1:`` marker)
         before it ever reaches the DB. Raises
         ``secret_box.SecretBoxNotConfigured`` when the real
-        ``MEDIAHUB_TOKEN_ENCRYPTION_KEY`` isn't set — a secret write fails
+        ``NOUS_TOKEN_ENCRYPTION_KEY`` isn't set — a secret write fails
         closed rather than silently landing under the public dev key.
         """
         concealed = conceal_for_key(key, value)
