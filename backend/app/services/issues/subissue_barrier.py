@@ -1,4 +1,4 @@
-"""Sub-issue completion barrier — a MediaHub port of multica's fan-in wake.
+"""Sub-issue completion barrier — a Nous port of multica's fan-in wake.
 
 When every sub-issue of a parent reaches a terminal status, the parent is
 "unblocked": we (a) write ONE roll-up report into the parent's timeline and

@@ -7,7 +7,7 @@ Implements the contract documented in ``docs/plans/nous-center-contract.md``:
                           outputs?, error? }
 
 Used by the canvas-run service when ``provider_slug`` starts with
-``nous/``. The mediahub-side ``mock_server`` fixture exercises the same
+``nous/``. The nous-app-side ``mock_server`` fixture exercises the same
 client against an in-process FastAPI stub so the canvas Run UX works
 end-to-end before the real nous-center backend ships.
 

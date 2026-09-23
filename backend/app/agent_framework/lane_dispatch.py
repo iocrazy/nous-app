@@ -1,6 +1,6 @@
 """lane_dispatch — helper for routing work into the correct LaneQueue.
 
-Today mediahub dispatch is direct: API handler → service → workflow,
+Today nous dispatch is direct: API handler → service → workflow,
 no priority discrimination. A flood of background AI summary work can
 starve a user clicking "fetch this video".
 

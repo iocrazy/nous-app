@@ -5,7 +5,7 @@ own concurrency cap so a flood of low-priority background work
 (thumbnail generation) can't starve high-priority user work
 (parse on click).
 
-mediahub lanes:
+nous lanes:
   USER         high priority, user clicked something — maxConcurrent 5
   BACKGROUND   AI workflow chains — maxConcurrent 3
   SCHEDULED    cron jobs — maxConcurrent 1 (avoid overlap)
@@ -147,7 +147,7 @@ async def test_drain_waits_for_outstanding():
 
 @pytest.mark.unit
 async def test_default_max_concurrent_for_unconfigured_lane():
-    """Lane without explicit cap uses default (4 by mediahub convention)."""
+    """Lane without explicit cap uses default (4 by nous convention)."""
     q = LaneQueue()
     snap = q.snapshot()
     # All standard lanes have a default in the snapshot

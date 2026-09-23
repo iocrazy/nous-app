@@ -13,7 +13,7 @@ Mirrors OpenClaw ``process/command-queue.ts`` (526 lines) +
 ``process/lanes.ts`` (7 lines). Python translation comes out smaller
 because asyncio.Semaphore handles most of what JS had to hand-code.
 
-mediahub lanes:
+nous lanes:
   USER         user clicked something — high priority
   BACKGROUND   AI workflow chains
   SCHEDULED    cron jobs (D11) — keep at 1 to avoid overlap
@@ -43,7 +43,7 @@ from typing import Any, Awaitable, Optional
 
 
 class Lane(str, Enum):
-    """Standard mediahub lanes. Stringified so logs / snapshot
+    """Standard nous lanes. Stringified so logs / snapshot
     keys stay human-readable."""
 
     USER = "user"

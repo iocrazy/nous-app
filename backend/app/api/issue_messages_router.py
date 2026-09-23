@@ -840,7 +840,7 @@ async def simulate_agent_run_complete(
     completed with a sample summary. The mig 208 terminal trigger then
     UPDATEs the chat row in place; Realtime delivers it to subscribers.
 
-    Mediahub doesn't have a real agent runtime listening for
+    Nous doesn't have a real agent runtime listening for
     issue_reply-triggered runs yet, so without this endpoint the chat
     row sits at "Agent picking up…" forever. This isn't gated to admin
     by intent — it's a dev tool that's safe in any environment because
@@ -888,7 +888,7 @@ async def simulate_agent_run_complete(
         )
 
     summary = output_summary or (
-        "(simulated) 我已经看完上下文，上面这条 reply 涉及 mediahub 的 paperclip-style "
+        "(simulated) 我已经看完上下文，上面这条 reply 涉及 nous 的 paperclip-style "
         "心跳模型 + workforce 调度。简短结论：当前实现已经把 4 维 liveness 接通到 chat row，"
         "下一步可以让 workforce 创建 agent_runs 时回填 issue_id。"
     )

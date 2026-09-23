@@ -142,7 +142,7 @@ def _heuristic_count(text: str) -> int:
 
     Strategy: count CJK chars as 1 token each; ASCII / latin chars as
     chars/4. This is dramatically more accurate than the original
-    chars/4 for mixed Chinese-English content (which is most of mediahub).
+    chars/4 for mixed Chinese-English content (which is most of nous).
 
     Empty string → 0. Non-string input → 0 (defensive)."""
     if not isinstance(text, str) or not text:

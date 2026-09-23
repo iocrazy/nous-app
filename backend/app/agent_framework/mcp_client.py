@@ -1,8 +1,8 @@
 """Q4 — Outbound MCP client (JSON-RPC over HTTP).
 
-The mcp_descriptor + mcp_stdio modules let mediahub *expose* its skills
+The mcp_descriptor + mcp_stdio modules let nous *expose* its skills
 to external MCP clients (Claude Desktop). This module is the inverse:
-mediahub *consumes* tools advertised by an external MCP server, so
+nous *consumes* tools advertised by an external MCP server, so
 AgentRunner can call those tools mid-turn.
 
 Why HTTP first (not stdio):

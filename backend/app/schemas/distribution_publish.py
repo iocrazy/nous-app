@@ -1,7 +1,7 @@
 """Distribution — publish task schemas (PR-D2).
 
 Ported from the media-router prototype (models/schemas.py TaskCreate /
-TaskResponse) and rewritten to mediahub conventions: BIGINT ids serialize as
+TaskResponse) and rewritten to nous conventions: BIGINT ids serialize as
 str (JS 2^53), multi-channel ('official'|'h5'|'session'), visibility triad
 matching the publish_tasks CHECK constraint.
 """

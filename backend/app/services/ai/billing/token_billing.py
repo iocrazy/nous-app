@@ -6,7 +6,7 @@ The platform has two model-cost flows that need accounting:
   1. Platform model (e.g. nous_qwen-max): user pays via points
      (PointsService) — every agent run charges to team_id's balance
   2. BYO key (user's own provider key): user is billed directly by the
-     provider, MediaHub records usage but doesn't charge points
+     provider, Nous records usage but doesn't charge points
 
 agent_runs already records prompt_tokens / completion_tokens / cost_cents
 per run. ai_usage_logs has per-run rows. This module exposes:
