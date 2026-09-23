@@ -63,7 +63,7 @@ export default function App() {
                 element={
                   <PlaceholderPage
                     title="API Keys"
-                    description="Planned: admin oversight of users' programmatic API keys — the access tokens (with scopes, max 10/user) that call the MediaHub API for external integrations and automations (backend api_key_router already exists; this page will list / revoke them). Not AI provider keys — those live in System → AI Models."
+                    description="Planned: admin oversight of users' programmatic API keys — the access tokens (with scopes, max 10/user) that call the Nous API for external integrations and automations (backend api_key_router already exists; this page will list / revoke them). Not AI provider keys — those live in System → AI Models."
                   />
                 }
               />

@@ -917,7 +917,30 @@ export function AIModelsPage() {
                       at={m.last_tested_at}
                     />
                     <Tag color={TYPE_COLORS[m.type] || 'gray'} size="small">{m.type}</Tag>
-                    <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
+                    {/* actual_model 可以合法为空：本地 daemon 协议(jimeng-local)
+                        没有模型旋钮——dreamina CLI 自己定，派发也是按行的 name
+                        匹配(canvas_generation._find_local)，不读 actual_model。
+                        但空着不渲染，跟"数据缺了"长得一模一样，所以改成显示那个
+                        真正被匹配的 name，并用弱化样式 + tooltip 说明为什么不同。 */}
+                    {m.actual_model ? (
+                      <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{m.actual_model}</span>
+                    ) : (
+                      <span
+                        title={
+                          'No actual_model on this row — expected for local-daemon ' +
+                          'protocols, whose CLI has no model selector. Dispatch matches ' +
+                          'on the row name shown here.'
+                        }
+                        style={{
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          fontStyle: 'italic',
+                          color: 'var(--color-text-3)',
+                        }}
+                      >
+                        {m.name}
+                      </span>
+                    )}
                     <PriceCoverageTag coverage={m.price_coverage} />
                     <Switch
                       size="small"

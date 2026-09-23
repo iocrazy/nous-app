@@ -87,7 +87,7 @@ export function AdminLayout() {
             borderBottom: '1px solid var(--color-border)',
           }}
         >
-          {collapsed ? 'M' : 'MediaHub Admin'}
+          {collapsed ? 'N' : 'Nous Admin'}
         </div>
         <Menu
           selectedKeys={[selectedKey]}

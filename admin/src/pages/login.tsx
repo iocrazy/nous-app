@@ -41,7 +41,7 @@ export function Login() {
       <Card style={{ width: 400, borderRadius: 8 }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Title heading={4} style={{ margin: 0 }}>
-            MediaHub Admin
+            Nous Admin
           </Title>
           <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
             Sign in to admin panel
