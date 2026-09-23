@@ -46,8 +46,8 @@ OWNED_FRAMES: Final[frozenset[str]] = frozenset(
         "available_skills",
         "available_workers",
         "agent_memory",
-        # 已退役的聊天路径压缩器曾把摘要包在这个框里；现在没有渲染方。
-        # 留着登记无害：再有人渲染它时，内容仍源自用户可控的对话。
+        # 压缩摘要：唯一渲染方是 app/boundary/summary_frame.py（压缩器与
+        # replay 共用）。摘要源自用户可控的对话，正文必须 escape_frame_body。
         "conversation_summary",
         "graph_facts",
         # harness p4 §1-③: a claimed inbox item injected at a step boundary

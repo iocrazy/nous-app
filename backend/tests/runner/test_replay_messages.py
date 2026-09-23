@@ -5,6 +5,7 @@ message (it is not in cross-turn history either)."""
 
 import pytest
 
+from app.boundary.summary_frame import frame_summary
 from app.services.ai.runner import replay as r
 
 pytestmark = pytest.mark.unit
@@ -50,7 +51,7 @@ def test_compaction_summary_replaces_everything_before_it_with_the_runtime_prefi
         _ev(4, "user", content="c"),
     ]
     assert r.messages_from_events(evs) == [
-        {"role": "system", "content": r.SUMMARY_PREFIX + "a and b, condensed"},
+        {"role": "system", "content": frame_summary("a and b, condensed")},
         {"role": "user", "content": "c"},
     ]
 

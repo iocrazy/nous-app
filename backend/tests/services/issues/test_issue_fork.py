@@ -5,6 +5,7 @@ ORDER is the contract."""
 
 import pytest
 
+from app.boundary.summary_frame import frame_summary
 from app.services.issues import issue_fork as f
 
 pytestmark = pytest.mark.unit
@@ -220,7 +221,7 @@ async def test_a_run_window_opening_with_a_summary_replaces_the_origin_entirely(
     await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
     msgs = next(c for c in d.calls if c[0] == "messages")[2]
     assert msgs == [
-        {"role": "system", "content": f.SUMMARY_PREFIX + "S"},
+        {"role": "system", "content": frame_summary("S")},
         {"role": "assistant", "content": "act 1"},
     ]
 

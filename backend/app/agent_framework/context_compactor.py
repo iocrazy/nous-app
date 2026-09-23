@@ -45,6 +45,7 @@ from app.agent_framework.context_window import resolve_model_window
 from app.agent_framework.message_truncation import cap_messages_tokens
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
 from app.agent_framework.tool_result_pruner import PruneStats, prune
+from app.boundary.summary_frame import render_summary_message
 
 
 class CompactionTier(str, Enum):
@@ -462,10 +463,7 @@ class ContextCompactor:
                 model=model,
                 user_id=user_id,
             )
-            summary_message = {
-                "role": "system",
-                "content": "[Earlier conversation summary]\n" + summary_text,
-            }
+            summary_message = render_summary_message(summary_text)
             summary_tokens = count_messages_tokens([summary_message], model)
             if summary_tokens < head_tokens:
                 await _emit(
