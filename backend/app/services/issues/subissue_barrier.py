@@ -143,8 +143,10 @@ class BarrierGateway:
                 ConversationsAiStore,
             )
 
+            # Newest window: past 200 messages the oldest window would
+            # answer with message #200 instead of the real last one.
             rows = await ConversationsAiStore().get_messages(
-                session_id=int(session_id), limit=200
+                session_id=int(session_id), limit=200, newest=True
             )
             for row in reversed(rows):
                 content = (row.get("content") or "").strip()
@@ -189,8 +191,10 @@ class BarrierGateway:
                 ConversationsAiStore,
             )
 
+            # Newest window: a report stamped after message 200 must still be
+            # seen, or the double-close guard lets a duplicate through.
             rows = await ConversationsAiStore().get_messages(
-                session_id=int(session_id), limit=200
+                session_id=int(session_id), limit=200, newest=True
             )
             return any(
                 (r.get("metadata_json") or {}).get("barrier_key") == key for r in rows

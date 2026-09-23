@@ -376,3 +376,56 @@ async def test_gateway_exception_is_swallowed():
     gw = _FakeGateway(issues={}, children={}, raise_on_get=True)
     res = await on_child_issue_terminal(10, "in_progress", "done", gateway=gw)
     assert res["fired"] is False and res["reason"] == "error"
+
+
+# ── real BarrierGateway session reads: newest window, not oldest ─────────────
+
+
+class _WindowedStore:
+    """Stands in for ConversationsAiStore over a 250-message conversation and
+    honours `newest` the way the real store does (window chosen, result ASC)."""
+
+    calls: list = []
+
+    def __init__(self) -> None:
+        self._rows = [
+            {"content": f"m{i}", "metadata_json": None} for i in range(1, 251)
+        ]
+        # The last message of the conversation carries the barrier stamp.
+        self._rows[-1] = {"content": "m250", "metadata_json": {"barrier_key": "k"}}
+
+    async def get_messages(
+        self, *, session_id: int, limit: int = 200, newest: bool = False
+    ) -> list:
+        _WindowedStore.calls.append({"limit": limit, "newest": newest})
+        return self._rows[-limit:] if newest else self._rows[:limit]
+
+
+@pytest.fixture
+def _windowed_store(monkeypatch):
+    import app.services.ai.chat.conversations_ai_store as store_mod
+
+    _WindowedStore.calls = []
+    monkeypatch.setattr(store_mod, "ConversationsAiStore", _WindowedStore)
+    return _WindowedStore
+
+
+@pytest.mark.asyncio
+async def test_last_substantive_message_reads_newest_window(_windowed_store) -> None:
+    """Past 200 messages the oldest window would answer 'm200'; the real last
+    message is 'm250'."""
+    out = await BarrierGateway().last_substantive_message(
+        {"id": 1, "ai_session_id": 42}
+    )
+    assert out == "m250"
+    assert _windowed_store.calls == [{"limit": 200, "newest": True}]
+
+
+@pytest.mark.asyncio
+async def test_already_reported_sees_barrier_key_in_newest_window(
+    _windowed_store,
+) -> None:
+    """A report written after message 200 must still be found — otherwise the
+    double-close guard lets a duplicate report through."""
+    assert await BarrierGateway().already_reported({"id": 1, "ai_session_id": 42}, "k")
+    assert _windowed_store.calls == [{"limit": 200, "newest": True}]
