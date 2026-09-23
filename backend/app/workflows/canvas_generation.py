@@ -41,6 +41,7 @@ from app.services.generation.local_dispatch import (  # noqa: F401 - re-exported
     require_provider_card,
     resolve_local_engine,
 )
+from app.services.generation.ref_urls import absolute_media_url
 from app.services.generation.request import GenerationRequest
 from app.services.library.generated_media_service import (
     GenerationOrigin,
@@ -74,22 +75,11 @@ def _actual_provider_of(provider: Any) -> str:
     return str(getattr(provider, "provider_key", "") or "")
 
 
-def _absolute_media_url(url: str) -> str:
-    """The daemon fetches refs over the public API, so relative durable urls
-    must be absolutised (it only accepts nous' own host — spec §10 SSRF)."""
-    if url.startswith("http://") or url.startswith("https://"):
-        return url
-    from app.core.config import settings
-
-    # The fallback is imported, not spelled again: ``_own_hosts`` has to
-    # RECOGNISE what this function MINTS, and two copies of the default host is
-    # exactly how a URL we made ourselves ends up classified as foreign.
-    from app.services.library.generated_media_service import (
-        _DEFAULT_PUBLIC_API_BASE,
-    )
-
-    base = str(getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE)
-    return f"{base.rstrip('/')}{url}"
+# The daemon fetches refs over the public API, so relative durable urls must be
+# absolutised. Shared with every caller that routes to the daemon
+# (``services/generation/ref_urls``); the old private name stays here because
+# ``_resolve_reference_urls`` looks it up as a module global (tests patch it).
+_absolute_media_url = absolute_media_url
 
 
 # ---------------------------------------------------------------------------
