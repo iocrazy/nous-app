@@ -29,7 +29,7 @@ vi.mock('../../services/aiService', () => ({
 const OK_STATUS = {
   status: 'ok',
   space: {
-    id: 1,
+    id: '352590227796039',
     actual_model: 'doubao-embedding-vision-251215',
     protocol: 'ark-multimodal',
     dims: 2048,

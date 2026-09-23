@@ -326,7 +326,7 @@ export const localSearch = (
 export interface VectorsStatus {
   status: 'ok' | 'unconfigured' | 'store_missing';
   space: {
-    id: number;
+    id: string; // Snowflake BIGINT, serialised as a string by the backend (JS precision past 2^53)
     actual_model: string;
     protocol: string;
     dims: number;
