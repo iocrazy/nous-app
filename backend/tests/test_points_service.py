@@ -343,3 +343,85 @@ async def test_add_points_raises_when_the_increment_matched_no_quota_row(
         )
 
     service.repo.create_transaction.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# 转写按时长计费需要的两处扩展
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consume_writes_ledger_fields_onto_the_transaction(
+    service: PointsService,
+) -> None:
+    """provider / model / duration_seconds / is_nous 四列本就为按时长计费而建，
+    扣费行要把它们带上，否则账本读不出「哪个模型、多长」。"""
+    service.repo.consume_points_atomic.return_value = {  # type: ignore[attr-defined]
+        "success": True,
+        "points_cost": 3,
+        "balance_after": 97,
+        "reason": None,
+    }
+    await service.check_and_consume(
+        team_id="1",
+        user_id="u",
+        action_type="ai_transcription",
+        reference_id="wf-1",
+        override_cost=3,
+        ledger_fields={
+            "provider": "nous",
+            "model": "nous-moss-asr",
+            "duration_seconds": 1800,
+            "is_nous": True,
+        },
+    )
+    row = service.repo.create_transaction.await_args.args[0]  # type: ignore[attr-defined]
+    assert row["provider"] == "nous"
+    assert row["model"] == "nous-moss-asr"
+    assert row["duration_seconds"] == 1800
+    assert row["is_nous"] is True
+    assert row["amount"] == -3
+    assert row["reference_id"] == "wf-1"
+
+
+@pytest.mark.asyncio
+async def test_ledger_fields_cannot_override_the_money_columns(
+    service: PointsService,
+) -> None:
+    service.repo.consume_points_atomic.return_value = {  # type: ignore[attr-defined]
+        "success": True,
+        "points_cost": 3,
+        "balance_after": 97,
+        "reason": None,
+    }
+    await service.check_and_consume(
+        team_id="1",
+        user_id="u",
+        action_type="ai_transcription",
+        override_cost=3,
+        ledger_fields={"amount": 0, "type": "gift", "model": "m"},
+    )
+    row = service.repo.create_transaction.await_args.args[0]  # type: ignore[attr-defined]
+    assert row["amount"] == -3
+    assert row["type"] == "consume"
+    assert row["model"] == "m"
+
+
+@pytest.mark.asyncio
+async def test_check_quota_honours_override_cost(service: PointsService) -> None:
+    """预检按调用方算好的时长价格比余额，不去查（生产里为空的）point_pricing。"""
+    service.repo.get_pricing.return_value = None  # type: ignore[attr-defined]
+    service.repo.get_team_quota.return_value = {"points_balance": 5}  # type: ignore[attr-defined]
+    service.repo.get_member_quota = AsyncMock(return_value=None)  # type: ignore[attr-defined]
+
+    denied = await service.check_quota(
+        team_id="1", user_id="u", action_type="ai_transcription", override_cost=6
+    )
+    assert denied["allowed"] is False
+    assert denied["points_cost"] == 6
+
+    ok = await service.check_quota(
+        team_id="1", user_id="u", action_type="ai_transcription", override_cost=5
+    )
+    assert ok["allowed"] is True
+    service.repo.get_pricing.assert_not_awaited()  # type: ignore[attr-defined]

@@ -45,6 +45,16 @@ def _auth() -> AuthContext:
     return AuthContext(user_id="user-1", auth_type="jwt")
 
 
+@pytest.fixture(autouse=True)
+def _free_preflight(monkeypatch):
+    """派发前的余额预检默认放行（不碰数据库）；专门测预检的用例自己覆盖它。"""
+    from app.services.billing import transcription_billing as tb
+
+    spy = AsyncMock(return_value=None)
+    monkeypatch.setattr(tb, "preflight_transcription", spy)
+    return spy
+
+
 class _NoActiveSession:
     """Stands in for the ORM AsyncSession used by the dedup probe — its
     execute().first() returns None (no in-flight transcription)."""
@@ -533,7 +543,9 @@ class TestTranscribeDedup:
         mgr.fail.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_the_race_loser_gets_its_points_back(self, monkeypatch) -> None:
+    async def test_the_race_loser_has_nothing_to_give_back(self, monkeypatch) -> None:
+        """派发时不再扣分（扣费挪到 workflow 成功收尾），所以输掉唯一索引竞争
+        的请求既没扣过、也不该退。"""
         media = {
             "id": "111",
             "platform_id": "pf-1",
@@ -546,42 +558,10 @@ class TestTranscribeDedup:
         dispatched: list = []
         created: list = []
         mgr = _patch_common(monkeypatch, dispatched, created)
-
-        settings_repo = MagicMock()
-        settings_repo.get_by_user_id = AsyncMock(
-            return_value={
-                "settings_json": {
-                    "ai_settings": {"task_assignment": {"transcription": "nous-asr"}}
-                }
-            }
-        )
-        monkeypatch.setattr(
-            "app.repositories.user_settings_repository.UserSettingsRepository",
-            lambda: settings_repo,
-        )
-        monkeypatch.setattr(
-            ai_router, "get_team_id_for_user", AsyncMock(return_value="team-1")
-        )
-        nous_repo = MagicMock()
-        nous_repo.get_by_name = AsyncMock(
-            return_value={
-                "is_enabled": True,
-                "pricing_type": "per_hour",
-                "pricing_value": 60,
-            }
-        )
-        monkeypatch.setattr(
-            "app.repositories.nous_model_repository." "get_nous_model_repository",
-            lambda: nous_repo,
-        )
-        refund = AsyncMock()
         pts = MagicMock()
-        pts.ensure_team_quota = AsyncMock()
-        pts.check_and_consume = AsyncMock(
-            return_value={"success": True, "points_cost": 10}
-        )
-        pts.refund_points = refund
-        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+        pts.check_and_consume = AsyncMock()
+        pts.refund_points = AsyncMock()
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts, raising=False)
 
         async def _conflict(**_kwargs):
             raise Exception(
@@ -594,8 +574,8 @@ class TestTranscribeDedup:
         res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
 
         assert res["message"] == "Transcription already in progress"
-        refund.assert_awaited_once()
-        assert refund.await_args.kwargs["amount"] == 10
+        pts.check_and_consume.assert_not_awaited()
+        pts.refund_points.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1117,3 +1097,111 @@ class TestManualTranscribeFlowGrouping:
         assert created[0]["flow_id"] == FLOW_ID
         assert len(dispatched) == 1
         assert dispatched[0]["name"] == "ai_transcription"
+
+
+# ─── 派发前余额预检（转写按时长计费）───────────────────────────────
+
+
+class TestTranscribePreflight:
+    """扣费在 workflow 成功收尾时发生；派发端只做不扣分的余额预检，
+    让余额不足的用户在派发前就拿到 402，而不是转写跑完才发现没扣上。"""
+
+    @pytest.mark.asyncio
+    async def test_resource_endpoint_402s_before_dispatch(
+        self, monkeypatch, _free_preflight
+    ) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+            "duration": "600",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _free_preflight.return_value = "Insufficient points balance."
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert exc.value.status_code == 402
+        assert exc.value.detail == "Insufficient points balance."
+        assert dispatched == [] and created == []
+        # 付钱的是发起转写的人（模型选择来自他自己的设置），不是资源属主。
+        _free_preflight.assert_awaited_once_with("user-1", 600.0)
+
+    @pytest.mark.asyncio
+    async def test_legacy_endpoint_402s_before_dispatch(
+        self, monkeypatch, _free_preflight
+    ) -> None:
+        media = {
+            "id": "329",
+            "platform_id": "pf-legacy",
+            "extract_audio_path": "d/audio.m4a",
+            "music_download_path": "",
+            "download_path": "d/video.mp4",
+            "title": "Legacy clip",
+            "duration": None,
+        }
+
+        async def _get(_pid):
+            return media
+
+        monkeypatch.setattr(ai_router, "_get_media_or_404", _get)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _free_preflight.return_value = "Insufficient points balance."
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription("pf-legacy", _auth(), None)
+
+        assert exc.value.status_code == 402
+        assert dispatched == [] and created == []
+        _free_preflight.assert_awaited_once_with("user-1", None)
+
+    @pytest.mark.asyncio
+    async def test_dispatch_never_consumes_points(self, monkeypatch) -> None:
+        """两条手动入口派发时都不扣分 —— 否则成功收尾再扣一次就是双扣。"""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+            "duration": "600",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+
+        async def _get(_pid):
+            return media
+
+        monkeypatch.setattr(ai_router, "_get_media_or_404", _get)
+        repo = MagicMock()
+        repo.get_resource_by_media_id_and_creator = AsyncMock(
+            return_value={"id": "res-9"}
+        )
+        monkeypatch.setattr(
+            "app.repositories.resources_repository.ResourcesRepository",
+            lambda: repo,
+        )
+        pts = MagicMock()
+        pts.check_and_consume = AsyncMock()
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts, raising=False)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        r1 = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+        await ai_router.trigger_transcription("pf-1", _auth(), None)
+
+        assert [d["name"] for d in dispatched] == ["ai_transcription"] * 2
+        assert r1["points_charged"] == 0
+        pts.check_and_consume.assert_not_awaited()

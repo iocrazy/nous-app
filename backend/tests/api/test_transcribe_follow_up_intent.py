@@ -28,6 +28,15 @@ from app.api import ai_router
 from app.core.deps import AuthContext
 
 
+@pytest.fixture(autouse=True)
+def _free_transcription_preflight(monkeypatch):
+    """The transcribe endpoints pre-flight the caller's balance (no consume);
+    keep that off the DB here — these tests are about other behaviour."""
+    from app.services.billing import transcription_billing as tb
+
+    monkeypatch.setattr(tb, "preflight_transcription", AsyncMock(return_value=None))
+
+
 def _auth() -> AuthContext:
     return AuthContext(user_id="requester-9", auth_type="jwt")
 
