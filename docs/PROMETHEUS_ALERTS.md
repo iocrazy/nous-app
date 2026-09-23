@@ -75,7 +75,8 @@ groups:
       # Compactor summarising far more often than usual — contexts too big.
       # agent_compaction_triggered is incremented by the runner's
       # ContextCompactor (the ONLY compactor since the chat-side one was
-      # retired), once per turn that actually compacted, on every agent path
+      # retired), once per turn that ran the head summary (orange/red tiers;
+      # yellow-tier pruning alone does not count), on every agent path
       # (chat, issues, sub-agents). Absolute rate on purpose: there is no
       # per-turn counter to divide by — agent_streaming_started only counts
       # the true-stream path, which production chat never takes (the
