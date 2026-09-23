@@ -58,7 +58,7 @@ async def _run(tier_counts):
             )
         )
         inc = st.enter_context(
-            patch("app.agent_framework.context_compactor.inc_metric", create=True)
+            patch("app.agent_framework.context_compactor.inc_metric")
         )
         _, stats = await ContextCompactor().maybe_compact(
             system_message="sys", user_messages=msgs, model="claude-sonnet-4-6"

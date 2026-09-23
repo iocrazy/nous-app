@@ -56,3 +56,29 @@ async def test_direct_run_turn_still_runs_its_own_preflight(compactor_calls):
     )
     assert out["stop_reason"] == "paused"
     assert compactor_calls == [history], compactor_calls
+
+
+async def test_recorderless_stream_turn_routes_the_callers_user_id(monkeypatch):
+    """``auto_recorder=False`` + no recorder: the caller's ``user_id`` is the
+    only routing context the legacy maintenance-model summary can get
+    (codex-local dials that user's machine). It used to be dropped."""
+    from uuid import UUID
+
+    seen: list[str | None] = []
+    real = ar._DEFAULT_COMPACTOR.maybe_compact
+
+    async def _spy(**kw):
+        seen.append(kw.get("user_id"))
+        return await real(**kw)
+
+    monkeypatch.setattr(ar._DEFAULT_COMPACTOR, "maybe_compact", _spy)
+    uid = UUID(int=42)
+    async for _ in _runner(_NoStreamAdapter(), "paused").stream_turn(
+        _composed(),
+        [{"role": "user", "content": "q"}],
+        recorder=None,
+        auto_recorder=False,
+        user_id=uid,
+    ):
+        pass
+    assert seen == [str(uid)], seen

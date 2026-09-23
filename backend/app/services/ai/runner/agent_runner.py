@@ -78,9 +78,15 @@ MAX_TOOL_ITERATIONS = 10
 _DEFAULT_COMPACTOR = ContextCompactor()
 
 
-def _compaction_user_id(recorder: Any) -> str | None:
-    """The run's user as a string, for compaction's legacy-summary routing."""
+def _compaction_user_id(recorder: Any, fallback: Any = None) -> str | None:
+    """The run's user as a string, for compaction's legacy-summary routing.
+
+    The recorder's user wins; ``fallback`` is the caller-supplied ``user_id``
+    for turns that run without a recorder (``stream_turn`` with
+    ``auto_recorder=False``) — without it that user was silently dropped.
+    """
     user_id = getattr(recorder, "user_id", None) if recorder is not None else None
+    user_id = user_id or fallback
     return str(user_id) if user_id else None
 
 
@@ -474,6 +480,7 @@ class AgentRunner:
                     user_messages,
                     recorder=recorder,
                     abort=abort,
+                    user_id=user_id,
                 ):
                     if getattr(_chunk, "finish_reason", None):
                         _last_terminal = _chunk
@@ -498,6 +505,7 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder],
         abort: Optional["AbortController"],
+        user_id: Optional["UUID"] = None,
     ):
         """R4: extracted inner generator so stream_turn can wrap us in
         an optional RunRecorder context without nesting concerns."""
@@ -511,7 +519,7 @@ class AgentRunner:
         # model window mid-stream and surface a cryptic provider error. On
         # budget rejection, emit one clean terminal chunk and stop.
         user_messages, preflight_err = await self._preflight_compact_and_budget(
-            composed, user_messages, recorder
+            composed, user_messages, recorder, user_id=user_id
         )
         if preflight_err is not None:
             yield StreamChunk(
@@ -1586,6 +1594,8 @@ class AgentRunner:
         composed: ComposedSystemPrompt,
         user_messages: list[dict],
         recorder: Optional[RunRecorder],
+        *,
+        user_id: Any = None,
     ) -> tuple[list[dict], Optional[dict[str, Any]]]:
         """Shared pre-flight for run_turn AND stream_turn.
 
@@ -1613,8 +1623,9 @@ class AgentRunner:
             # run transcript so a crash mid-summary is visible as an orphan.
             recorder=recorder,
             # The legacy maintenance-model summary needs the user as routing
-            # context (codex-local runs on the user's own machine).
-            user_id=_compaction_user_id(recorder),
+            # context (codex-local runs on the user's own machine). The
+            # caller's ``user_id`` covers recorder-less turns.
+            user_id=_compaction_user_id(recorder, user_id),
         )
         if (
             recorder is not None

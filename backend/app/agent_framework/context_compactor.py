@@ -5,21 +5,22 @@ runner used to either reject the turn (`check_context_budget` raises
 ContextWindowError) or pass through a request that the provider would
 later truncate / refuse. Neither lets the agent keep working.
 
-This module installs a 4-tier policy that runs at the start of every
-``AgentRunner.run_turn``:
+This module installs a 4-tier policy that runs in the runner's preflight
+(``AgentRunner._preflight_compact_and_budget``), once per turn — the only
+compactor on the agent path:
 
-    | budget_used   | tier       | action                                |
-    |---------------|------------|---------------------------------------|
-    | < 60 %        | green      | noop                                  |
-    | 60-80 %       | yellow     | `prune` tool results (dedupe + age)   |
-    | 80-90 %       | orange     | yellow + emergency cap (Phase 1 stub) |
-    | > 90 %        | red        | yellow + emergency cap, more aggressive |
+    | budget_used   | tier       | action                                  |
+    |---------------|------------|-----------------------------------------|
+    | < 60 %        | green      | noop                                    |
+    | 60-80 %       | yellow     | `prune` tool results (dedupe + age)     |
+    | 80-90 %       | orange     | yellow + LLM summary of head, keep tail |
+    | > 90 %        | red        | orange, keeping fewer recent turns      |
 
-Phase 1 (this file) ships only ``yellow`` properly. The ``orange`` and
-``red`` tiers fall through to a lossy emergency truncate using the
-existing ``cap_messages_tokens`` helper. Phase 2 replaces those tiers
-with an LLM-driven head summarizer; the public API of this module
-(``ContextCompactor.maybe_compact``) is the seam that doesn't change.
+Orange / red summarise the head and keep the tail verbatim. The split point
+is walked back so no tool call is separated from its replies
+(``_safe_split_index``); when no safe split exists, or the summarizer fails,
+the turn falls back to the lossy emergency cap (``cap_messages_tokens``).
+``ContextCompactor.maybe_compact`` is the public seam.
 
 A compaction never edits ``system_message`` and never drops the most
 recent ``keep_recent_turns`` messages — those carry intent that an
