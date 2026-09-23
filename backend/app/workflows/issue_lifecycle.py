@@ -447,6 +447,11 @@ async def run_issue_reply_step(
     from uuid import UUID
 
     from app.schemas.ai_library_chat import AttachmentRequest
+    from app.services.issues.issue_agent_executor import (
+        IssuePreemptedBeforeTurn,
+        issue_status_gate,
+        preempted_before_turn,
+    )
 
     async def _cb(delta: str) -> None:
         await publish_chunk(issue_id, delta)
@@ -456,27 +461,37 @@ async def run_issue_reply_step(
     )
 
     async with collect_deferred_dispatches() as pending:
-        result = await AILibraryChatService().run_session_turn(
-            # session_id is ai_sessions.id = BIGINT Snowflake (mig 231), a
-            # numeric string. Pass it through as-is; UUID() would raise
-            # ValueError.
-            session_id,
-            user_id=UUID(user_id),
-            content=reply_text,
-            trigger="issue_reply",
-            chunk_callback=_cb,
-            attachments=attachment_objects,
-            # phase 2b-2 §4.2: a reply turn is an issue run too. Without this
-            # the row is created with issue_id NULL and only
-            # route_finish_outcome's post-hoc backfill fills it — which never
-            # runs when the turn does not return (crash, cancel, empty output).
-            # Same hole as the dispatch path, different trigger.
-            issue_id=issue_id,
-            # Task 7a defect 6: provenance for the user message this turn opens
-            # with. The turn is the ONLY writer of that message (defect 7), so
-            # if it does not carry the source, nothing downstream can.
-            message_source=source,
-        )
+        try:
+            result = await AILibraryChatService().run_session_turn(
+                # session_id is ai_sessions.id = BIGINT Snowflake (mig 231), a
+                # numeric string. Pass it through as-is; UUID() would raise
+                # ValueError.
+                session_id,
+                user_id=UUID(user_id),
+                content=reply_text,
+                trigger="issue_reply",
+                chunk_callback=_cb,
+                attachments=attachment_objects,
+                # phase 2b-2 §4.2: a reply turn is an issue run too. Without this
+                # the row is created with issue_id NULL and only
+                # route_finish_outcome's post-hoc backfill fills it — which never
+                # runs when the turn does not return (crash, cancel, empty output).
+                # Same hole as the dispatch path, different trigger.
+                issue_id=issue_id,
+                # Task 7a defect 6: provenance for the user message this turn opens
+                # with. The turn is the ONLY writer of that message (defect 7), so
+                # if it does not carry the source, nothing downstream can.
+                message_source=source,
+                # Hotfix-2 PR-3: same gate as the dispatch turn — re-read the
+                # issue AFTER the per-user slot wait, before anything is written.
+                pre_turn_gate=issue_status_gate(issue_id),
+            )
+        except IssuePreemptedBeforeTurn as stop:
+            logger.info(
+                f"[issue_reply] issue {issue_id} is {stop.status!r} after the "
+                "slot wait; reply turn not started"
+            )
+            return {**preempted_before_turn(stop.status), "pending_dispatches": []}
         pending_dispatches = list(pending)
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
@@ -649,6 +664,21 @@ async def _run_reply_turns(
                     error_message=str(exc)[:500],
                 )
             raise
+
+        if _never_started(result):
+            # Hotfix-2 PR-3: the issue went PREEMPT while the reply waited for
+            # its slot. No run, nothing to drain or route; a resume write made
+            # before the cancel is already superseded by the cancel itself.
+            logger.info(
+                f"[issue_reply] issue {issue_id}: "
+                f"{result.get('preempted_status')!r} before the reply turn "
+                "started; not routing"
+            )
+            return {
+                "issue_id": issue_id,
+                "preempted": True,
+                "preempted_status": result.get("preempted_status"),
+            }
 
         last_run_id = _turn_run_id(result) or last_run_id
 
@@ -1244,9 +1274,13 @@ async def _read_issue_status(issue_id: int) -> Optional[str]:
 
 def _never_started(res: Optional[dict[str, Any]]) -> bool:
     """A turn result from ``run_issue_agent``'s pre-run gate: the issue was
-    already PREEMPT when the turn got its slot, so no run row exists."""
-    r = res or {}
-    return r.get("preempted_status") in PREEMPT_STATUSES and not r.get("run_id")
+    already PREEMPT when the turn got its slot, so no run row exists.
+
+    Tolerates a non-dict result (a stub, a future caller) like
+    ``_turn_run_id`` does: reading a marker must never break a turn."""
+    if not isinstance(res, dict):
+        return False
+    return res.get("preempted_status") in PREEMPT_STATUSES and not res.get("run_id")
 
 
 async def _run_dispatch_with_continuation(

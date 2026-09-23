@@ -93,15 +93,16 @@ CONTINUATION_NUDGE = (
 class IssuePreemptedBeforeTurn(Exception):
     """The issue reached a PREEMPT status while its turn waited for a slot.
 
-    Raised by the pre-turn gate inside ``run_session_turn`` and caught in
-    ``run_issue_agent`` — never escapes this module."""
+    Raised by the pre-turn gate inside ``run_session_turn`` and caught by the
+    two issue turn entry points (``run_issue_agent`` here and
+    ``issue_lifecycle.run_issue_reply_step``) — never escapes them."""
 
     def __init__(self, status: str) -> None:
         super().__init__(f"issue {status} before the turn started")
         self.status = status
 
 
-def _preempted_before_turn(status: str) -> dict[str, Any]:
+def preempted_before_turn(status: str) -> dict[str, Any]:
     """The typed result for a turn that never started. ``stop_reason`` is
     ``cancelled`` (the workflow never continues or routes it); no run exists,
     so ``run_id`` is None and nothing may be stamped EMPTY_OUTPUT."""
@@ -115,7 +116,7 @@ def _preempted_before_turn(status: str) -> dict[str, Any]:
     }
 
 
-def _issue_status_gate(iid: int):
+def issue_status_gate(iid: int):
     """Build the ``pre_turn_gate`` for one issue turn (hotfix-2 PR-3).
 
     The workflow's loop-top check runs before the turn queues for the
@@ -264,7 +265,7 @@ async def run_issue_agent(
                 fork_of=fork_of,
                 fork_steer=steer_text is not None,
                 issue_id=iid,
-                pre_turn_gate=_issue_status_gate(iid),
+                pre_turn_gate=issue_status_gate(iid),
             )
         except IssuePreemptedBeforeTurn as stop:
             # No run, no user message, no spend. The ``finally`` below still
@@ -273,7 +274,7 @@ async def run_issue_agent(
                 f"[issue_agent] issue={iid} session={session_id} is "
                 f"{stop.status!r} after the slot wait; not starting the turn"
             )
-            return _preempted_before_turn(stop.status)
+            return preempted_before_turn(stop.status)
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""
