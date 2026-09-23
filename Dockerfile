@@ -1,4 +1,4 @@
-# MediaHub Backend Dockerfile
+# Nous Backend Dockerfile
 # Frontend is deployed separately to Vercel
 
 # ============================================
@@ -233,7 +233,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # py-spy: sample a live process's Python stacks from outside the
 # interpreter. Kept in the image so an event-loop freeze (2026-07-06 P0)
 # can be diagnosed BEFORE the restart destroys the evidence:
-#   docker exec mediahub-app-backend py-spy dump --pid 1
+#   docker exec nous-backend py-spy dump --pid 1
 RUN --mount=type=cache,target=/root/.cache/pip pip install py-spy==0.4.0
 
 # Set working directory
