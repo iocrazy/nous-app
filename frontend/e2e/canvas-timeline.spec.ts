@@ -42,7 +42,7 @@ async function openCanvas(page: Page): Promise<void> {
   await page.addInitScript(() => {
     try {
       localStorage.setItem('language', 'en');
-      localStorage.setItem('mediahub.theme', 'dark');
+      localStorage.setItem('nous.theme', 'dark');
     } catch { /* unavailable */ }
   });
   await setupStubbedSession(page);

@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 // Island redesign D11 — three-state theme. 'system' follows
 // prefers-color-scheme; resolved value is written to <html data-theme>.
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-const STORAGE_KEY = 'mediahub.theme';
+const STORAGE_KEY = STORAGE_KEYS.theme;
 
 // Default preference follows the OS (spec D11). The light-theme contrast
 // polish has landed (hardcoded white/black sites themed, scrollbars

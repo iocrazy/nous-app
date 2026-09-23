@@ -48,6 +48,7 @@ import {
   saveResourceSearchScope,
 } from '../components/resourceSearchScope';
 import type { ResourceSearchField } from '../components/resourceSearchScope';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 // ─── Types ─────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ export type ResourcesFilterParams = Omit<
 const EMPTY_FILTER_PARAMS: ResourcesFilterParams = {};
 
 /** localStorage key for the resource grid's view mode preference. */
-export const RESOURCES_VIEW_MODE_KEY = 'mediahub_resources_view_mode';
+export const RESOURCES_VIEW_MODE_KEY = STORAGE_KEYS.resourcesViewMode;
 
 export interface ResourcesContextType {
   // ── Scope / URL-derived state ──
@@ -404,14 +405,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // Persisted so the preference survives reloads (mirrors useLibrary's pattern).
   const [flattenFolders, setFlattenFolders] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('mediahub_resources_flatten') === '1';
+      return localStorage.getItem(STORAGE_KEYS.resourcesFlatten) === '1';
     } catch {
       return false;
     }
   });
   useEffect(() => {
     try {
-      localStorage.setItem('mediahub_resources_flatten', flattenFolders ? '1' : '0');
+      localStorage.setItem(STORAGE_KEYS.resourcesFlatten, flattenFolders ? '1' : '0');
     } catch {
       /* ignore quota / privacy-mode failures */
     }

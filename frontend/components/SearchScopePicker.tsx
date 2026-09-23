@@ -10,14 +10,15 @@ import { useTranslation } from 'react-i18next';
 import { Check, Filter } from 'lucide-react';
 import type { SearchField } from '../services/searchService';
 import { ALL_SEARCH_FIELDS, DEFAULT_SEARCH_FIELDS } from '../services/searchService';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
-const STORAGE_KEY = 'mediahub_search_scope_v2';
+const STORAGE_KEY = STORAGE_KEYS.searchScope;
 
 /** The pre-v2 default. Anyone whose stored scope is exactly this never
  *  touched the picker, so they get the widened default instead of being
  *  stranded on a scope that cannot find their tags. A stored set that
  *  differs in any way is a real choice and is preserved as-is. */
-const LEGACY_STORAGE_KEY = 'mediahub_search_scope';
+const LEGACY_STORAGE_KEY = STORAGE_KEYS.searchScopeLegacy;
 const LEGACY_DEFAULT: SearchField[] = [
   'title',
   'description',

@@ -15,6 +15,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getSupabaseAccessToken } from '../supabaseClient';
+import { SESSION_KEYS } from '../utils/storageKeys';
 
 type ErrorType = 'runtime' | 'network' | 'unhandled_rejection' | 'react_boundary';
 
@@ -31,7 +32,7 @@ interface ErrorReport {
 
 // Stable per-tab session id so grouped errors in monitoring line up.
 function ensureSessionId(): string {
-  const key = 'mediahub_error_session_id';
+  const key = SESSION_KEYS.errorSessionId;
   try {
     const existing = window.sessionStorage?.getItem(key);
     if (existing) return existing;

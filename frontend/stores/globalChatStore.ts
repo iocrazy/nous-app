@@ -14,6 +14,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 export interface PageChatContext {
   projectId?: string;
@@ -211,7 +212,7 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       consumePendingAsset: () => set({ pendingAsset: null }),
     }),
     {
-      name: 'mediahub.global_chat',
+      name: STORAGE_KEYS.globalChat,
       // pageContext holds page callbacks — never persist it, and the
       // four one-shot channels must not survive a reload either (a
       // resurrected intent would re-fire on every page load).

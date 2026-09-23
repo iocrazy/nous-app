@@ -150,8 +150,8 @@ export async function setupStubbedSession(page: Page, opts: StubOptions = {}): P
     ([key, sess, teamId]) => {
       try {
         localStorage.setItem(key as string, JSON.stringify(sess));
-        localStorage.setItem('mediahub_selected_team', teamId as string);
-        localStorage.setItem('mediahub_personal_team', teamId as string);
+        localStorage.setItem('nous_selected_team', teamId as string);
+        localStorage.setItem('nous_personal_team', teamId as string);
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

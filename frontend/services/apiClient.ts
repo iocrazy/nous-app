@@ -20,9 +20,10 @@ import {
   isCallerAbort,
   reportApiNetworkFailure,
 } from '../utils/apiConfig';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
-const API_KEY_STORAGE_KEYS = ['mediahub_api_key', 'douyin_api_key'] as const;
-const TEAM_STORAGE_KEY = 'mediahub_selected_team';
+const API_KEY_STORAGE_KEYS = [STORAGE_KEYS.apiKey, 'douyin_api_key'] as const;
+const TEAM_STORAGE_KEY = STORAGE_KEYS.selectedTeam;
 
 function readStorage(key: string): string | null {
   try {

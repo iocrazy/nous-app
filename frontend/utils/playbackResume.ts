@@ -32,7 +32,9 @@
  * completes.
  */
 
-const STORE_KEY = 'mediahub_playback_positions_v1';
+import { STORAGE_KEYS } from './storageKeys';
+
+const STORE_KEY = STORAGE_KEYS.playbackPositions;
 
 /** Positions older than this are dropped on the next write. */
 export const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days

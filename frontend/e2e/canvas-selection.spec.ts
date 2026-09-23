@@ -5,7 +5,7 @@ test('clicking a node selects it and enables composer Run (selection regression)
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.addInitScript(() => {
     localStorage.setItem('language', 'en');
-    localStorage.setItem('mediahub.theme', 'dark');
+    localStorage.setItem('nous.theme', 'dark');
   });
   await setupStubbedSession(page);
   await page.route('**/api/v1/canvases/c-sel', (r) =>

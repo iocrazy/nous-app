@@ -166,7 +166,7 @@ describe('resume', () => {
 
 describe('volume memory', () => {
   it('applies the stored volume to a freshly attached element', () => {
-    localStorage.setItem('mediahub_volume_pref', JSON.stringify({ volume: 0.3, muted: false }));
+    localStorage.setItem('nous_volume_pref', JSON.stringify({ volume: 0.3, muted: false }));
 
     const { ref } = renderPlayer();
     const video = ref.current!;

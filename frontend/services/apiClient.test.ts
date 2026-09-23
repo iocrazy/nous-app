@@ -70,7 +70,7 @@ describe('buildAuthHeaders', () => {
   });
 
   it('prefers X-API-Key over Bearer when both available', async () => {
-    localStorage.setItem('mediahub_api_key', 'sk_test_abc');
+    localStorage.setItem('nous_api_key', 'sk_test_abc');
     getToken.mockResolvedValueOnce('t0k3n');
     const headers = await buildAuthHeaders();
     expect(headers['X-API-Key']).toBe('sk_test_abc');
@@ -84,7 +84,7 @@ describe('buildAuthHeaders', () => {
   });
 
   it('attaches X-Team-Id when selected team is set', async () => {
-    localStorage.setItem('mediahub_selected_team', 'team-42');
+    localStorage.setItem('nous_selected_team', 'team-42');
     getToken.mockResolvedValueOnce(null);
     const headers = await buildAuthHeaders();
     expect(headers['X-Team-Id']).toBe('team-42');

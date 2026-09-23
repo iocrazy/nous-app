@@ -177,3 +177,24 @@ describe('serializeWorkflow — strips the full RF internal set', () => {
     expect(node.dragging).toBeUndefined();
   });
 });
+
+describe('workflow format rename (mediahub → nous)', () => {
+  it('writes the nous format', () => {
+    expect(serializeWorkflow('smart', NODES, CONNECTIONS).format).toBe('nous-canvas-workflow');
+  });
+
+  it('still imports a file exported under the legacy mediahub format', () => {
+    const legacy = {
+      ...serializeWorkflow('smart', NODES, CONNECTIONS),
+      format: 'mediahub-canvas-workflow',
+    };
+    const parsed = parseWorkflow(JSON.stringify(legacy));
+    expect(parsed.nodes).toHaveLength(2);
+    expect(parsed.kind).toBe('smart');
+  });
+
+  it('rejects an unknown format with the Nous wording', () => {
+    const bad = { ...serializeWorkflow('smart', NODES, CONNECTIONS), format: 'something-else' };
+    expect(() => parseWorkflow(JSON.stringify(bad))).toThrow('Not a Nous canvas workflow file');
+  });
+});

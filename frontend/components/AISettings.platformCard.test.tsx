@@ -1,5 +1,5 @@
 /**
- * Tests for the "MediaHub (Platform)" models card.
+ * Tests for the "Nous (Platform)" models card.
  *
  * Two fixes under test:
  *   1. The card renders ALL enabled platform model types (llm / embedding /
@@ -114,7 +114,7 @@ function renderSettings() {
   return render(<AISettings settings={baseSettings} onSave={vi.fn()} />);
 }
 
-describe('AISettings — MediaHub (Platform) models card', () => {
+describe('AISettings — Nous (Platform) models card', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

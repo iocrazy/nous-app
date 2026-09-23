@@ -72,7 +72,7 @@ test.describe('smart canvas drag-snap-connect (Phase 1 G1)', () => {
     await page.addInitScript(() => {
       try {
         localStorage.setItem('language', 'en');
-        localStorage.setItem('mediahub.theme', 'dark');
+        localStorage.setItem('nous.theme', 'dark');
       } catch {
         /* localStorage unavailable */
       }

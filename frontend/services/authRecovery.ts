@@ -17,6 +17,7 @@
 
 import { getSupabaseClient } from '../supabaseClient';
 import { getApiUrl } from '../utils/apiConfig';
+import { SESSION_KEYS } from '../utils/storageKeys';
 
 /** Pure decision: does this response warrant a recovery attempt? */
 export function shouldIntercept(url: string, status: number, apiBase: string): boolean {
@@ -91,7 +92,7 @@ export function installAuthRecovery(): void {
       // Leave a one-shot breadcrumb so the login page can explain WHY
       // the user landed there ("session expired") instead of a silent kick.
       try {
-        sessionStorage.setItem('mediahub_auth_expired', '1');
+        sessionStorage.setItem(SESSION_KEYS.authExpired, '1');
       } catch (err) {
         console.error('[authRecovery] failed to set expiry breadcrumb:', err);
       }

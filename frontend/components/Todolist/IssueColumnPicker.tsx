@@ -9,6 +9,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Check, X } from 'lucide-react';
+import { TODOLIST_COLUMNS_PREFIX } from '../../utils/storageKeys';
 
 export type IssueColumnKey =
   | 'status'
@@ -51,7 +52,7 @@ export const DEFAULT_VISIBLE_COLUMNS: IssueColumnKey[] = [
   'updated',
 ];
 
-const STORAGE_KEY_PREFIX = 'mediahub:todolist:columns';
+const STORAGE_KEY_PREFIX = TODOLIST_COLUMNS_PREFIX;
 
 export function loadVisibleColumns(scopeKey: string): Set<IssueColumnKey> {
   try {

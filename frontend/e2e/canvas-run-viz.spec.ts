@@ -104,7 +104,7 @@ test('edges carry run-state classes matching their prompt status', async ({ page
   await page.addInitScript(() => {
     try {
       localStorage.setItem('language', 'en');
-      localStorage.setItem('mediahub.theme', 'dark');
+      localStorage.setItem('nous.theme', 'dark');
     } catch {
       /* localStorage unavailable */
     }

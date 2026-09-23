@@ -1,3 +1,6 @@
+// Must stay the first import: moves legacy mediahub* storage keys before any
+// reader module (zustand persist hydrates at import time) evaluates.
+import './utils/storageKeysBoot';
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';

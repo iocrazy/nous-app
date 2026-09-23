@@ -91,11 +91,11 @@ describe('pendingResource channel', () => {
     // partialize decides what survives a reload; a resurrected
     // pendingResource would re-insert a chip on every page load.
     const persisted = JSON.parse(
-      localStorage.getItem('mediahub.global_chat') ?? '{}',
+      localStorage.getItem('nous.global_chat') ?? '{}',
     );
     useGlobalChatStore.getState().sendResourceToChat(RESOURCE);
     const after = JSON.parse(
-      localStorage.getItem('mediahub.global_chat') ?? '{}',
+      localStorage.getItem('nous.global_chat') ?? '{}',
     );
 
     expect(persisted.state?.pendingResource).toBeUndefined();
@@ -155,11 +155,11 @@ describe('pendingAsset channel', () => {
     // partialize decides what survives a reload; a resurrected pendingAsset
     // would re-stage a chip on every page load.
     const persisted = JSON.parse(
-      localStorage.getItem('mediahub.global_chat') ?? '{}',
+      localStorage.getItem('nous.global_chat') ?? '{}',
     );
     useGlobalChatStore.getState().sendAssetToChat(ASSET);
     const after = JSON.parse(
-      localStorage.getItem('mediahub.global_chat') ?? '{}',
+      localStorage.getItem('nous.global_chat') ?? '{}',
     );
 
     expect(persisted.state?.pendingAsset).toBeUndefined();

@@ -107,13 +107,13 @@ describe('storage failures degrade to "no memory"', () => {
   });
 
   it('corrupt JSON reads as empty instead of crashing the player', () => {
-    localStorage.setItem('mediahub_playback_positions_v1', '{not json');
+    localStorage.setItem('nous_playback_positions_v1', '{not json');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(loadPosition(U, 'k')).toBeNull();
   });
 
   it('a non-object payload reads as empty', () => {
-    localStorage.setItem('mediahub_playback_positions_v1', '[1,2,3]');
+    localStorage.setItem('nous_playback_positions_v1', '[1,2,3]');
     expect(loadPosition(U, 'k')).toBeNull();
   });
 });
@@ -204,9 +204,9 @@ describe('clearUser', () => {
 
   it('is a no-op when the account has nothing stored', () => {
     savePosition(V, 'a', 120, 600);
-    const before = localStorage.getItem('mediahub_playback_positions_v1');
+    const before = localStorage.getItem('nous_playback_positions_v1');
     clearUser(U);
-    expect(localStorage.getItem('mediahub_playback_positions_v1')).toBe(before);
+    expect(localStorage.getItem('nous_playback_positions_v1')).toBe(before);
   });
 
   it('a user id that is a prefix of another does not take its entries', () => {
