@@ -7,8 +7,8 @@ timeline and the agent tool can move onto it; these tests pin two things:
 * the argv/payload it builds is BYTE-FOR-BYTE what canvas produced before the
   extraction (the expected values below were captured from the pre-refactor
   ``generate_canvas_media_step``, not re-derived from the new code);
-* the three failure paths that used to escape untyped — daemon offline,
-  provider card off, daemon timeout — now leave ``metadata.failure`` behind and
+* the failure paths that used to escape untyped — daemon offline, daemon too
+  old, provider card off, daemon timeout — now leave ``metadata.failure`` and
   are NOT retried by DBOS (a retry either cannot help, or re-submits a paid job).
 """
 
@@ -185,16 +185,48 @@ def test_video_dispatch_waits_longer_than_the_daemon_can_run():
 
     assert DAEMON_DREAMINA_RUN_BUDGET_S == 20 * 60
     assert DAEMON_DREAMINA_QUERY_BUDGET_S == 5 * 60
-    assert dispatch_timeout_for("video") == 25 * 60 + 120
-    assert dispatch_timeout_for("video") > (
+    assert dispatch_timeout_for("dreamina", "video") == 25 * 60 + 120
+    assert dispatch_timeout_for("dreamina", "video") > (
         DAEMON_DREAMINA_RUN_BUDGET_S + DAEMON_DREAMINA_QUERY_BUDGET_S
     )
-    assert dispatch_timeout_for("image") == DEFAULT_TIMEOUT_S == 600
+    assert DEFAULT_TIMEOUT_S == 600
+
+
+@pytest.mark.parametrize(
+    "engine,kind,expected",
+    [
+        # runDreaminaJob does not branch on kind: image and video share the
+        # 20 + 5 min budget, so a slow dreamina IMAGE must not be abandoned
+        # at 600 s while the daemon is still producing it.
+        ("dreamina", "image", 25 * 60 + 120),
+        ("dreamina", "video", 25 * 60 + 120),
+        # runImageJob -> runCommand's default timeoutMs (15 min) + grace.
+        ("codex", "image", 15 * 60 + 120),
+        # The daemon answers a codex non-image job with unsupported_kind
+        # at once; nothing to wait out, keep the old default.
+        ("codex", "video", 600),
+    ],
+)
+def test_timeout_follows_the_engine_budget(engine, kind, expected):
+    from app.services.generation.local_dispatch import (
+        DAEMON_CODEX_IMAGE_BUDGET_S,
+        dispatch_timeout_for,
+    )
+
+    assert DAEMON_CODEX_IMAGE_BUDGET_S == 15 * 60
+    assert dispatch_timeout_for(engine, kind) == expected
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind,expected", [("video", 1620), ("image", 600)])
-async def test_dispatch_passes_the_kind_timeout(kind, expected):
+@pytest.mark.parametrize(
+    "engine,kind,expected",
+    [
+        ("dreamina", "video", 1620),
+        ("dreamina", "image", 1620),
+        ("codex", "image", 1020),
+    ],
+)
+async def test_dispatch_passes_the_engine_timeout(engine, kind, expected):
     from app.services.generation import local_dispatch
 
     captured: dict = {}
@@ -207,7 +239,7 @@ async def test_dispatch_passes_the_kind_timeout(kind, expected):
         "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
     ):
         out = await local_dispatch.dispatch_local_generation(
-            engine="dreamina",
+            engine=engine,
             engine_model="3.0",
             media_kind=kind,
             request=_eff(kind, {"aspect": "16:9"}),
@@ -424,3 +456,61 @@ async def test_a_transient_daemon_failure_still_raises_for_a_retry():
             scope_id=7,
             attribution={},
         )
+
+
+class _OnlineTransport:
+    async def is_online(self, user_id: str) -> bool:
+        return True
+
+    async def send_job(self, user_id: str, job: dict) -> None:  # pragma: no cover
+        raise AssertionError("a too-old daemon must not be sent a job")
+
+    async def wait_result(self, job_id: str, timeout_s: float) -> dict:
+        raise AssertionError("never reached")  # pragma: no cover
+
+
+@pytest.mark.asyncio
+async def test_daemon_update_required_is_typed_and_not_retried():
+    """Before: ``DaemonUpdateRequiredError`` escaped the step untyped - no
+    ``metadata.failure``, and DBOS retried a verdict no update can change
+    inside its retry window."""
+    import app.workflows.canvas_generation as m
+
+    patched: dict = {}
+
+    async def fake_patch(task_id, patch_dict):
+        patched.update(patch_dict)
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.RedisDaemonTransport",
+            new=_OnlineTransport,
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.reported_daemon_version",
+            new=AsyncMock(return_value="0.3.0"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.services.generation.local_dispatch.patch_task_metadata",
+            new=fake_patch,
+        ),
+        patch.object(m.DBOS, "workflow_id", "wf-update", create=True),
+    ):
+        media = await m.generate_canvas_media_step(**_step_call("codex-local-image"))
+
+    assert media["failed"].startswith("[daemon_update_required]")
+    assert media["failed"].isascii()
+    # The real update route, not an invented one (tools/codex-daemon/README.md
+    # "Upgrading"): it keeps the device token, so no pairing code is needed.
+    assert "install.sh | sh -s -- --update" in media["failed"]
+    assert "0.3.0" in media["failed"]
+    assert patched["failure"]["code"] == "daemon_update_required"
+    assert "daemon_update_required" in m.NON_RETRYABLE_FAILURE_CODES

@@ -136,6 +136,14 @@ describe('humanizeTaskError — local daemon', () => {
     expect(r.hint ?? '').toMatch(/Generated/);
     expect(r.message).not.toMatch(/retry usually works/);
   });
+
+  it('tells a user with an old daemon how to update it', () => {
+    const r = humanizeTaskError(
+      'RuntimeError: [daemon_update_required] your local codex daemon is 0.3.0; image generation needs >= 0.4.0.',
+    );
+    expect(r.message).toBe('Your local daemon is too old for this job.');
+    expect(r.hint ?? '').toMatch(/--update/);
+  });
 });
 
 describe('humanizeTaskError — object store write failed', () => {

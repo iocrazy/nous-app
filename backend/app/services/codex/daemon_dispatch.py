@@ -85,7 +85,14 @@ class DaemonTimeoutError(TimeoutError):
 
 
 class DaemonUpdateRequiredError(RuntimeError):
-    """The connected daemon is too old for this job; message says how to update."""
+    """The connected daemon is too old for this job; message says how to update.
+
+    Typed like ``DaemonOfflineError`` so a generation step records it and does
+    not retry: no update happens inside DBOS's retry window.
+    """
+
+    code = "daemon_update_required"
+    detail = ""
 
 
 class DaemonJobFailedError(RuntimeError):
@@ -219,7 +226,8 @@ async def dispatch_to_daemon(
             reported, MIN_IMAGE_DAEMON_VERSION
         ):
             raise DaemonUpdateRequiredError(
-                f"your local codex daemon is {reported}; image generation needs "
+                f"[daemon_update_required] your local codex daemon is {reported}; "
+                "image generation needs "
                 f">= {MIN_IMAGE_DAEMON_VERSION}. No pairing code needed - update "
                 f"it in place with: {_UPDATE_COMMAND} "
                 "(on Windows, run install.ps1 with -Update instead; see "

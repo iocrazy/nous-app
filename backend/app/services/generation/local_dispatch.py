@@ -43,31 +43,42 @@ LOCAL_ENGINES = {"codex-local": "codex", "jimeng-local": "dreamina"}
 # ...and back: capabilities live under the catalog key, not the engine name.
 _ENGINE_PROVIDER_KEY = {engine: key for key, engine in LOCAL_ENGINES.items()}
 
-# The daemon's own budget for one dreamina job - tools/codex-daemon/index.mjs
-# ``runDreaminaJob``: ``runCommand('dreamina', ..., {timeoutMs: 20 * 60_000})``
-# for the generation, then ``query_result`` with ``timeoutMs: 5 * 60_000``.
-# Change these together with that file.
+# The daemon's own per-job budgets, from tools/codex-daemon/index.mjs. Change
+# these together with that file.
+#
+# dreamina (``runDreaminaJob``, image AND video - it does not branch on kind):
+#   ``runCommand('dreamina', args, { timeoutMs: 20 * 60_000 })`` for the run,
+#   then ``query_result`` with ``{ timeoutMs: 5 * 60_000 }``.
 DAEMON_DREAMINA_RUN_BUDGET_S = 20 * 60
 DAEMON_DREAMINA_QUERY_BUDGET_S = 5 * 60
+# codex image (``runImageJob``): ``runCommand('gpt-image-2-skill', ...)`` passes
+# no timeoutMs, so it gets runCommand's default,
+# ``export function runCommand(bin, args, { timeoutMs = 15 * 60_000, ... })``.
+DAEMON_CODEX_IMAGE_BUDGET_S = 15 * 60
 # Ref downloads before the run, the product upload after it, and the Redis
 # hops either side - none of which the daemon's timers count.
 DAEMON_GRACE_S = 120
-VIDEO_DISPATCH_TIMEOUT_S = (
+
+DREAMINA_DISPATCH_TIMEOUT_S = (
     DAEMON_DREAMINA_RUN_BUDGET_S + DAEMON_DREAMINA_QUERY_BUDGET_S + DAEMON_GRACE_S
 )
-IMAGE_DISPATCH_TIMEOUT_S = DEFAULT_TIMEOUT_S
+CODEX_IMAGE_DISPATCH_TIMEOUT_S = DAEMON_CODEX_IMAGE_BUDGET_S + DAEMON_GRACE_S
 
 
-def dispatch_timeout_for(media_kind: str) -> float:
-    """How long to wait for the daemon's answer.
+def dispatch_timeout_for(engine: str, media_kind: str) -> float:
+    """How long to wait for the daemon's answer: its own budget plus grace.
 
-    Video waits out the daemon's whole dreamina budget plus grace: giving up
-    earlier abandons a job the user's machine is still legitimately running
-    (and paying for). Image keeps the long-standing default.
+    Giving up before the daemon does abandons a job the user's machine is
+    still legitimately running (and paying for), and reports it as a timeout
+    that later "succeeds" when the upload lands. Anything the daemon has no
+    bounded runner for (a codex non-image job is answered ``unsupported_kind``
+    immediately) keeps the long-standing default.
     """
-    if media_kind == "video":
-        return VIDEO_DISPATCH_TIMEOUT_S
-    return IMAGE_DISPATCH_TIMEOUT_S
+    if engine == "dreamina":
+        return DREAMINA_DISPATCH_TIMEOUT_S
+    if engine == "codex" and media_kind == "image":
+        return CODEX_IMAGE_DISPATCH_TIMEOUT_S
+    return DEFAULT_TIMEOUT_S
 
 
 # Failures whose second attempt is guaranteed to be the first attempt again,
@@ -79,10 +90,17 @@ def dispatch_timeout_for(media_kind: str) -> float:
 #   daemon_offline         - nobody starts their daemon in DBOS's retry gap.
 #   daemon_timeout         - the job was delivered and may still be running;
 #                            a retry re-submits a PAID job after a wait of up
-#                            to ``VIDEO_DISPATCH_TIMEOUT_S``, and the first one
-#                            can still upload its product later.
+#                            to ``DREAMINA_DISPATCH_TIMEOUT_S``, and the first
+#                            one can still upload its product later.
+#   daemon_update_required - nobody updates their daemon in DBOS's retry gap.
 NON_RETRYABLE_FAILURE_CODES = frozenset(
-    {"content_refused", "provider_card_disabled", "daemon_offline", "daemon_timeout"}
+    {
+        "content_refused",
+        "provider_card_disabled",
+        "daemon_offline",
+        "daemon_timeout",
+        "daemon_update_required",
+    }
 )
 
 
@@ -251,7 +269,7 @@ async def dispatch_local_generation(
     caller needs ``eff.refs`` before it can resolve ``ref_urls``.
     ``scope_id`` / ``attribution`` ride the upload ticket: the daemon's upload
     endpoint, not the caller, creates the ``generated_media`` row.
-    ``timeout_s`` defaults to ``dispatch_timeout_for(media_kind)``.
+    ``timeout_s`` defaults to ``dispatch_timeout_for(engine, media_kind)``.
 
     Every typed failure - card off, daemon offline, daemon timeout, a failure
     the daemon reported - is recorded through ``record_failure_detail``, which
@@ -282,13 +300,16 @@ async def dispatch_local_generation(
             payload=payload,
             attribution=attribution,
             timeout_s=(
-                timeout_s if timeout_s is not None else dispatch_timeout_for(media_kind)
+                timeout_s
+                if timeout_s is not None
+                else dispatch_timeout_for(engine, media_kind)
             ),
         )
     except (
         daemon_dispatch.DaemonJobFailedError,
         daemon_dispatch.DaemonOfflineError,
         daemon_dispatch.DaemonTimeoutError,
+        daemon_dispatch.DaemonUpdateRequiredError,
     ) as exc:
         # Raises for transient codes; returns {"failed": ...} for
         # deterministic ones - the caller must check for that key.
@@ -364,10 +385,11 @@ __all__ = [
     "DAEMON_DREAMINA_QUERY_BUDGET_S",
     "DAEMON_DREAMINA_RUN_BUDGET_S",
     "DAEMON_GRACE_S",
-    "IMAGE_DISPATCH_TIMEOUT_S",
+    "CODEX_IMAGE_DISPATCH_TIMEOUT_S",
+    "DAEMON_CODEX_IMAGE_BUDGET_S",
     "LOCAL_ENGINES",
     "NON_RETRYABLE_FAILURE_CODES",
-    "VIDEO_DISPATCH_TIMEOUT_S",
+    "DREAMINA_DISPATCH_TIMEOUT_S",
     "build_local_payload",
     "capabilities_for",
     "dispatch_local_generation",

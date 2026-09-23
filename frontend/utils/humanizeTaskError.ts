@@ -81,6 +81,15 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     hint: 'It may still finish and appear in Generated. Check there before running it again.',
   },
   {
+    // The connected daemon is older than this job needs. The raw message
+    // carries the exact update command (tools/codex-daemon/README.md,
+    // "Upgrading"); Details shows it. Not retried: an update never happens
+    // inside the backend's retry window.
+    test: /\[daemon_update_required\]/i,
+    message: 'Your local daemon is too old for this job.',
+    hint: 'Update it in place (no pairing code needed): run install.sh with --update, or install.ps1 with -Update on Windows. The exact command is in Details.',
+  },
+  {
     // The image model DECLINED the prompt on content grounds: it answered with
     // prose (why, plus a rewrite that would work) instead of calling the image
     // tool. Two raw shapes reach here and both must match:
