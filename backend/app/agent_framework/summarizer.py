@@ -161,8 +161,13 @@ async def summarize(
     *,
     provider_override: Optional[str] = None,
     max_tokens: int = DEFAULT_SUMMARY_MAX_TOKENS,
+    user_id: str | None = None,
 ) -> str:
     """Compress ``messages`` into a single paragraph summary.
+
+    ``user_id`` is routing context, not a credential: a ``codex-local``
+    maintenance model runs on that user's own paired machine and refuses to
+    build without it. Background callers with no user may omit it.
 
     Returns the summary text (NOT a wrapped message dict — caller
     decides how to embed it). Raises ``RuntimeError`` on any provider
@@ -185,8 +190,8 @@ async def summarize(
         # DB-only credential resolution (铁律 2026-07-07): platform
         # ``nous_models`` catalog first, no env fallback. The compaction
         # provider is an admin-level system setting, so there is no user BYOK
-        # dict to thread through here.
-        adapter = await resolve_db_adapter(provider, "summarizer")
+        # dict to thread through here — only the user as routing context.
+        adapter = await resolve_db_adapter(provider, "summarizer", user_id=user_id)
     except ValueError as exc:
         raise RuntimeError(
             f"[summarizer] unsupported provider {provider!r}: {exc}"

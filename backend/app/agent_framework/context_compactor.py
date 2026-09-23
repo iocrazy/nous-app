@@ -39,6 +39,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.agent_framework._metrics_helper import inc_metric
 from app.agent_framework.context_window import resolve_model_window
 from app.agent_framework.message_truncation import cap_messages_tokens
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
@@ -82,6 +83,71 @@ class CompactionStats:
     yellow_prune: Optional[PruneStats] = None
     emergency_dropped_chars: int = 0
     notes: tuple[str, ...] = ()
+
+
+class NoSafeSplitError(RuntimeError):
+    """No head/tail boundary keeps every tool call with its replies.
+
+    Raised before any model call, so the caller's emergency-cap fallback
+    reports ``attempts=0`` rather than pretending it tried to summarize.
+    """
+
+
+def _safe_split_index(messages: list[dict], candidate: int) -> int:
+    """Walk ``candidate`` back until the tail holds no orphaned tool replies.
+
+    Summarization drops ``messages[:split]`` and keeps ``messages[split:]``
+    verbatim. A tail ``role=tool`` reply whose ``tool_call_id`` was issued by
+    an assistant ``tool_calls`` message in the head would be orphaned — the
+    call is summarized away, the reply answers nothing, and Anthropic-shaped
+    providers reject the request outright.
+
+    Moving the boundary back only moves messages from head into tail. An
+    assistant message that joins the tail brings no new orphan (its replies
+    come after it, so they are already in the tail); a tool reply that joins
+    the tail may, hence the loop until stable.
+
+    Returns 0 when no boundary is safe (one exchange spans the history).
+    Ported from ``llm_compactor._safe_split_index`` when the chat path moved
+    onto this compactor.
+    """
+    while candidate > 0:
+        tail_reply_ids = {
+            m.get("tool_call_id")
+            for m in messages[candidate:]
+            if m.get("role") == "tool" and m.get("tool_call_id")
+        }
+        if not tail_reply_ids:
+            return candidate
+        head_call_ids = {
+            call.get("id")
+            for m in messages[:candidate]
+            if m.get("role") == "assistant"
+            for call in m.get("tool_calls") or []
+            if call.get("id")
+        }
+        orphans = tail_reply_ids & head_call_ids
+        if not orphans:
+            return candidate
+        owner = _last_owner_before(messages, candidate, orphans)
+        if owner is None:
+            return 0
+        candidate = owner
+    return candidate
+
+
+def _last_owner_before(
+    messages: list[dict], candidate: int, call_ids: set[Any]
+) -> int | None:
+    """Index of the last assistant before ``candidate`` issuing any of
+    ``call_ids``; ``None`` if none does."""
+    for idx in range(candidate - 1, -1, -1):
+        msg = messages[idx]
+        if msg.get("role") != "assistant":
+            continue
+        if {c.get("id") for c in msg.get("tool_calls") or []} & call_ids:
+            return idx
+    return None
 
 
 async def _emit(recorder: Any, event_type: str, payload: dict[str, Any]) -> None:
@@ -137,6 +203,7 @@ class ContextCompactor:
         adapter: Any = None,
         tools: Optional[list] = None,
         recorder: Any = None,
+        user_id: str | None = None,
     ) -> tuple[list[dict], CompactionStats]:
         """Return possibly-compacted messages + stats.
 
@@ -144,6 +211,10 @@ class ContextCompactor:
         receives the compaction bracket — ``compaction_start`` /
         ``compaction_summary`` / ``compaction_end`` — on the orange/red path
         only. Telemetry: ``None`` is silent, a throwing recorder is a warning.
+
+        ``user_id`` is routing context for the legacy maintenance-model
+        summary (``codex-local`` runs on the user's own paired machine); the
+        warm path doesn't need it — it reuses the already-routed ``adapter``.
 
         Async because Phase 2 may make an LLM call to summarize the
         head when the budget is tight. The yellow path is still
@@ -242,6 +313,7 @@ class ContextCompactor:
         notes: list[str] = list(window_notes)
         capped: list[dict]
         dropped_chars = 0
+        inc_metric("compaction_triggered")
         # The bracket: start lands BEFORE the summarizer is awaited, end lands
         # in ``finally``. A crash in between leaves an orphan start — the
         # crash scene — never an end that claims a completion it did not see.
@@ -261,6 +333,7 @@ class ContextCompactor:
                     tools=tools,
                     adapter=adapter,
                     recorder=recorder,
+                    user_id=user_id,
                 )
                 notes.append("compacted via LLM head summary")
             except Exception as exc:
@@ -274,7 +347,11 @@ class ContextCompactor:
                     "compaction_summary",
                     {
                         "path": "emergency_cap",
-                        "attempts": self.SUMMARY_ATTEMPTS,
+                        "attempts": (
+                            0
+                            if isinstance(exc, NoSafeSplitError)
+                            else self.SUMMARY_ATTEMPTS
+                        ),
                         "error": f"{exc!s:.200}",
                     },
                 )
@@ -285,9 +362,12 @@ class ContextCompactor:
                     sys_tokens=sys_tokens,
                     keep_recent_turns=keep,
                 )
-                notes.append(
-                    f"emergency-cap fallback (summarizer failed: {exc!s:.120})"
+                reason = (
+                    "no safe split"
+                    if isinstance(exc, NoSafeSplitError)
+                    else "summarizer failed"
                 )
+                notes.append(f"emergency-cap fallback ({reason}: {exc!s:.120})")
             final_total = sys_tokens + count_messages_tokens(capped, model)
             end_payload = {
                 "tokens_after": final_total,
@@ -334,6 +414,7 @@ class ContextCompactor:
         tools: Optional[list] = None,
         adapter: Any = None,
         recorder: Any = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         """Replace messages[:-keep_recent_turns] with a single
         [Earlier conversation summary] system message produced by the
@@ -346,15 +427,28 @@ class ContextCompactor:
         a successful compaction. Rejected drafts are retried up to
         ``SUMMARY_ATTEMPTS`` in total, then this raises.
 
+        The boundary is pulled back so no assistant ``tool_calls`` message is
+        summarized away while its ``role=tool`` replies stay in the tail
+        (``_safe_split_index``); the tail may therefore exceed
+        ``keep_recent_turns``.
+
         Raises ``RuntimeError`` (from the summarizer, or from the shrink
         check) so the caller can fall back to the lossy ``_emergency_cap``
-        path — which is deterministic and always shrinks.
+        path — which is deterministic and always shrinks. Raises
+        ``NoSafeSplitError`` (a ``RuntimeError``) without calling any model
+        when every boundary would orphan a tool reply.
         """
         if len(messages) <= keep_recent_turns:
             return list(messages)  # nothing to summarize
 
-        head = messages[:-keep_recent_turns]
-        tail = messages[-keep_recent_turns:]
+        split = _safe_split_index(messages, len(messages) - keep_recent_turns)
+        if split == 0:
+            raise NoSafeSplitError(
+                "no safe split point: every head/tail boundary would separate "
+                "a tool call from its replies"
+            )
+        head = messages[:split]
+        tail = messages[split:]
         head_tokens = count_messages_tokens(head, model)
 
         last_summary_tokens: Optional[int] = None
@@ -365,6 +459,7 @@ class ContextCompactor:
                 tools=tools,
                 adapter=adapter,
                 model=model,
+                user_id=user_id,
             )
             summary_message = {
                 "role": "system",
@@ -419,6 +514,7 @@ class ContextCompactor:
         tools: Optional[list],
         adapter: Any,
         model: str,
+        user_id: str | None = None,
     ) -> tuple[str, str]:
         """Warm-prefix first, legacy cheap-model second.
 
@@ -454,7 +550,7 @@ class ContextCompactor:
                     "to the maintenance model: {}",
                     exc,
                 )
-        return await summarizer.summarize(head), "legacy"
+        return await summarizer.summarize(head, user_id=user_id), "legacy"
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
         if used_pct >= self.thresholds.red_pct:
@@ -480,6 +576,11 @@ class ContextCompactor:
         messages verbatim; cap each older message body to a fair share of
         the remaining budget. Phase 2 will replace this with an LLM
         summary of the older head.
+
+        Pair-safe without ``_safe_split_index``: this path only truncates
+        bodies (``cap_messages_tokens`` copies each message, keeping
+        ``tool_calls`` / ``tool_call_id``) and never removes a message, so no
+        boundary here can orphan a tool reply.
 
         Returns (new_messages, total_chars_dropped).
         """
@@ -518,6 +619,7 @@ class ContextCompactor:
 
 __all__ = [
     "ContextCompactor",
+    "NoSafeSplitError",
     "CompactionTier",
     "CompactionStats",
     "CompactionThresholds",

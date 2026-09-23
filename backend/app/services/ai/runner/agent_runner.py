@@ -77,6 +77,13 @@ MAX_TOOL_ITERATIONS = 10
 # object on the agent's hot path.
 _DEFAULT_COMPACTOR = ContextCompactor()
 
+
+def _compaction_user_id(recorder: Any) -> str | None:
+    """The run's user as a string, for compaction's legacy-summary routing."""
+    user_id = getattr(recorder, "user_id", None) if recorder is not None else None
+    return str(user_id) if user_id else None
+
+
 # Tool names recognised by the runner. Anything else is silently ignored
 # (forward-compat with future caller-provided tools).
 # Q5: MCP-routed tools are matched by ``"." in name`` separately — they
@@ -1602,6 +1609,9 @@ class AgentRunner:
             # Phase 2: the compaction bracket (start/summary/end) lands in the
             # run transcript so a crash mid-summary is visible as an orphan.
             recorder=recorder,
+            # The legacy maintenance-model summary needs the user as routing
+            # context (codex-local runs on the user's own machine).
+            user_id=_compaction_user_id(recorder),
         )
         if (
             recorder is not None
