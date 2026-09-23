@@ -217,7 +217,16 @@ async def fork_run(
         {"forked_from": {"run_id": int(run_id), "at_seq": int(at_seq)}},
     )
     if parked_wf is not None:
-        await deps.release_parked(parked_wf)
+        from app.agent_framework.input_gate import ParkedReleaseError
+
+        try:
+            await deps.release_parked(parked_wf)
+        except ParkedReleaseError as exc:
+            # The parked workflow could not be cancelled, so it still holds the
+            # lock and the marker (hotfix-2 defect H). Switching or dispatching
+            # now would run a second workflow beside it. The new session stays
+            # unreferenced; the issue is exactly as it was before the fork.
+            raise ForkRejected("release_failed", 503, str(exc)) from exc
     await deps.switch_session_and_mark(int(issue_id), session_id, forked_from)
     try:
         workflow_id = await deps.dispatch(int(issue_id))

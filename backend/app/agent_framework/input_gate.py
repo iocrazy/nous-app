@@ -15,6 +15,7 @@ phase/status 列）；inbox 通知走 notify() 唯一写路径。
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -25,6 +26,19 @@ TOPIC_PREFIX = "needs_input:"
 
 # 提问原文进 metadata / inbox 前的截断（spec: 500）
 _PROMPT_MAX = 500
+
+# Issue statuses that preempt any work on the issue. Same set as
+# ``issue_lifecycle.PREEMPT_STATUSES`` (a test pins the two together); not
+# imported from there because that module pulls in the whole DBOS workflow set.
+PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
+
+
+class ParkedReleaseError(RuntimeError):
+    """A parked workflow could not be cancelled from this process.
+
+    Raised by ``release_parked_workflow`` BEFORE the marker or the lock is
+    touched, so the row stays visible to the worker reapers
+    (``reap_preempted_input_waits`` / ``reap_stale_input_waits``)."""
 
 
 def _topic_for(issue_id: int) -> str:
@@ -324,7 +338,48 @@ async def _fetch_awaiting_rows() -> list[dict]:
     )
 
 
+async def _fetch_preempted_awaiting_rows() -> list[dict]:
+    """Issues already preempted (cancelled/done/closed) whose workflow is still
+    parked: ``awaiting_input`` marker present and the DBOS workflow PENDING or
+    ENQUEUED. Normally the cancel hook releases these at once; a row lands here
+    when that release could not cancel (defect H: the API process had no DBOS
+    handle) and so, by design, left the marker in place. Same engine-side read
+    as ``_fetch_awaiting_rows``."""
+    from app.db import engine as db_engine
+
+    return await db_engine.fetch_all(
+        """SELECT i.dbos_workflow_id, i.id AS issue_id, i.status
+           FROM public.issues i
+           JOIN dbos.workflow_status w ON w.workflow_uuid = i.dbos_workflow_id
+           WHERE i.execution_state ? 'awaiting_input'
+             AND i.status = ANY(:preempt)
+             AND w.status IN ('PENDING', 'ENQUEUED')""",
+        {"preempt": sorted(PREEMPT_STATUSES)},
+    )
+
+
 async def _cancel_workflow(workflow_id: str) -> None:
+    """Cancel through whichever DBOS handle THIS process really has.
+
+    - gateway (nous-backend): the DBOSClient built at startup, or built now if
+      startup failed to (``get_or_init_dbos_client``, in a thread: it connects);
+    - worker / combined: the launched singleton.
+
+    Neither → ``ParkedReleaseError``. Calling the singleton in a process that
+    never launched it raises ``DBOSException('No DBOS was created yet')`` —
+    that is how production issue 352701793481310 was stranded (defect H)."""
+    from app.services.infra import dbos_orchestrator as orch
+
+    client = orch.get_dbos_client()
+    if client is None and not orch.is_launched():
+        client = await asyncio.to_thread(orch.get_or_init_dbos_client)
+    if client is not None:
+        await client.cancel_workflow_async(workflow_id)
+        return
+    if not orch.is_launched():
+        raise ParkedReleaseError(
+            f"no usable DBOS handle in this process to cancel {workflow_id}"
+        )
     from dbos import DBOS
 
     await DBOS.cancel_workflow_async(workflow_id)
@@ -348,14 +403,55 @@ async def _clear_issue_lock(workflow_id: str) -> None:
 
 
 async def release_parked_workflow(workflow_id: str) -> None:
-    """Abandon a workflow parked on ``await_user_input``: clear the marker,
-    cancel the workflow, release the issue execution lock it holds. The
-    stale-wait reaper and the fork endpoint (phase 2b-1 §2 — "from here,
-    do this instead") are the two callers; a parked workflow never reaches
-    ``execute_issue``'s ``finally: clear_lock`` on its own."""
-    await clear_awaiting_input(workflow_id=workflow_id)
-    await _cancel_workflow(workflow_id)
-    await _clear_issue_lock(workflow_id)
+    """Abandon a workflow parked on ``await_user_input``: cancel it, then clear
+    the marker, then release the issue execution lock it holds. Callers: the
+    two worker reapers, the fork endpoint (phase 2b-1 §2) and the cancel hook
+    (``cancel_live_work``); a parked workflow never reaches ``execute_issue``'s
+    ``finally: clear_lock`` on its own.
+
+    Cancel FIRST (hotfix-2 ruling 2). If it fails, nothing else is touched and
+    ``ParkedReleaseError`` is raised: the marker keeps the row visible to
+    ``reap_preempted_input_waits`` on the worker. The old order cleared the
+    marker first, so a failed cancel left the workflow PENDING, the lock held,
+    and no reaper able to find it. Once the cancel succeeded the lock is
+    released even if the marker clear raises."""
+    try:
+        await _cancel_workflow(workflow_id)
+    except ParkedReleaseError:
+        raise
+    except Exception as exc:
+        raise ParkedReleaseError(
+            f"cancel of parked workflow {workflow_id} failed: {exc!r}"
+        ) from exc
+    try:
+        await clear_awaiting_input(workflow_id=workflow_id)
+    finally:
+        await _clear_issue_lock(workflow_id)
+
+
+async def reap_preempted_input_waits() -> int:
+    """Release parked workflows whose issue is already preempted.
+
+    Runs on the worker every minute (``agent_runs_sweeper``), where the DBOS
+    singleton is launched. Catches every release the cancel hook could not
+    finish in the API process. One bad row is logged and the sweep goes on."""
+    released = 0
+    for row in await _fetch_preempted_awaiting_rows():
+        wf = row["dbos_workflow_id"]
+        try:
+            await release_parked_workflow(wf)
+        except Exception as exc:  # noqa: BLE001 — one row must not stop the sweep
+            logger.error(
+                f"[input_gate] release of preempted wait failed "
+                f"issue={row.get('issue_id')} wf={wf}: {exc!r}"
+            )
+            continue
+        released += 1
+        logger.info(
+            f"[input_gate] released preempted wait issue={row.get('issue_id')} "
+            f"status={row.get('status')} wf={wf}"
+        )
+    return released
 
 
 async def reap_stale_input_waits(*, current_version: str) -> int:
@@ -385,6 +481,9 @@ __all__ = [
     "signal_user_reply",
     "mark_awaiting_input",
     "clear_awaiting_input",
+    "PREEMPT_STATUSES",
+    "ParkedReleaseError",
     "release_parked_workflow",
+    "reap_preempted_input_waits",
     "reap_stale_input_waits",
 ]

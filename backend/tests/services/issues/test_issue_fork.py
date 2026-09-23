@@ -178,6 +178,27 @@ async def test_parked_issue_is_released_before_the_switch_then_dispatched():
     assert ("release", "wf-old") in d.calls
 
 
+async def test_a_release_that_cannot_cancel_is_a_typed_503_and_nothing_switches():
+    """Hotfix-2 defect H: the release refuses (marker and lock untouched) when
+    it cannot cancel; the fork answers a typed 503 and never points the issue
+    at the new session or dispatches a second workflow beside the parked one."""
+    from app.agent_framework.input_gate import ParkedReleaseError
+
+    d = _Deps()
+    d.issue["execution_locked_at"] = "2026-09-09T10:05:00+00:00"
+
+    async def _refuse(workflow_id):
+        d.calls.append(("release", workflow_id))
+        raise ParkedReleaseError("no usable DBOS handle")
+
+    d.release_parked = _refuse
+    with pytest.raises(f.ForkRejected) as exc:
+        await f.fork_run(42, at_seq=4, steer=None, user_id="u", deps=d)
+    assert (exc.value.code, exc.value.status) == ("release_failed", 503)
+    kinds = [c[0] for c in d.calls]
+    assert "switch" not in kinds and "dispatch" not in kinds
+
+
 async def test_locked_but_not_parked_is_issue_busy():
     d = _Deps()
     d.issue["execution_locked_at"] = "2026-09-09T10:05:00+00:00"
