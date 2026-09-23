@@ -577,3 +577,54 @@ async def test_a_ticket_without_kind_keeps_the_canvas_defaults(
     assert origin.kind == "canvas_run"
     assert origin.derivation_kind == "image_gen"
     assert (origin.run_id, origin.turn, origin.step) == (None, None, None)
+    # Nothing agent-shaped leaks onto a canvas product, and it is not BYOK.
+    assert (origin.agent_id, origin.conversation_id, origin.byok) == (
+        None,
+        None,
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_agent_ticket_files_the_run_agent_and_conversation(
+    fake_redis, client, captured_register
+):
+    """An async GenerateVideo job (``agent_video`` workflow) lands through this
+    upload long after its tool call returned. Its ticket names the agent and
+    the conversation so the clip is attributed to the agent run, and carries
+    ``byok`` because it ran on the user's own machine and account - a local
+    product is never a platform charge."""
+    from app.api.codex_daemon_router import mint_upload_ticket
+
+    ticket = await mint_upload_ticket(
+        user_id="u1",
+        scope_id=7,
+        job_id="j1",
+        attribution={
+            **ATTRIBUTION,
+            "canvas_id": None,
+            "node_id": None,
+            "kind": "agent_run",
+            "derivation_kind": "video_gen",
+            "run_id": 4242,
+            "turn": 1,
+            "step": 3,
+            "agent_id": "ag-1",
+            "conversation_id": 9001,
+            "byok": True,
+        },
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out.png", _png(64, 64), "image/png")},
+        data={"ticket": ticket},
+    )
+    assert resp.status_code == 200, resp.text
+
+    origin = captured_register["origin"]
+    assert origin.kind == "agent_run"
+    assert origin.derivation_kind == "video_gen"
+    assert (origin.run_id, origin.turn, origin.step) == (4242, 1, 3)
+    assert origin.agent_id == "ag-1"
+    assert origin.conversation_id == 9001
+    assert origin.byok is True

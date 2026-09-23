@@ -49,8 +49,13 @@ def generate_video_tool_spec() -> dict:
         "function": {
             "name": "GenerateVideo",
             "description": (
-                "Generate a short video. Saved to the user's Generations library; a "
-                "reference is returned. Requires a source image URL to animate."
+                "Generate a short video from a source image. Asynchronous: this "
+                "call only submits the job and returns a task_id at once. "
+                "Rendering can take up to ~27 minutes; the finished video (its "
+                "generated_media_id and url) or the failure reason arrives later "
+                "as an inbox message. Do not poll, and do not re-submit the same "
+                "request while it is rendering. The video is saved to the user's "
+                "Generations library."
             ),
             "parameters": {
                 "type": "object",

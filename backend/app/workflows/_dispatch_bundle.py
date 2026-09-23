@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dbos import Queue
 
+from app.workflows.agent_video import agent_video_workflow  # noqa: F401
 from app.workflows.agent_workforce import (  # noqa: F401
     agent_workforce_queue,
     agent_workforce_workflow,

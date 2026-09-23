@@ -1011,6 +1011,31 @@ class UnifiedTaskManager:
             )
         return [_serialize_task_row(r) for r in rows]
 
+    async def find_active_by_dedup_key(
+        self, user_id: str, task_type: str, dedup_key: str
+    ) -> Optional[str]:
+        """The id of a still-active (pending/processing) task of this type
+        carrying ``dedup_key``, else None. Read-only: a duplicate guard for
+        callers that must not start the same paid job twice (agent
+        GenerateVideo). Uses ``idx_task_tracking_dedup_key``."""
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            found = (
+                await session.execute(
+                    select(TaskTracking.dbos_workflow_id)
+                    .where(TaskTracking.dedup_key == dedup_key)
+                    .where(TaskTracking.user_id == user_id)
+                    .where(TaskTracking.task_type == task_type)
+                    .where(TaskTracking.status.in_(["pending", "processing"]))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        return str(found) if found else None
+
     async def get_tasks(
         self,
         user_id: str,

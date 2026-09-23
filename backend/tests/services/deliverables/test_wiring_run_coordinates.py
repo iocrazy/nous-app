@@ -77,21 +77,7 @@ async def test_generate_image_tool_puts_the_coordinates_on_the_origin(monkeypatc
     assert (seen["origin"].turn, seen["origin"].step) == (1, 4)
 
 
-async def test_generate_video_tool_puts_the_coordinates_on_the_origin(monkeypatch):
-    seen: dict = {}
-    gmt = _stub_media_tools(monkeypatch, seen)
-    ctx = {
-        "run_id": 777,
-        "user_id": "u",
-        "team_id": 1,
-        "agent_id": "a",
-        "turn": 1,
-        "step": 9,
-    }
-
-    out = await gmt.GenerateMediaTools().generate_video(
-        {"prompt": "a cat", "source_image_url": "http://x/a.png"}, ctx
-    )
-
-    assert out["ok"] is True
-    assert (seen["origin"].turn, seen["origin"].step) == (1, 9)
+# GenerateVideo no longer generates in the turn: the tool only submits
+# (tests/services/ai/tools/test_generate_video_async.py) and the server path's
+# registration, attribution, coordinates and scratch reaping moved to the
+# workflow step (tests/workflows/test_agent_video_workflow.py).

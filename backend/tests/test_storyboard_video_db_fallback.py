@@ -14,10 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.ai.media.image_generation_service import (
-    ImageGenerationService,
-    LocalVideoUnsupportedError,
-)
+from app.services.ai.media.image_generation_service import ImageGenerationService
 from app.services.media.parsers.video_providers.db_registry import (
     LocalVideoRoute,
     ServerVideoRoute,
@@ -37,10 +34,11 @@ def _server_route(provider, actual_model: str) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_a_local_pick_is_refused_with_a_typed_error_not_run_on_the_server():
-    """The pick decides whose machine; the agent tool cannot wait on the
-    user's daemon (see ``LocalVideoUnsupportedError``), so a local pick is a
-    typed refusal - and no server provider is built or called for it."""
+async def test_a_local_pick_is_refused_not_run_on_the_server():
+    """This is the SERVER path. A local row belongs to the user's daemon
+    (``workflows/agent_video`` branches on the route before calling here), so
+    reaching it with a local pick raises - no server provider is built or
+    called, never a silent fallback onto nous' own session."""
     service = ImageGenerationService()
     with (
         patch(
@@ -58,7 +56,7 @@ async def test_a_local_pick_is_refused_with_a_typed_error_not_run_on_the_server(
             ),
         ),
     ):
-        with pytest.raises(LocalVideoUnsupportedError, match="jimeng-local-video"):
+        with pytest.raises(RuntimeError, match="jimeng-local-video"):
             await service.generate_video(
                 project_id="p1",
                 node_id="n1",
