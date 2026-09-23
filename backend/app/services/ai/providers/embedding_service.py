@@ -60,6 +60,11 @@ EMBED_REASON_CODES = (
     # An item's modality (image / video) is not in the embedder's declared
     # capabilities (embedding_capabilities). Refused before any request.
     "modality_unsupported",
+    # Not produced here: the writers (analyze_l1, the backfill) report it when
+    # ``resource_embeddings`` does not exist yet (migration 494 not applied).
+    # Listed so classify_embed_reason keeps it instead of folding it into
+    # provider_error.
+    "store_missing",
 )
 
 

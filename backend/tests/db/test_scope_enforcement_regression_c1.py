@@ -98,6 +98,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.scope import Scope, UnscopedQueryError, request_scope, system_request_scope
 from app.models import Resources, TaskTracking
 from app.services.infra.dbos_orchestrator import _routing_select_stmt
+from app.services.library.embedding_document import semantic_media_stmt
 from app.workflows.ai_summary import _summary_inputs_select_stmt
 from app.workflows.ai_transcription import _transcribe_inputs_select_stmt
 from app.workflows.analyze_l1 import _analyze_resource_lookup_stmt
@@ -416,3 +417,18 @@ async def test_unscoped_dbos_workflow_routing_query_never_raises_unscoped_query_
     async with sqlite_sessionmaker() as session:
         with pytest.raises(OperationalError):
             await session.execute(stmt)
+
+
+# ── embedding_document.py::load_semantic_inputs — resources ⋈ parsed_media ──
+
+
+async def test_semantic_document_media_read_is_load_bearing(
+    enforce_resources_on, sqlite_sessionmaker
+):
+    """app/services/library/embedding_document.py::load_semantic_inputs —
+    called from analyze_l1 (a DBOS step: SYSTEM wrap) and from the backfill
+    endpoint (an HTTP request: the caller's own user scope). Both must clear
+    the choke point; no scope at all must not."""
+    stmt = semantic_media_stmt(1)
+    await _assert_select_load_bearing(sqlite_sessionmaker, stmt)
+    await _assert_select_load_bearing_via_user_scope(sqlite_sessionmaker, stmt)
