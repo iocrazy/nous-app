@@ -24,6 +24,12 @@ import { fireEvent } from '@testing-library/dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { Video } from '../types';
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_k: string, def?: unknown) => (typeof def === 'string' ? def : _k),
+  }),
+}));
+
 vi.mock('../contexts/TaskManagerContext', () => ({
   useTaskManager: () => ({ tasks: [] }),
 }));
@@ -74,12 +80,13 @@ const video = {
   transcript_status: 'completed',
 } as unknown as Video;
 
-/** Mount the panel and open the Transcript tab. */
+/** Mount the panel and open AI → Transcript. */
 async function openTranscript(
   props: Partial<React.ComponentProps<typeof VideoDetailPanel>> = {},
 ) {
   const view = render(<VideoDetailPanel video={video} onClose={() => {}} {...props} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+  // Transcript is the AI tab's default sub tab.
+  fireEvent.click(screen.getByRole('button', { name: 'AI' }));
   await waitFor(() => expect(screen.getByText('first thing said')).toBeInTheDocument());
   return view;
 }

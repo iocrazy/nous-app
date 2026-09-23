@@ -6081,5 +6081,33 @@
     "citedInTitle": "Referenced in",
     "citedInNoIssue": "An issue with no key",
     "citedInHidden": "{{n}} hidden — on issues you cannot see"
+  },
+  "detail": {
+    "tabs": {
+      "overview": "Overview",
+      "ai": "AI",
+      "shots": "Shots",
+      "review": "Review",
+      "lyrics": "Lyrics"
+    },
+    "aiTabs": {
+      "transcript": "Transcript",
+      "summary": "Summary",
+      "visual": "Visual"
+    },
+    "searchHit": {
+      "title": "Search Hit",
+      "playFrom": "Play From {{time}}",
+      "openShots": "Open Shots"
+    },
+    "shots": {
+      "placeholder": {
+        "title": "Not Indexed Yet",
+        "estimate": "{{duration}} · ≈ {{shots}} shots · ≈ {{embeddings}} embeddings",
+        "index": "Index This Video",
+        "arrives": "Arrives with PR 3",
+        "hint": "Runs as a Task Center task · you can keep browsing"
+      }
+    }
   }
 }

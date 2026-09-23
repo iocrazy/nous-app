@@ -11,9 +11,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { hybridSearchMock, textSearchMock, toolbar } = vi.hoisted(() => ({
+const { hybridSearchMock, textSearchMock, navigateMock, toolbar } = vi.hoisted(() => ({
   hybridSearchMock: vi.fn(),
   textSearchMock: vi.fn(),
+  navigateMock: vi.fn(),
   toolbar: { props: null as any },
 }));
 
@@ -74,7 +75,7 @@ vi.mock('react-i18next', () => ({
     },
   }),
 }));
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => navigateMock }));
 
 // Library rows are deliberately NOT the hits: the hits render from the slim
 // SearchResultItem projection, which is the path that carries created_at.
@@ -160,6 +161,7 @@ vi.mock('./CompactMediaCard', () => ({
       data-testid="card"
       data-title={props.data.title}
       data-hit={props.hit ? `${props.hit.layer}:${props.hit.score}` : ''}
+      onDoubleClick={props.onDoubleClick}
     />
   ),
 }));
@@ -326,6 +328,47 @@ describe('DownloadsView — vector search hits', () => {
     await runSmartSearch();
     expect(screen.getByRole('button', { name: /Layer · All/ })).toBeInTheDocument();
     expect(cards(container).map((c) => c.title)).toEqual(['A', 'B']);
+  });
+
+  it('opening a hit carries its search hit into the detail page', async () => {
+    // Backend-hydrated `videos` carry resource_id — the row the detail route needs.
+    hybridSearchMock.mockReset().mockResolvedValue({
+      ...HYBRID_RESPONSE,
+      videos: [
+        { id: '1', platform_id: 'a', title: 'A', resource_id: 7001 },
+        { id: '2', platform_id: 'b', title: 'B', resource_id: 7002 },
+      ],
+    });
+    navigateMock.mockReset();
+    const { container } = render(<DownloadsView />);
+    await runSmartSearch();
+
+    const cardB = Array.from(container.querySelectorAll('[data-testid="card"]')).find(
+      (c) => c.getAttribute('data-title') === 'B',
+    )!;
+    await act(async () => {
+      fireEvent.doubleClick(cardB);
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith('/resources/file/7002', {
+      state: expect.objectContaining({ searchHit: { layer: 'semantic', score: 0.71 } }),
+    });
+  });
+
+  it('opening an item outside a search carries no search hit', async () => {
+    navigateMock.mockReset();
+    const row = VIDEOS[0] as Record<string, unknown>;
+    row.resource_id = 7100;
+    try {
+      const { container } = render(<DownloadsView />);
+      await act(async () => {
+        fireEvent.doubleClick(container.querySelector('[data-testid="card"]')!);
+      });
+      expect(navigateMock).toHaveBeenCalledTimes(1);
+      expect(navigateMock.mock.calls[0][1].state.searchHit).toBeUndefined();
+    } finally {
+      delete row.resource_id;
+    }
   });
 
   it('degrades without a trace when the backend has no legs / layer', async () => {

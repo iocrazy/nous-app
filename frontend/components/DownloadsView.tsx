@@ -770,8 +770,10 @@ export const DownloadsView: React.FC = () => {
       addToast('Still processing — try again in a moment', 'info');
       return;
     }
-    navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: item } });
-  }, [selectedTeamId, navigate, addToast]);
+    // Opened from an AI search → the detail page shows why it matched.
+    const searchHit = isSearchActive ? searchHitMap.get(item.platform_id) : undefined;
+    navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: item, searchHit } });
+  }, [selectedTeamId, navigate, addToast, isSearchActive, searchHitMap]);
 
   // ─── Multi-select ──────────────────────────────────────
   const handleToggleSelect = useCallback((platformId: string, e: React.MouseEvent) => {

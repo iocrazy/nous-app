@@ -6081,5 +6081,33 @@
     "citedInTitle": "被引用于",
     "citedInNoIssue": "一件没有编号的议题",
     "citedInHidden": "另有 {{n}} 条在你看不到的议题上"
+  },
+  "detail": {
+    "tabs": {
+      "overview": "概览",
+      "ai": "AI",
+      "shots": "镜头",
+      "review": "审阅",
+      "lyrics": "歌词"
+    },
+    "aiTabs": {
+      "transcript": "转录",
+      "summary": "摘要",
+      "visual": "画面"
+    },
+    "searchHit": {
+      "title": "搜索命中",
+      "playFrom": "从 {{time}} 播放",
+      "openShots": "打开镜头"
+    },
+    "shots": {
+      "placeholder": {
+        "title": "尚未建立镜头索引",
+        "estimate": "{{duration}} · 约 {{shots}} 个镜头 · 约 {{embeddings}} 条向量",
+        "index": "为此视频建立索引",
+        "arrives": "随 PR 3 上线",
+        "hint": "作为任务中心任务运行 · 可以继续浏览"
+      }
+    }
   }
 }
