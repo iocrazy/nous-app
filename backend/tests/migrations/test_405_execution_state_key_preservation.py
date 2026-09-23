@@ -61,8 +61,35 @@ async def _missing_service_role_rights() -> tuple[list[str], bool]:
     return missing, not (role or {}).get("rolbypassrls")
 
 
+_LOCAL_DB_HOSTS = frozenset({"localhost", "127.0.0.1"})
+
+
+def _db_host_is_local(dsn: str | None) -> bool:
+    """True only for a DSN whose host is this machine. Anything unparsable or
+    remote is treated as not local: the fixture below alters a ROLE, which is
+    cluster-wide, and must never run against a shared or production cluster."""
+    from sqlalchemy.engine import make_url
+
+    if not dsn:
+        return False
+    try:
+        host = make_url(dsn).host
+    except Exception:  # noqa: BLE001 — unparsable means "do not touch"
+        return False
+    return host in _LOCAL_DB_HOSTS
+
+
 @pytest.fixture(scope="module", autouse=True)
 async def _service_role_is_prod_shaped():
+    from app.core.config import settings
+
+    # The engine connects with SUPAVISOR_DATABASE_URL; that is the cluster the
+    # GRANT / ALTER ROLE below would land on.
+    if not _db_host_is_local(settings.SUPAVISOR_DATABASE_URL):
+        pytest.skip(
+            "test_405 alters the service_role role; refusing on a non-local"
+            " database (host must be localhost or 127.0.0.1)"
+        )
     missing, needs_bypass = await _missing_service_role_rights()
     if missing:
         await db_engine.execute(

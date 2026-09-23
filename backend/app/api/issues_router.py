@@ -51,7 +51,7 @@ from app.schemas.outputs import IssueOutputsResponse
 from app.services.deliverables.lineage_view import group_by_object
 from app.services.issues.issue_visibility import is_issue_visible
 from app.services.modules.gate import require_module
-from app.workflows.issue_lifecycle import execute_issue
+from app.workflows.issue_lifecycle import PREEMPT_STATUSES, execute_issue
 
 router = APIRouter(
     prefix="/issues",
@@ -411,6 +411,11 @@ async def transition_status(
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
+# The statuses ``set_status`` refuses to overwrite (``PREEMPT_STATUSES``): a
+# dispatch there would start a workflow that preempts itself at the loop top.
+DISPATCH_TERMINAL_STATUSES = PREEMPT_STATUSES
+
+
 @router.get("/{issue_id}/dispatch-preview", response_model=DispatchPreview)
 async def dispatch_preview(issue_id: int, auth: AuthDep) -> DispatchPreview:
     """Predict what POST /{id}/dispatch would start — without starting it.
@@ -438,7 +443,7 @@ async def dispatch_preview(issue_id: int, auth: AuthDep) -> DispatchPreview:
             agent_id=agent_id,
             blocked_reason=DispatchBlockedReason.DBOS_DISABLED,
         )
-    if issue_status in ("done", "cancelled"):
+    if issue_status in DISPATCH_TERMINAL_STATUSES:
         return DispatchPreview(
             will_start=False,
             agent_id=agent_id,
@@ -476,6 +481,18 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DBOS not enabled — issue dispatch unavailable",
+        )
+    issue_status = existing.get("status")
+    if issue_status in DISPATCH_TERMINAL_STATUSES:
+        # Typed, not a silent 200: the workflow would preempt itself and the
+        # caller would read "started". Dict detail → envelope ``details``.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "issue_terminal",
+                "status": issue_status,
+                "message": f"issue is {issue_status}; reopen it before dispatching",
+            },
         )
 
     await _start_execute_issue(issue_id)

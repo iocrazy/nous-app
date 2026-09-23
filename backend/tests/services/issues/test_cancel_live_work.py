@@ -252,3 +252,14 @@ async def test_budget_cancel_releases_the_parked_workflow(
     await budget.on_answer({"id": 7}, "Cancel", ctx=None)
 
     release.assert_awaited_once_with(WF)
+
+
+def test_cancel_terminal_set_is_the_preempt_set():
+    """Two copies of one fact: the cancel edge's notion of "already terminal"
+    and ``set_status``'s refusal set. If they drift, a cancel from a status
+    one side calls terminal fires (or skips) the stop hook on a write the
+    other side would (or would not) make."""
+    from app.services.issues.cancel_live_work import TERMINAL_STATUSES
+    from app.workflows.issue_lifecycle import PREEMPT_STATUSES
+
+    assert TERMINAL_STATUSES == PREEMPT_STATUSES
