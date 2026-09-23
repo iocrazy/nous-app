@@ -41,6 +41,10 @@ def _transcribe_inputs_select_stmt(parsed_media_id: int):
             ParsedMedia.extract_audio_path,
             ParsedMedia.music_download_path,
             ParsedMedia.platform_id,
+            # Billing facts: the fallback duration when the ASR reports none,
+            # and the title for the ledger description.
+            ParsedMedia.duration,
+            ParsedMedia.title,
             Resources.id.label("resource_id"),
         )
         .join(Resources, Resources.media_id == ParsedMedia.id)
@@ -131,6 +135,8 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
             settings = json.loads(settings)
         language = settings.get("ai_settings", {}).get("preferred_language", "auto")
 
+    from app.services.billing.transcription_billing import parse_duration_seconds
+
     return {
         "audio_path": audio_path,
         "resource_id": str(media_row["resource_id"]),
@@ -139,6 +145,12 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
         "provider_config": cfg.provider_config,
         "language": language,
         "task_assignment": cfg.model,
+        # Transcription billing (charge_transcription_step). Empty unless the
+        # run resolved to a platform catalog model — BYOK / env / governance
+        # runs are never charged.
+        "catalog_model": cfg.catalog_model,
+        "media_duration_seconds": parse_duration_seconds(media_row.get("duration")),
+        "title": media_row.get("title") or media_row["platform_id"],
     }
 
 
@@ -435,6 +447,34 @@ async def _run_volcengine_asr(
 
 
 @DBOS.step()
+async def charge_transcription_step(
+    *,
+    workflow_id: str | None,
+    user_id: str,
+    catalog_model: str,
+    duration_seconds: float | None,
+    title: str | None,
+) -> dict[str, Any]:
+    """Charge this transcription once, by duration, platform models only.
+
+    Its own DBOS step so a recorded outcome is replayed, never re-executed;
+    ``charge_transcription`` additionally refuses when the ledger already holds
+    a consume row for this ``workflow_id`` (the crash-before-checkpoint window).
+    Never raises — see ``app.services.billing.transcription_billing``.
+    """
+    from app.services.billing.transcription_billing import charge_transcription
+
+    outcome = await charge_transcription(
+        workflow_id=workflow_id,
+        user_id=user_id,
+        catalog_model=catalog_model,
+        duration_seconds=duration_seconds,
+        title=title,
+    )
+    return outcome.as_dict()
+
+
+@DBOS.step()
 async def mark_transcript_completed(parsed_media_id: int) -> None:
     """Flip resources.transcript_status='completed' for downstream consumers.
 
@@ -541,6 +581,18 @@ async def ai_transcription_workflow(
             task_assignment=inputs.get("task_assignment", ""),
         )
         await mark_transcript_completed(parsed_media_id)
+        # Bill AFTER the transcript is persisted: a failed run is never
+        # charged, and all three entry points (both manual endpoints and the
+        # post-download auto chain) converge here, so this is the one charge.
+        # Duration: what the ASR measured; media metadata only as a fallback.
+        billing = await charge_transcription_step(
+            workflow_id=wf_id,
+            user_id=user_id,
+            catalog_model=inputs.get("catalog_model") or "",
+            duration_seconds=summary.get("duration_seconds")
+            or inputs.get("media_duration_seconds"),
+            title=inputs.get("title"),
+        )
         await manager.update_progress(wf_id, 100, subtitle="Transcription complete")
         # Chain ai_summary AFTER transcript completes (was concurrent in
         # download_helpers.chain_transcript_summary_for_tags pre-this-fix —
@@ -581,7 +633,7 @@ async def ai_transcription_workflow(
                 f"[ai_transcription] summary follow-up consume failed for "
                 f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
             )
-        return {"parsed_media_id": parsed_media_id, **summary}
+        return {"parsed_media_id": parsed_media_id, **summary, "billing": billing}
     except Exception as e:  # noqa: BLE001
         # Surface the failure on the resource so the frontend Transcript
         # tab stops spinning. Business column (route-C rule 3), written by

@@ -172,6 +172,7 @@ async def test_load_transcribe_inputs_gallery_uses_music_download_path():
         provider_key="volcengine",
         provider_config={"api_key": "k"},
         model="volcengine:bigasr",
+        catalog_model="",
     )
     with (
         patch(
@@ -211,6 +212,7 @@ async def test_load_transcribe_inputs_video_prefers_extract_audio_path():
         provider_key="volcengine",
         provider_config={"api_key": "k"},
         model="volcengine:bigasr",
+        catalog_model="",
     )
     with (
         patch(
@@ -473,3 +475,69 @@ async def test_load_transcribe_inputs_locked_to_catalog_model():
     assert out["provider_key"] == "volcengine"
     assert out["provider_config"]["api_key"] == "cat-key"
     assert out["provider_config"]["app_id"] == "the-app-id"
+
+
+async def test_load_transcribe_inputs_carries_billing_facts():
+    """扣费步骤要的三样东西都从这一步出：平台目录名（BYOK 为空）、媒体元数据
+    里的时长（ASR 没报时长时的兜底）、标题（流水描述）。parsed_media.duration
+    是 String(50)，读不出数就是 None，不是 0 也不是 60。"""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import app.workflows.ai_transcription as m
+
+    media_row = {
+        "id": 1,
+        "download_path": "d/video.mp4",
+        "extract_audio_path": "d/audio.wav",
+        "music_download_path": None,
+        "platform_id": "douyin",
+        "resource_id": 5,
+        "duration": "612.5",
+        "title": "My Video",
+    }
+    cfg = SimpleNamespace(
+        origin="platform",
+        provider_key="nous",
+        provider_config={"api_key": "k"},
+        model="nous:moss-asr",
+        catalog_model="mediahub-moss-asr",
+    )
+    with (
+        patch(
+            "app.db.session.read_scope",
+            _fake_read_scope(execute_row=media_row, scalar_value={"ai_settings": {}}),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers."
+            "resolve_transcription_config",
+            AsyncMock(return_value=cfg),
+        ),
+    ):
+        out = await m.load_transcribe_inputs(1, "u")
+
+    assert out["catalog_model"] == "mediahub-moss-asr"
+    assert out["media_duration_seconds"] == 612.5
+    assert out["title"] == "My Video"
+
+    media_row["duration"] = "n/a"
+    with (
+        patch(
+            "app.db.session.read_scope",
+            _fake_read_scope(execute_row=media_row, scalar_value={"ai_settings": {}}),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers."
+            "resolve_transcription_config",
+            AsyncMock(return_value=cfg),
+        ),
+    ):
+        out = await m.load_transcribe_inputs(1, "u")
+    assert out["media_duration_seconds"] is None
+
+
+def test_transcribe_inputs_select_reads_duration_and_title():
+    import app.workflows.ai_transcription as m
+
+    cols = {c.key for c in m._transcribe_inputs_select_stmt(1).selected_columns}
+    assert {"duration", "title"} <= cols

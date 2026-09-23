@@ -178,6 +178,13 @@ def _patch_billing_spy(monkeypatch, *, transcription_model="nous-whisper"):
     )
     points.refund_points = AsyncMock()
     monkeypatch.setattr(ai_router, "PointsService", lambda: points)
+    # Transcription never consumes at dispatch any more — it is charged when the
+    # workflow lands the transcript. What a dispatch DOES touch is the balance
+    # pre-flight, so that is the transcribe endpoint's falsifiable spy.
+    from app.services.billing import transcription_billing as tb
+
+    points.preflight = AsyncMock(return_value=None)
+    monkeypatch.setattr(tb, "preflight_transcription", points.preflight)
     return points
 
 
@@ -206,6 +213,7 @@ class TestTranscribeAlreadyTranscribed:
         assert dispatched == [], "no workflow may be dispatched"
         assert created == [], "no task_tracking row may be created"
         points.check_and_consume.assert_not_awaited()
+        points.preflight.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_force_dispatches_a_fresh_billed_run(self, monkeypatch) -> None:
@@ -223,7 +231,9 @@ class TestTranscribeAlreadyTranscribed:
         assert res["already_transcribed"] is False
         assert res["message"] == "Transcription queued"
         assert [d["name"] for d in dispatched] == ["ai_transcription"]
-        points.check_and_consume.assert_awaited()
+        # Billed by the workflow on success; dispatch only pre-flights.
+        points.preflight.assert_awaited_once()
+        points.check_and_consume.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_completed_column_without_content_still_dispatches(

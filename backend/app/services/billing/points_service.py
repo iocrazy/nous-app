@@ -8,7 +8,7 @@ layer, including consumption, quota checks, refunds, balance queries, and
 welcome-bonus provisioning.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from loguru import logger
 
@@ -40,6 +40,7 @@ class PointsService:
         count: int = 1,
         override_cost: Optional[int] = None,
         description: Optional[str] = None,
+        ledger_fields: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Atomic flow: look up pricing, verify team balance, verify member
@@ -56,6 +57,11 @@ class PointsService:
                           (used for Nous duration-based billing).
             description: Optional human-readable description to override the
                         generic "Consumed N points for action" message.
+            ledger_fields: Optional extra ``point_transactions`` columns for the
+                        consume row (``provider`` / ``model`` /
+                        ``duration_seconds`` / ``is_nous`` for duration-billed
+                        transcription). They can never override the money /
+                        identity columns this method owns.
 
         Returns:
             Dict with keys: success, points_cost, balance_after, reason.
@@ -130,6 +136,8 @@ class PointsService:
         try:
             await self.repo.create_transaction(
                 {
+                    # Extras first so the owned columns below always win.
+                    **dict(ledger_fields or {}),
                     "team_id": team_id,
                     "user_id": user_id,
                     "amount": -points_cost,
@@ -170,6 +178,7 @@ class PointsService:
         user_id: str,
         action_type: str,
         count: int = 1,
+        override_cost: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Same checks as check_and_consume but WITHOUT consuming points.
@@ -179,21 +188,26 @@ class PointsService:
             user_id: UUID of the user.
             action_type: The action identifier.
             count: Multiplier for the base cost.
+            override_cost: If provided, skip the pricing lookup and check this
+                          cost (mirrors check_and_consume; used by the
+                          duration-billed transcription pre-flight).
 
         Returns:
             Dict with keys: allowed, points_cost, current_balance, reason.
         """
-        # 1. Get pricing
-        pricing = await self.repo.get_pricing(action_type)
-        if pricing is None:
-            return {
-                "allowed": True,
-                "points_cost": 0,
-                "current_balance": None,
-                "reason": None,
-            }
-
-        points_cost = pricing["points_cost"] * count
+        if override_cost is not None:
+            points_cost = override_cost
+        else:
+            # 1. Get pricing
+            pricing = await self.repo.get_pricing(action_type)
+            if pricing is None:
+                return {
+                    "allowed": True,
+                    "points_cost": 0,
+                    "current_balance": None,
+                    "reason": None,
+                }
+            points_cost = pricing["points_cost"] * count
 
         if points_cost == 0:
             return {

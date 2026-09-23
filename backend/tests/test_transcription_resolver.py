@@ -105,6 +105,8 @@ async def test_origin_platform_from_nous_pick():
     assert cfg.provider_config["api_key"] == "n-key"
     assert cfg.model == "volcengine:seed-asr-v2"
     assert cfg.agent_slug == ""
+    # 计费要按目录行定价，所以要带上用户选的目录名（不是上游 actual_model）。
+    assert cfg.catalog_model == "seed-asr"
 
 
 async def test_origin_byok_when_api_key_present():

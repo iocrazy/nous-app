@@ -53,6 +53,11 @@ class ResolvedAIConfig:
     # mig 155 的 ai_agents.fallback_models,仅 agent 行分支填充(spec
     # 2026-08-11-batch-llm-fallback §4);tuple 保持 frozen 语义。
     fallback_models: tuple[str, ...] = ()
+    # 仅转写的平台分支填充：用户在 ``task_assignment.transcription`` 里选的目录名
+    # （``nous:<name>`` 冒号后的部分，可能是改名前的 ``mediahub-*`` 拼写）。
+    # 转写按时长计费要用它查 ``nous_models`` 的定价行 —— ``model`` 里只有上游
+    # ``actual_model``，查不回目录行。非平台来源恒为空串 = 不计费。
+    catalog_model: str = ""
 
 
 async def get_ai_settings(user_id: str) -> dict:
@@ -812,6 +817,7 @@ async def resolve_transcription_config(
             model=f"{n_provider_key}:{n_model}",
             agent_slug="",
             origin="platform",
+            catalog_model=nous_name,
         )
 
     return ResolvedAIConfig(

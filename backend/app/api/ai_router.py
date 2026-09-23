@@ -25,6 +25,7 @@ from app.schemas.ai import (
     TranscriptResponse,
     VisualAnalysisResponse,
 )
+from app.services.billing import transcription_billing
 from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -81,16 +82,6 @@ def _has_extractable_video(media: dict | None) -> bool:
     audio from (as opposed to a gallery directory or no download yet)."""
     download_path = (media or {}).get("download_path") or ""
     return bool(download_path) and download_path.lower().endswith(_VIDEO_EXTS)
-
-
-def _format_duration_short(seconds: float) -> str:
-    """Format seconds into MM:SS or HH:MM:SS."""
-    total = int(seconds)
-    h, remainder = divmod(total, 3600)
-    m, s = divmod(remainder, 60)
-    if h > 0:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
 
 
 # Task Center rows used to be titled with the raw platform_id
@@ -499,66 +490,20 @@ async def trigger_transcription_by_resource(
             )
     # === End dedup ===
 
-    # === Nous billing — only charge if user selected a nous-* model ===
-    import math
-
-    from app.repositories.nous_model_repository import get_nous_model_repository
-    from app.repositories.user_settings_repository import UserSettingsRepository
-
-    settings_repo = UserSettingsRepository()
-    user_settings = await settings_repo.get_by_user_id(auth.user_id)
-    ai_settings = (user_settings or {}).get("settings_json", {}).get("ai_settings", {})
-    selected_model = ai_settings.get("task_assignment", {}).get("transcription", "")
-
-    points_service = PointsService()
-    resource_owner = resource.get("creator_id") or auth.user_id
-    _team_id = await get_team_id_for_user(resource_owner)
-    _points_cost = 0
-    _is_nous = selected_model.startswith("nous-")
-
-    if _is_nous and _team_id:
-        # Look up Nous model pricing
-        nous_repo = get_nous_model_repository()
-        nous_model = await nous_repo.get_by_name(selected_model)
-        if not nous_model or not nous_model.get("is_enabled"):
-            raise HTTPException(
-                status_code=400, detail=f"Nous model '{selected_model}' not available"
-            )
-
-        # Compute cost by media duration (reuse media from resolver)
-        duration_seconds = float(media.get("duration", 0)) if media else 0
-        if duration_seconds <= 0:
-            duration_seconds = 60  # fallback: charge 1 minute minimum
-
-        pricing_value = float(nous_model["pricing_value"])
-        if nous_model["pricing_type"] == "per_hour":
-            _points_cost = max(1, math.ceil(duration_seconds / 3600 * pricing_value))
-        else:
-            _points_cost = max(1, int(pricing_value))
-
-        # Build detailed description for transaction record
-        video_title = (media.get("title") or platform_id)[:50]
-        dur_str = (
-            _format_duration_short(duration_seconds) if duration_seconds > 0 else ""
-        )
-        _description = f"AI Transcription: {video_title} ({selected_model}"
-        if dur_str:
-            _description += f", {dur_str}"
-        _description += ")"
-
-        await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
-        points_result = await points_service.check_and_consume(
-            team_id=_team_id,
-            user_id=auth.user_id,
-            action_type="ai_transcription",
-            reference_id=resource_id,
-            override_cost=_points_cost,
-            description=_description,
-        )
-        if not points_result["success"]:
-            raise HTTPException(status_code=402, detail=points_result["reason"])
-        _points_cost = points_result.get("points_cost", 0)
-    # === End billing ===
+    # === Billing pre-flight (nothing is consumed here) ===
+    # Transcription is billed by duration when the transcript lands
+    # (ai_transcription_workflow → charge_transcription_step) — the one place
+    # all three entry points converge, so a failed run is never charged and
+    # nothing needs refunding. Here we only refuse up front when the caller's
+    # balance cannot cover the platform-model price for this media's length.
+    # The caller pays: the model choice comes from THEIR settings.
+    _preflight_denied = await transcription_billing.preflight_transcription(
+        auth.user_id,
+        transcription_billing.parse_duration_seconds((media or {}).get("duration")),
+    )
+    if _preflight_denied:
+        raise HTTPException(status_code=402, detail=_preflight_denied)
+    # === End pre-flight ===
 
     # Track unified_task so we can mark it failed if the dispatch
     # itself throws — and so the Task Center sees this run + Realtime
@@ -672,23 +617,9 @@ async def trigger_transcription_by_resource(
         # "already in progress" — reporting a 500 would tell the user their
         # media failed while it is in fact being processed. `_orphan_task_id`
         # is still None here (the create() itself is what raised), so nothing
-        # needs marking failed; the charge does need giving back, since this
-        # request dispatched no work.
+        # needs marking failed — and nothing needs refunding: dispatch never
+        # charges (billing happens when the workflow lands the transcript).
         if _orphan_task_id is None and is_active_task_conflict(e):
-            if _points_cost > 0 and _team_id:
-                try:
-                    await points_service.refund_points(
-                        team_id=_team_id,
-                        user_id=auth.user_id,
-                        amount=_points_cost,
-                        reference_type="ai_transcription",
-                        reference_id=resource_id,
-                        reason="Another transcription task is already active",
-                    )
-                except Exception as refund_err:
-                    logger.error(
-                        f"Failed to refund points after dedup conflict: {refund_err}"
-                    )
             # Which kind of task beat us decides what we may promise. When
             # we were inserting ai_transcription, the winner is one too, so
             # a transcript is coming; when we were inserting extract_audio,
@@ -727,21 +658,6 @@ async def trigger_transcription_by_resource(
                 logger.error(
                     f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
                 )
-        if _points_cost > 0 and _team_id:
-            try:
-                await points_service.refund_points(
-                    team_id=_team_id,
-                    user_id=auth.user_id,
-                    amount=_points_cost,
-                    reference_type="ai_transcription",
-                    reference_id=resource_id,
-                    reason=f"Task dispatch failed: {str(e)[:100]}",
-                )
-                logger.info(
-                    f"Refunded {_points_cost} points for failed transcription dispatch"
-                )
-            except Exception as refund_err:
-                logger.error(f"Failed to refund points: {refund_err}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue transcription: {str(e)}"
         )
@@ -754,7 +670,9 @@ async def trigger_transcription_by_resource(
         ),
         "resource_id": resource_id,
         "platform_id": platform_id,
-        "points_charged": _points_cost,
+        # Always 0: transcription is charged when the transcript lands, not
+        # at dispatch (see app/services/billing/transcription_billing.py).
+        "points_charged": 0,
         "extracting_audio": not _has_audio,
         # False on both success paths: this dispatch either transcribes
         # directly or extracts with chain_transcription=True.
@@ -1360,21 +1278,16 @@ async def trigger_transcription(
         )
     # === End classification ===
 
-    # === Points check ===
-    points_service = PointsService()
-    _team_id = await get_team_id_for_user(auth.user_id)
-    _points_cost = 0
-    if _team_id:
-        await points_service.ensure_team_quota(_team_id, user_id=auth.user_id)
-        points_result = await points_service.check_and_consume(
-            team_id=_team_id,
-            user_id=auth.user_id,
-            action_type="ai_transcription",
-        )
-        if not points_result["success"]:
-            raise HTTPException(status_code=402, detail=points_result["reason"])
-        _points_cost = points_result.get("points_cost", 0)
-    # === End points check ===
+    # === Billing pre-flight (nothing is consumed here) ===
+    # Same rule as the by-resource endpoint: the charge happens once, by
+    # duration, when ai_transcription_workflow lands the transcript.
+    _preflight_denied = await transcription_billing.preflight_transcription(
+        auth.user_id,
+        transcription_billing.parse_duration_seconds((media_row or {}).get("duration")),
+    )
+    if _preflight_denied:
+        raise HTTPException(status_code=402, detail=_preflight_denied)
+    # === End pre-flight ===
 
     # Track unified_task so the Task Center sees this run + Realtime
     # pushes status changes back to the frontend (manual click would
@@ -1480,21 +1393,6 @@ async def trigger_transcription(
                 logger.error(
                     f"Failed to mark orphan task {_orphan_task_id} failed: {fail_err}"
                 )
-        if _points_cost > 0 and _team_id:
-            try:
-                await points_service.refund_points(
-                    team_id=_team_id,
-                    user_id=auth.user_id,
-                    amount=_points_cost,
-                    reference_type="ai_transcription",
-                    reference_id=platform_id,
-                    reason=f"Task dispatch failed: {str(e)[:100]}",
-                )
-                logger.info(
-                    f"Refunded {_points_cost} points for failed transcription dispatch"
-                )
-            except Exception as refund_err:
-                logger.error(f"Failed to refund points: {refund_err}")
         raise HTTPException(
             status_code=500, detail=f"Failed to queue transcription: {str(e)}"
         )
