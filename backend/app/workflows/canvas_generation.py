@@ -41,6 +41,7 @@ from app.services.generation.local_dispatch import (  # noqa: F401 - re-exported
     require_provider_card,
     resolve_local_engine,
 )
+from app.services.generation.ref_urls import absolute_media_url
 from app.services.generation.request import GenerationRequest
 from app.services.library.generated_media_service import (
     GenerationOrigin,
@@ -74,22 +75,11 @@ def _actual_provider_of(provider: Any) -> str:
     return str(getattr(provider, "provider_key", "") or "")
 
 
-def _absolute_media_url(url: str) -> str:
-    """The daemon fetches refs over the public API, so relative durable urls
-    must be absolutised (it only accepts nous' own host — spec §10 SSRF)."""
-    if url.startswith("http://") or url.startswith("https://"):
-        return url
-    from app.core.config import settings
-
-    # The fallback is imported, not spelled again: ``_own_hosts`` has to
-    # RECOGNISE what this function MINTS, and two copies of the default host is
-    # exactly how a URL we made ourselves ends up classified as foreign.
-    from app.services.library.generated_media_service import (
-        _DEFAULT_PUBLIC_API_BASE,
-    )
-
-    base = str(getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE)
-    return f"{base.rstrip('/')}{url}"
+# The daemon fetches refs over the public API, so relative durable urls must be
+# absolutised. Shared with every caller that routes to the daemon
+# (``services/generation/ref_urls``); the old private name stays here because
+# ``_resolve_reference_urls`` looks it up as a module global (tests patch it).
+_absolute_media_url = absolute_media_url
 
 
 # ---------------------------------------------------------------------------
@@ -475,15 +465,29 @@ async def generate_canvas_media_step(
     # server-side provider at all — the work runs on the USER's machine via
     # their paired daemon (spec §6). Offline is a typed failure at dispatch
     # time, not a hang.
-    local = (
-        await _local_engine(
-            model,
-            kind if kind in ("image", "video") else "image",
-            user_id=user_id,
+    #
+    # VIDEO asks ``resolve_video_route``: ONE pick (the named row, or the
+    # default pick when ``model`` is empty) answers both "which row" and "whose
+    # machine". Asking the local question only of a NAMED model left a gap: an
+    # empty-model request whose default pick was a jimeng-local row fell into
+    # the server-only resolver and raised. The server branch below reuses the
+    # provider this pick already built. IMAGE keeps its named-model check.
+    video_route = None
+    if kind == "video":
+        video_route = await db_registry.resolve_video_route(
+            model or None, user_id=user_id
         )
-        if (model or "").strip()
-        else None
-    )
+        local = (
+            (video_route.engine, video_route.engine_model)
+            if isinstance(video_route, db_registry.LocalVideoRoute)
+            else None
+        )
+    else:
+        local = (
+            await _local_engine(model, "image", user_id=user_id)
+            if (model or "").strip()
+            else None
+        )
     if local:
         engine, engine_model = local
         media_kind = kind if kind in ("image", "video") else "image"
@@ -564,10 +568,9 @@ async def generate_canvas_media_step(
             "effective_params": eff.knobs_dict(),
         }
 
-    if kind == "video":
-        provider, actual_model = await db_registry.resolve_video_provider(
-            model or None, user_id=user_id
-        )
+    if isinstance(video_route, db_registry.ServerVideoRoute):
+        # Built by the same pick that ruled out the user's machine above.
+        provider, actual_model = video_route.provider, video_route.actual_model
         # ``model`` is the picker's CATALOG ROW NAME (that's what resolve
         # matched on); upstream must get the row's actual_model. Sending the
         # row name upstream was the 2026-08-18 codex HTTP-400 incident.

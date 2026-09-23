@@ -42,7 +42,8 @@ resolution is catalog-only and unchanged.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from loguru import logger
 
@@ -256,28 +257,27 @@ async def resolve_image_provider(
     return provider, actual_model
 
 
-async def resolve_video_provider(
-    name: Optional[str] = None,
-    *,
-    user_id: Optional[str] = None,
-) -> Tuple[JimengCliProvider, str]:
-    """Resolve a video provider from the ``nous_models`` catalog.
+async def _pick_video_row(name: Optional[str], user_id: Optional[str]) -> dict:
+    """The ONE video-row pick: owner scoping, then ``_pick_row``.
 
-    Returns ``(provider, actual_model)``. Only the jimeng-cli CLI has a wired
-    video path today; callers use ``provider.generate_video(...)`` directly.
-    Owner-scoped rows resolve only for their owner (see
-    ``resolve_image_provider``).
-
-    Raises:
-        RuntimeError: no enabled video model, the requested row is private to
-            another user, or the resolved row's ``actual_provider`` has no
-            wired video implementation.
+    Shared by ``resolve_video_provider`` (server-only) and
+    ``resolve_video_route`` (either machine) so the two can never disagree on
+    which row a request lands on.
     """
     video_rows = _visible_rows(await _enabled_rows("video"), name, user_id, "video")
     if not video_rows:
         raise RuntimeError("no video model configured in nous_models catalog")
+    return _pick_row(video_rows, name)
 
-    row = _pick_row(video_rows, name)
+
+def _build_server_video_provider(row: dict) -> Tuple[JimengCliProvider, str]:
+    """Build (and stamp) the server-side provider for an already-picked row.
+
+    Only the ``jimeng-cli`` family has a server-side video build. A local row
+    (``jimeng-local``) is refused here on purpose: building a server-side
+    JimengCliProvider for it would run the user's local model on nous' own
+    OAuth session (see ``JimengLocalProtocol``).
+    """
     actual_provider = (row.get("actual_provider") or "").lower()
 
     from app.services.ai.provider_protocols import resolve_generation_protocol
@@ -299,3 +299,93 @@ async def resolve_video_provider(
         "Resolved video provider from catalog: jimeng-cli (model={})", actual_model
     )
     return provider, actual_model
+
+
+async def resolve_video_provider(
+    name: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
+) -> Tuple[JimengCliProvider, str]:
+    """Resolve a SERVER-SIDE video provider from the ``nous_models`` catalog.
+
+    Returns ``(provider, actual_model)``. Only the jimeng-cli CLI has a wired
+    server-side video path; callers use ``provider.generate_video(...)``
+    directly. Owner-scoped rows resolve only for their owner (see
+    ``resolve_image_provider``). Callers that can also run on the user's own
+    machine use ``resolve_video_route`` instead.
+
+    Raises:
+        RuntimeError: no enabled video model, the requested row is private to
+            another user, or the resolved row's ``actual_provider`` has no
+            wired server-side video implementation (a local row included).
+    """
+    return _build_server_video_provider(await _pick_video_row(name, user_id))
+
+
+@dataclass(frozen=True)
+class LocalVideoRoute:
+    """The picked row runs on the user's OWN machine via the paired daemon."""
+
+    engine: str
+    engine_model: str
+    row_name: str
+
+
+@dataclass(frozen=True)
+class ServerVideoRoute:
+    """The picked row runs on our servers; ``provider`` is already built."""
+
+    provider: Any
+    actual_model: str
+    row_name: str
+
+
+VideoRoute = LocalVideoRoute | ServerVideoRoute
+
+
+async def resolve_video_route(
+    name: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
+) -> VideoRoute:
+    """Pick the video row ONCE, then branch on whose machine runs it.
+
+    ``name`` may be empty: most video callers (shot video, timeline, the agent
+    tool) name no model, so the local question has to be asked of the row the
+    default pick lands on - asking it only of an explicit name is how a default
+    pick onto a ``jimeng-local`` row used to raise inside
+    ``resolve_video_provider``.
+
+    Default pick (unchanged, pinned by ``tests/test_video_route_resolution``):
+    an explicit name match; else the first row, in catalog ``sort_order``, of
+    EITHER Dreamina family (``jimeng-cli`` / ``jimeng-local``); else the first
+    row. So with both a local and a server video row visible, whichever sorts
+    first wins.
+
+    Local rows map through ``local_dispatch.LOCAL_ENGINES``; only the
+    ``dreamina`` engine has a video runner on the daemon, so any other local
+    engine is refused here rather than after a dispatch.
+    """
+    from app.services.generation.local_dispatch import LOCAL_ENGINES
+
+    row = await _pick_video_row(name, user_id)
+    actual_provider = (row.get("actual_provider") or "").lower()
+    row_name = str(row.get("name") or "")
+    engine = LOCAL_ENGINES.get(actual_provider)
+    if engine is not None:
+        if engine != "dreamina":
+            raise RuntimeError(
+                f"No video provider implementation for actual_provider="
+                f"{actual_provider!r} (catalog row name={row_name!r}): the "
+                f"local {engine!r} engine has no video runner"
+            )
+        logger.info("Resolved video route: local daemon {} (row={})", engine, row_name)
+        return LocalVideoRoute(
+            engine=engine,
+            engine_model=str(row.get("actual_model") or ""),
+            row_name=row_name,
+        )
+    provider, actual_model = _build_server_video_provider(row)
+    return ServerVideoRoute(
+        provider=provider, actual_model=actual_model, row_name=row_name
+    )

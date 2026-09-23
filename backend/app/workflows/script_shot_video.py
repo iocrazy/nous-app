@@ -31,6 +31,14 @@ Two decisions worth reading (both recorded here so a future editor doesn't
    task_tracking mirrors it; the shot row is left untouched (no phantom 'failed'
    image state).
 
+3. **Whose machine.** The router names no model, so the row the catalog's
+   DEFAULT pick lands on decides (``db_registry.resolve_video_route``). A
+   ``jimeng-local`` row runs on the user's own paired daemon through the shared
+   seam (``services/generation/local_dispatch``): the shot image is sent as an
+   absolute URL, the daemon's upload registers the clip with this shot's
+   ``shot_video`` lineage (carried on the ticket), and
+   ``persist_video_generation`` only links that row.
+
 Persistence (route C): unlike the image path, a jimeng video product is ALWAYS
 a local file (no ephemeral CDN url to fall back to), so a persist failure has no
 durable artifact to keep — ``persist_video_generation`` raises rather than
@@ -41,18 +49,24 @@ degrading. The jimeng ``jimeng_`` scratch dir is reaped after ingest either way
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 from dbos import DBOS
 from loguru import logger
 
 from app.services.ai.media.gen_attribution import resolved_attribution
+from app.services.generation.local_dispatch import raise_if_failed
 from app.services.library.scratch_reaper import reap_scratch_dir
 from app.workflows.script_shot_generate import (
     _compose_prompt,
     _resolve_scope_id,
     _step_output,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.services.media.parsers.video_providers.db_registry import (
+        LocalVideoRoute,
+    )
 
 # Default video aspect — shots carry no aspect field; 16:9 is the cinematic
 # default (the provider maps it to the CLI --ratio).
@@ -103,28 +117,130 @@ def _canonical_provider(provider_key: Optional[str]) -> Optional[str]:
     return protocol.key if protocol is not None else provider_key
 
 
+async def _generate_shot_video_locally(
+    route: "LocalVideoRoute",
+    *,
+    shot_id: str,
+    shot: dict[str, Any],
+    scene: Optional[dict[str, Any]],
+    prompt: str,
+    user_id: Optional[str],
+    run_id: Optional[int],
+    turn: Optional[int],
+    step: Optional[int],
+) -> dict[str, str]:
+    """The picked row runs on the user's OWN machine: hand the job to their
+    paired daemon through the shared seam (``local_dispatch``).
+
+    Returns ``{"gen_id", "provider", "model"}`` - the daemon's upload already
+    created the ``generated_media`` row (with this shot's lineage, carried on
+    the ticket), so ``persist_video_generation`` only links it - or
+    ``{"failed": msg}`` for a deterministic failure. Returning the marker
+    instead of raising is what keeps this step's ``max_attempts=3`` from
+    re-submitting a job to an offline daemon (or a PAID one that timed out)
+    three times; the workflow raises on it.
+    """
+    from app.services.generation.local_dispatch import (
+        dispatch_local_generation,
+        reconcile_for_engine,
+    )
+    from app.services.generation.ref_urls import generated_media_ref_url
+    from app.services.generation.request import GenerationRequest
+
+    if not user_id:
+        # The daemon is the user's; without a user there is no daemon to ask
+        # and no tenant to file the product into.
+        raise ValueError(f"shot {shot_id} local video dispatch has no user_id")
+
+    # Same reference the server path uses (``shot.image_url``), with the same
+    # admission rule: only a durable generated-media url the server wrote.
+    # Anything else degrades to text2video, as it does there.
+    ref = generated_media_ref_url((shot or {}).get("image_url"))
+    request = GenerationRequest.from_params(
+        kind="video",
+        prompt=prompt,
+        model=route.row_name,
+        params={"aspect": _DEFAULT_ASPECT},
+        source_url=ref,
+    )
+    eff, dropped = await reconcile_for_engine(route.engine, request)
+    # The scope ``persist_video_generation`` registers a server-side clip into
+    # - one shot, one tenant, whichever machine ran it.
+    scope_id = await _resolve_scope_id(scene, str(user_id))
+    provider = f"{route.engine}-local"
+    result = await dispatch_local_generation(
+        engine=route.engine,
+        engine_model=route.engine_model,
+        media_kind="video",
+        request=eff,
+        # ``eff.refs`` are already absolute (``generated_media_ref_url``).
+        ref_urls=list(eff.refs),
+        user_id=str(user_id),
+        scope_id=scope_id,
+        attribution={
+            "kind": "shot_video",
+            "derivation_kind": "shot_video",
+            "node_id": str(shot_id),
+            "prompt": prompt,
+            "model": route.engine_model,
+            "provider": provider,
+            "run_id": run_id,
+            "turn": turn,
+            "step": step,
+            "requested": request.knobs_dict(),
+            "effective": eff.knobs_dict(),
+            "dropped": dropped,
+        },
+    )
+    if result.get("failed"):
+        return {"failed": str(result["failed"])}
+    logger.info(
+        "[script_shot_video][step] shot {} -> daemon generated_media {} ({})",
+        shot_id,
+        result.get("gen_id"),
+        "image2video" if eff.refs else "text2video",
+    )
+    return {
+        "gen_id": str(result.get("gen_id") or ""),
+        "provider": provider,
+        "model": route.engine_model,
+    }
+
+
 @DBOS.step(retries_allowed=True, max_attempts=3)
 async def generate_shot_video_step(
     shot_id: str,
     model: Optional[str],
     provider: Optional[str],
     user_id: Optional[str] = None,
+    *,
+    run_id: Optional[int] = None,
+    turn: Optional[int] = None,
+    step: Optional[int] = None,
 ) -> dict[str, str]:
-    """Read the shot + scene, compose the prompt, and run the video provider.
+    """Read the shot + scene, compose the prompt, and run the video model.
 
-    Returns ``{"path", "provider", "model"}`` — the produced clip's LOCAL file
-    path (jimeng writes to disk, no URL) plus the attribution the catalog
-    actually resolved. The request's ``model`` / ``provider`` are only the
-    catalog LOOKUP NAME (they are what gets handed to ``resolve_video_provider``
-    below), so they are not an answer to "which model ran" — the resolved row's
-    ``actual_model`` and the stamped ``provider_key`` are. Uses image2video when
-    the shot already has a filesystem-backed image, else text2video. Raises if
-    the shot is missing or the provider yields no file."""
+    Whose machine runs it is decided by the row the catalog pick lands on
+    (``resolve_video_route``; the router names no model, so this is usually
+    the default pick):
+
+    * **server row** - returns ``{"path", "provider", "model"}``: the produced
+      clip's LOCAL file path (jimeng writes to disk, no URL) plus the
+      attribution the catalog actually resolved. The request's ``model`` /
+      ``provider`` are only the catalog LOOKUP NAME, so they are not an answer
+      to "which model ran" - the resolved row's ``actual_model`` and the
+      stamped ``provider_key`` are. Uses image2video when the shot already has
+      a filesystem-backed image, else text2video. Raises if the provider
+      yields no file.
+    * **local row** (``jimeng-local``) - see ``_generate_shot_video_locally``:
+      ``{"gen_id", ...}`` or ``{"failed": ...}``. ``run_id``/``turn``/``step``
+      exist for this branch alone: the daemon's upload creates the row, so the
+      run coordinates have to ride the ticket.
+
+    Raises if the shot is missing."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
-    from app.services.media.parsers.video_providers.db_registry import (
-        resolve_video_provider,
-    )
+    from app.services.media.parsers.video_providers import db_registry
 
     shot = await get_script_shot_repository().get_by_id(shot_id)
     if not shot:
@@ -132,9 +248,22 @@ async def generate_shot_video_step(
     scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
     prompt = _compose_prompt(shot, scene)
 
-    provider_obj, actual_model = await resolve_video_provider(
+    route = await db_registry.resolve_video_route(
         provider or model or None, user_id=user_id
     )
+    if isinstance(route, db_registry.LocalVideoRoute):
+        return await _generate_shot_video_locally(
+            route,
+            shot_id=shot_id,
+            shot=shot,
+            scene=scene,
+            prompt=prompt,
+            user_id=user_id,
+            run_id=run_id,
+            turn=turn,
+            step=step,
+        )
+    provider_obj, actual_model = route.provider, route.actual_model
 
     async with _resolve_local_image_for_i2v(shot) as image_path:
         result = await provider_obj.generate_video(
@@ -186,6 +315,7 @@ async def persist_video_generation(
     *,
     resolved_provider: Optional[str] = None,
     resolved_model: Optional[str] = None,
+    existing_gen_id: Optional[str] = None,
 ) -> str:
     """Persist the local clip through the generated-media store → durable URL.
 
@@ -194,13 +324,27 @@ async def persist_video_generation(
     the image path there is NO ephemeral-url fallback (a jimeng video is always a
     local file), so any failure — missing user_id, unresolvable scope, ingest
     error — ``raise``s (route C: the workflow fails, task_tracking mirrors it).
-    The ``jimeng_`` scratch dir is reaped after ingest regardless (H1)."""
+    The ``jimeng_`` scratch dir is reaped after ingest regardless (H1).
+
+    ``existing_gen_id``: the clip ran on the user's own machine and the
+    daemon's upload ALREADY registered it (with this shot's lineage, carried
+    on the ticket). Registering again would file - and bill - it twice, so
+    this branch only links it. There is no local file to reap."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
     from app.services.library.generated_media_service import (
         GenerationOrigin,
         register_generated_media,
     )
+
+    if existing_gen_id:
+        durable = f"/api/v1/generated-media/{existing_gen_id}/stream"
+        logger.info(
+            "[script_shot_video][persist] shot {} → daemon generated_media {}",
+            shot_id,
+            existing_gen_id,
+        )
+        return durable
 
     try:
         if not user_id:
@@ -294,7 +438,18 @@ async def script_shot_video_workflow(
     task_tracking mirrors it); the shot row is left untouched so a video failure
     never corrupts the image lane. ``user_id`` is optional (frozen DBOS input
     compat) but a real value is required to persist."""
-    step_out = await generate_shot_video_step(shot_id, model, provider, user_id)
+    step_out = await generate_shot_video_step(
+        shot_id, model, provider, user_id, run_id=run_id, turn=turn, step=step
+    )
+    # The local-daemon branch returns a deterministic failure as a marker so
+    # the step is not retried; the WORKFLOW is what raises (route C §4: a
+    # workflow returning a failed dict would read as SUCCESS).
+    raise_if_failed(step_out)
+    # Set only by the local-daemon branch: its upload already registered the
+    # clip, so persist just links it.
+    existing_gen_id = (
+        str(step_out.get("gen_id") or "") if isinstance(step_out, dict) else ""
+    )
     # 第四格是层标记，出视频这条路上恒 False —— ``resolve_video_provider``
     # 只读平台目录（``_enabled_rows("video")``），没有 BYOK 层可读。共用
     # ``_step_output`` 是为了只有一处知道 step 返回值的形状。
@@ -310,6 +465,7 @@ async def script_shot_video_workflow(
         step,
         resolved_provider=gen_provider,
         resolved_model=gen_model,
+        existing_gen_id=existing_gen_id or None,
     )
     await mark_shot_video_done(shot_id, video_url)
     return {"status": "success", "shot_id": shot_id, "video_url": video_url}

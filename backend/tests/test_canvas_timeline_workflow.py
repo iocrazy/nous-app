@@ -9,14 +9,20 @@ generated-media store. Failures raise (route C).
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, create_autospec, patch
 
 import pytest
 
+from app.services.media.parsers.video_providers.db_registry import ServerVideoRoute
+from app.services.media.parsers.video_providers.jimeng_cli import JimengCliProvider
 from app.workflows.canvas_timeline import (
     concat_segments_step,
     extract_tail_frame_step,
     generate_segment_step,
+)
+
+_ROUTE_TARGET = (
+    "app.services.media.parsers.video_providers.db_registry.resolve_video_route"
 )
 
 
@@ -30,18 +36,36 @@ def _fake_local_path_cm(value):
     return _cm
 
 
-@pytest.mark.asyncio
-async def test_segment_step_passes_duration_and_tail_guide():
-    provider = SimpleNamespace(
-        generate_video=AsyncMock(
-            return_value=SimpleNamespace(local_path="/tmp/seg1.mp4", mime="video/mp4")
+def _provider(local_path):
+    """A SIGNATURE-FAITHFUL fake of the real server provider.
+
+    These tests used a ``SimpleNamespace`` whose ``generate_video`` accepted
+    any keyword, which hid a real bug for as long as the step existed: it
+    called ``generate_video(duration_seconds=...)`` while the real method takes
+    ``duration=`` and has no ``**kwargs`` - a TypeError on every real run.
+    ``create_autospec`` binds the real signature, so a wrong keyword raises
+    here exactly as it would in production.
+    """
+    provider = create_autospec(JimengCliProvider, instance=True)
+    provider.generate_video.return_value = SimpleNamespace(
+        local_path=local_path, mime="video/mp4"
+    )
+    return provider
+
+
+def _route(provider, actual_model="jimeng-video-3"):
+    return AsyncMock(
+        return_value=ServerVideoRoute(
+            provider=provider, actual_model=actual_model, row_name="row"
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_segment_step_passes_duration_and_tail_guide():
+    provider = _provider("/tmp/seg1.mp4")
     with (
-        patch(
-            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-            new=AsyncMock(return_value=(provider, "jimeng-video-3")),
-        ),
+        patch(_ROUTE_TARGET, new=_route(provider)),
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/tmp/tail0.png"),
@@ -59,20 +83,25 @@ async def test_segment_step_passes_duration_and_tail_guide():
     assert call.kwargs["prompt"] == "waves crash"
     assert call.kwargs["image_path"] == "/tmp/tail0.png"
     assert call.kwargs["aspect"] == "16:9"
+    # The keyword the REAL method takes (the step used to send duration_seconds).
+    assert call.kwargs["duration"] == 4
     assert out["local_path"] == "/tmp/seg1.mp4"
 
 
 @pytest.mark.asyncio
-async def test_segment_step_first_segment_is_t2v():
-    provider = SimpleNamespace(
-        generate_video=AsyncMock(
-            return_value=SimpleNamespace(local_path="/tmp/seg0.mp4", mime="video/mp4")
+async def test_segment_step_clamps_the_duration():
+    provider = _provider("/tmp/seg2.mp4")
+    with patch(_ROUTE_TARGET, new=_route(provider)):
+        await generate_segment_step(
+            prompt="long", seconds=99, model="", aspect="", guide_url=None
         )
-    )
-    with patch(
-        "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-        new=AsyncMock(return_value=(provider, "jimeng-video-3")),
-    ):
+    assert provider.generate_video.await_args.kwargs["duration"] == 10
+
+
+@pytest.mark.asyncio
+async def test_segment_step_first_segment_is_t2v():
+    provider = _provider("/tmp/seg0.mp4")
+    with patch(_ROUTE_TARGET, new=_route(provider)):
         await generate_segment_step(
             prompt="opening shot",
             seconds=5,
@@ -85,13 +114,8 @@ async def test_segment_step_first_segment_is_t2v():
 
 @pytest.mark.asyncio
 async def test_segment_step_raises_without_file():
-    provider = SimpleNamespace(
-        generate_video=AsyncMock(return_value=SimpleNamespace(local_path=None))
-    )
-    with patch(
-        "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
-        new=AsyncMock(return_value=(provider, "m")),
-    ):
+    provider = _provider(None)
+    with patch(_ROUTE_TARGET, new=_route(provider, "m")):
         with pytest.raises(RuntimeError):
             await generate_segment_step(
                 prompt="x", seconds=3, model="", aspect="", guide_url=None

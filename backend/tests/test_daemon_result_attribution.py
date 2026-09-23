@@ -509,3 +509,71 @@ async def test_an_older_ticket_without_the_stamp_files_a_null_not_a_crash(
 
     assert resp.status_code == 200, resp.text
     assert captured_register["origin"].source_asset_id is None
+
+
+# ---------------------------------------------------------------------------
+# Lineage beyond the canvas: shot videos and timeline segments ride the same
+# upload, so the ticket - not the endpoint - says what KIND of product it is.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_ticket_names_the_origin_kind_and_derivation(
+    fake_redis, client, captured_register
+):
+    """A shot video dispatched to the daemon must keep ``kind='shot_video'``
+    lineage and the dispatching run's coordinates - the upload endpoint used
+    to hard-code ``canvas_run`` / ``<media>_gen`` and drop run/turn/step."""
+    from app.api.codex_daemon_router import mint_upload_ticket
+
+    ticket = await mint_upload_ticket(
+        user_id="u1",
+        scope_id=7,
+        job_id="j1",
+        attribution={
+            **ATTRIBUTION,
+            "canvas_id": None,
+            "node_id": "337650953731886",
+            "kind": "shot_video",
+            "derivation_kind": "shot_video",
+            "run_id": 4242,
+            "turn": 2,
+            "step": 5,
+        },
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out.png", _png(64, 64), "image/png")},
+        data={"ticket": ticket},
+    )
+    assert resp.status_code == 200, resp.text
+
+    origin = captured_register["origin"]
+    assert origin.kind == "shot_video"
+    assert origin.derivation_kind == "shot_video"
+    assert origin.node_id == "337650953731886"
+    assert (origin.run_id, origin.turn, origin.step) == (4242, 2, 5)
+
+
+@pytest.mark.asyncio
+async def test_a_ticket_without_kind_keeps_the_canvas_defaults(
+    fake_redis, client, captured_register
+):
+    """Canvas tickets (and every ticket minted before this field existed) do
+    not name a kind: the defaults are exactly the old hard-coded values."""
+    from app.api.codex_daemon_router import mint_upload_ticket
+
+    ticket = await mint_upload_ticket(
+        user_id="u1", scope_id=7, job_id="j1", attribution=ATTRIBUTION
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out.png", _png(64, 64), "image/png")},
+        data={"ticket": ticket},
+    )
+    assert resp.status_code == 200, resp.text
+
+    origin = captured_register["origin"]
+    assert origin.kind == "canvas_run"
+    assert origin.derivation_kind == "image_gen"
+    assert (origin.run_id, origin.turn, origin.step) == (None, None, None)

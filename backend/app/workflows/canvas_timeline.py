@@ -16,6 +16,12 @@ Route C discipline (same as canvas_generation):
   - the durable result is patched into task METADATA on success;
   - failures raise — a returned failed-dict would read as SUCCESS.
 
+Whose machine: the picked catalog row decides (``resolve_video_route``). A
+``jimeng-local`` row runs each segment on the user's paired daemon; its upload
+registers the clip as a ``generated_media`` row tagged
+``derivation_kind='timeline_segment'`` and ``fetch_segment_file_step`` copies
+it back for ffmpeg.
+
 V1 deliberately drops Infinite's audio track and guide_strength (no provider
 support) — parked in the epic memo.
 """
@@ -24,18 +30,25 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from dbos import DBOS
 from loguru import logger
 
+from app.services.generation.local_dispatch import raise_if_failed
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 from app.services.library.scratch_reaper import reap_scratch_dir
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.services.media.parsers.video_providers.db_registry import (
+        LocalVideoRoute,
+    )
 
 _MAX_SEGMENTS = 12
 _MAX_SEGMENT_SECONDS = 10
@@ -54,6 +67,84 @@ async def _run_ffmpeg(args: List[str]) -> None:
         raise RuntimeError(f"ffmpeg failed (rc={proc.returncode}): {tail}")
 
 
+def _segment_seconds(seconds: int) -> int:
+    return min(max(int(seconds), 1), _MAX_SEGMENT_SECONDS)
+
+
+async def _generate_segment_locally(
+    route: "LocalVideoRoute",
+    *,
+    prompt: str,
+    seconds: int,
+    aspect: str,
+    guide_url: Optional[str],
+    user_id: Optional[str],
+    canvas_id: Optional[int],
+    node_id: Optional[str],
+    index: Optional[int],
+) -> Dict[str, Any]:
+    """Run one segment on the user's OWN machine via their paired daemon.
+
+    ``{"gen_id", "model"}`` on success - the daemon's upload registered the
+    clip as a ``generated_media`` row (``derivation_kind='timeline_segment'``,
+    so it is distinguishable from a finished film or a single generation);
+    ``fetch_segment_file_step`` brings it back for ffmpeg. ``{"failed": msg}``
+    for a deterministic failure (no DBOS retry of a paid job); the workflow
+    raises on it.
+    """
+    from app.services.generation.local_dispatch import (
+        dispatch_local_generation,
+        reconcile_for_engine,
+    )
+    from app.services.generation.ref_urls import generated_media_ref_url
+    from app.services.generation.request import GenerationRequest
+
+    if not user_id:
+        raise ValueError("timeline segment local dispatch has no user_id")
+    duration = _segment_seconds(seconds)
+    # The guide is our own tail-frame row; the same admission rule the server
+    # path applies (a generated-media url, else t2v), sent absolute.
+    request = GenerationRequest.from_params(
+        kind="video",
+        prompt=prompt,
+        model=route.row_name,
+        params={"aspect": aspect or "", "duration": duration},
+        source_url=generated_media_ref_url(guide_url),
+    )
+    eff, dropped = await reconcile_for_engine(route.engine, request)
+    provider = f"{route.engine}-local"
+    result = await dispatch_local_generation(
+        engine=route.engine,
+        engine_model=route.engine_model,
+        media_kind="video",
+        request=eff,
+        ref_urls=list(eff.refs),
+        user_id=str(user_id),
+        # The scope the timeline files its tail frames and film into.
+        scope_id=int(await _resolve_personal_team_id(str(user_id))),
+        attribution={
+            "kind": "canvas_run",
+            "derivation_kind": "timeline_segment",
+            "canvas_id": canvas_id,
+            "node_id": node_id,
+            "prompt": prompt,
+            "model": route.engine_model,
+            "provider": provider,
+            "requested": request.knobs_dict(),
+            "effective": eff.knobs_dict(),
+            "dropped": dropped,
+        },
+    )
+    if result.get("failed"):
+        return {"failed": str(result["failed"])}
+    logger.info(
+        "[canvas_timeline] segment {} -> daemon generated_media {}",
+        index,
+        result.get("gen_id"),
+    )
+    return {"gen_id": str(result.get("gen_id") or ""), "model": route.engine_model}
+
+
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def generate_segment_step(
     prompt: str,
@@ -62,17 +153,39 @@ async def generate_segment_step(
     aspect: str,
     guide_url: Optional[str],
     user_id: Optional[str] = None,
+    canvas_id: Optional[int] = None,
+    node_id: Optional[str] = None,
+    index: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Generate ONE timeline segment through the DB-catalog video provider.
+    """Generate ONE timeline segment on whichever machine the picked row runs.
 
-    ``guide_url`` is the previous segment's durable tail-frame URL — bridged
-    back to a local file for i2v; None (first segment) runs t2v.
+    ``guide_url`` is the previous segment's durable tail-frame URL; None
+    (first segment) runs t2v. The row is ``resolve_video_route``'s pick
+    (``model`` is often ``''`` - the default pick):
+
+    * server row: ``{"local_path", "model"}``, the guide bridged back to a
+      local file for i2v;
+    * local row (``jimeng-local``): see ``_generate_segment_locally`` -
+      ``{"gen_id", "model"}`` or ``{"failed": ...}``. ``canvas_id`` /
+      ``node_id`` / ``index`` exist for that branch: the daemon's upload
+      registers the clip, so the lineage has to ride the ticket.
     """
     from app.services.media.parsers.video_providers import db_registry
 
-    provider, actual_model = await db_registry.resolve_video_provider(
-        model or None, user_id=user_id
-    )
+    route = await db_registry.resolve_video_route(model or None, user_id=user_id)
+    if isinstance(route, db_registry.LocalVideoRoute):
+        return await _generate_segment_locally(
+            route,
+            prompt=prompt,
+            seconds=seconds,
+            aspect=aspect,
+            guide_url=guide_url,
+            user_id=user_id,
+            canvas_id=canvas_id,
+            node_id=node_id,
+            index=index,
+        )
+    provider, actual_model = route.provider, route.actual_model
     # Picker value is the catalog row name; upstream gets actual_model
     # (same rule as canvas_generation, 2026-08-18 incident).
     gen_model = actual_model or model
@@ -87,7 +200,10 @@ async def generate_segment_step(
             aspect=aspect or "",
             model_version=gen_model or None,
             image_path=image_path,
-            duration_seconds=min(max(int(seconds), 1), _MAX_SEGMENT_SECONDS),
+            # ``duration`` is the real provider's keyword. This used to send
+            # ``duration_seconds``, a TypeError on every real run that the
+            # tests' any-keyword stand-in never raised.
+            duration=_segment_seconds(seconds),
         )
     local_path = getattr(result, "local_path", None)
     if not local_path:
@@ -96,6 +212,32 @@ async def generate_segment_step(
         "local_path": str(local_path),
         "model": gen_model or "",
     }
+
+
+@DBOS.step(retries_allowed=True, max_attempts=3)
+async def fetch_segment_file_step(gen_id: str) -> str:
+    """Bring a daemon-produced segment back as a LOCAL file for ffmpeg.
+
+    A step of its own so a storage blip retries the download, never the
+    (paid) generation. The bridge may hand out the stored file itself
+    (filesystem rows) or a temp file deleted on exit (object-store rows), so
+    the clip is COPIED into a ``jimeng_`` scratch dir: it outlives the
+    bridge, the stored file is never touched by the timeline's later steps,
+    and ``reap_scratch_dir`` recognises the directory like any CLI product.
+    """
+    from app.services.library.generated_media_service import (
+        generated_media_local_path,
+    )
+
+    url = f"/api/v1/generated-media/{gen_id}/stream"
+    async with generated_media_local_path(url, media_kind="video") as path:
+        if not path:
+            raise RuntimeError(
+                f"daemon segment generated_media {gen_id} has no readable file"
+            )
+        dest = os.path.join(tempfile.mkdtemp(prefix="jimeng_"), "segment.mp4")
+        await asyncio.to_thread(shutil.copyfile, path, dest)
+    return dest
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -306,12 +448,24 @@ async def canvas_timeline_workflow(
             aspect=aspect,
             guide_url=guide_url,
             user_id=str(user_id),
+            canvas_id=canvas_id,
+            node_id=node_id,
+            index=index,
         )
-        segment_paths.append(media["local_path"])
+        # A deterministic local-daemon failure is a marker from the step (no
+        # retry); the workflow raises on it (route C §4).
+        raise_if_failed(media)
+        if media.get("gen_id"):
+            # Ran on the user's machine: the clip is a generated_media row;
+            # ffmpeg below needs it as a local file.
+            segment_path = await fetch_segment_file_step(str(media["gen_id"]))
+        else:
+            segment_path = media["local_path"]
+        segment_paths.append(segment_path)
         # Tail frame guides the NEXT segment; the last segment skips it.
         if index < total - 1:
             guide_url = await extract_tail_frame_step(
-                segment_path=media["local_path"],
+                segment_path=segment_path,
                 user_id=str(user_id),
                 canvas_id=canvas_id,
                 node_id=node_id,

@@ -901,6 +901,18 @@ async def test_generate_video_dispatches_and_threads_wf_id(
 # ---------------------------------------------------------------------------
 
 
+def _server_route(provider, actual_model: str):
+    """What ``db_registry.resolve_video_route`` returns for a server-side row
+    (the step asks "whose machine?" before it touches a provider)."""
+    from app.services.media.parsers.video_providers.db_registry import (
+        ServerVideoRoute,
+    )
+
+    return ServerVideoRoute(
+        provider=provider, actual_model=actual_model, row_name="jimeng-cli-seedance"
+    )
+
+
 class _FakeVideoProvider:
     """Records the generate_video call and returns a canned local path."""
 
@@ -929,7 +941,7 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
     provider = _FakeVideoProvider("/tmp/jimeng_x/clip.mp4")
 
     async def _resolve(name, *, user_id=None):
-        return provider, "seedance2.0fast"
+        return _server_route(provider, "seedance2.0fast")
 
     with (
         patch(
@@ -942,7 +954,7 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
         ),
         patch(
             "app.services.media.parsers.video_providers.db_registry."
-            "resolve_video_provider",
+            "resolve_video_route",
             _resolve,
         ),
         patch.object(
@@ -979,7 +991,7 @@ async def test_video_step_normalizes_an_alias_provider_key_to_the_family(
     provider.provider_key = "jimeng"
 
     async def _resolve(name, *, user_id=None):
-        return provider, "seedance2.0fast"
+        return _server_route(provider, "seedance2.0fast")
 
     with (
         patch(
@@ -992,7 +1004,7 @@ async def test_video_step_normalizes_an_alias_provider_key_to_the_family(
         ),
         patch(
             "app.services.media.parsers.video_providers.db_registry."
-            "resolve_video_provider",
+            "resolve_video_route",
             _resolve,
         ),
         patch.object(
@@ -1021,7 +1033,7 @@ async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
     provider = _FakeVideoProvider("/tmp/jimeng_y/clip.mp4")
 
     async def _resolve(name, *, user_id=None):
-        return provider, "seedance2.0fast"
+        return _server_route(provider, "seedance2.0fast")
 
     with (
         patch(
@@ -1034,7 +1046,7 @@ async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
         ),
         patch(
             "app.services.media.parsers.video_providers.db_registry."
-            "resolve_video_provider",
+            "resolve_video_route",
             _resolve,
         ),
         patch.object(
@@ -1061,7 +1073,7 @@ async def test_video_step_raises_when_no_file(monkeypatch):
     provider = _FakeVideoProvider("")  # empty local_path → no file
 
     async def _resolve(name, *, user_id=None):
-        return provider, "seedance2.0fast"
+        return _server_route(provider, "seedance2.0fast")
 
     with (
         patch(
@@ -1074,7 +1086,7 @@ async def test_video_step_raises_when_no_file(monkeypatch):
         ),
         patch(
             "app.services.media.parsers.video_providers.db_registry."
-            "resolve_video_provider",
+            "resolve_video_route",
             _resolve,
         ),
         patch.object(

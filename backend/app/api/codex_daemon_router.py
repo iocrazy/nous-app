@@ -239,7 +239,13 @@ async def _register_daemon_result(**kwargs: Any) -> dict:
             str(kwargs.get("source_path") or ""), media_kind, attribution
         )
         origin = GenerationOrigin(
-            kind="canvas_run",
+            # WHAT this product is comes from the ticket, which the server
+            # minted at dispatch (the daemon cannot alter it): a shot video is
+            # ``shot_video``, a timeline segment names its own derivation. The
+            # defaults are the values this endpoint used to hard-code, so
+            # canvas tickets - and every ticket minted before these fields
+            # existed - file exactly as before.
+            kind=str(attribution.get("kind") or "canvas_run"),
             canvas_id=attribution.get("canvas_id"),
             node_id=attribution.get("node_id"),
             prompt=attribution.get("prompt"),
@@ -248,7 +254,14 @@ async def _register_daemon_result(**kwargs: Any) -> dict:
             # ``params`` last: produced_by/job_id are notes about HOW this
             # arrived and must not be shadowed by an outcome key.
             params={**outcome, **params},
-            derivation_kind=f"{media_kind}_gen",
+            derivation_kind=str(
+                attribution.get("derivation_kind") or f"{media_kind}_gen"
+            ),
+            # The dispatching run's coordinates (3a lineage). Absent -> None,
+            # which is what a human-clicked canvas run has always recorded.
+            run_id=attribution.get("run_id"),
+            turn=attribution.get("turn"),
+            step=attribution.get("step"),
             # Server-resolved at dispatch (``canvas_generation`` verified it
             # against a real asset in this scope) and carried on the TICKET, so
             # the daemon can neither supply nor alter it. Absent for a ticket

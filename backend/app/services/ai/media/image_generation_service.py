@@ -42,6 +42,31 @@ from app.services.media.parsers.video_providers import (
 _DEFAULT_IMAGE_MODEL = "dall-e-3"
 
 
+class LocalVideoUnsupportedError(RuntimeError):
+    """The picked video row runs on the user's OWN machine, and this caller
+    cannot hand it there.
+
+    The agent GenerateVideo tool runs inside the chat turn, not in a DBOS step:
+    it has no task row to record a daemon failure on, and its per-tool budget
+    (``tool_timeouts``: 600s) is shorter than the daemon's own dreamina budget
+    (``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``, ~27 min) - waiting would
+    abandon a job the user's machine is still running and paying for. Moving
+    the tool onto a workflow is its own change; until then a local pick is a
+    typed refusal the tool turns into a user-visible error code, never a
+    silent fallback onto nous' own server session.
+    """
+
+    code = "local_video_unsupported"
+
+    def __init__(self, row_name: str) -> None:
+        self.row_name = row_name
+        super().__init__(
+            f"local video generation from the agent tool is not supported yet "
+            f"(model {row_name!r} runs on your own machine); use the canvas or "
+            "the shot video button, or pick a server-side video model"
+        )
+
+
 class ImageGenerationService:
     """Provider-agnostic image + video generation orchestration."""
 
@@ -262,9 +287,14 @@ class ImageGenerationService:
         )
         from app.services.media.parsers.video_providers import db_registry
 
-        video_provider, actual_model = await db_registry.resolve_video_provider(
+        # Pick the row once and ask whose machine runs it: the tool usually
+        # names no model, so the DEFAULT pick can land on a local row.
+        route = await db_registry.resolve_video_route(
             provider_name or None, user_id=user_id
         )
+        if isinstance(route, db_registry.LocalVideoRoute):
+            raise LocalVideoUnsupportedError(route.row_name)
+        video_provider, actual_model = route.provider, route.actual_model
         gen_model = model or actual_model
 
         async with generated_media_local_path(
@@ -296,4 +326,4 @@ class ImageGenerationService:
         return asdict(result)
 
 
-__all__ = ["ImageGenerationService"]
+__all__ = ["ImageGenerationService", "LocalVideoUnsupportedError"]

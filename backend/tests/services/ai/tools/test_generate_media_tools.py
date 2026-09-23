@@ -164,6 +164,37 @@ async def test_generate_video_no_video_keeps_error_text_and_types_it(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_generate_video_on_a_local_row_is_a_typed_unsupported_error(
+    monkeypatch,
+):
+    """The agent tool is not a DBOS step and its 600s tool budget is shorter
+    than the daemon's own (~27 min): it cannot wait on the user's machine
+    without abandoning a paid job. A local pick is therefore refused with a
+    typed, user-visible code - never a generic crash, never a silent
+    fallback onto the server."""
+    from app.services.ai.media.image_generation_service import (
+        LocalVideoUnsupportedError,
+    )
+
+    async def _gen(**kwargs):
+        raise LocalVideoUnsupportedError("jimeng-local-video")
+
+    captured: dict = {}
+    tools = _tools(monkeypatch, captured, 779, generate_video=_gen)
+    monkeypatch.setenv("GENMEDIA_DEFAULT_VIDEO_PROVIDER", "jimeng-local-video")
+
+    out = await tools.generate_video(
+        {"prompt": "pan", "source_image_url": "/api/v1/generated-media/1/cover"},
+        dict(_CTX),
+    )
+
+    assert out["ok"] is False
+    assert out["error_code"] == "local_video_unsupported"
+    assert "not supported" in out["error"]
+    assert captured == {}
+
+
+@pytest.mark.asyncio
 async def test_reaper_failure_does_not_fail_the_tool(monkeypatch, tmp_path):
     """回收是尽力而为——它炸了不该把一次已经付过钱的生成判失败。"""
     import app.services.ai.tools.generate_media_tools as gmt
