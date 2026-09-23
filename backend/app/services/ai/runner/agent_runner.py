@@ -1609,26 +1609,48 @@ class AgentRunner:
         conversation could overflow the window with a cryptic provider error
         instead of a clean rejection.
         """
-        user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
-            system_message=composed.system_message,
-            user_messages=user_messages,
-            model=composed.model,
-            # W3-1: the compactor replays this conversation's own prefix on
-            # its own adapter, so the summary's input tokens ride the
-            # provider's warm cache. Same account, same routing — the
-            # maintenance model has no cache of this conversation to hit.
-            adapter=self.adapter,
-            tools=composed.tools,
-            # Phase 2: the compaction bracket (start/summary/end) lands in the
-            # run transcript so a crash mid-summary is visible as an orphan.
-            recorder=recorder,
-            # The legacy maintenance-model summary needs the user as routing
-            # context (codex-local runs on the user's own machine). The
-            # caller's ``user_id`` covers recorder-less turns.
-            user_id=_compaction_user_id(recorder, user_id),
-        )
+        try:
+            user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
+                system_message=composed.system_message,
+                user_messages=user_messages,
+                model=composed.model,
+                # W3-1: the compactor replays this conversation's own prefix on
+                # its own adapter, so the summary's input tokens ride the
+                # provider's warm cache. Same account, same routing — the
+                # maintenance model has no cache of this conversation to hit.
+                adapter=self.adapter,
+                tools=composed.tools,
+                # Phase 2: the compaction bracket (start/summary/end) lands in the
+                # run transcript so a crash mid-summary is visible as an orphan.
+                recorder=recorder,
+                # The legacy maintenance-model summary needs the user as routing
+                # context (codex-local runs on the user's own machine). The
+                # caller's ``user_id`` covers recorder-less turns.
+                user_id=_compaction_user_id(recorder, user_id),
+            )
+        except Exception as exc:  # noqa: BLE001 — contain, log, degrade
+            # The compactor already degrades a failed SUMMARY to the emergency
+            # cap internally; this catches the layer above it (tokenizer,
+            # tier maths, pruning). Since 3d batch 2 this preflight is the ONLY
+            # compactor on the chat path, so letting the exception out would
+            # fail the whole turn where the old chat-side compactor used to
+            # degrade to "send the raw history". Degrade the same way here;
+            # the budget guard below still rejects an oversized history with
+            # the typed ``context_budget_exceeded`` instead of a stack trace.
+            logger.error(
+                "[runner] compactor crashed; sending raw history (model=%s, "
+                "messages=%d): %r",
+                composed.model,
+                len(user_messages),
+                exc,
+            )
+            from app.agent_framework._metrics_helper import inc_metric
+
+            inc_metric("compaction_failed")
+            compaction_stats = None
         if (
             recorder is not None
+            and compaction_stats is not None
             and compaction_stats.tokens_saved > 0
             and hasattr(recorder, "note_compaction")
         ):

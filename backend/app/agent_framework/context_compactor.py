@@ -463,6 +463,21 @@ class ContextCompactor:
                 model=model,
                 user_id=user_id,
             )
+            if not summary_text.strip():
+                # An empty summary always "shrinks" the head, so the size
+                # check below would accept it and the turn would carry an
+                # empty <conversation_summary> frame — while replay skips
+                # empty summaries and keeps the original history. Count it as
+                # a failed attempt; exhausting attempts lands on the caller's
+                # emergency-cap path, which both sides agree on.
+                last_summary_tokens = 0
+                logger.warning(
+                    "[compactor] summary came back blank on attempt {}/{} ({} path)",
+                    attempt,
+                    self.SUMMARY_ATTEMPTS,
+                    summary_path,
+                )
+                continue
             summary_message = render_summary_message(summary_text)
             summary_tokens = count_messages_tokens([summary_message], model)
             if summary_tokens < head_tokens:

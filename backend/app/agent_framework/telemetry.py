@@ -28,6 +28,7 @@ from typing import Any
 COUNTER_NAMES: tuple[str, ...] = (
     # Compaction
     "compaction_triggered",
+    "compaction_failed",
     # Loop guard
     "loop_guard_observed",
     "loop_guard_tripped",
