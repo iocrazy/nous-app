@@ -335,7 +335,7 @@ __all__ = [
     "Folders",
     "GalleryItems",
     "CoverTemplateUsage",
-    # embeddings (mig 494)
+    # embeddings (mig 497)
     "EmbeddingSpaces",
     "ResourceEmbeddings",
     "GeneratedMedia",

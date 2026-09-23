@@ -1,14 +1,14 @@
 """Vector reads of the semantic layer, for the three search paths.
 
 hybrid (``SearchService._vector_hits``), ``semantic_search`` and
-``find_similar_media`` all read here. Since migration 494 the vectors live in
+``find_similar_media`` all read here. Since migration 497 the vectors live in
 ``resource_embeddings`` (halfvec + HNSW, one space per embedder); the legacy
 ``resource_analysis.content_embedding`` column is a READ-ONLY fallback that
 goes away next release. The two reads fall back differently:
 
 * :meth:`SemanticStore.nearest` reads the legacy column only when the new
   store cannot be asked at all — ``EmbeddingStoreMissing`` (code deployed
-  before migration 494) or an embedder that cannot name its space. A
+  before migration 497) or an embedder that cannot name its space. A
   half-filled ``resource_embeddings`` is NOT topped up from the old column:
   rows not yet backfilled simply do not match.
 * :meth:`SemanticStore.similar` falls back per source resource: when that
@@ -60,7 +60,7 @@ class SemanticStore:
 
     async def current_space_id(self) -> Optional[int]:
         """Id of the embedder's space, or None when the embedder cannot name
-        one. Raises :class:`EmbeddingStoreMissing` before migration 494."""
+        one. Raises :class:`EmbeddingStoreMissing` before migration 497."""
         spec = await self.embedding_service.space_spec()
         if spec is None:
             return None
@@ -74,7 +74,7 @@ class SemanticStore:
         self, vec: List[float], *, user_id: str, limit: int, threshold: float
     ) -> List[Dict[str, Any]]:
         """Nearest neighbours of ``vec`` in the semantic layer of the
-        embedder's space; the legacy RPC answers before migration 494."""
+        embedder's space; the legacy RPC answers before migration 497."""
         try:
             space_id = await self.current_space_id()
             if space_id is not None:
@@ -88,7 +88,7 @@ class SemanticStore:
                 )
         except EmbeddingStoreMissing as e:
             logger.warning(
-                "[search] resource_embeddings unavailable (migration 494 not "
+                "[search] resource_embeddings unavailable (migration 497 not "
                 f"applied), reading the legacy column: {e}"
             )
         return await self.analysis_repo.search_by_embedding(
@@ -111,7 +111,7 @@ class SemanticStore:
             )
         except EmbeddingStoreMissing as e:
             logger.warning(
-                "[similar] resource_embeddings unavailable (migration 494 not "
+                "[similar] resource_embeddings unavailable (migration 497 not "
                 f"applied), reading the legacy column: {e}"
             )
             rows = None

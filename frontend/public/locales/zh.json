@@ -5818,7 +5818,13 @@
     "steps": "{{count}} 步",
     "denied": "已拦截：{{tool}}",
     "inboxSubagent": "子代理结果 · {{type}}（后台）· {{verdict}} · 已在第 {{n}} 步前读到",
-    "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到"
+    "inboxWakeup": "定时唤醒 · {{who}} 设 · 已在第 {{n}} 步前读到",
+    "inboxMedia": "视频结果 · {{verdict}} · 已在第 {{n}} 步前读到",
+    "mediaReady": "已完成",
+    "mediaFailed": "失败 · {{code}}",
+    "mediaJobReady": "视频已生成",
+    "mediaJobFailed": "视频生成失败 · {{code}}",
+    "mediaJobOpen": "打开"
   },
   "cost": {
     "tailTokens": "{{p}} 输入 · {{c}} 输出 tokens",

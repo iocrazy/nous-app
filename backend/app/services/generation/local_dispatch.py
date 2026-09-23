@@ -333,7 +333,7 @@ async def record_failure_detail(exc: BaseException) -> Dict[str, Any]:
     Two exits, chosen by the failure code:
 
     * **Deterministic** (``NON_RETRYABLE_FAILURE_CODES``): return
-      ``{"failed": <one ASCII line>}``. The step returns normally, so DBOS
+      ``{"failed": <one ASCII line>, "code": <failure code>}``. The step returns normally, so DBOS
       does NOT retry it; ``raise_if_failed`` in the workflow turns the marker
       into the raise that fails the task. Route C section 4 forbids the
       WORKFLOW returning a failed dict (the mirror would mark the task
@@ -350,8 +350,12 @@ async def record_failure_detail(exc: BaseException) -> Dict[str, Any]:
     task_id = DBOS.workflow_id
     if task_id:
         await patch_task_metadata(task_id, patch)
-    if patch["failure"]["code"] in NON_RETRYABLE_FAILURE_CODES:
-        return {"failed": message}
+    code = patch["failure"]["code"]
+    if code in NON_RETRYABLE_FAILURE_CODES:
+        # ``code`` rides beside the message for callers that report the
+        # failure onward as a typed value (the agent video workflow hands it
+        # to the model); ``raise_if_failed`` reads only ``failed``.
+        return {"failed": message, "code": code}
     raise RuntimeError(message) from exc
 
 

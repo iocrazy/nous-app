@@ -1,10 +1,10 @@
-"""Stubbed-session pins for the two mig-494 repositories.
+"""Stubbed-session pins for the two mig-497 repositories.
 
 What only a stub can pin cheaply: the statement SHAPE (CAST binds, ON
 CONFLICT target, RPC name) and the error CLASSIFICATION (a missing table /
 function becomes the typed ``EmbeddingStoreMissing``; every other
 ProgrammingError re-raises). Whether Postgres accepts the statements is
-``tests/db/test_migration_494_resource_embeddings_integration.py``'s job.
+``tests/db/test_migration_497_resource_embeddings_integration.py``'s job.
 """
 
 from __future__ import annotations

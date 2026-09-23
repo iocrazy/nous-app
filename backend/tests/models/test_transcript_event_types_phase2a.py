@@ -28,8 +28,8 @@ MIGRATION = (
 )
 # The allowlist is re-declared whole by each migration that touches it; the
 # ORM literal must equal the LATEST one (461 admitted the phase-2b-2
-# orchestration events).
-LATEST_MIGRATION = MIGRATION.parent / "461_harness_p4_phase2b2_orchestration.sql"
+# orchestration events, 492 ``media_job_done`` for async GenerateVideo).
+LATEST_MIGRATION = MIGRATION.parent / "492_agent_video_async_inbox.sql"
 _ARRAY = re.compile(r"ARRAY\[(.*?)\]", re.DOTALL)
 _LITERAL = re.compile(r"'([a-z_]+)'::text")
 
@@ -107,7 +107,7 @@ def test_migration_and_orm_event_type_sets_are_identical():
 
 
 def test_462_does_not_touch_the_event_allowlist():
-    """LATEST_MIGRATION 只能指向**最近一次重写白名单**的迁移，现在仍是 461。
+    """LATEST_MIGRATION 只能指向**最近一次重写白名单**的迁移（462 之后是 492）。
     462 只补产出血缘列与三个索引，不碰事件类型；它若重写了白名单而
     LATEST_MIGRATION 没跟上，上面那条 ORM 比对就会拿旧集合过关。
     这里把「462 不碰」这个前提钉死，而不是让常量悄悄指错。裸子串（连注释里

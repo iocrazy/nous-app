@@ -1,5 +1,5 @@
 """GET /search/vectors/status — what the library UI reads to show vector
-coverage (PR 2 / mig 494). Called as a coroutine with patched collaborators,
+coverage (PR 2 / mig 497). Called as a coroutine with patched collaborators,
 like ``test_visual_analysis_read_endpoint``. Three statuses, one test each,
 plus the not_built layer rule."""
 
@@ -130,7 +130,7 @@ async def test_unconfigured_still_reports_the_callers_total(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["space", "coverage"])
 async def test_store_missing(monkeypatch, where):
-    missing = EmbeddingStoreMissing("migration 494 not applied")
+    missing = EmbeddingStoreMissing("migration 497 not applied")
     _wire(
         monkeypatch,
         space_repo=_SpaceRepo(fail=missing if where == "space" else None),

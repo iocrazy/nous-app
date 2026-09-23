@@ -1,4 +1,4 @@
-"""The three vector read paths go through ``resource_embeddings`` (mig 494).
+"""The three vector read paths go through ``resource_embeddings`` (mig 497).
 
 hybrid (``_vector_hits``), ``semantic_search`` and ``find_similar_media`` all
 name the embedder's space and the semantic layer. Deploy window: when the new
@@ -159,7 +159,7 @@ async def test_space_is_resolved_once_per_process():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["space", "search"])
 async def test_hybrid_vector_leg_falls_back_to_legacy_rpc_when_store_missing(where):
-    missing = EmbeddingStoreMissing("mig 494 not applied")
+    missing = EmbeddingStoreMissing("mig 497 not applied")
     emb = _EmbRepo(fail=missing if where == "search" else None)
     space_repo = _SpaceRepo(fail=missing if where == "space" else None)
     legacy = _LegacyRepo(rows=[_row(2)])
@@ -173,7 +173,7 @@ async def test_hybrid_vector_leg_falls_back_to_legacy_rpc_when_store_missing(whe
 @pytest.mark.asyncio
 async def test_hybrid_vector_leg_reports_store_missing_when_both_paths_gone():
     svc = _svc(
-        emb_repo=_EmbRepo(fail=EmbeddingStoreMissing("494")),
+        emb_repo=_EmbRepo(fail=EmbeddingStoreMissing("497")),
         legacy=_LegacyRepo(fail=EmbeddingSearchUnavailable("gone")),
     )
     hits, outcome = await svc._vector_hits("cat", "u-1", limit=5, threshold=0.4)
@@ -194,7 +194,7 @@ async def test_semantic_search_reads_the_new_store():
 @pytest.mark.asyncio
 async def test_semantic_search_raises_when_both_stores_are_gone():
     svc = _svc(
-        emb_repo=_EmbRepo(fail=EmbeddingStoreMissing("494")),
+        emb_repo=_EmbRepo(fail=EmbeddingStoreMissing("497")),
         legacy=_LegacyRepo(fail=EmbeddingSearchUnavailable("gone")),
     )
     with pytest.raises(EmbeddingSearchUnavailable):

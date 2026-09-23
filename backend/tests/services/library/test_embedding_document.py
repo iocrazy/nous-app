@@ -1,4 +1,4 @@
-"""Semantic-layer document composition (PR 2 / mig 494).
+"""Semantic-layer document composition (PR 2 / mig 497).
 
 The document is what ``resource_embeddings`` layer ``semantic`` embeds: title +
 description + tags + summary + a transcript excerpt + the VLM analysis, each

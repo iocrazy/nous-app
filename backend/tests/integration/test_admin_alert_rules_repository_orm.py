@@ -203,6 +203,67 @@ async def test_resolve_history_commits(
     assert resolved is True
 
 
+# ─── System anchor rules (mig 495) ──────────────────────────────────────
+
+
+async def test_concurrent_anchor_creation_yields_one_row(
+    integration_db_url, patched_engine, cleanup_test_rows, monkeypatch
+):
+    """Two first-ever writers for the same anchor name: both miss the initial
+    read (a barrier holds them until both have), both insert, and the partial
+    UNIQUE index from mig 495 plus ON CONFLICT DO NOTHING leave one row that
+    both callers return."""
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from app.db import session as db_session
+    from app.services.alerting.anchor_rule import ensure_anchor_rule
+
+    real_read_scope = db_session.read_scope
+    barrier = asyncio.Barrier(2)
+
+    @asynccontextmanager
+    async def racing_read_scope():
+        async with real_read_scope() as session:
+            yield session
+        await barrier.wait()
+
+    monkeypatch.setattr(db_session, "read_scope", racing_read_scope)
+
+    name = f"{_PREFIX}anchor_{uuid.uuid4().hex[:6]}"
+    kwargs = dict(name=name, metric_type="scope_denied", threshold=0.0, is_active=True)
+    first, second = await asyncio.gather(
+        ensure_anchor_rule(**kwargs), ensure_anchor_rule(**kwargs)
+    )
+
+    assert first == second
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM alert_rules WHERE name = $1", name
+        )
+        # A user-created rule (created_by set) may still reuse the name.
+        # created_by FKs auth.users, so borrow an existing user when there is one.
+        user_id = await conn.fetchval("SELECT id FROM auth.users LIMIT 1")
+        if user_id is not None:
+            await conn.execute(
+                "INSERT INTO alert_rules (name, metric_type, condition, threshold, "
+                "created_by) VALUES ($1, 'error_rate', 'gt', 1.0, $2)",
+                name,
+                user_id,
+            )
+        # A second anchor row with that name is refused by the index itself.
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "INSERT INTO alert_rules (name, metric_type, condition, threshold) "
+                "VALUES ($1, 'scope_denied', 'gte', 0.0)",
+                name,
+            )
+    finally:
+        await conn.close()
+    assert count == 1
+
+
 # ─── Factory (ORM-only, post-rollout) ───────────────────────────────────
 
 

@@ -1,6 +1,6 @@
 """Backfill the semantic layer of ``resource_embeddings`` in place.
 
-Since PR 2 (mig 494) the semantic document no longer depends on the VLM
+Since PR 2 (mig 497) the semantic document no longer depends on the VLM
 (``embedding_document``), so every candidate is embedded inline: one
 embedding call, no analyze_l1 dispatch, no Task Center row. An unchanged
 document (same ``source_hash``) is skipped without paying for a call.

@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- 迁移编号 **494**（490 = #2396、491 已合并、492 = #2398、493 = #2399 已合并）。合并前再核一次 `ls supabase/migrations | tail`。
+- 迁移编号 **497**（490 = #2396、491 已合并、492 = #2398、493 = #2399、494 = #2401、495 = #2402、496 = #2403 都已合并）。合并前再核一次 `ls supabase/migrations | tail`。
 - 所有向量列一律 `halfvec(2048)`；宽度只从 `app.core.embedding_space.EMBEDDING_DIM` 读。
 - 新建的 SQL 函数必须 `REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated`（CLAUDE.md「SECURITY DEFINER」条）。
 - 不新增 `text()` 裸 SQL，**结构性例外**：调用 pgvector RPC 的 `SELECT * FROM <fn>(CAST(:q AS halfvec), ...)`（与 `analysis_repository.search_by_embedding` 同一豁免）。bind 写 `CAST(:x AS type)`，绝不写 `:x::type`。
@@ -30,7 +30,7 @@
 
 | 文件 | 责任 |
 |---|---|
-| `supabase/migrations/494_resource_embeddings_halfvec_spaces.sql` | 两张表、HNSW、RPC `match_resource_embeddings`、`find_duplicate_videos` 改读新表 |
+| `supabase/migrations/497_resource_embeddings_halfvec_spaces.sql` | 两张表、HNSW、RPC `match_resource_embeddings`、`find_duplicate_videos` 改读新表 |
 | `backend/app/models/embeddings.py` | `EmbeddingSpaces` / `ResourceEmbeddings` ORM |
 | `backend/app/core/embedding_space.py` | +`SEMANTIC_LAYER` / `LAYERS` / `SpaceSpec` |
 | `backend/app/repositories/embedding_space_repository.py` | `get_or_create(spec)` / `get(id)` |
@@ -51,14 +51,14 @@
 ### Task A: 数据层 — 迁移 493 + ORM + 两个 repository
 
 **Files:**
-- Create: `supabase/migrations/494_resource_embeddings_halfvec_spaces.sql`
+- Create: `supabase/migrations/497_resource_embeddings_halfvec_spaces.sql`
 - Create: `backend/app/models/embeddings.py`
 - Modify: `backend/app/models/__init__.py`（加 `from app.models.embeddings import EmbeddingSpaces, ResourceEmbeddings  # noqa: F401`）
 - Modify: `backend/app/core/embedding_space.py`（追加常量与 `SpaceSpec`）
 - Create: `backend/app/repositories/embedding_space_repository.py`
 - Create: `backend/app/repositories/resource_embeddings_repository.py`
 - Test: `backend/tests/test_resource_embeddings_repository.py`（桩 session，验语句形状与错误分类）
-- Test: `backend/tests/db/test_migration_494_resource_embeddings_integration.py`（真库，挂 schema-drift）
+- Test: `backend/tests/db/test_migration_497_resource_embeddings_integration.py`（真库，挂 schema-drift）
 - Modify: `.github/workflows/schema-drift.yml`（加一步 + 重数英文数字）
 
 **Interfaces:**
@@ -75,10 +75,10 @@
   - `EmbeddingStoreMissing(RuntimeError)`：表或函数不存在（42P01 / 42883）时由 repository 抛，其余 ProgrammingError 原样再抛
   - `get_embedding_space_repository()` / `get_resource_embeddings_repository()` 单例工厂
 
-- [ ] **Step 1: 写迁移 494**
+- [ ] **Step 1: 写迁移 497**
 
 ```sql
--- 494: resource_embeddings (halfvec 2048 + HNSW) + embedding_spaces.
+-- 497: resource_embeddings (halfvec 2048 + HNSW) + embedding_spaces.
 --
 -- resource_analysis.content_embedding is vector(2048): pgvector's HNSW caps
 -- `vector` at 2000 dims, so that column has never had an index and every
@@ -250,7 +250,7 @@ COMMIT;
 - [ ] **Step 2: ORM 模型 `backend/app/models/embeddings.py`**
 
 ```python
-"""embedding_spaces / resource_embeddings (migration 494).
+"""embedding_spaces / resource_embeddings (migration 497).
 
 Vector width comes from ``app.core.embedding_space.EMBEDDING_DIM`` (one
 source); the column is ``halfvec`` so HNSW can index 2048 dims.
@@ -386,7 +386,7 @@ class EmbeddingSpaceRepository:
                                                   EmbeddingSpaces.dims == spec.dims))).scalars().first()
         except ProgrammingError as exc:
             if _is_missing_relation(exc):
-                raise EmbeddingStoreMissing("embedding_spaces does not exist (migration 494)") from exc
+                raise EmbeddingStoreMissing("embedding_spaces does not exist (migration 497)") from exc
             raise
         return _space_dict(row)
 ```
@@ -408,7 +408,7 @@ class EmbeddingSpaceRepository:
 
 - [ ] **Step 6: 跑桩测试转绿；black/isort/flake8**
 
-- [ ] **Step 7: 真库集成测试 `backend/tests/db/test_migration_494_resource_embeddings_integration.py`**
+- [ ] **Step 7: 真库集成测试 `backend/tests/db/test_migration_497_resource_embeddings_integration.py`**
 
 照 `tests/db/test_playback_positions_integration.py` 的骨架（asyncpg 直连 `INTEGRATION_DATABASE_URL`，未设跳过，`pytestmark = [integration, asyncio]`）。断言：
 1. 两表存在，`resource_embeddings.embedding` 的 `format_type` 是 `halfvec(2048)`；
@@ -421,7 +421,7 @@ class EmbeddingSpaceRepository:
 
 照 `tests/db/test_playback_positions_integration.py` 那一步的写法复制一段，指向新文件；然后 `grep -c` 真库步骤数，把 `what "green" means for all <n>` 的英文数字改成新的总数（重数）。本地跑 actionlint（CLAUDE.md 有下载命令）。
 
-- [ ] **Step 9: Commit** `feat(db): embedding_spaces + resource_embeddings（halfvec 2048 + HNSW）与两个 repository（mig 494）`
+- [ ] **Step 9: Commit** `feat(db): embedding_spaces + resource_embeddings（halfvec 2048 + HNSW）与两个 repository（mig 497）`
 
 ---
 
@@ -627,7 +627,7 @@ if embedding:
 
 `search_service.py`：
 - 构造函数加 `space_repo` / `embeddings_repo`（默认工厂），保留 `analysis_repo`（旧列回退与 `get_analysis`）。
-- `_vector_hits`：embed 查询后 `spec = await self.embedding_service.space_spec()`；`space = await self.space_repo.get_or_create(spec)`；`rows = await self.embeddings_repo.search(embedding=vec, space_id=space["id"], layer=SEMANTIC_LAYER, user_id=..., limit=..., threshold=...)`。`EmbeddingStoreMissing` → 回退 `self.analysis_repo.search_by_embedding(...)`（旧列；日志 warning「migration 494 not applied」），旧路径再抛 `EmbeddingSearchUnavailable` → `"store_missing"`。
+- `_vector_hits`：embed 查询后 `spec = await self.embedding_service.space_spec()`；`space = await self.space_repo.get_or_create(spec)`；`rows = await self.embeddings_repo.search(embedding=vec, space_id=space["id"], layer=SEMANTIC_LAYER, user_id=..., limit=..., threshold=...)`。`EmbeddingStoreMissing` → 回退 `self.analysis_repo.search_by_embedding(...)`（旧列；日志 warning「migration 497 not applied」），旧路径再抛 `EmbeddingSearchUnavailable` → `"store_missing"`。
 - `semantic_search` 同样改（它也调 `search_by_embedding`）。
 - `find_similar`：先 `embeddings_repo.get(media→resource_id, SEMANTIC_LAYER, space_id)`（注意 `media_id` → `resources.id` 要经 `analysis_repo`/`resources` 查一次；现有代码用 `get_analysis(media_id)` 是按 resource_id 键的——保持现状的键），拿到向量走 `embeddings_repo.search`；没有则回退旧列（现有代码）。
 - `VECTOR_LEG_OUTCOMES` + `"store_missing"`；`schemas/search.py` 的注释同步。
@@ -668,7 +668,7 @@ async def vectors_status(auth: AuthDep):
 
 - [ ] **Step 6: 文档**
 
-- CLAUDE.md 向量陷阱条末尾加：`**2026-09-23 起（mig 494）语义层向量在 resource_embeddings（halfvec(2048) + HNSW，按 space_id 分空间）；resource_analysis.content_embedding 只读回退、下一版删。换模型 = 新空间 + 全量重嵌（回填端点就地嵌，不再派 VLM）。`
+- CLAUDE.md 向量陷阱条末尾加：`**2026-09-23 起（mig 497）语义层向量在 resource_embeddings（halfvec(2048) + HNSW，按 space_id 分空间）；resource_analysis.content_embedding 只读回退、下一版删。换模型 = 新空间 + 全量重嵌（回填端点就地嵌，不再派 VLM）。`
 - spec §7 PR 2 行状态改「已实现（本 PR）」，§4.2 补一句「语义层不依赖 VLM 字段，有什么嵌什么」。
 
 - [ ] **Step 7: 全量后端测试 + 三件 lint；Commit** `feat(search): 语义层接线到 resource_embeddings；回填就地嵌入；/search/vectors/status`

@@ -1,4 +1,4 @@
-"""Migration 494 and its two repositories against real Postgres.
+"""Migration 497 and its two repositories against real Postgres.
 
 The unit lane stubs the session, so it proves the statements compile, not that
 Postgres accepts them. Only a server can answer:
@@ -16,7 +16,7 @@ Postgres accepts them. Only a server can answer:
 Gated on INTEGRATION_DATABASE_URL — skips cleanly in the unit lane:
 
   INTEGRATION_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drift \
-    uv run pytest tests/db/test_migration_494_resource_embeddings_integration.py -v
+    uv run pytest tests/db/test_migration_497_resource_embeddings_integration.py -v
 """
 
 from __future__ import annotations

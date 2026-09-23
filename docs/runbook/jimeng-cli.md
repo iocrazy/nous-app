@@ -127,6 +127,10 @@ Video flags (verified against `dreamina image2video -h` / `text2video -h`,
 - `model_version` for both: `seedance2.0 / seedance2.0fast / seedance2.0_vip /
   seedance2.0fast_vip / seedance2.0mini` (text2video default `seedance2.0fast` —
   the catalog seed row `jimeng-cli-seedance` uses it).
+- ⚠️ Since mig 494 (2026-09-23) the server-side video row `jimeng-cli-seedance`
+  is **disabled**: all video generation runs on the user's paired device via
+  `jimeng-local-video` (the same dreamina CLI, driven by the local daemon).
+  Re-enable the row to bring the server path back; nothing was deleted.
 
 ## Troubleshooting
 

@@ -1568,6 +1568,13 @@ class AgentRunner:
             "user_id": str(recorder.user_id) if recorder else None,
             "team_id": recorder.team_id if recorder else None,
             "agent_id": str(composed.agent_id),
+            # Where an ASYNC result goes back to (GenerateVideo submits a
+            # workflow and returns; the outcome is delivered to the issue
+            # first, else the conversation — ``generate_media_tools``).
+            "issue_id": getattr(recorder, "issue_id", None) if recorder else None,
+            "conversation_id": (
+                getattr(recorder, "conversation_id", None) if recorder else None
+            ),
             # 产出登记要坐标才能把卡挂到正确的那一步（3a）。turn 与
             # ``_step_started`` 同源，恒为 1 —— 那是 mig 453 立下的契约，不是待办：
             # 「a run is one turn; the target outlives it」（``agent_run_inbox``

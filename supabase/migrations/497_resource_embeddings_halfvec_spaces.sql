@@ -1,4 +1,4 @@
--- 494: resource_embeddings (halfvec 2048 + HNSW) + embedding_spaces.
+-- 497: resource_embeddings (halfvec 2048 + HNSW) + embedding_spaces.
 --
 -- resource_analysis.content_embedding is vector(2048): pgvector's HNSW caps
 -- `vector` at 2000 dims, so that column has never had an index and every

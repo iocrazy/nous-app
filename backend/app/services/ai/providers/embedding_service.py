@@ -63,7 +63,7 @@ EMBED_REASON_CODES = (
     # capabilities (embedding_capabilities). Refused before any request.
     "modality_unsupported",
     # Not produced here: the writers (analyze_l1, the backfill) report it when
-    # ``resource_embeddings`` does not exist yet (migration 494 not applied).
+    # ``resource_embeddings`` does not exist yet (migration 497 not applied).
     # Listed so classify_embed_reason keeps it instead of folding it into
     # provider_error.
     "store_missing",

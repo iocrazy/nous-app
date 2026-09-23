@@ -61,16 +61,12 @@ groups:
         annotations:
           summary: "Loop guard tripped > 5x in 1h — flaky tool/skill?"
 
-      # Streaming aborted mid-stream a lot — UX issue
-      - alert: StreamingAbortRate
-        expr: |
-          rate(agent_streaming_aborted_mid[15m])
-            / clamp_min(rate(agent_streaming_started[15m]), 0.001) > 0.20
-        for: 15m
-        labels:
-          severity: warning
-        annotations:
-          summary: "20%+ of streaming chats aborted — users cancelling?"
+      # (StreamingAbortRate was retired 2026-09-22: it divided
+      # agent_streaming_aborted_mid by agent_streaming_started, and both only
+      # increment on the runner's true-stream path. Production chat hands the
+      # runner an LLMFallbackChain without ``stream``, so every turn takes the
+      # buffered fallback and the ratio was 0 / 0.001 forever. Bring it back
+      # only once a true-stream adapter is actually wired into chat.)
 
       # Compactor summarising far more often than usual — contexts too big.
       # agent_compaction_triggered is incremented by the runner's
@@ -118,7 +114,7 @@ These are not alerts — they're suggested SLOs for dashboards.
 |---|---|---|
 | chat turn p95 latency | < 8s | 5% |
 | `agent_mcp_tool_call_error` rate | < 1% of `agent_mcp_tool_call` | 5% |
-| `streaming_aborted_mid` rate | < 5% of `streaming_started` | 5% |
+| `streaming_aborted_mid` rate | < 5% of `streaming_started` (true-stream path only; both are 0 on the current buffered-fallback production chat, so this probe measures nothing until a true-stream adapter ships) | 5% |
 | compactor invocation rate | < 30% of turns | 10% |
 
 ## Dashboard panels
@@ -126,7 +122,9 @@ These are not alerts — they're suggested SLOs for dashboards.
 Group the counters in /metrics into 5 dashboards:
 
 1. **Chat Throughput** — `streaming_started`, `streaming_aborted_mid`,
-   `chat_mcp_registry_built`
+   `chat_mcp_registry_built`. The two `streaming_*` counters only cover the
+   runner's true-stream path and stay 0 on the current production route
+   (buffered fallback); they are not a chat-volume signal.
 2. **Tool Surface** — `mcp_tool_call*`, `tool_cache_hit`, `loop_guard_*`
 3. **Memory Lifecycle** — `memory_*`, `commitment_*`
 4. **Cost Discipline** — `output_budget_tightened`, `compaction_triggered`

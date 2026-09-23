@@ -224,10 +224,13 @@ on:
       # mig 491：后端专用 SECURITY DEFINER 函数对浏览器角色的执行权 —— 权限只有
       # Postgres 自己答得出，单测走后端会话，永远看不见 PostgREST 那条路。
       - 'backend/tests/db/test_migration_491_revoke_definer_rpcs_integration.py'
-      # mig 494：resource_embeddings（halfvec 2048 + HNSW）与两个 repository。
+      # mig 496：被 RLS 策略引用的 4 个 definer 身份助手只替调用者自己回答 —— 守卫读
+      # role GUC 与 JWT claims，只有真库在 anon / authenticated 角色下才测得出来。
+      - 'backend/tests/db/test_migration_496_rls_helper_identity_guard_integration.py'
+      # mig 497：resource_embeddings（halfvec 2048 + HNSW）与两个 repository。
       # halfvec 的 bind、ON CONFLICT 的目标、「同一空间才比」的 RPC、浏览器角色没有
       # EXECUTE —— 单测的 session 是桩的，这些只有 Postgres 答得出。
-      - 'backend/tests/db/test_migration_494_resource_embeddings_integration.py'
+      - 'backend/tests/db/test_migration_497_resource_embeddings_integration.py'
       - 'backend/app/repositories/resource_embeddings_repository.py'
       - 'backend/app/repositories/embedding_space_repository.py'
       # own_cost_cents 的四条不变量（3d 第 0 票 PR-B）。六个读面换了列之后，「按树
@@ -252,7 +255,7 @@ on:
       - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
       # The full-skip guard every integration step below runs through. A change
-      # to it changes what "green" means for all thirty-nine, so it has to
+      # to it changes what "green" means for all forty, so it has to
       # re-run them — otherwise the guard could be weakened by a PR this job
       # ignores.
       # ⚠️ That count has been wrong four times (it said "eight" when there
@@ -1034,7 +1037,18 @@ jobs:
           # 必须没有 EXECUTE，postgres 必须保留（负向对照：全收回会让扣分静默断掉）。
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_491_revoke_definer_rpcs_integration.py -v
 
-      - name: Assert mig 494's resource_embeddings (halfvec + HNSW) and its repositories
+      - name: Assert mig 496 made the RLS identity helpers answer only for the caller
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # is_conversation_member / conversation_member_joined_at / get_user_team_ids(_text)：
+          # anon（带 / 不带 JWT）与 authenticated 替别人问一律拿空；自己问、postgres 与
+          # service_role 拿真答案（负向对照）；引用它们的策略仍只放行调用者自己的行。
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_496_rls_helper_identity_guard_integration.py -v
+
+      - name: Assert mig 497's resource_embeddings (halfvec + HNSW) and its repositories
         working-directory: backend
         env:
           INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
@@ -1043,4 +1057,4 @@ jobs:
           # 列真是 halfvec(2048)、HNSW 用 halfvec_cosine_ops、RPC 只在一个空间里排序、
           # anon / authenticated 没有 EXECUTE；再经真 ORM 引擎跑两个 repository
           # （upsert 原地替换、insert-or-ignore 的空间键、coverage 与缺行反连接）。
-          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_494_resource_embeddings_integration.py -v
+          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_migration_497_resource_embeddings_integration.py -v

@@ -1,4 +1,4 @@
-"""Backfill the semantic layer of ``resource_embeddings`` (migration 494).
+"""Backfill the semantic layer of ``resource_embeddings`` (migration 497).
 
 Why this exists: ``analyze_l1`` ran for months with the embedder unconfigured
 and swallowed the ``None``, so most downloads have no vector. Candidates come
@@ -69,7 +69,7 @@ async def embed_candidate(
     Returns ``(True, None)`` when the row now holds a current vector (written
     now, or already there with the same ``source_hash`` — no call, no spend),
     else ``(False, reason)``: ``"empty_text"``, ``"store_missing"`` (migration
-    494 not applied), or the embedder's ``try_embed`` reason (classify it with
+    497 not applied), or the embedder's ``try_embed`` reason (classify it with
     ``classify_embed_reason`` before it reaches a user)."""
     inputs = await load_semantic_inputs(
         row.resource_id,
@@ -100,6 +100,6 @@ async def embed_candidate(
             source_text=text,
         )
     except EmbeddingStoreMissing as e:
-        logger.error(f"backfill: vector store missing (migration 494): {e}")
+        logger.error(f"backfill: vector store missing (migration 497): {e}")
         return False, "store_missing"
     return True, None

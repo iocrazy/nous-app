@@ -36,6 +36,20 @@ CLAIMED_TEXT_MAX = 500
 #: projection.
 CLAIMED_DESCRIPTION_MAX = 200
 
+#: An async media job (GenerateVideo) reporting back — success or failure.
+#: Written by ``workflows/agent_video.py``; admitted by mig 492.
+MEDIA_RESULT_KIND = "media_result"
+
+#: The keys a ``media_result`` carries into the transcript and the frame.
+_MEDIA_RESULT_KEYS = (
+    "status",
+    "media_kind",
+    "generated_media_id",
+    "url",
+    "error_code",
+    "task_id",
+)
+
 
 @dataclass(frozen=True)
 class InboxItem:
@@ -68,6 +82,11 @@ class InboxItem:
             # in the frame's attributes or of no use to the model — putting
             # the whole JSON here would burn tokens on nothing it can act on.
             return str(c.get("summary") or "")
+        if self.kind == MEDIA_RESULT_KIND:
+            # The producer (``workflows/agent_video.py``) writes one English
+            # sentence naming the outcome; ids and codes also ride as frame
+            # attributes. Never a JSON dump: ``dedupe_key`` is bookkeeping.
+            return str(c.get("text") or "")
         if isinstance(c.get("body"), str):
             return c["body"]
         if self.kind == "answer" and "value" in c:
@@ -125,6 +144,13 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
             "tokens_used": c.get("tokens_used"),
         }
 
+    if item.kind == MEDIA_RESULT_KIND:
+        # Same always-every-key rule as above: a missing ``status`` must never
+        # read as success on the card.
+        out_media: dict[str, Any] = {k: c.get(k) for k in _MEDIA_RESULT_KEYS}
+        out_media["text"] = clip_claimed_text(c.get("text") or "")
+        return out_media
+
     # Every other kind mig 461 allows (steer / answer / pause / resume /
     # budget_reply) is one piece of text plus optional provenance. The text is
     # read from the shapes those producers actually write — ``text`` from the
@@ -163,6 +189,16 @@ def render_inbox_message(item: InboxItem) -> str:
         extra = (
             f' child_run_id="{escape_frame_attr(str(c.get("child_run_id") or ""))}"'
             f' subagent_type="{escape_frame_attr(str(c.get("subagent_type") or ""))}"'
+        )
+    elif item.kind == MEDIA_RESULT_KIND:
+        # Which job this is and how it ended, so the model can cite the
+        # generated_media_id without parsing prose. ``status`` / ids are
+        # ours, but escaped like everything else: the frame's safety must not
+        # depend on remembering which values happen to be trusted.
+        c = item.content
+        extra = "".join(
+            f' {k}="{escape_frame_attr(str(c.get(k) or ""))}"'
+            for k in ("status", "media_kind", "task_id", "generated_media_id")
         )
     return (
         f'<{INBOX_FRAME} kind="{escape_frame_attr(item.kind)}"'
@@ -220,6 +256,7 @@ __all__ = [
     "CLAIMED_TEXT_MAX",
     "INBOX_FRAME",
     "InboxItem",
+    "MEDIA_RESULT_KIND",
     "claim_for_step",
     "claimed_event_content",
     "clip_claimed_text",

@@ -260,6 +260,39 @@ export function useUpdateTopicScoringConfig() {
   })
 }
 
+// ── Agent cost anomaly floor ──────────────────────────────────────────────
+export interface AgentCostAnomalyConfig {
+  /** An agent-hour's own cost must reach this many cents before a z-score
+   *  spike raises an alert. 0 = no floor. Backend default 0.5. */
+  min_hour_cost_cents: number
+}
+
+const AGENT_COST_ANOMALY_URL = '/api/v1/admin/settings/agent-cost-anomaly'
+const AGENT_COST_ANOMALY_KEY = ['settings', 'agent-cost-anomaly'] as const
+
+export function useAgentCostAnomalyConfig() {
+  return useQuery({
+    queryKey: AGENT_COST_ANOMALY_KEY,
+    queryFn: async () => {
+      const { data } = await apiClient.get<AgentCostAnomalyConfig>(AGENT_COST_ANOMALY_URL)
+      return data
+    },
+  })
+}
+
+export function useUpdateAgentCostAnomalyConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (update: AgentCostAnomalyConfig) => {
+      const { data } = await apiClient.put<AgentCostAnomalyConfig>(AGENT_COST_ANOMALY_URL, update)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AGENT_COST_ANOMALY_KEY })
+    },
+  })
+}
+
 // ── Topic L0 pre-filter config ────────────────────────────────────────────
 export interface TopicPrefilterConfig {
   /** Master switch for the keyword gate. Off = every item flows in. */
