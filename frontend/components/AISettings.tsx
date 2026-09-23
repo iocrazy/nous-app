@@ -1865,7 +1865,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         </button>
       </div>
 
-      {/* MCP moved to its own settings tab (2026-08-26 tab split). */}
+      {/* MCP lives in its own settings tab (left nav) since 2026-09. */}
 
       {/* G1-UI: Pending approvals — auto-hides when empty */}
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">

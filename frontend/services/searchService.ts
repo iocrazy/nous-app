@@ -279,3 +279,28 @@ export const localSearch = (
     processing_time_ms: Math.round(processingTime),
   };
 };
+
+// --- Vector spaces status (Settings → AI → Vectors) ---
+
+/** Real body of `GET /api/v1/search/vectors/status` (PR 2). `space` is null
+ *  when no embedder is configured or the vector store is not migrated. */
+export interface VectorsStatus {
+  status: 'ok' | 'unconfigured' | 'store_missing';
+  space: {
+    id: number;
+    actual_model: string;
+    protocol: string;
+    dims: number;
+    modalities: string[];
+    instruction_version: string;
+  } | null;
+  layers: Array<{
+    layer: 'semantic' | 'transcript';
+    status: 'ok' | 'not_built';
+    covered: number;
+    total: number;
+  }>;
+}
+
+export const getVectorsStatus = (): Promise<VectorsStatus> =>
+  apiClient.get<VectorsStatus>('/api/v1/search/vectors/status');

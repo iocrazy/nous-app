@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import { AISettingsTabs } from './settings/AISettingsTabs';
+import { MCPServersPanel } from './MCPServersPanel';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon, GitBranch
@@ -32,7 +33,7 @@ const startOfToday = (): Date => {
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies' | 'workflow';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'mcp' | 'docs' | 'cookies' | 'workflow';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
@@ -775,9 +776,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* AI Tab */}
       {/* AI settings with second-level tabs (General / Providers / Local
-          CLI / MCP / Memory) — sub-tabs, not sidebar entries (2026-08-26). */}
+          CLI / Memory / Vectors) — sub-tabs, not sidebar entries (2026-08-26). */}
       {activeTab === 'ai' && aiSettings && onSaveAISettings && (
         <AISettingsTabs settings={aiSettings} onSave={onSaveAISettings} />
+      )}
+
+      {/* MCP Tab — its own left-nav entry since 2026-09 (was an AI sub tab). */}
+      {activeTab === 'mcp' && (
+        <section className="bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
+          <MCPServersPanel />
+        </section>
       )}
 
       {/* Docs Tab */}
