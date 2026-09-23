@@ -97,14 +97,14 @@ describe('ProjectsListView', () => {
 
     fireEvent.click(screen.getByTestId('home-view-grid-btn'));
 
-    expect(localStorage.getItem('mediahub.projects.view')).toBe('grid');
+    expect(localStorage.getItem('nous.projects.view')).toBe('grid');
     expect(screen.getAllByTestId('project-card')).toHaveLength(2);
     expect(screen.getByText('Spring Campaign')).toBeTruthy();
     expect(screen.getByText('Client Reel')).toBeTruthy();
   });
 
   it('restores Grid view from a stored preference on mount', async () => {
-    localStorage.setItem('mediahub.projects.view', 'grid');
+    localStorage.setItem('nous.projects.view', 'grid');
     render(
       <ProjectsListView
         projects={PROJECTS}

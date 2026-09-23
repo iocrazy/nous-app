@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { Team } from '../types';
 import { fetchMyTeams, fetchPersonalTeam, fetchTeamMembers } from '../services/teamService';
 import { resolvePermissions } from '../utils/permissions';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, currentUserId: string | null) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [personalTeamId, setPersonalTeamId] = useState<string | null>(() => {
-    const saved = localStorage.getItem('mediahub_personal_team');
+    const saved = localStorage.getItem(STORAGE_KEYS.personalTeam);
     return saved || null;
   });
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
@@ -18,7 +19,7 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
   // selectedTeamId is now set by AppLayout from URL params
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
     // Fallback: read from localStorage for initial redirect
-    const saved = localStorage.getItem('mediahub_selected_team');
+    const saved = localStorage.getItem(STORAGE_KEYS.selectedTeam);
     return saved || null;
   });
 
@@ -52,7 +53,7 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
   // Persist selected team to localStorage (for fallback on next visit)
   useEffect(() => {
     if (selectedTeamId) {
-      localStorage.setItem('mediahub_selected_team', selectedTeamId);
+      localStorage.setItem(STORAGE_KEYS.selectedTeam, selectedTeamId);
     }
   }, [selectedTeamId]);
 
@@ -68,7 +69,7 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
           if (pt) {
             loadedPersonalId = pt.id;
             setPersonalTeamId(pt.id);
-            localStorage.setItem('mediahub_personal_team', pt.id);
+            localStorage.setItem(STORAGE_KEYS.personalTeam, pt.id);
           }
         }).catch(console.error),
       ]).finally(() => {
@@ -91,7 +92,7 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
               `[useTeams] selected team ${prev} is not in the user's teams; ` +
                 'falling back to personal / first available team',
             );
-            localStorage.removeItem('mediahub_selected_team');
+            localStorage.removeItem(STORAGE_KEYS.selectedTeam);
           }
           return loadedPersonalId || (loadedTeams.length > 0 ? loadedTeams[0].id : null);
         });

@@ -403,7 +403,7 @@ describe('ProjectWorkspace', () => {
       expect(screen.getByTestId('ws-ep-card')).toHaveTextContent('Ep 2 — Cutdown'),
     );
     expect(screen.getByTestId('ws-ep-storyboard')).toHaveTextContent('0/4');
-    expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
+    expect(localStorage.getItem('nous.project.p1.ep')).toBe('2');
   });
 
   // Task 2 review carry-over: `view`/`scene`/`shot` are scoped to whichever
@@ -647,7 +647,7 @@ describe('ProjectWorkspace', () => {
     // localStorage says Ep 1, but the URL says Ep 2 — a deep link (e.g.
     // shared, or back/forward navigated) must win over what this browser
     // last remembered.
-    localStorage.setItem('mediahub.project.p1.ep', '1');
+    localStorage.setItem('nous.project.p1.ep', '1');
     mockSearchParams.current = new URLSearchParams('ep=2');
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
@@ -656,7 +656,7 @@ describe('ProjectWorkspace', () => {
   });
 
   it('falls back to localStorage, then the first episode, when URL `ep` is missing or invalid', async () => {
-    localStorage.setItem('mediahub.project.p1.ep', '2');
+    localStorage.setItem('nous.project.p1.ep', '2');
     mockSearchParams.current = new URLSearchParams('ep=does-not-exist');
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 

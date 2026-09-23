@@ -7,6 +7,7 @@
 // pickers stay independent.
 
 import type { ScopeOption } from './ToolbarSearch';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 export type ResourceSearchField = 'name' | 'notes' | 'tags';
 
@@ -26,7 +27,7 @@ export const RESOURCE_SCOPE_OPTIONS: ScopeOption[] = ALL_RESOURCE_SCOPE.map((id)
   i18nKey: `search.scope.${id}`,
 }));
 
-const STORAGE_KEY = 'mediahub_resource_search_scope';
+const STORAGE_KEY = STORAGE_KEYS.resourceSearchScope;
 
 export function loadResourceSearchScope(): ResourceSearchField[] {
   if (typeof window === 'undefined') return DEFAULT_RESOURCE_SCOPE;

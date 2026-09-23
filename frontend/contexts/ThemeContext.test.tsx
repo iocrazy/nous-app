@@ -33,7 +33,7 @@ describe('ThemeContext', () => {
   });
 
   it("saved 'system' preference resolves via prefers-color-scheme", () => {
-    localStorage.setItem('mediahub.theme', 'system');
+    localStorage.setItem('nous.theme', 'system');
     render(<ThemeProvider><Probe /></ThemeProvider>);
     expect(screen.getByTestId('pref').textContent).toBe('system');
     expect(screen.getByTestId('resolved').textContent).toBe('dark'); // mocked matchMedia = dark
@@ -42,7 +42,7 @@ describe('ThemeContext', () => {
   it('setPreference(light) persists and flips data-theme', () => {
     render(<ThemeProvider><Probe /></ThemeProvider>);
     fireEvent.click(screen.getByText('go-light'));
-    expect(localStorage.getItem('mediahub.theme')).toBe('light');
+    expect(localStorage.getItem('nous.theme')).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 });

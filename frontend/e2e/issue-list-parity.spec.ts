@@ -111,7 +111,7 @@ async function setupListStubs(
 async function forceTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await page.addInitScript((t) => {
     try {
-      localStorage.setItem('mediahub.theme', t as string);
+      localStorage.setItem('nous.theme', t as string);
       // i18n defaults to 'zh' when no `language` key is stored (see i18n.ts).
       // The header assertions below read English, and they only used to pass
       // because the title was a hardcoded literal that ignored the locale.

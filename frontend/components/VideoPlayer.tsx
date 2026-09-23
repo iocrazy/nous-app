@@ -20,6 +20,7 @@ import {
   deleteRemotePosition,
 } from '../services/playbackSyncService';
 import { useOptionalAuth } from '../contexts/AuthContext';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 interface HlsLevel {
   height: number;
@@ -80,8 +81,8 @@ export const mediaIdentity = (url: string): string => {
   }
 };
 
-const QUALITY_PREF_KEY = 'mediahub_quality_pref';
-const VOLUME_PREF_KEY = 'mediahub_volume_pref';
+const QUALITY_PREF_KEY = STORAGE_KEYS.qualityPref;
+const VOLUME_PREF_KEY = STORAGE_KEYS.volumePref;
 
 /** How often a playing video writes its position. Once a second is plenty —
  * `timeupdate` fires ~4x that, and this is a localStorage write. */

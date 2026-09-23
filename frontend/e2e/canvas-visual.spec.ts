@@ -39,7 +39,7 @@ async function seedTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
     ([t]) => {
       try {
         localStorage.setItem('language', 'en');
-        localStorage.setItem('mediahub.theme', t as string);
+        localStorage.setItem('nous.theme', t as string);
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

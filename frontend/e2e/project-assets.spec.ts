@@ -478,7 +478,7 @@ test.describe('Project assets panel — the write paths (P3)', () => {
     // the state or writes the key back.
     await page.addInitScript(() => {
       try {
-        localStorage.removeItem('mediahub_personal_team');
+        localStorage.removeItem('nous_personal_team');
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

@@ -6,6 +6,7 @@
  */
 
 import type { ComponentType } from 'react';
+import { projectEpisodeKey } from '../../utils/storageKeys';
 import { LayoutDashboard, Frame, ListVideo, ListTodo, Users, MapPin,
   Package, Shirt, FolderOpen, Trash2, Settings } from 'lucide-react';
 
@@ -67,5 +68,5 @@ export const MANAGE_MODULES: WorkspaceModuleDef[] = [
 
 /** localStorage key for the last-selected episode, scoped per project. */
 export function episodeStorageKey(projectId: string): string {
-  return `mediahub.project.${projectId}.ep`;
+  return projectEpisodeKey(projectId);
 }

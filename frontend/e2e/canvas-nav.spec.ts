@@ -81,7 +81,7 @@ test.describe('canvas nav entry + landing page (Phase 0 G11)', () => {
     await page.addInitScript(() => {
       try {
         localStorage.setItem('language', 'en');
-        localStorage.setItem('mediahub.theme', 'dark');
+        localStorage.setItem('nous.theme', 'dark');
       } catch {
         /* localStorage unavailable — nothing we can do */
       }
@@ -163,7 +163,7 @@ test.describe('canvas trash (G9)', () => {
     await page.addInitScript(() => {
       try {
         localStorage.setItem('language', 'en');
-        localStorage.setItem('mediahub.theme', 'dark');
+        localStorage.setItem('nous.theme', 'dark');
       } catch {
         /* localStorage unavailable */
       }

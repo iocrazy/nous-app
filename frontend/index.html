@@ -10,7 +10,9 @@
       (function () {
         var pref = 'system';
         try {
-          var saved = localStorage.getItem('mediahub.theme');
+          // Runs before the JS bundle, i.e. before utils/storageKeys.ts has
+          // moved the pre-rename key — so fall back to it on first load.
+          var saved = localStorage.getItem('nous.theme') || localStorage.getItem('mediahub.theme');
           if (saved === 'light' || saved === 'dark' || saved === 'system') pref = saved;
         } catch (e) { /* Safari private mode — fall back to system */ }
         var resolved = pref;

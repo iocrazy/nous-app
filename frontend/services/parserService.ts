@@ -2,12 +2,13 @@
 import { ParsedMedia, DownloadStatus } from '../types';
 import { getSupabaseAccessToken } from '../supabaseClient';
 import { getApiUrl } from '../utils/apiConfig';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 // Get stored API Key
 const getApiKey = (): string | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem('mediahub_api_key') ||
+      return window.localStorage.getItem(STORAGE_KEYS.apiKey) ||
              window.localStorage.getItem('douyin_api_key'); // legacy fallback
     }
   } catch (e) {}
@@ -38,7 +39,7 @@ const buildHeaders = async (): Promise<HeadersInit> => {
 
   // Attach selected team ID for points/quota resolution
   try {
-    const teamId = window.localStorage.getItem('mediahub_selected_team');
+    const teamId = window.localStorage.getItem(STORAGE_KEYS.selectedTeam);
     if (teamId) {
       headers['X-Team-Id'] = teamId;
     }

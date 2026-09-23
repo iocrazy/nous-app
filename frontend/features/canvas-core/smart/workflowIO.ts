@@ -8,7 +8,10 @@
 
 import type { CanvasConnection, CanvasKind, CanvasNode } from '../types';
 
-export const WORKFLOW_FORMAT = 'mediahub-canvas-workflow';
+export const WORKFLOW_FORMAT = 'nous-canvas-workflow';
+/** Format tag written before the MediaHub → Nous rename. Users still have
+ *  files exported under it on disk, so import keeps accepting it. */
+export const LEGACY_WORKFLOW_FORMAT = 'mediahub-canvas-workflow';
 export const WORKFLOW_VERSION = 1;
 
 export interface WorkflowPayload {
@@ -141,8 +144,8 @@ export function parseWorkflow(
     throw new Error('Not a workflow file: unexpected content');
   }
   const obj = raw as Record<string, unknown>;
-  if (obj.format !== WORKFLOW_FORMAT) {
-    throw new Error('Not a MediaHub canvas workflow file');
+  if (obj.format !== WORKFLOW_FORMAT && obj.format !== LEGACY_WORKFLOW_FORMAT) {
+    throw new Error('Not a Nous canvas workflow file');
   }
   if (obj.version !== WORKFLOW_VERSION) {
     throw new Error(

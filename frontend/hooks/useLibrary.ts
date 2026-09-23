@@ -12,6 +12,7 @@ import { fetchMyCollections, createCollection, fetchVideoCollections, addVideoTo
 import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
 import { SearchResult } from '../services/searchService';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 /** The download library's view modes.
  *
@@ -25,7 +26,7 @@ export const LIBRARY_VIEW_MODES = ['justified', 'grid', 'list', 'feed'] as const
 export type LibraryViewMode = (typeof LIBRARY_VIEW_MODES)[number];
 
 /** localStorage blob holding the download library's UI preferences. */
-export const LIBRARY_PREFS_KEY = 'mediahub_library_preferences';
+export const LIBRARY_PREFS_KEY = STORAGE_KEYS.libraryPreferences;
 
 /** Default view mode for anyone without a deliberate choice on record. */
 export const DEFAULT_LIBRARY_VIEW_MODE: LibraryViewMode = 'justified';
@@ -145,7 +146,7 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
 
   // Library tab
   const [activeLibraryTab, setActiveLibraryTab] = useState<LibraryTab>(() => {
-    const saved = localStorage.getItem('mediahub_library_preferences');
+    const saved = localStorage.getItem(STORAGE_KEYS.libraryPreferences);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);

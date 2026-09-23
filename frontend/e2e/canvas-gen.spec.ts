@@ -98,7 +98,7 @@ test('image prompt Run lands both results in output slots', async ({ page }) => 
   await page.addInitScript(() => {
     try {
       localStorage.setItem('language', 'en');
-      localStorage.setItem('mediahub.theme', 'dark');
+      localStorage.setItem('nous.theme', 'dark');
     } catch {
       /* localStorage unavailable */
     }

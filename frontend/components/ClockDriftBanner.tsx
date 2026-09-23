@@ -7,8 +7,9 @@ import {
   formatDrift,
   measureClockDrift,
 } from '../services/clockDrift';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
-const DISMISS_KEY = 'mediahub_clock_drift_dismissed';
+const DISMISS_KEY = STORAGE_KEYS.clockDriftDismissed;
 
 /**
  * Persistent warning shown when the device clock is far off server time.

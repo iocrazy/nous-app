@@ -15,6 +15,7 @@ import { ProjectMembersPanel } from './ProjectMembersPanel';
 import { ProjectsQueueView } from './ProjectsQueueView';
 import { UiSelect } from './ui';
 import { PageHeader } from './layout/PageHeader';
+import { STORAGE_KEYS } from '../utils/storageKeys';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -28,7 +29,7 @@ type SortKey = 'updated_at' | 'created_at' | 'name';
 /** Homepage top-level view (PR-9, G7) — Queue (work-queue rows) is the default, Grid is secondary. */
 type HomeView = 'queue' | 'grid';
 
-const HOME_VIEW_STORAGE_KEY = 'mediahub.projects.view';
+const HOME_VIEW_STORAGE_KEY = STORAGE_KEYS.projectsView;
 
 function readStoredHomeView(): HomeView {
   try {

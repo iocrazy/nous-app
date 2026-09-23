@@ -90,7 +90,7 @@ async function setupStubs(page: Page): Promise<void> {
 async function forceTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await page.addInitScript((t) => {
     try {
-      localStorage.setItem('mediahub.theme', t as string);
+      localStorage.setItem('nous.theme', t as string);
     } catch {
       /* ignore */
     }

@@ -120,7 +120,7 @@ test('poisoned dup-id storyboard row: nodes render VISIBLY, reconcile does not r
   await page.addInitScript(() => {
     try {
       localStorage.setItem('language', 'en');
-      localStorage.setItem('mediahub.theme', 'dark');
+      localStorage.setItem('nous.theme', 'dark');
     } catch {
       /* localStorage unavailable */
     }

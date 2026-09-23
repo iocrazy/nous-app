@@ -102,7 +102,7 @@ export async function exportMediaAsZip(
   const blobUrl = URL.createObjectURL(content);
   const link = document.createElement('a');
   link.href = blobUrl;
-  link.download = opts?.zipName || `mediahub-export-${ok}-items.zip`;
+  link.download = opts?.zipName || `nous-export-${ok}-items.zip`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

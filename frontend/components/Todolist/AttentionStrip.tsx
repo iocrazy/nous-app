@@ -17,8 +17,9 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, HelpCircle, PauseCircle, ShieldCheck, CheckCircle2, Layers } from 'lucide-react';
 
 import type { AttentionItem, AttentionType } from './attentionItems';
+import { TODOLIST_ATTENTION_PREFIX } from '../../utils/storageKeys';
 
-const STORAGE_KEY_PREFIX = 'mediahub:todolist:attention';
+const STORAGE_KEY_PREFIX = TODOLIST_ATTENTION_PREFIX;
 
 /** Collapsed state per scope. Defaults to expanded — see the module note. */
 export function loadAttentionCollapsed(scopeKey: string): boolean {

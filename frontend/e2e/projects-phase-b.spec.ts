@@ -175,7 +175,7 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await page.addInitScript(() => {
       try {
         localStorage.setItem('language', 'en');
-        localStorage.setItem('mediahub.theme', 'dark');
+        localStorage.setItem('nous.theme', 'dark');
       } catch {
         /* localStorage unavailable — nothing we can do */
       }
@@ -218,7 +218,7 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
 
   test('homepage queue matches A mockup states — light theme', async ({ page }) => {
     // Same fixtures/assertions as the dark-theme run above, but forces the
-    // light color scheme + `mediahub.theme=light` (D5 stall-token needs
+    // light color scheme + `nous.theme=light` (D5 stall-token needs
     // coverage in both grounds — see the light [data-theme="light"] override
     // block in index.css). Registered after beforeEach's dark-forcing
     // addInitScript, so this one wins (init scripts run in registration
@@ -226,7 +226,7 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
     await page.emulateMedia({ colorScheme: 'light' });
     await page.addInitScript(() => {
       try {
-        localStorage.setItem('mediahub.theme', 'light');
+        localStorage.setItem('nous.theme', 'light');
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

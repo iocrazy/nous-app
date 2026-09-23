@@ -363,7 +363,7 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.addInitScript(() => {
       try {
-        localStorage.setItem('mediahub.theme', 'dark');
+        localStorage.setItem('nous.theme', 'dark');
       } catch {
         /* localStorage unavailable */
       }
@@ -437,7 +437,7 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.emulateMedia({ colorScheme: 'light' });
     await page.addInitScript(() => {
       try {
-        localStorage.setItem('mediahub.theme', 'light');
+        localStorage.setItem('nous.theme', 'light');
       } catch {
         /* localStorage unavailable */
       }

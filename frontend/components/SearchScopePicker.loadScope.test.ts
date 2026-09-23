@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { loadSearchScope, saveSearchScope } from './SearchScopePicker';
 import { DEFAULT_SEARCH_FIELDS } from '../services/searchService';
 
-const V2 = 'mediahub_search_scope_v2';
-const LEGACY = 'mediahub_search_scope';
+const V2 = 'nous_search_scope_v2';
+const LEGACY = 'nous_search_scope';
 
 describe('loadSearchScope', () => {
   beforeEach(() => {

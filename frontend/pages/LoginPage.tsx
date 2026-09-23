@@ -6,13 +6,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { LandingPage } from '../components/LandingPage';
 import { AuthOverlay } from '../components/AuthOverlay';
 import { ClockDriftBanner } from '../components/ClockDriftBanner';
+import { SESSION_KEYS } from '../utils/storageKeys';
 
 /** One-shot read of the breadcrumb authRecovery leaves when it kicks a
  * dead session to /login — lets us tell the user WHY they're here. */
 function consumeAuthExpiredFlag(): boolean {
   try {
-    const flag = sessionStorage.getItem('mediahub_auth_expired') === '1';
-    sessionStorage.removeItem('mediahub_auth_expired');
+    const flag = sessionStorage.getItem(SESSION_KEYS.authExpired) === '1';
+    sessionStorage.removeItem(SESSION_KEYS.authExpired);
     return flag;
   } catch {
     return false;
