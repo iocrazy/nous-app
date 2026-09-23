@@ -43,6 +43,25 @@ def _ensure_chat_completions_suffix(url: str) -> str:
     return f"{trimmed}/chat/completions"
 
 
+def ensure_v1_base(url: str) -> str:
+    """For self-hosted servers whose OpenAI-compatible routes live under
+    ``/v1`` (Ollama, LM Studio): accept the server root, the ``/v1`` base, or
+    the full endpoint, and return a URL that reaches ``/v1/...``.
+
+    Settings → AI Providers stores those servers' defaults WITHOUT ``/v1``
+    (``http://localhost:11434``), while the provider classes default WITH it.
+    Appending ``/chat/completions`` to the bare root produces a path neither
+    server serves, so the two stored forms have to converge here.
+
+    Only for protocols known to mount under ``/v1`` — a generic endpoint's
+    base_url is taken verbatim (``_ensure_chat_completions_suffix``).
+    """
+    trimmed = (url or "").rstrip("/")
+    if trimmed.endswith("/chat/completions") or trimmed.endswith("/v1"):
+        return trimmed
+    return f"{trimmed}/v1"
+
+
 class OpenAICompatibleAdapter:
     """Adapter for OpenAI-compatible chat-completion endpoints."""
 

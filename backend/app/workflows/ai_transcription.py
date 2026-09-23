@@ -234,13 +234,17 @@ async def run_whisper(
     so it special-cases through VolcengineASRService. All other providers
     (OpenAI, etc) go through WhisperService → AIProviderFactory.
 
-    Reason for the split: AIProviderFactory routes 'volcengine' to
-    DoubaoProvider (火山引擎 chat = Doubao), but Doubao's chat-completion
-    API doesn't expose audio transcription. master had this same split
-    in app.tasks.ai_tasks (Celery); when D-route ported the work to a
-    DBOS workflow the volcengine branch was dropped, so every transcribe
-    click since failed with "DoubaoProvider does not support transcription"
-    until DBOSMaxStepRetriesExceeded.
+    Reason for the split: the openspeech API PULLS a public URL instead of
+    accepting an upload, so the request needs this workflow's context (the
+    resource owner for the signed /media token, or an object-store signed URL
+    host-swapped to the public base). ``AIProviderFactory`` maps 'volcengine'
+    to ``VolcengineAsrProvider`` (its connection probe), whose ``transcribe``
+    refuses and points here. master had this same split in
+    app.tasks.ai_tasks (Celery); when D-route ported the work to a DBOS
+    workflow the volcengine branch was dropped, and every transcribe click
+    failed until DBOSMaxStepRetriesExceeded — back then the key still pointed
+    at DoubaoProvider, a chat client, which is why the error read "does not
+    support transcription".
 
     PR #237 audit: was sync ``def`` with two ``asyncio.run()`` calls
     (one here, one in _run_volcengine_asr). Now async — same fix as

@@ -14,6 +14,12 @@ from app.services.ai.provider_protocols.deepseek import DeepSeekProtocol
 from app.services.ai.provider_protocols.doubao import DoubaoProtocol
 from app.services.ai.provider_protocols.jimeng import JimengProtocol
 from app.services.ai.provider_protocols.jimeng_local import JimengLocalProtocol
+from app.services.ai.provider_protocols.kimi import KimiProtocol
+from app.services.ai.provider_protocols.local_endpoints import (
+    LMStudioProtocol,
+    OllamaProtocol,
+)
+from app.services.ai.provider_protocols.minimax import MiniMaxProtocol
 from app.services.ai.provider_protocols.modelscope import ModelScopeProtocol
 from app.services.ai.provider_protocols.nous import NousProtocol
 from app.services.ai.provider_protocols.openai import OpenAIProtocol
@@ -21,15 +27,25 @@ from app.services.ai.provider_protocols.openai_images import (
     OpenAIImagesProtocol,
 )
 from app.services.ai.provider_protocols.qwen import QwenProtocol
+from app.services.ai.provider_protocols.volcengine import VolcengineProtocol
 
+# Declaration order is the admin card order (protocolRank in
+# admin/src/pages/ai/index.tsx), so related protocols stay adjacent: hosted chat
+# vendors, then doubao with the Volcengine speech key right after it (same
+# vendor, different product), then the self-hosted endpoints, then generation.
 PROTOCOLS: tuple[ProviderProtocol, ...] = (
     QwenProtocol(),
     NousProtocol(),
     OpenAIProtocol(),
     ClaudeProtocol(),
     DeepSeekProtocol(),
+    KimiProtocol(),
+    MiniMaxProtocol(),
     DoubaoProtocol(),
+    VolcengineProtocol(),
     ModelScopeProtocol(),
+    OllamaProtocol(),
+    LMStudioProtocol(),
     ArkProtocol(),
     JimengProtocol(),
     JimengLocalProtocol(),

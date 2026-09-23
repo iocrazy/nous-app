@@ -135,6 +135,11 @@ class ProviderProtocol:
     #                    runs on our servers against a subscription quota
     #   "user_device"    the user's own credential on the user's own machine,
     #                    reached through the paired daemon; nous never sees it
+    #   "endpoint"       a self-hosted server someone runs (Ollama, LM Studio):
+    #                    the base_url is the credential and a key is optional.
+    #                    Called by THIS process — not via the paired daemon, so
+    #                    it is not "user_device" — and there is no vendor key
+    #                    or quota, so it is not "api_key" either
     #
     # This is the ONLY thing separating the three gpt-image cards in Admin →
     # AI Models (codex / codex-local / openai-images) and the two dreamina

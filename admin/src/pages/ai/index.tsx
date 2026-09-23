@@ -111,6 +111,11 @@ const CREDENTIAL_KIND: Record<string, { text: string; color: string; hint: strin
     color: 'green',
     hint: "Runs on the user's own machine through their paired daemon, on their own credential. nous never sees it and never pays for it.",
   },
+  endpoint: {
+    text: 'Endpoint',
+    color: 'orangered',
+    hint: 'A self-hosted server (Ollama, LM Studio) called from our backend: the base URL is the credential, a key is optional, and there is no vendor bill.',
+  },
 }
 
 // Cards sort by the backend registry's declaration order, which already groups

@@ -69,6 +69,25 @@ class TestResolveProviderKey:
         # Admin says doubao; a qwen-prefixed actual_model must not override.
         assert resolve_provider_key("doubao", "qwen-plus") == "doubao"
 
+    @pytest.mark.parametrize(
+        "label,model",
+        [
+            ("kimi", "kimi-k2.5"),
+            ("minimax", "MiniMax-M2.5"),
+            # No prefix rule knows local model ids — the row's label is the
+            # only thing that routes them. Before 2026-09-22 these went to qwen.
+            ("ollama", "qwen2.5:7b"),
+            ("lmstudio", "local-model"),
+        ],
+    )
+    def test_former_byok_only_labels_dispatch_to_their_own_protocol(self, label, model):
+        assert resolve_provider_key(label, model) == label
+
+    def test_volcengine_label_is_not_a_chat_dispatch_key(self):
+        # A speech key. It must not become a chat key; its ASR path reads
+        # actual_provider directly and never comes through here.
+        assert resolve_provider_key("volcengine", "no-prefix-asr") == "qwen"
+
     def test_unknown_label_falls_back_to_prefix_rule(self):
         assert resolve_provider_key("volcengine-ark", "doubao-pro-32k") == "doubao"
 
@@ -85,7 +104,63 @@ class TestResolveProviderKey:
         )
 
 
+class TestModelPrefixRules:
+    """BYOK chat resolves the provider from the model id alone
+    (``get_adapter_for_user``). Until 2026-09-22 there was no rule for the Kimi
+    and MiniMax model ids the Settings card offers, so every BYOK chat turn on
+    them raised "unsupported model"."""
+
+    @pytest.mark.parametrize(
+        "model,key",
+        [
+            ("kimi-k2.5", "kimi"),
+            ("kimi-k2", "kimi"),
+            ("moonshot-v1-128k", "kimi"),
+            ("MiniMax-M2.5", "minimax"),
+            ("MiniMax-M2.5-highspeed", "minimax"),
+            ("minimax-m2", "minimax"),
+        ],
+    )
+    def test_vendor_prefixes(self, model, key):
+        from app.services.ai.adapters.factory import provider_key_for_model
+
+        assert provider_key_for_model(model) == key
+
+    def test_byok_kimi_builds_the_kimi_adapter_end_to_end(self):
+        from app.services.ai.adapters.factory import get_adapter_for_user
+        from app.services.ai.adapters.kimi import KimiAdapter
+
+        a = get_adapter_for_user("kimi-k2.5", {"kimi": {"api_key": "k"}}, None)
+        assert isinstance(a, KimiAdapter)
+        assert a.api_url == "https://api.moonshot.cn/v1/chat/completions"
+
+    def test_byok_minimax_without_key_is_typed_not_configured(self):
+        from app.services.ai.adapters.factory import get_adapter_for_user
+        from app.services.ai.provider_protocols.base import (
+            ProviderNotConfiguredError,
+        )
+
+        with pytest.raises(ProviderNotConfiguredError) as exc:
+            get_adapter_for_user("MiniMax-M2.5", {}, None)
+        assert exc.value.provider == "minimax"
+
+
 class TestCatalogDispatch:
+    @pytest.mark.asyncio
+    async def test_blank_key_kimi_row_raises_typed_error_not_qwen(self):
+        """Behaviour change, pinned: a kimi platform row with no key used to
+        fall through to the generic qwen adapter and 401 upstream. It now
+        raises the same typed error every other keyed protocol raises."""
+        from app.services.ai.provider_protocols.base import (
+            ProviderNotConfiguredError,
+        )
+
+        with pytest.raises(ProviderNotConfiguredError) as exc:
+            await _resolve(
+                _row(actual_provider="kimi", actual_model="kimi-k2.5", api_key="")
+            )
+        assert exc.value.provider == "kimi"
+
     @pytest.mark.asyncio
     async def test_nous_qwen3_35b_row_builds_an_adapter(self):
         """The exact real-machine failure: unknown-prefix actual_model on an

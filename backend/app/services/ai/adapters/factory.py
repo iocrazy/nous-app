@@ -4,6 +4,8 @@ Known prefixes:
 - qwen-* / tongyi-* / "" (empty)           → QwenAdapter  (OpenAI-compatible)
 - deepseek-*                                → DeepSeekAdapter
 - doubao-* / ep-*                           → DoubaoAdapter
+- kimi-* / moonshot-*                       → KimiAdapter
+- minimax-* (case-insensitive: MiniMax-M2.5) → MiniMaxAdapter
 - claude-*                                  → ClaudeAdapter
 - gpt-* / o1-* / o3-*                       → OpenAIAdapter (multimodal)
 - org/name                                  → ModelScopeAdapter (BYO-only)
@@ -33,8 +35,9 @@ from app.services.ai.provider_protocols.base import (  # noqa: F401
 )
 
 _KNOWN_PREFIXES = (
-    "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, claude-*, gpt-*, o1-*, o3-*, "
-    "codex:* (local daemon), org/name (ModelScope)"
+    "qwen-*, tongyi-*, deepseek-*, doubao-*, ep-*, kimi-*, moonshot-*, "
+    "minimax-*, claude-*, gpt-*, o1-*, o3-*, codex:* (local daemon), "
+    "org/name (ModelScope)"
 )
 
 
@@ -71,6 +74,13 @@ def provider_key_for_model(model: str) -> str:
         return "deepseek"
     if m.startswith("doubao-") or m.startswith("ep-"):
         return "doubao"
+    # The ids the Settings → AI Providers Kimi / MiniMax cards offer. Without
+    # these rules every BYOK chat on them raised "unsupported model" (fixed
+    # 2026-09-22). ``m`` is lower-cased, so ``MiniMax-M2.5`` matches here.
+    if m.startswith("kimi-") or m.startswith("moonshot-"):
+        return "kimi"
+    if m.startswith("minimax-"):
+        return "minimax"
     if _is_openai(m):
         return "openai"
     if m == "" or m.startswith("qwen-") or m.startswith("tongyi-"):

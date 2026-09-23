@@ -30,7 +30,7 @@ from app.services.ai import provider_protocols as pp
 
 # The closed vocabulary. Adding a value here is a deliberate act; the admin
 # page has a label for each and renders an unknown one as the raw string.
-_KINDS = {"api_key", "server_session", "user_device"}
+_KINDS = {"api_key", "server_session", "user_device", "endpoint"}
 
 # Pinned per protocol rather than computed, so a change of mind about any one
 # of them shows up as a diff in this file — the same reason the prompt pin
@@ -43,7 +43,11 @@ _EXPECTED = {
     "openai": "api_key",
     "claude": "api_key",
     "deepseek": "api_key",
+    "kimi": "api_key",
+    "minimax": "api_key",
     "doubao": "api_key",
+    # The Volcengine SPEECH key (api_key + app_id) — not the doubao chat key.
+    "volcengine": "api_key",
     "modelscope": "api_key",
     "ark": "api_key",
     "openai-images": "api_key",
@@ -51,6 +55,10 @@ _EXPECTED = {
     "jimeng-cli": "server_session",
     "codex-local": "user_device",
     "jimeng-local": "user_device",
+    # Self-hosted OpenAI-compatible servers the user runs: the address is what
+    # grants access, a key is optional, and it is not the paired daemon.
+    "ollama": "endpoint",
+    "lmstudio": "endpoint",
 }
 
 

@@ -30,3 +30,10 @@ def test_codex_local_is_a_registered_chat_key_and_never_degrades():
     # one can explain. The catalog row (mig 444) MUST hit its own key.
     assert "codex-local" in chat_provider_keys()
     assert factory.resolve_provider_key("codex-local", "") == "codex-local"
+
+
+@pytest.mark.unit
+def test_volcengine_speech_key_never_enters_chat_dispatch():
+    # A speech key in _PROVIDER_KEYS would let a chat call build a chat adapter
+    # against openspeech. It is a protocol (asr) but deliberately not a chat key.
+    assert "volcengine" not in factory._PROVIDER_KEYS

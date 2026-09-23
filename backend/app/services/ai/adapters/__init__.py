@@ -13,6 +13,10 @@ from app.services.ai.adapters.factory import (
     get_adapter_for_user,
     provider_key_for_model,
 )
+from app.services.ai.adapters.kimi import KimiAdapter
+from app.services.ai.adapters.lmstudio import LMStudioAdapter
+from app.services.ai.adapters.minimax import MiniMaxAdapter
+from app.services.ai.adapters.ollama import OllamaAdapter
 from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.ai.adapters.qwen import QwenAdapter
 
@@ -23,6 +27,10 @@ __all__ = [
     "DoubaoAdapter",
     "get_adapter",
     "get_adapter_for_user",
+    "KimiAdapter",
+    "LMStudioAdapter",
+    "MiniMaxAdapter",
+    "OllamaAdapter",
     "provider_key_for_model",
     "OpenAICompatibleAdapter",
     "QwenAdapter",

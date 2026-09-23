@@ -9,14 +9,19 @@ from app.services.ai import provider_protocols as pp
 
 @pytest.mark.unit
 def test_chat_provider_keys_match_expected_set():
-    # Behavior-identical to factory._PROVIDER_KEYS pre-refactor.
+    # The four former BYOK-only chat cards joined on 2026-09-22. volcengine did
+    # NOT: it is a speech key, and a chat key would put it in factory dispatch.
     assert pp.chat_provider_keys() == frozenset(
         {
             "claude",
             "codex-local",
             "deepseek",
             "doubao",
+            "kimi",
+            "lmstudio",
+            "minimax",
             "nous",
+            "ollama",
             "openai",
             "modelscope",
             "qwen",

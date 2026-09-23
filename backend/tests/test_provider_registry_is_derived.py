@@ -11,25 +11,30 @@ transcription raised ``Unknown provider: nous`` until 2026-09-22 (PR #2375).
 The fix there was the missing entry. The fix here is the shape: the dict is now
 DERIVED, so the same mistake has nowhere to happen.
 
-WHY A SECOND DICT STILL EXISTS
-──────────────────────────────
-Five keys have an ``AIProvider`` but no protocol: ``volcengine`` (an alias for
-doubao), ``minimax``, ``kimi``, ``ollama``, ``lmstudio``. They are BYOK provider
-cards a user can configure in Settings → AI Providers; they are not platform
-catalog protocols, and promoting them would not be a refactor — it would add
-them to ``chat_provider_keys()``, which feeds ``adapters.factory``'s dispatch
-ladder and the admin's protocol dropdown. That is a behaviour change and does
-not belong in the same commit as a rewiring.
+THERE IS NO SECOND DICT ANY MORE
+───────────────────────────────
+The first version of this refactor kept five keys in a side dict,
+``BYOK_ONLY_PROVIDERS``: ``volcengine``, ``minimax``, ``kimi``, ``ollama``,
+``lmstudio``. They are now real protocols, and the side dict is gone.
 
-So they live in ONE named, documented dict instead of being mixed into the
-hand-written list. The difference that matters: a protocol can no longer be
-silently absent — it is either mapped or explicitly exempt, and
-``test_every_protocol_is_mapped_or_exempt`` rejects a third state.
+``volcengine`` was described there as "an alias for doubao". It never was: it
+is the Volcengine SPEECH key (openspeech bigasr / seed-asr, api_key + app_id),
+a different product with a different credential. The old dict pointed it at
+``DoubaoProvider``, a chat client that cannot transcribe — which is why
+``test_connection`` and ``ai_transcription`` both had to special-case the key
+before that class was ever reached. It now maps to ``VolcengineAsrProvider``,
+whose ``list_models`` IS the openspeech probe.
 
-THE PIN BELOW IS THE PROOF OF BEHAVIOUR-PRESERVATION
-────────────────────────────────────────────────────
-``_EXPECTED`` is the registry exactly as it read before this refactor, copied
-key by key. If the derivation drops, adds or re-points anything, this fails.
+A protocol can no longer be silently absent — it is either mapped or
+explicitly exempt, and ``test_every_protocol_is_mapped_or_exempt`` rejects a
+third state.
+
+THE PIN BELOW
+─────────────
+``_EXPECTED`` is the registry key by key. Exactly one entry changed when the
+side dict was folded in: ``volcengine`` moved from ``DoubaoProvider`` to
+``VolcengineAsrProvider`` (see above). If the derivation drops, adds or
+re-points anything else, this fails.
 """
 
 from __future__ import annotations
@@ -48,15 +53,16 @@ from app.services.ai.providers.ai_provider import (
     OllamaProvider,
     OpenAIProvider,
     QwenProvider,
+    VolcengineAsrProvider,
 )
 
-# The registry as it read on master before this commit, verbatim.
+# The registry, key by key.
 _EXPECTED = {
     "openai": OpenAIProvider,
     "nous": OpenAIProvider,
     "deepseek": DeepSeekProvider,
     "doubao": DoubaoProvider,
-    "volcengine": DoubaoProvider,
+    "volcengine": VolcengineAsrProvider,
     "minimax": MiniMaxProvider,
     "kimi": KimiProvider,
     "qwen": QwenProvider,
@@ -123,19 +129,21 @@ def test_exemptions_are_honest():
 
 
 @pytest.mark.unit
-def test_byok_only_keys_are_named_and_disjoint_from_protocols():
-    """The five extras must stay extras. If one of them ever becomes a protocol,
-    it has to be removed from here in the same change — two sources for one key
-    is the exact shape this refactor removes.
-    """
-    from app.services.ai.providers.ai_provider import BYOK_ONLY_PROVIDERS
+def test_there_is_no_side_dict():
+    """One registry. The five former BYOK-only extras are protocols now; a side
+    dict next to the derivation is the exact shape this refactor removes, so
+    its reappearance is a failure rather than a style choice."""
+    from app.services.ai.providers import ai_provider
 
-    protocol_keys = {p.key for p in pp.all_protocols()}
-    overlap = protocol_keys & set(BYOK_ONLY_PROVIDERS)
-    assert not overlap, (
-        f"{sorted(overlap)} are both a protocol and a BYOK-only extra. Delete "
-        f"the extra and let the protocol carry it."
-    )
+    assert not hasattr(ai_provider, "BYOK_ONLY_PROVIDERS")
+    assert AIProviderFactory._registry == ai_provider._protocol_providers()
+
+
+@pytest.mark.unit
+def test_volcengine_is_not_the_doubao_chat_client():
+    """The lie the side dict told. volcengine is a speech key; routing it to
+    DoubaoProvider made every consumer special-case it first."""
+    assert AIProviderFactory._registry["volcengine"] is not DoubaoProvider
 
 
 @pytest.mark.unit
