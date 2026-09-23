@@ -258,7 +258,7 @@ found three docs
 
 #### What the model sees
 
-2026-09-09（harness 二期 2b-1 Task 4）起每个工具调用都有墙钟上限（`runner/tool_timeouts.py`：Skill 30s / ResourceFetch 200s（高于其自身 180s 的抽帧截止，让它自己的「frame extraction timed out」结果仍可达）/ GenerateImage、GenerateVideo 600s / Delegate 900s / `skill.*` 同 Skill、`agent.*` 同 Delegate、其余 MCP 名 120s / 其他 60s；**AskUser、FinishIssue 不计时**——它们只写一行 transcript，切断会留下 runner 没看见的停靠问题；`config.yml TOOL_TIMEOUTS` 按工具名覆盖）。超时**不是** run 停止：模型收到的是那次调用的工具结果，正文是这一行 JSON（`timeout_s` / `elapsed_s` / `tool` / `message` 里的数值随实际值变化，其余字面量固定）：
+2026-09-09（harness 二期 2b-1 Task 4）起每个工具调用都有墙钟上限（`runner/tool_timeouts.py`：Skill 30s / ResourceFetch 200s（高于其自身 180s 的抽帧截止，让它自己的「frame extraction timed out」结果仍可达）/ GenerateImage 600s / GenerateVideo 60s（#2398 起只提交，渲染在 workflow 里跑）/ Delegate 900s / `skill.*` 同 Skill、`agent.*` 同 Delegate、其余 MCP 名 120s / 其他 60s；**AskUser、FinishIssue 不计时**——它们只写一行 transcript，切断会留下 runner 没看见的停靠问题；`config.yml TOOL_TIMEOUTS` 按工具名覆盖）。超时**不是** run 停止：模型收到的是那次调用的工具结果，正文是这一行 JSON（`timeout_s` / `elapsed_s` / `tool` / `message` 里的数值随实际值变化，其余字面量固定）：
 
 ```json
 {"error": "timeout", "timed_out": true, "timeout_s": 200.0, "elapsed_s": 200.004, "tool": "ResourceFetch", "message": "Tool ResourceFetch timed out after 200s. Retry once with a narrower request, or choose another way."}

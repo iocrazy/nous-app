@@ -362,11 +362,18 @@ async def notify_media_result_step(
     error_code: Optional[str],
 ) -> None:
     """The user-facing half. ``notify`` never raises. An issue target links
-    the issue; a conversation has no notification link kind, so it links
-    nothing (the Task Center row carries the rest)."""
+    the issue (by its human identifier, which the issues route consumes); a
+    conversation has no notification link kind, so it links nothing (the Task
+    Center row carries the rest).
+
+    ``dedupe=False``: every job is its own event, but the link is shared (or
+    absent), so ``notify``'s (user, kind, link) window would swallow a second
+    video finishing inside 10 minutes. Replay safety comes from this being a
+    memoized DBOS step instead."""
     from app.services.notifications import notify
 
     ok = status == "completed"
+    is_issue = target_kind == "issue"
     await notify(
         user_id=str(user_id),
         kind="generation_result",
@@ -377,9 +384,33 @@ async def notify_media_result_step(
             else f"Your agent's video could not be generated ({error_code})."
         ),
         severity="success" if ok else "error",
-        link_kind="issue" if target_kind == "issue" else None,
-        link_id=str(target_id) if target_kind == "issue" else None,
+        link_kind="issue" if is_issue else None,
+        link_id=await _issue_link_id(int(target_id)) if is_issue else None,
+        dedupe=False,
     )
+
+
+async def _issue_link_id(issue_id: int) -> str:
+    """The issue's human identifier (MH-N) for the deep link, falling back to
+    the numeric id (same rule as ``input_gate.mark_awaiting_input``)."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Issues
+
+    try:
+        async with read_scope() as session:
+            ident = (
+                await session.execute(
+                    select(Issues.identifier).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:  # noqa: BLE001 - logged; the link degrades
+        logger.warning(
+            "[agent_video] identifier lookup failed issue={}: {}", issue_id, exc
+        )
+        return str(issue_id)
+    return str(ident) if ident else str(issue_id)
 
 
 @DBOS.step()

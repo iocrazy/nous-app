@@ -485,7 +485,11 @@ async def test_notify_step_links_an_issue_and_names_the_outcome(monkeypatch):
         sent.append(kw)
         return 1
 
+    async def _ident(issue_id: int) -> str:
+        return f"MH-{issue_id}"
+
     monkeypatch.setattr(notifications, "notify", _notify)
+    monkeypatch.setattr(m, "_issue_link_id", _ident)
     await m.notify_media_result_step(
         user_id=_USER,
         status="failed",
@@ -503,10 +507,29 @@ async def test_notify_step_links_an_issue_and_names_the_outcome(monkeypatch):
     fail, ok = sent
     assert fail["kind"] == "generation_result"
     assert fail["severity"] == "error"
-    assert (fail["link_kind"], fail["link_id"]) == ("issue", "77")
+    # The issues route resolves by human identifier, not the numeric id.
+    assert (fail["link_kind"], fail["link_id"]) == ("issue", "MH-77")
     assert "daemon_offline" in fail["body"]
     assert ok["severity"] == "success"
     assert ok["link_kind"] is None
+    # Each job is its own event: the shared/absent link must not dedupe it.
+    assert fail["dedupe"] is False and ok["dedupe"] is False
+
+
+@pytest.mark.asyncio
+async def test_issue_link_id_falls_back_to_the_numeric_id(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.db import session as db_session
+    from app.workflows import agent_video as m
+
+    @asynccontextmanager
+    async def _broken():
+        raise RuntimeError("db down")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(db_session, "read_scope", _broken)
+    assert await m._issue_link_id(77) == "77"
 
 
 def test_workflow_is_exported_from_the_dispatch_bundle():

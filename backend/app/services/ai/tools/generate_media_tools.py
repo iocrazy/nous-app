@@ -175,9 +175,9 @@ class GenerateMediaTools:
         ``agent_video_workflow``, return at once.
 
         The generation never runs in the turn. A local-daemon job may take
-        ~27 min (``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``) and a tool
-        call has 600s, so waiting here abandoned jobs the user's machine was
-        still running. The outcome reaches the model later as an
+        ~27 min (``local_dispatch.DREAMINA_DISPATCH_TIMEOUT_S``), far past any
+        tool wall clock (this one's is 60s, ``runner/tool_timeouts.py``), so
+        waiting here abandoned jobs the user's machine was still running. The outcome reaches the model later as an
         ``agent_run_inbox`` item of kind ``media_result`` (delivery per target:
         ``workflows/agent_video.py``).
 
