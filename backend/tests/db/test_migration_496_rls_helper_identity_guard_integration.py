@@ -22,10 +22,12 @@ conversation per user):
       for everyone would pass (a) and (b));
   (d) the policies that call the helpers still show A its own rows and not B's.
 
-Claims are set in BOTH shapes — ``request.jwt.claim.sub`` (what the CI stub
-``auth.uid()`` in supabase/ci_bootstrap.sql reads) and ``request.jwt.claims``
-(what production's ``auth.uid()`` and the backend's ``caller_scope`` use) — so
-the assertions hold under either definition.
+Claims are set ONLY as ``request.jwt.claims`` (what current PostgREST and the
+backend's ``caller_scope`` set); the legacy ``request.jwt.claim.sub`` /
+``.role`` GUCs are cleared. That relies on the CI stub ``auth.uid()`` in
+supabase/ci_bootstrap.sql mirroring gotrue's claims fallback — pinned by
+test_ci_bootstrap_auth_stubs_integration.py. Under the old sub-only stub the
+"own answer" and policy tests below go red (auth.uid() would be NULL).
 
 Gated on INTEGRATION_DATABASE_URL — skips cleanly in the unit lane:
 
@@ -175,13 +177,14 @@ async def _become(pg, role: str | None, sub: str | None = None, jwt: bool = True
         claims["role"] = role
     if sub is not None:
         claims["sub"] = sub
+    # Only the claims GUC carries identity; the legacy per-claim GUCs are
+    # cleared so auth.uid() must resolve through the claims fallback — the
+    # path production's PostgREST and caller_scope take.
     await pg.execute(
         "SELECT set_config('request.jwt.claims', $1, true),"
-        " set_config('request.jwt.claim.sub', $2, true),"
-        " set_config('request.jwt.claim.role', $3, true)",
+        " set_config('request.jwt.claim.sub', '', true),"
+        " set_config('request.jwt.claim.role', '', true)",
         json.dumps(claims) if claims else "",
-        sub or "",
-        claims.get("role", ""),
     )
     if role is not None:
         await pg.execute(f"SET LOCAL ROLE {role}")
