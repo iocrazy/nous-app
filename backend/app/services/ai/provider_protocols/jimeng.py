@@ -77,6 +77,17 @@ class JimengProtocol(ProviderProtocol):
         video_modes=frozenset({"frames", "multimodal"}),
         honours_ratio="native",
     )
+    # dreamina's ``image_upscale`` takes any image regardless of which
+    # generation model the row names, so every server-side jimeng row can
+    # upscale. (``jimeng-local`` cannot: it runs on the user's device.)
+    upscale_capable = True
+
+    def build_upscale_provider(self, row: dict[str, Any]) -> Any:
+        from app.services.media.parsers.video_providers.jimeng_cli import (
+            JimengCliProvider,
+        )
+
+        return JimengCliProvider(), row.get("actual_model") or ""
 
     def build_image_provider(self, row: dict[str, Any]) -> Any:
         from app.services.media.parsers.video_providers.jimeng_cli import (
