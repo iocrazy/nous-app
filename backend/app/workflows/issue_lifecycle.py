@@ -518,6 +518,26 @@ def _pending_agent_outcome(issue: dict[str, Any]) -> Optional[str]:
     return state.get("agent_outcome") if isinstance(state, dict) else None
 
 
+def _reply_resumes(issue: dict[str, Any], *, routes_outcome: bool) -> bool:
+    """Whether a reply turn resumes the issue and routes its FinishIssue.
+
+    Spec-4: a reply answering a parked needs_input / empty_output declaration.
+    Defect G: a routed reply (the sub-issue barrier's wake) on any issue that
+    is neither terminal nor backlog."""
+    status = issue.get("status")
+    if status == "needs_followup" and _pending_agent_outcome(issue) in {
+        "needs_input",
+        "empty_output",
+    }:
+        return True
+    return (
+        routes_outcome
+        and status is not None
+        and status not in PREEMPT_STATUSES
+        and status != "backlog"
+    )
+
+
 async def _run_reply_turns(
     issue_id: int,
     user_id: str,
@@ -534,6 +554,7 @@ async def _run_reply_turns(
     max_attempts: int = REPLY_LOCK_MAX_ATTEMPTS,
     wait_seconds: int = REPLY_LOCK_WAIT_SECONDS,
     attachments: Optional[list[dict]] = None,
+    routes_outcome: bool = False,
 ) -> dict[str, Any]:
     """Acquire the per-issue turn lock (waiting if a turn is in flight), run
     exactly one reply turn, then release.
@@ -546,6 +567,16 @@ async def _run_reply_turns(
     turn's own FinishIssue outcome (``route_finish_outcome``) afterward. Any
     other status is left untouched — Spec-1b's original "no status change"
     behavior for a plain reply on an in-flight/already-terminal issue.
+
+    ``routes_outcome`` (defect G) opts a reply into the same resuming branch
+    for any live status: the sub-issue barrier's wake feeds the parent the
+    children's roll-up and expects the parent's FinishIssue to move it. Before
+    this, a ``todo`` / ``in_progress`` / ``in_review`` parent's declaration was
+    discarded. It never resumes a terminal (``PREEMPT_STATUSES``) or
+    ``backlog`` issue. Default off, so an ordinary comment is unchanged.
+
+    If the ``in_progress`` write is refused (``set_status`` returns False: a
+    cancel landed between the read and the write), the turn does not run.
 
     ``load_issue`` / ``set_status`` are optional so existing callers/tests
     that don't exercise the resume path (and predate it) keep working
@@ -581,14 +612,16 @@ async def _run_reply_turns(
         resuming = False
         if load_issue is not None and set_status is not None:
             issue = await load_issue(issue_id)
-            resuming = (issue or {}).get(
-                "status"
-            ) == "needs_followup" and _pending_agent_outcome(issue or {}) in {
-                "needs_input",
-                "empty_output",
-            }
+            resuming = _reply_resumes(issue or {}, routes_outcome=routes_outcome)
             if resuming:
-                await set_status(issue_id, "in_progress")
+                # ``is False``, not falsiness: injected fakes that predate the
+                # bool return hand back None and mean "written".
+                if await set_status(issue_id, "in_progress") is False:
+                    logger.info(
+                        f"[issue_reply] issue {issue_id}: resume refused"
+                        " (issue went terminal before the turn); turn skipped"
+                    )
+                    return {"issue_id": issue_id, "preempted": True}
 
         try:
             result = await run_turn(
@@ -658,6 +691,17 @@ async def _run_reply_turns(
         await release(issue_id)
 
 
+SUBISSUE_BARRIER_SOURCE_KIND = "subissue_barrier"
+
+
+def routes_reply_outcome(source: Optional[dict[str, Any]]) -> bool:
+    """Only the sub-issue barrier's wake is a routed reply (defect G). A
+    scheduled wake-up keeps Spec-1b's one-turn, no-status-change contract."""
+    return isinstance(source, dict) and (
+        source.get("kind") == SUBISSUE_BARRIER_SOURCE_KIND
+    )
+
+
 @DBOS.workflow()
 async def respond_to_issue_reply(
     issue_id: int,
@@ -685,6 +729,10 @@ async def respond_to_issue_reply(
     the exact kwarg set, so widening it there would break fakes that have
     nothing to do with provenance. A reply with no provenance keeps handing
     over the bare step, so the ordinary path is byte-for-byte what it was.
+
+    A ``{"kind": "subissue_barrier"}`` source (defect G) also turns on
+    ``routes_outcome``: the parent's FinishIssue after the roll-up is routed
+    (``in_review`` / ``done`` / ``needs_followup``) instead of dropped.
     """
     # Defensive outer finally: whatever happened, no dispatching marker
     # outlives this workflow. ``acquire_turn_lock`` already removes it on the
@@ -717,6 +765,7 @@ async def respond_to_issue_reply(
                 set_status=set_status,
                 auto_close=auto_close,
                 attachments=attachments,
+                routes_outcome=routes_reply_outcome(source),
             )
             return turns_out
         finally:
