@@ -18,7 +18,7 @@ class _FakeRepo:
     async def list_unclustered(self, *, window_hours=48, limit=60):
         return self.rows
 
-    async def nearest_group(self, vec, *, window_hours=48):
+    async def nearest_group(self, vec, *, window_hours=48, embedding_model=None):
         # vec carries the hotspot id in tests (e.g. "vec-1")
         self._current = vec
         return self.nearest_by_id.get(vec)
@@ -29,7 +29,7 @@ class _FakeRepo:
     async def recompute_group(self, group_id):
         self.recomputed.append(group_id)
 
-    async def create_group(self, *, label, vec):
+    async def create_group(self, *, label, vec, embedding_model=None):
         self._next_gid += 1
         gid = str(self._next_gid)
         self.created.append(gid)

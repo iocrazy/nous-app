@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from dbos import DBOS
 from loguru import logger
 
+from app.core.embedding_space import EmbeddingDimensionMismatch
 from app.repositories.hotspots_repository import HotspotsRepository
 from app.repositories.signal_sources_repository import SignalSourcesRepository
 from app.repositories.topic_groups_repository import TopicGroupRepository
@@ -143,7 +144,9 @@ async def embed_unembedded_once(
     """Compute + store embeddings for hotspots that lack one.
 
     Additive + isolated: never blocks fetching/scoring. Skips silently when the
-    embedding provider isn't admin-configured (embed_text returns None).
+    embedding provider isn't admin-configured (embed_text returns None). A
+    dimension mismatch is NOT skipped silently: it would repeat for every row,
+    so the pass stops, logs ERROR and reports ``embed_error``.
     """
     hotspots_repo = hotspots_repo or HotspotsRepository()
     embedder = embedder or TopicEmbeddingService()
@@ -152,9 +155,22 @@ async def embed_unembedded_once(
         return {"unembedded": 0, "embedded": 0}
     embedded = 0
     for r in rows:
-        vec = await embedder.embed_text(_embed_text(r))
+        try:
+            vec = await embedder.embed_text(_embed_text(r))
+        except EmbeddingDimensionMismatch as e:
+            logger.error(
+                f"topic_embed stopped: {e} — no hotspot vector will be written "
+                "until the embedder matches the columns"
+            )
+            return {
+                "unembedded": len(rows),
+                "embedded": embedded,
+                "embed_error": "dimension_mismatch",
+            }
         if vec:
-            await hotspots_repo.patch_embedding(str(r["id"]), vec)
+            await hotspots_repo.patch_embedding(
+                str(r["id"]), vec, embedding_model=embedder.model
+            )
             embedded += 1
     summary = {"unembedded": len(rows), "embedded": embedded}
     logger.info(f"topic_embed done: {summary}")
@@ -232,14 +248,21 @@ async def cluster_unassigned_once(
         if not vec:
             continue
         try:
-            nearest = await repo.nearest_group(vec, window_hours=window_hours)
+            # Compare only within the hotspot's embedding space; the group
+            # it seeds inherits that space.
+            space = r.get("embedding_model")
+            nearest = await repo.nearest_group(
+                vec, window_hours=window_hours, embedding_model=space
+            )
             if nearest and is_match(nearest.get("sim")):
                 gid = nearest["id"]
                 await repo.assign_hotspot(r["id"], gid)
                 await repo.recompute_group(gid)
                 clustered += 1
             else:
-                gid = await repo.create_group(label=r.get("title") or "", vec=vec)
+                gid = await repo.create_group(
+                    label=r.get("title") or "", vec=vec, embedding_model=space
+                )
                 if gid is not None:
                     await repo.assign_hotspot(r["id"], gid)
                     new_groups += 1

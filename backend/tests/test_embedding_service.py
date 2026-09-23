@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.embedding_space import EMBEDDING_DIM
 from app.services.ai.providers.embedding_config import EmbeddingConfig
 from app.services.ai.providers.embedding_service import EmbeddingService
 
@@ -28,7 +29,9 @@ async def test_uses_openai_shape_for_non_multimodal() -> None:
         multimodal=False,
     )
     fake_resp = MagicMock()
-    fake_resp.data = [MagicMock(embedding=[0.1] * 4096)]
+    # Column width, not the model's native 4096: the writer seam refuses any
+    # other width (tests/test_embedding_space.py).
+    fake_resp.data = [MagicMock(embedding=[0.1] * EMBEDDING_DIM)]
     fake_client = MagicMock()
     fake_client.embeddings.create = AsyncMock(return_value=fake_resp)
 
@@ -45,7 +48,7 @@ async def test_uses_openai_shape_for_non_multimodal() -> None:
         svc = EmbeddingService()
         out = await svc.generate_embedding("hello")
 
-    assert out == [0.1] * 4096
+    assert out == [0.1] * EMBEDDING_DIM
     mk.assert_called_once()
     ck = mk.call_args.kwargs
     assert ck["api_key"] == "sk-x" and ck["base_url"] == "http://10.0.0.10:8000/v1"
@@ -190,7 +193,7 @@ async def test_try_embed_returns_vector_and_no_reason_on_success() -> None:
         base_url="http://x/v1", api_key="k", model="m", dimensions=3, multimodal=False
     )
     fake_resp = MagicMock()
-    fake_resp.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
+    fake_resp.data = [MagicMock(embedding=[0.1] * EMBEDDING_DIM)]
     fake_client = MagicMock()
     fake_client.embeddings.create = AsyncMock(return_value=fake_resp)
     with (
@@ -204,7 +207,7 @@ async def test_try_embed_returns_vector_and_no_reason_on_success() -> None:
         ),
     ):
         vec, reason = await EmbeddingService().try_embed("hello")
-    assert vec == [0.1, 0.2, 0.3]
+    assert vec == [0.1] * EMBEDDING_DIM
     assert reason is None
 
 
@@ -276,7 +279,7 @@ async def test_try_embed_truncates_over_long_text_before_calling_the_provider() 
         base_url="http://x/v1", api_key="k", model="m", dimensions=3, multimodal=False
     )
     fake_resp = MagicMock()
-    fake_resp.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
+    fake_resp.data = [MagicMock(embedding=[0.1] * EMBEDDING_DIM)]
     fake_client = MagicMock()
     fake_client.embeddings.create = AsyncMock(return_value=fake_resp)
 
@@ -292,7 +295,7 @@ async def test_try_embed_truncates_over_long_text_before_calling_the_provider() 
     ):
         vec, reason = await EmbeddingService().try_embed("x" * (_MAX_CHARS + 500))
 
-    assert vec == [0.1, 0.2, 0.3] and reason is None
+    assert vec == [0.1] * EMBEDDING_DIM and reason is None
     _, kwargs = fake_client.embeddings.create.call_args
     assert len(kwargs["input"]) == _MAX_CHARS
 
@@ -304,7 +307,7 @@ async def test_generate_embedding_returns_the_vector_on_success() -> None:
         base_url="http://x/v1", api_key="k", model="m", dimensions=2, multimodal=False
     )
     fake_resp = MagicMock()
-    fake_resp.data = [MagicMock(embedding=[0.4, 0.5])]
+    fake_resp.data = [MagicMock(embedding=[0.4] * EMBEDDING_DIM)]
     fake_client = MagicMock()
     fake_client.embeddings.create = AsyncMock(return_value=fake_resp)
 
@@ -318,7 +321,9 @@ async def test_generate_embedding_returns_the_vector_on_success() -> None:
             return_value=fake_client,
         ),
     ):
-        assert await EmbeddingService().generate_embedding("hello") == [0.4, 0.5]
+        assert await EmbeddingService().generate_embedding("hello") == (
+            [0.4] * EMBEDDING_DIM
+        )
 
 
 @pytest.mark.parametrize(

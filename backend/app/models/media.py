@@ -37,6 +37,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.embedding_space import EMBEDDING_DIM
 from app.db.orm_base import Base, UserScoped
 from app.models._enums import AiTaskStatus, DownloadStatus
 
@@ -862,7 +863,9 @@ class ResourceAnalysis(Base):
     full_text_for_embedding: Mapped[str | None] = mapped_column(Text)
     # 2048 = doubao-embedding-vision; pgvector validates dims at bind time,
     # so a stale 1536 here raised ValueError on every write (mig 315).
-    content_embedding: Mapped[list[float] | None] = mapped_column(Vector(2048))
+    content_embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    # Which model produced ``content_embedding`` (mig 490); NULL = legacy.
+    embedding_model: Mapped[str | None] = mapped_column(Text)
     analysis_model: Mapped[str | None] = mapped_column(String(50))
     analysis_cost: Mapped[float | None] = mapped_column(
         Numeric(10, 6), server_default=text("0")

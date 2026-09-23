@@ -24,7 +24,12 @@ _MAX_TIMELINE = 20
 # returned embedding too, but no consumer ever reads it (the embed pass uses
 # list_unembedded's explicit projection), and returning a 2048-float vector on
 # every feed row is pure waste. Dropping it is invisible to every caller.
-_HOTSPOT_READ_COLS = [c for c in Hotspots.__table__.columns if c.name != "embedding"]
+# embedding_model (mig 490) travels with the vector and is excluded with it.
+_HOTSPOT_READ_COLS = [
+    c
+    for c in Hotspots.__table__.columns
+    if c.name not in ("embedding", "embedding_model")
+]
 
 
 def sanitize_search(raw: Optional[str]) -> str:
@@ -349,10 +354,17 @@ class HotspotsRepository:
             )
             return [_plain_row(m) for m in result.mappings().all()]
 
-    async def patch_embedding(self, hotspot_id: str, embedding: list[float]) -> None:
-        """Store a hotspot's embedding vector. Sent as a pgvector text literal
-        ``[v1,v2,...]`` cast to the vector column (same wire form the old
-        PostgREST path used) — bypasses the ORM Vector bind processor."""
+    async def patch_embedding(
+        self,
+        hotspot_id: str,
+        embedding: list[float],
+        *,
+        embedding_model: str | None = None,
+    ) -> None:
+        """Store a hotspot's embedding vector and the model that produced it
+        (its space, ``app.core.embedding_space``). Sent as a pgvector text
+        literal ``[v1,v2,...]`` cast to the vector column (same wire form the
+        old PostgREST path used) — bypasses the ORM Vector bind processor."""
         if not embedding:
             return
         literal = "[" + ",".join(repr(float(x)) for x in embedding) + "]"
@@ -360,10 +372,14 @@ class HotspotsRepository:
             async with write_scope() as session:
                 await session.execute(
                     text(
-                        "UPDATE public.hotspots SET embedding = CAST(:emb AS vector) "
-                        "WHERE id = :id"
+                        "UPDATE public.hotspots SET embedding = CAST(:emb AS vector), "
+                        "embedding_model = :model WHERE id = :id"
                     ),
-                    {"emb": literal, "id": _bigint(hotspot_id)},
+                    {
+                        "emb": literal,
+                        "model": embedding_model,
+                        "id": _bigint(hotspot_id),
+                    },
                 )
         except Exception as e:  # noqa: BLE001
             logger.error(f"patch_embedding failed for {hotspot_id}: {e}")
@@ -403,7 +419,11 @@ class HotspotsRepository:
                 await session.execute(
                     sa_update(Hotspots)
                     .where(Hotspots.id == _bigint(hotspot_id))
-                    .values(content_original=content.strip(), embedding=None)
+                    .values(
+                        content_original=content.strip(),
+                        embedding=None,
+                        embedding_model=None,
+                    )
                 )
         except Exception as e:  # noqa: BLE001
             logger.error(f"patch_content failed for {hotspot_id}: {e}")

@@ -19,11 +19,13 @@ class _FakeRepo:
     async def list_unembedded(self, limit=40):
         return self.rows
 
-    async def patch_embedding(self, hotspot_id, embedding):
+    async def patch_embedding(self, hotspot_id, embedding, *, embedding_model=None):
         self.patched.append((hotspot_id, embedding))
 
 
 class _FakeEmbedder:
+    model = "test-embedder"
+
     def __init__(self, vec):
         self.vec = vec
         self.calls = 0

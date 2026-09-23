@@ -1280,17 +1280,16 @@ async def backfill_embeddings(
         else:
             code = classify_embed_reason(reason) or "provider_error"
         skipped.append(_skip(cand.resource_id, code))
-        if reason == "unconfigured":
+        if code in ("embedder_unconfigured", "dimension_mismatch"):
             # Process-wide, not per-row: every later re-embed AND every
-            # dispatched VLM run would end the same way. Account for the
-            # rows this abort leaves untouched instead of dropping them.
+            # dispatched VLM run would end the same way (a mismatched
+            # embedder returns the wrong width for every text, so a
+            # dispatched analyze_l1 would pay for the VLM and still land no
+            # vector). Account for the rows this abort leaves untouched
+            # instead of dropping them.
             aborted = True
-            skipped.extend(
-                _skip(c.resource_id, "embedder_unconfigured") for c in reembed[i + 1 :]
-            )
-            skipped.extend(
-                _skip(c.resource_id, "embedder_unconfigured") for c in dispatch
-            )
+            skipped.extend(_skip(c.resource_id, code) for c in reembed[i + 1 :])
+            skipped.extend(_skip(c.resource_id, code) for c in dispatch)
             break
 
     dispatched: list[dict] = []

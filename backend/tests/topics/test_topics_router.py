@@ -186,13 +186,17 @@ def client(monkeypatch):
         async def get_interest(self, user_id):
             return calls.get("interest")  # None unless preset
 
-        async def set_interest(self, user_id, *, interest_text, vec):
+        async def set_interest(
+            self, user_id, *, interest_text, vec, embedding_model=None
+        ):
             calls["set_interest"] = {"text": interest_text, "vec": vec}
 
         async def rank_hotspot_ids(self, user_id, *, window_hours=72, limit=100):
             return calls.get("ranked", [])
 
     class _FakeEmbedder:
+        model = "test-embedder"
+
         async def embed_text(self, text):
             return calls.get("embed_result", [0.1, 0.2])
 
