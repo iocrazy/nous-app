@@ -24,6 +24,10 @@ from app.repositories.publish_tasks_repository import (
     PublishTasksRepository,
     aggregate_task_status,
 )
+from app.schemas.distribution import (
+    DistributionWebhookAck,
+    DistributionWebhookChallenge,
+)
 from app.services.distribution.credentials import (
     CredentialsNotConfigured,
     get_douyin_credentials,
@@ -66,7 +70,11 @@ async def _reaggregate_task_tracking(task_id: str) -> None:
         logger.warning(f"[webhook] reaggregate task {task_id} failed: {e}")
 
 
-@router.post("/webhook/douyin")
+@router.post(
+    "/webhook/douyin",
+    # Douyin's receipt shapes, verbatim: the challenge echo, else {"msg": "ok"}.
+    response_model=DistributionWebhookChallenge | DistributionWebhookAck,
+)
 async def douyin_webhook(request: Request):
     body_bytes = await request.body()
     try:

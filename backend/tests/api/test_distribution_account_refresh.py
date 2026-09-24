@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,7 +24,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import app.api.distribution_router as dr
+from app.models import SocialAccounts
+from app.repositories.social_accounts_repository import _public_row
 from app.services.distribution.browser_client import SessionErrorKind
+from tests.api.wire_parity import sample_row
 
 _USER = "11111111-1111-1111-1111-111111111111"
 _ACCOUNT_ID = 7788
@@ -35,6 +39,12 @@ _SESSION_ACCT = {
     "session_state": '{"cookies": [{"name": "sessionid", "value": "x"}]}',
     "environment": None,
 }
+
+
+def _public_account() -> dict:
+    row = sample_row(SocialAccounts)
+    row.update(id=_ACCOUNT_ID, created_by=uuid.UUID(_USER), username="Test Creator")
+    return _public_row(row)
 
 
 def _make_app() -> FastAPI:
@@ -59,9 +69,9 @@ def repo(monkeypatch):
     fake.update_profile = AsyncMock()
     fake.update_session_state = AsyncMock()
     fake.mark_needs_relogin = AsyncMock()
-    fake.get_public = AsyncMock(
-        return_value={"id": _ACCOUNT_ID, "username": "Test Creator"}
-    )
+    # The real ``_public_row`` shape: the route declares it (P7), so a
+    # two-key stub would now fail response validation.
+    fake.get_public = AsyncMock(return_value=_public_account())
     monkeypatch.setattr(dr, "accounts_repo", fake)
 
     async def _noop_authorize(account_id, user):

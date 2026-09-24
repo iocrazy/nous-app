@@ -9,10 +9,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert
 
+from app.api.row_guard import require_row
 from app.core.config import settings
 
 # get_current_user is otherwise unused directly in this module (CurrentUserDep
@@ -34,6 +35,7 @@ from app.schemas.distribution import (
     CapabilitiesResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
+    DistributionAccountRow,
     ReadbackTiming,
     SessionLoginCancelResponse,
     SessionLoginRequest,
@@ -56,6 +58,8 @@ from app.schemas.distribution_cover import (
 )
 from app.schemas.distribution_music import (
     BrowseIdentityOut,
+    DistributionMusicChartsPage,
+    DistributionMusicHarvestResult,
     MusicSearchResponse,
     MusicTrackOut,
 )
@@ -75,6 +79,7 @@ from app.schemas.distribution_topics import (
     TopicSuggestionOut,
     TopicSuggestResponse,
 )
+from app.schemas.wire import binary_response
 from app.services.distribution.credentials import (
     CredentialsNotConfigured,
     get_douyin_credentials,
@@ -322,6 +327,15 @@ async def connect_account(body: ConnectAccountRequest, user: CurrentUserDep):
 @router.get(
     "/accounts/oauth/{platform}/callback",
     dependencies=[Depends(require_distribution)],
+    # A browser redirect back to the frontend, never JSON.
+    response_class=RedirectResponse,
+    status_code=307,
+    responses={
+        307: {
+            "description": "Back to /distribution/accounts with ?connected=1, "
+            "?error=oauth_state or ?error=oauth_exchange"
+        }
+    },
 )
 async def oauth_callback(platform: str, code: str = "", state: str = ""):
     front = settings.FRONTEND_URL.rstrip("/")
@@ -416,11 +430,13 @@ async def _refresh_session_account(account_id: int, acct: dict) -> dict:
     # session_state=None: the session is alive but validate produced no new
     # cookies, so this bumps session_checked_at without blanking the row.
     await accounts_repo.update_session_state(account_id, None, status="active")
-    return await accounts_repo.get_public(account_id) or {}
+    # None = unbound between the guard and here: typed 404, not 200 {}.
+    return require_row(await accounts_repo.get_public(account_id))
 
 
 @router.post(
     "/accounts/{account_id}/refresh",
+    response_model=DistributionAccountRow,
     dependencies=[Depends(require_distribution)],
 )
 async def refresh_account(account_id: int, user: CurrentUserDep):
@@ -1845,6 +1861,8 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
 @router.get(
     "/music/seed.png",
     dependencies=[Depends(require_distribution)],
+    response_class=Response,
+    responses=binary_response("The blank harvest seed image", "image/png"),
 )
 async def get_music_harvest_seed():
     """The blank square the harvest uploads to reach the music panel.
@@ -1858,8 +1876,6 @@ async def get_music_harvest_seed():
     The consumer is the browser container over the docker network; it mounts no
     storage volume by design, so everything it uploads arrives over HTTP.
     """
-    from fastapi.responses import Response
-
     from app.services.distribution.music_charts import seed_png
 
     return Response(
@@ -1871,6 +1887,7 @@ async def get_music_harvest_seed():
 
 @router.get(
     "/accounts/{account_id}/music/charts",
+    response_model=DistributionMusicChartsPage,
     dependencies=[Depends(require_distribution)],
 )
 async def list_music_charts(account_id: int, user: CurrentUserDep):
@@ -1904,6 +1921,7 @@ async def list_music_charts(account_id: int, user: CurrentUserDep):
 
 @router.post(
     "/accounts/{account_id}/music/charts/refresh",
+    response_model=DistributionMusicHarvestResult,
     dependencies=[Depends(require_distribution)],
 )
 async def refresh_music_charts(account_id: int, user: CurrentUserDep):
