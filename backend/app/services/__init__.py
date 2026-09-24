@@ -18,10 +18,7 @@ from app.services.ai.visual.visual_analysis_service import (
     VisualAnalysisResult,
     VisualAnalysisService,
 )
-from app.services.infra.supabase_auth_service import (
-    SupabaseAdminAuthService,
-    SupabaseAuthService,
-)
+from app.services.infra.supabase_auth_service import SupabaseAuthService
 from app.services.media.downloader.downloader import DownloaderService
 from app.services.media.parsers.douyin_parse import (
     ABogusDouyinParser,
@@ -37,7 +34,6 @@ __all__ = [
     "DownloaderService",
     "MediaService",
     "SupabaseAuthService",
-    "SupabaseAdminAuthService",
     "VisualAnalysisService",
     "VisualAnalysisResult",
     "EmbeddingService",

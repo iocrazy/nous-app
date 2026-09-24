@@ -15,11 +15,7 @@ from loguru import logger
 from supabase_auth import AsyncGoTrueClient
 
 from app.core.config import settings
-from app.db.supabase_client import (
-    _HTTPX_LIMITS,
-    _HTTPX_TIMEOUT,
-    get_async_supabase_admin,
-)
+from app.db.supabase_client import _HTTPX_LIMITS, _HTTPX_TIMEOUT
 
 
 def _auth_http_client() -> httpx.AsyncClient:
@@ -205,8 +201,7 @@ class SupabaseAuthService:
 
         返回结构与历史版本对齐（id / email / user_metadata / app_metadata /
         created_at），让现有 caller（/auth/me、realtime、media_auth）不变。
-        created_at 不在 JWT claims 里，所以始终为 None — 需要 admin 字段
-        请改用 SupabaseAdminAuthService.get_user_by_id。
+        created_at 不在 JWT claims 里，所以始终为 None。
         """
         # Local import to avoid circular dependency with app.core.deps
         from app.core.deps import verify_jwt
@@ -318,78 +313,4 @@ class SupabaseAuthService:
             return {"success": False, "message": "更新失败"}
         except Exception as e:
             logger.error(f"更新用户信息失败: {e}")
-            return {"success": False, "message": str(e)}
-
-
-class SupabaseAdminAuthService:
-    """Supabase 管理员认证服务（使用 service_role key）(异步)"""
-
-    def __init__(self):
-        pass
-
-    async def _get_admin_client(self):
-        """Get async admin client (loop-aware, safe for Celery workers)."""
-        return await get_async_supabase_admin()
-
-    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """根据用户 ID 获取用户信息"""
-        try:
-            client = await self._get_admin_client()
-            response = await client.auth.admin.get_user_by_id(user_id)
-            if response.user:
-                return {
-                    "id": response.user.id,
-                    "email": response.user.email,
-                    "user_metadata": response.user.user_metadata,
-                    "app_metadata": response.user.app_metadata,
-                }
-            return None
-        except Exception as e:
-            logger.error(f"获取用户信息失败: {e}")
-            return None
-
-    async def list_users(self, page: int = 1, per_page: int = 50) -> Dict[str, Any]:
-        """获取用户列表"""
-        try:
-            client = await self._get_admin_client()
-            response = await client.auth.admin.list_users(page=page, per_page=per_page)
-            users = []
-            for user in response:
-                users.append(
-                    {
-                        "id": user.id,
-                        "email": user.email,
-                        "created_at": str(user.created_at) if user.created_at else None,
-                        "user_metadata": user.user_metadata,
-                    }
-                )
-            return {"success": True, "users": users}
-        except Exception as e:
-            logger.error(f"获取用户列表失败: {e}")
-            return {"success": False, "message": str(e), "users": []}
-
-    async def delete_user(self, user_id: str) -> Dict[str, Any]:
-        """删除用户"""
-        try:
-            client = await self._get_admin_client()
-            await client.auth.admin.delete_user(user_id)
-            logger.info(f"用户已删除: {user_id}")
-            return {"success": True, "message": "用户已删除"}
-        except Exception as e:
-            logger.error(f"删除用户失败: {e}")
-            return {"success": False, "message": str(e)}
-
-    async def update_user_role(self, user_id: str, role: str) -> Dict[str, Any]:
-        """更新用户角色（存储在 app_metadata 中）"""
-        try:
-            client = await self._get_admin_client()
-            response = await client.auth.admin.update_user_by_id(
-                user_id, {"app_metadata": {"role": role}}
-            )
-            if response.user:
-                logger.info(f"用户角色已更新: {user_id} -> {role}")
-                return {"success": True, "message": f"用户角色已更新为 {role}"}
-            return {"success": False, "message": "更新失败"}
-        except Exception as e:
-            logger.error(f"更新用户角色失败: {e}")
             return {"success": False, "message": str(e)}
