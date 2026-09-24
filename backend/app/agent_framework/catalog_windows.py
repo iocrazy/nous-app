@@ -66,9 +66,13 @@ def _catalog_windows_select_stmt():
 
 
 async def _fetch_catalog_rows() -> list[dict[str, Any]]:
-    from app.db.session import read_scope  # deferred — matches codebase convention
+    """Always its own session — never ``read_scope``, which joins an ambient
+    ``unit_of_work``. A failed read here (e.g. 42703 before migration 500 is
+    applied) inside a caller's transaction would leave that transaction
+    aborted, and the caller never asked for this read."""
+    from app.db import session as db_session  # deferred — codebase convention
 
-    async with read_scope() as session:
+    async with db_session.get_sessionmaker()() as session:
         rows = (await session.execute(_catalog_windows_select_stmt())).mappings().all()
     return [dict(r) for r in rows]
 
@@ -92,6 +96,13 @@ async def refresh_catalog_windows() -> None:
 
     Never raises: on failure the previous snapshot stays and the attempt is
     stamped, so a dead DB is retried once per TTL rather than every step.
+
+    The stamp is written on failure too (``_loaded_at``). Consequence while
+    code is deployed ahead of migration 500: the read fails with 42703, the
+    catalog layer stays empty and every lookup falls back to the table layer
+    (then the generic fallback) — for at most one TTL
+    (:data:`CATALOG_WINDOW_TTL_S`, 300 s) after the migration lands, when the
+    next reload picks the column up. No turn fails because of it.
 
     Deliberately lock-free: two concurrent reloads each publish a complete
     snapshot and the last one wins, and an ``asyncio.Lock`` at module level

@@ -306,3 +306,44 @@ async def test_admin_catalog_edits_refresh_the_cache(monkeypatch, verb):
     else:
         await r.delete_nous_model("1", auth=None)
     assert called == [1]
+
+
+@pytest.mark.unit
+async def test_fetch_opens_its_own_session_even_inside_a_unit_of_work(monkeypatch):
+    """A failed catalog read must not abort an ambient unit_of_work
+    transaction, so the fetch never joins it."""
+    from contextlib import asynccontextmanager
+
+    import app.db.session as dbs
+
+    used: list[str] = []
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [{"name": "n", "actual_model": "m", "context_window_tokens": 1}]
+
+    class _Own:
+        async def execute(self, stmt):
+            used.append("own")
+            return _Result()
+
+    class _Ambient:
+        async def execute(self, stmt):
+            used.append("ambient")
+            return _Result()
+
+    @asynccontextmanager
+    async def _session():
+        yield _Own()
+
+    monkeypatch.setattr(dbs, "get_sessionmaker", lambda: _session)
+    token = dbs._request_session.set(_Ambient())
+    try:
+        rows = await cwin._fetch_catalog_rows()
+    finally:
+        dbs._request_session.reset(token)
+    assert used == ["own"]
+    assert rows == [{"name": "n", "actual_model": "m", "context_window_tokens": 1}]
