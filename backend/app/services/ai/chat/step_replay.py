@@ -10,6 +10,11 @@ message is already in history, so the turn reuses it instead of appending.
 History is cut just before that message: it becomes this turn's user message
 again, and anything the killed attempt persisted after it belongs to the
 superseded run, not to the context the model should see twice.
+
+Limit: the scan only sees the history window the turn loads (newest 200
+messages). If more than 199 messages landed after the killed attempt's user
+message, it is not found and the turn falls back to the old behaviour (append
+again; the model sees the killed attempt's leftovers).
 """
 
 from __future__ import annotations

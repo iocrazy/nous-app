@@ -57,9 +57,14 @@ async def interrupt_inflight_runs(
 ) -> list[int]:
     """Close every registered run as interrupted by a worker shutdown.
 
-    Returns the run ids the terminal UPDATE actually took (a run that finished
-    on its own in the meantime is not ``running`` and is left alone). Never
-    raises; returns ``[]`` on timeout or failure."""
+    Two phases share one deadline but not one ``wait_for``. The flip is the
+    terminal UPDATE; the closes (turn_end + tree settle) run one by one on
+    whatever budget is left. The split matters because the sweeper only scans
+    ``running`` rows: once flipped, a run it did not get to close here keeps
+    no ``turn_end`` forever — so those ids are logged at ERROR, never dropped.
+
+    Returns the run ids the flip took (a run that finished on its own in the
+    meantime is not ``running`` and is left alone). Never raises."""
     recorders = live_recorders()
     if not recorders:
         return []
@@ -67,22 +72,38 @@ async def interrupt_inflight_runs(
         f"[live_runs] worker shutdown with {len(recorders)} run(s) in flight; "
         f"closing them as {WORKER_SHUTDOWN_DETAIL}"
     )
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
     try:
-        return await asyncio.wait_for(_interrupt(recorders), timeout=timeout_s)
+        flipped = await asyncio.wait_for(_flip(recorders), timeout=timeout_s)
     except asyncio.TimeoutError:
         logger.error(
-            f"[live_runs] closing in-flight runs exceeded {timeout_s}s; the "
-            f"sweeper will close whatever is still running"
+            f"[live_runs] flipping in-flight runs exceeded {timeout_s}s; they "
+            f"stay running and the heartbeat sweeper will close them"
         )
+        return []
     except Exception as exc:  # noqa: BLE001 — shutdown must proceed
         logger.opt(exception=True).error(
-            f"[live_runs] closing in-flight runs failed: {exc!r}; the sweeper "
-            f"will close whatever is still running"
+            f"[live_runs] flipping in-flight runs failed: {exc!r}; they stay "
+            f"running and the heartbeat sweeper will close them"
         )
-    return []
+        return []
+    unclosed = await _close_all(flipped, deadline=deadline)
+    if unclosed:
+        logger.error(
+            f"[live_runs] runs {unclosed} were flipped to heartbeat_lost "
+            f"(worker_shutdown) but not closed before the {timeout_s}s budget "
+            f"ran out: no turn_end{{interrupted}} and no tree settle. The sweeper "
+            f"will NOT revisit them (it only scans running rows)."
+        )
+    logger.info(
+        f"[live_runs] closed {len(flipped) - len(unclosed)}/{len(flipped)} "
+        f"run(s) as worker_shutdown"
+    )
+    return list(flipped)
 
 
-async def _interrupt(recorders: tuple["RunRecorder", ...]) -> list[int]:
+async def _flip(recorders: tuple["RunRecorder", ...]) -> list[int]:
     for recorder in recorders:
         await recorder.stop_heartbeat()
     run_ids = [int(r.run_id) for r in recorders if r.run_id is not None]
@@ -91,13 +112,23 @@ async def _interrupt(recorders: tuple["RunRecorder", ...]) -> list[int]:
 
     from app.repositories import agent_runs_repository as repo_mod
 
-    flipped = await repo_mod.get_agent_runs_repository().mark_worker_shutdown_ids(
-        run_ids
-    )
-    for run_id in flipped:
-        await _close_one(run_id)
-    logger.info(f"[live_runs] closed {len(flipped)} run(s) as worker_shutdown")
-    return list(flipped)
+    repo = repo_mod.get_agent_runs_repository()
+    return list(await repo.mark_worker_shutdown_ids(run_ids))
+
+
+async def _close_all(flipped: list[int], *, deadline: float) -> list[int]:
+    """Close each flipped run on the remaining budget; return the ids that did
+    not get closed (budget exhausted or the close itself hung)."""
+    loop = asyncio.get_running_loop()
+    for index, run_id in enumerate(flipped):
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return list(flipped[index:])
+        try:
+            await asyncio.wait_for(_close_one(run_id), timeout=remaining)
+        except asyncio.TimeoutError:
+            return list(flipped[index:])
+    return []
 
 
 async def _close_one(run_id: Any) -> None:

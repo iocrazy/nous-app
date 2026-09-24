@@ -160,3 +160,17 @@ def test_new_helpers_are_not_dbos_steps(fn_name):
     fn = getattr(tr, fn_name)
     assert not hasattr(fn, "dbos_function_name")
     assert inspect.unwrap(fn) is fn
+
+
+def test_the_limit_error_survives_a_pickle_round_trip():
+    """DBOS pickles a step's exception and rebuilds it on replay; the typed
+    prefix is the only typed signal on the blocked issue, so it must survive."""
+    import pickle
+
+    err = tr.IssueTurnRecoveryLimitExceeded(9, "wf:7", 4)
+    back = pickle.loads(pickle.dumps(err))
+    assert type(back) is tr.IssueTurnRecoveryLimitExceeded
+    assert str(back) == str(err)
+    assert str(back).startswith("[issue_turn_recovery_limit]")
+    assert back.error_code == "issue_turn_recovery_limit"
+    assert (back.issue_id, back.step_key, back.attempts) == (9, "wf:7", 4)

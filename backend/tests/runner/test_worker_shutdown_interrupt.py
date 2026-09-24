@@ -266,3 +266,35 @@ def test_interrupt_inflight_runs_is_not_a_dbos_step():
     fn = live_runs.interrupt_inflight_runs
     assert not hasattr(fn, "dbos_function_name")
     assert inspect.unwrap(fn) is fn
+
+
+async def test_a_hung_close_after_the_flip_logs_the_unclosed_ids(closers, monkeypatch):
+    """Flipped rows are no longer ``running``, so the sweeper never revisits
+    them; a close that runs out of budget must name them, not claim the
+    sweeper will pick them up."""
+    from loguru import logger
+
+    import app.services.ai.runner.interrupted_turn as it
+
+    async def _close(run_id, *, detail=None):
+        if run_id == 202:
+            await asyncio.sleep(3600)
+        closers["close"].append((run_id, detail))
+        return True
+
+    monkeypatch.setattr(it, "close_interrupted_run", _close)
+    live_runs.register(_recorder("101"))
+    live_runs.register(_recorder("202"))
+    live_runs.register(_recorder("303"))
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="ERROR")
+    try:
+        closed = await live_runs.interrupt_inflight_runs(timeout_s=0.2)
+    finally:
+        logger.remove(sink)
+
+    assert closed == [101, 202, 303]  # all three were flipped
+    assert closers["close"] == [(101, "worker_shutdown")]
+    unclosed = [line for line in lines if "not closed" in line]
+    assert unclosed and "[202, 303]" in unclosed[0]
+    assert not any("sweeper will close" in line for line in unclosed)

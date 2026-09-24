@@ -19,6 +19,10 @@ orphans every workflow in flight at the deploy. The typed code therefore
 rides in the message: ``error_message`` starts with
 ``[issue_turn_recovery_limit]``, and ``step_attempts`` stays on the row.
 
+"Recovery" means any re-execution of the same step under the same workflow
+id: automatic DBOS recovery after a worker restart AND an admin's manual
+``resume_workflow`` (``workflows_router``). Both count toward the limit.
+
 Nothing here is a DBOS step (no new step in any workflow body).
 """
 
@@ -38,14 +42,23 @@ class IssueTurnRecoveryLimitExceeded(RuntimeError):
 
     error_code = RECOVERY_LIMIT_ERROR_CODE
 
-    def __init__(self, *, issue_id: int, step_key: str, attempts: int) -> None:
+    def __init__(self, issue_id: int, step_key: str, attempts: int) -> None:
+        # Positional and all in ``self.args``: DBOS pickles a step's exception
+        # and rebuilds it on replay via ``Exception.__reduce__`` =
+        # ``(cls, self.args)``. A keyword-only __init__ made that rebuild raise
+        # TypeError, and the typed message prefix was lost exactly when a
+        # worker died between the step raising and the body parking the issue.
+        super().__init__(issue_id, step_key, attempts)
         self.issue_id = issue_id
         self.step_key = step_key
         self.attempts = attempts
-        super().__init__(
-            f"[{RECOVERY_LIMIT_ERROR_CODE}] issue {issue_id} turn step {step_key} "
-            f"was re-executed by worker recovery {attempts - 1} times (limit "
-            f"{ISSUE_TURN_MAX_RECOVERIES}); not starting another billed run"
+
+    def __str__(self) -> str:
+        return (
+            f"[{RECOVERY_LIMIT_ERROR_CODE}] issue {self.issue_id} turn step "
+            f"{self.step_key} was re-executed by worker recovery "
+            f"{self.attempts - 1} times (limit {ISSUE_TURN_MAX_RECOVERIES}); not "
+            f"starting another billed run"
         )
 
 
@@ -87,9 +100,7 @@ async def enforce_recovery_limit(issue_id: int, step_key: str) -> Optional[int]:
             f"recovery (attempt {attempts})"
         )
     if attempts > 1 + ISSUE_TURN_MAX_RECOVERIES:
-        raise IssueTurnRecoveryLimitExceeded(
-            issue_id=issue_id, step_key=step_key, attempts=attempts
-        )
+        raise IssueTurnRecoveryLimitExceeded(issue_id, step_key, attempts)
     return attempts
 
 
