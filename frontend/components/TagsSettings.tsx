@@ -23,6 +23,7 @@ import {
   NotebookPen,
 } from 'lucide-react';
 import type { Tag, TagGroup } from '../types/api';
+import { useOptionalAuth } from '../contexts/AuthContext';
 import { Loading } from './common/Loading';
 import { UiSelect } from './ui';
 import { mergeUpdatedTag } from './tagEditMerge';
@@ -64,6 +65,10 @@ const getTagStyle = (color: string | null, disabled = false) => {
 export const TagsSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const isZh = i18n.language?.startsWith('zh');
+  // tag_groups is one platform-wide table: only admins may create, rename,
+  // reorder or delete groups (the backend 403s everyone else). Everyone can
+  // still browse groups and file their own tags into them.
+  const canManageGroups = useOptionalAuth()?.userProfile?.role === 'admin';
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [groups, setGroups] = useState<TagGroup[]>([]);
@@ -874,7 +879,7 @@ export const TagsSettings: React.FC = () => {
                 merged its tags into the sentinel above; offer a one-click
                 cleanup so the user can delete the orphan group (its tags
                 stay, just become truly uncategorized). */}
-            {groups.some((g) => isReservedGroupName(g.name)) && (
+            {canManageGroups && groups.some((g) => isReservedGroupName(g.name)) && (
               <div className="mx-3 mt-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] text-warn-soft space-y-2">
                 <div>
                   Found a custom group named "Uncategorized" — its tags
@@ -906,17 +911,19 @@ export const TagsSettings: React.FC = () => {
               <span className="text-xs font-medium text-ink-500 uppercase tracking-wider">
                 Groups ({visibleGroups.length})
               </span>
-              <button
-                onClick={() => setShowCreateGroup(!showCreateGroup)}
-                className="text-ink-500 hover:text-ink-300 transition-colors"
-                title="Add group"
-              >
-                {showCreateGroup ? <X size={14} /> : <Plus size={14} />}
-              </button>
+              {canManageGroups && (
+                <button
+                  onClick={() => setShowCreateGroup(!showCreateGroup)}
+                  className="text-ink-500 hover:text-ink-300 transition-colors"
+                  title="Add group"
+                >
+                  {showCreateGroup ? <X size={14} /> : <Plus size={14} />}
+                </button>
+              )}
             </div>
 
             {/* Create group form */}
-            {showCreateGroup && (
+            {canManageGroups && showCreateGroup && (
               <div className="px-3 pb-2">
                 <div className="flex gap-1.5">
                   <input
@@ -952,7 +959,7 @@ export const TagsSettings: React.FC = () => {
                       ? 'border-t-2 border-indigo-500'
                       : ''
                 }`}
-                draggable={renamingGroupId !== group.id}
+                draggable={canManageGroups && renamingGroupId !== group.id}
                 onDragStart={() => handleDragStart(group.id)}
                 onDragOver={(e) => handleDragOver(e, group.id)}
                 onDragLeave={() => {
@@ -981,11 +988,16 @@ export const TagsSettings: React.FC = () => {
                 <button
                   onClick={() => setSelectedGroup(group.name)}
                   onDoubleClick={(e) => {
+                    if (!canManageGroups) return;
                     e.stopPropagation();
                     setRenamingGroupId(group.id);
                     setRenameGroupValue(group.name);
                   }}
-                  title={t('settings.tags.doubleClickToRename', 'Double-click to rename')}
+                  title={
+                    canManageGroups
+                      ? t('settings.tags.doubleClickToRename', 'Double-click to rename')
+                      : undefined
+                  }
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                     dragGroupId === group.id ? 'opacity-40' : ''
                   } ${
@@ -994,7 +1006,9 @@ export const TagsSettings: React.FC = () => {
                       : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
                   }`}
                 >
-                  <GripVertical size={12} className="text-ink-600 shrink-0 cursor-grab active:cursor-grabbing" />
+                  {canManageGroups && (
+                    <GripVertical size={12} className="text-ink-600 shrink-0 cursor-grab active:cursor-grabbing" />
+                  )}
                   <FolderOpen size={14} className="shrink-0" />
                   <span className="flex-1 text-left truncate">{group.name}</span>
                   <span className="text-xs text-ink-500 group-hover/item:hidden">{groupCounts.get(group.name) || 0}</span>
@@ -1016,7 +1030,7 @@ export const TagsSettings: React.FC = () => {
                       <X size={12} />
                     </button>
                   </div>
-                ) : (
+                ) : canManageGroups && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeletingGroupId(group.id); }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/item:block p-1 rounded text-ink-600 hover:text-red-400 hover:bg-ink-800 transition-colors"
