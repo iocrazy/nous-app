@@ -4,7 +4,7 @@ import { fetchResourceTags, addResourceTag, removeResourceTag } from '../../serv
 import { getSupabaseClient } from '../../supabaseClient';
 import { chunked, PG_IN_CHUNK } from '../../utils/chunk';
 import { mergeAssignedTagsIntoAllTags } from '../../utils/tagMerge';
-import { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 export interface ResourceData {
   id: string;

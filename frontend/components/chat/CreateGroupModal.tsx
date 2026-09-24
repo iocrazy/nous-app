@@ -5,7 +5,8 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { getTeamMembers } from '../../services/teamService';
 import { conversationService } from '../../services/conversationService';
 import { useToast } from '../Toast';
-import type { AILibraryAgent, Channel, TeamMember } from '../../types';
+import type { AILibraryAgent, Channel } from '../../types';
+import type { TeamMember } from '../../types/api';
 
 // ─────────────────────────────────────────────
 // Props

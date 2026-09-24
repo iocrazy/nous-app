@@ -1,7 +1,8 @@
 import React, { useRef, useCallback, useState } from 'react';
 import { File, Film, Image, Images, Music, FileText, FileSpreadsheet, Presentation, FileType, Trash2, RotateCcw, X, Clock, Check, MoreVertical, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ResourceItem, Tag } from '../types';
+import { ResourceItem } from '../types';
+import type { Tag } from '../types/api';
 import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
 import { isGalleryMime } from '../utils/galleryMime';
 import { formatDateShort } from '../utils/formatDate';

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, UserPlus, Trash2, LogOut, Shield, User, Crown, AlertTriangle, BarChart3 } from 'lucide-react';
 import { Loading } from './common/Loading';
-import { TeamMember } from '../types';
+import type { TeamMember } from '../types/api';
 import { fetchTeamMembers, updateTeam, updateMemberRole, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
 import { fetchUsageStats, fetchPointsBalance } from '../services/pointsService';
 import { UiSelect } from './ui';

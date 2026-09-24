@@ -11,7 +11,8 @@
 import React, { useEffect } from 'react';
 import { ArrowRight, ArrowLeft, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { AdvanceBlockedReason, AdvancePreview } from '../../types';
+import type { AdvanceBlockedReason } from '../../types';
+import type { AdvancePreview } from '../../types/api';
 
 const BLOCKED_KEY: Record<AdvanceBlockedReason, string> = {
   NOT_MANAGER_OR_EDITOR: 'projects.workflow.confirm.blockedNotManager',

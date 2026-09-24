@@ -12,7 +12,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectCard } from './ProjectCard';
 import * as svc from '../services/projectsService';
-import type { Project, ProjectSuggestionItem } from '../types';
+import type { Project } from '../types';
+import type { ProjectSuggestionItem } from '../types/api';
 
 // relativeTime pulls in the real i18n instance via formatDate — stub it so
 // this suite doesn't need initReactI18next.

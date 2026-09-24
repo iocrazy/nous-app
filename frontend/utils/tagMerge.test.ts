@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mergeAssignedTagsIntoAllTags } from './tagMerge';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 const tag = (id: string, name: string): Tag =>
   ({ id, name, color: '#fff', icon: null, type: 'user' }) as Tag;

@@ -69,7 +69,7 @@ class SessionUpdate(BaseModel):
 # ─── Messages ───────────────────────────────────────────────────────────────
 
 
-class MessageOut(BaseModel):
+class LibraryChatMessageOut(BaseModel):
     """One row from ai_messages — persisted chat turn."""
 
     model_config = _COERCE_IDS
@@ -105,7 +105,7 @@ class MessageOut(BaseModel):
 class SessionWithMessages(SessionOut):
     """Session detail view + full message history (newest last)."""
 
-    messages: list[MessageOut] = Field(default_factory=list)
+    messages: list[LibraryChatMessageOut] = Field(default_factory=list)
 
 
 # ─── Chat request/response ──────────────────────────────────────────────────
@@ -330,14 +330,32 @@ class ChatToolCall(BaseModel):
     error_code: Optional[str] = None
 
 
+class ChatAttachmentFailure(BaseModel):
+    """One attachment the turn could not deliver to the model.
+
+    Built by ``AILibraryChatService.chat`` in one shape for every source
+    (asset refs, the per-turn asset cap, binary resolution, the vision gate).
+    ``index`` points into the request's ``attachments`` list; ``reason`` is a
+    typed code the UI maps to copy (``AttachmentFailureBanner``).
+    """
+
+    index: int
+    kind: str
+    reason: str
+
+
 class ChatResponse(BaseModel):
     """Non-streaming chat response — the assistant's assistant message +
     usage for this turn + traced tool calls (for UI sub-task rendering)."""
 
     model_config = _COERCE_IDS
 
-    message: MessageOut
+    message: LibraryChatMessageOut
     usage: dict[str, int] = Field(default_factory=dict)
     # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
     run_id: str
     tool_calls: list[ChatToolCall] = Field(default_factory=list)
+    # The route has always returned this key, but until it was declared here
+    # ``response_model`` silently dropped it, so a buffered turn whose
+    # attachments failed looked identical to one where they all arrived.
+    attachment_failures: list[ChatAttachmentFailure] = Field(default_factory=list)

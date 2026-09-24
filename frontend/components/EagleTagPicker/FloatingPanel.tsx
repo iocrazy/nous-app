@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { EagleTagBrowser } from './EagleTagBrowser';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import type { PickerSettings, PanelSize } from '../../services/tagPreferencesService';
 
 interface FloatingPanelProps {

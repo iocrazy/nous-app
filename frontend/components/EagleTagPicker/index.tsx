@@ -5,7 +5,7 @@ import { TagPill } from './TagPill';
 import { FloatingPanel } from './FloatingPanel';
 import { useTagPreferences } from './useTagPreferences';
 import type { EagleTagPickerProps } from './types';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 /**
  * Shadow tags (origin === 'note', auto-created from note #tags) are hidden from the

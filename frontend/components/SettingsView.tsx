@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
+import { UserSettings, AISettings as AISettingsType } from '../types';
+import type { ApiKey } from '../types/api';
 import { AISettingsTabs } from './settings/AISettingsTabs';
 import { MCPServersPanel } from './MCPServersPanel';
 import {

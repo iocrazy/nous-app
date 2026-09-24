@@ -2,7 +2,7 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { Star, Flame, FolderOpen, Sparkles } from 'lucide-react';
 import { TagRow } from './TagRow';
 import { updateTag } from '../../services/unifiedTagService';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import type { PickerSettings } from '../../services/tagPreferencesService';
 
 interface TagContentProps {
@@ -71,8 +71,8 @@ export const TagContent: React.FC<TagContentProps> = ({
   const frequentTags = useMemo(() => {
     if (!settings.showRecently || search) return [];
     return [...groupFiltered]
-      .filter((t) => (t.media_count ?? t.video_count ?? 0) > 0)
-      .sort((a, b) => (b.media_count ?? b.video_count ?? 0) - (a.media_count ?? a.video_count ?? 0))
+      .filter((t) => (t.media_count ?? 0) > 0)
+      .sort((a, b) => (b.media_count ?? 0) - (a.media_count ?? 0))
       .slice(0, 6);
   }, [groupFiltered, settings.showRecently, search]);
 

@@ -309,6 +309,11 @@ else:
 
 # 媒体文件服务 - 用于访问下载的视频和封面
 # 使用普通路由而非 StaticFiles 子应用，确保 CORS 中间件覆盖
+# The file-serving routes below (and the SPA fallback further down) register
+# only when the host filesystem allows it, so they stay out of the OpenAPI
+# schema: the exported contract (scripts/export_openapi.py) must not depend on
+# which machine generated it. They serve bytes, not JSON, so no client types
+# are lost.
 try:
     _media_base_path = Path(Utils.get_download_base_path()).resolve()
     _media_base_path.mkdir(parents=True, exist_ok=True)
@@ -601,7 +606,7 @@ try:
 
         raise HTTPException(status_code=403, detail="Access denied")
 
-    @app.get("/media/{media_id}")
+    @app.get("/media/{media_id}", include_in_schema=False)
     async def serve_media_by_id(
         media_id: str,
         request: Request,
@@ -641,7 +646,7 @@ try:
             )
         return _serve_file(file_path)
 
-    @app.get("/media/{media_id}/cover")
+    @app.get("/media/{media_id}/cover", include_in_schema=False)
     async def serve_media_cover_by_id(
         media_id: str,
         request: Request,
@@ -678,7 +683,7 @@ try:
             )
         return _serve_file(file_path, cache_immutable=True)
 
-    @app.get("/media/{file_path:path}")
+    @app.get("/media/{file_path:path}", include_in_schema=False)
     async def serve_media_by_path(
         file_path: str,
         request: Request,
@@ -749,7 +754,7 @@ if frontend_path.exists():
     logger.info(f"前端静态文件已挂载: /assets -> {frontend_path / 'assets'}")
 
     # SPA 路由：所有非 API 请求返回 index.html
-    @app.get("/{full_path:path}")
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """SPA 路由支持：非 API 请求返回 index.html"""
         # 检查是否是静态文件
@@ -761,7 +766,7 @@ if frontend_path.exists():
 
 else:
     # 开发模式：前端独立运行
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     async def root():
         return {"message": "Nous API", "docs": "/docs", "health": "/health"}
 

@@ -21,7 +21,8 @@
  * property is unit-testable without mounting anything.
  */
 
-import type { AgentRunEvent, ChatToolCall } from '../../types';
+import type { AgentRunEvent } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import { judgeToolOk } from './toolOutcome';
 
 /** How a tool call reads to a human: did it look, suggest, or change things. */

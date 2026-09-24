@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hasPromptData, pickDefaultTriggerTag } from './promptTriggerTags';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 vi.mock('../services/unifiedTagService', () => ({
   createTag: vi.fn(),

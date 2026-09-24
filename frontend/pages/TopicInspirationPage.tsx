@@ -13,7 +13,7 @@ import {
   type HotspotStatePatch,
 } from '../services/topicService';
 import { fetchAllTags } from '../services/unifiedTagService';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';

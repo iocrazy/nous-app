@@ -16,7 +16,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../public/locales/en.json';
 import { StageNodeForm } from './StageNodeForm';
-import type { FormFieldDef } from '../../types';
+import type { FormFieldDef } from '../../types/api';
 
 function makeI18n(): I18n {
   const instance = createInstance();

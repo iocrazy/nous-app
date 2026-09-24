@@ -41,7 +41,8 @@ import {
 import { fetchAllTags } from '../../services/unifiedTagService';
 import { ensureDefaultTriggerTag } from '../../utils/promptTriggerTags';
 import { providerErrorMessage } from '../../utils/providerErrorMessage';
-import type { Resource, Tag } from '../../types';
+import type { Resource } from '../../types';
+import type { Tag } from '../../types/api';
 import { useOptionalToast } from '../Toast';
 import { PromptSection } from './PromptSection';
 

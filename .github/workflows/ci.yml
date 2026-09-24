@@ -121,6 +121,19 @@ jobs:
       - name: No zinc utilities (ink migration guard)
         run: bash scripts/check-no-zinc.sh
 
+      # 前端 API 类型由后端契约快照 backend/openapi.json 生成（openapi-typescript），
+      # 生成物提交进仓库。重新生成后有 diff = 改了契约没重新生成 → 红。
+      # 只改后端 schema 的 PR 也会跑到这里：ci-changed-areas.sh 把
+      # backend/openapi.json 映射到 frontend。
+      # spec: docs/superpowers/specs/2026-09-24-openapi-typed-frontend-design.md
+      - name: Generate API types & diff
+        run: |
+          npm run gen:api
+          if ! git diff --exit-code -- types/api.generated.d.ts; then
+            echo "::error::frontend/types/api.generated.d.ts is stale — run 'npm run gen:api' in frontend/ and commit the result."
+            exit 1
+          fi
+
       - name: Build (includes TypeScript check)
         run: npm run build
 
@@ -251,6 +264,22 @@ jobs:
       - name: Lint (flake8)
         if: steps.changed.outputs.files != ''
         run: uv run flake8 ${{ steps.changed.outputs.files }}
+
+      # 契约快照：离线导出 app.openapi()（不连 DB、不进 lifespan），与提交的
+      # backend/openapi.json 比。有 diff = 改了路由/Pydantic 没重新导出 → 红。
+      # 导出脚本自己还会拒绝重复 operationId 与同名模型（后者让导出不可复现）。
+      # 放在 pytest 之前：几秒出结果，且与 lint 不同，它不按改动文件收窄。
+      - name: Export OpenAPI & diff
+        env:
+          SUPABASE_URL: http://localhost:54321
+          SUPABASE_SERVICE_ROLE_KEY: dummy_service_role_key_for_ci
+          SUPABASE_ANON_KEY: dummy_anon_key_for_ci
+        run: |
+          uv run python scripts/export_openapi.py
+          if ! git diff --exit-code -- openapi.json; then
+            echo "::error::backend/openapi.json is stale — run 'uv run python scripts/export_openapi.py' in backend/, then 'npm run gen:api' in frontend/, and commit both."
+            exit 1
+          fi
 
       - name: Run tests (pytest)
         env:

@@ -9,7 +9,7 @@
  */
 import { useTranslation } from 'react-i18next';
 import { FileText, Frame, Clock } from 'lucide-react';
-import type { RecentItem } from '../../types';
+import type { RecentItem } from '../../types/api';
 import { formatRelativeTime } from '../../utils/relativeTime';
 
 interface RecentItemsListProps {

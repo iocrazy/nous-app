@@ -96,7 +96,7 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     deliverable_file_count: 0,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
   };
 }
@@ -350,7 +350,7 @@ describe('WorkspaceStageBoard', () => {
       board({
         node: node({
           owner_agent_id: 'agent-uuid-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
       }),
     );
@@ -388,7 +388,7 @@ describe('WorkspaceStageBoard', () => {
       board({
         node: node({
           owner_agent_id: 'agent-unknown',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
       }),
     );
@@ -446,7 +446,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue,
@@ -462,7 +462,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
         }),
         issue,
       }),
@@ -487,7 +487,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue,
@@ -517,7 +517,7 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
       board({
         node: node({
           owner_agent_id: 'agent-1',
-          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true, prepare_agent_run: false, auto_start: false },
           metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
         }),
         issue: null,

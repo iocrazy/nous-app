@@ -1,4 +1,4 @@
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 /** Default survivor = the most-used tag (highest media_count). */
 export function pickDefaultTarget(tags: Tag[]): string | null {

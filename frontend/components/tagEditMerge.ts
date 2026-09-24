@@ -1,4 +1,4 @@
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 /**
  * Merge the `PUT /tags/:id` response back into local tag state after an edit.

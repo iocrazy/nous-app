@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 import { mergeUpdatedTag } from './tagEditMerge';
 
 const baseTag = (overrides: Partial<Tag> = {}): Tag =>

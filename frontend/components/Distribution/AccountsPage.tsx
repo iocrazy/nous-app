@@ -9,7 +9,7 @@ import {
   connectAccount, deleteAccount, getAccountUsage, getBrowserHealth, listAccounts,
   listPublishTasks, refreshAccount,
 } from '../../services/distributionService';
-import { SocialAccount, PublishTask } from '../../types';
+import type { SocialAccount, PublishTask } from '../../types/api';
 import { AccountAvatar, PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
 import { describeSessionFreshness, needsReconnect, type SessionFreshness } from './accountStatus';
 import { PageHeader } from '../layout/PageHeader';
@@ -249,7 +249,9 @@ export const AccountsPage: React.FC = () => {
   /** Re-link a dead browser session — same modal, account-scoped copy. */
   const onRelogin = (a: SocialAccount) => void startQrLogin({
     platform: a.platform,
-    scopeType: a.scope_type,
+    // SocialAccountOut.scope_type is a bare `str` on the backend, but the
+    // distribution router only ever writes 'user' | 'team' (no DB CHECK yet).
+    scopeType: a.scope_type as 'user' | 'team',
     scopeId: a.scope_id,
     relinkUsername: a.username,
   });

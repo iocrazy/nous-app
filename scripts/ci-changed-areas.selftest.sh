@@ -70,6 +70,10 @@ expect "只改 tools/codex-daemon/ 只跑 codex_daemon" \
   tools/codex-daemon/src/main.js
 
 # —— 跨区依赖必须是超集 ——
+expect "backend/openapi.json 触发 backend + frontend（前端类型由它生成）" \
+  "frontend=true backend=true browser=false rust=false codex_daemon=false" -- \
+  backend/openapi.json backend/app/schemas/projects.py
+
 expect "supabase/migrations 触发 backend（取号查重跑在那个 job）" \
   "frontend=false backend=true browser=false rust=false codex_daemon=false" -- \
   supabase/migrations/462_x.sql

@@ -6,7 +6,8 @@
  * user-scoped 'AI' tag on demand.
  */
 import { createTag, updateTag } from '../services/unifiedTagService';
-import type { Resource, Tag } from '../types';
+import type { Resource } from '../types';
+import type { Tag } from '../types/api';
 
 type PromptFields = Pick<
   Resource,

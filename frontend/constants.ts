@@ -24,11 +24,10 @@ export const MOCK_PARSED_DATA: ParsedMedia = {
   music_name: "Original Sound - TechHunter",
   video_download_status: DownloadStatus.COMPLETED,
   music_download_status: DownloadStatus.PENDING,
-  notes: "Check this out for the UI design inspiration.",
   tags: ["UI", "React", "Design"]
 };
 
-export const MOCK_LIBRARY: Video[] = [
+export const MOCK_LIBRARY: ParsedMedia[] = [
   MOCK_PARSED_DATA,
   {
     ...MOCK_PARSED_DATA,
@@ -39,7 +38,6 @@ export const MOCK_LIBRARY: Video[] = [
     media_type: "carousel",
     image_download_urls: ["https://picsum.photos/400/600", "https://picsum.photos/400/601"],
     video_download_urls: [],
-    notes: "Possible background for the landing page.",
     tags: ["Travel", "Japan", "Photography"]
   },
   {
@@ -51,7 +49,6 @@ export const MOCK_LIBRARY: Video[] = [
     media_type: "video",
     // Using the third provided test URL (different video)
     video_download_urls: ["https://pichome.heygo.cn:88/index.php?mod=io&op=getStream&path=ejRPRDVoMU5EM1lXRWV6ai16QnpWRXloaTB6NUNMLVZEU2huYnROQ0pBajV5T2prd0QyeUpaZk9YanFIS2p0VERfbVlWNmRGWEVIMC01eUQ"],
-    notes: "",
     tags: ["Food", "Cooking"]
   }
 ];

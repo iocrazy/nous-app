@@ -17,7 +17,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { RecentItem } from '../types';
+import type { RecentItem } from '../types/api';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async () => {

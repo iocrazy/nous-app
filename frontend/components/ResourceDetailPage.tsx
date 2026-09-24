@@ -41,7 +41,8 @@ import { useTranslation } from 'react-i18next';
 import { ResourceInspectorTabs, visibleInspectorTabs, type InspectorTab } from './resources/ResourceInspectorTabs';
 import { AiSubTabs, AI_SUB_TABS, busiestStatus, type AiSubTab } from './detail/AiSubTabs';
 import { ShotsTabPlaceholder } from './VideoDetailPanel/ShotsTabPlaceholder';
-import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
+import { Resource, ResourceItem, ResourceVersion } from '../types';
+import type { Tag } from '../types/api';
 import {
   fetchResourceById,
   fetchResourceVersions,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildTagSuggestions } from './InspirationPage';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 const pool = (name: string, name_zh?: string, origin: 'curated' | 'note' = 'curated'): Tag =>
   ({ id: name, name, name_zh, color: null, icon: null, type: 'user', created_at: '', origin }) as Tag;

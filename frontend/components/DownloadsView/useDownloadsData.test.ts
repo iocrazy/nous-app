@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { useResourceDataMap, useSelectedVideoTags } from './useDownloadsData';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 // Supabase double for useResourceDataMap. The hook fires two queries per
 // chunk: the resource row read, and a media_id-only prompt-presence probe
@@ -44,10 +44,18 @@ vi.mock('../../supabaseClient', () => ({
 const tagA: Tag = {
   id: 't1', name: 'Anime', color: '#fff', icon: null, type: 'user',
   created_at: '2026-01-01T00:00:00Z',
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
+  prompt_trigger: false,
 };
 const tagB: Tag = {
   id: 't2', name: 'AI', color: '#6366f1', icon: null, type: 'user',
   created_at: '2026-01-01T00:00:00Z',
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
+  prompt_trigger: false,
 };
 
 const fetchResourceTags = vi.fn();

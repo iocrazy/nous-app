@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
+import type { ChatAttachmentFailure } from '../../types/api';
 import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
 
 /** One entry of the backend's `attachment_failures`, as it arrives on the
@@ -17,11 +18,7 @@ import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
  *  `f"{type(exc).__name__}: {exc}"` for anything it caught, so two binary
  *  failures rarely share a string and none of them is translatable. That split
  *  is why this component groups rather than merely de-duplicating. */
-export interface AttachmentFailure {
-  index: number;
-  kind: string;
-  reason: string;
-}
+export type AttachmentFailure = ChatAttachmentFailure;
 
 /**
  * The reasons this build has copy for — ruling C's four, `loadout_not_owned`

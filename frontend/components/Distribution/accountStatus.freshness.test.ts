@@ -24,7 +24,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { describeSessionFreshness } from './accountStatus';
-import type { SocialAccount } from '../../types';
+import type { SocialAccount } from '../../types/api';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;

@@ -33,6 +33,8 @@ export default [
       'coverage/**',
       'public/**',
       '.vercel/**',
+      // Generated from backend/openapi.json (npm run gen:api); never hand-edited.
+      'types/api.generated.d.ts',
     ],
   },
   {

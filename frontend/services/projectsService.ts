@@ -1,19 +1,5 @@
-import {
-  Project,
-  ProjectFile,
-  ProjectFolder,
-  ProjectMember,
-  ProjectShare,
-  FileVersion,
-  ReviewComment,
-  ReviewStatus,
-  ProjectStage,
-  ProjectSuggestionItem,
-  EpisodeProgress,
-  ProjectEntities,
-  RecentItem,
-  RenderItemPage,
-} from '../types';
+import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileVersion, ReviewComment, ReviewStatus, ProjectStage, EpisodeProgress, ProjectEntities, RenderItemPage } from '../types';
+import type { ProjectSuggestionItem, RecentItem } from '../types/api';
 import { apiClient, apiFetch } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
 

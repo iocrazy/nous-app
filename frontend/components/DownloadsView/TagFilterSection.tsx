@@ -4,8 +4,8 @@
 // doesn't scale as the tag set grows, so this applies the standard large-facet
 // pattern: selected tags pinned on top (removable), a search box (type-to-
 // filter), and — when not searching — only the most-used top-N by default with
-// a "Show all" affordance. Frequency comes from the tag's own media_count /
-// video_count (already on the Tag row), so no extra request.
+// a "Show all" affordance. Frequency comes from the tag's own media_count
+// (already on the Tag row), so no extra request.
 //
 // Client-side filtering is fine into the hundreds. When the catalog reaches the
 // thousands, swap the in-memory filter for a debounced server-side typeahead
@@ -15,13 +15,13 @@ import { useMemo, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import { Pill } from './filterSheetUi';
 
 const DEFAULT_VISIBLE = 14;
 
 function tagCount(t: Tag): number {
-  return t.media_count ?? t.video_count ?? 0;
+  return t.media_count ?? 0;
 }
 
 function byCountDesc(a: Tag, b: Tag): number {

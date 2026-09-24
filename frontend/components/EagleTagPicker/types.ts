@@ -1,4 +1,4 @@
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 export interface EagleTagPickerProps {
   // Mode 1: Resource detail

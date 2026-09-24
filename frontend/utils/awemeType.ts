@@ -18,12 +18,9 @@ export const MEDIA_TYPE_MAP: Record<string | number, string> = {
   '2': 'Album',
   '4': 'Video',
   '61': 'Video',
+  // Numeric lookups (MEDIA_TYPE_MAP[0]) hit these same keys: JS object keys
+  // are always strings, so a separate `0: 'Video'` entry was a duplicate.
   '68': 'Gallery',
-  0: 'Video',
-  2: 'Album',
-  4: 'Video',
-  61: 'Video',
-  68: 'Gallery',
 };
 
 // Keep old name as alias

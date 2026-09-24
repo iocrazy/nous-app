@@ -1,6 +1,5 @@
-import {
-  SocialAccount, PublishRequest, PublishTask, LibraryVideo, CoverSelectResult,
-} from '../types';
+import { PublishRequest, LibraryVideo, CoverSelectResult } from '../types';
+import type { SocialAccount, PublishTask } from '../types/api';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 

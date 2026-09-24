@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import { pickDefaultTarget, canMerge } from './mergeTagsLogic';
 
 const tag = (id: string, media_count: number, type = 'user'): Tag =>

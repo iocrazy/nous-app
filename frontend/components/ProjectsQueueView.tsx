@@ -15,7 +15,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, Loader2, Star } from 'lucide-react';
-import type { Project, ProjectSuggestionItem } from '../types';
+import type { Project, ProjectCardActivity } from '../types';
+import type { ProjectSuggestionItem } from '../types/api';
 import { generateMissingFrames } from '../services/projectsService';
 import { useToast } from './Toast';
 import { StageRing, ringStageFromBadge } from './project/StageRing';
@@ -131,7 +132,10 @@ export function ProjectsQueueView({
         });
         const isGenerate = item.action?.type === 'generate_missing_frames';
         const busy = busyId === item.project_id;
-        const activity = item.latest_activity;
+        // The backend declares `latest_activity` as a bare `dict`, so the
+        // generated type is `{ [key: string]: unknown }`. Narrow it to the
+        // shape projects.py actually builds until the schema declares a model.
+        const activity = item.latest_activity as unknown as ProjectCardActivity | null | undefined;
         // W3-3: the workflow badge is the only stage source (G3 dropped the SOP
         // current_stage fallback) — falls back to the suggestion's stage_slug.
         const badge = project?.workflow_badge ?? null;

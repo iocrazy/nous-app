@@ -3,7 +3,9 @@
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
-router = APIRouter(prefix="/style-templates")
+# Redirect-only surface: not API contract, so it stays out of the OpenAPI
+# schema (multi-method routes would otherwise emit duplicate operationIds).
+router = APIRouter(prefix="/style-templates", include_in_schema=False)
 
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

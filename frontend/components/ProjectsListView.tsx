@@ -4,7 +4,8 @@ import {
   Search, ArrowUpDown, MoreVertical
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectSuggestionItem } from '../types';
+import { Project } from '../types';
+import type { ProjectSuggestionItem } from '../types/api';
 import { updateProject, deleteProject, fetchProjectSuggestions } from '../services/projectsService';
 import { useTeamContext } from '../contexts/TeamContext';
 import { formatRelativeTime } from '../utils/relativeTime';

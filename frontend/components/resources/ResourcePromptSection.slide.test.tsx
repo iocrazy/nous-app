@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
 vi.mock('react-i18next', () => ({
@@ -56,6 +56,9 @@ vi.mock('../../supabaseClient', () => ({
 const triggerTag: Tag = {
   id: 't2', name: 'AI', color: '#6366f1', icon: null, type: 'user',
   prompt_trigger: true, created_at: '2026-01-01T00:00:00Z',
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
 };
 
 const updateResource = vi.fn().mockResolvedValue({});

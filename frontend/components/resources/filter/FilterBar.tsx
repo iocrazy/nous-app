@@ -25,7 +25,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import type { Tag } from '../../../types';
+import type { Tag } from '../../../types/api';
 import type { UseFilterBarConfigReturn } from '../../../hooks/useFilterBarConfig';
 import type { ResourceFilterType } from '../resourceFilters';
 import type { ChipId, DatePresetId, DurationPresetId, SocialMetric } from './types';
