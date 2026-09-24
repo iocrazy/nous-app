@@ -21,7 +21,7 @@ import pytest
 
 from app.repositories.approval_requests_repository import ApprovalRequest
 from app.schemas.agent_runs import RunDetail, RunListItem
-from app.schemas.ai_library_chat import ChatResponse, MessageOut, SessionOut
+from app.schemas.ai_library_chat import ChatResponse, LibraryChatMessageOut, SessionOut
 from app.schemas.issue_message import IssueMessage, IssueMessageKind
 
 # A representative BIGINT Snowflake id as both int (DB shape) and str (wire).
@@ -42,7 +42,9 @@ def test_message_out_accepts_bigint_session_id():
     msg_uuid = uuid4()
     # ai_messages.id was a real UUID under the (now retired) legacy store;
     # session_id is the bigint FK.
-    out = MessageOut(id=msg_uuid, session_id=_BIGINT_INT, role="user", content="hi")
+    out = LibraryChatMessageOut(
+        id=msg_uuid, session_id=_BIGINT_INT, role="user", content="hi"
+    )
     assert out.session_id == _BIGINT_STR
     assert str(out.id) == str(msg_uuid)
 
@@ -51,17 +53,17 @@ def test_message_out_accepts_bigint_session_id():
 def test_message_out_id_widened_to_str_accepts_both_uuid_and_bigint():
     """P2 Task 4: ai_messages.id was UUID under the retired legacy store
     but is a BIGINT Snowflake (public.messages.id) under ConversationsAiStore
-    (the sole store since P3 Task 6) — MessageOut.id must validate + coerce
+    (the sole store since P3 Task 6) — LibraryChatMessageOut.id must validate + coerce
     to str for both shapes, never raising a
     ResponseValidationError regardless of which store produced the row."""
     msg_uuid = uuid4()
-    out_uuid = MessageOut(
+    out_uuid = LibraryChatMessageOut(
         id=msg_uuid, session_id=_BIGINT_STR, role="user", content="hi"
     )
     assert out_uuid.id == str(msg_uuid)
     assert isinstance(out_uuid.id, str)
 
-    out_bigint = MessageOut(
+    out_bigint = LibraryChatMessageOut(
         id=_BIGINT_INT, session_id=_BIGINT_STR, role="assistant", content="ok"
     )
     assert out_bigint.id == _BIGINT_STR
@@ -70,7 +72,9 @@ def test_message_out_id_widened_to_str_accepts_both_uuid_and_bigint():
 
 @pytest.mark.unit
 def test_chat_response_accepts_bigint_run_id():
-    msg = MessageOut(id=uuid4(), session_id=_BIGINT_STR, role="assistant", content="ok")
+    msg = LibraryChatMessageOut(
+        id=uuid4(), session_id=_BIGINT_STR, role="assistant", content="ok"
+    )
     resp = ChatResponse(message=msg, run_id=_BIGINT_INT)
     assert resp.run_id == _BIGINT_STR
 

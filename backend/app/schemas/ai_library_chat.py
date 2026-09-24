@@ -69,7 +69,7 @@ class SessionUpdate(BaseModel):
 # ─── Messages ───────────────────────────────────────────────────────────────
 
 
-class MessageOut(BaseModel):
+class LibraryChatMessageOut(BaseModel):
     """One row from ai_messages — persisted chat turn."""
 
     model_config = _COERCE_IDS
@@ -105,7 +105,7 @@ class MessageOut(BaseModel):
 class SessionWithMessages(SessionOut):
     """Session detail view + full message history (newest last)."""
 
-    messages: list[MessageOut] = Field(default_factory=list)
+    messages: list[LibraryChatMessageOut] = Field(default_factory=list)
 
 
 # ─── Chat request/response ──────────────────────────────────────────────────
@@ -336,7 +336,7 @@ class ChatResponse(BaseModel):
 
     model_config = _COERCE_IDS
 
-    message: MessageOut
+    message: LibraryChatMessageOut
     usage: dict[str, int] = Field(default_factory=dict)
     # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
     run_id: str

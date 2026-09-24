@@ -70,13 +70,13 @@ from app.schemas.ai_library import (
     AgentUpdate,
     CapabilitiesOut,
     ChatPermissionsOut,
+    LibrarySkillCreate,
+    LibrarySkillUpdate,
     PermissionAuditItem,
     PermissionAuditListOut,
-    SkillCreate,
     SkillFileOut,
     SkillFileUpsert,
     SkillOut,
-    SkillUpdate,
 )
 from app.schemas.ai_library_chat import (
     ChatRequest,
@@ -1341,7 +1341,7 @@ async def get_skill(slug: str, auth: AuthDep) -> Dict[str, Any]:
     summary="Create a new user-owned skill (optionally forked)",
 )
 async def create_skill(
-    payload: SkillCreate,
+    payload: LibrarySkillCreate,
     auth: AuthDep,
 ) -> Dict[str, Any]:
     """Create a non-preset skill owned by the current user.
@@ -1458,7 +1458,7 @@ async def create_skill(
 )
 async def update_skill(
     slug: str,
-    payload: SkillUpdate,
+    payload: LibrarySkillUpdate,
     auth: AuthDep,
 ) -> Dict[str, Any]:
     """Patch a skill's mutable fields.

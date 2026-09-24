@@ -30,8 +30,11 @@ LEGACY_STORYBOARD_GONE_DETAIL = (
 _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
 
-@router.api_route("/storyboard", methods=_METHODS)
-@router.api_route("/storyboard/{rest:path}", methods=_METHODS)
+# Tombstones are not API contract: keep them out of the OpenAPI schema. A
+# multi-method ``api_route`` also gives every method the same operationId,
+# which the frontend type generator rejects as a duplicate.
+@router.api_route("/storyboard", methods=_METHODS, include_in_schema=False)
+@router.api_route("/storyboard/{rest:path}", methods=_METHODS, include_in_schema=False)
 async def legacy_storyboard_gone(rest: str = "") -> None:
     """Tombstone every retired legacy-workbench ``/storyboard/*`` path (410)."""
     raise HTTPException(status_code=410, detail=LEGACY_STORYBOARD_GONE_DETAIL)
