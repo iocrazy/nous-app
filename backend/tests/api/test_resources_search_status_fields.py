@@ -14,6 +14,7 @@ media FK) that must be *consumed* by the router and never *emitted*.
 
 from __future__ import annotations
 
+import datetime
 import json
 from unittest.mock import patch
 
@@ -64,7 +65,9 @@ def _row(**over):
         "size": 100,
         "scope_type": "personal",
         "scope_id": "9",
-        "updated_at": "2026-08-01T00:00:00Z",
+        "updated_at": datetime.datetime(
+            2026, 8, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        ),
         "thumbnail_path": None,
         "cover_image_path": None,
         "media_id": None,
@@ -159,7 +162,9 @@ def test_missing_columns_degrade_to_null_not_a_500():
         "size": 100,
         "scope_type": "personal",
         "scope_id": "u",
-        "updated_at": "2026-05-24T10:00:00Z",
+        "updated_at": datetime.datetime(
+            2026, 5, 24, 10, 0, 0, tzinfo=datetime.timezone.utc
+        ),
     }
     body = _search([row]).json()
     assert body["results"][0]["thumbnail_url"] is None

@@ -36,7 +36,9 @@ from app.api.assets_router import (
 )
 from app.core.deps import AuthDep
 from app.schemas.assets import ErrorEnvelope
+from app.schemas.envelope import Envelope
 from app.schemas.generated import GeneratedItem, SaveAsAssetRequest
+from app.schemas.resource_responses import ResourceSaveAsAssetResult
 from app.services.assets.assets_service import AssetError
 from app.services.library.generated_inbox_service import GeneratedInboxService
 
@@ -60,7 +62,12 @@ def _service() -> GeneratedInboxService:
     return GeneratedInboxService()
 
 
-@router.post("/{resource_id}/save-as-asset", status_code=201, responses=_ERRORS)
+@router.post(
+    "/{resource_id}/save-as-asset",
+    status_code=201,
+    response_model=Envelope[ResourceSaveAsAssetResult],
+    responses=_ERRORS,
+)
 async def save_resource_as_asset(
     resource_id: IdPath,
     payload: SaveAsAssetRequest,

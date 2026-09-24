@@ -20,7 +20,7 @@ these routes (the extra ``/gallery-items`` segment keeps GET distinct, but
 registering first is the defensive default).
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -30,6 +30,9 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import GalleryMembership
+from app.schemas.resource_rows import GalleryChild, ResourceRow
 from app.schemas.resources import GallerySetItemsRequest
 from app.services.library.gallery_mime import GALLERY_MIME, is_gallery_mime
 
@@ -38,7 +41,7 @@ from app.services.library.gallery_mime import GALLERY_MIME, is_gallery_mime
 router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
 
-@router.post("/galleries")
+@router.post("/galleries", response_model=Envelope[ResourceRow])
 async def create_gallery(
     auth: AuthDep,
     scope_id: str = Query(..., description="Owning workspace scope (snowflake id)"),
@@ -81,7 +84,7 @@ async def create_gallery(
         raise HTTPException(status_code=500, detail="Failed to create gallery")
 
 
-@router.get("/gallery-membership")
+@router.get("/gallery-membership", response_model=Envelope[GalleryMembership])
 async def get_gallery_membership(
     auth: AuthDep,
     scope_id: str = Query(..., description="Owning workspace scope (snowflake id)"),
@@ -113,7 +116,7 @@ async def get_gallery_membership(
         raise HTTPException(status_code=500, detail="Failed to get gallery membership")
 
 
-@router.put("/{gallery_id}/gallery-items")
+@router.put("/{gallery_id}/gallery-items", response_model=Envelope[List[GalleryChild]])
 async def set_gallery_items(
     gallery_id: str,
     body: GallerySetItemsRequest,
@@ -176,7 +179,7 @@ async def set_gallery_items(
         raise HTTPException(status_code=500, detail="Failed to set gallery items")
 
 
-@router.get("/{gallery_id}/gallery-items")
+@router.get("/{gallery_id}/gallery-items", response_model=Envelope[List[GalleryChild]])
 async def list_gallery_items(
     gallery_id: str,
     auth: AuthDep,

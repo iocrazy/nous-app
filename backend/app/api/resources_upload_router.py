@@ -15,6 +15,13 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
+from app.schemas.envelope import Envelope
+from app.schemas.resource_responses import (
+    ResourceDuplicateCheck,
+    ResourceLinkExisting,
+    ResourcePermissions,
+)
+from app.schemas.resource_rows import ResourceRow
 from app.schemas.resources_batch import CheckDuplicatesRequest, CheckDuplicatesResponse
 from app.services.library.permission_service import PermissionService
 from app.services.library.resources_service import ResourcesService
@@ -31,7 +38,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 # ============================================
 
 
-@router.get("/permissions")
+@router.get("/permissions", response_model=Envelope[ResourcePermissions])
 async def get_effective_permissions(
     auth: AuthDep,
     object_type: str = Query(..., pattern="^(folder|library|resource|project)$"),
@@ -58,7 +65,7 @@ async def get_effective_permissions(
 # ============================================
 
 
-@router.get("/check-duplicate")
+@router.get("/check-duplicate", response_model=ResourceDuplicateCheck)
 async def check_duplicate(
     auth: AuthDep,
     file_hash: str = Query(..., min_length=64, max_length=64),
@@ -128,7 +135,12 @@ async def check_duplicates_batch(
         raise HTTPException(status_code=500, detail="Failed to check duplicates")
 
 
-@router.post("/link-existing")
+@router.post(
+    "/link-existing",
+    response_model=ResourceLinkExisting,
+    # ``already_linked`` is only sent when true; keep an absent key absent.
+    response_model_exclude_unset=True,
+)
 async def link_existing_resource(
     auth: AuthDep,
     resource_id: str = Query(...),
@@ -172,7 +184,7 @@ async def link_existing_resource(
 # ============================================
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=Envelope[ResourceRow])
 async def upload_resource(
     auth: AuthDep,
     scope_id: str = Query(...),
