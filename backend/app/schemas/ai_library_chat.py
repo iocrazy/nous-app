@@ -330,6 +330,20 @@ class ChatToolCall(BaseModel):
     error_code: Optional[str] = None
 
 
+class ChatAttachmentFailure(BaseModel):
+    """One attachment the turn could not deliver to the model.
+
+    Built by ``AILibraryChatService.chat`` in one shape for every source
+    (asset refs, the per-turn asset cap, binary resolution, the vision gate).
+    ``index`` points into the request's ``attachments`` list; ``reason`` is a
+    typed code the UI maps to copy (``AttachmentFailureBanner``).
+    """
+
+    index: int
+    kind: str
+    reason: str
+
+
 class ChatResponse(BaseModel):
     """Non-streaming chat response — the assistant's assistant message +
     usage for this turn + traced tool calls (for UI sub-task rendering)."""
@@ -341,3 +355,7 @@ class ChatResponse(BaseModel):
     # agent_runs.id is BIGINT Snowflake (mig 232) → numeric string.
     run_id: str
     tool_calls: list[ChatToolCall] = Field(default_factory=list)
+    # The route has always returned this key, but until it was declared here
+    # ``response_model`` silently dropped it, so a buffered turn whose
+    # attachments failed looked identical to one where they all arrived.
+    attachment_failures: list[ChatAttachmentFailure] = Field(default_factory=list)

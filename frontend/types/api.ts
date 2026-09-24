@@ -46,6 +46,7 @@ export type UsagePerAgent = Schemas['UsagePerAgent'];
 export type UsageAggregate = Schemas['UsageAggregate'];
 export type ChatToolCall = Schemas['ChatToolCall'];
 export type ChatResponse = Schemas['ChatResponse'];
+export type ChatAttachmentFailure = Schemas['ChatAttachmentFailure'];
 export type TopicRef = Schemas['TopicRef'];
 export type MusicRef = Schemas['MusicRef'];
 export type TranscriptSegment = Schemas['TranscriptSegmentSchema'];

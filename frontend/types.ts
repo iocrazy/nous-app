@@ -2216,16 +2216,6 @@ export interface AILibraryCommitment {
   expires_at: string | null;
 }
 
-/**
- * One attachment the backend could not resolve for a chat turn (G2).
- * Mirrors backend ``AttachmentFailure`` — ``index`` is 0-based into the
- * binary (non-``resource_ref``) attachments sent with that turn.
- */
-export interface ChatAttachmentFailure {
-  index: number;
-  kind: string;
-  reason: string;
-}
 
 /** Reference attachment for chat composer @-mention.
  *  Body shape mirrors the backend `resource_ref` resolver expectation.

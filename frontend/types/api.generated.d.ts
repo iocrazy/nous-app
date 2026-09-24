@@ -20436,6 +20436,23 @@ export interface components {
             lines: string[];
         };
         /**
+         * ChatAttachmentFailure
+         * @description One attachment the turn could not deliver to the model.
+         *
+         *     Built by ``AILibraryChatService.chat`` in one shape for every source
+         *     (asset refs, the per-turn asset cap, binary resolution, the vision gate).
+         *     ``index`` points into the request's ``attachments`` list; ``reason`` is a
+         *     typed code the UI maps to copy (``AttachmentFailureBanner``).
+         */
+        ChatAttachmentFailure: {
+            /** Index */
+            index: number;
+            /** Kind */
+            kind: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * ChatModuleGovernanceResponse
          * @description Governance state for the chat module (toggle only — agent owns the model).
          */
@@ -20533,6 +20550,8 @@ export interface components {
          *     usage for this turn + traced tool calls (for UI sub-task rendering).
          */
         ChatResponse: {
+            /** Attachment Failures */
+            attachment_failures?: components["schemas"]["ChatAttachmentFailure"][];
             message: components["schemas"]["LibraryChatMessageOut"];
             /** Run Id */
             run_id: string;

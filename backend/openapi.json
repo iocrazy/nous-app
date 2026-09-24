@@ -8649,6 +8649,30 @@
         "title": "CardUpdate",
         "type": "object"
       },
+      "ChatAttachmentFailure": {
+        "description": "One attachment the turn could not deliver to the model.\n\nBuilt by ``AILibraryChatService.chat`` in one shape for every source\n(asset refs, the per-turn asset cap, binary resolution, the vision gate).\n``index`` points into the request's ``attachments`` list; ``reason`` is a\ntyped code the UI maps to copy (``AttachmentFailureBanner``).",
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "kind",
+          "reason"
+        ],
+        "title": "ChatAttachmentFailure",
+        "type": "object"
+      },
       "ChatModuleGovernanceResponse": {
         "description": "Governance state for the chat module (toggle only — agent owns the model).",
         "properties": {
@@ -8834,6 +8858,13 @@
       "ChatResponse": {
         "description": "Non-streaming chat response — the assistant's assistant message +\nusage for this turn + traced tool calls (for UI sub-task rendering).",
         "properties": {
+          "attachment_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ChatAttachmentFailure"
+            },
+            "title": "Attachment Failures",
+            "type": "array"
+          },
           "message": {
             "$ref": "#/components/schemas/LibraryChatMessageOut"
           },
