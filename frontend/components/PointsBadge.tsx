@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Coins } from 'lucide-react';
 import { fetchPointsBalance } from '../services/pointsService';
-import { TeamQuota } from '../types';
+import type { PointsBalance } from '../types/api';
 
 interface PointsBadgeProps {
   onClick: () => void;
 }
 
 export const PointsBadge: React.FC<PointsBadgeProps> = ({ onClick }) => {
-  const [quota, setQuota] = useState<TeamQuota | null>(null);
+  const [quota, setQuota] = useState<PointsBalance | null>(null);
 
   useEffect(() => {
     let cancelled = false;

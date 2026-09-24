@@ -8,37 +8,38 @@
  */
 
 import { apiClient } from './apiClient';
-import { TeamQuota, PointTransaction, PointPricing, QuotaCheck } from '../types';
+import type {
+  Envelope,
+  PointsBalance,
+  PointsPricing,
+  PointsPricingResponse,
+  PointsQuotaCheck,
+  PointsTransaction,
+  PointsTransactionsResponse,
+  PointsUsageStats,
+} from '../types/api';
 
-interface Envelope<T> {
-  success: boolean;
-  message?: string;
-  data?: T;
-  // Some endpoints use specific field names instead of data:
-  transactions?: T;
-  pricing?: T;
-}
-
-function unwrap<T>(result: Envelope<T>, field: keyof Envelope<T> = 'data'): T {
+/**
+ * Failures never reach these bodies: the backend raises, and `apiClient`
+ * throws on the non-2xx `ErrorResponse`. The `success` check is kept for a
+ * body that says otherwise anyway.
+ */
+function assertSuccess(result: { success: boolean }): void {
   if (!result.success) {
-    throw new Error(result.message || 'Request failed');
+    throw new Error((result as { message?: string }).message || 'Request failed');
   }
-  const value = result[field];
-  if (value === undefined) {
-    throw new Error(`Missing field "${String(field)}" in response`);
-  }
-  return value as T;
 }
 
 /**
  * Fetch the points balance and quota for a team.
  */
-export const fetchPointsBalance = async (teamId?: string): Promise<TeamQuota> => {
-  const result = await apiClient.get<Envelope<TeamQuota>>(
+export const fetchPointsBalance = async (teamId?: string): Promise<PointsBalance> => {
+  const result = await apiClient.get<Envelope<PointsBalance>>(
     '/api/v1/points/balance',
     { query: { team_id: teamId } },
   );
-  return unwrap(result);
+  assertSuccess(result);
+  return result.data;
 };
 
 /**
@@ -52,8 +53,8 @@ export const fetchPointsTransactions = async (
   referenceType?: string,
   search?: string,
   days?: number,
-): Promise<PointTransaction[]> => {
-  const result = await apiClient.get<Envelope<PointTransaction[]>>(
+): Promise<PointsTransaction[]> => {
+  const result = await apiClient.get<PointsTransactionsResponse>(
     '/api/v1/points/transactions',
     {
       query: {
@@ -67,28 +68,32 @@ export const fetchPointsTransactions = async (
       },
     },
   );
-  return unwrap(result, 'transactions');
+  assertSuccess(result);
+  return result.transactions;
 };
 
 /**
  * Fetch the pricing table for all action types.
  */
-export const fetchPointsPricing = async (): Promise<PointPricing[]> => {
-  const result = await apiClient.get<Envelope<PointPricing[]>>(
+export const fetchPointsPricing = async (): Promise<PointsPricing[]> => {
+  const result = await apiClient.get<PointsPricingResponse>(
     '/api/v1/points/pricing',
   );
-  return unwrap(result, 'pricing');
+  assertSuccess(result);
+  return result.pricing;
 };
 
 /**
- * Fetch usage statistics (consumption breakdown, trends, etc.).
+ * Fetch the team's all-time consumption totals and per-type breakdown.
+ * There is no per-month or per-member breakdown on this endpoint.
  */
-export const fetchUsageStats = async (teamId?: string): Promise<unknown> => {
-  const result = await apiClient.get<Envelope<unknown>>(
+export const fetchUsageStats = async (teamId?: string): Promise<PointsUsageStats> => {
+  const result = await apiClient.get<Envelope<PointsUsageStats>>(
     '/api/v1/points/usage-stats',
     { query: { team_id: teamId } },
   );
-  return unwrap(result);
+  assertSuccess(result);
+  return result.data;
 };
 
 /**
@@ -98,14 +103,15 @@ export const checkQuota = async (
   actionType: string,
   count: number = 1,
   teamId?: string,
-): Promise<QuotaCheck> => {
-  const result = await apiClient.get<Envelope<QuotaCheck>>(
+): Promise<PointsQuotaCheck> => {
+  const result = await apiClient.get<Envelope<PointsQuotaCheck>>(
     '/api/v1/points/check',
     {
       query: { action_type: actionType, count, team_id: teamId },
     },
   );
-  return unwrap(result);
+  assertSuccess(result);
+  return result.data;
 };
 
 /**
