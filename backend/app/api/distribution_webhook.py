@@ -70,6 +70,18 @@ async def _reaggregate_task_tracking(task_id: str) -> None:
         logger.warning(f"[webhook] reaggregate task {task_id} failed: {e}")
 
 
+def _json_object(text: str) -> dict:
+    """A signed body that is not a JSON object is a malformed request (400),
+    not a server error (it used to be a 500 from ``json.loads`` / ``.get``)."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed webhook body")
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="Malformed webhook body")
+    return value
+
+
 @router.post(
     "/webhook/douyin",
     # Douyin's receipt shapes, verbatim: the challenge echo, else {"msg": "ok"}.
@@ -93,16 +105,25 @@ async def douyin_webhook(request: Request):
         logger.warning("distribution webhook: signature mismatch")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    data = json.loads(body_str) if body_str else {}
+    data = _json_object(body_str) if body_str else {}
     event = data.get("event", "")
 
     if event == "verify_webhook":
-        return {"challenge": data.get("challenge", 0)}
+        # Douyin's documented body carries the challenge under ``content``;
+        # the top-level spot is what this handler always read, kept first.
+        if "challenge" in data:
+            return {"challenge": data["challenge"]}
+        content = data.get("content")
+        if isinstance(content, dict) and "challenge" in content:
+            return {"challenge": content["challenge"]}
+        return {"challenge": 0}
 
     if event == "create_video":
         content = data.get("content", "{}")
         if isinstance(content, str):
-            content = json.loads(content)
+            content = _json_object(content or "{}")
+        if not isinstance(content, dict):
+            content = {}
         share_id = content.get("share_id", "")
         item_id = content.get("item_id", "")
         if not share_id:

@@ -176,3 +176,32 @@ def test_non_utf8_body_is_403_not_500(monkeypatch):
         headers={"x-douyin-signature": "x"},
     )
     assert resp.status_code == 403
+
+
+# --- body parsing -------------------------------------------------------------
+
+
+def _post_signed(client, body: str):
+    sig = hashlib.sha1(("secret" + body).encode()).hexdigest()
+    return client.post(
+        "/api/v1/distribution/webhook/douyin",
+        content=body,
+        headers={"x-douyin-signature": sig},
+    )
+
+
+def test_verify_event_reads_challenge_under_content(monkeypatch):
+    """Douyin documents ``{"event":"verify_webhook","content":{"challenge":N}}``;
+    the handler used to answer ``{"challenge": 0}`` to that."""
+    client = _client(monkeypatch)
+    body = '{"event":"verify_webhook","content":{"challenge":4567}}'
+    resp = _post_signed(client, body)
+    assert resp.status_code == 200 and resp.json() == {"challenge": 4567}
+
+
+@pytest.mark.parametrize(
+    "body", ["not json", "[1, 2]", '{"event":"create_video","content":"{"}']
+)
+def test_signed_malformed_body_is_400_not_500(monkeypatch, body):
+    client = _client(monkeypatch)
+    assert _post_signed(client, body).status_code == 400
