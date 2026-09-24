@@ -57,6 +57,7 @@ function formatBackfillResult(r: BackfillResult, t: TFn): string {
     if (r.dispatched.length) parts.push(t('settings.vectors.resultWouldDispatch', count(r.dispatched.length)));
   } else {
     parts.push(t('settings.vectors.resultEmbedded', count(r.reembedded.length)));
+    if (r.rehashed) parts.push(t('settings.vectors.resultRehashed', count(r.rehashed)));
     if (r.dispatched.length) parts.push(t('settings.vectors.resultDispatched', count(r.dispatched.length)));
   }
   if (r.skipped.length) {

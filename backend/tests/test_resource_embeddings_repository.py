@@ -417,6 +417,54 @@ async def test_stale_count_refuses_falsy_user_id():
     assert got == 0
 
 
+async def test_rewrite_hash_changes_only_the_hash_and_updated_at():
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    session = _Session()
+    with patch(f"{REPO}.write_scope", _scope(session)):
+        await ResourceEmbeddingsRepository().rewrite_hash(
+            7, "semantic", 42, old_hash="abc", new_hash="v:abc"
+        )
+    stmt = session.calls[0][0]
+    sql = _sql(stmt)
+    assert sql.startswith(
+        "UPDATE public.resource_embeddings SET source_hash=%(source_hash)s, "
+        "updated_at=now()"
+    )
+    set_clause = sql.split(" SET ", 1)[1].split("WHERE")[0]
+    assert "embedding" not in set_clause, "a relabel must not rewrite the vector"
+    # Compare-and-set: a concurrent re-embed wins over the relabel.
+    assert "resource_embeddings.source_hash = " in sql.split("WHERE")[1]
+    params = stmt.compile(dialect=postgresql.dialect()).params
+    assert params["source_hash"] == "v:abc" and "abc" in params.values()
+
+
+async def test_all_three_listings_count_the_same_population():
+    """coverage / stale_count / pending_for_user must agree on "the user's
+    resources": a resource without a parsed_media row is in none of them."""
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    repo = ResourceEmbeddingsRepository()
+    session = _Session([_Result(scalar=0)] * 5 + [_Result([])])
+    with patch(f"{REPO}.read_scope", _scope(session)):
+        await repo.coverage(user_id=USER, space_id=42, layer="semantic")
+        await repo.stale_count(
+            user_id=USER, space_id=42, layer="semantic", doc_version="v9"
+        )
+        await repo.pending_for_user(
+            user_id=USER, space_id=42, layer="semantic", limit=1, doc_version="v9"
+        )
+    sqls = [_sql(c[0]) for c in session.calls]
+    assert len(sqls) == 5
+    for sql in sqls:
+        assert "JOIN public.parsed_media ON public.parsed_media.id = " in sql
+        assert "public.resources.media_id IS NOT NULL" in sql
+
+
 async def test_touch_moves_updated_at_only():
     from app.repositories.resource_embeddings_repository import (
         ResourceEmbeddingsRepository,

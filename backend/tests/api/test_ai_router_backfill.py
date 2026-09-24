@@ -435,3 +435,30 @@ async def test_stale_counts_the_stale_rows_of_this_batch(dry_run) -> None:
         out = await _call(BackfillEmbeddingsBody(dry_run=dry_run))
     assert out["stale"] == 2
     assert out["total_missing"] == 40
+
+
+@pytest.mark.asyncio
+async def test_rehashed_rows_are_counted_apart_from_reembedded() -> None:
+    """A relabelled legacy hash is current without an embedding call: it
+    leaves ``remaining`` but is not reported as embedded."""
+    from app.services.library.embedding_backfill import REHASHED
+
+    rows = [_row(1), _row(2, "stale_version"), _row(3, "stale_version")]
+    repo = _Repo(rows, 10)
+    embed = AsyncMock(side_effect=[(True, None), (True, REHASHED), (True, REHASHED)])
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+    assert out["reembedded"] == ["1"]
+    assert out["rehashed"] == 2
+    assert out["remaining"] == 7
+
+
+@pytest.mark.asyncio
+async def test_dry_run_reports_zero_rehashed() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    p = _patches(repo=_Repo([_row(1)], 1))
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call(BackfillEmbeddingsBody(dry_run=True))
+    assert out["rehashed"] == 0

@@ -85,7 +85,11 @@ def _stale_version(doc_version: str):
 
 
 def _stale_source():
-    """A summary or transcript of the resource is newer than its vector."""
+    """A summary or transcript of the resource is newer than its vector.
+
+    Neither table has an ``updated_at``: ``created_at`` serves as the last
+    write time (``AIRepository.save_transcript`` / ``save_summary`` move it on
+    every upsert, so a re-run counts too)."""
     newer_summary = exists().where(
         ResourceSummaries.resource_id == Resources.id,
         ResourceSummaries.created_at > ResourceEmbeddings.updated_at,
@@ -257,10 +261,12 @@ class ResourceEmbeddingsRepository:
 
     @staticmethod
     def _owned_web_resources(user_id: str):
-        """The population both coverage and backfill count against: the
-        user's non-trashed web downloads that have a parsed_media row."""
+        """The population coverage, stale_count and pending_for_user all count
+        against: the user's non-trashed web downloads that have a
+        parsed_media row (INNER JOIN, same predicate in all three)."""
         return (
             select(Resources.id)
+            .join(ParsedMedia, ParsedMedia.id == Resources.media_id)
             .where(Resources.creator_id == user_id)
             .where(Resources.source_type == "web")
             .where(Resources.is_trashed.is_(False))
@@ -355,6 +361,7 @@ class ResourceEmbeddingsRepository:
             .where(Resources.creator_id == user_id)
             .where(Resources.source_type == "web")
             .where(Resources.is_trashed.is_(False))
+            .where(Resources.media_id.isnot(None))
             .where(or_(missing, stale_version, _stale_source()))
         )
         count_stmt = select(func.count()).select_from(
@@ -410,6 +417,37 @@ class ResourceEmbeddingsRepository:
         try:
             async with read_scope() as session:
                 return int((await session.execute(stmt)).scalar_one() or 0)
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise _store_missing("resource_embeddings") from exc
+            raise
+
+    async def rewrite_hash(
+        self,
+        resource_id: int,
+        layer: str,
+        space_id: int,
+        *,
+        old_hash: str,
+        new_hash: str,
+    ) -> None:
+        """Relabel a current vector: set ``source_hash`` to ``new_hash`` (and
+        move ``updated_at``) without touching the embedding. Compare-and-set
+        on ``old_hash``: if a concurrent write already replaced the row, this
+        is a no-op."""
+        stmt = (
+            update(ResourceEmbeddings)
+            .where(
+                ResourceEmbeddings.resource_id == resource_id,
+                ResourceEmbeddings.layer == layer,
+                ResourceEmbeddings.space_id == space_id,
+                ResourceEmbeddings.source_hash == old_hash,
+            )
+            .values(source_hash=new_hash, updated_at=func.now())
+        )
+        try:
+            async with write_scope() as session:
+                await session.execute(stmt)
         except ProgrammingError as exc:
             if is_store_missing(exc):
                 raise _store_missing("resource_embeddings") from exc

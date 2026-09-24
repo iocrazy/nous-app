@@ -53,6 +53,7 @@ class _Repo:
         self.upserts: List[dict] = []
         self.gets: List[tuple] = []
         self.touches: List[tuple] = []
+        self.rehashes: List[dict] = []
 
     async def get(self, resource_id, layer, space_id):
         self.gets.append((resource_id, layer, space_id))
@@ -67,6 +68,17 @@ class _Repo:
 
     async def touch(self, resource_id, layer, space_id):
         self.touches.append((resource_id, layer, space_id))
+
+    async def rewrite_hash(self, resource_id, layer, space_id, *, old_hash, new_hash):
+        self.rehashes.append(
+            {
+                "resource_id": resource_id,
+                "layer": layer,
+                "space_id": space_id,
+                "old_hash": old_hash,
+                "new_hash": new_hash,
+            }
+        )
 
 
 class _Embedder:
@@ -136,6 +148,40 @@ async def test_stale_source_with_an_unchanged_document_is_touched_not_embedded(i
     assert (ok, reason) == (True, None)
     assert emb.texts == [] and repo.upserts == []
     assert repo.touches == [(7, SEMANTIC_LAYER, 3)]
+
+
+@pytest.mark.asyncio
+async def test_bare_legacy_hash_of_the_same_document_is_rehashed_not_embedded(inputs):
+    """Rows written before the "<version>:<sha1>" format hold the bare sha1 of
+    the SAME versioned text: the vector is current, only the label is old.
+    Rewrite the hash, never pay for an embedding call."""
+    _, source_hash = compose_semantic_document(**_INPUTS)
+    bare = source_hash.split(":", 1)[1]
+    repo, emb = _Repo(existing={"source_hash": bare}), _Embedder()
+    ok, reason = await bf.embed_candidate(
+        _row(reason="stale_version"), embedder=emb, space_id=3, repo=repo
+    )
+    assert (ok, reason) == (True, bf.REHASHED)
+    assert emb.texts == [] and repo.upserts == []
+    assert repo.rehashes == [
+        {
+            "resource_id": 7,
+            "layer": SEMANTIC_LAYER,
+            "space_id": 3,
+            "old_hash": bare,
+            "new_hash": source_hash,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bare_hash_of_a_different_document_is_re_embedded(inputs):
+    repo, emb = _Repo(existing={"source_hash": "0" * 40}), _Embedder()
+    ok, reason = await bf.embed_candidate(
+        _row(reason="stale_version"), embedder=emb, space_id=3, repo=repo
+    )
+    assert (ok, reason) == (True, None)
+    assert len(emb.texts) == 1 and repo.rehashes == []
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,11 @@ from app.services.library.embedding_document import (
     load_semantic_inputs,
 )
 
+#: ``embed_candidate`` outcome for a row whose vector was current but whose
+#: hash predated the ``"<version>:<sha1>"`` format: the label was rewritten,
+#: no embedding call was made.
+REHASHED = "rehashed"
+
 
 class _Embedder(Protocol):
     async def try_embed(
@@ -55,6 +60,16 @@ class _EmbeddingsRepo(Protocol):
 
     async def touch(self, resource_id: int, layer: str, space_id: int) -> None: ...
 
+    async def rewrite_hash(
+        self,
+        resource_id: int,
+        layer: str,
+        space_id: int,
+        *,
+        old_hash: str,
+        new_hash: str,
+    ) -> None: ...
+
 
 async def embed_candidate(
     row: BackfillRow,
@@ -72,7 +87,9 @@ async def embed_candidate(
 
     Returns ``(True, None)`` when the row now holds a current vector (written
     now, or already there with the same ``source_hash`` — no call, no spend),
-    else ``(False, reason)``: ``"empty_text"``, ``"store_missing"`` (migration
+    ``(True, REHASHED)`` when the stored vector already embedded this exact
+    document under a legacy bare-sha1 hash (the hash was relabelled, no
+    call), else ``(False, reason)``: ``"empty_text"``, ``"store_missing"`` (migration
     499 not applied), or the embedder's ``try_embed`` reason (classify it with
     ``classify_embed_reason`` before it reaches a user)."""
     inputs = await load_semantic_inputs(
@@ -95,6 +112,19 @@ async def embed_candidate(
                 # listing picks this row again on every run.
                 await repo.touch(row.resource_id, SEMANTIC_LAYER, space_id)
             return True, None
+        # Written before the "<version>:<sha1>" format: the bare digest of the
+        # same versioned text means the vector is current, only the label is
+        # old. Relabel it instead of paying to embed identical text again.
+        bare_digest = source_hash.split(":", 1)[1]
+        if existing is not None and existing.get("source_hash") == bare_digest:
+            await repo.rewrite_hash(
+                row.resource_id,
+                SEMANTIC_LAYER,
+                space_id,
+                old_hash=bare_digest,
+                new_hash=source_hash,
+            )
+            return True, REHASHED
         vector, reason = await embedder.try_embed(text)
         if vector is None:
             return False, reason or "provider_error: empty result"

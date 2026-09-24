@@ -196,6 +196,20 @@ describe('VectorsPanel', () => {
     await waitFor(() => expect(getVectorsStatusMock).toHaveBeenCalledTimes(2));
   });
 
+  it('reports relabelled legacy hashes apart from embedded rows', async () => {
+    getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+    render(<VectorsPanel />);
+    await screen.findByText('doubao-embedding-vision-251215');
+    backfillMock.mockResolvedValueOnce({
+      success: true, dry_run: false, reembedded: ['1'], rehashed: 20, dispatched: [], skipped: [],
+      in_flight: 0, remaining: 1368, total_missing: 1389, stale: 20,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Run 200' }));
+    expect(
+      await screen.findByText('1 embedded · 20 relabelled (no embedding call) · 1,368 remaining'),
+    ).toBeInTheDocument();
+  });
+
   it('aggregates skipped reasons and reports dispatched separately', async () => {
     getVectorsStatusMock.mockResolvedValue(OK_STATUS);
     render(<VectorsPanel />);

@@ -1117,6 +1117,7 @@
       "resultWouldEmbed": "将嵌入 {{count}} 条",
       "resultWouldDispatch": "将派发 {{count}} 条",
       "resultEmbedded": "已嵌入 {{count}} 条",
+      "resultRehashed": "{{count}} 条仅更新标记（未调用嵌入）",
       "resultDispatched": "已派发 {{count}} 条",
       "resultSkipped": "跳过 {{count}} 条（{{reasons}}）",
       "resultInFlight": "{{count}} 条进行中",

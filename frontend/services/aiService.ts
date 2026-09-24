@@ -625,7 +625,8 @@ export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
  *  `details.code` (`embedder_unconfigured` 409, `vector_store_missing` 503).
  *  Resource ids are strings: Snowflake BIGINTs lose precision as JSON numbers
  *  past 2^53. `total_missing` counts missing + stale vectors; `stale` is how
- *  many rows of this batch were stale rather than missing. */
+ *  many rows of this batch were stale rather than missing; `rehashed` counts
+ *  legacy hashes relabelled without an embedding call. */
 export interface BackfillResult {
   success: boolean;
   dry_run: boolean;
@@ -637,6 +638,9 @@ export interface BackfillResult {
   remaining: number;
   total_missing: number;
   stale?: number;
+  /** Rows whose vector was already current under a legacy bare-sha1 hash:
+   *  the hash was relabelled without an embedding call (not in `reembedded`). */
+  rehashed?: number;
   aborted_reason?: string | null;
 }
 

@@ -600,3 +600,94 @@ async def test_pending_selects_a_later_summary_as_stale_source(orm_dsn, pg, fx):
     assert total == 1 and stale == 1
     assert [(r.resource_id, r.reason) for r in rows] == [(fx["r1"], "stale_source")]
     assert total_after == 0, "touch moved updated_at past the summary"
+
+
+class _NoSource:
+    """analysis / tags / ai repos with nothing to add: the document is the
+    title alone, read from the real parsed_media row."""
+
+    async def get_analysis(self, resource_id, analysis_level=None):
+        return None
+
+    async def get_resource_tags(self, resource_id):
+        return []
+
+    async def get_summary(self, resource_id):
+        return None
+
+    async def get_transcript(self, resource_id):
+        return None
+
+
+class _MustNotEmbed:
+    def __init__(self):
+        self.calls = 0
+
+    async def try_embed(self, text):
+        self.calls += 1
+        raise AssertionError("a legacy hash of the same text must not be re-embedded")
+
+
+@_skip
+async def test_legacy_bare_hash_of_the_same_text_is_rehashed_without_embedding(
+    orm_dsn, pg, fx
+):
+    """Rows written before the "<version>:<sha1>" format hold the bare sha1
+    of the same versioned text. They are listed as stale_version, but the
+    vector is current: relabel the hash, never pay for the call."""
+    from app.db.scope import Scope, request_scope
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+    from app.services.library.embedding_backfill import REHASHED, embed_candidate
+    from app.services.library.embedding_document import (
+        DOC_VERSION,
+        compose_semantic_document,
+    )
+
+    _, prefixed = compose_semantic_document(
+        title="First Clip",
+        description="",
+        tags=[],
+        summary_text=None,
+        transcript_text=None,
+        analysis=None,
+    )
+    bare = prefixed.split(":", 1)[1]
+    await _insert_vector(pg, fx["r1"], fx["s1"], bare, _HOUR)
+    repo = ResourceEmbeddingsRepository()
+    user = str(fx["user"])
+    embedder = _MustNotEmbed()
+    src = _NoSource()
+    async with request_scope(Scope(user_id=user)):
+        rows, _ = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version=DOC_VERSION,
+        )
+        row = next(r for r in rows if r.resource_id == fx["r1"])
+        assert row.reason == "stale_version"
+        got = await embed_candidate(
+            row,
+            embedder=embedder,
+            space_id=fx["s1"],
+            repo=repo,
+            analysis_repo=src,
+            tags_repo=src,
+            ai_repo=src,
+        )
+        after = await repo.get(fx["r1"], "semantic", fx["s1"])
+        rows_after, _ = await repo.pending_for_user(
+            user_id=user,
+            space_id=fx["s1"],
+            layer="semantic",
+            limit=10,
+            doc_version=DOC_VERSION,
+        )
+    assert got == (True, REHASHED)
+    assert embedder.calls == 0
+    assert after["source_hash"] == prefixed
+    assert after["embedding"] == _unit(0), "the vector itself is untouched"
+    assert fx["r1"] not in [r.resource_id for r in rows_after]
