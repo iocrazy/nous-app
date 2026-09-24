@@ -11,7 +11,6 @@ import {
   findSimilarVideos,
   hybridSearch,
   localSearch,
-  quickSearch,
   semanticSearch,
   textSearch,
 } from './searchService';
@@ -237,24 +236,6 @@ describe('findSimilarVideos', () => {
     expect(url).toContain('/api/v1/search/similar/42');
     expect(url).toContain('limit=5');
     expect(url).toContain('threshold=0.8');
-  });
-});
-
-describe('quickSearch', () => {
-  it('uses GET /quick with q+limit', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      text: async () =>
-        JSON.stringify({ results: [], suggestions: [] }),
-      json: async () => ({ results: [], suggestions: [] }),
-    } as unknown as Response);
-
-    await quickSearch('foo', 7);
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('q=foo');
-    expect(url).toContain('limit=7');
   });
 });
 

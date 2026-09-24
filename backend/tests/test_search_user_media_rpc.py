@@ -704,8 +704,8 @@ async def test_find_similar_media_forwards_user_id_to_the_embedding_repo(
 async def test_search_by_embedding_requires_a_user(monkeypatch) -> None:
     """``user_id`` has no default, by design.
 
-    ``/search/similar`` and ``/search/quick`` do not post-filter the RPC's
-    output, so this argument is their only cross-user control. A default meant
+    ``/search/similar`` does not post-filter the RPC's
+    output, so this argument is its only cross-user control. A default meant
     one forgotten keyword anywhere on the path silently restored the global
     scan — the failure is invisible because the response still looks like a
     normal result page.

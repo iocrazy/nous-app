@@ -39,6 +39,7 @@ from app.schemas.topics import (
     SourceHealthOut,
     SourceHealthResponse,
     SourceMutationResponse,
+    TopicScriptResponse,
 )
 from app.services.ai.providers.ai_provider_helpers import (
     resolve_script_ai_config,
@@ -447,7 +448,7 @@ async def _generate_script_for(
     return await svc.generate_outline(premise)
 
 
-@router.post("/{hotspot_id}/generate-script")
+@router.post("/{hotspot_id}/generate-script", response_model=TopicScriptResponse)
 async def generate_script(hotspot_id: str, auth: AuthDep):
     repo = HotspotsRepository()
     visible = await _visible_source_ids(auth.user_id)
