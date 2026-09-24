@@ -52,7 +52,8 @@ describe('fetchComments', () => {
 describe('createComment', () => {
   it('POSTs the full payload', async () => {
     const spy = stubJson({
-      data: { id: 'c1', content: 'hi', resource_id: 'r1', status: 'open' },
+      // Wire shape: Snowflake ids are JSON numbers.
+      data: { id: 4101, content: 'hi', resource_id: 3101, status: 'open', annotations: [] },
     });
     const result = await createComment({
       resource_id: 'r1',
@@ -80,7 +81,7 @@ describe('createComment', () => {
 
 describe('resolve / reopen / delete', () => {
   it('resolveComment POSTs to the resolve sub-URL', async () => {
-    const spy = stubJson({ data: { id: 'c1', status: 'resolved' } });
+    const spy = stubJson({ data: { id: 4101, status: 'resolved' } });
     await resolveComment('c1');
     const [url, init] = spy.mock.calls[0];
     expect(url).toBe(
@@ -90,7 +91,7 @@ describe('resolve / reopen / delete', () => {
   });
 
   it('reopenComment POSTs to the reopen sub-URL', async () => {
-    const spy = stubJson({ data: { id: 'c1', status: 'open' } });
+    const spy = stubJson({ data: { id: 4101, status: 'open' } });
     await reopenComment('c1');
     expect(spy.mock.calls[0][0]).toBe(
       'https://api.test/api/v1/reviews/comments/c1/reopen',
@@ -114,7 +115,7 @@ describe('resolve / reopen / delete', () => {
 describe('review status', () => {
   it('setReviewStatus POSTs resource_id + status', async () => {
     const spy = stubJson({
-      data: { id: 's1', status: 'approved', resource_id: 'r1' },
+      data: { id: 5101, status: 'approved', resource_id: 3101 },
     });
     const result = await setReviewStatus({
       resource_id: 'r1',

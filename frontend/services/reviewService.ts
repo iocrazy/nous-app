@@ -1,41 +1,15 @@
+import type {
+  Envelope,
+  ResourceReviewComment,
+  ResourceReviewCommentCreated,
+  ResourceReviewStatus,
+  ResourceReviewThread,
+} from '../types/api';
 import { apiClient } from './apiClient';
 
 // ─── Types ──────────────────────────────────────────────
-
-export interface ReviewAnnotation {
-  id: string;
-  comment_id: string;
-  tool_type: 'arrow' | 'rect' | 'freehand' | 'text';
-  data: Record<string, unknown>;
-  created_at: string;
-}
-
-export interface ReviewComment {
-  id: string;
-  resource_id: string;
-  version_id: string | null;
-  author_id: string;
-  timecode: number | null;
-  frame_number: number | null;
-  content: string;
-  status: 'open' | 'resolved' | 'wontfix';
-  parent_id: string | null;
-  created_at: string;
-  updated_at: string;
-  annotations?: ReviewAnnotation[];
-  replies?: ReviewComment[];
-}
-
-export interface ReviewStatus {
-  id: string;
-  resource_id: string;
-  version_id: string | null;
-  reviewer_id: string;
-  status: 'pending' | 'approved' | 'needs_changes' | 'rejected';
-  comment: string | null;
-  created_at: string;
-  updated_at: string;
-}
+// Response shapes are the generated aliases in types/api.ts (P7 reviews).
+// Ids are Snowflake BIGINTs sent as JSON numbers.
 
 export interface CreateCommentPayload {
   resource_id: string;
@@ -50,18 +24,14 @@ export interface CreateCommentPayload {
   }>;
 }
 
-interface Envelope<T> {
-  data?: T;
-}
-
 // ─── Comments ───────────────────────────────────────────
 
 export async function fetchComments(
   resourceId: string,
   versionId?: string,
   status?: string,
-): Promise<ReviewComment[]> {
-  const response = await apiClient.get<Envelope<ReviewComment[]>>(
+): Promise<ResourceReviewThread[]> {
+  const response = await apiClient.get<Envelope<ResourceReviewThread[]>>(
     '/api/v1/reviews/comments',
     {
       query: { resource_id: resourceId, version_id: versionId, status },
@@ -72,8 +42,8 @@ export async function fetchComments(
 
 export async function createComment(
   payload: CreateCommentPayload,
-): Promise<ReviewComment> {
-  const response = await apiClient.post<Envelope<ReviewComment>>(
+): Promise<ResourceReviewCommentCreated> {
+  const response = await apiClient.post<Envelope<ResourceReviewCommentCreated>>(
     '/api/v1/reviews/comments',
     payload,
   );
@@ -81,23 +51,23 @@ export async function createComment(
   return response.data;
 }
 
-export async function resolveComment(commentId: string): Promise<ReviewComment> {
-  const response = await apiClient.post<Envelope<ReviewComment>>(
+export async function resolveComment(commentId: string | number): Promise<ResourceReviewComment> {
+  const response = await apiClient.post<Envelope<ResourceReviewComment>>(
     `/api/v1/reviews/comments/${commentId}/resolve`,
   );
   if (!response.data) throw new Error('Empty response from resolveComment');
   return response.data;
 }
 
-export async function reopenComment(commentId: string): Promise<ReviewComment> {
-  const response = await apiClient.post<Envelope<ReviewComment>>(
+export async function reopenComment(commentId: string | number): Promise<ResourceReviewComment> {
+  const response = await apiClient.post<Envelope<ResourceReviewComment>>(
     `/api/v1/reviews/comments/${commentId}/reopen`,
   );
   if (!response.data) throw new Error('Empty response from reopenComment');
   return response.data;
 }
 
-export async function deleteComment(commentId: string): Promise<void> {
+export async function deleteComment(commentId: string | number): Promise<void> {
   await apiClient.delete(`/api/v1/reviews/comments/${commentId}`);
 }
 
@@ -108,8 +78,8 @@ export async function setReviewStatus(payload: {
   version_id?: string;
   status: string;
   comment?: string;
-}): Promise<ReviewStatus> {
-  const response = await apiClient.post<Envelope<ReviewStatus>>(
+}): Promise<ResourceReviewStatus> {
+  const response = await apiClient.post<Envelope<ResourceReviewStatus>>(
     '/api/v1/reviews/status',
     payload,
   );
@@ -120,8 +90,8 @@ export async function setReviewStatus(payload: {
 export async function fetchReviewStatuses(
   resourceId: string,
   versionId?: string,
-): Promise<ReviewStatus[]> {
-  const response = await apiClient.get<Envelope<ReviewStatus[]>>(
+): Promise<ResourceReviewStatus[]> {
+  const response = await apiClient.get<Envelope<ResourceReviewStatus[]>>(
     '/api/v1/reviews/status',
     {
       query: { resource_id: resourceId, version_id: versionId },
