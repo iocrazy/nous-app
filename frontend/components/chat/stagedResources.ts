@@ -31,6 +31,23 @@ export interface StagedResourceRef {
 }
 
 /**
+ * The search API types `scope.type` as a plain string, but the backend only
+ * ever emits `'personal'` or `'team'` there and the `resource_ref` resolver
+ * accepts only those two. Anything else is a contract break worth logging,
+ * not a value to forward.
+ */
+function toAttachmentScope(
+  scope: ResourceRefInsertItem['scope'],
+): StagedResourceRef['scope'] {
+  if (!scope) return { type: 'personal', id: '' };
+  if (scope.type === 'personal' || scope.type === 'team') {
+    return { type: scope.type, id: scope.id };
+  }
+  console.error('[stagedResources] unexpected resource scope type', scope.type);
+  return { type: 'personal', id: scope.id };
+}
+
+/**
  * Normalise either entry point's item into the staged shape.
  *
  * Absent is normalised to '' rather than left undefined for the same reason
@@ -44,7 +61,7 @@ export function toStagedResource(item: ResourceRefInsertItem): StagedResourceRef
     name: item.name ?? '',
     kind: item.kind ?? 'doc',
     mime: item.mime ?? '',
-    scope: item.scope ?? { type: 'personal', id: '' },
+    scope: toAttachmentScope(item.scope),
     thumbnail_url: item.thumbnail_url ?? '',
     transcript_status: item.transcript_status ?? '',
     summary_status: item.summary_status ?? '',

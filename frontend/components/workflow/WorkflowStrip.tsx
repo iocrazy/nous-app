@@ -17,7 +17,7 @@
 import React, { useMemo } from 'react';
 import { Check, Lock, Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { ProjectStageNode } from '../../types';
+import type { ProjectStageNode } from '../../types/api';
 import { isNodeInActiveGroup, isNodeOverdue, NODE_STATUS_CONFIG, unmetDeps } from './nodeStatus';
 import { isDeliverableOnly, resolveSurface } from '../workspace/nodeSurface';
 

@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { useUpload, type UploadFileProgress } from '../contexts/UploadContext';
 import { computeFileHash } from '../utils/fileHash';
 import { runWithConcurrency } from '../utils/concurrency';
-import { runImport } from '../utils/importPipeline';
+import { runImport, type CheckBatchResultItem } from '../utils/importPipeline';
 import {
   uploadResource,
   checkDuplicatesBatch,
@@ -186,7 +186,7 @@ export function useResourceUpload({
         file_size: file.size,
       }));
 
-      let batchResult: { file_hash: string; duplicate: boolean; existing: unknown }[];
+      let batchResult: CheckBatchResultItem[];
       try {
         batchResult = await checkDuplicatesBatch(batchItems);
       } catch {
@@ -201,7 +201,7 @@ export function useResourceUpload({
       for (const r of batchResult) {
         dupByHash.set(r.file_hash, {
           duplicate: r.duplicate,
-          existing: r.existing as { id: string } | null,
+          existing: r.existing,
         });
       }
       dupCount += batchResult.filter((r) => r.duplicate).length;

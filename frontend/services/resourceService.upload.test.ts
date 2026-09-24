@@ -122,9 +122,9 @@ describe('the progress samples', () => {
     FakeXhr.last?.progress(2_048, 8_192);
     now.mockReturnValue(1_500);
     FakeXhr.last?.progress(6_144, 8_192);
-    FakeXhr.last?.finish(200, JSON.stringify({ data: { id: 'r-1' } }));
+    FakeXhr.last?.finish(200, JSON.stringify({ success: true, data: { id: 1 } }));
 
-    expect(await done).toEqual({ id: 'r-1' });
+    expect(await done).toEqual({ id: 1 });
     expect(samples).toEqual([
       { loaded: 2_048, total: 8_192, at: 1_000 },
       { loaded: 6_144, total: 8_192, at: 1_500 },
@@ -145,7 +145,7 @@ describe('the progress samples', () => {
     await Promise.resolve();
 
     FakeXhr.last?.progress(512, 0, false);
-    FakeXhr.last?.finish(200, JSON.stringify({ data: { id: 'r-1' } }));
+    FakeXhr.last?.finish(200, JSON.stringify({ success: true, data: { id: 1 } }));
     await done;
 
     expect(samples).toEqual([{ loaded: 512, total: null, at: 4_000 }]);

@@ -19,7 +19,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project } from '../../types';
+import type { Project } from '../../types/api';
 import { formatDateShort } from '../../utils/formatDate';
 
 interface ProjectNavSidebarProps {

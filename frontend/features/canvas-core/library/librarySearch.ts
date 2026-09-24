@@ -27,7 +27,7 @@ import { generatedMediaCoverUrl } from '../../../services/generatedMediaService'
 import { fetchGenerated, type GeneratedItem } from '../../../services/generatedService';
 import { getResourceCoverUrl } from '../../../services/resourceService';
 import { searchResources } from '../../../services/resourceSearchService';
-import type { ResourceSearchResult } from '../../../types';
+import type { ResourceSearchResult } from '../../../types/api';
 import { mediaSrc } from '../smart/mediaUrl';
 
 const DEBOUNCE_MS = 300;

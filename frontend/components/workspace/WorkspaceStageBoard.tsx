@@ -36,7 +36,7 @@ import { BriefField } from '../workflow/BriefField';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
 import { DispatchConfirmDialog } from '../Todolist/DispatchConfirmDialog';
 import { StageNodeForm } from './StageNodeForm';
-import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types';
+import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types/api';
 
 interface WorkspaceStageBoardProps {
   projectId: string;

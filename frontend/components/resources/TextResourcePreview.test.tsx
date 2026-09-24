@@ -12,12 +12,13 @@ vi.mock('./PlainTextResourceEditor', () => ({
     <div data-testid="code-editor" data-readonly={String(!!readOnly)}>{value}</div>
   ),
 }));
-const saveNew = vi.fn(async () => ({ id: 'v2' }));
-const overwrite = vi.fn(async () => ({ id: 'v1' }));
+// Normalised service mocks: `ResourceVersion` ids are JSON numbers.
+const saveNew = vi.fn(async (..._args: unknown[]) => ({ id: 2 }));
+const overwrite = vi.fn(async (..._args: unknown[]) => ({ id: 1 }));
 vi.mock('../../services/resourceService', () => ({
   saveTextAsNewVersion: (...a: unknown[]) => saveNew(...a),
   overwriteVersionContent: (...a: unknown[]) => overwrite(...a),
-  fetchResourceVersions: async () => [{ id: 'v1', version_number: 1 }],
+  fetchResourceVersions: async () => [{ id: 1, version_number: 1 }],
 }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }) }));
@@ -25,7 +26,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, d?: s
 import { TextResourcePreview } from './TextResourcePreview';
 
 const res = (over: Record<string, unknown> = {}) => ({
-  id: '10', filename: 'notes.md', mime_type: 'text/markdown',
+  id: 10, filename: 'notes.md', mime_type: 'text/markdown',
   file_size_bytes: 20, current_version: 1, ...over,
 }) as never;
 

@@ -32,7 +32,7 @@ import {
 } from '../../../../features/canvas-core/services/sendAssetToCanvas';
 import type { Canvas } from '../../../../features/canvas-core/types';
 import type { AssetRowDetail } from '../../../../services/assetsService';
-import type { Project } from '../../../../types';
+import type { Project } from '../../../../types/api';
 
 /** Every typed reason, plus the two this component owns (creating the new
  *  canvas, listing a project's canvases). One sentence each. */

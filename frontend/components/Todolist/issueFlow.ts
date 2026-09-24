@@ -124,7 +124,7 @@ export function readDueDate(raw: unknown): string | null | undefined {
 // simply hides).
 
 import { fetchProjectWorkflow } from '../../services/workflowService';
-import type { ProjectWorkflow } from '../../types';
+import type { ProjectWorkflow } from '../../types/api';
 
 /** Flow read-out for the context bar's progress ring. */
 export interface ProjectFlow {

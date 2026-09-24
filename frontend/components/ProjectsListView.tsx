@@ -4,8 +4,7 @@ import {
   Search, ArrowUpDown, MoreVertical
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Project } from '../types';
-import type { ProjectSuggestionItem } from '../types/api';
+import type { Project, ProjectSuggestionItem } from '../types/api';
 import { updateProject, deleteProject, fetchProjectSuggestions } from '../services/projectsService';
 import { useTeamContext } from '../contexts/TeamContext';
 import { formatRelativeTime } from '../utils/relativeTime';
@@ -91,7 +90,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   const handleToggleStar = async (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
     try {
-      await updateProject(project.id, { is_starred: !project.is_starred });
+      await updateProject(String(project.id), { is_starred: !project.is_starred });
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to toggle star:', err);
@@ -100,7 +99,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const handleToggleStarById = async (project: Project) => {
     try {
-      await updateProject(project.id, { is_starred: !project.is_starred });
+      await updateProject(String(project.id), { is_starred: !project.is_starred });
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to toggle star:', err);
@@ -109,7 +108,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const handleToggleArchive = async (project: Project) => {
     try {
-      await updateProject(project.id, { archived: !project.archived_at });
+      await updateProject(String(project.id), { archived: !project.archived_at });
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to toggle archive:', err);
@@ -119,7 +118,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   const handleDeleteProject = async (project: Project) => {
     if (!window.confirm(t('projects.confirmDelete', `Delete "${project.name}"? This cannot be undone.`))) return;
     try {
-      await deleteProject(project.id);
+      await deleteProject(String(project.id));
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to delete project:', err);
@@ -133,7 +132,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
 
   const handleColorLabel = async (project: Project, color: string | null) => {
     try {
-      await updateProject(project.id, { color_label: color });
+      await updateProject(String(project.id), { color_label: color });
       onProjectsChange?.();
     } catch (err) {
       console.error('Failed to set color label:', err);
@@ -358,9 +357,6 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${colorLabelDots[project.color_label]}`} />
                       )}
                       <span className="text-sm text-ink-50 font-medium">{project.name}</span>
-                      {project.display_code && (
-                        <span className="text-[11px] font-mono text-ink-500">{project.display_code}</span>
-                      )}
                       {project.workflow_badge?.current_node_name && (
                         <span
                           data-testid="project-workflow-stage-chip"

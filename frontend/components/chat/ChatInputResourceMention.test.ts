@@ -5,7 +5,7 @@ import {
   createResourceMentionExtension,
   MENTION_QUERY_TERMINATORS,
 } from './ChatInputResourceMention';
-import type { ResourceSearchResult } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 
 // Real `/resources/search` row shape (Task 1 contract) — including the
 // RELATIVE thumbnail path and both status columns.

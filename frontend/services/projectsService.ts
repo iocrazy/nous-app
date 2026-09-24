@@ -1,5 +1,5 @@
-import { Project, ProjectFile, ProjectFolder, ProjectMember, ProjectShare, FileVersion, ReviewComment, ReviewStatus, ProjectStage, EpisodeProgress, ProjectEntities, RenderItemPage } from '../types';
-import type { ProjectSuggestionItem, RecentItem } from '../types/api';
+import { ReviewStatus, EpisodeProgress } from '../types';
+import type { FileVersion, GeneratedMediaPage, Project, ProjectDetail, ProjectEntities, ProjectFile, ProjectFileRow, ProjectFolder, ProjectMember, ProjectMemberRow, ProjectRow, ProjectShare, ProjectStage, ProjectSuggestionItem, RecentItem, ReviewComment, Schemas } from '../types/api';
 import { apiClient, apiFetch } from './apiClient';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -10,6 +10,18 @@ interface Envelope<T> {
 // ============================================
 // Projects
 // ============================================
+
+/** Lift a by-id / create response into the list-row shape every project
+ * holder uses. Those endpoints don't batch-derive the card enrichment, so it
+ * is `null` (the list endpoint's own "no rows" value) rather than absent. */
+export const toProject = (row: ProjectRow | ProjectDetail): Project => ({
+  ...row,
+  file_count: 'file_count' in row ? row.file_count : 0,
+  current_stage: null,
+  latest_activity: null,
+  members_preview: null,
+  workflow_badge: null,
+});
 
 export const fetchProjects = async (params?: {
   type?: string;
@@ -31,9 +43,9 @@ export const fetchProjects = async (params?: {
 // explicit project_members rows too (any role). URL-addressed navigation to a
 // shared project must fall back to this when the list has no match.
 export const fetchProject = async (id: string): Promise<Project> => {
-  const response = await apiClient.get<Envelope<Project>>(`/api/v1/projects/${id}`);
+  const response = await apiClient.get<Envelope<ProjectDetail>>(`/api/v1/projects/${id}`);
   if (!response.data) throw new Error('Project not found');
-  return response.data;
+  return toProject(response.data);
 };
 
 export const createProject = async (data: {
@@ -50,25 +62,35 @@ export const createProject = async (data: {
   // Ideation (M1.5): create-from-topic stamps the source topic id.
   topic_id?: string;
 }): Promise<Project> => {
-  const response = await apiClient.post<Envelope<Project>>(
+  const response = await apiClient.post<Envelope<ProjectRow>>(
     '/api/v1/projects',
     data,
   );
   if (!response.data) throw new Error('Empty response from createProject');
-  return response.data;
+  return toProject(response.data);
 };
 
 export const updateProject = async (
   id: string,
-  data: Partial<Project> & { archived?: boolean },
-): Promise<Project> => {
-  const response = await apiClient.put<Envelope<Project>>(
+  data: Schemas['ProjectUpdate'],
+): Promise<ProjectRow> => {
+  const response = await apiClient.put<Envelope<ProjectRow>>(
     `/api/v1/projects/${id}`,
     data,
   );
   if (!response.data) throw new Error('Empty response from updateProject');
   return response.data;
 };
+
+/** Lift a single-file response (`ProjectFileRow`) into the list-row shape
+ * held in UI state. The single-file endpoints send `source_issue_id` as a
+ * number and omit `source_issue_identifier`; keep the caller's copy of the
+ * latter (the list endpoint is the only one that joins it). */
+export const toProjectFile = (row: ProjectFileRow, prev?: ProjectFile): ProjectFile => ({
+  ...row,
+  source_issue_id: row.source_issue_id == null ? null : String(row.source_issue_id),
+  source_issue_identifier: prev?.source_issue_identifier ?? null,
+});
 
 export const deleteProject = async (id: string): Promise<void> => {
   await apiClient.delete(`/api/v1/projects/${id}`);
@@ -102,7 +124,7 @@ export const uploadFile = async (
   file: File,
   notes?: string,
   sourceIssueId?: string | null,
-): Promise<ProjectFile> => {
+): Promise<ProjectFileRow> => {
   // FormData upload: use apiFetch directly so we can pass `raw` body.
   const formData = new FormData();
   formData.append('file', file);
@@ -115,7 +137,7 @@ export const uploadFile = async (
       query: { notes: notes ?? undefined, source_issue_id: sourceIssueId ?? undefined },
     },
   );
-  const json: Envelope<ProjectFile> = await response.json();
+  const json: Envelope<ProjectFileRow> = await response.json();
   if (!json.data) throw new Error('Empty response from uploadFile');
   return json.data;
 };
@@ -123,8 +145,8 @@ export const uploadFile = async (
 export const linkVideoToProject = async (
   projectId: string,
   mediaId: string,
-): Promise<ProjectFile> => {
-  const response = await apiClient.post<Envelope<ProjectFile>>(
+): Promise<ProjectFileRow> => {
+  const response = await apiClient.post<Envelope<ProjectFileRow>>(
     `/api/v1/projects/${projectId}/files/link-media`,
     { media_id: mediaId },
   );
@@ -135,8 +157,8 @@ export const linkVideoToProject = async (
 export const getFileInfo = async (
   projectId: string,
   fileId: string,
-): Promise<ProjectFile> => {
-  const response = await apiClient.get<Envelope<ProjectFile>>(
+): Promise<ProjectFileRow> => {
+  const response = await apiClient.get<Envelope<ProjectFileRow>>(
     `/api/v1/projects/${projectId}/files/${fileId}`,
   );
   if (!response.data) throw new Error('Empty response from getFileInfo');
@@ -156,9 +178,9 @@ export const getProjectFileDownloadUrl = (
 export const updateFile = async (
   projectId: string,
   fileId: string,
-  data: Partial<ProjectFile>,
-): Promise<ProjectFile> => {
-  const response = await apiClient.put<Envelope<ProjectFile>>(
+  data: Schemas['ProjectFileUpdate'],
+): Promise<ProjectFileRow> => {
+  const response = await apiClient.put<Envelope<ProjectFileRow>>(
     `/api/v1/projects/${projectId}/files/${fileId}`,
     data,
   );
@@ -261,8 +283,8 @@ export const updateReviewStatus = async (
   projectId: string,
   fileId: string,
   status: ReviewStatus | null,
-): Promise<ProjectFile> => {
-  const response = await apiClient.put<Envelope<ProjectFile>>(
+): Promise<ProjectFileRow> => {
+  const response = await apiClient.put<Envelope<ProjectFileRow>>(
     `/api/v1/projects/${projectId}/files/${fileId}/review-status`,
     { review_status: status },
   );
@@ -324,8 +346,8 @@ export const moveFileToFolder = async (
   projectId: string,
   fileId: string,
   folderId: string | null,
-): Promise<ProjectFile> => {
-  const response = await apiClient.put<Envelope<ProjectFile>>(
+): Promise<ProjectFileRow> => {
+  const response = await apiClient.put<Envelope<ProjectFileRow>>(
     `/api/v1/projects/${projectId}/files/${fileId}/move`,
     { folder_id: folderId },
   );
@@ -363,8 +385,8 @@ export const updateMemberRole = async (
   projectId: string,
   memberId: string,
   role: string,
-): Promise<ProjectMember> => {
-  const response = await apiClient.put<Envelope<ProjectMember>>(
+): Promise<ProjectMemberRow> => {
+  const response = await apiClient.put<Envelope<ProjectMemberRow>>(
     `/api/v1/projects/${projectId}/members/${memberId}`,
     { role },
   );
@@ -402,8 +424,8 @@ export const createProjectShare = async (
     allow_download?: boolean;
     expires_hours?: number;
   },
-): Promise<any> => {
-  const response = await apiClient.post<Envelope<any>>(
+): Promise<ProjectShare | undefined> => {
+  const response = await apiClient.post<Envelope<ProjectShare>>(
     `/api/v1/projects/${projectId}/shares`,
     data,
   );
@@ -527,8 +549,8 @@ export const fetchProjectEntities = async (
 export const fetchProjectRenders = async (
   projectId: string,
   params?: { episodeId?: string | null; cursor?: string | null; limit?: number },
-): Promise<RenderItemPage> => {
-  const response = await apiClient.get<Envelope<RenderItemPage>>(
+): Promise<GeneratedMediaPage> => {
+  const response = await apiClient.get<Envelope<GeneratedMediaPage>>(
     `/api/v1/projects/${projectId}/renders`,
     {
       query: {

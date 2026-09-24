@@ -8,11 +8,7 @@
  */
 
 import { apiClient } from './apiClient';
-
-export interface EffectivePermission {
-  role: string;
-  capabilities: string[];
-}
+import type { Envelope, ResourcePermissions } from '../types/api';
 
 /**
  * Fetch the effective role and capabilities for the current user
@@ -22,15 +18,13 @@ export const fetchEffectiveRole = async (
   objectType: string,
   objectId: string,
   teamId: string,
-): Promise<EffectivePermission> => {
-  const json = await apiClient.get<
-    EffectivePermission | { data: EffectivePermission }
-  >('/api/v1/resources/permissions', {
+): Promise<ResourcePermissions> => {
+  const json = await apiClient.get<Envelope<ResourcePermissions>>('/api/v1/resources/permissions', {
     query: {
       object_type: objectType,
       object_id: objectId,
       team_id: teamId,
     },
   });
-  return 'data' in json ? json.data : json;
+  return json.data;
 };

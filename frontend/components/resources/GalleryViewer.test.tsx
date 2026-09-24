@@ -38,10 +38,10 @@ describe('GalleryViewer', () => {
 
   it('renders the 1/n pager in position order and steps with arrows + keys', async () => {
     // API returns children OUT of order — the viewer must sort by position so
-    // the first frame is position 0 (child-1), not the API's first row.
+    // the first frame is position 0 (id 101), not the API's first row.
     getGalleryItems.mockResolvedValue([
-      { id: 'child-2', filename: 'b.jpg', thumbnail_path: null, position: 1 },
-      { id: 'child-1', filename: 'a.jpg', thumbnail_path: null, position: 0 },
+      { id: 102, filename: 'b.jpg', thumbnail_path: null, position: 1 },
+      { id: 101, filename: 'a.jpg', thumbnail_path: null, position: 0 },
     ]);
 
     render(<GalleryViewer galleryId="gal-1" mediaToken="tok" />);
@@ -49,17 +49,17 @@ describe('GalleryViewer', () => {
     // First frame = position 0, counter reads 1 / 2.
     await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
     expect(getGalleryItems).toHaveBeenCalledWith('gal-1');
-    expect(currentSrc()).toBe('/media/child-1?token=tok');
+    expect(currentSrc()).toBe('/media/101?token=tok');
 
     // Next arrow → second frame.
     fireEvent.click(screen.getByRole('button', { name: /Next image/i }));
     expect(screen.getByText('2 / 2')).toBeInTheDocument();
-    expect(currentSrc()).toBe('/media/child-2?token=tok');
+    expect(currentSrc()).toBe('/media/102?token=tok');
 
     // Keyboard ArrowLeft → back to the first frame.
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
-    expect(currentSrc()).toBe('/media/child-1?token=tok');
+    expect(currentSrc()).toBe('/media/101?token=tok');
   });
 
   it('shows a friendly empty state for a gallery with no images', async () => {
@@ -73,8 +73,8 @@ describe('GalleryViewer', () => {
   describe('per-child prompt drawer', () => {
     beforeEach(() => {
       getGalleryItems.mockResolvedValue([
-        { id: 'child-1', filename: 'a.jpg', thumbnail_path: null, position: 0 },
-        { id: 'child-2', filename: 'b.jpg', thumbnail_path: null, position: 1 },
+        { id: 101, filename: 'a.jpg', thumbnail_path: null, position: 0 },
+        { id: 102, filename: 'b.jpg', thumbnail_path: null, position: 1 },
       ]);
     });
 
@@ -92,8 +92,8 @@ describe('GalleryViewer', () => {
 
       fireEvent.click(screen.getByText('Prompt'));
 
-      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('child-1');
-      expect(capturedPromptResourceId).toBe('child-1');
+      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('101');
+      expect(capturedPromptResourceId).toBe('101');
     });
 
     it('closes the drawer and re-mounts for the new child on navigation', async () => {
@@ -101,16 +101,16 @@ describe('GalleryViewer', () => {
       await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
 
       fireEvent.click(screen.getByText('Prompt'));
-      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('child-1');
+      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('101');
 
       fireEvent.click(screen.getByRole('button', { name: /Next image/i }));
       expect(screen.getByText('2 / 2')).toBeInTheDocument();
 
-      // Drawer collapses on navigation — ResourcePromptSection for child-1 unmounts.
+      // Drawer collapses on navigation — ResourcePromptSection for child 101 unmounts.
       expect(screen.queryByTestId('resource-prompt-section')).toBeNull();
 
       fireEvent.click(screen.getByText('Prompt'));
-      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('child-2');
+      expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('102');
     });
 
     it('closes via the drawer\'s own close button, restoring the corner toggle pill', async () => {

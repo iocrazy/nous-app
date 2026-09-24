@@ -1,5 +1,5 @@
 import { getAuthHeaders } from './parserService';
-import type { ResourceSearchResponse } from '../types';
+import type { ResourceSearchResponse } from '../types/api';
 
 const API = import.meta.env.VITE_API_URL || '';
 

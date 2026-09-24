@@ -52,12 +52,8 @@ import {
   type StagedAssetRef,
 } from '../chat/stagedResources';
 import { useToast } from '../Toast';
-import type {
-  AssetRefAttachment,
-  OutputRefAttachment,
-  ResourceRefAttachment,
-  ResourceSearchResult,
-} from '../../types';
+import type { AssetRefAttachment, OutputRefAttachment, ResourceRefAttachment } from '../../types';
+import type { ResourceSearchResult } from '../../types/api';
 import { IssueCommentTriggerChip } from './IssueCommentTriggerChip';
 import { isNoteDraft } from './isNoteDraft';
 import { LaterPopover } from './LaterPopover';

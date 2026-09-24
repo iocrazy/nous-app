@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
-import { ProjectFile } from '../types';
+import type { ProjectFile } from '../types/api';
 import { fetchProjectFiles, updateFile, deleteFile } from '../services/projectsService';
 import {
   listProjectCanvasTrash,
@@ -67,7 +67,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
 
   const handleRestore = async (file: ProjectFile) => {
     try {
-      await updateFile(projectId, file.id, { is_trashed: false });
+      await updateFile(projectId, String(file.id), { is_trashed: false });
       loadTrashed();
     } catch (err) {
       console.error('Failed to restore file:', err);
@@ -78,7 +78,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
     if (!window.confirm(t('projects.trash.confirmPermanentDelete',
       `Permanently delete "${file.filename}"? This cannot be undone.`))) return;
     try {
-      await deleteFile(projectId, file.id);
+      await deleteFile(projectId, String(file.id));
       loadTrashed();
     } catch (err) {
       console.error('Failed to permanently delete file:', err);

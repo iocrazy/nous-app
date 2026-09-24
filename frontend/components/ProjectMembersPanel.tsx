@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, UserPlus, Loader2, Crown, Pencil, Eye, Trash2 } from 'lucide-react';
 import { Loading } from './common/Loading';
-import { Project, ProjectMember } from '../types';
+import type { Project, ProjectMember } from '../types/api';
 import { UiSelect } from './ui';
 import { fetchProjectMembers, addProjectMember, updateMemberRole, removeProjectMember } from '../services/projectsService';
 
@@ -61,7 +61,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
   const loadMembers = async () => {
     setIsLoading(true);
     try {
-      const data = await fetchProjectMembers(project.id);
+      const data = await fetchProjectMembers(String(project.id));
       setMembers(data);
     } catch (err) {
       console.error('Failed to load members:', err);
@@ -77,7 +77,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
     try {
       // For now we use email as user_id placeholder — the backend needs to resolve
       // In a real scenario we'd search users by email first
-      await addProjectMember(project.id, inviteEmail.trim(), inviteRole);
+      await addProjectMember(String(project.id), inviteEmail.trim(), inviteRole);
       setInviteEmail('');
       await loadMembers();
     } catch (err) {
@@ -89,7 +89,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
 
   const handleRoleChange = async (memberId: string, newRole: string) => {
     try {
-      await updateMemberRole(project.id, memberId, newRole);
+      await updateMemberRole(String(project.id), memberId, newRole);
       await loadMembers();
     } catch (err) {
       console.error('Failed to update role:', err);
@@ -98,7 +98,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
 
   const handleRemove = async (memberId: string) => {
     try {
-      await removeProjectMember(project.id, memberId);
+      await removeProjectMember(String(project.id), memberId);
       await loadMembers();
     } catch (err) {
       console.error('Failed to remove member:', err);

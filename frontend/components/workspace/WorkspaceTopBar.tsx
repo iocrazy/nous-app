@@ -10,11 +10,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Bot, Zap, ZapOff } from 'lucide-react';
-import { MiniStepper } from './MiniStepper';
+import { MiniStepper, type MiniStepperStage } from './MiniStepper';
 import { updateProject } from '../../services/projectsService';
 import { useOptionalToast } from '../Toast';
 import { NODE_STATUS_LABEL } from '../workflow/nodeStatus';
-import type { Project, ProjectStage, ProjectWorkflow } from '../../types';
+import type { ProjectWorkflow } from '../../types/api';
 
 interface WorkspaceTopBarProps {
   projectName: string;
@@ -73,8 +73,8 @@ export function WorkspaceTopBar({
     setAutopilot(next); // optimistic
     setAutopilotSaving(true);
     try {
-      const updated: Project = await updateProject(projectId, { autopilot_enabled: next });
-      onAutopilotChange?.(updated.autopilot_enabled ?? next);
+      const updated = await updateProject(projectId, { autopilot_enabled: next });
+      onAutopilotChange?.(updated.autopilot_enabled);
     } catch (err) {
       console.error('[WorkspaceTopBar] autopilot toggle failed', err);
       setAutopilot(prev); // revert
@@ -92,14 +92,13 @@ export function WorkspaceTopBar({
   const wfCurrentIndex = hasWorkflow
     ? wfNodes.findIndex((n) => n.id === workflow?.current_node_id)
     : -1;
-  const wfCatalog: ProjectStage[] = wfNodes.map((n) => ({
+  const wfCatalog: MiniStepperStage[] = wfNodes.map((n) => ({
     id: n.id,
     slug: n.name,
     name: n.name,
     sort_order: n.sort_order,
-    tools_recommended: [],
   }));
-  const handleWorkflowJump = (stage: ProjectStage) => {
+  const handleWorkflowJump = (stage: MiniStepperStage) => {
     const targetIndex = wfNodes.findIndex((n) => n.id === stage.id);
     if (targetIndex === wfCurrentIndex + 1) onRequestAdvance?.('forward');
     else if (targetIndex === wfCurrentIndex - 1) onRequestAdvance?.('back');

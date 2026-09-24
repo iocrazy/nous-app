@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, Image, Video, Music, LayoutGrid, Shapes, FileOutput } from 'lucide-react';
-import type { ResourceSearchResult, ResourceSearchResponse } from '../../types';
+import type { ResourceSearchResponse, ResourceSearchResult } from '../../types/api';
 import { resourceProcessingState } from './resourceStatus';
 import { ResourceThumb } from './ResourceThumb';
 import {

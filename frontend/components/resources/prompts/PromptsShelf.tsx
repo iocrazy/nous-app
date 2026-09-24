@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { fetchPrompts, promptText, thumbSrc, type PromptEntry, type PromptForm, type PromptLang, type PromptOrigin, type PromptPage, type PromptSlide } from '../../../services/promptsService';
 import { fetchProjects } from '../../../services/projectsService';
-import type { Project } from '../../../types';
+import type { Project } from '../../../types/api';
 import { SendToCanvasModal } from '../SendToCanvasModal';
 import { SaveAsTemplateDialog } from '../../prompts/SaveAsTemplateDialog';
 import { PromptAlbumCard } from './PromptAlbumCard';

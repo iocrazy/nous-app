@@ -2,7 +2,8 @@ import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Video, FileText, Image, File, Clock, CornerUpLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ProjectFile, ReviewStatus } from '../types';
+import { ReviewStatus } from '../types';
+import type { ProjectFile } from '../types/api';
 import { issueDeepLink } from '../utils/issueLinks';
 
 interface FileCardProps {
@@ -45,10 +46,14 @@ const STATUS_STYLES: Record<ReviewStatus, { bg: string; text: string; label: str
   approved: { bg: 'bg-green-400/10', text: 'text-green-300', label: 'mediatrack.review.approved' },
 };
 
-const StatusBadge: React.FC<{ status: ReviewStatus }> = ({ status }) => {
+/** `review_status` is a plain string on the wire; narrow before indexing. */
+export const isReviewStatus = (s: string): s is ReviewStatus =>
+  Object.prototype.hasOwnProperty.call(STATUS_STYLES, s);
+
+const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   const { t } = useTranslation();
+  if (!isReviewStatus(status)) return null;
   const style = STATUS_STYLES[status];
-  if (!style) return null;
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${style.bg} ${style.text}`}>
       {t(style.label)}

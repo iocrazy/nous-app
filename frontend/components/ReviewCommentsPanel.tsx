@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Clock, Send, X, Loader2, MessageSquare, PenTool } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ReviewComment, DrawingData } from '../types';
+import { DrawingData } from '../types';
+import type { ReviewComment } from '../types/api';
 import { fetchComments, addComment, deleteComment } from '../services/projectsService';
 import { ReviewCommentItem } from './ReviewCommentItem';
 import Loading from './common/Loading';

@@ -24,7 +24,7 @@ afterEach(() => vi.clearAllMocks());
 
 describe('saveWorkflowToLibrary', () => {
   it('uploads the payload as a JSON file into the team scope', async () => {
-    uploadResource.mockResolvedValue({ id: '77' });
+    uploadResource.mockResolvedValue({ id: 77 });
     const payload = {
       format: WORKFLOW_FORMAT,
       version: 1,
@@ -33,7 +33,7 @@ describe('saveWorkflowToLibrary', () => {
       connections: [],
     };
     const resource = await saveWorkflowToLibrary(payload as never, 'team-1');
-    expect(resource.id).toBe('77');
+    expect(resource.id).toBe(77);
     const [file, scopeId] = uploadResource.mock.calls[0];
     expect(scopeId).toBe('team-1');
     expect((file as File).name).toMatch(/^workflow-1nodes-.*\.json$/);

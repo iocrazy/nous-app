@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { FileCard } from './FileCard';
-import type { ProjectFile } from '../types';
+import type { ProjectFile } from '../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -18,8 +18,8 @@ vi.mock('react-i18next', () => ({
 }));
 
 const baseFile: ProjectFile = {
-  id: '900',
-  project_id: '500',
+  id: 900,
+  project_id: 500,
   filename: 'final-cut.mp4',
   file_type: 'video',
   mime_type: 'video/mp4',
@@ -39,6 +39,8 @@ const baseFile: ProjectFile = {
   cover_image_path: null,
   uploaded_by: null,
   notes: null,
+  folder_id: null,
+  source_issue_id: null,
   is_trashed: false,
   trashed_at: null,
   review_status: null,

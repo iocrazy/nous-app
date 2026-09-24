@@ -1,7 +1,8 @@
 import React from 'react';
 import { Trash2, PenTool } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ReviewComment, DrawingData } from '../types';
+import { DrawingData } from '../types';
+import type { ReviewComment } from '../types/api';
 
 interface ReviewCommentItemProps {
   comment: ReviewComment;
@@ -34,9 +35,6 @@ function getAvatarColor(authorId: string): string {
 }
 
 function getAvatarLetter(comment: ReviewComment): string {
-  if (comment.author_email) {
-    return comment.author_email.charAt(0).toUpperCase();
-  }
   return comment.author_id.charAt(0).toUpperCase();
 }
 
@@ -73,12 +71,19 @@ function getRelativeTime(dateString: string, t: (key: string, options?: Record<s
 }
 
 function getDisplayName(comment: ReviewComment): string {
-  if (comment.author_email) {
-    return comment.author_email;
-  }
   return comment.author_id.length > 12
     ? `${comment.author_id.slice(0, 12)}...`
     : comment.author_id;
+}
+
+/** `drawing_data` is an opaque JSONB dict on the wire — narrow to the
+ * annotation shape the canvas overlay draws before handing it over. */
+function asDrawingData(value: ReviewComment['drawing_data']): DrawingData | null {
+  if (!value) return null;
+  if (!Array.isArray(value.strokes) || value.strokes.length === 0) return null;
+  // Only ever written by this client (ReviewCommentsPanel posts a
+  // DrawingData), so a non-empty `strokes` array identifies the shape.
+  return value as unknown as DrawingData;
 }
 
 const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
@@ -88,6 +93,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
   onDelete,
   onViewAnnotation,
 }) => {
+  const drawingData = asDrawingData(comment.drawing_data);
   const { t } = useTranslation();
   const isOwn = comment.author_id === currentUserId;
 
@@ -135,9 +141,9 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
         </p>
 
         {/* View Annotation button */}
-        {comment.drawing_data && comment.drawing_data.strokes && comment.drawing_data.strokes.length > 0 && onViewAnnotation && (
+        {drawingData && onViewAnnotation && (
           <button
-            onClick={() => onViewAnnotation(comment.drawing_data!)}
+            onClick={() => onViewAnnotation(drawingData)}
             className="inline-flex items-center gap-1 mt-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/15 text-warn hover:bg-amber-500/25 transition-colors"
           >
             <PenTool className="w-3 h-3" />

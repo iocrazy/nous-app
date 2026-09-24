@@ -9,7 +9,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AILibrarySkill, Team, Project } from '../../types';
+import type { AILibrarySkill, Team } from '../../types';
+import type { Project } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchMyTeams } from '../../services/teamService';
 import { fetchProjects } from '../../services/projectsService';

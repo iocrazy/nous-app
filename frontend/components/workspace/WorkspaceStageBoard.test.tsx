@@ -18,7 +18,8 @@ import enJson from '../../public/locales/en.json';
 import { WorkspaceStageBoard } from './WorkspaceStageBoard';
 import { ToastProvider } from '../Toast';
 import { ApiError } from '../../services/apiClient';
-import type { ProjectStageNode, ProjectWorkflow, StageBoardData } from '../../types';
+import type { ProjectStageNode, ProjectWorkflow, StageBoardData } from '../../types/api';
+import { makeStageNode } from '../../tests/fixtures/projects';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -75,7 +76,7 @@ const mockIssuesService = vi.hoisted(() => ({
 vi.mock('../../services/issuesService', () => mockIssuesService);
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
-  return {
+  return makeStageNode({
     id: '1',
     project_id: '10',
     source_template_node_id: null,
@@ -98,7 +99,7 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     completion_policy: 'owner',
     events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
-  };
+  });
 }
 
 function board(over: Partial<StageBoardData> = {}): StageBoardData {

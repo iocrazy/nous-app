@@ -24,7 +24,8 @@ import {
   Send,
   Frame,
 } from 'lucide-react';
-import { Team, Project, SidebarMode, ViewState } from '../types';
+import { Team, SidebarMode, ViewState } from '../types';
+import type { Project } from '../types/api';
 import { SmartCollection } from '../services/smartCollectionService';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { SidebarSection } from './sidebar/SidebarSection';

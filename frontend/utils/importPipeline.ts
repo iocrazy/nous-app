@@ -16,7 +16,8 @@ import { runWithConcurrency } from './concurrency';
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
-/** Minimal shape returned per item by checkBatch. */
+/** Minimal shape returned per item by checkBatch. `existing.id` is already
+ *  stringified by `checkDuplicatesBatch` (it is a JSON number on the wire). */
 export interface CheckBatchResultItem {
   file_hash: string;
   duplicate: boolean;

@@ -75,7 +75,7 @@ import { typeLabelKey, typeSingularKey } from '../resources/assets/assetTypeMeta
 import { ASSET_TYPES } from '../assets/assetSlots';
 import { useAssetFailureReporter } from '../resources/assets/useAssetFailure';
 import { fetchProjects } from '../../services/projectsService';
-import type { Project } from '../../types';
+import type { Project } from '../../types/api';
 import {
   importFromScript,
   linkProject,

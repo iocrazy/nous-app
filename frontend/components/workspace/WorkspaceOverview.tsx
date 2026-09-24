@@ -63,7 +63,8 @@ import { formatRelativeTime } from '../../utils/relativeTime';
 import { Loading } from '../common/Loading';
 import { WorkflowSection } from '../workflow/WorkflowSection';
 import { EpisodeSummaryRow } from './EpisodeSummaryRow';
-import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress } from '../../types';
+import type { Project, ProjectWorkflow } from '../../types/api';
 
 export interface WorkspaceOverviewProps {
   project: Project;
@@ -142,8 +143,8 @@ export function WorkspaceOverview({
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
       {workflow && !workflow.has_workflow && !workflowLoading && (
         <WorkflowSection
-          projectId={project.id}
-          teamId={project.team_id ?? ''}
+          projectId={String(project.id)}
+          teamId={project.team_id == null ? '' : String(project.team_id)}
           episodeId={expandedEpisodeId}
           workflow={workflow}
           canWrite={canWrite}
@@ -215,8 +216,8 @@ export function WorkspaceOverview({
                             owns that case. */}
                         {workflow?.has_workflow && (
                           <WorkflowSection
-                            projectId={project.id}
-                            teamId={project.team_id ?? ''}
+                            projectId={String(project.id)}
+                            teamId={project.team_id == null ? '' : String(project.team_id)}
                             episodeId={ep.episode_id}
                             workflow={workflow}
                             canWrite={canWrite}

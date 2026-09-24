@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, Share2, ChevronDown, MessageSquare, Info, PenTool, Columns2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ProjectFile, FileVersion, ReviewStatus, DrawingData } from '../types';
-import { fetchFileVersions, getFileInfo, updateReviewStatus } from '../services/projectsService';
+import { ReviewStatus, DrawingData } from '../types';
+import type { FileVersion, ProjectFile } from '../types/api';
+import { fetchFileVersions, getFileInfo, toProjectFile, updateReviewStatus } from '../services/projectsService';
+import { isReviewStatus } from './FileCard';
 import { VideoPlayer } from './VideoPlayer';
 import { VersionCompareView } from './VersionCompareView';
 import { ReviewCommentsPanel } from './ReviewCommentsPanel';
@@ -35,6 +37,8 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [file, setFile] = useState<ProjectFile>(initialFile);
+  // Snowflake ids are JSON numbers on the wire; service calls take strings.
+  const fileId = String(file.id);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [versions, setVersions] = useState<FileVersion[]>([]);
@@ -63,7 +67,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   // Load versions on mount
   useEffect(() => {
     loadVersions();
-  }, [file.id]);
+  }, [fileId]);
 
   // Close version dropdown on outside click
   useEffect(() => {
@@ -81,7 +85,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
 
   const loadVersions = async () => {
     try {
-      const data = await fetchFileVersions(projectId, file.id);
+      const data = await fetchFileVersions(projectId, fileId);
       setVersions(data);
       // Set selected version to the current one
       const current = data.find(v => v.version_number === file.current_version);
@@ -93,12 +97,12 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
 
   const refreshFile = useCallback(async () => {
     try {
-      const updated = await getFileInfo(projectId, file.id);
-      setFile(updated);
+      const updated = await getFileInfo(projectId, fileId);
+      setFile(prev => toProjectFile(updated, prev));
     } catch (err) {
       console.error('Failed to refresh file:', err);
     }
-  }, [projectId, file.id]);
+  }, [projectId, fileId]);
 
   const handleSeekTo = useCallback((seconds: number) => {
     if (videoRef.current) {
@@ -108,7 +112,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
 
   const handleStatusChange = async (status: ReviewStatus | null) => {
     try {
-      await updateReviewStatus(projectId, file.id, status);
+      await updateReviewStatus(projectId, fileId, status);
       setFile(prev => ({ ...prev, review_status: status }));
     } catch (err) {
       console.error('Failed to update review status:', err);
@@ -146,7 +150,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   }, []);
 
   // Get the compare version object
-  const compareVersion = compareVersionId ? versions.find(v => v.id === compareVersionId) : null;
+  const compareVersion = compareVersionId ? versions.find(v => String(v.id) === compareVersionId) : null;
 
   // Versions available for comparison (exclude currently selected)
   const comparableVersions = versions.filter(v => v.id !== selectedVersion?.id);
@@ -296,7 +300,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                   {comparableVersions.map(v => (
                     <button
                       key={v.id}
-                      onClick={() => handleEnterCompareMode(v.id)}
+                      onClick={() => handleEnterCompareMode(String(v.id))}
                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-300 hover:bg-ink-700 transition-colors"
                     >
                       <span className="font-medium">V{v.version_number}</span>
@@ -311,7 +315,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
 
         <div className="flex items-center gap-2 flex-shrink-0">
           <ReviewStatusDropdown
-            currentStatus={file.review_status}
+            currentStatus={file.review_status && isReviewStatus(file.review_status) ? file.review_status : null}
             onStatusChange={handleStatusChange}
           />
           <button
@@ -331,7 +335,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
             /* Compare mode: side-by-side */
             <VersionCompareView
               projectId={projectId}
-              fileId={file.id}
+              fileId={fileId}
               versionA={selectedVersion}
               versionB={compareVersion}
               fps={videoFps}
@@ -457,8 +461,8 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
             {activeTab === 'comments' ? (
               <ReviewCommentsPanel
                 projectId={projectId}
-                fileId={file.id}
-                versionId={selectedVersion?.id}
+                fileId={fileId}
+                versionId={selectedVersion ? String(selectedVersion.id) : undefined}
                 currentTime={currentTime}
                 currentUserId={currentUserId}
                 onSeekTo={handleSeekTo}
@@ -481,7 +485,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
         isOpen={isVersionModalOpen}
         onClose={() => setIsVersionModalOpen(false)}
         projectId={projectId}
-        fileId={file.id}
+        fileId={fileId}
         currentVersionNumber={file.current_version}
         onVersionSelect={handleVersionSelect}
         onVersionUploaded={handleVersionUploaded}
