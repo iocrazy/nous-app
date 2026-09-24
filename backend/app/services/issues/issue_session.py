@@ -184,7 +184,10 @@ async def _rebind_to_assignee(
         return
 
     agent = await get_agent_repository().get_by_id(UUID(new_id))
-    if not agent or not agent.get("slug"):
+    # get_by_id is a history read: once ai_agents has deleted_at (FH2 T8) it
+    # returns tombstones too. Never bind a session onto a soft-deleted agent.
+    # Before T8 the key is absent and .get() is None → no-op.
+    if not agent or not agent.get("slug") or agent.get("deleted_at"):
         raise IssueAssigneeNotFound(issue_id, new_id)
     async with write_scope() as session:
         await session.execute(

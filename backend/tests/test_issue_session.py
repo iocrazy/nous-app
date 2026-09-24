@@ -370,3 +370,28 @@ async def test_rebind_false_returns_the_session_without_resolving(monkeypatch):
     assert await m.get_or_create_issue_session(409, rebind=False) == sid
     repo.get_by_id.assert_not_awaited()
     assert not any("conversation_ai_meta" in sql for sql, _ in session.calls)
+
+
+async def test_soft_deleted_new_assignee_is_refused_and_meta_untouched(monkeypatch):
+    """get_by_id is a history read and returns tombstones once ai_agents grows
+    deleted_at (FH2 T8); rebinding a session onto one would fail at turn time
+    with a less useful error. Before T8 the key is absent → no-op."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    new = uuid4()
+    session = _FakeSession(
+        select_row=_existing_row(sid, new),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    _spy_agent_repo(
+        monkeypatch,
+        m,
+        {"id": str(new), "slug": "gone", "deleted_at": "2026-09-23T12:00:00+00:00"},
+    )
+
+    with pytest.raises(m.IssueAssigneeNotFound) as exc:
+        await m.get_or_create_issue_session(409)
+    assert exc.value.agent_id == str(new)
+    assert not any("UPDATE" in sql for sql, _ in session.calls)
