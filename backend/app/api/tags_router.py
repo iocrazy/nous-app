@@ -1,12 +1,14 @@
 """API routes for Tags management."""
 
 import asyncio
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
+from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.repositories.hotspots_repository import get_hotspots_repository
 from app.repositories.note_tags_repository import get_note_tags_repository
@@ -21,6 +23,7 @@ from app.schemas.tag_preferences import (
 from app.schemas.tags import (
     TagCountItem,
     TagCreate,
+    TagGroupMutationResult,
     TagListResponse,
     TagResponse,
     TagStatisticsResponse,
@@ -98,10 +101,29 @@ def _validate_group_name(name: str) -> str:
     return cleaned
 
 
+def _group_not_found() -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "code": NOT_FOUND_OR_OUT_OF_SCOPE,
+            "message": "Tag group not found.",
+        },
+    )
+
+
+def _group_id(raw: str) -> int:
+    """A group id from the path/body. Not a number cannot name a group: 404,
+    not the 500 an ``int()`` ValueError used to be."""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        _group_not_found()
+
+
 @router.post(
     "/groups", response_model=TagGroupItem, status_code=status.HTTP_201_CREATED
 )
-async def create_tag_group(auth: AuthDep, body: TagGroupCreate):
+async def create_tag_group(auth: AdminAuthDep, body: TagGroupCreate):
     """Create a new tag group."""
     body.name = _validate_group_name(body.name)
     from sqlalchemy import insert, select
@@ -149,26 +171,36 @@ class TagGroupReorderRequest(BaseModel):
     group_ids: List[str] = Field(..., description="Ordered list of group IDs")
 
 
-@router.put("/groups/reorder")
-async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
-    """Update sort_order for all groups based on the provided order."""
-    from sqlalchemy import update
+@router.put("/groups/reorder", response_model=TagGroupMutationResult)
+async def reorder_tag_groups(auth: AdminAuthDep, body: TagGroupReorderRequest):
+    """Update sort_order for all groups based on the provided order.
+
+    Admin only: ``tag_groups`` is one platform-wide table (no owner column),
+    so the order is everyone's order.
+    """
+    from sqlalchemy import select, update
 
     from app.db.session import write_scope
     from app.models import TagGroups
 
+    ids = [_group_id(g) for g in body.group_ids]
     async with write_scope() as session:
-        for idx, group_id in enumerate(body.group_ids):
+        found = set(
+            (await session.execute(select(TagGroups.id).where(TagGroups.id.in_(ids))))
+            .scalars()
+            .all()
+        )
+        if found != set(ids):
+            _group_not_found()
+        for idx, group_id in enumerate(ids):
             await session.execute(
-                update(TagGroups)
-                .where(TagGroups.id == int(group_id))
-                .values(sort_order=idx)
+                update(TagGroups).where(TagGroups.id == group_id).values(sort_order=idx)
             )
     return {"success": True}
 
 
 @router.put("/groups/{group_id}", response_model=TagGroupItem)
-async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
+async def rename_tag_group(auth: AdminAuthDep, group_id: str, body: TagGroupUpdate):
     """Rename a tag group."""
     body.name = _validate_group_name(body.name)
     from sqlalchemy import update
@@ -181,7 +213,7 @@ async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
             (
                 await session.execute(
                     update(TagGroups)
-                    .where(TagGroups.id == int(group_id))
+                    .where(TagGroups.id == _group_id(group_id))
                     .values(name=body.name)
                     .returning(TagGroups.id, TagGroups.name, TagGroups.sort_order)
                 )
@@ -194,21 +226,36 @@ async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
     return TagGroupItem(id=str(g["id"]), name=g["name"], sort_order=g["sort_order"])
 
 
-@router.delete("/groups/{group_id}", status_code=status.HTTP_200_OK)
-async def delete_tag_group(auth: AuthDep, group_id: str):
-    """Delete a tag group. Tags in this group become uncategorized."""
+@router.delete(
+    "/groups/{group_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=TagGroupMutationResult,
+)
+async def delete_tag_group(auth: AdminAuthDep, group_id: str):
+    """Delete a tag group. Tags in this group become uncategorized.
+
+    Admin only: the group is platform-wide and the un-grouping touches every
+    user's tags that sit in it.
+    """
     from sqlalchemy import delete, update
 
     from app.db.session import write_scope
     from app.models import TagGroups, Tags
 
+    gid = _group_id(group_id)
     async with write_scope() as session:
         # Move tags to uncategorized (set group_id to NULL)
         await session.execute(
-            update(Tags).where(Tags.group_id == int(group_id)).values(group_id=None)
+            update(Tags).where(Tags.group_id == gid).values(group_id=None)
         )
         # Delete the group
-        await session.execute(delete(TagGroups).where(TagGroups.id == int(group_id)))
+        deleted = (
+            await session.execute(
+                delete(TagGroups).where(TagGroups.id == gid).returning(TagGroups.id)
+            )
+        ).first()
+        if deleted is None:
+            _group_not_found()
     return {"success": True}
 
 

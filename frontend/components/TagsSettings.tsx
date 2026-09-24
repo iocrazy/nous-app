@@ -22,7 +22,7 @@ import {
   GripVertical,
   NotebookPen,
 } from 'lucide-react';
-import type { Tag } from '../types/api';
+import type { Tag, TagGroup } from '../types/api';
 import { Loading } from './common/Loading';
 import { UiSelect } from './ui';
 import { mergeUpdatedTag } from './tagEditMerge';
@@ -36,7 +36,6 @@ import {
   reorderTagGroups,
   updateTag,
   deleteTag,
-  type TagGroup,
 } from '../services/unifiedTagService';
 
 // Color palette for tags

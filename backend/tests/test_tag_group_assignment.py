@@ -76,30 +76,49 @@ def _user_tag(**over) -> dict:
 
 
 class _RecordingSession:
-    """Collects executed statements; returns nothing (reorder ignores rows)."""
+    """Collects executed statements. The first one is reorder's existence
+    check, which reads the ids back; the updates ignore their result."""
 
-    def __init__(self) -> None:
+    def __init__(self, existing: list[int]) -> None:
         self.statements: list = []
+        self._existing = existing
 
     async def execute(self, stmt, *a, **kw):
         self.statements.append(stmt)
-        return None
+        existing = self._existing
+
+        class _R:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return list(existing)
+
+        return _R()
 
 
 def test_reorder_route_is_not_shadowed_by_rename(client, monkeypatch):
     """PUT /tags/groups/reorder must reach reorder_tag_groups, not the rename
     route with group_id='reorder'."""
-    session = _RecordingSession()
+    from app.core.admin_deps import get_admin_auth
+
+    ids = ["283891237134915", "283891237134916"]
+    session = _RecordingSession([int(i) for i in ids])
 
     @asynccontextmanager
     async def _scope():
         yield session
 
     monkeypatch.setattr("app.db.session.write_scope", _scope)
+    # Group writes are admin-only since P6 (tests/api/test_tag_groups_wire.py
+    # covers the gate); this test is about routing.
+    client.app.dependency_overrides[get_admin_auth] = client.app.dependency_overrides[
+        get_auth
+    ]
 
     res = client.put(
         "/api/v1/tags/groups/reorder",
-        json={"group_ids": ["283891237134915", "283891237134916"]},
+        json={"group_ids": ids},
     )
 
     # The rename route's signature is what produced the prod 422 — a body
@@ -107,7 +126,8 @@ def test_reorder_route_is_not_shadowed_by_rename(client, monkeypatch):
     # future re-ordering of the decorators fails loudly here.
     assert res.status_code == 200, res.text
     assert res.json() == {"success": True}
-    assert len(session.statements) == 2
+    # One existence check, then one UPDATE per group.
+    assert len(session.statements) == 3
 
 
 # ── 2. BIGINT coercion ─────────────────────────────────────────────────────

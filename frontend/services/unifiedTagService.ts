@@ -6,7 +6,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-import type { Tag } from '../types/api';
+import type { Tag, TagGroup } from '../types/api';
 import { getApiUrl } from '../utils/apiConfig';
 
 // ─── Global tag CRUD ──────────────────────────────────────
@@ -153,13 +153,6 @@ export async function mergeTags(
   if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to merge tags'));
   invalidateAllTagsCache();
   return res.json();
-}
-
-export interface TagGroup {
-  id: string;
-  name: string;
-  sort_order: number;
-  created_at: string;
 }
 
 export async function fetchTagGroups(): Promise<TagGroup[]> {
