@@ -2,12 +2,15 @@
 
 The session itself is re-bound to the new assignee lazily, at the start of the
 next turn (``issue_session._rebind_to_assignee``). This module only leaves the
-visible trace: one user-role message on the issue's session, authored by the
-human who reassigned it. It lands where both readers look —
+visible trace: one user-role message on the issue's session whose row sender
+is the human who reassigned it. It lands where both readers look —
 
 * the issue thread UI reads the session (``issue_messages`` is the legacy path
-  for session-less issues only), where a user-role row renders as that
-  person's ``comment``;
+  for session-less issues only), where a user-role row renders as a
+  ``comment``. The thread mapper attributes EVERY user-role row to the session
+  owner (the issue creator), not to the row's sender — so the body names the
+  reassigner itself ("… by <username>"), or a teammate's reassignment would
+  read as the creator's;
 * the new agent replays the session history on its first turn, so it sees why
   a conversation it did not start is now its own.
 
@@ -26,8 +29,9 @@ from loguru import logger
 from app.repositories.agent_repository import get_agent_repository
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 
-# The agent name is user-controlled text that ends up in model history.
+# Agent and user names are user-controlled text that ends up in model history.
 REASSIGN_NAME_MAX = 80
+UNKNOWN_ACTOR = "a teammate"
 
 
 def _assignee(row: dict[str, Any]) -> Optional[str]:
@@ -38,8 +42,35 @@ def _assignee(row: dict[str, Any]) -> Optional[str]:
 def _display_name(agent: Optional[dict[str, Any]], fallback: str) -> str:
     """One line, bounded: a crafted name cannot open a paragraph of its own."""
     raw = (agent or {}).get("name") or (agent or {}).get("slug") or fallback
-    flat = " ".join(str(raw).split())
-    return flat[:REASSIGN_NAME_MAX] or fallback
+    return _flatten(raw) or fallback
+
+
+def _flatten(raw: Any) -> str:
+    return " ".join(str(raw).split())[:REASSIGN_NAME_MAX]
+
+
+async def _actor_name(user_id: str) -> str:
+    """The reassigner's username (flattened, bounded), or a neutral fallback."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models.users import UserProfiles
+
+    try:
+        async with read_scope() as session:
+            username = (
+                await session.execute(
+                    select(UserProfiles.username).where(
+                        UserProfiles.id == UUID(user_id)
+                    )
+                )
+            ).scalar_one_or_none()
+    except Exception as exc:  # noqa: BLE001 — a missing name must not drop the note
+        logger.warning(
+            f"[issue_reassign] username lookup for {user_id} failed: {exc!r}"
+        )
+        return UNKNOWN_ACTOR
+    return _flatten(username) if username else UNKNOWN_ACTOR
 
 
 async def note_reassignment(
@@ -60,10 +91,11 @@ async def note_reassignment(
     issue_id = updated.get("id") or existing.get("id")
     try:
         agent = await get_agent_repository().get_by_id(UUID(new))
+        actor = await _actor_name(actor_user_id)
         await ConversationsAiStore().append_user_message(
             session_id=int(session_id),
             user_id=actor_user_id,
-            content=f'Reassigned to "{_display_name(agent, new)}".',
+            content=f'Reassigned to "{_display_name(agent, new)}" by {actor}.',
             metadata={"issue_reassigned": {"from_agent_id": old, "to_agent_id": new}},
         )
     except Exception as exc:  # noqa: BLE001 — see docstring

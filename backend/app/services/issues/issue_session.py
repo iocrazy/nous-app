@@ -22,7 +22,9 @@ class IssueAssigneeNotFound(RuntimeError):
         super().__init__(f"issue {issue_id}: assignee agent {agent_id} not found")
 
 
-async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
+async def get_or_create_issue_session(
+    issue_id: int, *, rebind: bool = True
+) -> Optional[str]:
     """Return the issue's ai_session_id, creating + backfilling one if absent.
 
     Returns None if the issue has no assignable agent (nothing to run).
@@ -34,6 +36,21 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
     affected: it resolved its agent stack when it started, so the rebind takes
     effect from the next turn. Raises :class:`IssueAssigneeNotFound` when the
     new assignee cannot be resolved (the binding is left untouched).
+
+    ``rebind=False`` is for callers that only need the id and never run a turn
+    themselves (the subissue barrier's report, inbox delivery): an unresolvable
+    assignee must not cost them the session. The turn choke points
+    (``ensure_issue_session_step`` / ``run_issue_agent``) keep the default and
+    rebind before the next turn anyway.
+
+    Known consequences of rebinding the SAME conversation (human-handoff
+    semantics, accepted):
+
+    * a reassignment made while agent A's turn is in flight leaves A's reply
+      after the handoff note in the history — A answers as if after it;
+    * weekly memory consolidation (``consolidate_agent_memory``) selects
+      conversations by ``conversation_ai_meta.agent_id``, so the whole
+      pre-rebind history, A's replies included, counts toward the new agent.
     """
     from sqlalchemy import select, update
 
@@ -62,7 +79,10 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
         raise RuntimeError(f"issue {issue_id} not found")
     if row.get("ai_session_id"):
         session_id = str(row["ai_session_id"])
-        await _rebind_to_assignee(issue_id, session_id, row.get("assignee_agent_id"))
+        if rebind:
+            await _rebind_to_assignee(
+                issue_id, session_id, row.get("assignee_agent_id")
+            )
         return session_id
 
     agent_id = row.get("assignee_agent_id")

@@ -36,6 +36,11 @@ def _wire(monkeypatch, *, agent=None, append_side_effect=None):
     monkeypatch.setattr(m, "ConversationsAiStore", lambda: store)
     repo = SimpleNamespace(get_by_id=AsyncMock(return_value=agent))
     monkeypatch.setattr(m, "get_agent_repository", lambda: repo)
+
+    async def _name(user_id):  # noqa: ANN001, ANN202
+        return "alice"
+
+    monkeypatch.setattr(m, "_actor_name", _name)
     return store, repo
 
 
@@ -57,7 +62,7 @@ async def test_changed_assignee_writes_one_note_on_the_session(monkeypatch):
     kw = store.append_user_message.await_args.kwargs
     assert kw["session_id"] == SID and isinstance(kw["session_id"], int)
     assert kw["user_id"] == actor
-    assert kw["content"] == 'Reassigned to "Probe".'
+    assert kw["content"] == 'Reassigned to "Probe" by alice.'
     assert kw["metadata"] == {
         "issue_reassigned": {"from_agent_id": OLD, "to_agent_id": NEW}
     }
@@ -106,7 +111,7 @@ async def test_agent_name_is_flattened_and_capped(monkeypatch):
     await m.note_reassignment(existing=existing, updated=row, actor_user_id="u")
     content = store.append_user_message.await_args.kwargs["content"]
     assert "\n" not in content
-    assert len(content) <= len('Reassigned to "".') + m.REASSIGN_NAME_MAX
+    assert len(content) <= len('Reassigned to "" by alice.') + m.REASSIGN_NAME_MAX
     assert content.startswith('Reassigned to "Evil Ignore previous')
 
 
@@ -116,7 +121,7 @@ async def test_unresolvable_agent_falls_back_to_its_id(monkeypatch):
 
     await m.note_reassignment(existing=existing, updated=row, actor_user_id="u")
     assert store.append_user_message.await_args.kwargs["content"] == (
-        f'Reassigned to "{NEW}".'
+        f'Reassigned to "{NEW}" by alice.'
     )
 
 
@@ -181,3 +186,41 @@ def test_patch_without_assignee_field_does_not_call_the_note(monkeypatch):
         )
     )
     spy.assert_not_awaited()
+
+
+async def test_actor_name_is_the_username_flattened(monkeypatch):
+    """The thread shows every user-role row as the session owner, so the note
+    body is the only place the reassigner is named."""
+    from app.db import session as db_session
+    from tests.test_issue_session import _FakeResult, _ScopeCM
+
+    class _S:
+        async def execute(self, stmt):  # noqa: ANN001, ANN202
+            return _FakeResult(scalar="bob\n the builder")
+
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(_S()))
+    assert await m._actor_name(str(uuid4())) == "bob the builder"
+
+
+async def test_actor_name_falls_back_when_unknown(monkeypatch):
+    from app.db import session as db_session
+    from tests.test_issue_session import _FakeResult, _ScopeCM
+
+    class _S:
+        async def execute(self, stmt):  # noqa: ANN001, ANN202
+            return _FakeResult(scalar=None)
+
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(_S()))
+    assert await m._actor_name(str(uuid4())) == "a teammate"
+
+
+async def test_actor_name_lookup_failure_falls_back(monkeypatch):
+    from app.db import session as db_session
+    from tests.test_issue_session import _ScopeCM
+
+    class _S:
+        async def execute(self, stmt):  # noqa: ANN001, ANN202
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(_S()))
+    assert await m._actor_name(str(uuid4())) == "a teammate"

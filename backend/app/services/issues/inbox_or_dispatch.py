@@ -445,7 +445,9 @@ async def _session_id(issue_id: int) -> Optional[str]:
     from app.services.issues.issue_session import get_or_create_issue_session
 
     try:
-        return await get_or_create_issue_session(int(issue_id))
+        # Id only: delivery never runs the turn itself; the turn it hands off
+        # to rebinds at its own choke point (FH2 T5).
+        return await get_or_create_issue_session(int(issue_id), rebind=False)
     except Exception as exc:  # noqa: BLE001 — a missing session is not a
         # reason to drop the delivery; the inbox row is keyed on the issue.
         logger.warning(f"[deliver] issue {issue_id}: session lookup failed: {exc!r}")

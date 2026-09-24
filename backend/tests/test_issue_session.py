@@ -351,3 +351,22 @@ def test_rebind_helper_is_not_a_dbos_step():
     for fn in (m.get_or_create_issue_session, m._rebind_to_assignee):
         assert not hasattr(fn, "dbos_function_name")
         assert inspect.unwrap(fn) is fn
+
+
+async def test_rebind_false_returns_the_session_without_resolving(monkeypatch):
+    """Id-only callers (barrier report, inbox delivery) pass rebind=False: an
+    unresolvable assignee must not cost them the session id. The next turn's
+    choke point still rebinds."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    session = _FakeSession(
+        select_row=_existing_row(sid, uuid4()),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, None)
+
+    assert await m.get_or_create_issue_session(409, rebind=False) == sid
+    repo.get_by_id.assert_not_awaited()
+    assert not any("conversation_ai_meta" in sql for sql, _ in session.calls)
