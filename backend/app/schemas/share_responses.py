@@ -6,9 +6,10 @@ Every model mirrors the dict the route already built, key for key (spec
 PostgREST-shaped dicts itself (``_row_to_dict``): datetimes are ISO strings
 already, UUIDs are strings, BIGINT ids stay JSON numbers.
 
-The ``shares.password`` column holds the password in plain text; no model
-here declares it. Owner rows carry ``has_password`` instead, and the visitor
-payload carries neither.
+No model here declares ``shares.password`` or ``shares.password_hash``
+(since mig 504 the first is a random lock and the second a bcrypt hash).
+Owner rows carry ``has_password`` instead, and the visitor payload carries
+neither.
 """
 
 from __future__ import annotations

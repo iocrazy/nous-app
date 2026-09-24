@@ -521,6 +521,7 @@ class Shares(Base):
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
     password: Mapped[Optional[str]] = mapped_column(Text)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text)
     expires_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     max_views: Mapped[Optional[int]] = mapped_column(Integer)
     project_file_id: Mapped[Optional[int]] = mapped_column(BigInteger)

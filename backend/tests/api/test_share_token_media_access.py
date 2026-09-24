@@ -41,6 +41,7 @@ from app.main import app
 from app.models import ParsedMedia
 from app.repositories._orm_helpers import _orm_obj_to_dict
 from app.repositories.media_repository import _PM_NAME_TO_ATTR, MediaRepository
+from app.services.library.share_passwords import share_password_columns
 from tests.api.wire_parity import sample_orm
 
 pytestmark = pytest.mark.unit
@@ -70,7 +71,7 @@ def _share(**overrides: Any) -> dict:
         "expires_at": FUTURE,
         "max_views": None,
         "view_count": 0,
-        "password": None,
+        **share_password_columns(overrides.pop("password", None)),
     }
     row.update(overrides)
     return row
@@ -159,11 +160,12 @@ async def test_grant_opens_a_password_share(shares) -> None:
 @pytest.mark.asyncio
 async def test_grant_dies_with_a_password_change(shares) -> None:
     grant = _grant(shares[LOCKED_ID])
-    shares[LOCKED_ID]["password"] = "rotated"
+    shares[LOCKED_ID].update(share_password_columns("rotated"))
     assert (
         await media_permissions._validate_share_token(grant, str(RES_SHARED)) is False
     )
-    shares[LOCKED_ID]["password"] = None  # removing the password also revokes it
+    # removing the password also revokes it
+    shares[LOCKED_ID].update(share_password_columns(None))
     assert (
         await media_permissions._validate_share_token(grant, str(RES_SHARED)) is False
     )
