@@ -25,7 +25,8 @@ vi.mock('../../services/aiService', () => ({
   backfillEmbeddings: (...args: unknown[]) => backfillMock(...args),
 }));
 
-// Real wire shape of GET /api/v1/search/vectors/status (PR 2): ids are numbers.
+// Real wire shape of GET /api/v1/search/vectors/status: the Snowflake space id
+// is a string; `stale` counts covered vectors the next backfill re-embeds.
 const OK_STATUS = {
   status: 'ok',
   space: {
@@ -37,8 +38,8 @@ const OK_STATUS = {
     instruction_version: 'en_keyword_v1',
   },
   layers: [
-    { layer: 'semantic', status: 'ok', covered: 20, total: 1409 },
-    { layer: 'transcript', status: 'not_built', covered: 0, total: 1409 },
+    { layer: 'semantic', status: 'ok', covered: 20, total: 1409, stale: 0 },
+    { layer: 'transcript', status: 'not_built', covered: 0, total: 1409, stale: 0 },
   ],
 };
 
@@ -62,6 +63,27 @@ describe('VectorsPanel', () => {
     expect(screen.getByRole('button', { name: 'Dry Run' })).toBeEnabled();
   });
 
+  it('coverage shows stale vectors only when there are some', async () => {
+    getVectorsStatusMock.mockResolvedValue({
+      ...OK_STATUS,
+      layers: [
+        { layer: 'semantic', status: 'ok', covered: 20, total: 1409, stale: 7 },
+        { layer: 'transcript', status: 'not_built', covered: 0, total: 1409, stale: 0 },
+      ],
+    });
+    render(<VectorsPanel />);
+    const semantic = await screen.findByTestId('vector-layer-semantic');
+    expect(semantic).toHaveTextContent('20 / 1,409 · 7 stale');
+    expect(screen.getByTestId('vector-layer-transcript')).not.toHaveTextContent('stale');
+  });
+
+  it('coverage omits the stale note at zero', async () => {
+    getVectorsStatusMock.mockResolvedValue(OK_STATUS);
+    render(<VectorsPanel />);
+    const semantic = await screen.findByTestId('vector-layer-semantic');
+    expect(semantic).not.toHaveTextContent('stale');
+  });
+
   it('unconfigured status shows the setup hint and disables backfill buttons', async () => {
     getVectorsStatusMock.mockResolvedValue({
       status: 'unconfigured',
@@ -73,7 +95,7 @@ describe('VectorsPanel', () => {
       await screen.findByText('No embedding model configured. Set one in Admin → AI Models.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dry Run' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Run 20' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run 200' })).toBeDisabled();
   });
 
   it('disabled backfill buttons explain why on hover', async () => {
@@ -85,7 +107,7 @@ describe('VectorsPanel', () => {
     render(<VectorsPanel />);
     const dry = await screen.findByRole('button', { name: 'Dry Run' });
     expect(dry).toHaveAttribute('title', 'Configure an embedding model first');
-    expect(screen.getByRole('button', { name: 'Run 20' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Run 200' })).toHaveAttribute(
       'title',
       'Configure an embedding model first',
     );
@@ -111,11 +133,11 @@ describe('VectorsPanel', () => {
     expect(screen.queryByText('Could not load vector status')).toBeNull();
     expect(screen.getByTestId('vector-layer-semantic')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dry Run' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Run 20' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Run 200' })).toBeEnabled();
 
     backfillMock.mockResolvedValueOnce({
-      success: true, dry_run: true, reembedded: [1], dispatched: [], skipped: [],
-      in_flight: 0, remaining: 10, total_missing: 10,
+      success: true, dry_run: true, reembedded: ['1'], dispatched: [], skipped: [],
+      in_flight: 0, remaining: 10, total_missing: 10, stale: 0,
     });
     fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
     expect(await screen.findByText('1 would be embedded · 10 remaining')).toBeInTheDocument();
@@ -147,30 +169,30 @@ describe('VectorsPanel', () => {
     spy.mockRestore();
   });
 
-  it('Dry Run calls backfill with dry_run=true; Run 20 calls with limit 20, lists skipped by reason and refetches status', async () => {
+  it('Dry Run calls backfill with dry_run=true; Run 200 calls with limit 200, lists skipped by reason and refetches status', async () => {
     getVectorsStatusMock.mockResolvedValue(OK_STATUS);
     render(<VectorsPanel />);
     await screen.findByText('doubao-embedding-vision-251215');
 
     backfillMock.mockResolvedValueOnce({
-      success: true, dry_run: true, reembedded: [1, 2], dispatched: [], skipped: [],
-      in_flight: 0, remaining: 1389, total_missing: 1389,
+      success: true, dry_run: true, reembedded: ['352590227796039123', '352590227796039124'], dispatched: [], skipped: [],
+      in_flight: 0, remaining: 1389, total_missing: 1389, stale: 0,
     });
     fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }));
     expect(await screen.findByText('2 would be embedded · 1,389 remaining')).toBeInTheDocument();
-    expect(backfillMock).toHaveBeenLastCalledWith({ limit: 20, dry_run: true });
+    expect(backfillMock).toHaveBeenLastCalledWith({ limit: 200, dry_run: true });
     expect(getVectorsStatusMock).toHaveBeenCalledTimes(1);
 
     backfillMock.mockResolvedValueOnce({
-      success: true, dry_run: false, reembedded: [1], dispatched: [],
-      skipped: [{ resource_id: 2, reason: 'empty_text' }],
-      in_flight: 0, remaining: 1388, total_missing: 1389,
+      success: true, dry_run: false, reembedded: ['352590227796039123'], dispatched: [],
+      skipped: [{ resource_id: '352590227796039124', reason: 'empty_text' }],
+      in_flight: 0, remaining: 1388, total_missing: 1389, stale: 0,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Run 20' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run 200' }));
     expect(
       await screen.findByText('1 embedded · 1 skipped (empty_text ×1) · 1,388 remaining'),
     ).toBeInTheDocument();
-    expect(backfillMock).toHaveBeenLastCalledWith({ limit: 20, dry_run: false });
+    expect(backfillMock).toHaveBeenLastCalledWith({ limit: 200, dry_run: false });
     await waitFor(() => expect(getVectorsStatusMock).toHaveBeenCalledTimes(2));
   });
 
@@ -180,15 +202,15 @@ describe('VectorsPanel', () => {
     await screen.findByText('doubao-embedding-vision-251215');
     backfillMock.mockResolvedValueOnce({
       success: true, dry_run: false, reembedded: [],
-      dispatched: [{ resource_id: 5, task_id: 't1' }, { resource_id: 6, task_id: 't2' }],
+      dispatched: [{ resource_id: '5', task_id: 't1' }, { resource_id: '6', task_id: 't2' }],
       skipped: [
-        { resource_id: 7, reason: 'no_cover_url' },
-        { resource_id: 8, reason: 'no_cover_url' },
-        { resource_id: 9, reason: 'analysis_row_missing' },
+        { resource_id: '7', reason: 'no_cover_url' },
+        { resource_id: '8', reason: 'no_cover_url' },
+        { resource_id: '9', reason: 'analysis_row_missing' },
       ],
-      in_flight: 0, remaining: 1389, total_missing: 1389,
+      in_flight: 0, remaining: 1389, total_missing: 1389, stale: 0,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Run 20' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run 200' }));
     expect(
       await screen.findByText(
         '0 embedded · 2 dispatched · 3 skipped (no_cover_url ×2, analysis_row_missing ×1) · 1,389 remaining',
@@ -208,7 +230,7 @@ describe('VectorsPanel', () => {
         details: { code: 'embedder_unconfigured', message: 'No embedding model configured' },
       }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Run 20' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run 200' }));
     const line = await screen.findByTestId('vectors-backfill-error');
     expect(line).toHaveTextContent('No embedding model configured. Set one in Admin → AI Models before backfilling.');
     expect(line).toHaveClass('text-danger');

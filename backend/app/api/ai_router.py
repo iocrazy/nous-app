@@ -1110,7 +1110,8 @@ class BackfillEmbeddingsBody(BaseModel):
 
 
 def _skip(resource_id: int, reason: str) -> dict:
-    return {"resource_id": resource_id, "reason": reason}
+    # String: Snowflake ids lose precision as JSON numbers past 2^53.
+    return {"resource_id": str(resource_id), "reason": reason}
 
 
 def _backfill_skip_code(reason: str | None) -> str:
@@ -1142,13 +1143,22 @@ async def backfill_embeddings(
     uses whatever the resource has — title, description, tags, summary,
     transcript excerpt, and the analysis when present — so there is nothing
     to wait for and nothing to pay the VLM for. ``limit`` caps the batch so
-    a first run of 20 can be inspected before the rest (``total_missing``) is
+    a first run can be inspected before the rest (``total_missing``) is
     released. ``dry_run`` only reports, with the same shapes as a real run.
+
+    Candidates are missing OR stale vectors
+    (``ResourceEmbeddingsRepository.pending_for_user``): stale = written by
+    another ``DOC_VERSION``, or older than the resource's summary /
+    transcript. Missing rows come first.
 
     Response: ``space`` names the space the vectors land in; ``reembedded``
     landed (or was already current) NOW; ``skipped`` names batch rows that
     were attempted or refused, with a stable reason code (never provider
-    text); ``remaining`` is ``total_missing`` minus what landed.
+    text); ``total_missing`` counts missing + stale (despite the name, kept
+    for readers of the old shape); ``stale`` is how many rows of THIS batch
+    were stale rather than missing; ``remaining`` is ``total_missing`` minus
+    what landed. Resource ids (``reembedded[]``, ``skipped[].resource_id``)
+    are strings, like ``space.id`` (Snowflake > 2^53).
     ``aborted_reason`` says why the batch stopped early: ``"provider_error"``
     (3 in a row), ``"time_budget"`` (past ``_BACKFILL_WALL_CLOCK_S``; the
     rest are skipped as ``not_attempted``), one of the process-wide codes
@@ -1162,6 +1172,7 @@ async def backfill_embeddings(
     from app.repositories import resource_embeddings_repository as emb_mod
     from app.services.ai.providers import embedding_config
     from app.services.ai.providers import embedding_service as emb_svc_mod
+    from app.services.library.embedding_document import DOC_VERSION
 
     opts = body or BackfillEmbeddingsBody()
     # Typed refusal, not a silent no-op.
@@ -1177,11 +1188,12 @@ async def backfill_embeddings(
     repo = emb_mod.get_resource_embeddings_repository()
     try:
         space = await space_mod.get_embedding_space_repository().get_or_create(spec)
-        rows, total_missing = await repo.missing_for_user(
+        rows, total_missing = await repo.pending_for_user(
             user_id=auth.user_id,
             space_id=space["id"],
             layer=SEMANTIC_LAYER,
             limit=opts.limit,
+            doc_version=DOC_VERSION,
         )
     except emb_mod.EmbeddingStoreMissing as e:
         logger.error(f"backfill: vector store missing: {e}")
@@ -1200,12 +1212,13 @@ async def backfill_embeddings(
         "dispatched": [],
         "in_flight": 0,
         "total_missing": total_missing,
+        "stale": sum(1 for r in rows if r.reason != "missing"),
     }
     if opts.dry_run:
         return {
             **base,
             "dry_run": True,
-            "reembedded": [r.resource_id for r in rows],
+            "reembedded": [str(r.resource_id) for r in rows],
             "skipped": [],
             "remaining": total_missing,
             "aborted_reason": None,
@@ -1226,7 +1239,7 @@ async def backfill_embeddings(
 
 async def _embed_backfill_rows(
     rows: list, *, embedder, space_id: int, repo
-) -> tuple[list[int], list[dict], str | None]:
+) -> tuple[list[str], list[dict], str | None]:
     """Embed ``rows`` in order. Returns (landed ids, skipped, aborted_reason).
 
     Stops early — every remaining row accounted for in ``skipped`` — on a
@@ -1237,7 +1250,7 @@ async def _embed_backfill_rows(
     """
     from app.services.library import embedding_backfill
 
-    reembedded: list[int] = []
+    reembedded: list[str] = []
     skipped: list[dict] = []
     started = _backfill_clock()
     provider_streak = 0
@@ -1255,7 +1268,7 @@ async def _embed_backfill_rows(
             provider_streak = 0
             continue
         if ok:
-            reembedded.append(row.resource_id)
+            reembedded.append(str(row.resource_id))
             provider_streak = 0
             continue
         code = _backfill_skip_code(reason)

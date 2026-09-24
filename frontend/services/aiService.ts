@@ -622,17 +622,22 @@ export const getAIGovernance = async (): Promise<AIGovernanceFlags> => {
  *  orthogonal: `reembedded` landed a vector now, `dispatched` started a run
  *  whose vector has not landed yet, `skipped` carries a stable reason code.
  *  Refusals arrive as the ErrorResponse envelope with the typed code in
- *  `details.code` (`embedder_unconfigured` 409, `vector_store_missing` 503). */
+ *  `details.code` (`embedder_unconfigured` 409, `vector_store_missing` 503).
+ *  Resource ids are strings: Snowflake BIGINTs lose precision as JSON numbers
+ *  past 2^53. `total_missing` counts missing + stale vectors; `stale` is how
+ *  many rows of this batch were stale rather than missing. */
 export interface BackfillResult {
   success: boolean;
   dry_run: boolean;
   space?: unknown;
-  reembedded: number[];
-  dispatched: Array<{ resource_id: number; task_id?: string }>;
-  skipped: Array<{ resource_id: number; reason: string }>;
+  reembedded: string[];
+  dispatched: Array<{ resource_id: string; task_id?: string }>;
+  skipped: Array<{ resource_id: string; reason: string }>;
   in_flight: number;
   remaining: number;
   total_missing: number;
+  stale?: number;
+  aborted_reason?: string | null;
 }
 
 export const backfillEmbeddings = (body: {

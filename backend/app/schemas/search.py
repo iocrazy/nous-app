@@ -15,6 +15,11 @@ SearchField = Literal[
     "notes",  # resources.notes (per-user)
 ]
 
+# Which retrieval leg produced a hit (``SearchResultItem.layer``). Mirrored by
+# ``HitLayer`` in frontend/services/searchService.ts, which keys the hit
+# badges on it; ``tests/test_search_fields_frontend_mirror.py`` pins the two.
+HitLayer = Literal["text", "semantic", "visual", "camera", "transcript"]
+
 # The search box placeholder promises "title, tags, notes", so all three have
 # to be on by default — shipping ``tags``/``notes`` as opt-in meant a user who
 # never opened the scope picker could not find anything by tag (927 of this
@@ -150,8 +155,9 @@ class SearchResultItem(BaseModel):
     author: Optional[str] = None
     view_count: int = 0
     created_at: Optional[str] = None
-    #: Which leg produced the hit: "text" (ILIKE) or "semantic" (vector).
-    layer: Literal["text", "semantic"] = "text"
+    #: Which leg produced the hit: "text" (ILIKE) or "semantic" (vector)
+    #: today; the other members are reserved for the shot / transcript legs.
+    layer: HitLayer = "text"
 
 
 class SearchResponse(BaseModel):
@@ -210,6 +216,9 @@ class LayerStatus(BaseModel):
     status: Literal["ok", "not_built"]
     covered: int
     total: int
+    #: Vectors in ``covered`` that the next backfill would re-embed (written
+    #: by another DOC_VERSION, or older than a summary / transcript).
+    stale: int = 0
 
 
 class VectorsStatusResponse(BaseModel):

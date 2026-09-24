@@ -53,9 +53,20 @@ class _SpaceRepo:
 
 
 class _EmbRepo:
-    def __init__(self, covered: int, total: int, fail: Exception | None = None):
-        self.covered, self.total, self.fail = covered, total, fail
+    def __init__(
+        self,
+        covered: int,
+        total: int,
+        fail: Exception | None = None,
+        stale: int = 0,
+    ):
+        self.covered, self.total, self.fail, self.stale = covered, total, fail, stale
         self.calls: List[dict] = []
+        self.stale_calls: List[dict] = []
+
+    async def stale_count(self, **kwargs):
+        self.stale_calls.append(kwargs)
+        return self.stale
 
     async def coverage(self, **kwargs):
         self.calls.append(kwargs)
@@ -93,10 +104,39 @@ async def test_ok_reports_space_and_coverage(monkeypatch):
         "id": str(_SPACE["id"]),
     }
     assert body["layers"] == [
-        {"layer": "semantic", "status": "ok", "covered": 12, "total": 1409},
-        {"layer": "transcript", "status": "not_built", "covered": 0, "total": 1409},
+        {
+            "layer": "semantic",
+            "status": "ok",
+            "covered": 12,
+            "total": 1409,
+            "stale": 0,
+        },
+        {
+            "layer": "transcript",
+            "status": "not_built",
+            "covered": 0,
+            "total": 1409,
+            "stale": 0,
+        },
     ]
     assert emb.calls == [{"user_id": "u-1", "space_id": 3, "layer": SEMANTIC_LAYER}]
+
+
+@pytest.mark.asyncio
+async def test_ok_reports_stale_vectors_of_the_semantic_layer(monkeypatch):
+    from app.services.library.embedding_document import DOC_VERSION
+
+    emb = _wire(monkeypatch, emb_repo=_EmbRepo(12, 1409, stale=5))
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert [x["stale"] for x in body["layers"]] == [5, 0]
+    assert emb.stale_calls == [
+        {
+            "user_id": "u-1",
+            "space_id": 3,
+            "layer": SEMANTIC_LAYER,
+            "doc_version": DOC_VERSION,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -109,6 +149,7 @@ async def test_empty_semantic_layer_is_not_built(monkeypatch):
         "status": "not_built",
         "covered": 0,
         "total": 5,
+        "stale": 0,
     }
 
 

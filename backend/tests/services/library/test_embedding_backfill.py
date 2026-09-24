@@ -34,7 +34,7 @@ _INPUTS: Dict[str, Any] = {
 }
 
 
-def _row(rid: int = 7) -> BackfillRow:
+def _row(rid: int = 7, reason: str = "missing") -> BackfillRow:
     return BackfillRow(
         resource_id=rid,
         media_id=rid * 10,
@@ -42,6 +42,7 @@ def _row(rid: int = 7) -> BackfillRow:
         title="T",
         description="D",
         has_analysis=False,
+        reason=reason,
     )
 
 
@@ -51,6 +52,7 @@ class _Repo:
         self.fail = fail
         self.upserts: List[dict] = []
         self.gets: List[tuple] = []
+        self.touches: List[tuple] = []
 
     async def get(self, resource_id, layer, space_id):
         self.gets.append((resource_id, layer, space_id))
@@ -62,6 +64,9 @@ class _Repo:
         if self.fail is not None:
             raise self.fail
         self.upserts.append(kwargs)
+
+    async def touch(self, resource_id, layer, space_id):
+        self.touches.append((resource_id, layer, space_id))
 
 
 class _Embedder:
@@ -115,6 +120,30 @@ async def test_unchanged_document_is_not_re_embedded(inputs):
     assert (ok, reason) == (True, None)
     assert emb.texts == [], "same hash: no embedding call, no spend"
     assert repo.upserts == []
+
+
+@pytest.mark.asyncio
+async def test_stale_source_with_an_unchanged_document_is_touched_not_embedded(inputs):
+    """A row listed as ``stale_source`` (a summary/transcript newer than the
+    vector) whose document hashes the same must still move ``updated_at``:
+    otherwise the listing picks it again on every run and ``remaining``
+    never shrinks."""
+    _, source_hash = compose_semantic_document(**_INPUTS)
+    repo, emb = _Repo(existing={"source_hash": source_hash}), _Embedder()
+    ok, reason = await bf.embed_candidate(
+        _row(reason="stale_source"), embedder=emb, space_id=3, repo=repo
+    )
+    assert (ok, reason) == (True, None)
+    assert emb.texts == [] and repo.upserts == []
+    assert repo.touches == [(7, SEMANTIC_LAYER, 3)]
+
+
+@pytest.mark.asyncio
+async def test_unchanged_missing_row_is_not_touched(inputs):
+    _, source_hash = compose_semantic_document(**_INPUTS)
+    repo, emb = _Repo(existing={"source_hash": source_hash}), _Embedder()
+    await bf.embed_candidate(_row(), embedder=emb, space_id=3, repo=repo)
+    assert repo.touches == []
 
 
 @pytest.mark.asyncio

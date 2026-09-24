@@ -338,6 +338,8 @@ export interface VectorsStatus {
     status: 'ok' | 'not_built';
     covered: number;
     total: number;
+    /** Covered vectors the next backfill re-embeds; absent on older backends. */
+    stale?: number;
   }>;
 }
 

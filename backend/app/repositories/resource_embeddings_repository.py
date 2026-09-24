@@ -22,14 +22,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, case, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import ProgrammingError
 
 from app.db.session import read_scope, write_scope
-from app.models import ParsedMedia, ResourceAnalysis, ResourceEmbeddings, Resources
+from app.models import (
+    ParsedMedia,
+    ResourceAnalysis,
+    ResourceEmbeddings,
+    Resources,
+    ResourceSummaries,
+    ResourceTranscripts,
+)
+from app.services.library.like_escape import LIKE_ESCAPE_CHAR, escape_like
 
 # SQLSTATEs that mean "migration 499 has not run on this database".
 _UNDEFINED_TABLE = "42P01"
@@ -46,9 +54,18 @@ class EmbeddingStoreMissing(RuntimeError):
     typed reason ``store_missing``; readers fall back to the legacy store."""
 
 
+#: Why a resource is up for (re-)embedding:
+#: ``missing`` — no vector in the (space, layer);
+#: ``stale_version`` — its ``source_hash`` was written by another
+#: ``DOC_VERSION`` (or predates the ``"<version>:<sha1>"`` format);
+#: ``stale_source`` — a summary / transcript arrived after the vector.
+PendingReason = Literal["missing", "stale_version", "stale_source"]
+
+
 @dataclass(frozen=True)
 class BackfillRow:
-    """A resource that has no vector in the requested (space, layer)."""
+    """A resource whose vector in the requested (space, layer) is missing or
+    stale (``reason``)."""
 
     resource_id: int
     media_id: int
@@ -56,6 +73,28 @@ class BackfillRow:
     title: str
     description: str
     has_analysis: bool
+    reason: PendingReason = "missing"
+
+
+def _stale_version(doc_version: str):
+    """The row's hash was not written by ``doc_version``. The version is a
+    LIKE pattern prefix, so its ``_`` must be escaped to match itself."""
+    return ResourceEmbeddings.source_hash.notlike(
+        f"{escape_like(doc_version)}:%", escape=LIKE_ESCAPE_CHAR
+    )
+
+
+def _stale_source():
+    """A summary or transcript of the resource is newer than its vector."""
+    newer_summary = exists().where(
+        ResourceSummaries.resource_id == Resources.id,
+        ResourceSummaries.created_at > ResourceEmbeddings.updated_at,
+    )
+    newer_transcript = exists().where(
+        ResourceTranscripts.resource_id == Resources.id,
+        ResourceTranscripts.created_at > ResourceEmbeddings.updated_at,
+    )
+    return or_(newer_summary, newer_transcript)
 
 
 def is_store_missing(exc: ProgrammingError) -> bool:
@@ -257,16 +296,36 @@ class ResourceEmbeddingsRepository:
             raise
         return covered, total
 
-    async def missing_for_user(
-        self, *, user_id: str, space_id: int, layer: str, limit: int
+    async def pending_for_user(
+        self,
+        *,
+        user_id: str,
+        space_id: int,
+        layer: str,
+        limit: int,
+        doc_version: str,
     ) -> tuple[list[BackfillRow], int]:
-        """Up to ``limit`` resources without a vector in (space, layer),
-        resources with an L1 analysis first, then newest; plus the TOTAL
-        still missing."""
+        """Up to ``limit`` resources to (re-)embed in (space, layer), plus the
+        TOTAL pending. Two kinds, each row tagged with its ``reason``:
+
+        * ``missing`` — no row in (space, layer);
+        * stale — a row exists but its ``source_hash`` does not start with
+          ``"<doc_version>:"`` (``stale_version``), or a summary / transcript
+          was created after the row's ``updated_at`` (``stale_source``).
+
+        Missing rows first (they have no vector at all), then resources with
+        an L1 analysis, then newest."""
         if not user_id:
             # A falsy owner would render as ``creator_id IS NULL`` and select
             # exactly the orphan rows nobody should be billed for.
             return [], 0
+        missing = ResourceEmbeddings.resource_id.is_(None)
+        stale_version = _stale_version(doc_version)
+        reason = case(
+            (missing, "missing"),
+            (stale_version, "stale_version"),
+            else_="stale_source",
+        )
         stmt = (
             select(
                 Resources.id,
@@ -275,6 +334,7 @@ class ResourceEmbeddingsRepository:
                 ParsedMedia.title,
                 ParsedMedia.description,
                 ResourceAnalysis.resource_id.label("analysis_rid"),
+                reason.label("reason"),
             )
             .join(ParsedMedia, ParsedMedia.id == Resources.media_id)
             .outerjoin(
@@ -295,13 +355,15 @@ class ResourceEmbeddingsRepository:
             .where(Resources.creator_id == user_id)
             .where(Resources.source_type == "web")
             .where(Resources.is_trashed.is_(False))
-            .where(ResourceEmbeddings.resource_id.is_(None))
+            .where(or_(missing, stale_version, _stale_source()))
         )
         count_stmt = select(func.count()).select_from(
             stmt.with_only_columns(Resources.id).subquery()
         )
         ordered = stmt.order_by(
-            ResourceAnalysis.resource_id.is_(None), Resources.id.desc()
+            ResourceEmbeddings.resource_id.isnot(None),
+            ResourceAnalysis.resource_id.is_(None),
+            Resources.id.desc(),
         ).limit(limit)
         try:
             async with read_scope() as session:
@@ -319,9 +381,60 @@ class ResourceEmbeddingsRepository:
                 title=r[3] or "",
                 description=r[4] or "",
                 has_analysis=r[5] is not None,
+                reason=r[6],
             )
             for r in rows
         ], total
+
+    async def stale_count(
+        self, *, user_id: str, space_id: int, layer: str, doc_version: str
+    ) -> int:
+        """How many of the user's vectors in (space, layer) are stale (the
+        ``stale_version`` / ``stale_source`` half of :meth:`pending_for_user`).
+        """
+        if not user_id:
+            return 0
+        stmt = select(func.count()).select_from(
+            self._owned_web_resources(user_id)
+            .join(
+                ResourceEmbeddings,
+                and_(
+                    ResourceEmbeddings.resource_id == Resources.id,
+                    ResourceEmbeddings.space_id == space_id,
+                    ResourceEmbeddings.layer == layer,
+                ),
+            )
+            .where(or_(_stale_version(doc_version), _stale_source()))
+            .subquery()
+        )
+        try:
+            async with read_scope() as session:
+                return int((await session.execute(stmt)).scalar_one() or 0)
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise _store_missing("resource_embeddings") from exc
+            raise
+
+    async def touch(self, resource_id: int, layer: str, space_id: int) -> None:
+        """Move ``updated_at`` without rewriting the vector: a ``stale_source``
+        row whose recomposed document hashes the same is current again, and
+        must stop being listed."""
+        stmt = (
+            update(ResourceEmbeddings)
+            .where(
+                ResourceEmbeddings.resource_id == resource_id,
+                ResourceEmbeddings.layer == layer,
+                ResourceEmbeddings.space_id == space_id,
+            )
+            .values(updated_at=func.now())
+        )
+        try:
+            async with write_scope() as session:
+                await session.execute(stmt)
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise _store_missing("resource_embeddings") from exc
+            raise
 
 
 _repository: ResourceEmbeddingsRepository | None = None

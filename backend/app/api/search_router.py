@@ -27,6 +27,7 @@ from app.schemas.search import (
 )
 from app.schemas.unified_search import UnifiedSearchResponse
 from app.services.ai.providers.embedding_service import EmbeddingService
+from app.services.library.embedding_document import DOC_VERSION
 from app.services.library.like_escape import escape_like
 from app.services.library.search_service import (
     SearchFiltersUnavailable,
@@ -453,13 +454,14 @@ async def text_search(
 NO_SPACE_ID = 0
 
 
-def _layers(covered: int, total: int) -> List[LayerStatus]:
+def _layers(covered: int, total: int, stale: int = 0) -> List[LayerStatus]:
     return [
         LayerStatus(
             layer="semantic",
             status="ok" if covered else "not_built",
             covered=covered,
             total=total,
+            stale=stale,
         ),
         # Enum slot only until the transcript layer ships.
         LayerStatus(layer="transcript", status="not_built", covered=0, total=total),
@@ -494,13 +496,19 @@ async def vectors_status(auth: AuthDep):
         covered, total = await repo.coverage(
             user_id=auth.user_id, space_id=space["id"], layer=SEMANTIC_LAYER
         )
+        stale = await repo.stale_count(
+            user_id=auth.user_id,
+            space_id=space["id"],
+            layer=SEMANTIC_LAYER,
+            doc_version=DOC_VERSION,
+        )
     except EmbeddingStoreMissing as e:
         logger.error(f"Vector status: store missing (migration 499): {e}")
         return VectorsStatusResponse(space=None, status="store_missing", layers=[])
     return VectorsStatusResponse(
         space=SpaceInfo.from_row(space),
         status="ok",
-        layers=_layers(covered, total),
+        layers=_layers(covered, total, stale),
     )
 
 

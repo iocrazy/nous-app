@@ -24,6 +24,7 @@ from app.repositories.resource_embeddings_repository import (
     BackfillRow,
     EmbeddingStoreMissing,
 )
+from app.services.library.embedding_document import DOC_VERSION
 
 _SPEC = SpaceSpec(
     actual_model="doubao-embedding-vision-251215",
@@ -87,7 +88,7 @@ def test_backfill_no_longer_dispatches_the_vlm() -> None:
     source = _source("backfill_embeddings") + _source("_embed_backfill_rows")
     assert "_dispatch_l1_analysis(" not in source
     assert "embed_candidate(" in source
-    assert "missing_for_user(" in source
+    assert "pending_for_user(" in source
     mod = importlib.import_module("app.api.ai_router")
     assert not hasattr(mod, "_BACKFILL_OVERFETCH_FACTOR")
     assert not hasattr(mod, "_BACKFILL_MAX_SCAN")
@@ -113,7 +114,7 @@ async def test_resources_with_active_l1_short_circuits_on_an_empty_list() -> Non
 # ---------------------------------------------------------------------------
 # behaviour of the endpoint body
 # ---------------------------------------------------------------------------
-def _row(rid: int) -> BackfillRow:
+def _row(rid: int, reason: str = "missing") -> BackfillRow:
     return BackfillRow(
         resource_id=rid,
         media_id=rid * 10,
@@ -121,10 +122,11 @@ def _row(rid: int) -> BackfillRow:
         title=f"t{rid}",
         description="",
         has_analysis=False,
+        reason=reason,
     )
 
 
-def _reasons(skipped: list[dict]) -> dict[int, str]:
+def _reasons(skipped: list[dict]) -> dict[str, str]:
     return {s["resource_id"]: s["reason"] for s in skipped}
 
 
@@ -133,7 +135,7 @@ class _Repo:
         self.rows, self.total, self.fail = rows, total, fail
         self.calls: list[dict] = []
 
-    async def missing_for_user(self, **kwargs):
+    async def pending_for_user(self, **kwargs):
         self.calls.append(kwargs)
         if self.fail is not None:
             raise self.fail
@@ -211,13 +213,19 @@ async def test_backfill_embeds_every_candidate_in_place() -> None:
         out = await _call(BackfillEmbeddingsBody(limit=5))
 
     assert repo.calls == [
-        {"user_id": "u-1", "space_id": 3, "layer": SEMANTIC_LAYER, "limit": 5}
+        {
+            "user_id": "u-1",
+            "space_id": 3,
+            "layer": SEMANTIC_LAYER,
+            "limit": 5,
+            "doc_version": DOC_VERSION,
+        }
     ]
     assert embed.await_args_list[0].kwargs["space_id"] == 3
     assert out["success"] is True and out["dry_run"] is False
     assert out["space"] == _SPACE_OUT
-    assert out["reembedded"] == [1]
-    assert _reasons(out["skipped"]) == {2: "empty_text"}
+    assert out["reembedded"] == ["1"]
+    assert _reasons(out["skipped"]) == {"2": "empty_text"}
     # Kept for readers of the old shape; nothing is dispatched any more.
     assert out["dispatched"] == [] and out["in_flight"] == 0
     assert out["remaining"] == 8 and out["total_missing"] == 9
@@ -242,7 +250,7 @@ async def test_process_wide_failures_stop_the_batch_and_account_for_every_row(
         out = await _call()
 
     assert embed.await_count == 1, "every later row would fail identically"
-    assert _reasons(out["skipped"]) == {1: code, 2: code, 3: code}
+    assert _reasons(out["skipped"]) == {"1": code, "2": code, "3": code}
     assert out["remaining"] == 3
 
 
@@ -256,7 +264,7 @@ async def test_one_bad_row_does_not_lose_the_batch() -> None:
     with p[0], p[1], p[2], p[3], p[4]:
         out = await _call()
     # Stable codes only — provider text stays in the log.
-    assert _reasons(out["skipped"]) == {1: "reembed_error", 2: "provider_error"}
+    assert _reasons(out["skipped"]) == {"1": "reembed_error", "2": "provider_error"}
 
 
 @pytest.mark.asyncio
@@ -311,7 +319,7 @@ async def test_dry_run_uses_the_same_element_shapes_as_a_real_run() -> None:
     embed.assert_not_awaited()
     assert out["success"] is True and out["dry_run"] is True
     assert out["space"] == _SPACE_OUT
-    assert out["reembedded"] == [1, 2]
+    assert out["reembedded"] == ["1", "2"]
     assert out["dispatched"] == [] and out["skipped"] == [] and out["in_flight"] == 0
     assert out["remaining"] == 9 == out["total_missing"]
 
@@ -346,13 +354,13 @@ async def test_three_provider_errors_in_a_row_stop_the_batch() -> None:
         out = await _call()
 
     assert embed.await_count == 5
-    assert out["reembedded"] == [2]
+    assert out["reembedded"] == ["2"]
     assert _reasons(out["skipped"]) == {
-        1: "provider_error",
-        3: "provider_error",
-        4: "provider_error",
-        5: "provider_error",
-        6: "provider_error",
+        "1": "provider_error",
+        "3": "provider_error",
+        "4": "provider_error",
+        "5": "provider_error",
+        "6": "provider_error",
     }
     assert out["aborted_reason"] == "provider_error"
     assert out["remaining"] == 5
@@ -381,8 +389,8 @@ async def test_wall_clock_budget_marks_the_rest_not_attempted() -> None:
 
     assert budget == 60
     assert embed.await_count == 1
-    assert out["reembedded"] == [1]
-    assert _reasons(out["skipped"]) == {2: "not_attempted", 3: "not_attempted"}
+    assert out["reembedded"] == ["1"]
+    assert _reasons(out["skipped"]) == {"2": "not_attempted", "3": "not_attempted"}
     assert out["aborted_reason"] == "time_budget"
     assert out["remaining"] == 2
 
@@ -391,3 +399,39 @@ def test_not_attempted_is_a_response_code_not_an_embed_reason() -> None:
     from app.services.ai.providers.embedding_service import EMBED_REASON_CODES
 
     assert "not_attempted" not in EMBED_REASON_CODES
+
+
+_SNOWFLAKE = 352590227796039123  # > 2^53: a JS number would round it
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_resource_ids_are_sent_as_strings(dry_run) -> None:
+    """Snowflake ids past 2^53 lose precision as JSON numbers; ``space.id``
+    already goes out as a string, the per-row ids must too."""
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    repo = _Repo([_row(_SNOWFLAKE), _row(_SNOWFLAKE + 1)], 2)
+    embed = AsyncMock(side_effect=[(True, None), (False, "empty_text")])
+    p = _patches(repo=repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call(BackfillEmbeddingsBody(dry_run=dry_run))
+    ids = out["reembedded"] + [s["resource_id"] for s in out["skipped"]]
+    assert ids and all(isinstance(i, str) for i in ids)
+    assert str(_SNOWFLAKE) in out["reembedded"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_stale_counts_the_stale_rows_of_this_batch(dry_run) -> None:
+    """``total_missing`` = missing + stale; ``stale`` = stale rows in THIS
+    batch, whatever happened to them."""
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    rows = [_row(1), _row(2, "stale_version"), _row(3, "stale_source")]
+    repo = _Repo(rows, 40)
+    p = _patches(repo=repo)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call(BackfillEmbeddingsBody(dry_run=dry_run))
+    assert out["stale"] == 2
+    assert out["total_missing"] == 40

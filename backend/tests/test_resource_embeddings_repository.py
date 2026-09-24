@@ -294,7 +294,7 @@ async def test_get_missing_row_is_none():
         assert await ResourceEmbeddingsRepository().get(7, "semantic", 42) is None
 
 
-# ── coverage / missing_for_user ──────────────────────────────────────────
+# ── coverage / pending_for_user ──────────────────────────────────────────
 
 
 async def test_coverage_returns_covered_and_total():
@@ -314,48 +314,121 @@ async def test_coverage_returns_covered_and_total():
     assert "resource_embeddings.layer" in covered_sql
 
 
-async def test_missing_for_user_refuses_falsy_user_id():
-    """Same guard as embedding_backfill.list_candidates: a falsy owner would
-    render as ``creator_id IS NULL`` and select the orphan rows."""
+async def test_pending_for_user_refuses_falsy_user_id():
+    """A falsy owner would render as ``creator_id IS NULL`` and select the
+    orphan rows."""
     from app.repositories.resource_embeddings_repository import (
         ResourceEmbeddingsRepository,
     )
 
     with patch(f"{REPO}.read_scope", lambda: _Unreachable()):
-        got = await ResourceEmbeddingsRepository().missing_for_user(
-            user_id="", space_id=42, layer="semantic", limit=10
+        got = await ResourceEmbeddingsRepository().pending_for_user(
+            user_id="", space_id=42, layer="semantic", limit=10, doc_version="v9"
         )
     assert got == ([], 0)
 
 
-async def test_missing_for_user_builds_backfill_rows_analysis_first():
+async def test_pending_for_user_builds_rows_with_their_reason():
     from app.repositories.resource_embeddings_repository import (
         BackfillRow,
         ResourceEmbeddingsRepository,
     )
 
     rows = [
-        (1, 11, "p1", "T1", None, 1),
-        (2, 22, "p2", None, "D2", None),
+        (1, 11, "p1", "T1", None, 1, "missing"),
+        (2, 22, "p2", None, "D2", None, "stale_version"),
+        (3, 33, "p3", "T3", "D3", None, "stale_source"),
     ]
     session = _Session([_Result(scalar=5), _Result(rows)])
     with patch(f"{REPO}.read_scope", _scope(session)):
-        got, total = await ResourceEmbeddingsRepository().missing_for_user(
-            user_id=USER, space_id=42, layer="semantic", limit=2
+        got, total = await ResourceEmbeddingsRepository().pending_for_user(
+            user_id=USER, space_id=42, layer="semantic", limit=3, doc_version="v9"
         )
 
     assert total == 5
     assert got == [
-        BackfillRow(1, 11, "p1", "T1", "", True),
-        BackfillRow(2, 22, "p2", "", "D2", False),
+        BackfillRow(1, 11, "p1", "T1", "", True, "missing"),
+        BackfillRow(2, 22, "p2", "", "D2", False, "stale_version"),
+        BackfillRow(3, 33, "p3", "T3", "D3", False, "stale_source"),
     ]
-    sql = _sql(session.calls[1][0])
+
+
+async def test_pending_for_user_selects_missing_and_stale_missing_first():
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    session = _Session([_Result(scalar=0), _Result([])])
+    with patch(f"{REPO}.read_scope", _scope(session)):
+        await ResourceEmbeddingsRepository().pending_for_user(
+            user_id=USER,
+            space_id=42,
+            layer="semantic",
+            limit=2,
+            doc_version="semantic_v2",
+        )
+    stmt = session.calls[1][0]
+    sql = _sql(stmt)
     assert "LEFT OUTER JOIN public.resource_embeddings" in sql
     assert "resource_embeddings.resource_id IS NULL" in sql
+    # (b) stale version: the prefix is a LIKE pattern, so the ``_`` in
+    # "semantic_v2" must be escaped or it matches any character.
+    assert "resource_embeddings.source_hash NOT LIKE" in sql
+    params = stmt.compile(dialect=postgresql.dialect()).params
+    assert "semantic\\_v2:%" in params.values()
+    # (b) stale source: a summary / transcript newer than the vector.
+    assert "public.resource_summaries" in sql
+    assert "public.resource_transcripts" in sql
+    assert sql.count("> public.resource_embeddings.updated_at") == 2
+    order = sql[sql.index("ORDER BY") :]
     assert (
-        "ORDER BY public.resource_analysis.resource_id IS NULL, "
-        "public.resources.id DESC"
-    ) in sql
+        order.index("resource_embeddings.resource_id IS NOT NULL")
+        < order.index("public.resource_analysis.resource_id IS NULL")
+        < order.index("public.resources.id DESC")
+    )
+
+
+async def test_stale_count_counts_only_rows_that_have_a_vector():
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    session = _Session([_Result(scalar=4)])
+    with patch(f"{REPO}.read_scope", _scope(session)):
+        got = await ResourceEmbeddingsRepository().stale_count(
+            user_id=USER, space_id=42, layer="semantic", doc_version="v9"
+        )
+    assert got == 4
+    sql = _sql(session.calls[0][0])
+    assert "JOIN public.resource_embeddings" in sql
+    assert "LEFT OUTER JOIN public.resource_embeddings" not in sql
+    assert "source_hash NOT LIKE" in sql
+
+
+async def test_stale_count_refuses_falsy_user_id():
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    with patch(f"{REPO}.read_scope", lambda: _Unreachable()):
+        got = await ResourceEmbeddingsRepository().stale_count(
+            user_id="", space_id=42, layer="semantic", doc_version="v9"
+        )
+    assert got == 0
+
+
+async def test_touch_moves_updated_at_only():
+    from app.repositories.resource_embeddings_repository import (
+        ResourceEmbeddingsRepository,
+    )
+
+    session = _Session()
+    with patch(f"{REPO}.write_scope", _scope(session)):
+        await ResourceEmbeddingsRepository().touch(7, "semantic", 42)
+    sql = _sql(session.calls[0][0])
+    assert sql.startswith("UPDATE public.resource_embeddings SET updated_at=now()")
+    for col in ("resource_id", "layer", "space_id"):
+        assert f"resource_embeddings.{col} =" in sql
 
 
 # ── EmbeddingSpaceRepository ─────────────────────────────────────────────

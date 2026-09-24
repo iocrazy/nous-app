@@ -4,7 +4,7 @@
 //   • Vector Spaces — the current embedding space (model / protocol /
 //     capabilities / dimensions / instruction) from GET /search/vectors/status.
 //   • Retrieval Layers — per-layer coverage, with the semantic layer's
-//     backfill (Dry Run / Run 20) wired to POST /ai/analyze/backfill-embeddings.
+//     backfill (Dry Run / Run 200) wired to POST /ai/analyze/backfill-embeddings.
 //
 // Visual / Camera rows and the `Add Space` button are DELIBERATE disabled
 // placeholders (they arrive with shot indexing and space switching), the same
@@ -18,7 +18,8 @@ import { backfillEmbeddings, type BackfillResult } from '../../services/aiServic
 import { ApiError } from '../../services/apiClient';
 import { getVectorsStatus, type VectorsStatus } from '../../services/searchService';
 
-const BACKFILL_BATCH = 20;
+// Same ceiling as the backend (BackfillEmbeddingsBody.limit le=200).
+const BACKFILL_BATCH = 200;
 const NUM = new Intl.NumberFormat('en-US');
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
@@ -273,7 +274,7 @@ function LayersSection({
                 />
               </td>
               <td className="py-2 pr-3">
-                <Coverage covered={semantic?.covered} total={semantic?.total} />
+                <Coverage covered={semantic?.covered} total={semantic?.total} stale={semantic?.stale} t={t} />
               </td>
               <td className="py-2 pr-3 text-xs text-ink-400">{t('settings.vectors.semanticSource')}</td>
               <td className="py-2">
@@ -294,7 +295,7 @@ function LayersSection({
                     title={disabledHint}
                     onClick={() => onBackfill(false)}
                   >
-                    {t('settings.vectors.run20')}
+                    {t('settings.vectors.run200')}
                   </button>
                 </span>
               </td>
@@ -353,14 +354,31 @@ function StatusCell({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function Coverage({ covered, total }: { covered?: number; total?: number }) {
+interface CoverageProps {
+  covered?: number;
+  total?: number;
+  /** Covered vectors the next backfill re-embeds (older document version, or
+   *  a summary / transcript newer than the vector). */
+  stale?: number;
+  t?: TFn;
+}
+
+function Coverage({ covered, total, stale, t }: CoverageProps) {
   if (covered === undefined || total === undefined) {
     return <span className="tabular-nums text-ink-500">—</span>;
   }
   const pct = total > 0 ? Math.min(100, (covered / total) * 100) : 0;
   return (
     <span className="flex flex-col gap-1">
-      <span className="tabular-nums">{`${NUM.format(covered)} / ${NUM.format(total)}`}</span>
+      <span className="tabular-nums">
+        {`${NUM.format(covered)} / ${NUM.format(total)}`}
+        {stale && t ? (
+          <span className="text-xs text-warn">
+            {' '}
+            {t('settings.vectors.staleSuffix', { count: NUM.format(stale) })}
+          </span>
+        ) : null}
+      </span>
       <span className="h-1 w-24 overflow-hidden rounded bg-ink-800">
         <span className="block h-full bg-ok" style={{ width: `${pct}%` }} />
       </span>
