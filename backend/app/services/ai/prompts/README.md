@@ -131,9 +131,24 @@ found three docs
 
 `child_run_id` 是给父 agent 下一轮 `Skill(skill="task", child_run_id=…)` 续聊用的。信封里其余字段（`status` / `cost_cents` / `tokens_used` / `description`）**刻意不进框** —— 模型无法据它们行动，进框只是白烧 token。
 
+正文取值顺序是 `content.text` → `content.body`（2026-09-23 FH2 T1，与 `claimed_event_content` 同序）。在此之前定时唤醒的 steer 是 `{"text", "source"}`、没有 `body`，正文会落到整行 JSON，模型读到的是 `{"text": "…", "source": {"kind": "schedule", …}}`。
+
+带附件的 steer（评论在 root run 忙时被转进收件箱）在正文之后、闭合标记之前多一段附件清单；**没有附件就一行都不加**，上面两个例子的字节不变：
+
+```
+<inbox_message kind="steer" at="…">
+see these
+Attached to this message (listed for reference; the files are not loaded into this turn):
+[attachment 1] kind="resource_ref" name="shot-04.png" resource_id="353004118021504"
+[attachment 2] kind="output_ref" title="Draft v2" ref_kind="script" ref_id="352701793895008" version="2"
+</inbox_message>
+```
+
+每行只带白名单字段、按固定顺序、缺的不写：`kind` / `name` / `title` / `resource_id` / `asset_id` / `loadout_id` / `ref_kind` / `ref_id` / `version`。只列 `str` / `int` 值（嵌套 dict、列表、bool 跳过——免费形状的收件箱 API 能塞任意值，`str()` 出来只是 Python repr 噪声）；一个白名单字段都不剩的附件整条不列，编号在过滤之后再数，所以不会出现空的 `[attachment N]`，全被过滤时标题也不加。值全部走 `escape_frame_attr`（文件名是用户写的，引号与 `<>&` 都会被转义，闭合标记伪造不了）；正文经 `escape_frame_prose` 压成一行，所以用户文本伪造不出**独立的**清单行（它能照抄措辞，但只会待在正文那一行里）。`url`（文件系统路径）与 `data_url`（字节）**刻意不进框**。只是文本清单：像素没有注入，**清单里的 id 本轮也取不到**——`ResourceFetch` 的白名单是本轮请求开始时由请求自带的引用算定的，所以标题刻意不许诺「可以打开」（见 Known Limitations）。
+
 #### Token effect
 
-每条一个框，长度就是那条消息的正文长度。`subagent_result` 只放 summary，所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
+每条一个框，长度就是那条消息的正文长度，外加每个附件一行（几十 token，不含文件内容）。`subagent_result` 只放 summary，所以一次后台子 agent 的回执通常是几十到几百 token，而不是整个信封的 JSON。领取本身有条数上限（见 `agent_run_inbox_repository.claim`），所以单个步骤边界注入的量是有界的。
 
 #### KV Cache effect
 
@@ -217,7 +232,7 @@ found three docs
  "type": "function",
  "function": {
   "name": "ScheduleWakeup",
-  "description": "Schedule a one-time wake-up for this issue; when it fires you will receive the note as a message. Use it to wait for long external work instead of polling.",
+  "description": "Schedule a one-time wake-up for this issue; when it fires you will receive the note as a message. Use it to wait for long external work instead of polling. At most 3 per run, and at most 5 consecutive wake-ups per issue without a user reply.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -242,13 +257,13 @@ found three docs
 }
 ```
 
-调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
+调用成功后模型收到 `{"schedule_id": "<uuid>", "fire_at": "<ISO>"}`，**本轮照常继续**（与 `AskUser` 不同，它不停靠）。拒绝一律是工具结果不是异常，模型可以据此改时间重试：`at or delay_minutes required` / `note is required` / `at must be an ISO-8601 timestamp` / `delay_minutes must be a whole number of minutes` / `fire_at must be in the future` / `fire_at must be within 30 days` / `too_many_wakeups`（每个 **run** 最多 3 次——按 `payload.run_id` 在表上数，所以跨轮次也是 3 次不是每轮 3 次；被拒的调用不计数）/ `{"error": "too_many_wakeups_on_issue", "limit": 5, "hint": "wait for the user to reply; stop scheduling"}`（2026-09-23 FH2 T2：每个 **issue** 自上次有人说话以来最多连续 5 次 agent 唤醒——每次唤醒起的是新 run、per-run 预算随之重置，单靠上一条挡不住链条。按 `user_schedules` 里该 issue 的 agent 行数、锚点是 issue 会话里最后一条**人**写的 user 消息（`body.meta` 带 `source` / `subissue_barrier` / `pipeline_relay` 任一键的系统写入与续跑 nudge 不算人），没有就用 `issues.created_at`；人一评论就归零；在 per-run 检查之后判，拒绝同时记 WARN）/ `ScheduleWakeup failed: <ExceptionClass>`。未注册该工具的轮次上误调用得到 `ScheduleWakeup is not available on this turn — it only applies while working an assigned issue.`。
 
-到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑）——正文就是 `note` 原文。
+到点时模型看到的**不是**这个工具的返回，而是一条普通用户消息（issue 空闲）或收件箱里的 steer 框（run 在跑，或 issue 停在 needs_input 闸门上等人回答——后者由用户回答起的那一轮在首个步边界领取）——正文就是 `note` 原文。
 
 #### Token effect
 
-紧凑 JSON 约 480 字符、约 120 token，恒定，不随 agent 配置或对话增长。只在 issue 根 run 的 `tools` 数组里；聊天路与子代理 run 上完全不存在，那两条路的请求体一个字节都不变。
+紧凑 JSON 735 字符、约 180 token（口径：`json.dumps(schedule_wakeup_spec(), separators=(",", ":"))` 实测字符数，按约 4 字符/token 折算；FH2 T2 描述加了一句上限说明），恒定，不随 agent 配置或对话增长。只在 issue 根 run 的 `tools` 数组里；聊天路与子代理 run 上完全不存在，那两条路的请求体一个字节都不变。
 
 #### KV Cache effect
 
@@ -464,7 +479,7 @@ Each <output/> above is a CITATION the human made — one specific version of an
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **资产的主图可能「有」却「取不到」，此时条目被降级渲染**。`has_image` 由解析器用**系统作用域**读 `resources` 算出（资产的文件行是经资产可读的，不是经调用者的 team 成员关系），而 `ResourceFetch` 只认本轮可访问集合——两者会不一致，最典型的是系统预设资产，它的文件落在用户不属于的 scope 里。`ai_library_chat_service._merge_asset_primaries` 在这种情况下把条目改写成 `has_image="false"` 且**省掉 `primary_resource_id`**（即上面那条「没有图可取」的形状），并向用户回一条 `asset_no_primary_image`。宁可少给一张图，也不给模型一个用了就失败的 id。
 - **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 的 reason 词表里，`asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得再给词表加一个值（词表现在是五个：四个来自 `asset_ref_resolver`，第五个 `attachment_limit_exceeded` 由 chat service 的 `asset_ref` 条数上限产出）。
-- **被转进收件箱的评论，其 `output_ref` 引用不会渲染成 `<referenced_outputs>`**。一条评论在 root run 忙时会进 `agent_run_inbox`，而 `render_inbox_message`（`../runner/inbox.py`）只渲染正文——附件躺在 `content.attachments` 里没有消费方。⚠️ `resource_ref` / `asset_ref` 在这条路上同样如此，是 P4 之前就有的缺口；显式记在这里，是因为「两个入口只接一个」这类缺口在本仓出现过多次。
+- **被转进收件箱的评论，附件只以文本清单进框**（2026-09-23 FH2 T1 起）。一条评论在 root run 忙时会进 `agent_run_inbox`；`render_inbox_message`（`../runner/inbox.py`）现在在框内列出每个附件的 kind / 名字 / id，但 `output_ref` 仍**不会**渲染成 `<referenced_outputs>`，图片也不作为像素注入，而且**清单 id 不进本轮 `ResourceFetch` 白名单**（`_available_refs` 在请求开始时算定；没有引用的轮次连工具都不注册），调了只会拿到 `resource not referenced in this turn`——模型只知道文件存在。领取后仍然取不到：这条评论已被本 run 领走，不会作为下一轮请求的附件再来。像素注入与「领取时把清单 id 并入本 run 白名单（并在无引用轮次注册 ResourceFetch、过一遍访问校验）」是同一张留票：都要把 hook 与本轮的工具/vision 状态接起来。
 - **聊天面板一侧的引用是被「拒绝」而不是「校验」的**（3a 修复轮 1）。`AILibraryChatService.chat` 碰到 `output_ref` 附件直接回 400 `output_ref_unresolvable`（消息说 citations require an issue context），轮次一次都不开始。理由是引用在 3a 里按定义就是 issue 作用域的——解析器校验的正是「这一版的 run 属于本 issue」——而聊天会话没有 issue 可比；在那里编一套「拿 session 的 run 当 issue 用」的第二套归属语义，比拒绝更糟。⚠️ 所以聊天面板**今天不能引用产出**，这是本期的范围边界，不是缺陷。引用哪天变成非 issue 作用域，改的是 `refuse_citations_without_issue` 一个函数。
 - **legacy 路径（issue 没有 assignee agent）根本不转发附件**，所以那条路上的引用既不被校验也不到达任何人。这对所有附件 kind 都成立，不是 `output_ref` 引进的；在那里加校验只会给出「引用有效」的假保证，因为它随后照样被丢掉。
 - **`script_chapter` 今天没有生产者**，所以引用它必然是 `output_ref_unresolvable`。没有特判——登记表说没有就是没有。

@@ -74,8 +74,10 @@ class InboxItem:
         )
 
     def body(self) -> str:
-        """Human text of the item: ``content.body`` for steers, the answer
-        value for answers, else the whole content as JSON."""
+        """Human text of the item: ``content.text`` (wake-up / comment shape)
+        or ``content.body`` (older steer shape) — the same order as
+        ``claimed_event_content`` — the answer value for answers, else the
+        whole content as JSON."""
         c = self.content
         if self.kind == "subagent_result":
             # The envelope's other fields (cost, tokens, status) are already
@@ -87,6 +89,11 @@ class InboxItem:
             # sentence naming the outcome; ids and codes also ride as frame
             # attributes. Never a JSON dump: ``dedupe_key`` is bookkeeping.
             return str(c.get("text") or "")
+        # ``text`` first: the wake-up steer is ``{"text", "source"}`` with no
+        # ``body``, and used to fall through to the JSON dump below, so the
+        # model read its own schedule's bookkeeping as raw JSON (FH2 T1).
+        if isinstance(c.get("text"), str):
+            return c["text"]
         if isinstance(c.get("body"), str):
             return c["body"]
         if self.kind == "answer" and "value" in c:
@@ -174,6 +181,75 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
     return out
 
 
+#: Header line of the attachment manifest inside ``<inbox_message>``.
+#:
+#: It promises NOTHING about fetching. ResourceFetch accepts only the ids the
+#: turn started with (``_available_refs`` is computed once, at request start,
+#: from that request's own references), so an id listed from an item claimed
+#: mid-run always comes back "resource not referenced in this turn" — and on a
+#: turn with no references the tool is not even registered. Telling the model
+#: to open it would buy a guaranteed failed call (FH2 T1 review H1).
+ATTACHMENT_MANIFEST_HEADER = (
+    "Attached to this message (listed for reference; the files are not loaded "
+    "into this turn):"
+)
+
+#: Which attachment fields reach the model, in this order. A whitelist, not a
+#: dump: ``data_url`` is bytes and ``url`` is a filesystem path — neither is
+#: something the model can act on, and the path is not ours to show.
+_ATTACHMENT_MANIFEST_KEYS = (
+    "kind",
+    "name",
+    "title",
+    "resource_id",
+    "asset_id",
+    "loadout_id",
+    "ref_kind",
+    "ref_id",
+    "version",
+)
+
+
+def _attachment_manifest(content: dict[str, Any]) -> list[str]:
+    """One ``[attachment N] key="value" …`` line per attachment, empty when
+    there are none.
+
+    Text-level only (FH2 T1): the model learns the files exist and what they
+    are; the pixels are not injected and the ids are NOT fetchable this turn
+    (see ``ATTACHMENT_MANIFEST_HEADER``). Only ``str`` / ``int`` values are
+    listed — anything else (a nested dict from the free-form inbox API, a
+    bool) would reach the model as a Python repr — and an attachment left
+    with no listed field is dropped, numbering counted after the drop, so an
+    empty ``[attachment N]`` never appears. Every value goes through
+    ``escape_frame_attr`` — a file name is user-written, and quoting plus
+    entity escaping is what keeps it from closing the frame or forging a
+    row. The body above is flattened to one line by ``escape_frame_prose``,
+    so user text cannot fake a standalone manifest line either (it can copy
+    the wording, but only inside the body's own line).
+    """
+    raw = content.get("attachments")
+    if not isinstance(raw, list):
+        return []
+    rows = [p for p in (_manifest_pairs(a) for a in raw if isinstance(a, dict)) if p]
+    if not rows:
+        return []
+    return [ATTACHMENT_MANIFEST_HEADER] + [
+        f"[attachment {i}]{pairs}" for i, pairs in enumerate(rows, start=1)
+    ]
+
+
+def _manifest_pairs(att: dict[str, Any]) -> str:
+    """`` key="value"`` for each listed field holding a non-empty str / int
+    (``bool`` is an ``int`` subclass and is excluded on purpose)."""
+    return "".join(
+        f' {k}="{escape_frame_attr(str(v))}"'
+        for k in _ATTACHMENT_MANIFEST_KEYS
+        if (v := att.get(k)) not in (None, "")
+        and isinstance(v, (str, int))
+        and not isinstance(v, bool)
+    )
+
+
 def render_inbox_message(item: InboxItem) -> str:
     """The frame the model reads. We own ``<inbox_message>`` (registered in
     OWNED_FRAMES): attributes go through ``escape_frame_attr``, the body
@@ -200,12 +276,14 @@ def render_inbox_message(item: InboxItem) -> str:
             f' {k}="{escape_frame_attr(str(c.get(k) or ""))}"'
             for k in ("status", "media_kind", "task_id", "generated_media_id")
         )
-    return (
+    lines = [
         f'<{INBOX_FRAME} kind="{escape_frame_attr(item.kind)}"'
-        f' at="{escape_frame_attr(at)}"{extra}>\n'
-        f"{escape_frame_prose(item.body())}\n"
-        f"</{INBOX_FRAME}>"
-    )
+        f' at="{escape_frame_attr(at)}"{extra}>',
+        escape_frame_prose(item.body()),
+        *_attachment_manifest(item.content),
+        f"</{INBOX_FRAME}>",
+    ]
+    return "\n".join(lines)
 
 
 async def resolve_targets(

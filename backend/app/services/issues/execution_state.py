@@ -11,7 +11,7 @@ service_role-only under the mig-170 allowlist trigger, so the write runs as
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy import cast, func, literal, text, update
 from sqlalchemy.dialects.postgresql import JSONB
@@ -21,6 +21,30 @@ from app.models import Issues
 # A role identifier cannot be a bound parameter; this fixed fragment is the
 # same carve-out mark_turn_progress / set_status rely on.
 _AS_SERVICE_ROLE = text("SET LOCAL ROLE service_role")
+
+
+def is_parked_on_input(issue: Mapping[str, Any]) -> bool:
+    """Is a workflow suspended on the needs_input gate for this issue?
+
+    Parked = the turn lock is still held (``execution_locked_at``) AND
+    ``execution_state.awaiting_input`` names a question nobody has answered
+    yet (no ``answered_at``). ``needs_followup`` alone cannot tell this apart
+    from an issue that is merely waiting with nothing suspended (empty output,
+    an expired gate), which is why both readers — the resume decision table
+    and the wake-up fire — ask this one predicate instead of the status.
+
+    ``execution_state`` may arrive as a JSON string (asyncpg can hand jsonb
+    back as ``str``); an unreadable value reads as "not parked"."""
+    if not issue.get("execution_locked_at"):
+        return False
+    state = issue.get("execution_state")
+    if isinstance(state, str):
+        try:
+            state = json.loads(state) if state.strip() else {}
+        except ValueError:
+            return False
+    marker = state.get("awaiting_input") if isinstance(state, dict) else None
+    return isinstance(marker, dict) and bool(marker) and not marker.get("answered_at")
 
 
 def merge_stmt(issue_id: int, patch: dict[str, Any]):

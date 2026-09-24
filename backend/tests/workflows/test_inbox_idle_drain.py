@@ -290,6 +290,37 @@ async def test_the_listing_users_see_is_not_narrowed_by_the_turn_lock():
     assert "execution_locked_at" not in sql
 
 
+async def test_pending_issue_targets_skips_a_paused_issue():
+    """FH2 T1. A paused issue's items were rescanned every minute forever:
+    ``deliver_or_dispatch`` answers ``inbox/already_enqueued`` (paused is one
+    of its busy signals) and ``expire_stale_stmt(skip_paused_issues=True)``
+    keeps them from expiring on purpose, so nothing ever ended the loop (prod
+    issue 347469360799030, paused since 2026-09-08). Resume drains them, so
+    the scan excludes paused issues and loses nothing."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.agent_run_inbox_repository import pending_issue_targets_stmt
+
+    sql = str(
+        pending_issue_targets_stmt(20).compile(dialect=postgresql.dialect())
+    ).lower()
+    assert "paused_at is not null" in sql
+    assert sql.count("not in") >= 2, "paused issues must be EXCLUDED, not selected"
+
+
+async def test_the_listing_users_see_still_counts_a_paused_issues_queue():
+    """Negative control. The "queued" chip on a paused issue is how the user
+    sees what resume will deliver; only the sweeper's scan drops paused."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.repositories.agent_run_inbox_repository import pending_summary_stmt
+
+    sql = str(
+        pending_summary_stmt(str(uuid.uuid4())).compile(dialect=postgresql.dialect())
+    ).lower()
+    assert "paused_at" not in sql
+
+
 # ── expiry stops being silent ──────────────────────────────────────────
 
 

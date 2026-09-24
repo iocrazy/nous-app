@@ -40,9 +40,26 @@ def inserted(monkeypatch: pytest.MonkeyPatch) -> list:
     async def _count(run_id: str) -> int:
         return sum(1 for r in rows if r["payload"].get("run_id") == run_id)
 
+    async def _count_issue(issue_id: int) -> int:
+        # "since the last human message": rows armed after the marker the
+        # ``human_replies`` fixture moves. Every row here is agent-armed.
+        since = _HUMAN_MARK.get(id(rows), 0)
+        return sum(
+            1 for r in rows[since:] if r["payload"].get("issue_id") == int(issue_id)
+        )
+
     monkeypatch.setattr(swt, "_insert_wakeup_row", _insert)
     monkeypatch.setattr(swt, "_count_wakeups_for_run", _count)
+    monkeypatch.setattr(swt, "_count_agent_wakeups_since_human", _count_issue)
     return rows
+
+
+_HUMAN_MARK: dict[int, int] = {}
+
+
+def _human_replies(rows: list) -> None:
+    """A person spoke on the issue: only rows armed after now count."""
+    _HUMAN_MARK[id(rows)] = len(rows)
 
 
 def _handler():
@@ -261,3 +278,89 @@ def test_the_api_and_the_tool_share_one_horizon():
     from app.api.schedules_router import MAX_WAKEUP_HORIZON
 
     assert MAX_WAKEUP_HORIZON is swt.MAX_WAKEUP_HORIZON
+
+
+# ── FH2 T2: consecutive agent wake-ups per issue ────────────────────────────
+
+
+async def _arm_across_runs(n: int, first_run: int = 100) -> list[dict]:
+    """n wake-ups, each from a different run — the per-run cap (3) never
+    trips, which is exactly how a chain outlived the work in prod."""
+    return [
+        await _handler()(
+            {"delay_minutes": 30, "note": f"#{i}"}, _Recorder(first_run + i)
+        )
+        for i in range(n)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_sixth_consecutive_wakeup_on_an_issue_is_refused(inserted):
+    outs = await _arm_across_runs(swt.MAX_AGENT_WAKEUPS_PER_ISSUE)
+    assert all("schedule_id" in o for o in outs)
+    out = await _handler()({"delay_minutes": 30, "note": "#6"}, _Recorder(999))
+    assert out == {
+        "error": "too_many_wakeups_on_issue",
+        "limit": 5,
+        "hint": "wait for the user to reply; stop scheduling",
+    }
+    assert len(inserted) == swt.MAX_AGENT_WAKEUPS_PER_ISSUE
+
+
+@pytest.mark.asyncio
+async def test_a_human_reply_resets_the_issue_count(inserted):
+    await _arm_across_runs(swt.MAX_AGENT_WAKEUPS_PER_ISSUE)
+    _human_replies(inserted)
+    out = await _handler()({"delay_minutes": 30, "note": "after reply"}, _Recorder(7))
+    assert "schedule_id" in out
+
+
+@pytest.mark.asyncio
+async def test_the_per_run_refusal_still_wins_inside_one_run(inserted):
+    recorder = _Recorder(1)
+    for _ in range(swt.MAX_WAKEUPS_PER_RUN):
+        await _handler()({"delay_minutes": 30, "note": "x"}, recorder)
+    out = await _handler()({"delay_minutes": 30, "note": "x"}, recorder)
+    assert out == {"error": "too_many_wakeups"}
+
+
+@pytest.mark.asyncio
+async def test_the_issue_refusal_is_logged_as_a_warning(inserted, monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(swt.logger, "warning", lambda m, *a, **k: warnings.append(m))
+    await _arm_across_runs(swt.MAX_AGENT_WAKEUPS_PER_ISSUE)
+    await _handler()({"delay_minutes": 30, "note": "#6"}, _Recorder(999))
+    assert any("too_many_wakeups_on_issue" in w and "issue 7" in w for w in warnings)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_issue_count_is_a_typed_result(inserted, monkeypatch):
+    async def _boom(issue_id: int) -> int:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(swt, "_count_agent_wakeups_since_human", _boom)
+    out = await _handler()({"delay_minutes": 5, "note": "ok"}, _Recorder())
+    assert out["error"].startswith("ScheduleWakeup failed")
+    assert inserted == []
+
+
+def test_the_description_states_the_issue_cap():
+    desc = swt.schedule_wakeup_spec()["function"]["description"]
+    assert "at most 5 consecutive wake-ups per issue without a user reply" in desc
+
+
+@pytest.mark.asyncio
+async def test_the_count_delegates_to_the_repository(monkeypatch):
+    """The SQL lives in the repository (no raw ``text()``); the tool only
+    forwards the issue id."""
+    from app.repositories import user_schedules_repository as repo
+
+    seen: list = []
+
+    async def _count(issue_id: int) -> int:
+        seen.append(issue_id)
+        return 3
+
+    monkeypatch.setattr(repo, "count_agent_wakeups_since_human", _count)
+    assert await swt._count_agent_wakeups_since_human(7) == 3
+    assert seen == [7]
