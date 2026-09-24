@@ -1,5 +1,11 @@
 import { PublishRequest, LibraryVideo, CoverSelectResult } from '../types';
-import type { SocialAccount, PublishTask } from '../types/api';
+import type {
+  MusicChartsPage,
+  MusicHarvestResult,
+  PublishTask,
+  SocialAccount,
+  SocialAccountRow,
+} from '../types/api';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -514,51 +520,23 @@ export const searchMusic = (
     { signal },
   );
 
-/**
- * One cached chart tab of the platform's 「选择音乐」 panel.
+/*
+ * The cached 「选择音乐」 charts: `MusicChart` / `MusicChartsPage` are the
+ * backend's own models (`types/api.ts`, P7). Two rules the types cannot say:
  *
  * ⚠️ `category_id` alone is NOT the identity. Measured on the live panel:
  * 推荐 and 收藏 both answer `"1"` and differ only by `kind`, so anything that
- * keys a tab (React list keys included) must use both.
+ * keys a tab (React list keys included) must use both (`musicChartKey`).
  *
  * ⚠️ `ok === true` with `tracks: []` is a real, common state — an account with
  * no saved tracks. `ok === false` is "we failed to read this tab", and it
- * still carries whatever tracks survived from the previous harvest. Rendering
- * the two the same way either shows an empty tab as if the platform had
- * nothing, or shows a stale tab as if it were fresh.
- */
-export interface MusicChart {
-  id: string;
-  category_id: string;
-  category_kind: string;
-  category_name: string;
-  position: number;
-  ok: boolean;
-  error: string;
-  cursor: string;
-  has_more: boolean;
-  /** When the tracks below were read. Advances on SUCCESS only. */
-  fetched_at: string | null;
-  /** When we last tried. Advances every attempt — including failures. */
-  checked_at: string | null;
-  tracks: MusicTrack[];
-}
-
-/**
- * The cached charts, plus three separate facts about freshness.
+ * still carries whatever tracks survived from the previous harvest.
+ * `fetched_at` advances on SUCCESS only; `checked_at` on every attempt.
  *
  * `never_harvested` is NOT `stale` with a different name: a cold cache needs
- * "nothing has been read yet, want to read it now?", a stale one needs
- * "this is from yesterday". Only one of them is worth a warning, and merging
- * them would make the empty first-run look like a fault.
+ * "nothing has been read yet", a stale one needs "this is from yesterday".
  */
-export interface MusicChartsPage {
-  charts: MusicChart[];
-  last_success_at: string | null;
-  stale: boolean;
-  never_harvested: boolean;
-  ttl_hours: number;
-}
+export type { MusicChart, MusicChartsPage } from '../types/api';
 
 /** The tab identity. Both halves, always — see `MusicChart`. */
 export const musicChartKey = (chart: {
@@ -585,13 +563,13 @@ export const fetchMusicCharts = (
  * draft on the account. Any caller must say so before the user clicks; this is
  * not a button to fire on mount.
  */
-export const refreshMusicCharts = (accountId: string): Promise<unknown> =>
-  request<unknown>(`/accounts/${encodeURIComponent(accountId)}/music/charts/refresh`, {
+export const refreshMusicCharts = (accountId: string): Promise<MusicHarvestResult> =>
+  request<MusicHarvestResult>(`/accounts/${encodeURIComponent(accountId)}/music/charts/refresh`, {
     method: 'POST',
   });
 
-export const refreshAccount = (id: string): Promise<SocialAccount> =>
-  request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
+export const refreshAccount = (id: string): Promise<SocialAccountRow> =>
+  request<SocialAccountRow>(`/accounts/${id}/refresh`, { method: 'POST' });
 
 /**
  * What unbinding this account would touch. Backing data for the unbind
