@@ -397,3 +397,47 @@ def test_reply_step_uses_the_same_resolver():
     src = inspect.getsource(issue_lifecycle.run_issue_reply_step)
     assert "resolve_turn_outcome(" in src
     assert "awaiting_input_outcome(" not in src
+
+
+# ── 5. a human cancel after a declared completed never auto-closes ────────
+
+
+@pytest.mark.parametrize("auto_close", [False, True])
+async def test_cancelled_after_declared_completed_goes_to_review_never_done(
+    auto_close,
+):
+    """Review MEDIUM-1: with the trace kept, a run cancelled via
+    ``/ai-library/runs/{id}/cancel`` after FinishIssue(completed) would route
+    as completed — and ``done`` under auto_close. A person said stop; a person
+    reviews. The cancelled branch breaks out of the dispatch loop, so the
+    downgraded ``continue`` takes the capped route: in_review, never done."""
+    from app.services.issues.turn_outcome import resolve_turn_outcome
+
+    result = {**_turn_result(_finish_trace()), "stop_reason": "cancelled"}
+    got = resolve_turn_outcome(result)
+    assert got.outcome == "continue"
+    assert got.reason == _PROD_FINISH_ARGS["reason"]
+    assert got.awaiting_input is False
+
+    set_status = AsyncMock()
+    await route_finish_outcome(
+        1,
+        got.outcome,
+        got.reason,
+        auto_close=auto_close,
+        set_status=set_status,
+        content_len=0,
+        disarm_wakeups=AsyncMock(),
+    )
+    set_status.assert_awaited_once()
+    assert set_status.await_args.args[1] == "in_review"
+    for call in set_status.await_args_list:
+        assert call.args[1] != "done"
+
+
+@pytest.mark.parametrize("declared", ["continue", "needs_input"])
+def test_cancelled_leaves_other_declarations_alone(declared):
+    from app.services.issues.turn_outcome import resolve_turn_outcome
+
+    result = {**_turn_result(_finish_trace(declared)), "stop_reason": "cancelled"}
+    assert resolve_turn_outcome(result).outcome == declared

@@ -1036,12 +1036,18 @@ async def route_finish_outcome(
 
     EMPTY_OUTPUT policy (fh2 T4, 2026-09-23). "0 chars + none" is three
     different things; only the first is decided here, by the caller:
-      ① Declaration present, no text (the turn ended on a tool call, e.g.
-        FinishIssue then a hook STOP at the next step boundary) → routed by
-        the declaration. Fixed upstream: ``AgentRunner._stopped_response``
-        now carries the ``tool_calls`` trace, and ``turn_outcome`` lets a
-        declared ``completed`` beat a budget park. Prod: 2 of the 4
-        EMPTY_OUTPUT runs of 2026-09-08 (347463025060485, 347463748025273).
+      ① Declaration present, no text, turn ended by a step-hook STOP at the
+        next step boundary → routed by the declaration. Fixed upstream:
+        ``AgentRunner._stopped_response`` now carries the ``tool_calls``
+        trace, and ``turn_outcome`` lets a declared ``completed`` beat a
+        budget park (a human cancel demotes it to ``continue`` → in_review,
+        never done). Covers the hook STOP exit ONLY: ``run_timeout``, abort
+        mid-call, ``max_tool_iterations_exceeded`` and awaiting-approval
+        still drop the trace (ticketed — routing them by the declaration is
+        a semantic decision). Prod, 2026-09-08: 347463748025273 (budget halt)
+        now routes by its declaration; 347463025060485 (PauseHook) keeps its
+        trace, but the body returns on ``paused`` before routing, so its
+        routing waits for resume (ticketed).
       ② No declaration, last event a non-finish tool (the other 2 prod runs:
         last tool ``Skill``) → still EMPTY_OUTPUT here. The fix is ONE bounded
         continuation (``continue`` semantics, counted against

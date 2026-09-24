@@ -1829,9 +1829,14 @@ class AgentRunner:
         including a FinishIssue the agent already declared. Without the trace
         the buffered fallback of ``stream_turn`` (production's only path)
         forwarded ``[]`` and the declaration was lost: 2 of the 4 production
-        EMPTY_OUTPUT runs (2026-09-08) had declared ``completed``. Every other
-        exit already carries it (``_awaiting_input_response``, the true-stream
-        stop chunk)."""
+        EMPTY_OUTPUT runs (2026-09-08) had declared ``completed``. Exits that
+        carry it: the normal final answer, ``_awaiting_input_response``, the
+        true-stream stop chunk, and this one. Exits that still do NOT (a
+        declaration made before them is lost — same defect family, left as is
+        because routing them by the declaration is a semantic call, ticketed):
+        ``run_timeout`` (``_run_turn_inner`` ~:2000), abort mid-call (~:2069),
+        ``max_tool_iterations_exceeded`` (~:2488) and
+        ``_awaiting_approval_response`` (~:2720)."""
         from app.services.ai.runner.question import payload_from_view
 
         reason = step_ctx.stop_reason
