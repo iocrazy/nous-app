@@ -6,20 +6,56 @@ Shares Router
 Sharing system API endpoints: create, list, update, cancel, and
 public access by share code. Supports link, review, presentation,
 and delivery share types.
+
+Access rules (P6, 2026-09-24):
+
+- Owner routes (``DELETE /shares/{id}``, ``DELETE /shares/{id}/permanent``):
+  a share that does not exist and a share someone else created are the same
+  typed 404 ``not_found_or_out_of_scope`` (it used to be 404 vs 403, which
+  confirmed that a guessed id existed). ``GET /shares`` lists only the
+  caller's own. ``GET`` / ``PUT /shares/{id}`` were removed in P6: nothing
+  called them.
+- ``POST /shares`` only shares what the caller may read: their own resource
+  (or one filed into their team), a file of a project they can read, a folder
+  of a team they belong to. It used to share any id, and a share is a public
+  read grant — that was a way to read anybody's file.
+- Visitor routes (``/shares/code/{code}...``) go through
+  ``app/api/share_access.py``: the access route hands out a share grant once
+  the password has been checked, and the comment routes demand that grant on
+  a protected share.
 """
 
 import secrets
 import string
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
+from app.api.share_access import (
+    is_live,
+    load_share,
+    password_matches,
+    sign_share_grant,
+    token_opens_share,
+)
 from app.core.deps import AuthDep, OptionalAuthDep
-from app.schemas.shares import ShareAccessRequest, ShareCreate, ShareUpdate
+from app.schemas.envelope import Envelope
+from app.schemas.share_responses import (
+    ShareComment,
+    ShareCommentRow,
+    ShareListResponse,
+    ShareMessageResponse,
+    ShareRow,
+    ShareStatusToggleResponse,
+    ShareVisitorView,
+)
+from app.schemas.shares import ShareAccessRequest, ShareCreate
 from app.services.modules.gate import require_module
 
 
@@ -38,6 +74,16 @@ router = APIRouter(
 SHARE_CODE_LENGTH = 8
 SHARE_CODE_ALPHABET = string.ascii_letters + string.digits
 
+ShareTokenQuery = Annotated[
+    Optional[str],
+    Query(
+        description=(
+            "The access_token from POST /shares/code/{code}. Required when "
+            "the share has a password."
+        )
+    ),
+]
+
 
 # ============================================
 # Helper functions
@@ -52,33 +98,6 @@ def _generate_share_code(length: int = SHARE_CODE_LENGTH) -> str:
 def _build_share_url(share_code: str) -> str:
     """Build the public URL for a share code."""
     return f"/s/{share_code}"
-
-
-def _is_expired(share: dict) -> bool:
-    """Check whether a share has expired by time or max views."""
-    if share.get("status") != "active":
-        return True
-
-    expires_at = share.get("expires_at")
-    if expires_at:
-        if isinstance(expires_at, str):
-            try:
-                expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-        if isinstance(expires_at, datetime):
-            now = datetime.now(timezone.utc)
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if now > expires_at:
-                return True
-
-    max_views = share.get("max_views")
-    view_count = share.get("view_count", 0)
-    if max_views is not None and view_count >= max_views:
-        return True
-
-    return False
 
 
 def _enrich_share(share: dict) -> dict:
@@ -104,18 +123,202 @@ def _row_to_dict(row) -> dict:
     return out
 
 
+def _not_found(message: str = "Share not found") -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={"code": NOT_FOUND_OR_OUT_OF_SCOPE, "message": message},
+    )
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resources_scope(reason: str):
+    """``resources`` is user-scoped; a visitor has no user scope at all."""
+    from app.db.scope import is_enforced, system_request_scope
+
+    if is_enforced("resources"):
+        return system_request_scope(reason=f"shares: {reason}")
+    return nullcontext()
+
+
+async def _load_owned_share(share_id: str, user_id: str, *columns) -> dict:
+    """``columns`` of the caller's own share row, or the typed 404 (missing
+    and foreign are indistinguishable)."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Shares
+
+    sid = _as_int(share_id)
+    if sid is None:
+        raise _not_found()
+    async with read_scope() as session:
+        row = (
+            (await session.execute(select(*columns).where(Shares.id == sid).limit(1)))
+            .mappings()
+            .first()
+        )
+    if not row or str(row["shared_by"]) != str(user_id):
+        raise _not_found()
+    return _row_to_dict(row)
+
+
+# ============================================
+# Share target checks (POST /shares)
+# ============================================
+
+
+async def _in_team(session, team_id: int, user_id: str) -> bool:
+    from sqlalchemy import select
+
+    from app.models import TeamMembers
+
+    hit = (
+        await session.execute(
+            select(TeamMembers.team_id)
+            .where(TeamMembers.team_id == team_id)
+            .where(TeamMembers.user_id == user_id)
+            .limit(1)
+        )
+    ).first()
+    return hit is not None
+
+
+async def _can_share_project_file(file_id: int, user_id: str) -> bool:
+    from sqlalchemy import select
+
+    from app.core.scope_guards import _resolve_project_access
+    from app.db.session import read_scope
+    from app.models import ProjectFiles
+
+    async with read_scope() as session:
+        project_id = (
+            await session.execute(
+                select(ProjectFiles.project_id).where(ProjectFiles.id == file_id)
+            )
+        ).scalar()
+    if project_id is None:
+        return False
+    access = await _resolve_project_access(str(project_id), user_id)
+    return bool(access and access.can_read)
+
+
+async def _can_share_folder(folder_id: int, user_id: str) -> bool:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Folders
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Folders.scope_id, Folders.created_by).where(
+                    Folders.id == folder_id
+                )
+            )
+        ).first()
+        if row is None:
+            return False
+        if str(row[1]) == str(user_id):
+            return True
+        return await _in_team(session, row[0], user_id)
+
+
+async def _version_belongs_to_file(version_id: int, file_id: int | None) -> bool:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import FileVersions
+
+    if file_id is None:
+        return False
+    async with read_scope() as session:
+        owner = (
+            await session.execute(
+                select(FileVersions.file_id).where(FileVersions.id == version_id)
+            )
+        ).scalar()
+    return owner is not None and owner == file_id
+
+
+async def _require_share_targets(data: ShareCreate, user_id: str) -> dict:
+    """Every id in ``data`` exists and the caller may share it; returns the
+    ids as ints. A target the caller cannot read is the typed 404."""
+    from app.api.media_access_guard import caller_can_read_resource
+    from app.db.session import read_scope
+
+    raw = {
+        "resource_id": data.resource_id,
+        "project_file_id": data.project_file_id,
+        "folder_id": data.folder_id,
+        "version_id": data.version_id,
+        "team_id": data.team_id,
+    }
+    ids = {k: _as_int(v) for k, v in raw.items() if v}
+    if any(v is None for v in ids.values()):
+        raise _not_found("Share target not found")
+
+    checks = []
+    if "resource_id" in ids:
+        checks.append(caller_can_read_resource(ids["resource_id"], user_id))
+    if "project_file_id" in ids:
+        checks.append(_can_share_project_file(ids["project_file_id"], user_id))
+    if "folder_id" in ids:
+        checks.append(_can_share_folder(ids["folder_id"], user_id))
+    if "version_id" in ids:
+        checks.append(
+            _version_belongs_to_file(ids["version_id"], ids.get("project_file_id"))
+        )
+    for check in checks:
+        if not await check:
+            raise _not_found("Share target not found")
+    if "team_id" in ids:
+        async with read_scope() as session:
+            if not await _in_team(session, ids["team_id"], user_id):
+                raise _not_found("Team not found")
+    return ids
+
+
 # ============================================
 # Authenticated endpoints
 # ============================================
 
 
-@router.post("")
+async def _unique_share_code() -> str:
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Shares
+
+    for _ in range(5):
+        share_code = _generate_share_code()
+        async with read_scope() as session:
+            exists = (
+                await session.execute(
+                    select(Shares.id).where(Shares.share_code == share_code).limit(1)
+                )
+            ).scalar()
+        if exists is None:
+            return share_code
+    raise HTTPException(
+        status_code=500,
+        detail="Failed to generate a unique share code. Please try again.",
+    )
+
+
+@router.post("", response_model=Envelope[ShareRow])
 async def create_share(data: ShareCreate, auth: AuthDep):
     """
     Create a new share.
 
     At least one of resource_id, project_file_id, or folder_id must be
-    provided.  A unique 8-character share code is generated automatically.
+    provided, and the caller must be able to read it.  A unique 8-character
+    share code is generated automatically.
 
     Authentication: Bearer Token or API Key
     """
@@ -127,32 +330,14 @@ async def create_share(data: ShareCreate, auth: AuthDep):
         )
 
     try:
-        from sqlalchemy import insert, select
+        from sqlalchemy import insert
 
-        from app.db.session import read_scope, write_scope
+        from app.db.session import write_scope
         from app.models import Shares
 
-        # Generate a unique share code with retry
-        share_code = _generate_share_code()
-        for _ in range(5):
-            async with read_scope() as session:
-                exists = (
-                    await session.execute(
-                        select(Shares.id)
-                        .where(Shares.share_code == share_code)
-                        .limit(1)
-                    )
-                ).scalar()
-            if exists is None:
-                break
-            share_code = _generate_share_code()
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate a unique share code. Please try again.",
-            )
+        ids = await _require_share_targets(data, auth.user_id)
+        share_code = await _unique_share_code()
 
-        # FK ids are BIGINT columns → coerce the schema's str fields to int;
         # expires_at is timestamptz → bind the native datetime (not isoformat).
         insert_data = {
             "share_code": share_code,
@@ -161,24 +346,14 @@ async def create_share(data: ShareCreate, auth: AuthDep):
             "share_name": data.share_name,
             "allow_download": data.allow_download,
             "watermark": data.watermark,
+            **ids,
         }
-
-        if data.resource_id:
-            insert_data["resource_id"] = int(data.resource_id)
-        if data.project_file_id:
-            insert_data["project_file_id"] = int(data.project_file_id)
-        if data.folder_id:
-            insert_data["folder_id"] = int(data.folder_id)
-        if data.version_id:
-            insert_data["version_id"] = int(data.version_id)
         if data.password:
             insert_data["password"] = data.password
         if data.expires_at:
             insert_data["expires_at"] = data.expires_at
         if data.max_views is not None:
             insert_data["max_views"] = data.max_views
-        if data.team_id:
-            insert_data["team_id"] = int(data.team_id)
 
         async with write_scope() as session:
             row = (
@@ -207,7 +382,7 @@ async def create_share(data: ShareCreate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to create share")
 
 
-@router.get("")
+@router.get("", response_model=ShareListResponse)
 async def list_shares(
     auth: AuthDep,
     share_type: Optional[str] = Query(
@@ -234,6 +409,12 @@ async def list_shares(
 
     Authentication: Bearer Token or API Key
     """
+    team_filter = None
+    if team_id and team_id != "personal":
+        team_filter = _as_int(team_id)
+        if team_filter is None:
+            raise HTTPException(status_code=400, detail="Invalid team_id")
+
     try:
         from sqlalchemy import select
 
@@ -248,8 +429,8 @@ async def list_shares(
 
         if team_id == "personal":
             stmt = stmt.where(Shares.team_id.is_(None))
-        elif team_id:
-            stmt = stmt.where(Shares.team_id == int(team_id))
+        elif team_filter is not None:
+            stmt = stmt.where(Shares.team_id == team_filter)
 
         if share_type:
             stmt = stmt.where(Shares.share_type == share_type)
@@ -274,161 +455,7 @@ async def list_shares(
         raise HTTPException(status_code=500, detail="Failed to list shares")
 
 
-@router.get("/{share_id}")
-async def get_share(share_id: str, auth: AuthDep):
-    """
-    Get detailed information about a share (owner only).
-
-    Returns full share details including view statistics.
-
-    Authentication: Bearer Token or API Key
-    """
-    try:
-        from sqlalchemy import select
-
-        from app.db.session import read_scope
-        from app.models import Shares, ShareViews
-
-        async with read_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(*Shares.__table__.columns)
-                        .where(Shares.id == int(share_id))
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not row:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        share = _row_to_dict(row)
-
-        if share["shared_by"] != auth.user_id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to view this share"
-            )
-
-        share = _enrich_share(share)
-
-        # Fetch recent view records
-        async with read_scope() as session:
-            views = (
-                (
-                    await session.execute(
-                        select(*ShareViews.__table__.columns)
-                        .where(ShareViews.share_id == int(share_id))
-                        .order_by(ShareViews.last_viewed_at.desc())
-                        .limit(50)
-                    )
-                )
-                .mappings()
-                .all()
-            )
-        share["recent_views"] = [_row_to_dict(v) for v in views]
-
-        return {"success": True, "data": share}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get share {share_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get share")
-
-
-@router.put("/{share_id}")
-async def update_share(share_id: str, data: ShareUpdate, auth: AuthDep):
-    """
-    Update share settings (owner only).
-
-    Allows modifying password, expiration, download permission, and watermark.
-
-    Authentication: Bearer Token or API Key
-    """
-    try:
-        from sqlalchemy import select, update
-
-        from app.db.session import read_scope, write_scope
-        from app.models import Shares
-
-        # Verify ownership
-        async with read_scope() as session:
-            existing = (
-                (
-                    await session.execute(
-                        select(Shares.id, Shares.shared_by, Shares.status)
-                        .where(Shares.id == int(share_id))
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        if existing["shared_by"] != auth.user_id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to update this share"
-            )
-
-        if existing["status"] == "cancelled":
-            raise HTTPException(
-                status_code=400, detail="Cannot update a cancelled share"
-            )
-
-        update_data = {}
-
-        if data.share_name is not None:
-            update_data["share_name"] = data.share_name
-        if data.password is not None:
-            # Empty string means remove password
-            update_data["password"] = data.password if data.password else None
-        if data.allow_download is not None:
-            update_data["allow_download"] = data.allow_download
-        if data.expires_at is not None:
-            update_data["expires_at"] = data.expires_at
-        if data.max_views is not None:
-            update_data["max_views"] = data.max_views
-        if data.watermark is not None:
-            update_data["watermark"] = data.watermark
-
-        if not update_data:
-            raise HTTPException(status_code=400, detail="No fields to update")
-
-        async with write_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        update(Shares)
-                        .where(Shares.id == int(share_id))
-                        .values(**update_data)
-                        .returning(*Shares.__table__.columns)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to update share")
-
-        updated = _enrich_share(_row_to_dict(row))
-        logger.info(f"Share {share_id} updated by user {auth.user_id}")
-        return {"success": True, "data": updated}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update share {share_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update share")
-
-
-@router.delete("/{share_id}")
+@router.delete("/{share_id}", response_model=ShareStatusToggleResponse)
 async def toggle_share_status(share_id: str, auth: AuthDep):
     """
     Toggle share status: active → inactive, inactive → active.
@@ -436,29 +463,14 @@ async def toggle_share_status(share_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        from sqlalchemy import select, update
+        from sqlalchemy import update
 
-        from app.db.session import read_scope, write_scope
+        from app.db.session import write_scope
         from app.models import Shares
 
-        async with read_scope() as session:
-            existing = (
-                (
-                    await session.execute(
-                        select(Shares.id, Shares.shared_by, Shares.status)
-                        .where(Shares.id == int(share_id))
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        if existing["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized")
+        existing = await _load_owned_share(
+            share_id, auth.user_id, Shares.id, Shares.shared_by, Shares.status
+        )
 
         # Toggle: active → inactive, inactive/cancelled → active
         new_status = "inactive" if existing["status"] == "active" else "active"
@@ -467,14 +479,15 @@ async def toggle_share_status(share_id: str, auth: AuthDep):
             updated = (
                 await session.execute(
                     update(Shares)
-                    .where(Shares.id == int(share_id))
+                    .where(Shares.id == existing["id"])
+                    .where(Shares.shared_by == auth.user_id)
                     .values(status=new_status)
                     .returning(Shares.id)
                 )
             ).scalar()
 
         if updated is None:
-            raise HTTPException(status_code=500, detail="Failed to update share status")
+            raise _not_found()
 
         logger.info(f"Share {share_id} toggled to {new_status} by user {auth.user_id}")
         return {"success": True, "message": f"Share {new_status}", "status": new_status}
@@ -486,7 +499,7 @@ async def toggle_share_status(share_id: str, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to update share")
 
 
-@router.delete("/{share_id}/permanent")
+@router.delete("/{share_id}/permanent", response_model=ShareMessageResponse)
 async def delete_share_permanent(share_id: str, auth: AuthDep):
     """
     Permanently delete a share record (hard delete).
@@ -494,32 +507,21 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
     Authentication: Bearer Token or API Key
     """
     try:
-        from sqlalchemy import delete, select
+        from sqlalchemy import delete
 
-        from app.db.session import read_scope, write_scope
+        from app.db.session import write_scope
         from app.models import Shares
 
-        async with read_scope() as session:
-            existing = (
-                (
-                    await session.execute(
-                        select(Shares.id, Shares.shared_by)
-                        .where(Shares.id == int(share_id))
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        if existing["shared_by"] != auth.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized")
+        existing = await _load_owned_share(
+            share_id, auth.user_id, Shares.id, Shares.shared_by
+        )
 
         async with write_scope() as session:
-            await session.execute(delete(Shares).where(Shares.id == int(share_id)))
+            await session.execute(
+                delete(Shares)
+                .where(Shares.id == existing["id"])
+                .where(Shares.shared_by == auth.user_id)
+            )
 
         logger.info(f"Share {share_id} permanently deleted by user {auth.user_id}")
         return {"success": True, "message": "Share deleted"}
@@ -536,7 +538,131 @@ async def delete_share_permanent(share_id: str, auth: AuthDep):
 # ============================================
 
 
-@router.post("/code/{share_code}")
+async def _record_view(share_id: int, viewer_id: Optional[str]) -> None:
+    """Upsert the viewer's ``share_views`` row (anonymous: always a new row).
+    last_viewed_at is timestamptz → bind a native datetime (asyncpg rejects
+    ISO strings)."""
+    from sqlalchemy import insert, select, update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import ShareViews
+
+    now_dt = datetime.now(timezone.utc)
+    if not viewer_id:
+        async with write_scope() as session:
+            await session.execute(
+                insert(ShareViews).values(share_id=share_id, last_viewed_at=now_dt)
+            )
+        return
+
+    async with read_scope() as session:
+        view_record = (
+            (
+                await session.execute(
+                    select(ShareViews.id, ShareViews.view_count)
+                    .where(ShareViews.share_id == share_id)
+                    .where(ShareViews.viewer_id == viewer_id)
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    async with write_scope() as session:
+        if view_record:
+            await session.execute(
+                update(ShareViews)
+                .where(ShareViews.id == view_record["id"])
+                .values(
+                    view_count=view_record["view_count"] + 1,
+                    last_viewed_at=now_dt,
+                )
+            )
+        else:
+            await session.execute(
+                insert(ShareViews).values(
+                    share_id=share_id, viewer_id=viewer_id, last_viewed_at=now_dt
+                )
+            )
+
+
+async def _resource_preview_meta(resource_id: Any) -> dict:
+    """mime_type / filename / cover / media_id of the shared resource, for the
+    visitor's preview. Empty when the resource is gone.
+
+    ``resources`` is user-scoped and a visitor has no scope: without the
+    system scope this lookup raised under ``SCOPE_ENFORCE_RESOURCES`` (on in
+    production), the except below swallowed it, and every share page lost
+    its preview metadata."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Resources
+
+    if not resource_id:
+        return {}
+    try:
+        async with _resources_scope("visitor preview of the shared resource"):
+            async with read_scope() as session:
+                res = (
+                    (
+                        await session.execute(
+                            select(
+                                Resources.mime_type,
+                                Resources.file_type,
+                                Resources.filename,
+                                Resources.cover_image_path,
+                                Resources.thumbnail_path,
+                                Resources.media_id,
+                            )
+                            .where(Resources.id == resource_id)
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+    except Exception as e:
+        logger.warning(f"Failed to fetch resource metadata for share: {e}")
+        return {}
+    if not res:
+        return {}
+    return {
+        "mime_type": res.get("mime_type"),
+        "file_type": res.get("file_type"),
+        "filename": res.get("filename"),
+        "cover_image_path": res.get("cover_image_path"),
+        "thumbnail_path": res.get("thumbnail_path"),
+        "media_id": (str(res["media_id"]) if res.get("media_id") else None),
+    }
+
+
+async def _require_open_share(share: dict) -> None:
+    """410 for a share that is switched off or used up. An expired share that
+    still says ``active`` is flipped to ``expired`` on the way out."""
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import Shares
+
+    if share["status"] in ("cancelled", "inactive"):
+        raise HTTPException(status_code=410, detail="This share is no longer available")
+    if share["status"] != "active" or not is_live(share, count_views=True):
+        if share["status"] == "active":
+            async with write_scope() as session:
+                await session.execute(
+                    update(Shares)
+                    .where(Shares.id == share["id"])
+                    .values(status="expired")
+                )
+        raise HTTPException(status_code=410, detail="This share has expired")
+
+
+@router.post(
+    "/code/{share_code}",
+    response_model=Envelope[ShareVisitorView],
+    response_model_exclude_unset=True,
+)
 async def access_share_by_code(
     share_code: str,
     body: ShareAccessRequest,
@@ -546,15 +672,16 @@ async def access_share_by_code(
     Public: access shared content by share code.
 
     Validates password (if set), checks expiration and max view limits,
-    increments view_count, and records a view in share_views.
+    increments view_count, and records a view in share_views. Returns an
+    ``access_token`` (share grant) for the media and comment routes.
 
     Authentication: Optional (viewer identity is recorded if authenticated)
     """
     try:
-        from sqlalchemy import insert, select, update
+        from sqlalchemy import select, update
 
         from app.db.session import read_scope, write_scope
-        from app.models import Resources, Shares, ShareViews
+        from app.models import Shares
 
         # Look up the share by code
         async with read_scope() as session:
@@ -574,24 +701,7 @@ async def access_share_by_code(
             raise HTTPException(status_code=404, detail="Share not found")
 
         share = _row_to_dict(row)
-
-        # Check status
-        if share["status"] in ("cancelled", "inactive"):
-            raise HTTPException(
-                status_code=410, detail="This share is no longer available"
-            )
-
-        # Check expiration
-        if _is_expired(share):
-            # Auto-update status to expired if it was still active
-            if share["status"] == "active":
-                async with write_scope() as session:
-                    await session.execute(
-                        update(Shares)
-                        .where(Shares.id == share["id"])
-                        .values(status="expired")
-                    )
-            raise HTTPException(status_code=410, detail="This share has expired")
+        await _require_open_share(share)
 
         # Check password
         if share.get("password"):
@@ -601,7 +711,7 @@ async def access_share_by_code(
                     detail="Password required",
                     headers={"X-Share-Password-Required": "true"},
                 )
-            if body.password != share["password"]:
+            if not password_matches(share["password"], body.password):
                 raise HTTPException(status_code=401, detail="Incorrect password")
 
         # Increment view_count on the share
@@ -613,97 +723,10 @@ async def access_share_by_code(
                 .values(view_count=new_view_count)
             )
 
-        # Record/update share_views. last_viewed_at is timestamptz → bind a
-        # native datetime (asyncpg rejects ISO strings).
         viewer_id = auth.user_id if auth else None
-        now_dt = datetime.now(timezone.utc)
-
-        if viewer_id:
-            # Check if this viewer already has a record
-            async with read_scope() as session:
-                view_record = (
-                    (
-                        await session.execute(
-                            select(ShareViews.id, ShareViews.view_count)
-                            .where(ShareViews.share_id == share["id"])
-                            .where(ShareViews.viewer_id == viewer_id)
-                            .limit(1)
-                        )
-                    )
-                    .mappings()
-                    .first()
-                )
-
-            if view_record:
-                # Update existing view record
-                async with write_scope() as session:
-                    await session.execute(
-                        update(ShareViews)
-                        .where(ShareViews.id == view_record["id"])
-                        .values(
-                            view_count=view_record["view_count"] + 1,
-                            last_viewed_at=now_dt,
-                        )
-                    )
-            else:
-                # Create new view record
-                async with write_scope() as session:
-                    await session.execute(
-                        insert(ShareViews).values(
-                            share_id=share["id"],
-                            viewer_id=viewer_id,
-                            last_viewed_at=now_dt,
-                        )
-                    )
-        else:
-            # Anonymous viewer: create a record without viewer_id
-            async with write_scope() as session:
-                await session.execute(
-                    insert(ShareViews).values(
-                        share_id=share["id"],
-                        last_viewed_at=now_dt,
-                    )
-                )
-
-        # Fetch resource metadata for preview (mime_type, filename, cover)
-        resource_meta = {}
-        if share.get("resource_id"):
-            try:
-                async with read_scope() as session:
-                    res = (
-                        (
-                            await session.execute(
-                                select(
-                                    Resources.mime_type,
-                                    Resources.file_type,
-                                    Resources.filename,
-                                    Resources.cover_image_path,
-                                    Resources.thumbnail_path,
-                                    Resources.media_id,
-                                )
-                                .where(Resources.id == share["resource_id"])
-                                .limit(1)
-                            )
-                        )
-                        .mappings()
-                        .first()
-                    )
-                if res:
-                    resource_meta = {
-                        "mime_type": res.get("mime_type"),
-                        "file_type": res.get("file_type"),
-                        "filename": res.get("filename"),
-                        "cover_image_path": res.get("cover_image_path"),
-                        "thumbnail_path": res.get("thumbnail_path"),
-                        "media_id": (
-                            str(res["media_id"]) if res.get("media_id") else None
-                        ),
-                    }
-            except Exception as e:
-                logger.warning(f"Failed to fetch resource metadata for share: {e}")
+        await _record_view(share["id"], viewer_id)
 
         # Build the response (strip sensitive fields)
-        share["view_count"] = new_view_count
         response_data = {
             "id": share["id"],
             "share_type": share["share_type"],
@@ -717,7 +740,10 @@ async def access_share_by_code(
             "folder_id": share.get("folder_id"),
             "version_id": share.get("version_id"),
             "created_at": share["created_at"],
-            **resource_meta,
+            "access_token": sign_share_grant(
+                {"id": share["id"], "password": share.get("password")}
+            ),
+            **(await _resource_preview_meta(share.get("resource_id"))),
         }
 
         logger.info(
@@ -738,55 +764,64 @@ async def access_share_by_code(
 # ============================================
 
 
-@router.get("/code/{share_code}/comments")
+async def _review_share_for_comments(
+    share_code: str, share_token: Optional[str], action: str
+) -> dict:
+    """The live review share behind ``share_code``, after the same checks a
+    visitor passes on ``POST /shares/code/{code}``.
+
+    The comment routes used to check only the code: a password-protected
+    review's comments were readable (and writable) without the password, and
+    GET also served inactive and expired shares.
+    """
+    share = await load_share(code=share_code)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+
+    if share["status"] == "cancelled":
+        raise HTTPException(status_code=410, detail="Share cancelled")
+    # Views are not counted again here: the visitor spent one on the page.
+    if not is_live(share, count_views=False):
+        raise HTTPException(status_code=410, detail="Share is not active")
+    if share["share_type"] != "review":
+        raise HTTPException(
+            status_code=400, detail="Comments only available for review shares"
+        )
+    if share.get("resource_id") is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot {action}: share has no associated resource",
+        )
+    if share.get("password") and not await token_opens_share(share_token, share["id"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Password required",
+            headers={"X-Share-Password-Required": "true"},
+        )
+    return share
+
+
+@router.get("/code/{share_code}/comments", response_model=Envelope[list[ShareComment]])
 async def get_share_comments(
     share_code: str,
     auth: OptionalAuthDep = None,
+    share_token: ShareTokenQuery = None,
 ):
     """
     Get comments for a shared resource (public endpoint).
 
     Returns review_comments for the share's resource, ordered by created_at.
+    A password-protected share needs ``share_token`` (the access_token).
     """
     try:
         from sqlalchemy import select
 
         from app.db.session import read_scope
-        from app.models import ReviewComments, Shares
+        from app.models import ReviewComments
 
-        # Look up share
-        async with read_scope() as session:
-            share = (
-                (
-                    await session.execute(
-                        select(
-                            Shares.id,
-                            Shares.status,
-                            Shares.share_type,
-                            Shares.resource_id,
-                        )
-                        .where(Shares.share_code == share_code)
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not share:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        if share["status"] == "cancelled":
-            raise HTTPException(status_code=410, detail="Share cancelled")
-        if share["share_type"] != "review":
-            raise HTTPException(
-                status_code=400, detail="Comments only available for review shares"
-            )
-        if share.get("resource_id") is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot load comments: share has no associated resource",
-            )
+        share = await _review_share_for_comments(
+            share_code, share_token, "load comments"
+        )
 
         # Fetch comments for this share's resource
         async with read_scope() as session:
@@ -820,58 +855,30 @@ async def get_share_comments(
         raise HTTPException(status_code=500, detail="Failed to get comments")
 
 
-@router.post("/code/{share_code}/comments")
+@router.post("/code/{share_code}/comments", response_model=Envelope[ShareCommentRow])
 async def create_share_comment(
     share_code: str,
     body: ShareCommentCreate,
     auth: OptionalAuthDep = None,
+    share_token: ShareTokenQuery = None,
 ):
     """
     Create a comment on a shared resource.
 
     Authenticated review-share members only (review_comments.author_id is
     NOT NULL — anonymous posts are rejected with 401).
-    Only available for review-type shares.
+    Only available for review-type shares; a password-protected share needs
+    ``share_token`` (the access_token).
     """
     try:
-        from sqlalchemy import insert, select
+        from sqlalchemy import insert
 
-        from app.db.session import read_scope, write_scope
-        from app.models import ReviewComments, Shares
+        from app.db.session import write_scope
+        from app.models import ReviewComments
 
-        # Look up share
-        async with read_scope() as session:
-            share = (
-                (
-                    await session.execute(
-                        select(
-                            Shares.id,
-                            Shares.status,
-                            Shares.share_type,
-                            Shares.resource_id,
-                        )
-                        .where(Shares.share_code == share_code)
-                        .limit(1)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-
-        if not share:
-            raise HTTPException(status_code=404, detail="Share not found")
-
-        if share["status"] != "active":
-            raise HTTPException(status_code=410, detail="Share is not active")
-        if share["share_type"] != "review":
-            raise HTTPException(
-                status_code=400, detail="Comments only available for review shares"
-            )
-        if share.get("resource_id") is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot add comments: share has no associated resource",
-            )
+        share = await _review_share_for_comments(
+            share_code, share_token, "add comments"
+        )
 
         # author_id is NOT NULL in DB, so anonymous comments are rejected.
         if auth is None:
@@ -904,10 +911,7 @@ async def create_share_comment(
             raise HTTPException(status_code=500, detail="Failed to create comment")
 
         comment = _row_to_dict(row)
-        logger.info(
-            f"Comment created on share {share_code} by "
-            f"{auth.user_id if auth else 'anonymous'}"
-        )
+        logger.info(f"Comment created on share {share_code} by {auth.user_id}")
         return {"success": True, "data": comment}
 
     except HTTPException:

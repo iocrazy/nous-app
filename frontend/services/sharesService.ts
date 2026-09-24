@@ -5,23 +5,22 @@
  *
  * Provides functions for creating, fetching, updating,
  * cancelling, and accessing shares via share code.
+ *
+ * Shapes come from the backend (`types/api.ts`, "P6 shares"). Failures arrive
+ * as non-2xx `ErrorResponse` bodies, which `apiClient` turns into an
+ * `ApiError` carrying the backend's `error` text — a 2xx body is always a
+ * success, so there is nothing to unwrap but `data`.
  */
 
 import { apiClient, apiFetch } from './apiClient';
-import { Share } from '../types';
+import type {
+  Envelope,
+  Share,
+  ShareStatusToggle,
+  ShareVisitorView,
+} from '../types/api';
 
-interface Envelope<T> {
-  success: boolean;
-  message?: string;
-  data: T;
-}
-
-function unwrap<T>(result: Envelope<T>): T {
-  if (!result.success) {
-    throw new Error(result.message || 'Request failed');
-  }
-  return result.data;
-}
+type ShareId = Share['id'] | string;
 
 /**
  * Create a new share.
@@ -40,72 +39,42 @@ export const createShare = async (data: {
   watermark?: boolean;
 }): Promise<Share> => {
   const result = await apiClient.post<Envelope<Share>>('/api/v1/shares', data);
-  return unwrap(result);
+  return result.data;
 };
 
 /**
- * Fetch shares list with optional filters.
+ * Fetch the caller's shares with optional filters.
  */
 export const fetchShares = async (params?: {
-  resource_id?: string;
-  project_file_id?: string;
-  folder_id?: string;
+  share_type?: string;
   status?: string;
   team_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<Share[]> => {
-  const result = await apiClient.get<Envelope<Share[]>>('/api/v1/shares', {
-    query: params ?? {},
-  });
-  return unwrap(result);
+  const result = await apiClient.get<Envelope<Share[]> & { count: number }>(
+    '/api/v1/shares',
+    { query: params ?? {} },
+  );
+  return result.data;
 };
 
 /**
- * Get a single share by ID.
+ * Toggle a share between active and inactive. Returns the new status.
  */
-export const getShare = async (shareId: string): Promise<Share> => {
-  const result = await apiClient.get<Envelope<Share>>(
+export const cancelShare = async (
+  shareId: ShareId,
+): Promise<ShareStatusToggle['status']> => {
+  const result = await apiClient.delete<ShareStatusToggle>(
     `/api/v1/shares/${shareId}`,
   );
-  return unwrap(result);
+  return result.status;
 };
 
 /**
- * Update an existing share.
+ * Permanently delete a share (hard delete).
  */
-export const updateShare = async (
-  shareId: string,
-  data: {
-    share_name?: string;
-    password?: string | null;
-    allow_download?: boolean;
-    expires_at?: string | null;
-    max_views?: number | null;
-    watermark?: boolean;
-  },
-): Promise<Share> => {
-  const result = await apiClient.put<Envelope<Share>>(
-    `/api/v1/shares/${shareId}`,
-    data,
-  );
-  return unwrap(result);
-};
-
-/**
- * Cancel (soft-delete) a share.
- */
-export const cancelShare = async (shareId: string): Promise<void> => {
-  const result = await apiClient.delete<Envelope<null>>(
-    `/api/v1/shares/${shareId}`,
-  );
-  unwrap(result);
-};
-
-/**
- * Permanently delete a share (hard delete, only for expired/cancelled).
- */
-export const deleteSharePermanent = async (shareId: string): Promise<void> => {
+export const deleteSharePermanent = async (shareId: ShareId): Promise<void> => {
   await apiClient.delete(`/api/v1/shares/${shareId}/permanent`);
 };
 
@@ -113,15 +82,18 @@ export const deleteSharePermanent = async (shareId: string): Promise<void> => {
  * Access a share by its public share code (no auth required for public access).
  * Uses apiFetch directly because this endpoint is unauthenticated and accepts
  * password via JSON body.
+ *
+ * The returned `access_token` is what the media and comment routes take as
+ * `share_token`; a password-protected share accepts nothing else.
  */
 export const accessShare = async (
   shareCode: string,
   password?: string,
-): Promise<Share> => {
+): Promise<ShareVisitorView> => {
   const response = await apiFetch(`/api/v1/shares/code/${shareCode}`, {
     method: 'POST',
     json: { password: password || null },
   });
-  const result: Envelope<Share> = await response.json();
-  return unwrap(result);
+  const result: Envelope<ShareVisitorView> = await response.json();
+  return result.data;
 };

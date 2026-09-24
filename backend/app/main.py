@@ -649,8 +649,14 @@ try:
 
         Handles old cached frontends that still use /media/{file_path} URLs.
         New frontends should use /media/{id} instead.
+
+        A share link does not open this route. There is no id here to match
+        against the share, and ``_authenticate_media_request`` lets any
+        non-empty ``share_token`` through unchecked (the id routes check it
+        afterwards) — so ``?share_token=x`` used to serve ANY file under the
+        media root to anyone, signed in or not.
         """
-        await _authenticate_media_request(request, token, share_token, review_token)
+        await _authenticate_media_request(request, token, None, review_token)
         return _serve_file(file_path)
 
 except ValueError:

@@ -186,6 +186,33 @@ async def caller_can_read_resource_or_media(
     return await caller_can_read_media(rid, user_id)
 
 
+async def caller_can_read_resource(resource_id: Any, user_id: str | None) -> bool:
+    """True when ``resource_id`` is a ``resources`` row that ``user_id``
+    created or that is filed into a team ``user_id`` belongs to. Unlike
+    :func:`caller_can_read_resource_or_media` it never falls back to media
+    rules: an id that is not a resource is False."""
+    from app.db.session import read_scope
+    from app.models import Resources
+
+    rid = _as_id(resource_id)
+    if not user_id or rid is None:
+        return False
+    async with _cross_owner_scope("ownership of a resource id"):
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(Resources.id, Resources.creator_id).where(
+                        Resources.id == rid
+                    )
+                )
+            ).first()
+            if row is None:
+                return False
+            if str(row[1]) == str(user_id):
+                return True
+            return await _in_filing_team(session, [rid], user_id)
+
+
 async def require_media_access(
     media_id: Any, user_id: str | None, detail: str = MEDIA_NOT_FOUND
 ) -> None:
