@@ -9,6 +9,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from app.agent_framework.catalog_windows import refresh_catalog_windows
 from app.core.admin_deps import AdminAuthDep
 from app.repositories.nous_model_repository import (
     NousModelRepository,
@@ -79,6 +80,7 @@ def _to_response(row: dict, *, price_coverage: str | None = None) -> NousModelRe
         last_tested_at=(
             str(row["last_tested_at"]) if row.get("last_tested_at") else None
         ),
+        context_window_tokens=row.get("context_window_tokens"),
         price_coverage=price_coverage,
     )
 
@@ -220,6 +222,8 @@ async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
     if not row:
         raise HTTPException(status_code=500, detail="Failed to create model")
     logger.info(f"[Admin] Created Nous model: {body.name}")
+    # This process's window cache (mig 500); other processes reload on TTL.
+    await refresh_catalog_windows()
     return _to_response(row)
 
 
@@ -236,6 +240,7 @@ async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAut
     if not row:
         raise HTTPException(status_code=404, detail="Model not found")
     logger.info(f"[Admin] Updated Nous model: {model_id}")
+    await refresh_catalog_windows()
     return _to_response(row)
 
 
@@ -247,6 +252,7 @@ async def delete_nous_model(model_id: str, auth: AdminAuthDep):
     if not ok:
         raise HTTPException(status_code=404, detail="Model not found")
     logger.info(f"[Admin] Deleted Nous model: {model_id}")
+    await refresh_catalog_windows()
     return {"message": "Deleted"}
 
 

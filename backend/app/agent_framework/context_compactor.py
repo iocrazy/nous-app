@@ -242,16 +242,16 @@ class ContextCompactor:
             )
 
         window, window_known = resolve_model_window(model)
-        # Every tier below divides by `window`. When the table didn't know the
-        # model, that denominator is a default, and a wrong denominator makes
+        # Every tier below divides by `window`. When neither the catalog nor
+        # the table knew the model, that denominator is a default, and a wrong denominator makes
         # a confidently-wrong tier — so it rides every return path, including
         # green, which is where a mis-measured model is most likely to sit.
         window_notes: tuple[str, ...] = (
             ()
             if window_known
             else (
-                f"window is a fallback ({window} tokens): model={model!r} is "
-                "not in _MODEL_WINDOWS, so tier thresholds are relative to a "
+                f"window is a fallback ({window} tokens): model={model!r} has "
+                "no catalog/table window, so tier thresholds are relative to a "
                 "default, not to this model's real context window",
             )
         )

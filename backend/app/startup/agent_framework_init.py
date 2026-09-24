@@ -53,12 +53,24 @@ async def install_agent_primitives(app: FastAPI) -> None:
 
         dbos_orchestrator.set_bounds_registry(app.state.bounds_registry)
 
+        await warm_catalog_windows(app)
+
         logger.info(
             "Agent framework primitives ready "
             "(LifecycleBus + LaneQueue + BoundsRegistry + ContextEngineRegistry)"
         )
     except Exception as e:
         logger.warning(f"Agent framework primitive setup failed: {e}")
+
+
+async def warm_catalog_windows(app: FastAPI) -> None:
+    """Load the provider-catalog context windows (mig 500) before the first
+    turn, so step one of the first run already has the catalog's denominator.
+    ``refresh_catalog_windows`` never raises; a failed load leaves the table
+    layer answering until the runner's TTL reload retries."""
+    from app.agent_framework.catalog_windows import refresh_catalog_windows
+
+    await refresh_catalog_windows()
 
 
 async def _install_prometheus_pusher(app: FastAPI) -> None:
