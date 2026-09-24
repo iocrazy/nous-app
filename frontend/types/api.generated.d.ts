@@ -11682,10 +11682,10 @@ export interface paths {
          *     A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
          *     ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
          *     so the review page had no URL that could play an uploaded file. This is
-         *     that URL: the same dual transport as
-         *     ``resources_versions_router.serve_version_file`` (Bearer / API key, or the
-         *     signed media token in ``?token=``), then the same project read check as
-         *     every other read here, then ``serve_stored_file`` inline.
+         *     that URL. Its guard is the media variant of the project read guard: the
+         *     same read check, with the caller also accepted from the signed media
+         *     token in ``?token=``. The body serves the file inline via
+         *     ``serve_stored_file`` (Range-aware; ``sb://`` rows may 302 to a signed URL).
          */
         get: operations["stream_file_api_v1_projects__project_id__files__file_id__stream_get"];
         put?: never;

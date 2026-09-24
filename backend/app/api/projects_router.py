@@ -14,7 +14,6 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
-    Header,
     HTTPException,
     Query,
     Request,
@@ -26,6 +25,7 @@ from loguru import logger
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
+    verify_project_media_read_access,
     verify_project_read_access,
     verify_project_write_access,
 )
@@ -1403,34 +1403,19 @@ async def stream_file(
     file_id: str,
     request: Request,
     version_id: Optional[str] = Query(None, description="A file_versions id"),
-    authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
-    token: Optional[str] = Query(None, description="Signed media token"),
+    _project_guard: None = Depends(verify_project_media_read_access),
 ):
     """Play a project file in the review page's player.
 
     A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
     ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
     so the review page had no URL that could play an uploaded file. This is
-    that URL: the same dual transport as
-    ``resources_versions_router.serve_version_file`` (Bearer / API key, or the
-    signed media token in ``?token=``), then the same project read check as
-    every other read here, then ``serve_stored_file`` inline.
+    that URL. Its guard is the media variant of the project read guard: the
+    same read check, with the caller also accepted from the signed media
+    token in ``?token=``. The body serves the file inline via
+    ``serve_stored_file`` (Range-aware; ``sb://`` rows may 302 to a signed URL).
     """
-    from app.api.media_auth import validate_media_cookie
-    from app.core.deps import get_auth
-    from app.core.scope_guards import _check_project_access
     from app.services.library.media_serving import serve_stored_file
-
-    user_id: Optional[str] = None
-    if token and not authorization and not x_api_key:
-        user_id = await validate_media_cookie(token)
-    if user_id is None:
-        effective = authorization
-        if not effective and not x_api_key and token:
-            effective = f"Bearer {token}"
-        user_id = (await get_auth(request, effective, x_api_key)).user_id
-    await _check_project_access(project_id, str(user_id), write=False)
 
     svc = ProjectsService()
     try:

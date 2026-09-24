@@ -11,6 +11,7 @@ import pytest
 
 from app.api.projects_router import router
 from app.core.scope_guards import (
+    verify_project_media_read_access,
     verify_project_read_access,
     verify_project_write_access,
 )
@@ -49,9 +50,14 @@ def test_project_route_declares_guard(route):
     if key in EXEMPT:
         pytest.skip("no project_id target")
     calls = set(_flat_dependency_calls(route.dependant))
-    assert (
-        verify_project_read_access in calls or verify_project_write_access in calls
-    ), f"{key} has no project access guard"
+    # The media variant runs the same read check; it only also accepts the
+    # signed media token, for routes a bare <video src> loads.
+    guards = {
+        verify_project_read_access,
+        verify_project_write_access,
+        verify_project_media_read_access,
+    }
+    assert calls & guards, f"{key} has no project access guard"
 
 
 def _find_route(router_, path: str, method: str):

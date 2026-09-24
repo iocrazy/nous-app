@@ -16,7 +16,7 @@ Routes consume them as: `_guard: None = Depends(verify_scope_access)`.
 
 from typing import NamedTuple, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from app.core.deps import AuthContext, get_auth
 
@@ -198,6 +198,38 @@ async def verify_project_read_access(
     auth: AuthContext = Depends(get_auth),
 ) -> None:
     """Guard for `/projects/{project_id}/...` read targets."""
+    await _check_project_access(project_id, auth.user_id, write=False)
+
+
+async def get_auth_or_media_token(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Query(None, description="Signed media token"),
+) -> AuthContext:
+    """``get_auth`` plus the signed media token in ``?token=``.
+
+    Only for routes a bare ``<video>`` / ``<audio>`` / ``<img>`` loads: those
+    cannot send a header. Same transport as
+    ``resources_versions_router.serve_version_file``: a ``?token=`` is tried
+    as a media token first, then as a Supabase JWT; headers win when present.
+    """
+    from app.api.media_auth import validate_media_cookie
+
+    if token and not authorization and not x_api_key:
+        user_id = await validate_media_cookie(token)
+        if user_id:
+            return AuthContext(user_id=str(user_id), auth_type="media_token")
+        authorization = f"Bearer {token}"
+    return await get_auth(request, authorization, x_api_key)
+
+
+async def verify_project_media_read_access(
+    project_id: str,
+    auth: AuthContext = Depends(get_auth_or_media_token),
+) -> None:
+    """``verify_project_read_access`` for media routes: the same read check,
+    with the caller identified by :func:`get_auth_or_media_token`."""
     await _check_project_access(project_id, auth.user_id, write=False)
 
 

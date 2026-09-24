@@ -117,3 +117,25 @@ async def test_project_read_check_still_applies(client, wired, monkeypatch) -> N
     resp = await client.get(URL, params={"token": "someone-else"})
     assert resp.status_code == 403
     assert "served" not in wired
+
+
+@pytest.mark.asyncio
+async def test_header_credentials_win_over_the_query_token(
+    client, wired, monkeypatch
+) -> None:
+    from app.core.deps import AuthContext
+
+    async def _never(value):
+        raise AssertionError("the media token must not be consulted")
+
+    async def _header_auth(request, authorization, x_api_key):
+        assert authorization == "Bearer jwt"
+        return AuthContext(user_id=USER, auth_type="jwt")
+
+    monkeypatch.setattr(media_auth, "validate_media_cookie", _never)
+    monkeypatch.setattr(scope_guards, "get_auth", _header_auth)
+    resp = await client.get(
+        URL, params={"token": "good"}, headers={"Authorization": "Bearer jwt"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert wired["access"] == ("11", USER, False)
