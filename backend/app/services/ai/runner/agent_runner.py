@@ -1696,6 +1696,16 @@ class AgentRunner:
                 system_prompt=composed.system_message,
                 user_messages=user_messages,
                 model=composed.model,
+                # Measure once: the compactor already counted system + these
+                # messages with the guard's own functions. 0 is its "not
+                # measured" sentinel (kill switch / no window) and a crashed
+                # compactor has no stats — the guard counts for itself then.
+                measured_tokens=(
+                    compaction_stats.tokens_after
+                    if compaction_stats is not None
+                    and compaction_stats.tokens_after > 0
+                    else None
+                ),
             )
         except ContextWindowError as exc:
             logger.warning(f"[AgentRunner] context budget rejected: {exc}")

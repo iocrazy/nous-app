@@ -14,7 +14,14 @@ compactor on the agent path:
     | < 60 %        | green      | noop                                    |
     | 60-80 %       | yellow     | `prune` tool results (dedupe + age)     |
     | 80-90 %       | orange     | yellow + LLM summary of head, keep tail |
-    | > 90 %        | red        | orange, keeping fewer recent turns      |
+    | >= 90 %       | red        | orange, keeping fewer recent turns      |
+
+The red line IS the budget guard's rejection line
+(``context_window.REJECT_RATIO``, imported below — never re-typed here), and
+both sides count with ``tokenizer.count_messages_tokens``. A turn still at or
+over it after compaction is rejected by ``check_context_budget``; the
+emergency cap targets ``EMERGENCY_TARGET_PCT`` (0.70), under orange, so a
+capped turn clears the guard with a tenth of the window to spare.
 
 Orange / red summarise the head and keep the tail verbatim. The split point
 is walked back so no tool call is separated from its replies
@@ -41,7 +48,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.agent_framework._metrics_helper import inc_metric
-from app.agent_framework.context_window import resolve_model_window
+from app.agent_framework.context_window import REJECT_RATIO, resolve_model_window
 from app.agent_framework.message_truncation import cap_messages_tokens
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
 from app.agent_framework.tool_result_pruner import PruneStats, prune
@@ -60,14 +67,15 @@ class CompactionThresholds:
     """Token-budget percentages that move us between tiers.
 
     Defaults follow the "Anthropic effective harnesses" recommendation
-    (60/80/90). Conservative on purpose — burning a small amount of
+    (60/80/90); red is ``REJECT_RATIO`` so it cannot drift from the budget
+    guard's rejection line. Conservative on purpose — burning a small amount of
     cheap-model spend on early compaction is much cheaper than losing
     a turn to a context-window provider error.
     """
 
     yellow_pct: float = 0.60
     orange_pct: float = 0.80
-    red_pct: float = 0.90
+    red_pct: float = REJECT_RATIO
 
 
 @dataclass(frozen=True)
@@ -175,16 +183,12 @@ class ContextCompactor:
     # fallback is free and guaranteed to shrink.
     SUMMARY_ATTEMPTS = 2
 
-    # Emergency cap targets this fraction of the window for messages
-    # (rest reserved for system prompt). 0.80 lands a compacted run at
-    # the orange/red boundary — enough headroom for the next turn's
-    # tool output without immediately re-triggering compaction.
-    EMERGENCY_TARGET_PCT = 0.80
-
-    # Hard-stop floor when even the "keep recent" budget can't fit the
-    # window. Below this we give up and let the existing
-    # check_context_budget raise — same behaviour as before this module.
-    EMERGENCY_FLOOR_PCT = 0.95
+    # Emergency cap targets this fraction of the window for system +
+    # messages. Under orange (0.80) so the next turn's tool output does not
+    # re-trigger the summarizer at once, and a tenth of the window under the
+    # rejection line (REJECT_RATIO) so a capped turn is never rejected on the
+    # same turn — the old 0.80 target sat on the old 0.80 rejection line.
+    EMERGENCY_TARGET_PCT = 0.70
 
     def __init__(self, thresholds: Optional[CompactionThresholds] = None):
         self.thresholds = thresholds or CompactionThresholds()
@@ -380,9 +384,11 @@ class ContextCompactor:
             raise
         finally:
             await _emit(recorder, "compaction_end", end_payload)
-        if final_total / window > self.EMERGENCY_FLOOR_PCT:
+        if final_total >= int(window * REJECT_RATIO):
+            # Same comparison as check_context_budget, so this note and the
+            # rejection that follows can never disagree.
             notes.append(
-                f"still over emergency floor {self.EMERGENCY_FLOOR_PCT:.0%} "
+                f"still at/over the rejection line {REJECT_RATIO:.0%} "
                 f"after compaction; downstream budget check will reject"
             )
 
