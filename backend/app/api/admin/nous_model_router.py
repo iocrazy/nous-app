@@ -293,7 +293,11 @@ async def create_nous_model(body: NousModelCreate, auth: AdminAuthDep):
 async def update_nous_model(model_id: str, body: NousModelUpdate, auth: AdminAuthDep):
     """Update a Nous model."""
     repo = get_nous_model_repository()
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_none=True, exclude={"clear_context_window"})
+    # exclude_none can never write NULL; the explicit flag can (the schema
+    # already rejected it arriving together with a value).
+    if body.clear_context_window:
+        updates["context_window_tokens"] = None
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     if updates.get("name"):
