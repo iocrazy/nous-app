@@ -230,6 +230,10 @@ services:
       start_period: 90s
       retries: 3
     restart: unless-stopped
+    # 优雅停机窗口(fh2 T3)。默认 10s 后 SIGKILL,而 lifespan 关停链要先把在跑的
+    # agent run 收尾成 heartbeat_lost/worker_shutdown(限时 10s)、再给 DBOS 5s、
+    # 后台任务 3s —— 10s 不够,被 KILL 的 run 会在 running 上挂 2 分钟等清扫器。
+    stop_grace_period: 30s
 
   # falkordb（Graphiti L3 图记忆）已于 2026-09-22 下线：三个月 0 节点、get_context
   # 零读方；system_settings 已置 memory.l3_provider=none / graph_memory_enabled=false，

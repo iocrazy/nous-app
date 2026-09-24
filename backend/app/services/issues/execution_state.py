@@ -72,6 +72,57 @@ async def merge_execution_state(issue_id: int, patch: dict[str, Any]) -> None:
         await session.execute(merge_stmt(issue_id, patch))
 
 
+def increment_step_attempt_stmt(issue_id: int, step_key: str):
+    """Atomic per-step attempt counter (fh2 T3):
+
+        UPDATE issues SET execution_state = COALESCE(execution_state,'{}') ||
+            jsonb_build_object('step_attempts', jsonb_build_object(
+                :key, COALESCE((execution_state->'step_attempts'->>:key)::int, 0) + 1))
+        WHERE id = :issue
+        RETURNING execution_state->'step_attempts'->>:key
+
+    The read and the write are one statement under the row lock, so two
+    executions of the same step cannot both read ``n``. ``step_attempts`` keeps
+    ONLY the current key: a new step replaces it (count back to 1). Recovery
+    re-executes one step at a time per issue (the dispatch lock), so older keys
+    carry no information and the column stays bounded."""
+    from sqlalchemy import Integer, Text
+
+    key = cast(literal(step_key), Text)
+    state = func.coalesce(Issues.execution_state, cast(literal("{}"), JSONB))
+    previous = state.op("->", return_type=JSONB)(
+        cast(literal("step_attempts"), Text)
+    ).op("->>", return_type=Text)(key)
+    attempts = func.coalesce(cast(previous, Integer), 0) + 1
+    merged = state.op("||", return_type=JSONB)(
+        func.jsonb_build_object(
+            cast(literal("step_attempts"), Text), func.jsonb_build_object(key, attempts)
+        )
+    )
+    stored = Issues.execution_state.op("->", return_type=JSONB)(
+        cast(literal("step_attempts"), Text)
+    ).op("->>", return_type=Text)(key)
+    return (
+        update(Issues)
+        .where(Issues.id == int(issue_id))
+        .values(execution_state=merged)
+        .returning(stored)
+    )
+
+
+async def increment_step_attempt(issue_id: int, step_key: str) -> int | None:
+    """Count one more execution of ``step_key``; returns the new count, or None
+    when the issue row does not exist."""
+    from app.db.session import write_scope
+
+    async with write_scope() as session:
+        await session.execute(_AS_SERVICE_ROLE)
+        row = (
+            await session.execute(increment_step_attempt_stmt(issue_id, step_key))
+        ).first()
+    return int(row[0]) if row is not None and row[0] is not None else None
+
+
 def claim_budget_wrap_up_stmt(issue_id: int, run_id: Any):
     """Conditional claim of the one-run budget grace (phase 2a §3):
 
@@ -120,6 +171,8 @@ async def claim_budget_wrap_up(issue_id: int, run_id: Any) -> bool:
 __all__ = [
     "claim_budget_wrap_up",
     "claim_budget_wrap_up_stmt",
+    "increment_step_attempt",
+    "increment_step_attempt_stmt",
     "merge_execution_state",
     "merge_stmt",
 ]
