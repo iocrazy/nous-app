@@ -9,6 +9,7 @@ there is no metadata, not sent as None. Found by the P3 prod probe.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -36,14 +37,24 @@ def _fake_client(captured: dict):
     return client
 
 
+def _use(monkeypatch, client) -> None:
+    """Every call runs on its own GoTrue client (``_isolated_auth_client``)."""
+
+    @asynccontextmanager
+    async def _isolated():
+        yield client.auth
+
+    monkeypatch.setattr(
+        "app.services.infra.supabase_auth_service._isolated_auth_client", _isolated
+    )
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_sign_up_without_metadata_omits_options_key(monkeypatch):
     captured: dict = {}
     svc = SupabaseAuthService()
-    monkeypatch.setattr(
-        svc, "_get_client", AsyncMock(return_value=_fake_client(captured))
-    )
+    _use(monkeypatch, _fake_client(captured))
 
     result = await svc.sign_up(email="a@example.com", password="secret123")
 
@@ -56,9 +67,7 @@ async def test_sign_up_without_metadata_omits_options_key(monkeypatch):
 async def test_sign_up_with_metadata_sends_options_data(monkeypatch):
     captured: dict = {}
     svc = SupabaseAuthService()
-    monkeypatch.setattr(
-        svc, "_get_client", AsyncMock(return_value=_fake_client(captured))
-    )
+    _use(monkeypatch, _fake_client(captured))
 
     result = await svc.sign_up(
         email="b@example.com", password="secret123", metadata={"username": "bee"}
