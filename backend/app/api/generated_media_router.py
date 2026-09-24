@@ -27,6 +27,15 @@ from pydantic import BaseModel
 from app.core.deps import AuthDep
 from app.db.scope import Scope, request_scope
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.schemas.generated_media import (
+    GeneratedMediaDeleted,
+    GeneratedMediaImported,
+    GeneratedMediaPage,
+    GeneratedMediaPromoted,
+    GeneratedMediaRow,
+    GeneratedMediaUpscaled,
+)
+from app.schemas.wire import DataEnvelope, binary_response
 from app.services.library.generated_roles import (
     REFERENCE,
     ROLE_KEY,
@@ -124,7 +133,7 @@ async def _import_scope(auth, canvas_id: int | None) -> int:
     return await _canvas_import_scope(auth, canvas_id)
 
 
-@router.get("")
+@router.get("", response_model=DataEnvelope[GeneratedMediaPage])
 async def list_generations(
     auth: AuthDep,
     kind: Optional[str] = Query(None),
@@ -146,7 +155,11 @@ async def list_generations(
     return {"data": page}
 
 
-@router.get("/{gen_id}/cover")
+@router.get(
+    "/{gen_id}/cover",
+    response_class=Response,
+    responses=binary_response("The image: a WebP preview, or the original", "image/*"),
+)
 async def get_generation_cover(gen_id: int, full: int = 0):
     """Serve a generated image (no auth required).
 
@@ -178,7 +191,13 @@ async def get_generation_cover(gen_id: int, full: int = 0):
     return await _serve_media_row(row, headers=headers)
 
 
-@router.get("/{gen_id}/stream")
+@router.get(
+    "/{gen_id}/stream",
+    response_class=Response,
+    responses=binary_response(
+        "The video or audio bytes (Range-aware)", "video/*", "audio/*"
+    ),
+)
 async def get_generation_stream(gen_id: int, request: Request):
     """Serve a generated VIDEO or AUDIO row's bytes (no auth required).
 
@@ -208,7 +227,7 @@ IMPORT_CHUNK_BYTES = 1024 * 1024
 _IMPORT_KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 
 
-@router.post("/import")
+@router.post("/import", response_model=DataEnvelope[GeneratedMediaImported])
 async def import_generation(
     auth: AuthDep,
     file: UploadFile = File(...),
@@ -372,7 +391,9 @@ class ResourceImportRequest(BaseModel):
     resource_id: str
 
 
-@router.post("/import-from-resource")
+@router.post(
+    "/import-from-resource", response_model=DataEnvelope[GeneratedMediaImported]
+)
 async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) -> dict:
     """Mint a durable /generated-media/ URL from an existing library resource.
 
@@ -470,7 +491,11 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
     }
 
 
-@router.get("/{gen_id}/file")
+@router.get(
+    "/{gen_id}/file",
+    response_class=Response,
+    responses=binary_response("The stored file, served with its own mime", "*/*"),
+)
 async def get_generation_file(gen_id: int, auth: AuthDep):
     row = await GeneratedMediaRepository().get(gen_id, await _scope(auth))
     if not row:
@@ -478,7 +503,7 @@ async def get_generation_file(gen_id: int, auth: AuthDep):
     return await _serve_media_row(row)
 
 
-@router.get("/{gen_id}")
+@router.get("/{gen_id}", response_model=DataEnvelope[GeneratedMediaRow])
 async def get_generation(gen_id: int, auth: AuthDep) -> dict:
     row = await GeneratedMediaRepository().get(gen_id, await _scope(auth))
     if not row:
@@ -486,7 +511,7 @@ async def get_generation(gen_id: int, auth: AuthDep) -> dict:
     return {"data": row}
 
 
-@router.delete("/{gen_id}")
+@router.delete("/{gen_id}", response_model=DataEnvelope[GeneratedMediaDeleted])
 async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
     ok = await GeneratedMediaRepository().delete(gen_id, await _scope(auth))
     return {"data": {"deleted": ok}}
@@ -581,7 +606,7 @@ class UpscaleRequest(BaseModel):
     resolution: str = "2k"
 
 
-@router.post("/{gen_id}/upscale")
+@router.post("/{gen_id}/upscale", response_model=DataEnvelope[GeneratedMediaUpscaled])
 async def upscale_generation(
     gen_id: int, payload: UpscaleRequest, auth: AuthDep
 ) -> dict:
@@ -652,7 +677,7 @@ async def upscale_generation(
     }
 
 
-@router.post("/{gen_id}/promote")
+@router.post("/{gen_id}/promote", response_model=DataEnvelope[GeneratedMediaPromoted])
 async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
     """Promote a generation into a resource, in the scope it already lives in.
 

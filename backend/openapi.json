@@ -11159,6 +11159,78 @@
         "title": "CropRegionModel",
         "type": "object"
       },
+      "DataEnvelope_GeneratedMediaDeleted_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaDeleted"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaDeleted]",
+        "type": "object"
+      },
+      "DataEnvelope_GeneratedMediaImported_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaImported"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaImported]",
+        "type": "object"
+      },
+      "DataEnvelope_GeneratedMediaPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaPage"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaPage]",
+        "type": "object"
+      },
+      "DataEnvelope_GeneratedMediaPromoted_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaPromoted"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaPromoted]",
+        "type": "object"
+      },
+      "DataEnvelope_GeneratedMediaRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaRow"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaRow]",
+        "type": "object"
+      },
+      "DataEnvelope_GeneratedMediaUpscaled_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeneratedMediaUpscaled"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataEnvelope[GeneratedMediaUpscaled]",
+        "type": "object"
+      },
       "DatesResponse": {
         "properties": {
           "dates": {
@@ -12960,6 +13032,342 @@
           }
         },
         "title": "GenerateSlotResponse",
+        "type": "object"
+      },
+      "GeneratedMediaDeleted": {
+        "description": "``deleted`` is false when no row matched in the caller's scope.",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "GeneratedMediaDeleted",
+        "type": "object"
+      },
+      "GeneratedMediaImported": {
+        "description": "A file minted into the store, with the URL the canvas should read.\n\n``url`` ends in ``/cover`` for images, ``/stream`` for videos and\n``/file`` otherwise.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "media_kind": {
+            "title": "Media Kind",
+            "type": "string"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "media_kind",
+          "mime"
+        ],
+        "title": "GeneratedMediaImported",
+        "type": "object"
+      },
+      "GeneratedMediaPage": {
+        "description": "A keyset page; ``next_cursor`` is null on the last page.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedMediaRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "title": "GeneratedMediaPage",
+        "type": "object"
+      },
+      "GeneratedMediaPromoted": {
+        "properties": {
+          "promoted_resource_id": {
+            "title": "Promoted Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "promoted_resource_id"
+        ],
+        "title": "GeneratedMediaPromoted",
+        "type": "object"
+      },
+      "GeneratedMediaRow": {
+        "description": "One ``generated_media`` row as the repository projects it (``_GM_COLS``).\n\n``content_sha256`` is deliberately absent: the projection keeps it\ninternal. ``tests/api/test_generated_media_wire.py`` pins this field set\nto the projection, so a column added there fails until it is declared.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "canvas_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canvas Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "cost_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Cents"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "creator_id": {
+            "title": "Creator Id",
+            "type": "string"
+          },
+          "derivation_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivation Kind"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "file_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Bytes"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "media_kind": {
+            "title": "Media Kind",
+            "type": "string"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "origin_kind": {
+            "title": "Origin Kind",
+            "type": "string"
+          },
+          "origin_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Run Id"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "parent_resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Resource Id"
+          },
+          "promoted_resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promoted Resource Id"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "source_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Asset Id"
+          }
+        },
+        "required": [
+          "id",
+          "scope_id",
+          "creator_id",
+          "media_kind",
+          "mime",
+          "file_path",
+          "file_size_bytes",
+          "origin_kind",
+          "origin_run_id",
+          "agent_id",
+          "canvas_id",
+          "node_id",
+          "prompt",
+          "model",
+          "provider",
+          "params",
+          "cost_cents",
+          "parent_resource_id",
+          "derivation_kind",
+          "promoted_resource_id",
+          "review_state",
+          "source_asset_id",
+          "conversation_id",
+          "created_at"
+        ],
+        "title": "GeneratedMediaRow",
+        "type": "object"
+      },
+      "GeneratedMediaUpscaled": {
+        "description": "The NEW row holding the upscaled image; the source row is untouched.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "GeneratedMediaUpscaled",
         "type": "object"
       },
       "GraphMemorySettingsResponse": {
@@ -67409,9 +67817,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Generations Api V1 Generated Media Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaPage_"
                 }
               }
             },
@@ -67488,9 +67894,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Import Generation Api V1 Generated Media Import Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaImported_"
                 }
               }
             },
@@ -67567,9 +67971,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Import From Resource Api V1 Generated Media Import From Resource Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaImported_"
                 }
               }
             },
@@ -67644,9 +68046,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Generation Api V1 Generated Media  Gen Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaDeleted_"
                 }
               }
             },
@@ -67719,9 +68119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Generation Api V1 Generated Media  Gen Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaRow_"
                 }
               }
             },
@@ -67773,11 +68171,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "image/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The image: a WebP preview, or the original"
           },
           "422": {
             "content": {
@@ -67846,11 +68247,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The stored file, served with its own mime"
           },
           "422": {
             "content": {
@@ -67922,9 +68326,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Promote Generation Api V1 Generated Media  Gen Id  Promote Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaPromoted_"
                 }
               }
             },
@@ -67966,11 +68368,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "audio/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The video or audio bytes (Range-aware)"
           },
           "422": {
             "content": {
@@ -68052,9 +68463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Upscale Generation Api V1 Generated Media  Gen Id  Upscale Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DataEnvelope_GeneratedMediaUpscaled_"
                 }
               }
             },
