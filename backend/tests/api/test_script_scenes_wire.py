@@ -351,3 +351,78 @@ async def test_copilot_wire_unchanged(monkeypatch, client, read_version, proposa
         expected["proposal"] = True
     assert_wire_unchanged(resp, _env(expected))
     assert ("proposal" in resp.json()["data"]) is proposal
+
+
+# --------------------------------------------------------------------------- #
+# A body chapter_id must be a chapter of the scene's own script (P6 fix)
+# --------------------------------------------------------------------------- #
+
+OWN_CHAPTER = str(SAMPLE_BIGINT + 41)
+FOREIGN_CHAPTER = str(SAMPLE_BIGINT + 42)
+
+
+class _FakeChapterRepo:
+    async def get_by_id(self, chapter_id: str) -> dict | None:
+        owner = {OWN_CHAPTER: SCRIPT_ID, FOREIGN_CHAPTER: SAMPLE_BIGINT + 99}
+        if chapter_id not in owner:
+            return None
+        return {"id": int(chapter_id), "script_id": owner[chapter_id]}
+
+
+class _FakeScriptService:
+    chapter_repo = _FakeChapterRepo()
+
+
+@pytest.fixture
+def _chapters(monkeypatch):
+    import app.services.storyboard.script.script_service as svc
+
+    monkeypatch.setattr(svc, "ScriptService", _FakeScriptService)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chapter", [FOREIGN_CHAPTER, str(SAMPLE_BIGINT + 404)])
+async def test_create_with_chapter_outside_script_is_404(
+    client, _chapters, chapter
+) -> None:
+    FakeRepo.result = scene()
+    resp = await client.post(
+        f"/api/v1/scripts/{SCRIPT_ID}/scenes", json={"chapter_id": chapter}
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["details"]["code"] == "not_found_or_out_of_scope"
+    assert "create" not in FakeRepo.calls
+
+
+@pytest.mark.asyncio
+async def test_create_with_own_chapter_is_allowed(client, _chapters) -> None:
+    FakeRepo.result = scene()
+    resp = await client.post(
+        f"/api/v1/scripts/{SCRIPT_ID}/scenes", json={"chapter_id": OWN_CHAPTER}
+    )
+    assert resp.status_code == 200, resp.text
+    assert FakeRepo.calls == ["create"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chapter", [FOREIGN_CHAPTER, str(SAMPLE_BIGINT + 404)])
+async def test_move_into_chapter_outside_script_is_404(
+    client, _chapters, chapter
+) -> None:
+    FakeRepo.result = scene(script_id=SCRIPT_ID)
+    resp = await client.post(
+        f"/api/v1/scenes/{SCENE_ID}/move", json={"chapter_id": chapter}
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["details"]["code"] == "not_found_or_out_of_scope"
+    assert "move_scene" not in FakeRepo.calls
+
+
+@pytest.mark.asyncio
+async def test_move_into_own_chapter_is_allowed(client, _chapters) -> None:
+    FakeRepo.result = scene(script_id=SCRIPT_ID)
+    resp = await client.post(
+        f"/api/v1/scenes/{SCENE_ID}/move", json={"chapter_id": OWN_CHAPTER}
+    )
+    assert resp.status_code == 200, resp.text
+    assert FakeRepo.calls == ["get_by_id", "move_scene"]

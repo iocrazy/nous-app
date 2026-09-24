@@ -16,6 +16,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from app.api.script_chapter_guard import require_chapter_of_script as _chapter_of_script
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_script_access
 from app.schemas.script import CreateBranchesRequest, ExpandChapterRequest
@@ -23,19 +24,6 @@ from app.schemas.script_ai_responses import ScriptAiTaskDispatch
 from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter(prefix="/scripts")
-
-
-async def _chapter_of_script(chapter_id: str, script_id: str) -> None:
-    """404 unless ``chapter_id`` is a chapter of ``script_id``.
-
-    Both sides are str-coerced: the chapter's ``script_id`` reads back as a
-    native int while the ids arrive as strings (#1006 — an int-vs-str ``!=`` is
-    always true)."""
-    from app.services.storyboard.script.script_service import ScriptService
-
-    chapter = await ScriptService().chapter_repo.get_by_id(chapter_id)
-    if not chapter or str(chapter.get("script_id")) != str(script_id):
-        raise HTTPException(status_code=404, detail="Chapter not found in this script")
 
 
 @router.post("/expand-chapter", response_model=ScriptAiTaskDispatch)

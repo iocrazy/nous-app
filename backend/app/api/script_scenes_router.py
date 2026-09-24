@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.api.row_guard import require_row
+from app.api.script_chapter_guard import require_chapter_of_script
 from app.core.config import settings
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
@@ -141,7 +142,10 @@ async def create_scene(
     _guard: None = Depends(verify_script_access),
 ) -> Dict[str, Any]:
     """Create a scene under a script. sort_order auto-assigns to MAX+STEP
-    within the (script_id, chapter_id) group when omitted."""
+    within the (script_id, chapter_id) group when omitted. A ``chapter_id``
+    must be a chapter of this script (404 otherwise)."""
+    if body.chapter_id is not None:
+        await require_chapter_of_script(body.chapter_id, script_id)
     try:
         data = body.model_dump(exclude_none=True)
         data["script_id"] = script_id
@@ -457,10 +461,15 @@ async def move_scene(
     _guard: None = Depends(verify_scene_access),
 ) -> Dict[str, Any]:
     """Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps
-    the current chapter; supplied (incl. null) reparents."""
+    the current chapter; supplied (incl. null) reparents — a non-null one must
+    be a chapter of the scene's own script (404 otherwise)."""
+    chapter_id = body.chapter_id if "chapter_id" in body.model_fields_set else UNSET
+    repo = get_script_scene_repository()
+    if chapter_id is not UNSET and chapter_id is not None:
+        current = require_row(await repo.get_by_id(scene_id))
+        await require_chapter_of_script(chapter_id, current.get("script_id"))
     try:
-        chapter_id = body.chapter_id if "chapter_id" in body.model_fields_set else UNSET
-        scene = await get_script_scene_repository().move_scene(
+        scene = await repo.move_scene(
             scene_id,
             chapter_id=chapter_id,
             before_scene_id=body.before_scene_id,
