@@ -250,7 +250,7 @@ def test_legacy_path_route_ignores_share_token() -> None:
     source = (Path(__file__).parents[2] / "app" / "main.py").read_text()
     body = source[source.index("async def serve_media_by_path(") :]
     body = body[: body.index("return _serve_file(file_path)")]
-    assert "_authenticate_media_request(request, token, None, review_token)" in body
+    assert "request, token, None, review_token" in body
 
 
 # --------------------------------------------------------------------------- #

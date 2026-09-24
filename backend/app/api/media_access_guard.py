@@ -279,3 +279,70 @@ async def require_media_file_access(
             logger.error(f"Team membership check failed: {e}")
 
     raise HTTPException(status_code=403, detail="Access denied")
+
+
+async def caller_can_read_stored_path(
+    paths: Iterable[str], user_id: str | None
+) -> bool:
+    """True when one of ``paths`` (the same file spelled relative to the
+    download root and absolute) is a stored path of something ``user_id`` may
+    read: a resource the caller created or that is filed into their team, or
+    a ``parsed_media`` row the caller may read (:func:`caller_can_read_media`).
+
+    Backs the path-addressed ``/media/{file_path}`` route. Its callers are the
+    server-built signed URLs handed to outbound APIs (the ASR fetch, publish
+    uploads), always for the token owner's own file; before this check any
+    signed-in caller could read any file under the media root by path.
+    """
+    from sqlalchemy import or_
+
+    from app.db.session import read_scope
+    from app.models import ParsedMedia, Resources
+
+    wanted = sorted({p for p in paths if p})
+    if not user_id or not wanted:
+        return False
+
+    resource_cols = (
+        Resources.file_path,
+        Resources.thumbnail_path,
+        Resources.cover_image_path,
+    )
+    media_cols = (
+        ParsedMedia.download_path,
+        ParsedMedia.cover_download_path,
+        ParsedMedia.hls_path,
+        ParsedMedia.image_download_path,
+        ParsedMedia.music_download_path,
+        ParsedMedia.extract_audio_path,
+    )
+    async with _cross_owner_scope("which rows store a served file path"):
+        async with read_scope() as session:
+            owners = (
+                await session.execute(
+                    select(Resources.id, Resources.creator_id).where(
+                        or_(*(col.in_(wanted) for col in resource_cols))
+                    )
+                )
+            ).all()
+            if any(str(creator) == str(user_id) for _, creator in owners):
+                return True
+            if owners and await _in_filing_team(
+                session, [rid for rid, _ in owners], user_id
+            ):
+                return True
+            media_ids = (
+                (
+                    await session.execute(
+                        select(ParsedMedia.id).where(
+                            or_(*(col.in_(wanted) for col in media_cols))
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+    for media_id in media_ids:
+        if await caller_can_read_media(media_id, user_id):
+            return True
+    return False

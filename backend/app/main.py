@@ -655,8 +655,25 @@ try:
         non-empty ``share_token`` through unchecked (the id routes check it
         afterwards) — so ``?share_token=x`` used to serve ANY file under the
         media root to anyone, signed in or not.
+
+        Callers: the signed ``/media/{rel_path}?token=`` URLs the ASR workflow
+        and publish tasks hand to outbound APIs (always the token owner's own
+        file). The path must be stored on a row the caller may read
+        (``caller_can_read_stored_path``); otherwise 404.
         """
-        await _authenticate_media_request(request, token, None, review_token)
+        user_id = await _authenticate_media_request(request, token, None, review_token)
+        # The file must be one the caller may read: a signed token or media
+        # cookie only proves WHO is asking, and any signed-in caller used to
+        # get any file under the media root by path. Denied reads look like a
+        # missing file (404), as the id routes do.
+        from app.api.media_access_guard import caller_can_read_stored_path
+
+        relative = file_path.lstrip("/")
+        absolute = str((_media_base_path / relative).resolve())
+        if not await caller_can_read_stored_path(
+            (file_path, relative, absolute), user_id
+        ):
+            raise HTTPException(status_code=404, detail="File not found")
         return _serve_file(file_path)
 
 except ValueError:
