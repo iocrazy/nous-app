@@ -17,10 +17,17 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.row_guard import NOT_FOUND_OR_OUT_OF_SCOPE
 from app.core.deps import AuthDep
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.repositories.topics_repository import get_topics_repository
-from app.schemas.ideation import TopicCreate, TopicUpdate
+from app.schemas.ideation import (
+    IdeationTopicDeleteResponse,
+    IdeationTopicListResponse,
+    IdeationTopicResponse,
+    TopicCreate,
+    TopicUpdate,
+)
 from app.services.modules.gate import require_module
 
 router = APIRouter(
@@ -33,7 +40,31 @@ router = APIRouter(
 # ── topic collection ─────────────────────────────────────────────────────────
 
 
-@router.get("")
+def _topic_not_found() -> HTTPException:
+    """Missing, out of the caller's teams, or a junk id: all the same typed 404."""
+    return HTTPException(
+        status_code=404,
+        detail={"code": NOT_FOUND_OR_OUT_OF_SCOPE, "message": "Topic not found"},
+    )
+
+
+def _is_snowflake(value: str) -> bool:
+    """A non-numeric id used to reach ``int()`` in the repository: a 500."""
+    try:
+        int(str(value))
+    except ValueError:
+        return False
+    return True
+
+
+async def _team_role(team_id: str, user_id: str) -> Optional[str]:
+    """The caller's role in ``team_id``; a junk id is "not a member" (403)."""
+    if not _is_snowflake(team_id):
+        return None
+    return await resolve_effective_role(user_id, team_id=team_id)
+
+
+@router.get("", response_model=IdeationTopicListResponse)
 async def list_topics(
     auth: AuthDep,
     team_id: str = Query(..., description="Team scope (snowflake id)"),
@@ -44,7 +75,7 @@ async def list_topics(
     ),
 ):
     """List a team's ideation topics, optionally filtered by status."""
-    role = await resolve_effective_role(auth.user_id, team_id=team_id)
+    role = await _team_role(team_id, auth.user_id)
     if role is None:
         raise HTTPException(status_code=403, detail="You are not a member of this team")
 
@@ -53,14 +84,14 @@ async def list_topics(
     return {"success": True, "data": topics}
 
 
-@router.post("")
+@router.post("", response_model=IdeationTopicResponse)
 async def create_topic(
     data: TopicCreate,
     auth: AuthDep,
     team_id: str = Query(..., description="Team scope (snowflake id)"),
 ):
     """Create a topic (candidate by default)."""
-    role = await resolve_effective_role(auth.user_id, team_id=team_id)
+    role = await _team_role(team_id, auth.user_id)
     if role is None:
         raise HTTPException(status_code=403, detail="You are not a member of this team")
     if role not in WRITE_ROLES:
@@ -87,27 +118,29 @@ async def create_topic(
 async def _resolve_topic_role(topic_id: str, user_id: str):
     """Return (team_id, role) for a topic, raising 404 when the topic is missing
     OR the caller is not a member of its team (no existence leak)."""
+    if not _is_snowflake(topic_id):
+        raise _topic_not_found()
     repo = get_topics_repository()
     team_id = await repo.get_topic_team_id(topic_id)
     if team_id is None:
-        raise HTTPException(status_code=404, detail="Topic not found")
+        raise _topic_not_found()
     role = await resolve_effective_role(user_id, team_id=team_id)
     if role is None:
-        raise HTTPException(status_code=404, detail="Topic not found")
+        raise _topic_not_found()
     return team_id, role
 
 
-@router.get("/{topic_id}")
+@router.get("/{topic_id}", response_model=IdeationTopicResponse)
 async def get_topic(topic_id: str, auth: AuthDep):
     team_id, _role = await _resolve_topic_role(topic_id, auth.user_id)
     repo = get_topics_repository()
     topic = await repo.get_topic(topic_id, team_id)
     if topic is None:
-        raise HTTPException(status_code=404, detail="Topic not found")
+        raise _topic_not_found()
     return {"success": True, "data": topic}
 
 
-@router.patch("/{topic_id}")
+@router.patch("/{topic_id}", response_model=IdeationTopicResponse)
 async def update_topic(topic_id: str, data: TopicUpdate, auth: AuthDep):
     team_id, role = await _resolve_topic_role(topic_id, auth.user_id)
     if role not in WRITE_ROLES:
@@ -125,11 +158,11 @@ async def update_topic(topic_id: str, data: TopicUpdate, auth: AuthDep):
         status=patch.get("status"),
     )
     if topic is None:
-        raise HTTPException(status_code=404, detail="Topic not found")
+        raise _topic_not_found()
     return {"success": True, "data": topic}
 
 
-@router.delete("/{topic_id}")
+@router.delete("/{topic_id}", response_model=IdeationTopicDeleteResponse)
 async def delete_topic(topic_id: str, auth: AuthDep):
     team_id, role = await _resolve_topic_role(topic_id, auth.user_id)
     if role not in WRITE_ROLES:
@@ -138,5 +171,5 @@ async def delete_topic(topic_id: str, auth: AuthDep):
     repo = get_topics_repository()
     ok = await repo.delete_topic(topic_id, team_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Topic not found")
+        raise _topic_not_found()
     return {"success": True, "data": {"deleted": True}}
