@@ -395,3 +395,25 @@ async def test_always_policy_fires_even_with_open_previous_issue(
         )
 
     repo.atomic_create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_routine_does_not_assign_work_to_a_soft_deleted_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mig 501: the agent lookup filters ``deleted_at IS NULL``, so a routine
+    whose agent was deleted fails as "not found" instead of creating a new
+    issue assigned to it."""
+    from app.workflows import scheduled_master as sm
+
+    # [0] budget_team_id lookup, [1] agent lookup finds nothing live
+    session = _patch_scopes(
+        monkeypatch, [_FakeResult(scalar=None), _FakeResult(rows=[])]
+    )
+    with pytest.raises(RuntimeError, match="not found"):
+        await sm._fire_agent_routine(_routine_row())
+    agent_sql = [
+        sql for sql, _ in (_compile(c) for c in session.calls) if "ai_agents" in sql
+    ]
+    assert len(agent_sql) == 1
+    assert "ai_agents.deleted_at IS NULL" in agent_sql[0]

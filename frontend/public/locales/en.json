@@ -4614,7 +4614,7 @@
       "overrideResetConfirm": "Discard your personal changes and restore this system template? Your edits cannot be recovered.",
       "overrideResetToast": "Restored system defaults",
       "delete": "Delete agent",
-      "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",
+      "deleteConfirm": "Delete this agent? It disappears from agent lists; its runs and chat history stay readable.",
       "deletedToast": "Agent deleted",
       "attributes": "Attributes",
       "limitsSection": "Budget & limits",

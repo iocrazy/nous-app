@@ -548,7 +548,10 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             (
                 await session.execute(
                     select(AiAgents.id, AiAgents.name).where(
-                        AiAgents.slug == agent_slug
+                        AiAgents.slug == agent_slug,
+                        # mig 501: a routine must not assign new work to a
+                        # soft-deleted agent — treat it as "not found".
+                        AiAgents.deleted_at.is_(None),
                     )
                 )
             )

@@ -383,7 +383,10 @@ class SkillRepository(BaseRepository):
                         select(AiAgents.slug, AiAgents.name)
                         .select_from(AgentSkills)
                         .join(AiAgents, AiAgents.id == AgentSkills.agent_id)
-                        .where(AgentSkills.skill_id == int(skill_id))
+                        .where(
+                            AgentSkills.skill_id == int(skill_id),
+                            AiAgents.deleted_at.is_(None),  # mig 501
+                        )
                     )
                 ).all()
                 agents = [
@@ -418,7 +421,10 @@ class SkillRepository(BaseRepository):
                         select(AgentSkills.skill_id, AiAgents.slug, AiAgents.name)
                         .select_from(AgentSkills)
                         .join(AiAgents, AiAgents.id == AgentSkills.agent_id)
-                        .where(AgentSkills.skill_id.in_(ids))
+                        .where(
+                            AgentSkills.skill_id.in_(ids),
+                            AiAgents.deleted_at.is_(None),  # mig 501
+                        )
                     )
                 ).all()
             out: Dict[int, List[Dict[str, str]]] = {}

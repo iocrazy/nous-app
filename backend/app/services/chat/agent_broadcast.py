@@ -100,7 +100,9 @@ async def scan_and_broadcast() -> dict[str, Any]:
             bc_agents: list[dict[str, Any]] = []
             for aid in agent_ids:
                 agent = await ar.get_by_id(aid)
-                if agent is None:
+                # mig 501: the member row outlives a soft delete; the agent
+                # must not keep posting into the channel.
+                if agent is None or agent.get("deleted_at"):
                     continue
                 caps = agent_chat_caps(agent)
                 if caps.auto_broadcast and caps.enabled and caps.allows_team(team_id):

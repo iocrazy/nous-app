@@ -4614,7 +4614,7 @@
       "overrideResetConfirm": "放弃你的个人修改并恢复系统模板？修改无法找回。",
       "overrideResetToast": "已恢复系统默认",
       "delete": "删除智能体",
-      "deleteConfirm": "删除该智能体?其运行记录与技能绑定将被移除;聊天历史仍可查看。",
+      "deleteConfirm": "删除该智能体？它将从智能体列表中移除；运行记录与聊天历史仍可查看。",
       "deletedToast": "智能体已删除",
       "attributes": "属性",
       "limitsSection": "预算与限额",

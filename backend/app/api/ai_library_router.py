@@ -36,6 +36,7 @@ from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
 from app.core.scope_guards import verify_project_read_access
+from app.repositories.agent_references import count_live_agent_references
 from app.repositories.agent_repository import (
     AGENT_OVERRIDE_FIELDS,
     AgentRepository,
@@ -1015,14 +1016,16 @@ async def list_agent_permission_audits(
     summary="Delete a user-owned agent (system presets cannot be deleted)",
 )
 async def delete_agent(slug: str, auth: AuthDep) -> None:
-    """Hard-delete a NON-PRESET agent the caller created.
+    """Soft-delete a NON-PRESET agent the caller created (mig 501).
 
-    - 404: no such agent.
+    - 404: no such (live) agent.
     - 403: system preset (seed files stay authoritative — reset an
       override instead) or the caller is not the creator.
-    Every FK referencing ai_agents cascades or nulls out, so runs /
-    skills bindings / overrides clean themselves up; direct-chat
-    sessions survive with a null agent join (history stays readable).
+    - 409 ``agent_in_use``: live routing still points at the agent (open
+      assigned issues, pipeline steps, project stage / template nodes, a run
+      in flight). ``counts`` says which; the user reassigns first.
+    Runs, transcripts, costs and chat history all stay; sessions bound to the
+    agent answer later turns with 409 ``agent_deleted``.
     """
     agent_repo, _ = _repos()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -1043,7 +1046,22 @@ async def delete_agent(slug: str, auth: AuthDep) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="only the agent's creator can delete it",
         )
-    deleted = await agent_repo.delete_agent(UUID(str(agent["id"])))
+    agent_uuid = UUID(str(agent["id"]))
+    refs = await count_live_agent_references(agent_uuid)
+    if refs.in_use:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "agent_in_use",
+                "message": (
+                    "This agent still has work routed to it. Reassign its open "
+                    "issues, pipeline steps and project stages, or wait for its "
+                    "running tasks to finish, then delete it."
+                ),
+                "counts": refs.as_counts(),
+            },
+        )
+    deleted = await agent_repo.delete_agent(agent_uuid)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

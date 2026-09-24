@@ -420,7 +420,8 @@ class ConversationService:
         slug_to_agent: dict[str, Any] = {}
         for aid in agent_ids:
             agent = await ar.get_by_id(aid)
-            if agent is None:
+            # mig 501: the member row outlives a soft delete; the agent does not.
+            if agent is None or agent.get("deleted_at"):
                 continue
             caps = agent_chat_caps(agent)
             if not caps.enabled or not caps.allows_team(conversation["scope_id"]):

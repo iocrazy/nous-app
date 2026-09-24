@@ -122,7 +122,8 @@ CREATE TABLE ai_agents (
     seed_hash TEXT,
     timeout_sec INTEGER,
     max_concurrent_runs INTEGER,
-    agent_group TEXT
+    agent_group TEXT,
+    deleted_at TEXT
 )
 """
 

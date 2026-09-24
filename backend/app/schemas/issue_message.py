@@ -140,6 +140,9 @@ class CommentTriggerPreview(BaseModel):
     will_wake: bool
     agent_id: Optional[str] = None
     is_note: bool = False
+    # mig 501: the assignee was soft-deleted — posting would be refused (409
+    # agent_deleted) until the issue is reassigned.
+    agent_deleted: bool = False
 
 
 class IssueMessagePost(BaseModel):

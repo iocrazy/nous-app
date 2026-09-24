@@ -167,7 +167,10 @@ async def get_workforce_board(
                         AiAgents.persistent,
                         AiAgents.paused_reason,
                     )
-                    .where(AiAgents.persistent.is_(True))
+                    .where(
+                        AiAgents.persistent.is_(True),
+                        AiAgents.deleted_at.is_(None),  # mig 501
+                    )
                     .order_by(AiAgents.slug)
                 )
             )
@@ -511,7 +514,10 @@ async def workforce_healthz() -> dict[str, Any]:
                 await session.execute(
                     select(func.count())
                     .select_from(AiAgents)
-                    .where(AiAgents.persistent.is_(True))
+                    .where(
+                        AiAgents.persistent.is_(True),
+                        AiAgents.deleted_at.is_(None),  # mig 501
+                    )
                 )
             ).scalar() or 0
 

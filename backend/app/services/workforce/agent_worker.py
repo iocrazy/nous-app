@@ -64,6 +64,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.core.config import settings
+from app.repositories.agent_references import is_agent_soft_deleted
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.agent_workforce_repository import (
     AgentWorkforceRepository,
@@ -180,6 +181,10 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     # through would fail every background Task with 'not_persistent' — the
     # persistent flag gates the DELEGATE path, which this is not.
     if (payload.get("kind") or "") == "subagent":
+        # mig 501: a soft-deleted target is refused here too — this branch
+        # skips the persistent gate below, where the main path checks it.
+        if await is_agent_soft_deleted(agent_id):
+            return await _fail_agent_deleted(workforce, task_id, agent_id)
         return await _run_subagent_task(
             task_id=task_id, payload=payload, workforce=workforce, agent_id=agent_id
         )
@@ -197,6 +202,12 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             error_message=f"agent_id {agent_id} no longer exists",
         )
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
+
+    # mig 501: get_by_id returns the tombstone (history face) and it is still
+    # persistent=true, so queued inbox work — which the old hard delete
+    # CASCADEd away — would otherwise run as a deleted agent.
+    if agent.get("deleted_at"):
+        return await _fail_agent_deleted(workforce, task_id, agent_id)
 
     # Persistent flag is the gate: refuse to run a non-persistent agent
     # via the workforce path. (The DelegateTool already rejects this on
@@ -415,6 +426,20 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
 
     return {"task_id": str(task_id), "status": final_lifecycle, "run_id": str(run_id)}
+
+
+async def _fail_agent_deleted(
+    workforce: Any, task_id: UUID, agent_id: UUID
+) -> dict[str, Any]:
+    """Typed failure for a task whose agent was soft-deleted (mig 501)."""
+    logger.warning(f"[agent-worker] agent {agent_id} was deleted — task {task_id}")
+    await workforce.update_task_status(
+        task_id=task_id,
+        lifecycle_status="failed",
+        error_code="agent_deleted",
+        error_message=f"agent {agent_id} was deleted",
+    )
+    return {"task_id": str(task_id), "status": "failed", "run_id": None}
 
 
 async def _run_subagent_task(

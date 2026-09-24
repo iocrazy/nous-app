@@ -122,6 +122,12 @@ async def _run(w, task):
             "app.services.workforce.agent_worker.get_agent_repository",
             return_value=w.agent_repo,
         ),
+        # mig 501: the sub-agent branch checks deletion through its own lookup;
+        # pin "not deleted" instead of relying on get_by_id failing without a DB.
+        patch(
+            "app.services.workforce.agent_worker.is_agent_soft_deleted",
+            AsyncMock(return_value=False),
+        ),
         patch(
             "app.repositories.agent_runs_repository.get_agent_runs_repository",
             return_value=w.runs_repo,

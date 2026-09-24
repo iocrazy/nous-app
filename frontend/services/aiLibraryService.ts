@@ -331,16 +331,18 @@ export const aiLibraryService = {
     return handle<AILibraryAgent>(resp);
   },
 
-  /** Hard-delete a user-owned agent. 403 for system presets / non-creators. */
+  /** Soft-delete a user-owned agent (runs and chat history stay). 403 for
+   *  system presets / non-creators; 409 `agent_in_use` while open issues,
+   *  pipeline steps, project stages or running tasks still point at it —
+   *  thrown as an AiLibraryRequestError carrying that code and the server's
+   *  sentence. */
   async deleteAgent(slug: string): Promise<void> {
     const resp = await fetch(`${base()}/agents/${encodeURIComponent(slug)}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
     });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`${resp.status}: ${text}`);
-    }
+    if (resp.ok) return;
+    await typedJson<never>(resp);
   },
 
   /** Reset a system preset to its defaults — drop the caller's override

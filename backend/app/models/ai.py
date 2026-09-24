@@ -74,7 +74,11 @@ class AiAgents(Base):
             "ux_ai_agents_slug_user",
             "user_id",
             "slug",
-            postgresql_where="((is_system_preset = false) AND (user_id IS NOT NULL))",
+            # mig 501: a soft-deleted row releases its slug.
+            postgresql_where=(
+                "((is_system_preset = false) AND (user_id IS NOT NULL)"
+                " AND (deleted_at IS NULL))"
+            ),
             unique=True,
         ),
         {
@@ -182,6 +186,13 @@ class AiAgents(Base):
         comment=(
             "Roster grouping for the AI Library gallery: writing / art / tools. "
             "NULL = ungrouped (UI falls back to tools)."
+        ),
+    )
+    deleted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True),
+        comment=(
+            "Soft delete. Non-NULL = deleted: hidden from selection surfaces, "
+            "kept for history (runs, transcripts, costs)."
         ),
     )
 

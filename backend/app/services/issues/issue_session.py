@@ -11,6 +11,20 @@ from app.repositories.agent_repository import get_agent_repository
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 
 
+class IssueAssigneeDeleted(RuntimeError):
+    """The issue's assignee was soft-deleted (mig 501); no session can be made
+    for it. Typed so callers can refuse with ``agent_deleted`` instead of
+    reading ``create_session``'s generic 404 (its slug lookup hides deleted
+    rows)."""
+
+    code = "agent_deleted"
+
+    def __init__(self, issue_id: int, agent_id: str) -> None:
+        super().__init__(f"issue {issue_id}: assignee agent {agent_id} was deleted")
+        self.issue_id = issue_id
+        self.agent_id = agent_id
+
+
 class IssueAssigneeNotFound(RuntimeError):
     """The issue's assignee agent could not be resolved when (re)binding its
     session. A RuntimeError subclass so every existing ``except RuntimeError``
@@ -93,6 +107,8 @@ async def get_or_create_issue_session(
     agent = await get_agent_repository().get_by_id(UUID(str(agent_id)))
     if not agent:
         raise RuntimeError(f"assignee agent {agent_id} not found")
+    if agent.get("deleted_at"):
+        raise IssueAssigneeDeleted(issue_id, str(agent_id))
 
     # M4 Autopilot fix (task O2 review C1): the issue's own project_id/team_id
     # MUST flow onto the session — RunRecorder tags agent_runs.project_id from

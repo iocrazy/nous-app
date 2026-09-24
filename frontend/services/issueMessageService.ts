@@ -170,6 +170,9 @@ export interface CommentTriggerPreview {
    *  client suppression). Optional so a pre-note cached verdict still validates;
    *  the backend always sends it (defaults to false). */
   is_note?: boolean;
+  /** The assignee was soft-deleted: nothing will wake, and posting is refused
+   *  with 409 `agent_deleted` until the issue is reassigned. */
+  agent_deleted?: boolean;
 }
 
 export interface IssueMessagePostResponse {

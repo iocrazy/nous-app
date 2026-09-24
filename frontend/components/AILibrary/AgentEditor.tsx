@@ -510,12 +510,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     }
   };
 
-  // Hard-delete this user-owned agent (presets never see the menu item).
+  // Soft-delete this user-owned agent (presets never see the menu item). A
+  // 409 agent_in_use arrives as an AiLibraryRequestError whose message is the
+  // server's own sentence (reassign first), which friendlyError passes through.
   const handleDeleteAgent = async (): Promise<void> => {
     // eslint-disable-next-line no-alert
     if (!window.confirm(
       t('aiLibrary.agents.deleteConfirm',
-        'Delete this agent? Its runs and skill bindings are removed; chat history stays readable.'),
+        'Delete this agent? It disappears from agent lists; its runs and chat history stay readable.'),
     )) return;
     try {
       await aiLibraryService.deleteAgent(slug);

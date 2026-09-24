@@ -59,6 +59,7 @@ from app.services.ai.chat.step_replay import (
     split_replayed_turn,
     user_message_metadata,
 )
+from app.services.ai.chat.turn_agent import resolve_turn_agent
 from app.services.ai.permissions.high_risk_caps import (
     high_risk_caps,
     media_kill_switch_engaged,
@@ -746,6 +747,16 @@ class AILibraryChatService:
                 detail="session has no agent_slug bound — cannot chat",
             )
 
+        # Resolve the agent BEFORE anything is persisted (mig 501): a session
+        # bound to a deleted agent is refused with a typed 409 agent_deleted,
+        # and a refused turn must not leave an unanswerable user message.
+        # Agent-overrides (mig 341): 1:1 chat resolves the CALLER's
+        # customization — user layer over the session's team layer.
+        agent_repo = get_agent_repository()
+        agent_record = await resolve_turn_agent(
+            agent_repo, session=session, agent_slug=agent_slug, user_id=user_id
+        )
+
         # Newest window: a conversation past 200 messages must feed the model
         # its most recent context, not its first 200 messages.
         history = await self.get_messages(session_id, user_id=user_id, newest=True)
@@ -809,20 +820,8 @@ class AILibraryChatService:
         # M1.5 wiring: load agent record so we can read budget/fallback,
         # then build the full runner stack (HookRegistry pre-populated,
         # fallback chain wrapping adapter, memory recall pre-fetched).
-        agent_repo = get_agent_repository()
+        # (agent_record was resolved at the top of the turn.)
         skill_repo = get_skill_repository()
-        # Agent-overrides (mig 341): 1:1 chat resolves the CALLER's
-        # customization — user layer over the session's team layer.
-        agent_record = await agent_repo.get_by_slug(
-            agent_slug,
-            override_user_id=user_id,
-            override_team_id=session.get("team_id"),
-        )
-        if not agent_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"agent slug not found: {agent_slug}",
-            )
 
         stack = await build_agent_runner_stack(
             agent=agent_record,

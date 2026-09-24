@@ -690,3 +690,24 @@ async def test_one_bad_channel_does_not_abort_scan():
 
     assert result["channels_scanned"] == 2
     assert result["messages_posted"] == 1
+
+
+# ── mig 501: a soft-deleted agent never broadcasts ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_agent_does_not_broadcast():
+    """Its conversation_members row survives a soft delete (the old hard delete
+    CASCADEd it away), so the scan must skip the tombstone itself."""
+    tomb = {**_agent(auto_broadcast=True), "deleted_at": "2026-09-23T00:00:00+00:00"}
+    br, cr, ar = _make_repos(agent=tomb, watermark=_WM_TS)
+
+    with (
+        patch(f"{_SVC}.get_broadcast_repository", return_value=br),
+        patch(f"{_SVC}.get_conversation_repository", return_value=cr),
+        patch(f"{_SVC}.get_agent_repository", return_value=ar),
+    ):
+        result = await scan_and_broadcast()
+
+    cr.send_message.assert_not_called()
+    assert result["messages_posted"] == 0
