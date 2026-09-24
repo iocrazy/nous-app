@@ -123,6 +123,16 @@ const CREDENTIAL_KIND: Record<string, { text: string; color: string; hint: strin
 // behaviour, inherited from whatever the Map happened to see first) scattered
 // them — in production the local rows carry 51/52/53 and everything else 0,
 // so the pairs an admin most needs to compare landed furthest apart.
+// Admin only manages what runs on OUR side with a credential we hold (API key,
+// server session, self-hosted endpoint). `user_device` protocols run on the
+// user's own paired daemon with the user's own credential — there is nothing
+// for an admin to configure, test or bill, so their catalog rows are not
+// shown here (they stay in the DB: routing still reads them).
+function isAdminManaged(protocols: ProviderProtocol[], key: string): boolean {
+  const p = protocols.find((x) => x.key === key)
+  return p === undefined || p.credential_kind !== 'user_device'
+}
+
 function protocolRank(protocols: ProviderProtocol[], key: string): number {
   const i = protocols.findIndex((p) => p.key === key)
   // Unknown providers (a custom value typed into "Add Provider") sort last
@@ -324,6 +334,7 @@ export function AIModelsPage() {
   const groups = useMemo<ProviderGroup[]>(() => {
     const map = new Map<string, ProviderGroup>()
     for (const m of models) {
+      if (!isAdminManaged(protocols, m.actual_provider)) continue
       const key = `${m.actual_provider}|${m.base_url || ''}`
       if (!map.has(key)) {
         map.set(key, {
@@ -352,10 +363,12 @@ export function AIModelsPage() {
 
   const protocolOptions = useMemo(
     () =>
-      protocols.map((p) => ({
-        label: `${p.label} — ${p.model_types.join('/')}`,
-        value: p.key,
-      })),
+      protocols
+        .filter((p) => p.credential_kind !== 'user_device')
+        .map((p) => ({
+          label: `${p.label} — ${p.model_types.join('/')}`,
+          value: p.key,
+        })),
     [protocols],
   )
 
