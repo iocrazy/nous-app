@@ -20,7 +20,8 @@ import { conversationService } from '../../services/conversationService';
 import { getTeamMembers } from '../../services/teamService';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { useToast } from '../Toast';
-import type { AILibraryAgent, Channel, ConversationMember } from '../../types';
+import type { AILibraryAgent, Channel } from '../../types';
+import type { ConversationMember } from '../../types/api';
 import type { TeamMember } from '../../types/api';
 
 interface Props {
