@@ -40,14 +40,8 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react';
-import type {
-  UsageAggregate,
-  UsageDailySummary,
-  UsageGroupBy,
-  UsagePerAgent,
-  UsageRunItem,
-  UsageScope,
-} from '../types';
+import type { UsageDailySummary, UsageGroupBy, UsageRunItem, UsageScope } from '../types';
+import type { UsageAggregate, UsagePerAgent } from '../types/api';
 import { aiLibraryService } from '../services/aiLibraryService';
 import {
   usageService,

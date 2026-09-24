@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UserPlus, Trash2, Shield, User, Crown, Loader2, Search, Users } from 'lucide-react';
 import { Loading } from './common/Loading';
-import { TeamMember } from '../types';
+import type { TeamMember } from '../types/api';
 import { fetchTeamMembers, updateMemberRole, removeMember } from '../services/teamService';
 import { fetchUsageStats } from '../services/pointsService';
 import { InviteMembersModal } from './InviteMembersModal';

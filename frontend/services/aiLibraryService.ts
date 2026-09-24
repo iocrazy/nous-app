@@ -14,39 +14,8 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { decodeErrorEnvelope } from './errorEnvelope';
-import type {
-  AgentCapabilities,
-  AgentChatPermissions,
-  AgentDashboard,
-  AgentPermissionAudit,
-  AgentRunDetail,
-  AgentRunUndoReport,
-  AgentUsage,
-  AgentRunEvent,
-  AgentRunGroupListResponse,
-  AgentRunListResponse,
-  LiveAgentRun,
-  AILibraryAgent,
-  AILibraryApprovalRequest,
-  AILibraryCommitment,
-  AILibraryMCPServer,
-  AILibrarySkill,
-  AILibraryUsageSummary,
-  AILibraryVersionItem,
-  AILibrarySkillFile,
-  ChatResponse,
-  ChatSession,
-  ChatSessionWithMessages,
-  CreateAgentPayload,
-  CreateChatSessionPayload,
-  CreateSkillPayload,
-  UsageAggregate,
-  UsageDailySummary,
-  UsageGroupBy,
-  RunCost,
-  UsageRunsPage,
-  UsageScope,
-} from '../types';
+import type { AgentCapabilities, AgentChatPermissions, AgentDashboard, AgentPermissionAudit, AgentRunDetail, AgentRunUndoReport, AgentUsage, AgentRunEvent, AgentRunGroupListResponse, AgentRunListResponse, LiveAgentRun, AILibraryAgent, AILibraryApprovalRequest, AILibraryCommitment, AILibraryMCPServer, AILibrarySkill, AILibraryUsageSummary, AILibraryVersionItem, AILibrarySkillFile, ChatSession, ChatSessionWithMessages, CreateAgentPayload, CreateChatSessionPayload, CreateSkillPayload, UsageDailySummary, UsageGroupBy, RunCost, UsageRunsPage, UsageScope } from '../types';
+import type { ChatResponse, UsageAggregate } from '../types/api';
 
 const base = (): string => `${getApiUrl()}/api/v1/ai-library`;
 

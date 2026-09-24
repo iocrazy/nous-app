@@ -39,16 +39,8 @@ import {
   MAX_FORM_FIELDS,
   updateTemplate,
 } from '../../services/workflowService';
-import type {
-  FormFieldDef,
-  FormFieldType,
-  StageLibraryItem,
-  WorkflowCompletionPolicy,
-  WorkflowMemberRef,
-  WorkflowNodeEvents,
-  WorkflowTemplate,
-  WorkflowTemplateNodeInput,
-} from '../../types';
+import type { FormFieldType, StageLibraryItem, WorkflowCompletionPolicy, WorkflowMemberRef, WorkflowTemplate, WorkflowTemplateNodeInput } from '../../types';
+import type { FormFieldDef, WorkflowNodeEvents } from '../../types/api';
 import { FORM_FIELD_TYPES } from '../../types';
 import { formatOptionsInput, parseOptionsInput } from './formFieldOptions';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';

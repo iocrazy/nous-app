@@ -17,7 +17,7 @@
  * `StageNodeForm` (required badge, per-field) and `CurrentNodeCard` (the
  * aggregate N/M count, which counts ALL fields regardless of `required`).
  */
-import type { FormFieldDef } from '../../types';
+import type { FormFieldDef } from '../../types/api';
 
 /** Whether a single field counts as "filled" per its type. Ignores
  * `field.required` entirely — callers decide whether an unfilled field

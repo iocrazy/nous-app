@@ -8,7 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRunEvent, ChatToolCall } from '../../types';
+import type { AgentRunEvent } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import { judgeToolOk, toolTimedOut } from './toolOutcome';
 import {
   coerceRecord,

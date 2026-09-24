@@ -10,7 +10,7 @@
  * sites (MediaCard, ResourcesContext, useDownloadsData) that each hold
  * `allTags` locally don't drift out of sync with each other.
  */
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 export function mergeAssignedTagsIntoAllTags<T extends { tag?: Tag | null }>(
   prev: Tag[],

@@ -8,7 +8,7 @@ import {
   getReadbackTiming, getShareSchema, isScheduleUnreachable, listAccounts, listPublishTasks,
   retryPublishTask, type ReadbackTiming,
 } from '../../services/distributionService';
-import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
+import type { PublishTask, PublishTaskAccount, SocialAccount } from '../../types/api';
 import { humanizeTaskError } from '../../utils/humanizeTaskError';
 import { PageHeader } from '../layout/PageHeader';
 import { AccountAvatar } from './platform';

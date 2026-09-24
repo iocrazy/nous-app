@@ -26,7 +26,8 @@ import {
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
-import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
+import { LibraryVideo, SelfDeclaration } from '../../types';
+import type { SocialAccount, TopicRef } from '../../types/api';
 import { CoverSlots, type CoverOrientation, type CoverPair } from './CoverSlots';
 import { clearPublishDraft, readPublishDraft, writePublishDraft } from './publishDraft';
 import { HelpTip } from './CoverStudio/HelpTip';

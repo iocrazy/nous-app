@@ -6,7 +6,8 @@ import {
   Mic, FileText, Eye, ListMusic,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Video, Tag } from '../types';
+import { Video } from '../types';
+import type { Tag } from '../types/api';
 import { fetchAllTags as fetchTags, createTag } from '../services/unifiedTagService';
 import { MediaCard } from '../components/MediaCard';
 import { CompactMediaCard } from '../components/CompactMediaCard';

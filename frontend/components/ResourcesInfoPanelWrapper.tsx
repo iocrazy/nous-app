@@ -2,7 +2,7 @@ import React from 'react';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
 import { FolderInfoPanel } from './FolderInfoPanel';
-import { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 // ─── Types ───────────────────────────────────────────────
 

@@ -22,7 +22,7 @@ import {
   GripVertical,
   NotebookPen,
 } from 'lucide-react';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 import { Loading } from './common/Loading';
 import { UiSelect } from './ui';
 import { mergeUpdatedTag } from './tagEditMerge';

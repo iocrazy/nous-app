@@ -5,7 +5,8 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Copy, Check, FileText, Shapes } from 'lucide-react';
 
-import type { AIChatMessageAttachment, ChatToolCall, RunCost } from '../../types';
+import type { AIChatMessageAttachment, RunCost } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ResourceThumb } from './ResourceThumb';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';

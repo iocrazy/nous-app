@@ -22,7 +22,8 @@
  */
 import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { FormFieldDef, FormFieldType } from '../../types';
+import type { FormFieldType } from '../../types';
+import type { FormFieldDef } from '../../types/api';
 import { isFieldFilled } from '../workflow/formFieldFill';
 import { DateTimePopover } from '../common/DateTimePopover';
 

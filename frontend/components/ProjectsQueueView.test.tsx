@@ -11,7 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ProjectsQueueView } from './ProjectsQueueView';
 import * as svc from '../services/projectsService';
-import type { Project, ProjectSuggestionItem } from '../types';
+import type { Project } from '../types';
+import type { ProjectSuggestionItem } from '../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

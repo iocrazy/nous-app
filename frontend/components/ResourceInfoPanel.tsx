@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, File, Film, Image, FileText, Pencil, FolderOpen, Star, Music, Brain, Sparkles, Eye, Loader2, Check, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Resource, Tag } from '../types';
+import { Resource } from '../types';
+import type { Tag } from '../types/api';
 import { getResourceCoverUrl, getResourceProvenance } from '../services/resourceService';
 import type { OutputLineage } from '../services/outputsService';
 import { EagleTagPicker } from './EagleTagPicker';

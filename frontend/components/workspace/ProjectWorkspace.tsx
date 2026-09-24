@@ -47,7 +47,8 @@ import { ApiError } from '../../services/apiClient';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { AdvancePreview, EpisodeProgress, Project, ProjectStageNode } from '../../types';
+import type { EpisodeProgress, Project, ProjectStageNode } from '../../types';
+import type { AdvancePreview } from '../../types/api';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
 // (PR-19). Overview is the landing module so it stays eager, as do the

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 interface TagRowProps {
   tag: Tag;
@@ -22,7 +22,7 @@ export const TagRow: React.FC<TagRowProps> = ({
 }) => {
   const { i18n } = useTranslation();
   const label = i18n.language === 'zh' && tag.name_zh ? tag.name_zh : tag.name;
-  const count = tag.media_count ?? tag.video_count ?? 0;
+  const count = tag.media_count ?? 0;
 
   return (
     <button

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Music, MessageCircle, Share2, Bookmark, Star } from 'lucide-react';
-import type { Video, Tag } from '../types';
+import type { Video } from '../types';
+import type { Tag } from '../types/api';
 import { RatingStars } from './detail/DetailCardKit';
 import { EagleTagPicker } from './EagleTagPicker';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';

@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../supabaseClient';
 import { apiClient } from './apiClient';
-import { Team, TeamMember } from '../types';
+import { Team } from '../types';
+import type { TeamMember } from '../types/api';
 
 // PostgREST returns BIGINT as JSON number; ensure IDs are always strings.
 // teams.is_personal was dropped in PR-E (mig 243) in favour of teams.kind;

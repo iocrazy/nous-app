@@ -10,7 +10,7 @@
 import {
   addResourceTag, createTag, fetchAllTags, removeResourceTag,
 } from './unifiedTagService';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 
 // Well-known tag name. Matched case-insensitively so a pre-existing tag with
 // different casing is reused rather than duplicated.

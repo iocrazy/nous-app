@@ -23,7 +23,7 @@ import { CategorySidebar } from './CategorySidebar';
 import { TagContent } from './TagContent';
 import { MergeTagsDialog } from './MergeTagsDialog';
 import { SettingsPopover } from './SettingsPopover';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 import type { PickerSettings } from '../../services/tagPreferencesService';
 
 const TAG_COLORS = [

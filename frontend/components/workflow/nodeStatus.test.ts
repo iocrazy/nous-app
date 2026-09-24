@@ -30,7 +30,7 @@ function node(over: Partial<ProjectStageNode>): ProjectStageNode {
     skipped: false,
     members: [],
     completion_policy: 'owner',
-    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false, prepare_agent_run: false, auto_start: false },
     ...over,
   };
 }

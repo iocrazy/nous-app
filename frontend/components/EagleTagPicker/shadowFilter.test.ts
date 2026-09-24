@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { filterPickerTags } from './index';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 const t = (id: string, origin?: 'curated' | 'note'): Tag =>
   ({ id, name: id, color: null, icon: null, type: 'user', created_at: '', origin }) as Tag;

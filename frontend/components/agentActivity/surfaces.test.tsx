@@ -12,7 +12,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MessageBubble } from '../chat/AIChatBubble';
 import { IssueChatThread } from '../Todolist/IssueChatThread';
 import { __clearRunToolActivityCache } from './useRunToolActivity';
-import type { ChatToolCall } from '../../types';
+import type { ChatToolCall } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

@@ -29,3 +29,29 @@ export interface Envelope<T> {
 
 export type { components, paths } from './api.generated';
 export type { Schemas };
+
+// —— Response shapes migrated off hand-written copies in types.ts (P1) ——
+export type CollectionCondition = Schemas['CollectionCondition'];
+export type CollectionRules = Schemas['CollectionRules'];
+export type CleanupSuggestion = Schemas['CleanupSuggestion'];
+export type WorkflowNodeEvents = Schemas['WorkflowNodeEvents'];
+export type FormFieldDef = Schemas['FormFieldDef'];
+export type AdvanceNodeRef = Schemas['AdvanceNodeRef'];
+export type AdvancePreview = Schemas['AdvancePreview'];
+export type StoryboardProgress = Schemas['StoryboardProgress'];
+export type SuggestionAction = Schemas['SuggestionAction'];
+export type ProjectSuggestionItem = Schemas['ProjectSuggestionItem'];
+export type RecentItem = Schemas['RecentItem'];
+export type UsagePerAgent = Schemas['UsagePerAgent'];
+export type UsageAggregate = Schemas['UsageAggregate'];
+export type ChatToolCall = Schemas['ChatToolCall'];
+export type ChatResponse = Schemas['ChatResponse'];
+export type TopicRef = Schemas['TopicRef'];
+export type MusicRef = Schemas['MusicRef'];
+export type TranscriptSegment = Schemas['TranscriptSegmentSchema'];
+export type ApiKey = Schemas['ApiKeyResponse'];
+export type TeamMember = Schemas['TeamMemberResponse'];
+export type Tag = Schemas['TagResponse'];
+export type SocialAccount = Schemas['SocialAccountOut'];
+export type PublishTask = Schemas['PublishTaskOut'];
+export type PublishTaskAccount = Schemas['TaskAccountOut'];

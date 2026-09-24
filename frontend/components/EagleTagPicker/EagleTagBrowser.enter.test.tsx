@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { EagleTagBrowser } from './EagleTagBrowser';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 const tag = (over: Partial<Tag>): Tag => ({
   id: '1', name: 'copywriting', name_zh: '文案', color: null, icon: null,
-  type: 'user', created_at: '2026-01-01', ...over,
+  type: 'user', created_at: '2026-01-01', enabled: true, media_count: 0, origin: 'curated', prompt_trigger: false, ...over,
 });
 
 const baseProps = {

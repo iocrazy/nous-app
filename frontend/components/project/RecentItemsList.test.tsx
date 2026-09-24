@@ -6,7 +6,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RecentItemsList } from './RecentItemsList';
-import type { RecentItem } from '../../types';
+import type { RecentItem } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),

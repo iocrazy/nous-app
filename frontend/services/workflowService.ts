@@ -11,20 +11,8 @@
  *     so they return the model DIRECTLY — do NOT unwrap `.data` there.
  */
 
-import {
-  AdvancePreview,
-  ProjectNodeCreate,
-  ProjectNodePatch,
-  ProjectStageNode,
-  ProjectWorkflow,
-  StageBoardData,
-  StageLibraryItem,
-  WorkflowCompletionPolicy,
-  WorkflowNodeEvents,
-  WorkflowTemplate,
-  WorkflowTemplateNode,
-  WorkflowTemplateNodeInput,
-} from '../types';
+import { ProjectNodeCreate, ProjectNodePatch, ProjectStageNode, ProjectWorkflow, StageBoardData, StageLibraryItem, WorkflowCompletionPolicy, WorkflowTemplate, WorkflowTemplateNode, WorkflowTemplateNodeInput } from '../types';
+import type { AdvancePreview, WorkflowNodeEvents } from '../types/api';
 import { apiClient } from './apiClient';
 
 interface Envelope<T> {

@@ -14,7 +14,7 @@ import {
 import { fetchAllTags, createTag } from '../../services/unifiedTagService';
 import { EagleTagPicker } from '../EagleTagPicker';
 import { isPipelineTag } from '../../utils/aiIntents';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 type Phase = 'collapsed' | 'input' | 'result';
 

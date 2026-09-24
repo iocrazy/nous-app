@@ -6,7 +6,7 @@
  */
 
 import { getAuthHeaders } from './parserService';
-import type { Tag } from '../types';
+import type { Tag } from '../types/api';
 import { getApiUrl } from '../utils/apiConfig';
 
 // ─── Global tag CRUD ──────────────────────────────────────

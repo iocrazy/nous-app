@@ -192,7 +192,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   // Resource tags (fetched from resource_tags junction table)
   const [resourceTags, setResourceTags] = useState<Array<{ tag: { id: string; name: string; color?: string } }>>([]);
   const [resourceId, setResourceId] = useState<string | null>(null);
-  const [allTags, setAllTags] = useState<import('../types').Tag[]>([]);
+  const [allTags, setAllTags] = useState<import('../types/api').Tag[]>([]);
 
   useEffect(() => {
     fetchAllTags().then(setAllTags).catch(() => {});
@@ -946,7 +946,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {resourceId && (
             <div className="mb-4 -mx-4">
               <EagleTagPicker
-                assignedTags={resourceTags.map(item => item.tag).filter((t): t is import('../types').Tag => !!t)}
+                assignedTags={resourceTags.map(item => item.tag).filter((t): t is import('../types/api').Tag => !!t)}
                 allTags={allTags}
                 onAdd={handleAddTag}
                 onRemove={handleRemoveTag}

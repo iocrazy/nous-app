@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import type { Tag } from '../../types';
+import type { Tag } from '../../types/api';
 
 // ─── Mocks ──────────────────────────────────────────────
 
@@ -27,10 +27,16 @@ vi.mock('../../supabaseClient', () => ({
 const tagNoTrigger: Tag = {
   id: 't1', name: 'Anime', color: '#fff', icon: null, type: 'user',
   prompt_trigger: false, created_at: '2026-01-01T00:00:00Z',
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
 };
 const triggerTag: Tag = {
   id: 't2', name: 'AI', color: '#6366f1', icon: null, type: 'user',
   prompt_trigger: true, created_at: '2026-01-01T00:00:00Z',
+  enabled: true,
+  media_count: 0,
+  origin: 'curated',
 };
 
 const fetchResourceTags = vi.fn().mockResolvedValue([{ tag: tagNoTrigger }]);
