@@ -498,3 +498,138 @@ async def test_admin_update_without_name_skips_collision_lookup():
         await update_nous_model("6", NousModelUpdate(display_name="Y"), MagicMock())
     repo.get_by_name.assert_not_called()
     repo.update.assert_awaited_once()
+
+
+# ─── explicit rename nous-qwen3-llm ↔ nous-qwen3-8-27b, per lookup site ────
+#
+# Every site above is proven for the prefix swap; these prove the explicit
+# rename table reaches them too (old name → renamed row, and the reverse for
+# the window before the data migration lands).
+
+_OLD_Q = "nous-qwen3-llm"
+_NEW_Q = "nous-qwen3-8-27b"
+
+
+@pytest.mark.asyncio
+async def test_repo_rename_old_name_finds_renamed_row(monkeypatch):
+    _catalog(monkeypatch, _NEW_Q)
+    row = await NousModelRepository().get_by_name(_OLD_Q)
+    assert row is not None and row["name"] == _NEW_Q
+
+
+@pytest.mark.asyncio
+async def test_repo_rename_new_name_finds_unrenamed_row(monkeypatch):
+    _catalog(monkeypatch, _OLD_Q)
+    row = await NousModelRepository().get_by_name(_NEW_Q)
+    assert row is not None and row["name"] == _OLD_Q
+
+
+@pytest.mark.asyncio
+async def test_repo_rename_exact_wins_when_both_exist(monkeypatch):
+    _catalog(monkeypatch, _NEW_Q, _OLD_Q)
+    repo = NousModelRepository()
+    assert (await repo.get_by_name(_OLD_Q))["name"] == _OLD_Q
+    assert (await repo.get_by_name(_NEW_Q))["name"] == _NEW_Q
+
+
+@pytest.mark.asyncio
+async def test_resolve_db_adapter_old_name_hits_renamed_row(monkeypatch):
+    """A canvas node still carrying ``provider_slug: nous-qwen3-llm`` after the
+    row is renamed: the real resolve chain (only the DB session is stubbed)
+    must land on the renamed row's ``actual_model`` and platform key."""
+    from app.services.ai.providers.ai_provider_helpers import resolve_db_adapter
+
+    rows = [
+        NousModels(
+            id=1,
+            name=_NEW_Q,
+            is_enabled=True,
+            actual_provider="nous",
+            actual_model="qwen3-8-27b",
+            api_key="platform-key",
+            base_url="http://host.docker.internal:8000/v1",
+        )
+    ]
+    session = _Session(rows)
+    monkeypatch.setattr(repo_mod, "read_scope", lambda: _CM(session))
+    with patch(
+        "app.services.ai.governance.ai_governance.is_nous_allowed",
+        AsyncMock(return_value=True),
+    ):
+        adapter = await resolve_db_adapter(_OLD_Q, "canvas")
+    assert type(adapter).__name__ == "NousAdapter"
+    assert adapter.default_model == "qwen3-8-27b"
+    assert adapter.api_key == "platform-key"
+
+
+def test_db_registry_rename_explicit_match_both_directions():
+    from app.services.media.parsers.video_providers import db_registry
+
+    old = [{"name": _OLD_Q}]
+    new = [{"name": _NEW_Q}]
+    assert db_registry._explicit_match(new, _OLD_Q) is new[0]
+    assert db_registry._explicit_match(old, _NEW_Q) is old[0]
+
+
+@pytest.mark.asyncio
+async def test_resolve_local_engine_rename_old_name_hits_renamed_row():
+    from app.services.generation import local_dispatch
+
+    rows = [{"name": _NEW_Q, "actual_provider": "jimeng-local", "actual_model": "m"}]
+    with patch(
+        "app.services.media.parsers.video_providers.db_registry._enabled_rows",
+        AsyncMock(return_value=rows),
+    ):
+        got = await local_dispatch.resolve_local_engine(_OLD_Q, "image", "u")
+    assert got is not None and got[1] == "m"
+
+
+@pytest.mark.asyncio
+async def test_capabilities_for_model_rename_resolves():
+    from app.services.generation import model_capabilities as gm
+
+    rows = [{"name": _OLD_Q, "actual_provider": "doubao"}]
+    with patch.object(gm, "visible_generation_rows", AsyncMock(return_value=rows)):
+        assert await gm.capabilities_for_model(_NEW_Q, "u") is not None
+
+
+@pytest.mark.asyncio
+async def test_disabled_old_rename_hides_renamed_row():
+    from app.services.ai import platform_model_visibility as v
+
+    rows = [{"name": _NEW_Q}, {"name": "nous-other"}]
+    with patch.object(
+        v,
+        "platform_model_gate",
+        AsyncMock(return_value=(True, frozenset({_OLD_Q}))),
+    ):
+        out = await v.filter_platform_models_for_user("u", rows)
+    assert [r["name"] for r in out] == ["nous-other"]
+
+
+@pytest.mark.asyncio
+async def test_local_vision_catalog_name_resolves_rename(monkeypatch):
+    from app.services.ai import model_capabilities as m
+
+    m._cache.clear()
+    m._local_vision_models.clear()
+    m._cache_loaded = False
+    monkeypatch.setattr(m, "_fetch_capabilities", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        m, "_fetch_local_vision_models", AsyncMock(return_value={_NEW_Q})
+    )
+    try:
+        assert await m.model_supports_vision(_OLD_Q) is True
+    finally:
+        m._cache.clear()
+        m._local_vision_models.clear()
+        m._cache_loaded = False
+
+
+def test_catalog_window_rename_both_directions(monkeypatch):
+    from app.agent_framework import catalog_windows as cw
+
+    monkeypatch.setattr(cw, "_windows", {_NEW_Q: 131072})
+    assert cw.catalog_window(_OLD_Q) == 131072
+    monkeypatch.setattr(cw, "_windows", {_OLD_Q: 65536})
+    assert cw.catalog_window(_NEW_Q) == 65536
