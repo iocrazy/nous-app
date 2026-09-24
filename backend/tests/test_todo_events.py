@@ -6,7 +6,7 @@ Task Center showed no steps, a restart lost the plan, an audit had nothing to
 replay. Every successful mutation now appends ONE transcript event carrying
 the complete list (dsh whole-value rule: the current list IS the last
 `todo_write` event; no deltas to reconcile) and mirrors the same payload into
-`agent_runs.metadata_json.todos` — the row the Task Center already receives
+`agent_runs.metadata_json.view.todos` — the row the Task Center already receives
 over Realtime, so the UI gets it with zero new push channels.
 
 Reads (`op=show`) do not emit: a frame per read floods the log with identical
@@ -187,7 +187,7 @@ async def test_runner_hands_its_recorder_to_the_skill_tool_for_the_turn():
     assert tool.recorder is None
 
 
-# ── mirror: the snapshot also lands on agent_runs.metadata_json.todos ─────
+# ── mirror: the snapshot lands on agent_runs.metadata_json.view.todos ─────
 
 
 @pytest.mark.unit
