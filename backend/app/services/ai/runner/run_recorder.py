@@ -1268,9 +1268,11 @@ class RunEventWriter:
     interrupted``) — so there is exactly one way an event reaches storage.
 
     The mirror is skipped when a fold returned the same object (nothing
-    changed). Legacy keys ``todos`` / ``turn_end_reason`` / ``last_retry``
-    are still written from the view during the phase-1 transition; Task 7
-    removes them once the frontend reads ``view``.
+    changed). Only ``view`` and ``cost`` are mirrored: the phase-2 legacy
+    keys ``todos`` / ``turn_end_reason`` / ``last_retry`` were dropped in
+    framework hardening B (2026-09-23) once the frontend read ``view`` only.
+    The ``agent_runs.turn_end_reason`` COLUMN is unrelated and still written
+    by ``_finish``.
     """
 
     def __init__(self, run_id: int, *, seq_start: int = 0, value_max_chars: int = 4000):
@@ -1714,14 +1716,7 @@ class RunEventWriter:
     def mirror_keys(self) -> dict[str, Any]:
         """Whole values written into metadata_json — one place to read them."""
         view, cost = self.views["view"], self.views["cost"]
-        return {
-            "view": view,
-            "cost": cost,
-            # transition-only legacy keys (Task 7 removes)
-            "todos": _legacy_todos(view),
-            "turn_end_reason": (view.get("ended") or {}).get("reason"),
-            "last_retry": view.get("retry"),
-        }
+        return {"view": view, "cost": cost}
 
     def mirror_stmt(self):
         """The UPDATE that writes every mirror key — a pure builder so its bind
@@ -1815,21 +1810,3 @@ def _jsonable(value: Any) -> Any:
     """Round-trip through json so non-JSON scalars (Decimal, datetime) become
     JSON-safe before the JSONB bind processor serialises the value once."""
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
-
-
-def _legacy_todos(view: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """Transition shape of ``metadata_json.todos`` for readers not yet on
-    ``view`` (AgentResultBody's Steps table reads ``todos.todos``). Until
-    2026-09-06 this returned ``todos: []`` — n/m survived, the table went
-    blank (真栈 run 346496695717971: 3/3 with zero rows)."""
-    step = view.get("step")
-    if not step:
-        return None
-    return {
-        "todos": list(view.get("todos") or []),
-        "counts": {
-            "total": step["total"],
-            "completed": step["done"],
-            "in_progress": 1 if step.get("label") else 0,
-        },
-    }

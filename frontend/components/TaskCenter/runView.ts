@@ -4,9 +4,10 @@
  *
  * Components never touch the JSON shape directly: everything reads through
  * here, so a backend field rename is one edit. Every selector returns `null`
- * for a row without a `view` (rows older than mig 453) — the legacy keys
- * (`todos` / `last_retry` / `turn_end_reason`) are read by the fallbacks in
- * agentRunPresentation.ts during the transition, not here.
+ * for a row without a `view` (rows older than mig 453). The phase-2 legacy
+ * keys (`todos` / `last_retry` / `turn_end_reason`) are no longer read anywhere
+ * (framework hardening B, 2026-09-23): the few pre-453 rows simply show no
+ * subtitle / progress.
  */
 
 export type RunPhase = 'running' | 'compacting' | 'paused' | 'waiting_input' | 'ended';
@@ -68,6 +69,15 @@ export interface RunOutputs {
   last: { kind: string; ref_id: string; version: number; title: string | null } | null;
 }
 
+/** One row of the agent's todo list as the backend folds it into
+ * `view.todos` (whole list, last snapshot wins, bounded by MAX_TODO_ITEMS). */
+export interface RunTodo {
+  id: number;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  active_form: string | null;
+}
+
 export interface RunEnded {
   reason: string;
   [k: string]: unknown;
@@ -77,6 +87,9 @@ export interface RunView {
   v: number;
   phase: RunPhase | string;
   step: RunStep | null;
+  /** The Steps table rows (todo fold). OPTIONAL: views folded before the
+   *  list was kept carry only `step`. Read through runTodos. */
+  todos?: RunTodo[] | null;
   current: { turn: number | null; step: number | null; model: string | null } | null;
   retry: RunRetry | null;
   context: RunContext | null;
@@ -168,6 +181,16 @@ export function stepProgress(view: RunView | null): RunStep | null {
   if (!s || typeof s.done !== 'number' || typeof s.total !== 'number') return null;
   if (!Number.isFinite(s.done) || !Number.isFinite(s.total)) return null;
   return { done: s.done, total: s.total, label: typeof s.label === 'string' ? s.label : null };
+}
+
+/** The agent's todo rows for the Steps table — [] when the view keeps none.
+ *  Rows without a string content are dropped rather than rendered blank. */
+export function runTodos(view: RunView | null): RunTodo[] {
+  const raw = view?.todos;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (t): t is RunTodo => !!t && typeof t === 'object' && typeof (t as RunTodo).content === 'string',
+  );
 }
 
 export interface RetryState {

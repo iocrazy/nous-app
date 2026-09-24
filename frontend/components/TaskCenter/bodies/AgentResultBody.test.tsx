@@ -25,19 +25,21 @@ const task = (metadata: Record<string, unknown>): UnifiedTask =>
     created_at: '2026-08-27T06:00:00Z',
   }) as UnifiedTask;
 
-describe('AgentResultBody — todo list (harness phase 2)', () => {
+describe('AgentResultBody — todo list from view.todos', () => {
   it('lists every step with its status and the counts', () => {
     const { container } = render(
       <AgentResultBody
         task={task({
           agent_output: 'done',
-          todos: {
+          view: {
+            v: 1, phase: 'running', step: { done: 1, total: 3, label: 'Drafting' }, current: null, retry: null,
+            context: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0,
+            budget: null, revision: 2,
             todos: [
               { id: 1, content: 'Outline', status: 'completed', active_form: null },
               { id: 2, content: 'Draft', status: 'in_progress', active_form: 'Drafting' },
               { id: 3, content: 'Polish', status: 'pending', active_form: null },
             ],
-            counts: { total: 3, completed: 1, in_progress: 1 },
           },
         })}
       />,
@@ -54,11 +56,23 @@ describe('AgentResultBody — todo list (harness phase 2)', () => {
     const { container } = render(<AgentResultBody task={task({ agent_output: 'done' })} />);
     expect(container.querySelector('[data-testid="agent-todo-list"]')).toBeNull();
   });
+
+  it('ignores the dropped legacy todos key (framework hardening B)', () => {
+    const { container } = render(
+      <AgentResultBody
+        task={task({
+          agent_output: 'done',
+          todos: { todos: [{ id: 1, content: 'a', status: 'completed', active_form: null }], counts: { total: 1, completed: 1, in_progress: 0 } },
+        })}
+      />,
+    );
+    expect(container.querySelector('[data-testid="agent-todo-list"]')).toBeNull();
+  });
 });
 
 
 describe('AgentResultBody — view-first counts + trajectory (harness P4 T11)', () => {
-  it('prefers view.step counts over the legacy todo counts and draws the run trajectory', () => {
+  it('reads counts from view.step and draws the run trajectory', () => {
     activity.events = [
       { seq: 1, event_type: 'step_start', payload: { turn: 1, step: 1 }, created_at: '', turn: 1, step: 1 },
       { seq: 2, event_type: 'tool_call', payload: { tool: 'ReadScene', iteration: 1 }, created_at: '' },
@@ -67,8 +81,7 @@ describe('AgentResultBody — view-first counts + trajectory (harness P4 T11)', 
     const { container } = render(
       <AgentResultBody
         task={task({
-          view: { v: 1, phase: 'ended', step: { done: 5, total: 6, label: null }, current: null, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: { reason: 'completed' }, inbox_pending: 0, budget: null, revision: 3 },
-          todos: { todos: [{ id: 1, content: 'a', status: 'completed', active_form: null }], counts: { total: 1, completed: 1, in_progress: 0 } },
+          view: { v: 1, phase: 'ended', step: { done: 5, total: 6, label: null }, current: null, retry: null, context: null, blocked: null, children: { total: 0, done: 0 }, ended: { reason: 'completed' }, inbox_pending: 0, budget: null, revision: 3, todos: [{ id: 1, content: 'a', status: 'completed', active_form: null }] },
         })}
       />,
     );

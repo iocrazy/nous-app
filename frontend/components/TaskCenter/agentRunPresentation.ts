@@ -1,5 +1,4 @@
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
-import { coerceRecord } from '../agentActivity/toolActivity';
 import { endedReason, retryState, selectRunView, stepProgress } from './runView';
 
 // agent_runs is the universal record for every agent turn (chat + issue +
@@ -44,8 +43,9 @@ export interface AgentRunRow {
   input_summary: string | null;
   output_summary: string | null;
   error_message: string | null;
-  /** Backend mirrors run-level facts here (todos, turn_end_reason). Absent on
-   * older rows and on realtime payloads that predate the column selection. */
+  /** Backend mirrors the folded run projections here (`view` / `cost`, mig
+   * 453). Absent on older rows and on realtime payloads that predate the
+   * column selection. */
   metadata_json?: Record<string, unknown> | null;
   started_at: string | null;
   ended_at: string | null;
@@ -83,16 +83,14 @@ export function agentDisplayName(run: Pick<AgentRunRow, 'ai_agents'>): string | 
 
 /**
  * How the turn actually ended, for the completed-state subtitle. The backend
- * files one typed `turn_end` per turn (harness phase 2) and mirrors its reason
- * into `metadata_json.turn_end_reason`. "completed" and the reasons that already
+ * files one typed `turn_end` per turn (harness phase 2) and folds its reason
+ * into `metadata_json.view.ended.reason`. "completed" and the reasons that already
  * flip the run to failed/cancelled yield null — the default copy is right for
  * them. Only the endings a "completed" run can hide get their own line: the
  * run says done while the agent was in fact stopped short.
  */
 export function turnEndSubtitle(metadata: Record<string, unknown> | null | undefined): string | null {
-  // view-first (mig 453 fold), legacy mirror key as the transition fallback
-  const reason = endedReason(selectRunView(metadata)) ?? metadata?.turn_end_reason;
-  switch (reason) {
+  switch (endedReason(selectRunView(metadata))) {
     case 'max_iterations':    return 'Stopped at tool limit';
     case 'provider_length':   return 'Cut off by model limit';
     case 'context_rejected':  return 'Rejected: context too large';
@@ -100,20 +98,6 @@ export function turnEndSubtitle(metadata: Record<string, unknown> | null | undef
     case 'interrupted':       return 'Interrupted';
     default:                  return null;
   }
-}
-
-/** One row of the agent's todo list, as the backend snapshots it (whole
- * value per write — never a delta, so a missed event cannot corrupt it). */
-export interface AgentTodoItem {
-  id: number;
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-  active_form: string | null;
-}
-
-export interface AgentTodoSnapshot {
-  todos: AgentTodoItem[];
-  counts: { total: number; completed: number; in_progress: number };
 }
 
 export interface TodoProgress {
@@ -124,25 +108,13 @@ export interface TodoProgress {
 }
 
 /**
- * "3/7 · doing B" from `metadata_json.todos`. Null when no snapshot ever landed
- * (older runs, agents that never wrote a list) — the card then draws nothing
- * rather than "0/0". Malformed counts are also null: a NaN in the UI is worse
- * than silence.
+ * "3/7 · doing B" from `metadata_json.view.step`. Null when no snapshot ever
+ * landed (older runs, agents that never wrote a list) — the card then draws
+ * nothing rather than "0/0". Malformed counts are also null: a NaN in the UI
+ * is worse than silence.
  */
 export function todoProgress(metadata: Record<string, unknown> | null | undefined): TodoProgress | null {
-  const fromView = stepProgress(selectRunView(metadata));
-  if (fromView) return fromView;
-  // Phase-2 rows mirrored these as jsonb STRINGS (double-encoded) — coerce.
-  const snap = coerceRecord(metadata?.todos) as Partial<AgentTodoSnapshot> | null;
-  const counts = snap?.counts;
-  if (!snap || !counts || typeof counts.total !== 'number' || typeof counts.completed !== 'number') {
-    return null;
-  }
-  if (!Number.isFinite(counts.total) || !Number.isFinite(counts.completed)) return null;
-  const todos = Array.isArray(snap.todos) ? snap.todos : [];
-  const active = todos.find((t) => t?.status === 'in_progress');
-  const label = active ? active.active_form || active.content || null : null;
-  return { label, done: counts.completed, total: counts.total };
+  return stepProgress(selectRunView(metadata));
 }
 
 export interface RetryProgress {
@@ -153,7 +125,7 @@ export interface RetryProgress {
 }
 
 /**
- * "Retry 2/4 · waiting 3.2s" from `metadata_json.last_retry`. The backend
+ * "Retry 2/4 · waiting 3.2s" from `metadata_json.view.retry`. The backend
  * stamps `at` when it files the retry; the wait is aged against the caller's
  * clock so a retry that already happened reads "Retried 2/4", not a wait that
  * never ends. Null when the run never retried.
@@ -162,16 +134,7 @@ export function retryProgress(
   metadata: Record<string, unknown> | null | undefined,
   now: number,
 ): RetryProgress | null {
-  const fromView = retryState(selectRunView(metadata), now);
-  if (fromView) return fromView;
-  const r = coerceRecord(metadata?.last_retry) as
-    | { attempt?: unknown; max_retries?: unknown; delay_ms?: unknown; at?: unknown }
-    | null;
-  if (!r || typeof r.attempt !== 'number' || typeof r.max_retries !== 'number') return null;
-  const delayMs = typeof r.delay_ms === 'number' ? r.delay_ms : 0;
-  const atMs = typeof r.at === 'string' ? Date.parse(r.at) : NaN;
-  const remaining = Number.isFinite(atMs) ? atMs + delayMs - now : 0;
-  return { attempt: r.attempt, max: r.max_retries, waitingSeconds: Math.max(0, remaining / 1000) };
+  return retryState(selectRunView(metadata), now);
 }
 
 /** agent_runs has no "queued" state — a run is executing or terminal. */
@@ -220,13 +183,10 @@ export function agentRunToTask(run: AgentRunRow, cachedAgentName?: string): Unif
       // cache is keyed by agent_id.
       agent_id: run.agent_id ?? null,
       agent_name: agentName ?? null,
-      // Phase 2 mirrors (todo snapshot / last retry / turn end). Passed through
-      // whole so todoProgress()/retryProgress() read one shape everywhere.
-      todos: run.metadata_json?.todos ?? null,
-      last_retry: run.metadata_json?.last_retry ?? null,
-      turn_end_reason: run.metadata_json?.turn_end_reason ?? null,
-      // P4 whole-value projections (mig 453). Selectors in runView.ts read
-      // these; the three legacy keys above go once every row carries them.
+      // P4 whole-value projections (mig 453) — the only run facts the card
+      // reads; selectors in runView.ts do the reading. The phase-2 legacy keys
+      // (todos / last_retry / turn_end_reason) are no longer written or read
+      // (framework hardening B, 2026-09-23).
       view: run.metadata_json?.view ?? null,
       cost: run.metadata_json?.cost ?? null,
       // Where a steer from the card goes (T11): issue first, else conversation.

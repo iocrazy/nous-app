@@ -174,22 +174,6 @@ def test_every_registered_fold_is_enumerable_and_covers_the_new_event_types():
     } <= set(rp.registered_types())
 
 
-def test_legacy_todos_mirror_carries_the_items_from_view():
-    from app.services.ai.runner.run_recorder import _legacy_todos
-
-    view = {
-        "step": {"done": 1, "total": 2, "label": "b"},
-        "todos": [
-            {"id": 1, "content": "a", "status": "completed", "active_form": None},
-            {"id": 2, "content": "b", "status": "in_progress", "active_form": None},
-        ],
-    }
-    out = _legacy_todos(view)
-    assert out["counts"] == {"total": 2, "completed": 1, "in_progress": 1}
-    assert [t["id"] for t in out["todos"]] == [1, 2]
-    assert _legacy_todos({}) is None
-
-
 # ── phase 2a: typed question (folds/question.py) ─────────────────────────
 
 

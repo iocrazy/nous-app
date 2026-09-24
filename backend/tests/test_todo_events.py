@@ -241,9 +241,13 @@ async def test_todo_write_mirrors_into_metadata_json(monkeypatch):
     sql, params = mirrors[0]
     assert "agent_runs" in sql and "AS TEXT[]" in sql
     keys = [v for v in params.values() if isinstance(v, str)]
-    assert {"view", "cost", "todos"} <= set(keys)
+    assert {"view", "cost"} <= set(keys)
+    # The phase-2 legacy ``todos`` key is gone (framework hardening B) — the
+    # Steps table reads ``view.todos`` now.
+    assert "todos" not in keys
     view = next(v for v in params.values() if isinstance(v, dict) and "phase" in v)
     assert view["step"] == {"done": 1, "total": 2, "label": "b"}
+    assert [t["content"] for t in view["todos"]] == ["a", "b"]
 
 
 @pytest.mark.unit

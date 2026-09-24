@@ -179,17 +179,32 @@ describe('agentRunToTask — agent attribution', () => {
   });
 });
 
+/** A folded run view (mig 453) with the given slices — the only shape the
+ * Task Center reads since the phase-2 legacy keys were dropped (framework
+ * hardening B, 2026-09-23). */
+const mkView = (over: Record<string, unknown> = {}) => ({
+  v: 1, phase: 'running', step: null, current: null, retry: null, context: null, blocked: null,
+  children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, revision: 1,
+  ...over,
+});
+const ended = (reason: string) => ({ view: mkView({ phase: 'ended', ended: { reason } }) });
+
 describe('turnEndSubtitle', () => {
   it('names the silent endings a "completed" run can hide', () => {
-    expect(turnEndSubtitle({ turn_end_reason: 'max_iterations' })).toBe('Stopped at tool limit');
-    expect(turnEndSubtitle({ turn_end_reason: 'provider_length' })).toBe('Cut off by model limit');
+    expect(turnEndSubtitle(ended('max_iterations'))).toBe('Stopped at tool limit');
+    expect(turnEndSubtitle(ended('provider_length'))).toBe('Cut off by model limit');
+    expect(turnEndSubtitle(ended('awaiting_approval'))).toBe('Waiting for approval');
   });
 
-  it('stays quiet for a natural finish and for rows without the mirror', () => {
-    expect(turnEndSubtitle({ turn_end_reason: 'completed' })).toBeNull();
+  it('stays quiet for a natural finish and for rows without a view', () => {
+    expect(turnEndSubtitle(ended('completed'))).toBeNull();
     expect(turnEndSubtitle({})).toBeNull();
     expect(turnEndSubtitle(null)).toBeNull();
     expect(turnEndSubtitle(undefined)).toBeNull();
+  });
+
+  it('ignores the dropped legacy turn_end_reason key', () => {
+    expect(turnEndSubtitle({ turn_end_reason: 'max_iterations' })).toBeNull();
   });
 
   it('wins over output_summary on a completed run — the stop reason is the news', () => {
@@ -197,7 +212,7 @@ describe('turnEndSubtitle', () => {
       baseRow({
         status: 'completed',
         output_summary: 'Drafted three scenes',
-        metadata_json: { turn_end_reason: 'max_iterations' },
+        metadata_json: ended('max_iterations'),
       }),
     );
     expect(t.subtitle).toBe('Stopped at tool limit');
@@ -208,53 +223,48 @@ describe('turnEndSubtitle', () => {
       baseRow({
         status: 'completed',
         output_summary: 'Drafted three scenes',
-        metadata_json: { turn_end_reason: 'completed' },
+        metadata_json: ended('completed'),
       }),
     );
     expect(t.subtitle).toBe('Drafted three scenes');
   });
 
-  it('selects metadata_json so the mirror actually reaches the row', () => {
+  it('selects metadata_json so the view actually reaches the row', () => {
     expect(AGENT_RUN_SELECT).toContain('metadata_json');
   });
 });
 
 describe('todoProgress', () => {
-  const snap = {
-    todos: [
-      { id: 1, content: 'step A', status: 'completed', active_form: null },
-      { id: 2, content: 'step B', status: 'in_progress', active_form: 'doing B' },
-    ],
-    counts: { total: 7, completed: 3, in_progress: 1 },
-  };
+  const meta = { view: mkView({ step: { done: 3, total: 7, label: 'doing B' } }) };
 
-  it('renders "3/7 · doing B" from the todo snapshot', () => {
-    expect(todoProgress({ todos: snap })).toEqual({ label: 'doing B', done: 3, total: 7 });
-  });
-
-  it('falls back to content when active_form is null', () => {
-    const s = { ...snap, todos: [{ ...snap.todos[1], active_form: null }] };
-    expect(todoProgress({ todos: s })?.label).toBe('step B');
+  it('renders "3/7 · doing B" from view.step', () => {
+    expect(todoProgress(meta)).toEqual({ label: 'doing B', done: 3, total: 7 });
   });
 
   it('has no label when nothing is in progress', () => {
-    const s = { ...snap, todos: [snap.todos[0]] };
-    expect(todoProgress({ todos: s })?.label).toBeNull();
+    expect(todoProgress({ view: mkView({ step: { done: 3, total: 7, label: null } }) })?.label).toBeNull();
   });
 
-  it('returns null when no snapshot ever landed', () => {
+  it('returns null when the run never kept a list', () => {
+    expect(todoProgress({ view: mkView() })).toBeNull();
     expect(todoProgress({})).toBeNull();
     expect(todoProgress(null)).toBeNull();
     expect(todoProgress(undefined)).toBeNull();
   });
 
   it('malformed counts render nothing rather than NaN/7', () => {
-    expect(todoProgress({ todos: { todos: [], counts: { completed: 3 } } })).toBeNull();
-    expect(todoProgress({ todos: { todos: [], counts: { total: '7', completed: 3 } } })).toBeNull();
+    expect(todoProgress({ view: mkView({ step: { done: 3 } }) })).toBeNull();
+    expect(todoProgress({ view: mkView({ step: { done: 3, total: '7' } }) })).toBeNull();
+  });
+
+  it('ignores the dropped legacy todos key', () => {
+    const legacy = { todos: [], counts: { total: 4, completed: 1, in_progress: 0 } };
+    expect(todoProgress({ todos: legacy })).toBeNull();
+    expect(todoProgress({ todos: JSON.stringify(legacy) })).toBeNull();
   });
 
   it('reaches the task through agentRunToTask metadata', () => {
-    const t = agentRunToTask(baseRow({ metadata_json: { todos: snap } }));
+    const t = agentRunToTask(baseRow({ metadata_json: meta }));
     expect(todoProgress(t.metadata)).toEqual({ label: 'doing B', done: 3, total: 7 });
   });
 });
@@ -262,7 +272,7 @@ describe('todoProgress', () => {
 describe('retryProgress', () => {
   const at = '2026-08-27T06:00:00.000Z';
   const atMs = Date.parse(at);
-  const meta = { last_retry: { attempt: 2, max_retries: 4, delay_ms: 3200, at, model: 'm' } };
+  const meta = { view: mkView({ retry: { attempt: 2, max: 4, delay_ms: 3200, at, model: 'm' } }) };
 
   it('reports the remaining wait against the caller clock', () => {
     const p = retryProgress(meta, atMs + 1000);
@@ -274,37 +284,33 @@ describe('retryProgress', () => {
   });
 
   it('is null when the run never retried', () => {
+    expect(retryProgress({ view: mkView() }, atMs)).toBeNull();
     expect(retryProgress({}, atMs)).toBeNull();
-    expect(retryProgress({ last_retry: { attempt: '2' } }, atMs)).toBeNull();
+    expect(retryProgress({ view: mkView({ retry: { attempt: '2' } }) }, atMs)).toBeNull();
+  });
+
+  it('ignores the dropped legacy last_retry key', () => {
+    const last_retry = { attempt: 2, max_retries: 4, delay_ms: 0, at: null };
+    expect(retryProgress({ last_retry }, 0)).toBeNull();
+    expect(retryProgress({ last_retry: JSON.stringify(last_retry) }, 0)).toBeNull();
   });
 });
 
 
-describe('view-first selectors (mig 453) with legacy fallback', () => {
-  const view = { v: 1, phase: 'running', step: { done: 2, total: 5, label: 'B' }, current: null, retry: { attempt: 1, max: 3, delay_ms: 0, model: null, at: null }, context: null, blocked: null, children: { total: 0, done: 0 }, ended: { reason: 'max_iterations' }, inbox_pending: 0, budget: null, revision: 3 };
-  it('prefers view over the legacy keys', () => {
-    const meta = { view, todos: { todos: [], counts: { total: 9, completed: 9, in_progress: 0 } }, last_retry: { attempt: 9, max_retries: 9 }, turn_end_reason: 'completed' };
-    expect(todoProgress(meta)).toEqual({ done: 2, total: 5, label: 'B' });
-    expect(retryProgress(meta, 0)).toEqual({ attempt: 1, max: 3, waitingSeconds: 0 });
-    expect(turnEndSubtitle(meta)).toBe('Stopped at tool limit');
-  });
-  it('still reads the legacy keys on rows without view', () => {
-    expect(todoProgress({ todos: { todos: [], counts: { total: 4, completed: 1, in_progress: 0 } } })).toEqual({ done: 1, total: 4, label: null });
-    expect(turnEndSubtitle({ turn_end_reason: 'awaiting_approval' })).toBe('Waiting for approval');
-  });
+describe('agentRunToTask — view/cost only (legacy keys dropped)', () => {
+  const view = mkView({ step: { done: 2, total: 5, label: 'B' } });
   it('carries view/cost through to the task metadata', () => {
     const task = agentRunToTask(baseRow({ metadata_json: { view, cost: { spent_cents: 1 } } }));
     expect((task.metadata as Record<string, unknown>).view).toEqual(view);
     expect((task.metadata as Record<string, unknown>).cost).toEqual({ spent_cents: 1 });
   });
-});
-
-
-describe('legacy mirror keys stored as jsonb strings (phase-2 rows)', () => {
-  it('still yields progress from a stringified todos / last_retry', () => {
-    const todos = JSON.stringify({ todos: [], counts: { total: 4, completed: 1, in_progress: 0 } });
-    expect(todoProgress({ todos })).toEqual({ done: 1, total: 4, label: null });
-    const last_retry = JSON.stringify({ attempt: 2, max_retries: 4, delay_ms: 0, at: null });
-    expect(retryProgress({ last_retry }, 0)).toEqual({ attempt: 2, max: 4, waitingSeconds: 0 });
+  it('no longer passes the three legacy mirror keys through', () => {
+    const task = agentRunToTask(
+      baseRow({ metadata_json: { view, todos: { todos: [] }, last_retry: { attempt: 1 }, turn_end_reason: 'completed' } }),
+    );
+    const m = task.metadata as Record<string, unknown>;
+    expect('todos' in m).toBe(false);
+    expect('last_retry' in m).toBe(false);
+    expect('turn_end_reason' in m).toBe(false);
   });
 });

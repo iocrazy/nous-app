@@ -394,9 +394,16 @@ async def test_a_recorder_that_throws_on_turn_end_does_not_break_the_turn():
 
 
 async def test_turn_end_is_mirrored_into_run_metadata(monkeypatch):
-    """The event is the truth; metadata_json.turn_end_reason is the cache the
-    Task Center reads off the agent_runs row it already has."""
+    """The event is the truth; ``metadata_json.view.ended.reason`` is the cache
+    the Task Center reads off the agent_runs row it already has.
+
+    The phase-2 legacy key ``metadata_json.turn_end_reason`` is no longer
+    written (framework hardening B) — only ``view`` / ``cost``. The
+    ``agent_runs.turn_end_reason`` COLUMN is a different thing and stays
+    (``_finish`` writes it; efficiency repos read it)."""
     import contextlib
+
+    from sqlalchemy.dialects import postgresql
 
     from app.db import session as dbs
     from app.services.ai.runner import run_recorder as rr
@@ -405,8 +412,8 @@ async def test_turn_end_is_mirrored_into_run_metadata(monkeypatch):
 
     class _S:
         async def execute(self, stmt, *a, **k):
-            c = stmt.compile()
-            executed.append(str(c) + " " + repr(getattr(c, "params", {})))
+            c = stmt.compile(dialect=postgresql.dialect())
+            executed.append((str(c), dict(getattr(c, "params", {}))))
 
     @contextlib.asynccontextmanager
     async def _ws():
@@ -417,9 +424,25 @@ async def test_turn_end_is_mirrored_into_run_metadata(monkeypatch):
     rec.run_id = 7
     rec._event_seq = 0
     await rec.record_event("turn_end", {"reason": "max_iterations", "tool_calls": 3})
-    mirrors = [e for e in executed if "jsonb_set" in e]
+    mirrors = [(s, p) for s, p in executed if "jsonb_set" in s]
     assert len(mirrors) == 1, executed
-    assert "agent_runs" in mirrors[0] and "turn_end_reason" in mirrors[0]
+    sql, params = mirrors[0]
+    assert "agent_runs" in sql
+    keys = {v for v in params.values() if isinstance(v, str)}
+    assert "turn_end_reason" not in keys, "legacy mirror key is gone"
+    view = next(v for v in params.values() if isinstance(v, dict) and "phase" in v)
+    assert view["ended"]["reason"] == "max_iterations"
+
+
+def test_mirror_writes_only_view_and_cost():
+    """Guard: the three phase-2 legacy keys (todos / turn_end_reason /
+    last_retry) stay deleted. A new mirror key is a decision, not a drift."""
+    from app.services.ai.runner.run_recorder import RunEventWriter
+
+    writer = RunEventWriter(7)
+    writer.views["view"]["step"] = {"done": 1, "total": 2, "label": "x"}
+    writer.views["view"]["ended"] = {"reason": "completed"}
+    assert set(writer.mirror_keys()) == {"view", "cost"}
 
 
 # ── exhaustiveness guard ─────────────────────────────────────────────────
