@@ -1616,6 +1616,13 @@ class AgentRunner:
         conversation could overflow the window with a cryptic provider error
         instead of a clean rejection.
         """
+        # Catalog windows (mig 500) are cached per process. Turns run on the
+        # worker while admin edits land on the gateway, so this — the one
+        # async point every turn passes before the window is read — keeps the
+        # cache inside its TTL. Never raises (keeps the last good snapshot).
+        from app.agent_framework import catalog_windows
+
+        await catalog_windows.ensure_catalog_windows_loaded()
         try:
             user_messages, compaction_stats = await _DEFAULT_COMPACTOR.maybe_compact(
                 system_message=composed.system_message,

@@ -4,7 +4,7 @@
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Must stay in lockstep with the table's CHECK constraint (migration 345).
 # It stopped at "asr" from 345 until 2026-09-21 while the database accepted
@@ -34,6 +34,8 @@ class NousModelCreate(BaseModel):
     pricing_value: float = 8
     is_enabled: bool = True
     sort_order: int = 0
+    # Context window in tokens (migration 500); None = unknown.
+    context_window_tokens: Optional[int] = Field(default=None, gt=0)
 
 
 class NousModelUpdate(BaseModel):
@@ -52,6 +54,9 @@ class NousModelUpdate(BaseModel):
     pricing_value: Optional[float] = None
     is_enabled: Optional[bool] = None
     sort_order: Optional[int] = None
+    # Omitted = unchanged (the router drops None fields, so this cannot clear
+    # the column back to NULL — set it with SQL if a value must be withdrawn).
+    context_window_tokens: Optional[int] = Field(default=None, gt=0)
 
 
 class NousModelResponse(BaseModel):
@@ -84,6 +89,8 @@ class NousModelResponse(BaseModel):
     last_test_status: Optional[str] = None
     last_test_detail: Optional[str] = None
     last_tested_at: Optional[str] = None
+    # Context window in tokens (migration 500); None = unknown.
+    context_window_tokens: Optional[int] = None
     # Does RunRecorder have an ai_model_prices row to snapshot for this model?
     # priced / missing / not_applicable / unknown (see model_pricing_coverage).
     # Independent of the probe status: reachable and unpriced both happen.

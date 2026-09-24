@@ -33,6 +33,7 @@ from __future__ import annotations
 import warnings
 from typing import Any, Iterable, Optional
 
+from app.agent_framework.catalog_windows import catalog_window
 from app.core.config import settings
 
 # Warn when system+user takes >= this fraction of the window.
@@ -46,9 +47,12 @@ ERROR_RATIO: float = 0.8
 # than underestimate).
 _CHARS_PER_TOKEN: float = 4.0
 
-# Known model windows. Conservative values — providers may publish
-# higher caps but real-world usable budget is often less due to provider
-# overhead. When unknown, falls back to settings.LLM_MAX_CONTEXT_TOKENS.
+# Known model windows — the SECOND layer. The provider catalog
+# (``nous_models.context_window_tokens``, migration 500) is consulted first;
+# this table answers only models the catalog has no value for. Conservative
+# values — providers may publish higher caps but real-world usable budget is
+# often less due to provider overhead. When neither knows the model, falls
+# back to settings.LLM_MAX_CONTEXT_TOKENS.
 _MODEL_WINDOWS: dict[str, int] = {
     # OpenAI
     "gpt-4o": 128_000,
@@ -74,6 +78,11 @@ _MODEL_WINDOWS: dict[str, int] = {
     "doubao-pro-128k": 131_072,
     "doubao-1-5-pro-32k": 32_768,
     "doubao-1-5-pro-128k": 131_072,
+    # Public docs list 256k for the Seed 2.0 family — UNVERIFIED against the
+    # Volcengine console, so the conservative 128k until someone confirms it.
+    # Migration 500 seeds the same value into the catalog; the admin may raise
+    # it there, and the catalog wins over this line.
+    "doubao-seed-2-0-lite-260428": 131_072,
     # DeepSeek
     "deepseek-chat": 65_536,
     "deepseek-reasoner": 65_536,
@@ -139,9 +148,16 @@ def resolve_model_window(model: str) -> tuple[int, bool]:
     Production 2026-08-23: 12 of 20 configured agents run models missing from
     the table (``doubao-seed-2-0-lite-260428``, ``nous-qwen3-llm``), so their
     tier decisions have all been made against ``LLM_MAX_CONTEXT_TOKENS``.
+
+    Lookup order: provider catalog (``nous_models.context_window_tokens``, by
+    actual model id or catalog name) → ``_MODEL_WINDOWS`` → the fallback.
+    Catalog and table hits are both "known"; only the fallback is not.
     """
     if not model:
         return settings.LLM_MAX_CONTEXT_TOKENS, False
+    from_catalog = catalog_window(model)
+    if from_catalog is not None:
+        return from_catalog, True
     key = model.strip().lower()
     if key in _MODEL_WINDOWS:
         return _MODEL_WINDOWS[key], True

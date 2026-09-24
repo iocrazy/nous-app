@@ -320,6 +320,10 @@ class NousModels(Base):
             "'bad_response', 'other')",
             name="nous_models_last_test_code_check",
         ),
+        CheckConstraint(
+            "context_window_tokens IS NULL OR context_window_tokens > 0",
+            name="nous_models_context_window_tokens_check",
+        ),
         PrimaryKeyConstraint("id", name="nous_models_pkey"),
         UniqueConstraint("name", name="nous_models_name_key"),
         {"schema": "public"},
@@ -374,6 +378,10 @@ class NousModels(Base):
     # rather than a platform api_key. Enforced in list_enabled (catalog
     # queries) AND db_registry resolvers (dispatch, fail-closed).
     owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True))
+    # Context window in tokens (migration 500). First layer of
+    # agent_framework.context_window.resolve_model_window; NULL = unknown
+    # (falls through to the hardcoded table, then the generic fallback).
+    context_window_tokens: Mapped[Optional[int]] = mapped_column(Integer)
 
 
 class AgentOverrides(Base):

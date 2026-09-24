@@ -36,7 +36,10 @@ def test_a_known_model_is_not_reported_as_a_guess():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "model", ["doubao-seed-2-0-lite-260428", "nous-qwen3-llm", "totally-made-up"]
+    # doubao-seed-2-0-lite-260428 left this list when mig 500 gave it a
+    # (conservative) window in the table; its sibling is still unknown.
+    "model",
+    ["doubao-seed-2-0-pro-260215", "nous-qwen3-llm", "totally-made-up"],
 )
 async def test_an_unknown_model_says_so_in_the_stats(compactor, model):
     """The note is the only place a reader can learn the window was guessed."""
