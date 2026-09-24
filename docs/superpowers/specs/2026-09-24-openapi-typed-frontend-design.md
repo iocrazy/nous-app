@@ -100,8 +100,8 @@ P0+P1 一个 PR，P2 一个 PR，之后每域一个。
 
 ## 5. 风险与裁定
 
-- **生成类型会把 Snowflake BIGINT 暴露为 `number`**（`scenes`/`shots` 原样返回 ORM
-  dict）。这是真实 wire 形状，**要保留**；前端已有 `bigIntSafeFetch` 处理精度。
+- **生成类型会把 Snowflake BIGINT 暴露为 `number`**（beats / commits 等原样返回 ORM
+  dict 的 router；`scenes`/`shots` 自 #1809 起已在边界转成 string，照实声明为 `str`）。这是真实 wire 形状，**要保留**；前端已有 `bigIntSafeFetch` 处理精度。
   别在生成后手工改成 `string`。
 - **`dict` 响应补 `response_model` 可能改变序列化**（Pydantic 会丢掉 model 未声明
   的字段）。每个路由补类型时必须对照真实响应（`api_request_logs` 或本地跑一次）
