@@ -13,7 +13,9 @@ strings — Snowflake BIGINTs do not survive a JS number.
 Scope: only the caller's OWN library. ``hybrid_search`` has no team argument
 yet; team libraries are a Known Limitation (prompts/README.md).
 
-Layers: today the search yields ``text`` and ``semantic`` hits. ``visual`` /
+Layers: today the search yields ``text`` and ``semantic`` hits. Without a
+filter, or with ``text`` in it, the hybrid search runs; ``semantic``
+without ``text`` runs the vector leg alone (``SearchService.semantic_only``). ``visual`` /
 ``camera`` / ``transcript`` are in the enum so the signature does not change
 when PR 3/4 land; asking for them now is not an error, it is simply empty.
 ``shot`` is always ``None`` until shot-level indexing exists.
@@ -39,6 +41,9 @@ SIMILARITY_THRESHOLD = 0.4
 # of hits stays a bounded tool result; see Known Limitations on why they are
 # not wrapped in neutralize_external_text.
 TEXT_MAX_CHARS = 200
+# Same cap as the search API's request schemas (app/schemas/search.py).
+# Longer queries are cut, not refused, and the result says so.
+QUERY_MAX_CHARS = 500
 
 
 def library_search_spec() -> dict[str, Any]:
@@ -99,7 +104,8 @@ def _clamp_limit(raw: Any) -> int:
 
 
 def _validate_layers(raw: Any) -> tuple[Optional[frozenset[str]], Optional[str]]:
-    if raw is None:
+    # An empty list is "no filter", same as omitting it.
+    if raw is None or raw == []:
         return None, None
     if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
         return None, "layers must be a list of layer names"
@@ -124,6 +130,49 @@ def _hit_dict(result: Any, resource: Optional[dict]) -> dict[str, Any]:
     }
 
 
+def _recount_legs(
+    ran: Optional[dict], results: list, wanted: Optional[frozenset[str]]
+) -> dict[str, int]:
+    """Per-layer counts of the hits the model is shown. A key means that leg
+    ran (0 = ran, matched nothing); filtered-out layers are dropped."""
+    keys = set(ran or {}) | {r.layer for r in results}
+    if wanted is not None:
+        keys &= wanted
+    return {
+        layer: sum(1 for r in results if r.layer == layer)
+        for layer in LAYERS
+        if layer in keys
+    }
+
+
+async def _search_legs(
+    *,
+    query: str,
+    wanted: Optional[frozenset[str]],
+    limit: int,
+    user_id: str,
+    search_service: Any,
+) -> Any:
+    """Pick the leg(s) to run. None = nothing that can match was asked for."""
+    if wanted is None:
+        return await search_service.hybrid_search(
+            query, user_id=user_id, limit=limit, threshold=SIMILARITY_THRESHOLD
+        )
+    if "text" in wanted:
+        # A layer filter applied after the merge would underfill the page,
+        # so ask for the ceiling and cut after filtering.
+        return await search_service.hybrid_search(
+            query, user_id=user_id, limit=MAX_LIMIT, threshold=SIMILARITY_THRESHOLD
+        )
+    if "semantic" in wanted:
+        # Through hybrid a page of text hits would skip the vector leg
+        # entirely (skipped_full_page); ask it directly.
+        return await search_service.semantic_only(
+            query, user_id=user_id, limit=limit, threshold=SIMILARITY_THRESHOLD
+        )
+    return None
+
+
 async def _run_search(
     *,
     query: str,
@@ -132,12 +181,22 @@ async def _run_search(
     user_id: str,
     search_service: Any,
 ) -> dict[str, Any]:
-    # A layer filter applied after the merge would underfill the page, so
-    # ask for the ceiling and cut after filtering.
-    ask = MAX_LIMIT if wanted is not None else limit
-    response = await search_service.hybrid_search(
-        query, user_id=user_id, limit=ask, threshold=SIMILARITY_THRESHOLD
+    response = await _search_legs(
+        query=query,
+        wanted=wanted,
+        limit=limit,
+        user_id=user_id,
+        search_service=search_service,
     )
+    if response is None:
+        return {
+            "query": query,
+            "hits": [],
+            "legs": {},
+            "vector_leg": None,
+            "reranked": False,
+            "total": 0,
+        }
     results = list(response.results)
     if wanted is not None:
         results = [r for r in results if r.layer in wanted]
@@ -149,7 +208,7 @@ async def _run_search(
     return {
         "query": query,
         "hits": hits,
-        "legs": response.legs,
+        "legs": _recount_legs(response.legs, results, wanted),
         "vector_leg": response.vector_leg,
         "reranked": bool(response.reranked),
         "total": len(hits),
@@ -186,15 +245,19 @@ async def library_search(
         if is_enforced("resources")
         else nullcontext()
     )
+    query = query.strip()
+    truncated = len(query) > QUERY_MAX_CHARS
+    query = query[:QUERY_MAX_CHARS]
     try:
         async with scope_cm:
-            return await _run_search(
-                query=query.strip(),
+            result = await _run_search(
+                query=query,
                 wanted=wanted,
                 limit=_clamp_limit(limit),
                 user_id=str(user_id),
                 search_service=search_service,
             )
+        return {**result, "truncated": truncated}
     except Exception as exc:
         logger.exception(f"[library_search] failed: {exc!r}")
         return {"error": f"library search failed: {exc.__class__.__name__}"}

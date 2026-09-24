@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
@@ -110,6 +111,22 @@ QUERY_INSTRUCTION = (
     "Instruct: Given a search keyword, retrieve short-video titles and "
     "descriptions that contain or are about this keyword\nQuery: "
 )
+
+
+# CJK scripts: kana, CJK ideographs (+ext A, compatibility), hangul, and the
+# CJK / fullwidth punctuation blocks (incl. the ideographic space U+3000).
+_CJK = "\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef"
+_SPACE_NEXT_TO_CJK = re.compile(rf"(?<=[{_CJK}])\s+|\s+(?=[{_CJK}])")
+
+
+def normalize_query_spaces(query: str) -> str:
+    """Drop whitespace that touches a CJK character on at least one side.
+
+    CJK titles are written without spaces, so "31 岁" must become "31岁" to
+    match; but a Latin phrase keeps its spaces ("Morning Routine 2024"),
+    which used to be squashed into a string no title contains.
+    """
+    return _SPACE_NEXT_TO_CJK.sub("", query)
 
 
 def _chip_filters_active(filters: Optional[LibraryChipFilters]) -> bool:
@@ -462,6 +479,46 @@ class SearchService:
             merged.append(replace(h, layer="semantic"))
         return merged[:limit]
 
+    async def semantic_only(
+        self,
+        query: str,
+        *,
+        user_id: Optional[str],
+        limit: int,
+        threshold: float = 0.4,
+    ) -> SearchResponse:
+        """The vector leg alone, scoped to ``user_id``.
+
+        For callers that asked for meaning matches only: through
+        ``hybrid_search`` a page full of text hits skips the vector leg
+        (``skipped_full_page``), so filtering hybrid's output to semantic
+        hits can come back empty while the vector leg never ran. The leg's
+        outcome travels with the result, same as hybrid.
+        """
+        query_clean = (query or "").strip()
+        if not user_id or not query_clean:
+            return SearchResponse(
+                results=[],
+                total=0,
+                query=query or "",
+                search_type="semantic",
+                vector_leg="skipped_no_scope" if not user_id else "skipped_no_query",
+                legs={},
+            )
+        hits, outcome = await self._vector_hits(
+            query_clean, user_id, limit=limit, threshold=threshold
+        )
+        results = [replace(h, layer="semantic") for h in hits][:limit]
+        return SearchResponse(
+            results=results,
+            total=len(results),
+            query=query,
+            search_type="semantic",
+            vector_leg=outcome,
+            # Only this leg ran: no "text" key (a present key reads as "ran").
+            legs={"semantic": len(results)},
+        )
+
     async def hybrid_search(
         self,
         query: str,
@@ -506,7 +563,8 @@ class SearchService:
 
         # Normalize query for search (handle CJK text with spaces)
         query_clean = query.strip() if query else ""
-        query_normalized = query_clean.replace(" ", "")  # "31 岁" -> "31岁"
+        # "31 岁" -> "31岁", but "Morning Routine 2024" keeps its spaces.
+        query_normalized = normalize_query_spaces(query_clean)
 
         # Honour the caller's scope checkboxes. This used to be hardcoded to
         # the four basic fields, which silently discarded whatever the user had

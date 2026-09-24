@@ -20,8 +20,11 @@ use it for things the user has not saved; say so instead.
 
 ## Rewrite the query before calling
 
-The search matches keywords (text layer) and meaning (semantic layer). Short,
-concrete queries work best.
+The search matches keywords (text layer) and meaning (semantic layer). The
+text layer looks for the whole query as one substring, with spaces next to
+Chinese characters removed ("日本 夜景" is searched as "日本夜景"). So a text
+query should be one keyword or one exact phrase; combinations of ideas belong
+in a descriptive query for the semantic layer.
 
 1. **Chinese and English complement each other.** For a Chinese request, also
    run one English query with the same meaning (and the reverse). Saved titles
@@ -38,9 +41,10 @@ See `references/examples.md` for worked rewrites.
 - **Looking for words** (a title, a phrase, a creator): prefer `text` hits;
   pass `layers: ["text"]` when the user quotes an exact phrase.
 - **Looking for a look** (a shot type, a mood, a camera move): the `visual`
-  and `camera` layers are not built yet, so they come back empty. Search
-  without `layers` and rely on `semantic` hits, and tell the user the match is
-  by description, not by the frames themselves.
+  and `camera` layers are not built yet, so they come back empty. Pass
+  `layers: ["semantic"]` with a descriptive query (keyword matches would
+  otherwise crowd the page), and tell the user the match is by description,
+  not by the frames themselves.
 
 ## Explain the hits
 

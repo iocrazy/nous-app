@@ -57,6 +57,19 @@ class _FakeSearch:
             legs=counts,
         )
 
+    async def semantic_only(self, query: str, **kw: Any) -> SearchResponse:
+        self.calls.append({"query": query, "semantic_only": True, **kw})
+        self.scope_seen = db_scope._scope.get()
+        res = [r for r in self.results if r.layer == "semantic"][: kw.get("limit", 20)]
+        return SearchResponse(
+            results=res,
+            total=len(res),
+            query=query,
+            search_type="semantic",
+            vector_leg=self.vector_leg,
+            legs={"semantic": len(res)},
+        )
+
 
 @pytest.fixture
 def lookup(monkeypatch):
@@ -139,24 +152,74 @@ async def test_title_and_description_are_capped(lookup):
     assert len(hit["description"]) <= lst.TEXT_MAX_CHARS + 1
 
 
-async def test_layers_filter_keeps_only_requested_layers(lookup):
+async def test_text_layer_filter_goes_through_hybrid_and_recounts_legs(lookup):
     fake = _FakeSearch([_hit(1, "text", 1.0), _hit(2, "semantic", 0.5)])
     out = await lst.library_search(
-        query="q", layers=["semantic"], limit=5, user_id=USER, search_service=fake
+        query="q", layers=["text"], limit=5, user_id=USER, search_service=fake
     )
-    assert [h["layer"] for h in out["hits"]] == ["semantic"]
+    assert [h["layer"] for h in out["hits"]] == ["text"]
     assert out["total"] == 1
     # Filtering after the merge would underfill; ask the service for a full page.
     assert fake.calls[0]["limit"] == lst.MAX_LIMIT
+    assert "semantic_only" not in fake.calls[0]
+    # legs describe what the model is shown, not the pre-filter merge.
+    assert out["legs"] == {"text": 1}
+
+
+async def test_semantic_without_text_skips_the_text_leg(lookup):
+    """Through hybrid, 20 text rows fill the page and the vector leg never
+    runs (skipped_full_page) — so a semantic-only ask goes straight to it."""
+    fake = _FakeSearch(
+        [_hit(1, "text", 1.0), _hit(2, "semantic", 0.5)], vector_leg="timeout"
+    )
+    out = await lst.library_search(
+        query="q", layers=["semantic"], limit=5, user_id=USER, search_service=fake
+    )
+    assert fake.calls[0]["semantic_only"] is True
+    assert fake.calls[0]["limit"] == 5
+    assert fake.calls[0]["user_id"] == USER
+    assert [h["layer"] for h in out["hits"]] == ["semantic"]
+    assert out["vector_leg"] == "timeout"
+    assert out["legs"] == {"semantic": 1}
+
+
+async def test_only_unbuilt_layers_call_nothing(lookup):
+    fake = _FakeSearch([_hit(1, "text", 1.0)])
+    out = await lst.library_search(
+        query="q", layers=["visual"], user_id=USER, search_service=fake
+    )
+    assert fake.calls == []
+    assert out["hits"] == [] and out["legs"] == {}
+
+
+async def test_empty_layers_means_all(lookup):
+    fake = _FakeSearch([_hit(1, "text", 1.0), _hit(2, "semantic", 0.5)])
+    out = await lst.library_search(
+        query="q", layers=[], limit=4, user_id=USER, search_service=fake
+    )
+    assert fake.calls[0]["limit"] == 4
+    assert out["total"] == 2
+
+
+async def test_long_query_is_truncated_not_rejected(lookup):
+    fake = _FakeSearch([])
+    out = await lst.library_search(query="x" * 900, user_id=USER, search_service=fake)
+    assert len(fake.calls[0]["query"]) == lst.QUERY_MAX_CHARS == 500
+    assert out["truncated"] is True
+    short = await lst.library_search(query="q", user_id=USER, search_service=fake)
+    assert short["truncated"] is False
 
 
 async def test_layers_not_built_yet_are_accepted_and_empty(lookup):
     fake = _FakeSearch([_hit(1, "text", 1.0)])
     out = await lst.library_search(
-        query="q", layers=["visual", "camera"], user_id=USER, search_service=fake
+        query="q",
+        layers=["text", "visual", "camera"],
+        user_id=USER,
+        search_service=fake,
     )
     assert "error" not in out
-    assert out["hits"] == []
+    assert [h["layer"] for h in out["hits"]] == ["text"]
 
 
 @pytest.mark.parametrize(
