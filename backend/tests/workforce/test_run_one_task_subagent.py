@@ -379,3 +379,24 @@ async def test_the_issue_id_reaches_the_child_service():
 
     assert seen["issue_id"] == 7
     assert str(seen["parent_run_id"]) == PARENT_RUN_ID
+
+
+async def test_a_cancelled_child_marks_the_task_cancelled():
+    """Framework hardening C3: the envelope says ``cancelled`` → the task row
+    says ``cancelled`` (CHECK allows it, mig 159), not ``failed``/``done``."""
+    w = _wire(
+        envelope={
+            "status": "cancelled",
+            "summary": "",
+            "sub_run_id": "52",
+            "tokens_used": 3,
+        },
+        agent_repo_raises=True,
+    )
+    out = await _run(w, _task())
+    assert out["status"] == "cancelled"
+    kw = w.workforce.update_task_status.await_args.kwargs
+    assert kw["lifecycle_status"] == "cancelled"
+    assert "error_code" not in kw
+    event_type, payload = w.writer.append.await_args.args
+    assert event_type == "subagent_done" and payload["status"] == "cancelled"

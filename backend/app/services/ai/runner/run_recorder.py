@@ -257,7 +257,19 @@ class RunRecorder:
         final_status = "completed"
         final_error: Optional[str] = None
         try:
-            if self._cancelled:
+            # Two signals, one status. ``_cancelled`` is the DB-side
+            # ``cancel_requested`` observed by check_cancelled(); a hook STOP
+            # (IssueStatusGate / CancelHook) returns normally instead, and its
+            # only trace is the folded ``turn_end{cancelled}``. Reading only
+            # the first filed those runs ``completed`` while the same row's
+            # ``turn_end_reason`` said ``cancelled`` (framework hardening C1).
+            # ``_cancelled`` keeps its old precedence (it wins over an
+            # exception); the fold signal only applies to a clean exit — a
+            # body that raised after a cancel fold is still ``failed``.
+            if self._cancelled or (
+                exc is None
+                and self._efficiency_counts()["turn_end_reason"] == "cancelled"
+            ):
                 final_status = "cancelled"
                 await self._finish(status="cancelled")
             elif exc is None:

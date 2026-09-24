@@ -106,7 +106,12 @@ async def test_issue_cancelled_before_step_two_stops_the_run(status):
         chunks.append(ch)
     assert adapter.calls == 1, "step 2 must not reach the model"
     assert reads == [42, 42]
-    assert not any((c.content or "") == "step 2 ran" for c in chunks)
+    # ``delta_text`` — StreamChunk has no ``content``; this line used to read
+    # one and passed only because the buffered path yielded no chunk at all.
+    assert not any((c.delta_text or "") == "step 2 ran" for c in chunks)
+    # The buffered path now ends on a terminal chunk naming the cancel
+    # (framework hardening C4) — the issue workflow routes on it.
+    assert chunks and (chunks[-1].usage or {}).get("stop_reason") == "cancelled"
     ends = rec.turn_ends()
     assert len(ends) == 1 and ends[0]["reason"] == "cancelled", ends
 

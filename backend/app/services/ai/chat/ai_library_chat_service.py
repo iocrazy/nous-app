@@ -1689,7 +1689,10 @@ class AILibraryChatService:
                         "content": assistant_content,
                         "tool_calls": tool_calls_trace,
                     }
-                    if stream_cancelled:
+                    # Same contract as run_turn's stopped result
+                    # (``cancelled = stop_reason == "cancelled"``): a hook
+                    # cancel rides the terminal chunk on both stream routes.
+                    if stream_cancelled or stream_stop_reason == "cancelled":
                         result["cancelled"] = True
                     if stream_stop_reason:
                         result["stop_reason"] = stream_stop_reason

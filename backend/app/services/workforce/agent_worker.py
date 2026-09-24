@@ -75,6 +75,7 @@ from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
+from app.services.ai.runner.turn_end import result_was_cancelled
 from app.services.ai.scope.scope_binding import resolve_dispatch_scope, team_of_run
 
 logger = logging.getLogger(__name__)
@@ -338,6 +339,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
             )
             run_id = recorder.run_id
             assistant_content = result.get("content") or ""
+            turn_cancelled = result_was_cancelled(result)
             recorder.set_summaries(output_summary=assistant_content)
 
     except AgentPausedError as err:
@@ -362,9 +364,14 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         return {"task_id": str(task_id), "status": "failed", "run_id": None}
 
     # ── Persist task result + outbox delivery ───────────────────────
+    # A hook cancel returns normally from run_turn; ``done`` would file
+    # stopped work as finished (framework hardening C3). The CHECK already
+    # allows ``cancelled`` (mig 159). The outbox still delivers whatever the
+    # turn produced — the sender is owed an answer either way.
+    final_lifecycle = "cancelled" if turn_cancelled else "done"
     await workforce.update_task_status(
         task_id=task_id,
-        lifecycle_status="done",
+        lifecycle_status=final_lifecycle,
         current_run_id=run_id,
         result={
             "content": assistant_content,
@@ -405,7 +412,7 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
     # next 'task_assigned'.
     await _move_worker_back_to_idle(agent_id, task_id, trigger="task_completed")
 
-    return {"task_id": str(task_id), "status": "done", "run_id": str(run_id)}
+    return {"task_id": str(task_id), "status": final_lifecycle, "run_id": str(run_id)}
 
 
 async def _run_subagent_task(
@@ -472,7 +479,10 @@ async def _run_subagent_task(
     except (KeyError, ValueError) as err:
         logger.error(f"[agent-worker] subagent task {task_id} payload unusable: {err}")
         await _finalise_subagent_task(
-            workforce, task_id, ok=False, error_code="bad_subagent_payload"
+            workforce,
+            task_id,
+            lifecycle_status="failed",
+            error_code="bad_subagent_payload",
         )
         return {
             "task_id": str(task_id),
@@ -619,14 +629,28 @@ async def _run_subagent_task(
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
-    ok = content["status"] == "success" and not failures
-    error_code = failures[0] if failures else (None if ok else "subagent_failed")
+    # Tri-state (framework hardening C3): a delivery failure is still a
+    # failure; otherwise the envelope's own verdict decides, and a cancelled
+    # child files the task ``cancelled`` — not ``failed`` (nothing broke) and
+    # not ``done`` (the work was stopped).
+    if failures:
+        outcome, error_code = "failed", failures[0]
+    elif content["status"] == "success":
+        outcome, error_code = "success", None
+    elif content["status"] == "cancelled":
+        outcome, error_code = "cancelled", None
+    else:
+        outcome, error_code = "failed", "subagent_failed"
     await _finalise_subagent_task(
-        workforce, task_id, ok=ok, error_code=error_code, error=envelope.get("error")
+        workforce,
+        task_id,
+        lifecycle_status=_SUBAGENT_OUTCOME_TO_LIFECYCLE[outcome],
+        error_code=error_code,
+        error=envelope.get("error"),
     )
     return {
         "task_id": str(task_id),
-        "status": "success" if ok else "failed",
+        "status": outcome,
         "run_id": content["child_run_id"],
         "idle_dispatch": idle_dispatch,
     }
@@ -794,11 +818,18 @@ async def _child_row_cost_cents(child_run_id: Optional[str], task_id: UUID) -> f
         return 0.0
 
 
+_SUBAGENT_OUTCOME_TO_LIFECYCLE: dict[str, str] = {
+    "success": "done",
+    "failed": "failed",
+    "cancelled": "cancelled",
+}
+
+
 async def _finalise_subagent_task(
     workforce: AgentWorkforceRepository,
     task_id: UUID,
     *,
-    ok: bool,
+    lifecycle_status: str,
     error_code: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
@@ -808,14 +839,14 @@ async def _finalise_subagent_task(
     try:
         await workforce.update_task_status(
             task_id=task_id,
-            lifecycle_status="done" if ok else "failed",
+            lifecycle_status=lifecycle_status,
             **({} if error_code is None else {"error_code": error_code}),
             **({} if not error else {"error_message": str(error)[:500]}),
         )
     except Exception as err:  # noqa: BLE001
         logger.exception(
             f"[agent-worker] subagent task {task_id} could not be finalised "
-            f"({'done' if ok else 'failed'}): {err}"
+            f"({lifecycle_status}): {err}"
         )
 
 

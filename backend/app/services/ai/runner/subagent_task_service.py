@@ -399,7 +399,8 @@ class SubAgentTaskService:
         results = list(await asyncio.gather(*(run_one(t) for t in tasks)))
         # ``queued`` counts as OK: the background form's success IS the queued
         # row. Reading it as a failure would report every background fan-out
-        # as failed while every child is about to run.
+        # as failed while every child is about to run. ``cancelled`` is not
+        # OK: a stopped child did not do its part, so it reads partial/failed.
         ok = sum(1 for r in results if r.get("status") in ("success", "queued"))
         if ok == len(results):
             status = "success"
@@ -1107,9 +1108,19 @@ class SubAgentTaskService:
         """Map AgentRunner.run_turn's verbose result into the compact
         envelope the parent agent reads. Keep this small — extra
         fields have token cost in the parent's context."""
+        from app.services.ai.runner.turn_end import result_was_cancelled
+
         content = result.get("content") or ""
         error = result.get("error")
-        status = "failed" if error else "success"
+        # A cancelled child is neither a success nor a failure (framework
+        # hardening C2): a hook cancel returns normally with no ``error``, so
+        # the old ``failed if error else success`` told the parent model — and
+        # the fan-out tally, the SubTaskCard, the worker task row — that
+        # stopped work had succeeded. Checked first; a cancel carries no error.
+        if result_was_cancelled(result):
+            status = "cancelled"
+        else:
+            status = "failed" if error else "success"
 
         # Whole-sub-turn token total. The recorder accumulates prompt+completion
         # across ALL iterations and is the source of truth; run_turn's result
