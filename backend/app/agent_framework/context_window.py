@@ -14,7 +14,8 @@ It counts with the compactor's ruler (``tokenizer.count_tokens`` /
 per-message framing included), and the rejection line is the compactor's
 red threshold — one constant, imported there. Two rulers used to disagree:
 chars/4 made the guard ~4x too lenient on Chinese history, and an emergency
-cap targeting 0.80 landed on the old 0.80 rejection line.
+cap targeting 0.80 left the turn only ~1% under the old 0.80 rejection line,
+so whether it was rejected anyway came down to the tokenizer.
 
 Usage from agent_runner:
 

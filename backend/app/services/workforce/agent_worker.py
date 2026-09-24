@@ -365,9 +365,11 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
 
     # ── Persist task result + outbox delivery ───────────────────────
     # A hook cancel returns normally from run_turn; ``done`` would file
-    # stopped work as finished (framework hardening C3). The CHECK already
-    # allows ``cancelled`` (mig 159). The outbox still delivers whatever the
-    # turn produced — the sender is owed an answer either way.
+    # stopped work as finished (framework hardening C3). ``cancelled`` is a
+    # first-class lifecycle: agent_tasks merged into task_tracking (mig 200)
+    # and ``agent_workforce_repository.LIFECYCLE_TO_STATUS`` maps it to the
+    # ``cancelled`` status. The outbox still delivers whatever the turn
+    # produced — the sender is owed an answer either way.
     final_lifecycle = "cancelled" if turn_cancelled else "done"
     await workforce.update_task_status(
         task_id=task_id,

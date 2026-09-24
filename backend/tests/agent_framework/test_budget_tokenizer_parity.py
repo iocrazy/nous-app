@@ -4,8 +4,9 @@ Before 2026-09-23 ``check_context_budget`` counted ``chars / 4`` over the
 text parts only (no ``tool_calls``, no per-message framing) while the
 compactor counted with ``tokenizer.count_messages_tokens`` (CJK = 1 token per
 char). On Chinese history the guard was ~4x too lenient, and on ASCII a
-successful emergency cap landed exactly on the rejection line (target 0.80,
-reject >= 0.80), so the same turn was truncated and then rejected anyway.
+successful emergency cap (target 0.80) left the turn only ~1% under the old
+0.80 rejection line — inside the two rulers' disagreement, so whether a
+just-truncated turn was rejected anyway came down to the tokenizer.
 """
 
 from __future__ import annotations

@@ -748,7 +748,8 @@ async def get_task_by_inbox(
             (lifecycle_status / started_at / ended_at / error_*).
             ``None`` when the recipient agent hasn't picked it up yet.
         ``outbox_response``: the sub-agent's reply outbox row when the
-            task is done. ``None`` for queued / in_progress.
+            task is terminal (done / failed / cancelled). ``None`` for
+            queued / in_progress.
 
     Auth: only callers who can see the inbox message itself — i.e. the
     sender_user_id of the inbox row (the user who triggered the chat
@@ -827,7 +828,9 @@ async def get_task_by_inbox(
     # ``reply_to_message_id`` pointing back at our inbox row, so we can
     # find the response without a task→outbox join.
     outbox_response: Optional[dict[str, Any]] = None
-    if task and task.get("lifecycle_status") in ("done", "failed"):
+    # ``cancelled`` too: a cancelled worker still delivers its partial answer
+    # (agent_worker, framework hardening C3).
+    if task and task.get("lifecycle_status") in ("done", "failed", "cancelled"):
         async with read_scope() as session:
             outbox_rows = (
                 (

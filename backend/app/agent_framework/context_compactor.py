@@ -187,7 +187,8 @@ class ContextCompactor:
     # messages. Under orange (0.80) so the next turn's tool output does not
     # re-trigger the summarizer at once, and a tenth of the window under the
     # rejection line (REJECT_RATIO) so a capped turn is never rejected on the
-    # same turn — the old 0.80 target sat on the old 0.80 rejection line.
+    # same turn. The old 0.80 target left a capped turn only ~1% under the old
+    # 0.80 rejection line, so whether it was rejected came down to the tokenizer.
     EMERGENCY_TARGET_PCT = 0.70
 
     def __init__(self, thresholds: Optional[CompactionThresholds] = None):
