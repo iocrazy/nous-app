@@ -197,6 +197,44 @@ async def test_the_count_resets_on_a_person_and_only_on_a_person(orm_dsn, pg, wo
     await _wakeup(pg, world, issue_id=other, created_by="agent", at=_ago(hours=11))
     assert await count_agent_wakeups_since_human(iid) == 2
 
+    # System-written user-role messages from the sub-issue barrier and the
+    # pipeline relay carry their own provenance keys (no ``source``) — they
+    # are not a person either (T2 review H1: they used to reset 2 → 0).
+    await _message(
+        pg,
+        world,
+        sender="user",
+        body={
+            "text": "children done",
+            "meta": {"barrier_key": "k", "subissue_barrier": True},
+        },
+        at=_ago(hours=10),
+    )
+    await _message(
+        pg,
+        world,
+        sender="user",
+        body={
+            "text": "stage handed over",
+            "meta": {"pipeline_key": "k", "pipeline_relay": True},
+        },
+        at=_ago(hours=9),
+    )
+    assert await count_agent_wakeups_since_human(iid) == 2
+
+    # A reassignment note IS a person acting (PR-C): it resets the count.
+    await _message(
+        pg,
+        world,
+        sender="user",
+        body={
+            "text": "reassigned",
+            "meta": {"issue_reassigned": {"from": "a", "to": "b"}},
+        },
+        at=_ago(hours=8),
+    )
+    assert await count_agent_wakeups_since_human(iid) == 0
+
     # An issue with no session at all: anchored on its own created_at.
     assert await count_agent_wakeups_since_human(other) == 1
     # An issue that does not exist counts nothing (no anchor → no match).

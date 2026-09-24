@@ -359,4 +359,12 @@ def test_the_issue_cap_count_is_one_orm_statement():
     assert "messages.sender_type" in sql
     assert "issues.ai_session_id" in sql
     assert "coalesce" in sql.lower() and "issues.created_at" in sql
-    assert "IS NULL" in sql  # body -> meta -> source IS NULL
+    # every registered provenance key is excluded (T2 review H1)
+    assert "?|" in sql
+    params = (
+        count_agent_wakeups_since_human_stmt(7)
+        .compile(dialect=postgresql.dialect())
+        .params
+    )
+    keys = {v for v in params.values() if isinstance(v, str)}
+    assert {"source", "subissue_barrier", "pipeline_relay"} <= keys

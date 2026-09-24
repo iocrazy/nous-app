@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import false, func, select, update
+from sqlalchemy.dialects.postgresql import array
 
 from app.db.session import read_scope, write_scope
 from app.models import Issues, Messages, UserSchedules
@@ -36,6 +37,16 @@ ISSUE_TERMINAL = "issue_terminal"
 
 WAKEUP_TASK_TYPE = "issue_wakeup"
 AGENT_CREATOR = "agent"
+
+#: ``body.meta`` keys that mark a USER-role message as written by the system,
+#: not by a person — the per-issue wake-up cap must not reset on them:
+#: ``source`` (a wake-up / scheduled delivery), ``subissue_barrier``
+#: (``subissue_barrier.write_report_to_session``), ``pipeline_relay``
+#: (``pipeline_relay.post_parent_message``).
+#: ⚠️ Any NEW system writer of a user-role message into an issue session must
+#: register its marker key here, or every such message silently re-arms a
+#: fresh wake-up budget.
+SYSTEM_USER_MESSAGE_META_KEYS = ("source", "subissue_barrier", "pipeline_relay")
 
 
 async def disarm_agent_wakeups(issue_id: int, *, reason: str) -> int:
@@ -76,9 +87,11 @@ def count_agent_wakeups_since_human_stmt(issue_id: int):
     an author user are 6 wake-up mirrors), so anchoring on it would reset the
     count on every fired wake-up and the cap would never trip.
 
-    Not a person, even though the role is ``user``: a delivery that carries
-    provenance (``body.meta.source`` — a wake-up, a sub-issue barrier) and the
-    continuation nudge the dispatch loop sends itself. With no human message
+    Not a person, even though the role is ``user``: a message whose
+    ``body.meta`` carries any key in ``SYSTEM_USER_MESSAGE_META_KEYS`` (a
+    wake-up delivery, a sub-issue barrier report, a pipeline hand-off) and the
+    continuation nudge the dispatch loop sends itself. A missing ``meta``
+    makes ``?|`` NULL, so it is coalesced to false — a plain comment counts. With no human message
     at all the anchor is ``issues.created_at``; a missing issue has no anchor
     and counts nothing."""
     from app.services.issues.issue_agent_executor import CONTINUATION_NUDGE
@@ -87,7 +100,12 @@ def count_agent_wakeups_since_human_stmt(issue_id: int):
         select(func.max(Messages.created_at))
         .where(Messages.conversation_id == Issues.ai_session_id)
         .where(Messages.sender_type == "user")
-        .where(Messages.body["meta"]["source"].is_(None))
+        .where(
+            func.coalesce(
+                Messages.body["meta"].has_any(array(SYSTEM_USER_MESSAGE_META_KEYS)),
+                false(),
+            ).is_(False)
+        )
         .where(func.coalesce(Messages.body["text"].astext, "") != CONTINUATION_NUDGE)
         .correlate(Issues)
         .scalar_subquery()
@@ -123,6 +141,7 @@ __all__ = [
     "AGENT_CREATOR",
     "ISSUE_NOT_ACTIVE",
     "ISSUE_TERMINAL",
+    "SYSTEM_USER_MESSAGE_META_KEYS",
     "count_agent_wakeups_since_human",
     "count_agent_wakeups_since_human_stmt",
     "disarm_agent_wakeups",
