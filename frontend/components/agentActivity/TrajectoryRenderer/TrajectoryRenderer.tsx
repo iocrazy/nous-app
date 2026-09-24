@@ -8,7 +8,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 
-import type { AgentRunEvent } from '../../../types';
+import type { AgentRunEvent } from '../../../types/api';
 import { foldEvents, type TrajectoryNode } from './foldEvents';
 import './nodes/builtins';
 import './nodes/NarrationNode';

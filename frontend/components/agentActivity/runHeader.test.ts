@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { forkOrigin, timedOutTools } from './runHeader';
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 
 const ev = (seq: number, event_type: string, payload: Record<string, unknown>): AgentRunEvent =>
   ({ seq, event_type, payload, created_at: '' }) as unknown as AgentRunEvent;

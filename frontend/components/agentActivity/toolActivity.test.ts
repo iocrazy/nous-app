@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 import type { ChatToolCall } from '../../types/api';
 import { judgeToolOk, toolTimedOut } from './toolOutcome';
 import {
@@ -45,6 +45,8 @@ function transcriptEvent(
     // shape really is a string here. Tests use the true shape on purpose.
     payload: { tool, iteration, result: JSON.stringify(result) },
     created_at: '2026-08-04T00:00:00Z',
+    turn: null,
+    step: null,
   };
 }
 
@@ -116,8 +118,8 @@ describe('fromTranscriptEvents — exactly once', () => {
 
   it('ignores non-tool_call events so the chip row stays tools-only', () => {
     const acts = fromTranscriptEvents([
-      { seq: 1, event_type: 'user', payload: { content: 'hi' }, created_at: '' },
-      { seq: 2, event_type: 'assistant', payload: { content: 'ok' }, created_at: '' },
+      { seq: 1, event_type: 'user', payload: { content: 'hi' }, created_at: '', turn: null, step: null },
+      { seq: 2, event_type: 'assistant', payload: { content: 'ok' }, created_at: '', turn: null, step: null },
       transcriptEvent(3, 'ReadScene', { ok: true }),
     ]);
     expect(acts).toHaveLength(1);
@@ -131,6 +133,8 @@ describe('fromTranscriptEvents — exactly once', () => {
         event_type: 'tool_call',
         payload: { tool: 'ReadScene', iteration: 1, result: '{"ok":true,"elem...' },
         created_at: '',
+        turn: null,
+        step: null,
       },
     ]);
     // Dropping it would be the "vanishes" half of the failure mode.
@@ -264,6 +268,8 @@ function denialEvent(
     event_type: 'capability_denied',
     payload,
     created_at: '2026-08-10T00:00:00Z',
+    turn: null,
+    step: null,
   };
 }
 
@@ -335,6 +341,8 @@ function codedEvent(
     event_type: 'tool_call',
     payload: { tool, iteration, result: JSON.stringify(result), error_code: errorCode },
     created_at: '2026-09-22T00:00:00Z',
+    turn: null,
+    step: null,
   };
 }
 

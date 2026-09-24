@@ -4,7 +4,7 @@
  * A fork may only land on one of these seqs (the backend rejects anything
  * else with `not_a_step_boundary`).
  */
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 
 export interface Tick {
   seq: number;

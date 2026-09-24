@@ -21,7 +21,7 @@
  * property is unit-testable without mounting anything.
  */
 
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 import type { ChatToolCall } from '../../types/api';
 import { judgeToolOk } from './toolOutcome';
 
