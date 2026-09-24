@@ -240,8 +240,42 @@ class TestTextModels:
         assert data[0]["type"] == "llm"
         # Public columns only — credentials must never reach the browser.
         assert all("api_key" not in m and "base_url" not in m for m in data)
+        assert all("actual_provider" not in m for m in data)
         assert list_enabled.await_args.args == ("llm",)
         assert list_enabled.await_args.kwargs["viewer_user_id"]
+
+    @pytest.mark.asyncio
+    async def test_carries_admin_label_and_probe_status(self, client, monkeypatch):
+        # Production-shaped list_enabled row (2026-09-24): actual_model is what
+        # the admin card prints, last_test_status lets the picker hide a
+        # failed row. The probe's failure text must not ride along.
+        rows = [
+            {
+                "id": 7300000000001,
+                "name": "nous-deepseek-v4-pro",
+                "display_name": "DeepSeek V4 Pro",
+                "actual_model": "deepseek-v4-pro",
+                "type": "llm",
+                "pricing_type": "per_token",
+                "pricing_value": 0,
+                "sort_order": 10,
+                "last_test_status": "ok",
+                "last_tested_at": "2026-09-24T01:00:00+00:00",
+                "last_test_code": None,
+                "is_local": False,
+            },
+        ]
+        repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+        import app.repositories.nous_model_repository as repo_mod
+
+        monkeypatch.setattr(repo_mod, "get_nous_model_repository", lambda: repo)
+
+        resp = await client.get("/api/v1/canvases/text-models")
+        assert resp.status_code == 200
+        (row,) = resp.json()["data"]
+        assert row["actual_model"] == "deepseek-v4-pro"
+        assert row["last_test_status"] == "ok"
+        assert "last_test_detail" not in row
 
 
 def _read_scope_returning(row, *, forbid_writes: bool = False):

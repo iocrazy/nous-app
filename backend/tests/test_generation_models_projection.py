@@ -16,6 +16,15 @@ def test_raw_provider_stays_out_of_the_projection():
     assert "api_key" not in names
 
 
+def test_canvas_pickers_carry_admin_label_and_probe_status():
+    """2026-09-24: the canvas pickers name a row by ``actual_model``, the same
+    string the admin AI Models card shows, and drop failed rows client-side
+    with the same predicate as Settings. The probe's failure TEXT stays out."""
+    assert "actual_model" in _GENERATION_MODEL_PUBLIC_FIELDS
+    assert "last_test_status" in _GENERATION_MODEL_PUBLIC_FIELDS
+    assert "last_test_detail" not in _GENERATION_MODEL_PUBLIC_FIELDS
+
+
 def test_generation_models_payload_carries_is_local_not_provider():
     assert "is_local" in _GENERATION_MODEL_PUBLIC_FIELDS
     assert "actual_provider" not in _GENERATION_MODEL_PUBLIC_FIELDS

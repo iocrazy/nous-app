@@ -23,8 +23,10 @@ vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
 vi.mock('./useAgents', () => ({ useAgents: () => [] }));
 vi.mock('./useTextModels', () => ({
   useTextModels: () => [
-    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', type: 'llm', actual_provider: 'doubao' },
-    { name: 'mediahub-deepseek', display_name: 'DeepSeek', type: 'llm', actual_provider: 'deepseek' },
+    // Real text-models row shape (2026-09-24): actual_model + last_test_status
+    // ride along; actual_provider never does (leak tripwire).
+    { name: 'mediahub-doubao-llm', display_name: 'Doubao LLM', actual_model: 'doubao-seed-1-6-250615', type: 'llm', last_test_status: 'ok' },
+    { name: 'mediahub-deepseek', display_name: 'DeepSeek', actual_model: 'deepseek-v4-pro', type: 'llm', last_test_status: 'not_probed' },
   ],
 }));
 
@@ -86,8 +88,9 @@ describe('PromptNodeView text-model dropdown (P0-1)', () => {
     const options = Array.from(select.options).map((o) => ({ value: o.value, label: o.textContent }));
     expect(options).toEqual([
       { value: '', label: 'Catalog default' },
-      { value: 'mediahub-doubao-llm', label: 'Doubao LLM' },
-      { value: 'mediahub-deepseek', label: 'DeepSeek' },
+      // Labelled like the admin AI Models card; the value stays the row name.
+      { value: 'mediahub-doubao-llm', label: 'doubao-seed-1-6-250615 · Doubao LLM' },
+      { value: 'mediahub-deepseek', label: 'deepseek-v4-pro · DeepSeek' },
     ]);
     // The retired hardcoded values must be gone.
     const values = options.map((o) => o.value);
