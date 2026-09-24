@@ -1,7 +1,7 @@
 """Strip Qwen3-style chain-of-thought from LLM output.
 
 Qwen3 *thinking* models (e.g. Qwen3-30B-A3B, served as ``qwen3-6-35b`` on the
-self-hosted nous-center box) emit their reasoning then the answer in ONE
+self-hosted nous-engine box) emit their reasoning then the answer in ONE
 ``content`` string. The chat template consumes the opening ``<think>`` token, so
 the wire format is::
 

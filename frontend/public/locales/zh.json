@@ -5860,19 +5860,6 @@
       "continuity": "检查本集是否存在连贯性问题。"
     }
   },
-  "nousCenterVerify": {
-    "title": "nous-center 协议",
-    "desc": "向已配置的 nous-center 服务发起探测，确认 workflow-provider 契约仍然可用。使用服务端的 service token，不会用到你的账号。",
-    "verifying": "验证中…",
-    "verify": "验证协议",
-    "reachable": "服务可达",
-    "baseUrl": "Base URL",
-    "workflowsVisible": "可见 workflow 数",
-    "failed": "验证失败",
-    "failedWithStatus": "HTTP {{status}} —— 验证失败",
-    "unknownReason": "未知原因",
-    "malformed": "响应格式异常"
-  },
   "trajectory": {
     "timedOut": "超时 · {{s}}",
     "elapsed": "实际 {{s}}",

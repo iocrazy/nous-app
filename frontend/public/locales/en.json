@@ -5860,19 +5860,6 @@
       "continuity": "Check this episode for continuity problems."
     }
   },
-  "nousCenterVerify": {
-    "title": "nous-center protocol",
-    "desc": "Pings the configured nous-center service to confirm the workflow-provider contract is live. Uses the server-side service token, not your account.",
-    "verifying": "Verifying…",
-    "verify": "Verify protocol",
-    "reachable": "Service reachable",
-    "baseUrl": "Base URL",
-    "workflowsVisible": "Workflows visible",
-    "failed": "verification failed",
-    "failedWithStatus": "HTTP {{status}} — verification failed",
-    "unknownReason": "unknown reason",
-    "malformed": "malformed response"
-  },
   "trajectory": {
     "timedOut": "Timed out · {{s}}",
     "elapsed": "elapsed {{s}}",

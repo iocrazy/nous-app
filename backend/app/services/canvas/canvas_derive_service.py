@@ -201,14 +201,7 @@ async def derive_canvas_outpaint(
     target, source = await _prepare(
         canvas_id=canvas_id, user_id=user_id, source_url=source_url, node_id=node_id
     )
-    image = await extend_image(
-        source.file_bytes,
-        source.mime_type,
-        padding,
-        prompt=prompt,
-        mode=mode,
-        label=source.label,
-    )
+    image = await extend_image(source.file_bytes, source.mime_type, padding)
     return await _register(
         target,
         source,

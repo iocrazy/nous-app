@@ -70,9 +70,6 @@ vi.mock('./ApprovalsPanel', () => ({ ApprovalsPanel: () => null }));
 vi.mock('./MemoryPanel', () => ({ MemoryPanel: () => null }));
 vi.mock('./AgentMemoriesPanel', () => ({ AgentMemoriesPanel: () => null }));
 vi.mock('./AIHealthBoard', () => ({ AIHealthBoard: () => null }));
-vi.mock('../features/canvas-core/smart/NousCenterVerifyPanel', () => ({
-  NousCenterVerifyPanel: () => null,
-}));
 
 const MOSS_MODEL: NousModelPublic = {
   name: 'mediahub-moss-asr',

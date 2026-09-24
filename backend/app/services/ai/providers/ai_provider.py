@@ -113,7 +113,7 @@ class OpenAIProvider(AIProvider):
         # Pop it here so it never leaks into `**kwargs` (an unknown `hotwords`
         # multipart part would confuse the upstream).
         hotwords = (kwargs.pop("hotwords", "") or "").strip()
-        # merge_segments: nous-center server-side segment merging — fragments
+        # merge_segments: nous-engine server-side segment merging — fragments
         # coalesce to sentence-final boundaries (speaker boundaries never
         # crossed), turning MOSS's native pause-level splits (~2s on fast
         # speech) into readable sentence segments. Unknown to other

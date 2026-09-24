@@ -5,10 +5,10 @@
 blurred, stretched copy of the source — the classic "background blur
 pad" used for aspect-ratio conversion (9:16 ↔ 16:9 etc).
 
-This is the deterministic v1 fill. The outpaint UI also collects a
-prompt; once a real generation provider (nous-center) ships an
-outpaint workflow, the derive service swaps this primitive for the AI
-path without touching the editor. No DB writes here.
+This is the deterministic fill the canvas outpaint derive uses. The
+outpaint UI also collects a prompt, but no generative fill is wired
+(the legacy nous-center workflow bridge was retired on 2026-09-24).
+No DB writes here.
 """
 
 from __future__ import annotations
