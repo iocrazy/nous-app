@@ -55,6 +55,11 @@ import { HotwordChipInput } from './settings/HotwordChipInput';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { AIHealthBoard } from './AIHealthBoard';
 import { UiSelect } from './ui';
+import { useOptionalToast } from './Toast';
+
+const SAVE_SUCCESS_MS = 2000;
+const SAVE_SHORTCUT_LABEL =
+  typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform) ? '⌘S' : 'Ctrl+S';
 
 interface AISettingsProps {
   /** Which slice to render (settings-page tab split, 2026-08-26):
@@ -517,6 +522,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   // alike. Provider brand names, model ids and upstream error text stay verbatim
   // — they are identifiers, not copy.
   const { t } = useTranslation();
+  // Optional: bare unit mounts render this page without a ToastProvider; the
+  // inline error bubble next to the save button covers that case.
+  const toast = useOptionalToast();
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
   const [governance, setGovernance] = useState<AIGovernanceFlags>(GOVERNANCE_ALL_ALLOWED);
   const [localSettings, setLocalSettings] = useState<AISettingsType>(() => ({
@@ -547,6 +555,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   const [governanceLoaded, setGovernanceLoaded] = useState(false);
   const optionsReady = nousModelsLoaded && agentsLoaded && governanceLoaded;
   const isDirtyRef = useRef(false);
+  // Render-visible mirror of isDirtyRef: drives the floating save button's
+  // "unsaved changes" dot. The ref stays the source of truth for the prop
+  // re-sync effect (it must not re-run on every edit).
+  const [isDirty, setIsDirty] = useState(false);
+  const savingRef = useRef(false);
 
   // AuthContext loads AI settings asynchronously after login, so the prop
   // may hydrate after this form mounted with empty defaults. Re-sync the
@@ -563,6 +576,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     updater: (prev: AISettingsType) => AISettingsType
   ) => {
     isDirtyRef.current = true;
+    setIsDirty(true);
     setLocalSettings(updater);
   };
 
@@ -988,23 +1002,47 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     // nothing and re-running is impossible.
   }, [localSettings.providers, t]);
 
-  // Save handler - persists to API then updates local state
+  // Save handler - persists to API then updates local state. Re-entrant
+  // calls (double click, Ctrl+S held down) are dropped while one is in flight.
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setIsSaving(true);
     setSaveSuccess(false);
     setSaveError(null);
     try {
       await saveAISettingsApi(localSettings);
       isDirtyRef.current = false;
+      setIsDirty(false);
       onSave(localSettings);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(false), SAVE_SUCCESS_MS);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : t('aiSettings.errSaveFailed'));
+      console.error('[AISettings] save failed:', err);
+      const message = err instanceof Error ? err.message : t('aiSettings.errSaveFailed');
+      setSaveError(message);
+      toast?.addToast(`${t('aiSettings.errSaveFailed')}: ${message}`, 'error');
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
+
+  // ⌘S / Ctrl+S saves while this page is mounted (it only mounts inside the
+  // settings dialog's AI tab). The ref keeps the listener stable while still
+  // calling the handler that closes over the latest localSettings.
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void handleSaveRef.current();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Helper: get provider config
   const getProviderConfig = (key: string): AIProviderConfig => {
@@ -1840,30 +1878,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       </section>
       )}
 
-      {/* Save Button */}
-      <div className="flex flex-col items-end gap-2 pt-2 pb-4">
-        {saveError && (
-          <div className="flex items-center gap-2 text-sm text-red-400">
-            <AlertCircle size={14} />
-            {saveError}
-          </div>
-        )}
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white px-8 py-3 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-lg shadow-indigo-900/20"
-        >
-          {isSaving ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : saveSuccess ? (
-            <Check size={18} />
-          ) : (
-            <Save size={18} />
-          )}
-          {saveSuccess ? t('aiSettings.settingsSaved') : t('aiSettings.saveSettings')}
-        </button>
-      </div>
-
       {/* MCP lives in its own settings tab (left nav) since 2026-09. */}
 
       {/* G1-UI: Pending approvals — auto-hides when empty */}
@@ -1872,6 +1886,53 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       </section>
 
       {/* Memory panels moved to the Memory settings tab (2026-08-26). */}
+
+      {/* Floating save — sticks to the bottom-right of the settings scroll
+          area so a long provider list never pushes it out of reach (user
+          request 2026-09-23). Last child of the root so `sticky` pins it for
+          the whole page; pointer-events pass through the empty strip. */}
+      <div className="sticky bottom-4 z-20 flex items-center justify-end gap-2 pointer-events-none">
+        {saveError && (
+          <div
+            role="alert"
+            className="pointer-events-auto flex items-center gap-2 rounded-lg border border-danger-line bg-ink-900 px-3 py-2 text-sm text-danger shadow-lg"
+          >
+            <AlertCircle size={14} className="shrink-0" aria-hidden />
+            <span>{saveError}</span>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          aria-busy={isSaving}
+          aria-label={saveSuccess ? t('aiSettings.settingsSaved') : t('aiSettings.saveSettings')}
+          title={`${saveSuccess ? t('aiSettings.settingsSaved') : t('aiSettings.saveSettings')} (${SAVE_SHORTCUT_LABEL})`}
+          data-testid="ai-settings-save"
+          className={`pointer-events-auto relative flex h-11 w-11 items-center justify-center rounded-full shadow-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950 ${
+            saveSuccess
+              ? 'bg-ok text-white'
+              : isDirty || isSaving
+                ? 'bg-accent text-white hover:opacity-90'
+                : 'border border-ink-700 bg-ink-800 text-ink-400 opacity-80 hover:text-ink-100 hover:opacity-100'
+          }`}
+        >
+          {isSaving ? (
+            <Loader2 size={18} className="animate-spin" aria-hidden />
+          ) : saveSuccess ? (
+            <Check size={18} aria-hidden />
+          ) : (
+            <Save size={18} aria-hidden />
+          )}
+          {isDirty && !isSaving && (
+            <span
+              data-testid="ai-settings-unsaved-dot"
+              className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-warn ring-2 ring-ink-950"
+            >
+              <span className="sr-only">{t('aiSettings.unsavedIndicator')}</span>
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 };
