@@ -76,21 +76,6 @@ async def _load(svc: LibrariesService, library_id: str) -> dict | None:
     return await svc.get_library(library_id)
 
 
-@router.get("/{library_id}", response_model=LibraryResponse)
-async def get_library(library_id: str, auth: AuthDep):
-    """Get a single library by ID."""
-    try:
-        svc = LibrariesService()
-        library = await _load(svc, library_id)
-        await require_library_access(library, auth.user_id, write=False)
-        return {"success": True, "data": library}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get library {library_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get library")
-
-
 @router.patch("/{library_id}", response_model=LibraryResponse)
 async def update_library(library_id: str, data: LibraryUpdate, auth: AuthDep):
     """Update a library."""

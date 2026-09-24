@@ -162,7 +162,6 @@ async def test_create_in_own_team_is_allowed(client, _wiring) -> None:
 
 
 ID_CALLS = [
-    ("GET", None),
     ("PATCH", {"name": "Renamed"}),
     ("DELETE", None),
 ]
@@ -212,25 +211,27 @@ async def test_own_personal_library_is_allowed(client, _wiring) -> None:
 async def test_project_library_follows_project_role(client, _wiring) -> None:
     project_id = "7300000000000000555"
     _wiring.row = _library(scope_type="project", scope_id=project_id)
-    resp = await client.get(f"/api/v1/libraries/{LIB_ID}")
+    resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={"name": "x"})
     _assert_typed_404(resp)
+    # A viewer can see it but may not change it.
     ROLES[f"project:{project_id}"] = "viewer"
-    assert (await client.get(f"/api/v1/libraries/{LIB_ID}")).status_code == 200
-    # A viewer reads but may not change it.
     resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={"name": "x"})
     assert resp.status_code == 403
     assert _wiring.writes == []
+    ROLES[f"project:{project_id}"] = "editor"
+    resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={"name": "x"})
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_missing_library_is_typed_404(client, _wiring) -> None:
     _wiring.row = None
-    _assert_typed_404(await client.get(f"/api/v1/libraries/{LIB_ID}"))
+    _assert_typed_404(await client.delete(f"/api/v1/libraries/{LIB_ID}"))
 
 
 @pytest.mark.asyncio
 async def test_non_numeric_library_id_is_typed_404_not_500(client) -> None:
-    _assert_typed_404(await client.get("/api/v1/libraries/abc"))
+    _assert_typed_404(await client.delete("/api/v1/libraries/abc"))
 
 
 # --------------------------------------------------------------------------- #
@@ -265,9 +266,9 @@ async def test_create_wire(client, _wiring) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_wire_dirty_row(client, _wiring) -> None:
+async def test_patch_empty_body_wire_dirty_row(client, _wiring) -> None:
     _wiring.row = _dirty_library()
-    resp = await client.get(f"/api/v1/libraries/{LIB_ID}")
+    resp = await client.patch(f"/api/v1/libraries/{LIB_ID}", json={})
     assert_wire_unchanged(resp, {"success": True, "data": _wiring.row})
 
 
@@ -303,3 +304,10 @@ async def test_patch_row_gone_after_guard_is_typed_404(
 async def test_delete_wire(client) -> None:
     resp = await client.delete(f"/api/v1/libraries/{LIB_ID}")
     assert_wire_unchanged(resp, {"success": True, "message": "Library deleted"})
+
+
+@pytest.mark.asyncio
+async def test_single_library_read_route_is_gone(client) -> None:
+    """``GET /libraries/{id}`` had no caller in frontend / admin / browser /
+    scripts / nous-core and no API-key scope (P7)."""
+    assert (await client.get(f"/api/v1/libraries/{LIB_ID}")).status_code == 405
