@@ -139,3 +139,26 @@ async def test_foreign_template_stays_403(client):
     _Repo.target = {**TEMPLATE, "user_id": "someone-else"}
     resp = await client.put(URL, json={"name": "X"})
     assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored, served",
+    [
+        ({"not": "a list"}, []),
+        ("garbage", []),
+        (None, []),
+        ([FULL_ANCHOR, "stray", 7, None], [FULL_ANCHOR]),
+    ],
+)
+async def test_hand_edited_anchors_do_not_500_the_list(client, stored, served):
+    """``anchors`` is JSONB and promises nothing. One hand-edited row used to
+    500 the whole list; now its bad value reads as no anchors (or loses the
+    bad elements) and the healthy rows are served unchanged."""
+    dirty = {**TEMPLATE, "id": TEMPLATE["id"] + 2, "anchors": stored}
+    _Repo.rows = [TEMPLATE, dirty]
+    resp = await client.get("/api/v1/beat-templates")
+    assert resp.status_code == 200, resp.text
+    assert_wire_unchanged(
+        resp, {"success": True, "data": [TEMPLATE, {**dirty, "anchors": served}]}
+    )

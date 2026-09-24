@@ -12,11 +12,19 @@ column itself promises nothing. The anchor model therefore requires none of
 them and keeps unknown keys; the routes are declared
 ``response_model_exclude_unset`` so a key a row lacks stays absent instead of
 turning into ``null`` (or into a 500).
+
+A row whose ``anchors`` is not a list at all, or holds non-object elements,
+can only come from a hand edit of the database. It used to 500 the whole
+list; now the bad value reads as no anchors (or the bad element is dropped)
+and a warning names the row.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Any
+
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
 from app.schemas.envelope import Envelope
 
@@ -42,6 +50,24 @@ class BeatTemplateRow(BaseModel):
     anchors: list[BeatTemplateAnchorRow]
     created_at: str
     updated_at: str
+
+    @field_validator("anchors", mode="before")
+    @classmethod
+    def _tolerate_dirty_anchors(cls, value: Any, info: ValidationInfo) -> Any:
+        row_id = (info.data or {}).get("id")
+        if not isinstance(value, list):
+            logger.warning(
+                f"beat_templates {row_id}: anchors is {type(value).__name__}, "
+                "not a list; serving it as no anchors"
+            )
+            return []
+        kept = [anchor for anchor in value if isinstance(anchor, dict)]
+        if len(kept) != len(value):
+            logger.warning(
+                f"beat_templates {row_id}: dropped {len(value) - len(kept)} "
+                "anchor(s) that are not objects"
+            )
+        return kept
 
 
 class BeatTemplateListResponse(Envelope[list[BeatTemplateRow]]):
