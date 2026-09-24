@@ -247,13 +247,21 @@ function PriceCoverageTag({ coverage }: { coverage?: NousModel['price_coverage']
   )
 }
 
-// 131072 → "128k": context windows are conventionally quoted in KiB-tokens,
-// so 1024 is the divisor (128k, 32k, 1M-ish all read the way vendors write
-// them). One decimal, trailing ".0" dropped. Exact count goes in the title.
+// Windows come in two conventions: binary (131072 = "128k", 1048576 = "1M")
+// and decimal (128000 = "128k", 200000 = "200k"). A round decimal count
+// divides by 1000 (128000 is also 125 × 1024 — decimal must win); otherwise an
+// exact binary multiple divides by 1024; anything else by 1000. One decimal, trailing ".0" dropped; exact count goes in
+// the chip's title.
+const MIB = 1024 * 1024
 function formatContextWindow(tokens: number): string {
-  if (tokens < 1000) return String(tokens)
-  const k = Math.round((tokens / 1024) * 10) / 10
-  return `${Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)}k`
+  const fmt = (v: number) => {
+    const r = Math.round(v * 10) / 10
+    return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)
+  }
+  const unit = (dec: number, bin: number) => (tokens % dec !== 0 && tokens % bin === 0 ? bin : dec)
+  if (tokens >= 1_000_000) return `${fmt(tokens / unit(1_000_000, MIB))}M`
+  if (tokens >= 1000) return `${fmt(tokens / unit(1000, 1024))}k`
+  return String(tokens)
 }
 
 // Only LLM rows have a context window; other types render nothing.
@@ -277,12 +285,16 @@ function ContextWindowChip({ model }: { model: NousModel }) {
   )
 }
 
-// Empty = no value (clear on save); otherwise a positive integer.
+// The column is int4; the backend rejects anything larger with a 422.
+const INT4_MAX = 2_147_483_647
+
+// Empty = no value (clear on save); otherwise a positive integer ≤ int4.
 function validateContextWindow(value: unknown, callback: (error?: string) => void) {
   const raw = value === undefined || value === null ? '' : String(value).trim()
   if (raw === '') return callback()
   const n = Number(raw)
   if (!Number.isInteger(n) || n <= 0) return callback('Must be a positive whole number of tokens')
+  if (n > INT4_MAX) return callback(`Must be at most ${INT4_MAX.toLocaleString('en-US')} tokens`)
   callback()
 }
 

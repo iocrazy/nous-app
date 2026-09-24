@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field, model_validator
 # real constraint, tests/db/test_nous_model_type_matches_db_check.py.
 NousModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
 
+# context_window_tokens is an int4 column: a larger value fails the UPDATE,
+# which the repository swallows into None (→ a misleading 404).
+INT4_MAX = 2_147_483_647
+
 
 class NousModelCreate(BaseModel):
     """Request body for creating a Nous model."""
@@ -35,7 +39,7 @@ class NousModelCreate(BaseModel):
     is_enabled: bool = True
     sort_order: int = 0
     # Context window in tokens (migration 500); None = unknown.
-    context_window_tokens: Optional[int] = Field(default=None, gt=0)
+    context_window_tokens: Optional[int] = Field(default=None, gt=0, le=INT4_MAX)
 
 
 class NousModelUpdate(BaseModel):
@@ -56,7 +60,7 @@ class NousModelUpdate(BaseModel):
     sort_order: Optional[int] = None
     # Omitted = unchanged (the router drops None fields). To withdraw a value
     # and fall back to the builtin table / default, send clear_context_window.
-    context_window_tokens: Optional[int] = Field(default=None, gt=0)
+    context_window_tokens: Optional[int] = Field(default=None, gt=0, le=INT4_MAX)
     # The only way to write NULL through the exclude_none patch (same trick as
     # issues ``clear_budget``). Mutually exclusive with context_window_tokens.
     clear_context_window: bool = False
