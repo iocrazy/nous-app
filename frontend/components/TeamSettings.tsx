@@ -4,6 +4,7 @@ import { Loading } from './common/Loading';
 import type { TeamMember } from '../types/api';
 import { fetchTeamMembers, updateTeam, updateMemberRole, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
 import { fetchUsageStats, fetchPointsBalance } from '../services/pointsService';
+import type { PointsUsageStats } from '../types/api';
 import { UiSelect } from './ui';
 
 interface TeamSettingsProps {
@@ -17,15 +18,6 @@ interface TeamSettingsProps {
   onTeamDeleted: () => void;
   onTeamLeft: () => void;
   onTeamUpdated?: (team: any) => void;
-}
-
-// Per-member usage info returned from usage stats
-interface MemberUsage {
-  user_id: string;
-  name: string | null;
-  email: string | null;
-  points_used: number;
-  monthly_limit: number | null; // null = unlimited
 }
 
 export const TeamSettings: React.FC<TeamSettingsProps> = ({
@@ -59,9 +51,8 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
   const [updatingRoleFor, setUpdatingRoleFor] = useState<string | null>(null);
 
   // Team consumption stats
-  const [usageStats, setUsageStats] = useState<any>(null);
+  const [usageStats, setUsageStats] = useState<PointsUsageStats | null>(null);
   const [teamBalance, setTeamBalance] = useState<number | null>(null);
-  const [memberUsages, setMemberUsages] = useState<MemberUsage[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
   // Determine if current user is owner or admin
@@ -100,11 +91,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
       ]);
       setUsageStats(stats);
       setTeamBalance(balance?.points_balance ?? null);
-
-      // Extract per-member usage from stats if available
-      if (stats?.member_usage && Array.isArray(stats.member_usage)) {
-        setMemberUsages(stats.member_usage);
-      }
     } catch {
       // Stats are non-critical, fail silently
     } finally {
@@ -217,11 +203,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
     return { name, email, isCurrentUser };
   };
 
-  // Get member monthly usage info
-  const getMemberUsage = (userId: string): MemberUsage | undefined => {
-    return memberUsages.find(u => u.user_id === userId);
-  };
-
   return (
     <div className="space-y-8">
       {/* Team Name */}
@@ -261,9 +242,9 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 {/* Summary row */}
                 <div className="flex items-center gap-6">
                   <div>
-                    <p className="text-xs text-ink-500 uppercase font-medium">Points Used This Month</p>
+                    <p className="text-xs text-ink-500 uppercase font-medium">Total Points Used</p>
                     <p className="text-2xl font-bold text-ink-50">
-                      {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
+                      {usageStats?.total_consumed.toLocaleString() ?? '0'}
                     </p>
                   </div>
                   {teamBalance !== null && (
@@ -275,25 +256,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                     </div>
                   )}
                 </div>
-
-                {/* Top consumers */}
-                {usageStats?.top_consumers && usageStats.top_consumers.length > 0 && (
-                  <div>
-                    <p className="text-xs text-ink-500 uppercase font-medium mb-2">Top Consumers</p>
-                    <div className="space-y-1.5">
-                      {usageStats.top_consumers.map((consumer: any, idx: number) => (
-                        <div key={consumer.user_id || idx} className="flex items-center justify-between text-sm">
-                          <span className="text-ink-300">
-                            {consumer.name || consumer.email || 'Unknown'}
-                          </span>
-                          <span className="text-ink-400 font-mono">
-                            {consumer.points_used?.toLocaleString() ?? 0} pts
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {!usageStats && (
                   <p className="text-sm text-ink-500">No consumption data available yet.</p>
@@ -328,9 +290,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Member</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Role</th>
-                  {canViewStats && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Monthly Usage</th>
-                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-ink-500 uppercase">Joined</th>
                   {isOwner && (
                     <th className="px-4 py-3 text-right text-xs font-medium text-ink-500 uppercase">Actions</th>
@@ -340,7 +299,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
               <tbody className="divide-y divide-ink-800/50">
                 {members.map((member) => {
                   const { name, email, isCurrentUser } = getMemberDisplayInfo(member);
-                  const usage = getMemberUsage(member.user_id);
                   return (
                   <tr key={member.user_id} className="hover:bg-ink-800/30">
                     <td className="px-4 py-3">
@@ -388,24 +346,6 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                         </span>
                       )}
                     </td>
-                    {canViewStats && (
-                      <td className="px-4 py-3 text-sm text-ink-400">
-                        {usage ? (
-                          usage.monthly_limit !== null ? (
-                            <span>
-                              {usage.points_used.toLocaleString()} / {usage.monthly_limit.toLocaleString()} points used
-                            </span>
-                          ) : (
-                            <span>
-                              {usage.points_used.toLocaleString()} points used
-                              <span className="ml-1 text-ink-600">(Unlimited)</span>
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-ink-600">--</span>
-                        )}
-                      </td>
-                    )}
                     <td className="px-4 py-3 text-sm text-ink-500">
                       {new Date(member.joined_at).toLocaleDateString()}
                     </td>
@@ -426,7 +366,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                 })}
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={isOwner ? (canViewStats ? 5 : 4) : (canViewStats ? 4 : 3)} className="px-4 py-8 text-center text-ink-500">
+                    <td colSpan={isOwner ? 4 : 3} className="px-4 py-8 text-center text-ink-500">
                       No members found
                     </td>
                   </tr>

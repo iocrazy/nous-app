@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
-import type { AILibraryMCPServer } from '../types';
+import type { AILibraryMCPServer } from '../types/api';
 import {
   EMPTY_MCP_FORM as EMPTY_FORM,
   buildMCPServerUpdatePayload,

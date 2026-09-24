@@ -9,7 +9,7 @@ and administrative operations.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -143,3 +143,117 @@ class QuotaCheckResult(BaseModel):
     reason: Optional[str] = Field(
         None, description="Explanation when the action is denied"
     )
+
+
+# ============================================
+# Wire shapes of the points routes (OpenAPI typed frontend, P4)
+# ============================================
+#
+# These declare what ``app/api/points_router.py`` already sends; nothing here
+# changes the wire. The classes above predate them and are not used by any
+# route (their constraints — ``balance_after >= 0``, a five-value ``type``,
+# ``storage_used_percent <= 100`` — would turn a real row into a 500 if they
+# were).
+#
+# Id and time conventions come from ``points_repository._parity``: bigint
+# ids stay JSON numbers, uuids are strings, timestamps are already ISO
+# strings, the one Numeric column (``duration_seconds``) is a string.
+# ``tests/api/test_points_wire.py`` pins the row models to the ORM columns.
+
+# The ``point_transactions_type_check`` constraint, value for value.
+PointsTransactionType = Literal[
+    "purchase",
+    "consume",
+    "refund",
+    "gift",
+    "admin_adjust",
+    "daily_gift",
+    "daily_gift_reclaim",
+]
+
+
+class PointsBalance(BaseModel):
+    """``PointsService.get_balance``: a team with no quota row reads as zeros.
+
+    ``team_id`` is the resolved team id as the router holds it (a string),
+    not the bigint column.
+    """
+
+    team_id: str
+    points_balance: int
+    storage_limit_bytes: int
+    storage_used_bytes: int
+    storage_used_percent: float
+
+
+class PointsTransactionRow(BaseModel):
+    """One ``point_transactions`` row as ``PointsRepository._txn_row`` shapes it."""
+
+    id: int
+    team_id: int
+    user_id: str | None
+    amount: int
+    balance_after: int
+    type: PointsTransactionType
+    reference_type: str | None
+    reference_id: str | None
+    description: str | None
+    provider: str | None
+    model: str | None
+    duration_seconds: str | None
+    is_nous: bool | None
+    created_at: str
+
+
+class PointsTransactionsResponse(BaseModel):
+    """``GET /points/transactions``: the list sits under ``transactions``, not ``data``."""
+
+    success: bool = True
+    count: int
+    transactions: list[PointsTransactionRow]
+
+
+class PointsPricingRow(BaseModel):
+    """One active ``point_pricing`` row as ``PointsRepository._pricing_row`` shapes it."""
+
+    id: str
+    action_type: str
+    points_cost: int
+    is_active: bool
+    description: str | None
+    created_at: str
+    updated_at: str
+
+
+class PointsPricingResponse(BaseModel):
+    """``GET /points/pricing``: the list sits under ``pricing``, not ``data``."""
+
+    success: bool = True
+    pricing: list[PointsPricingRow]
+
+
+class PointsUsageStats(BaseModel):
+    """``PointsRepository.get_usage_stats``: all-time totals for one team.
+
+    There is no per-month or per-member breakdown; a read failure returns
+    the same shape zeroed.
+    """
+
+    total_consumed: int
+    total_purchased: int
+    by_type: dict[str, int]
+
+
+class PointsQuotaCheck(BaseModel):
+    """``PointsService.check_quota`` on the 200 path.
+
+    A denial never reaches this model — the router turns it into a 402 —
+    so ``allowed`` is true and ``reason`` null on the wire.
+    ``current_balance`` is null when the action is free (no pricing row, or
+    a zero cost): the balance is not read then.
+    """
+
+    allowed: bool
+    points_cost: int
+    current_balance: int | None
+    reason: str | None

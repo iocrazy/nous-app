@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import _is_team_member
 from app.repositories.points_repository import get_points_repository
 from app.schemas.payment import CreateOrderRequest
 from app.services.billing.payment_service import PaymentService
@@ -37,10 +38,18 @@ async def _resolve_team_id(
     """
     Resolve the team ID for the current request.
 
-    If *team_id* is provided explicitly it is used as-is; otherwise
-    the authenticated user's own ID is used as a personal-team fallback.
+    An explicit *team_id* is used once the caller is a member of that team
+    (403 otherwise). Before this check any signed-in user could list another
+    team's orders or open an order on its behalf by passing its id -- the
+    same hole ``points_router._resolve_team_id`` had. Without one, the
+    authenticated user's own ID is used as a personal-team fallback.
     """
     if team_id:
+        if not team_id.isdigit() or not await _is_team_member(team_id, auth.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of this team",
+            )
         return team_id
     # Fallback: treat the user's own ID as a personal team
     return auth.user_id
@@ -90,6 +99,16 @@ async def get_order_status(order_id: str, auth: AuthDep):
     """
     Lightweight endpoint for the frontend to poll payment status.
     """
+    # Order ids are Snowflakes (near-sequential): without this a caller could
+    # walk other teams' payment status and amounts. A foreign order answers
+    # the same 404 as a missing one, so its existence is not confirmed.
+    order = await _payment_service.payment_repo.get_order_by_id(order_id)
+    if order is None or not await _is_team_member(
+        str(order.get("team_id")), auth.user_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
+        )
     result = await _payment_service.get_order_status(order_id)
     if not result.get("success"):
         raise HTTPException(

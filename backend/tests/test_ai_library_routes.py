@@ -504,9 +504,12 @@ async def test_get_skill_version_returns_body(client: AsyncClient) -> None:
     """GET /skills/{slug}/versions/{n} returns the full snapshot body."""
     skill = _skill_row(slug="my-skill", is_public=False, project_id=42)
     skill_patches = _patch_skill_repo(get_by_slug=AsyncMock(return_value=skill))
+    # Every skill_versions column, as _serialize_row hands it to the route.
     snapshot = {
         "id": str(uuid4()),
+        "skill_id": 101,
         "version_number": 3,
+        "created_at": _NOW_ISO,
         "body_md": "OLD body text",
         "frontmatter_json": {"k": "v"},
         "notes": None,

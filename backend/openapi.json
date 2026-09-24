@@ -3629,6 +3629,423 @@
         "title": "AgentCreate",
         "type": "object"
       },
+      "AgentDashboard": {
+        "description": "``GET /agents/{slug}/dashboard`` — 14-day, caller-scoped.",
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentDashboardAgent"
+          },
+          "costs_14d": {
+            "$ref": "#/components/schemas/AgentDashboardCosts"
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentDashboardLatestRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent_runs": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDashboardRecentRun"
+            },
+            "title": "Recent Runs",
+            "type": "array"
+          },
+          "recent_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/AgentTaskShape"
+            },
+            "title": "Recent Tasks",
+            "type": "array"
+          },
+          "run_activity_14d": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDashboardDailyCount"
+            },
+            "title": "Run Activity 14D",
+            "type": "array"
+          },
+          "success_rate_14d": {
+            "items": {
+              "$ref": "#/components/schemas/AgentDashboardDailySuccess"
+            },
+            "title": "Success Rate 14D",
+            "type": "array"
+          },
+          "tasks_by_status_14d": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Tasks By Status 14D",
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent",
+          "latest_run",
+          "run_activity_14d",
+          "tasks_by_status_14d",
+          "success_rate_14d",
+          "costs_14d",
+          "recent_tasks",
+          "recent_runs"
+        ],
+        "title": "AgentDashboard",
+        "type": "object"
+      },
+      "AgentDashboardAgent": {
+        "properties": {
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "persistent": {
+            "title": "Persistent",
+            "type": "boolean"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "icon",
+          "model",
+          "persistent",
+          "paused_reason"
+        ],
+        "title": "AgentDashboardAgent",
+        "type": "object"
+      },
+      "AgentDashboardCosts": {
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_cost_cents": {
+            "title": "Total Cost Cents",
+            "type": "number"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "total_cost_cents",
+          "run_count"
+        ],
+        "title": "AgentDashboardCosts",
+        "type": "object"
+      },
+      "AgentDashboardDailyCount": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "count"
+        ],
+        "title": "AgentDashboardDailyCount",
+        "type": "object"
+      },
+      "AgentDashboardDailySuccess": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "success",
+          "total"
+        ],
+        "title": "AgentDashboardDailySuccess",
+        "type": "object"
+      },
+      "AgentDashboardLatestRun": {
+        "description": "Most recent run (ISO timestamps, id as a numeric string).",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Cents"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Summary"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Summary"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "trigger",
+          "model",
+          "started_at",
+          "ended_at",
+          "prompt_tokens",
+          "completion_tokens",
+          "cost_cents",
+          "input_summary",
+          "output_summary",
+          "error_code",
+          "error_message"
+        ],
+        "title": "AgentDashboardLatestRun",
+        "type": "object"
+      },
+      "AgentDashboardRecentRun": {
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Cents"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "trigger",
+          "model",
+          "started_at",
+          "ended_at",
+          "prompt_tokens",
+          "completion_tokens",
+          "cost_cents"
+        ],
+        "title": "AgentDashboardRecentRun",
+        "type": "object"
+      },
       "AgentFault": {
         "description": "Why an agent is unhealthy, plus what to do about it.\n\n``detail`` is NOT optional in practice for every kind we emit — the spec\nrequires a fault badge to carry one actionable line, so a bare kind with\nno remedy would defeat the point.",
         "properties": {
@@ -4011,6 +4428,263 @@
         "title": "AgentStatsResponse",
         "type": "object"
       },
+      "AgentStatusOut": {
+        "description": "``GET /agents/{slug}/status`` — the header chip.",
+        "properties": {
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "running_count": {
+            "title": "Running Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "running",
+              "paused"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "paused_reason",
+          "running_count"
+        ],
+        "title": "AgentStatusOut",
+        "type": "object"
+      },
+      "AgentTaskShape": {
+        "description": "A ``task_tracking`` row in agent_tasks shape (``tt_row_to_task_shape``).\n\nThe dashboard SELECTs only some columns, so several keys are always null\nthere; they are still sent, because the mapper always writes them.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "assigned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "current_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Run Id"
+          },
+          "dispatch_attempt": {
+            "title": "Dispatch Attempt",
+            "type": "integer"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "inbox_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Message Id"
+          },
+          "lifecycle_status": {
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Task Id"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "result": {
+            "title": "Result"
+          },
+          "root_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Task Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "workforce_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workforce Workflow Id"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "user_id",
+          "title",
+          "payload",
+          "lifecycle_status",
+          "current_run_id",
+          "result",
+          "error_code",
+          "error_message",
+          "parent_task_id",
+          "root_task_id",
+          "inbox_message_id",
+          "created_at",
+          "assigned_at",
+          "dispatch_attempt",
+          "workforce_workflow_id",
+          "started_at",
+          "ended_at",
+          "updated_at"
+        ],
+        "title": "AgentTaskShape",
+        "type": "object"
+      },
       "AgentUpdate": {
         "properties": {
           "agent_group": {
@@ -4270,6 +4944,748 @@
           }
         },
         "title": "AgentUpdate",
+        "type": "object"
+      },
+      "AgentUsageModule": {
+        "properties": {
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "module_key": {
+            "title": "Module Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "module_key",
+          "feature_key"
+        ],
+        "title": "AgentUsageModule",
+        "type": "object"
+      },
+      "AgentUsageOut": {
+        "description": "``GET /agents/{slug}/usage`` — the \"Used by\" card.",
+        "properties": {
+          "conversation_count": {
+            "title": "Conversation Count",
+            "type": "integer"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUsageModule"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "routine_count": {
+            "title": "Routine Count",
+            "type": "integer"
+          },
+          "trigger_counts": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUsageTrigger"
+            },
+            "title": "Trigger Counts",
+            "type": "array"
+          },
+          "window_days": {
+            "title": "Window Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "modules",
+          "trigger_counts",
+          "conversation_count",
+          "routine_count",
+          "window_days"
+        ],
+        "title": "AgentUsageOut",
+        "type": "object"
+      },
+      "AgentUsageTrigger": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "feature_key": {
+            "title": "Feature Key",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger",
+          "feature_key",
+          "count"
+        ],
+        "title": "AgentUsageTrigger",
+        "type": "object"
+      },
+      "AgentVersionDetail": {
+        "description": "One ``ai_agent_versions`` row, every column (ISO timestamps, str uuids).",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Md"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "identity_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Md"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "soul_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soul Md"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "version_number",
+          "created_at",
+          "identity_md",
+          "soul_md",
+          "agent_md",
+          "model",
+          "temperature",
+          "max_tokens",
+          "notes",
+          "created_by"
+        ],
+        "title": "AgentVersionDetail",
+        "type": "object"
+      },
+      "AgentVersionList": {
+        "properties": {
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentVersionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "current_version"
+        ],
+        "title": "AgentVersionList",
+        "type": "object"
+      },
+      "AgentVersionListItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "notes",
+          "created_by",
+          "created_at",
+          "model",
+          "temperature",
+          "max_tokens"
+        ],
+        "title": "AgentVersionListItem",
+        "type": "object"
+      },
+      "AiLibraryUsageByDay": {
+        "properties": {
+          "cost_points": {
+            "title": "Cost Points",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "total_tokens",
+          "cost_points",
+          "run_count"
+        ],
+        "title": "AiLibraryUsageByDay",
+        "type": "object"
+      },
+      "AiLibraryUsageByModel": {
+        "properties": {
+          "cost_points": {
+            "title": "Cost Points",
+            "type": "number"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "total_tokens",
+          "cost_points",
+          "run_count"
+        ],
+        "title": "AiLibraryUsageByModel",
+        "type": "object"
+      },
+      "AiLibraryUsageDaily": {
+        "properties": {
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/AiLibraryUsageDailyRow"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "group_by": {
+            "enum": [
+              "model",
+              "agent"
+            ],
+            "title": "Group By",
+            "type": "string"
+          },
+          "month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month"
+          },
+          "total_cost_cents": {
+            "title": "Total Cost Cents",
+            "type": "number"
+          },
+          "total_failed": {
+            "title": "Total Failed",
+            "type": "integer"
+          },
+          "total_requests": {
+            "title": "Total Requests",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days",
+          "month",
+          "group_by",
+          "total_requests",
+          "total_failed",
+          "total_tokens",
+          "total_cost_cents",
+          "daily"
+        ],
+        "title": "AiLibraryUsageDaily",
+        "type": "object"
+      },
+      "AiLibraryUsageDailyRow": {
+        "description": "One (day, model|agent) bucket of ``/ai-library/usage/daily``.\n\nNot ``UsageDailyRow``: that is the team ``/usage/summary`` row.",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "failed_requests": {
+            "title": "Failed Requests",
+            "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "key",
+          "label",
+          "requests",
+          "failed_requests",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost_cents"
+        ],
+        "title": "AiLibraryUsageDailyRow",
+        "type": "object"
+      },
+      "AiLibraryUsageOverall": {
+        "properties": {
+          "cost_points": {
+            "title": "Cost Points",
+            "type": "number"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_tokens",
+          "cost_points",
+          "run_count"
+        ],
+        "title": "AiLibraryUsageOverall",
+        "type": "object"
+      },
+      "AiLibraryUsageRunItem": {
+        "description": "``agent_slug`` / ``agent_name`` are ABSENT when the agent lookup found\nnothing (the route declares ``response_model_exclude_unset``).",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "agent_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Slug"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "number"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "model",
+          "provider",
+          "status",
+          "trigger",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost_cents",
+          "duration_ms",
+          "started_at",
+          "error_code"
+        ],
+        "title": "AiLibraryUsageRunItem",
+        "type": "object"
+      },
+      "AiLibraryUsageRunsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AiLibraryUsageRunItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "AiLibraryUsageRunsPage",
+        "type": "object"
+      },
+      "AiLibraryUsageSummary": {
+        "description": "``/ai-library/usage/summary`` — points rollup from ``ai_usage_logs``.",
+        "properties": {
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/AiLibraryUsageByDay"
+            },
+            "title": "By Day",
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/AiLibraryUsageByModel"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/AiLibraryUsageOverall"
+          },
+          "window_end": {
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_start",
+          "window_end",
+          "overall",
+          "by_model",
+          "by_day"
+        ],
+        "title": "AiLibraryUsageSummary",
         "type": "object"
       },
       "AiUsageDailyRow": {
@@ -5640,6 +7056,131 @@
           "total"
         ],
         "title": "AppLogListResponse",
+        "type": "object"
+      },
+      "ApprovalDecisionResult": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ApprovalDecisionResult",
+        "type": "object"
+      },
+      "ApprovalRequestItem": {
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "hook_name": {
+            "title": "Hook Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "session_id",
+          "run_id",
+          "hook_name",
+          "reason",
+          "payload",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "ApprovalRequestItem",
+        "type": "object"
+      },
+      "ApprovalRequestList": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRequestItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "ApprovalRequestList",
         "type": "object"
       },
       "AssetCountsResponse": {
@@ -8138,6 +9679,74 @@
         "title": "CanvasCropDeriveRequest",
         "type": "object"
       },
+      "CanvasDeriveResult": {
+        "properties": {
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasDerivedImage"
+            },
+            "title": "Images",
+            "type": "array"
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "title": "CanvasDeriveResult",
+        "type": "object"
+      },
+      "CanvasDerivedImage": {
+        "description": "A durable generated-media item a canvas derive produced.",
+        "properties": {
+          "col": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0-based tile column for a grid derive; null otherwise.",
+            "title": "Col"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0-based tile row for a grid derive; null otherwise.",
+            "title": "Row"
+          },
+          "url": {
+            "description": "Always ``/api/v1/generated-media/{id}/cover``.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "kind",
+          "row",
+          "col"
+        ],
+        "title": "CanvasDerivedImage",
+        "type": "object"
+      },
       "CanvasGenerationCapability": {
         "description": "Which generation knobs one catalog model honours.\n\n``ratios`` keeps the aspect declaration order and ``quality_tiers`` runs\nlow → max; ``video_modes`` is sorted.",
         "properties": {
@@ -8189,6 +9798,41 @@
           "video_modes"
         ],
         "title": "CanvasGenerationCapability",
+        "type": "object"
+      },
+      "CanvasGenerationDispatch": {
+        "description": "``POST /canvases/{id}/generations``: the ids sit NEXT TO ``success``,\nnot under ``data`` (that is how the route has always answered).",
+        "properties": {
+          "flow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Task Center group (``task_flows.id``) when count > 1 and the flow row was created; null for a single task or when the best-effort flow insert failed.",
+            "title": "Flow Id"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "task_ids",
+          "flow_id"
+        ],
+        "title": "CanvasGenerationDispatch",
         "type": "object"
       },
       "CanvasGenerationRequest": {
@@ -8246,6 +9890,62 @@
           "prompt"
         ],
         "title": "CanvasGenerationRequest",
+        "type": "object"
+      },
+      "CanvasGenerationTask": {
+        "description": "One ``task_tracking`` row as ``GET /canvases/generations/{task_id}``\nprojects it. ``phase`` / ``status`` / ``error_msg`` are trigger-owned\n(route C); ``metadata`` is the workflow's open jsonb decoration, where\n``result_url`` / ``generated_media_id`` / ``dropped_knobs`` /\n``dropped_refs`` / ``failure`` land.",
+        "properties": {
+          "dbos_workflow_id": {
+            "title": "Dbos Workflow Id",
+            "type": "string"
+          },
+          "error_msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Msg"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dbos_workflow_id",
+          "phase",
+          "status",
+          "error_msg",
+          "metadata"
+        ],
+        "title": "CanvasGenerationTask",
         "type": "object"
       },
       "CanvasGridDeriveRequest": {
@@ -8475,10 +10175,10 @@
         "title": "CanvasPromptRunRequest",
         "type": "object"
       },
-      "CanvasReferencedResource": {
-        "description": "A library resource a canvas references (one row per resource).\n\n``role`` / ``node_id`` describe the most recent ref to it.",
+      "CanvasPromptRunResponse": {
+        "description": "Backend → frontend reply.\n\n`ok=False` ALWAYS carries a non-null `error` and an empty `text`.\nThe HTTP layer always returns 200 for normal runs (errors are\nin-band) — 5xx is reserved for the request being malformed or the\nbackend itself being broken.",
         "properties": {
-          "cover_image_path": {
+          "error": {
             "anyOf": [
               {
                 "type": "string"
@@ -8487,79 +10187,41 @@
                 "type": "null"
               }
             ],
-            "title": "Cover Image Path"
+            "title": "Error"
           },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "response_kind": {
+            "const": "canvas_prompt_run",
+            "default": "canvas_prompt_run",
+            "title": "Response Kind",
             "type": "string"
           },
-          "file_type": {
+          "result": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "File Type"
+            "description": "Structured op output for non-text nodes (e.g. image_gen carries {image_url, width, height, ...}). None for plain text runs.",
+            "title": "Result"
           },
-          "filename": {
-            "title": "Filename",
+          "text": {
+            "default": "",
+            "title": "Text",
             "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "mime_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mime Type"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          },
-          "role": {
-            "enum": [
-              "reference",
-              "output"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "thumbnail_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Thumbnail Path"
           }
         },
         "required": [
-          "id",
-          "filename",
-          "file_type",
-          "mime_type",
-          "thumbnail_path",
-          "cover_image_path",
-          "created_at",
-          "role",
-          "node_id"
+          "ok"
         ],
-        "title": "CanvasReferencedResource",
+        "title": "CanvasPromptRunResponse",
         "type": "object"
       },
       "CanvasRow": {
@@ -8772,6 +10434,19 @@
           "node_count"
         ],
         "title": "CanvasSummary",
+        "type": "object"
+      },
+      "CanvasTimelineDispatch": {
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "CanvasTimelineDispatch",
         "type": "object"
       },
       "CanvasTimelineRequest": {
@@ -9171,6 +10846,61 @@
           "reason"
         ],
         "title": "ChatAttachmentFailure",
+        "type": "object"
+      },
+      "ChatAttachmentUpload": {
+        "properties": {
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "image",
+              "video",
+              "pdf"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "resource_id",
+          "file_path",
+          "url",
+          "size_bytes",
+          "mime",
+          "filename"
+        ],
+        "title": "ChatAttachmentUpload",
         "type": "object"
       },
       "ChatModuleGovernanceResponse": {
@@ -10302,6 +12032,177 @@
           "message"
         ],
         "title": "CommitCreate",
+        "type": "object"
+      },
+      "CommitmentItem": {
+        "description": "``agent_commitments`` row; ``id`` is a BIGINT sent as a JSON number.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "fulfilled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfilled At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "fulfilled",
+              "cancelled",
+              "expired",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger At"
+          },
+          "trigger_event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Event"
+          },
+          "trigger_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "time",
+                  "event",
+                  "next_session"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Type"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "session_id",
+          "description",
+          "trigger_type",
+          "trigger_at",
+          "trigger_event",
+          "status",
+          "created_at",
+          "fulfilled_at",
+          "expires_at"
+        ],
+        "title": "CommitmentItem",
+        "type": "object"
+      },
+      "CommitmentList": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CommitmentItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "CommitmentList",
+        "type": "object"
+      },
+      "CommitmentStatusResult": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "fulfilled",
+              "cancelled",
+              "expired",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "CommitmentStatusResult",
         "type": "object"
       },
       "ConnectAccountRequest": {
@@ -12088,6 +13989,57 @@
         "title": "Envelope[BundleResponse]",
         "type": "object"
       },
+      "Envelope_CanvasDeriveResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CanvasDeriveResult"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CanvasDeriveResult]",
+        "type": "object"
+      },
+      "Envelope_CanvasGenerationTask_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CanvasGenerationTask"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CanvasGenerationTask]",
+        "type": "object"
+      },
+      "Envelope_CanvasPromptRunResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CanvasPromptRunResponse"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CanvasPromptRunResponse]",
+        "type": "object"
+      },
       "Envelope_CanvasRow_": {
         "properties": {
           "data": {
@@ -12103,6 +14055,23 @@
           "data"
         ],
         "title": "Envelope[CanvasRow]",
+        "type": "object"
+      },
+      "Envelope_CanvasTimelineDispatch_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CanvasTimelineDispatch"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CanvasTimelineDispatch]",
         "type": "object"
       },
       "Envelope_DeletedResponse_": {
@@ -12613,6 +14582,27 @@
         "title": "Envelope[List[ScriptAssetRow]]",
         "type": "object"
       },
+      "Envelope_List_TaskTrackingRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TaskTrackingRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[List[TaskTrackingRow]]",
+        "type": "object"
+      },
       "Envelope_List_UsedInCanvasRef__": {
         "properties": {
           "data": {
@@ -12649,6 +14639,57 @@
           "data"
         ],
         "title": "Envelope[LoadoutResponse]",
+        "type": "object"
+      },
+      "Envelope_PointsBalance_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PointsBalance"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PointsBalance]",
+        "type": "object"
+      },
+      "Envelope_PointsQuotaCheck_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PointsQuotaCheck"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PointsQuotaCheck]",
+        "type": "object"
+      },
+      "Envelope_PointsUsageStats_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PointsUsageStats"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PointsUsageStats]",
         "type": "object"
       },
       "Envelope_ProjectCollectionRow_": {
@@ -13229,6 +15270,57 @@
         "title": "Envelope[SurfaceCompletionSyncResult]",
         "type": "object"
       },
+      "Envelope_TaskActiveCounts_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TaskActiveCounts"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[TaskActiveCounts]",
+        "type": "object"
+      },
+      "Envelope_TaskStats_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TaskStats"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[TaskStats]",
+        "type": "object"
+      },
+      "Envelope_TaskTrackingRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TaskTrackingRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[TaskTrackingRow]",
+        "type": "object"
+      },
       "Envelope_Union_Dict_str__Any___NoneType__": {
         "properties": {
           "data": {
@@ -13425,27 +15517,6 @@
         "title": "Envelope[list[CanvasModelOption]]",
         "type": "object"
       },
-      "Envelope_list_CanvasReferencedResource__": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/CanvasReferencedResource"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "success": {
-            "default": true,
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "Envelope[list[CanvasReferencedResource]]",
-        "type": "object"
-      },
       "Envelope_list_CanvasSummary__": {
         "properties": {
           "data": {
@@ -13507,27 +15578,6 @@
           "data"
         ],
         "title": "Envelope[list[EpisodeProgressRow]]",
-        "type": "object"
-      },
-      "Envelope_list_ProjectAssetsTreeProject__": {
-        "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/ProjectAssetsTreeProject"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "success": {
-            "default": true,
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "Envelope[list[ProjectAssetsTreeProject]]",
         "type": "object"
       },
       "Envelope_list_ProjectCollectionRow__": {
@@ -20362,6 +22412,154 @@
         "title": "LinkedResponse",
         "type": "object"
       },
+      "LiveRunItem": {
+        "properties": {
+          "agent_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Icon"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "agent_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Slug"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_cents": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Cents"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Summary"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "status",
+          "trigger",
+          "model",
+          "started_at",
+          "prompt_tokens",
+          "completion_tokens",
+          "cost_cents",
+          "input_summary",
+          "task_id",
+          "agent_slug",
+          "agent_name",
+          "agent_icon"
+        ],
+        "title": "LiveRunItem",
+        "type": "object"
+      },
+      "LiveRunList": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LiveRunItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "LiveRunList",
+        "type": "object"
+      },
       "LoadoutCreate": {
         "properties": {
           "costume_ids": {
@@ -20684,6 +22882,73 @@
           "message"
         ],
         "title": "MarkReadResponse",
+        "type": "object"
+      },
+      "McpServerList": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "McpServerList",
+        "type": "object"
+      },
+      "McpServerOut": {
+        "description": "The bearer token never leaves the server; only whether one is set.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_bearer_token": {
+            "title": "Has Bearer Token",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "description",
+          "enabled",
+          "has_bearer_token"
+        ],
+        "title": "McpServerOut",
         "type": "object"
       },
       "MediaCapsIn": {
@@ -24961,6 +27226,354 @@
         "title": "PointsAdjustRequest",
         "type": "object"
       },
+      "PointsBalance": {
+        "description": "``PointsService.get_balance``: a team with no quota row reads as zeros.\n\n``team_id`` is the resolved team id as the router holds it (a string),\nnot the bigint column.",
+        "properties": {
+          "points_balance": {
+            "title": "Points Balance",
+            "type": "integer"
+          },
+          "storage_limit_bytes": {
+            "title": "Storage Limit Bytes",
+            "type": "integer"
+          },
+          "storage_used_bytes": {
+            "title": "Storage Used Bytes",
+            "type": "integer"
+          },
+          "storage_used_percent": {
+            "title": "Storage Used Percent",
+            "type": "number"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "points_balance",
+          "storage_limit_bytes",
+          "storage_used_bytes",
+          "storage_used_percent"
+        ],
+        "title": "PointsBalance",
+        "type": "object"
+      },
+      "PointsPricingResponse": {
+        "description": "``GET /points/pricing``: the list sits under ``pricing``, not ``data``.",
+        "properties": {
+          "pricing": {
+            "items": {
+              "$ref": "#/components/schemas/PointsPricingRow"
+            },
+            "title": "Pricing",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pricing"
+        ],
+        "title": "PointsPricingResponse",
+        "type": "object"
+      },
+      "PointsPricingRow": {
+        "description": "One active ``point_pricing`` row as ``PointsRepository._pricing_row`` shapes it.",
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "points_cost": {
+            "title": "Points Cost",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action_type",
+          "points_cost",
+          "is_active",
+          "description",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PointsPricingRow",
+        "type": "object"
+      },
+      "PointsQuotaCheck": {
+        "description": "``PointsService.check_quota`` on the 200 path.\n\nA denial never reaches this model — the router turns it into a 402 —\nso ``allowed`` is true and ``reason`` null on the wire.\n``current_balance`` is null when the action is free (no pricing row, or\na zero cost): the balance is not read then.",
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "current_balance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Balance"
+          },
+          "points_cost": {
+            "title": "Points Cost",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "allowed",
+          "points_cost",
+          "current_balance",
+          "reason"
+        ],
+        "title": "PointsQuotaCheck",
+        "type": "object"
+      },
+      "PointsTransactionRow": {
+        "description": "One ``point_transactions`` row as ``PointsRepository._txn_row`` shapes it.",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "integer"
+          },
+          "balance_after": {
+            "title": "Balance After",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_nous": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Nous"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "reference_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Type"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "purchase",
+              "consume",
+              "refund",
+              "gift",
+              "admin_adjust",
+              "daily_gift",
+              "daily_gift_reclaim"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "team_id",
+          "user_id",
+          "amount",
+          "balance_after",
+          "type",
+          "reference_type",
+          "reference_id",
+          "description",
+          "provider",
+          "model",
+          "duration_seconds",
+          "is_nous",
+          "created_at"
+        ],
+        "title": "PointsTransactionRow",
+        "type": "object"
+      },
+      "PointsTransactionsResponse": {
+        "description": "``GET /points/transactions``: the list sits under ``transactions``, not ``data``.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "transactions": {
+            "items": {
+              "$ref": "#/components/schemas/PointsTransactionRow"
+            },
+            "title": "Transactions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "transactions"
+        ],
+        "title": "PointsTransactionsResponse",
+        "type": "object"
+      },
+      "PointsUsageStats": {
+        "description": "``PointsRepository.get_usage_stats``: all-time totals for one team.\n\nThere is no per-month or per-member breakdown; a read failure returns\nthe same shape zeroed.",
+        "properties": {
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "total_consumed": {
+            "title": "Total Consumed",
+            "type": "integer"
+          },
+          "total_purchased": {
+            "title": "Total Purchased",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_consumed",
+          "total_purchased",
+          "by_type"
+        ],
+        "title": "PointsUsageStats",
+        "type": "object"
+      },
       "PrefsUpdate": {
         "properties": {
           "inject_enabled": {
@@ -25017,71 +27630,6 @@
           "display_id"
         ],
         "title": "ProfileResponse",
-        "type": "object"
-      },
-      "ProjectAssetsTreeCanvas": {
-        "properties": {
-          "asset_count": {
-            "title": "Asset Count",
-            "type": "integer"
-          },
-          "canvas_id": {
-            "title": "Canvas Id",
-            "type": "string"
-          },
-          "canvas_name": {
-            "title": "Canvas Name",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "smart",
-              "lite",
-              "classic",
-              "character",
-              "location",
-              "prop",
-              "costume",
-              "storyboard"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "canvas_id",
-          "canvas_name",
-          "kind",
-          "asset_count"
-        ],
-        "title": "ProjectAssetsTreeCanvas",
-        "type": "object"
-      },
-      "ProjectAssetsTreeProject": {
-        "description": "A visible project and its non-blank canvases (possibly none).",
-        "properties": {
-          "canvases": {
-            "items": {
-              "$ref": "#/components/schemas/ProjectAssetsTreeCanvas"
-            },
-            "title": "Canvases",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "project_id": {
-            "title": "Project Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_id",
-          "name",
-          "canvases"
-        ],
-        "title": "ProjectAssetsTreeProject",
         "type": "object"
       },
       "ProjectCharacterEntity": {
@@ -32075,6 +34623,25 @@
         "title": "ReviewStatusUpdate",
         "type": "object"
       },
+      "RunCancelResult": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "cancel_requested",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "run_id"
+        ],
+        "title": "RunCancelResult",
+        "type": "object"
+      },
       "RunCostRow": {
         "description": "One run's money line for ``GET /ai-library/runs/costs`` (3c §4.2).\n\n``cost_cents`` and ``charged_points`` are both ``None``-able and mean\ndifferent things by it: no recorded cost, versus nobody billed this run\n(BYOK, or billing switched off). Neither is 0.",
         "properties": {
@@ -32442,6 +35009,109 @@
           "created_at"
         ],
         "title": "RunDetail",
+        "type": "object"
+      },
+      "RunForkItem": {
+        "properties": {
+          "at_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Seq"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "at_seq",
+          "created_at",
+          "status"
+        ],
+        "title": "RunForkItem",
+        "type": "object"
+      },
+      "RunForkList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunForkItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RunForkList",
+        "type": "object"
+      },
+      "RunForkOrigin": {
+        "properties": {
+          "at_seq": {
+            "title": "At Seq",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "at_seq"
+        ],
+        "title": "RunForkOrigin",
+        "type": "object"
+      },
+      "RunForkResult": {
+        "description": "``run_id`` is always null: the workflow opens the run row later.",
+        "properties": {
+          "forked_from": {
+            "$ref": "#/components/schemas/RunForkOrigin"
+          },
+          "issue_id": {
+            "title": "Issue Id",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "null"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "session_id",
+          "workflow_id",
+          "issue_id",
+          "forked_from"
+        ],
+        "title": "RunForkResult",
         "type": "object"
       },
       "RunGroupItem": {
@@ -32869,6 +35539,111 @@
           "id"
         ],
         "title": "RunTaskRef",
+        "type": "object"
+      },
+      "RunTranscriptEvent": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "seq",
+          "event_type",
+          "payload",
+          "created_at",
+          "turn",
+          "step"
+        ],
+        "title": "RunTranscriptEvent",
+        "type": "object"
+      },
+      "RunTranscriptPage": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunTranscriptEvent"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count",
+          "has_more"
+        ],
+        "title": "RunTranscriptPage",
+        "type": "object"
+      },
+      "RunViewAt": {
+        "description": "``view`` / ``cost`` are the fold registry's open projections\n(``run_projection.empty_views``); their keys grow with each fold.",
+        "properties": {
+          "cost": {
+            "additionalProperties": true,
+            "title": "Cost",
+            "type": "object"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "view": {
+            "additionalProperties": true,
+            "title": "View",
+            "type": "object"
+          }
+        },
+        "required": [
+          "seq",
+          "view",
+          "cost"
+        ],
+        "title": "RunViewAt",
         "type": "object"
       },
       "SaveAsAssetRequest": {
@@ -36905,6 +39680,99 @@
         "title": "SkillFileUpsert",
         "type": "object"
       },
+      "SkillFileVersionList": {
+        "properties": {
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillFileVersionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "current_version"
+        ],
+        "title": "SkillFileVersionList",
+        "type": "object"
+      },
+      "SkillFileVersionListItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "file_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Type"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "notes",
+          "created_by",
+          "created_at",
+          "path",
+          "file_type"
+        ],
+        "title": "SkillFileVersionListItem",
+        "type": "object"
+      },
       "SkillOut": {
         "properties": {
           "agents": {
@@ -37190,6 +40058,160 @@
           }
         },
         "title": "SkillUpdate",
+        "type": "object"
+      },
+      "SkillVersionDetail": {
+        "description": "One ``skill_versions`` row, every column (``skill_id`` is a number).",
+        "properties": {
+          "body_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Md"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "frontmatter_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frontmatter Json"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "integer"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "skill_id",
+          "version_number",
+          "created_at",
+          "body_md",
+          "frontmatter_json",
+          "notes",
+          "created_by"
+        ],
+        "title": "SkillVersionDetail",
+        "type": "object"
+      },
+      "SkillVersionList": {
+        "properties": {
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillVersionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "current_version"
+        ],
+        "title": "SkillVersionList",
+        "type": "object"
+      },
+      "SkillVersionListItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "version_number": {
+            "title": "Version Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version_number",
+          "notes",
+          "created_by",
+          "created_at"
+        ],
+        "title": "SkillVersionListItem",
         "type": "object"
       },
       "SkippedReference": {
@@ -39448,6 +42470,164 @@
         "title": "TaskAccountOut",
         "type": "object"
       },
+      "TaskAck": {
+        "description": "Cancel / delete answer ``{\"success\": true}`` and nothing else.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "TaskAck",
+        "type": "object"
+      },
+      "TaskActiveCounts": {
+        "description": "Active (pending/processing) task counts by ``task_type``.",
+        "properties": {
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_type"
+        ],
+        "title": "TaskActiveCounts",
+        "type": "object"
+      },
+      "TaskClearCompletedResult": {
+        "properties": {
+          "cleared": {
+            "title": "Cleared",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cleared"
+        ],
+        "title": "TaskClearCompletedResult",
+        "type": "object"
+      },
+      "TaskExtendResult": {
+        "properties": {
+          "max_duration_minutes": {
+            "title": "Max Duration Minutes",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "max_duration_minutes"
+        ],
+        "title": "TaskExtendResult",
+        "type": "object"
+      },
+      "TaskHealthOverrideResult": {
+        "description": "``PATCH /tasks/{id}/health-override``: the patched row.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskTrackingRow"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "title": "TaskHealthOverrideResult",
+        "type": "object"
+      },
+      "TaskIdList": {
+        "description": "``GET /tasks/ids``: terminal task ids for cross-page select-all.",
+        "properties": {
+          "capped": {
+            "description": "True when more rows matched than the server cap.",
+            "title": "Capped",
+            "type": "boolean"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ids",
+          "total",
+          "capped"
+        ],
+        "title": "TaskIdList",
+        "type": "object"
+      },
+      "TaskListPage": {
+        "description": "``GET /tasks``: one page plus page-number pagination siblings.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TaskTrackingRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "TaskListPage",
+        "type": "object"
+      },
       "TaskModuleGovernanceResponse": {
         "description": "Governance state for a task module (toggle + admin base_url/model/key).",
         "properties": {
@@ -39542,6 +42722,219 @@
         "title": "TaskModuleGovernanceUpdate",
         "type": "object"
       },
+      "TaskProgress": {
+        "description": "``GET /tasks/{id}/progress``.\n\nTwo sources: the Redis ``download_progress:<id>`` key while a download is\nlive, else the ``task_tracking`` row. ``downloaded`` exists only on the\nRedis branch (absent, not null, otherwise). ``speed`` is a human string\n(``\"2.5 MB/s\"``) from Redis but the raw BIGINT bytes/s column from the DB.",
+        "properties": {
+          "dbos_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dbos Workflow Id"
+          },
+          "downloaded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Redis branch only; absent on the DB fallback.",
+            "title": "Downloaded"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "task_id",
+          "dbos_workflow_id",
+          "status",
+          "percent",
+          "total",
+          "speed",
+          "error",
+          "subtitle"
+        ],
+        "title": "TaskProgress",
+        "type": "object"
+      },
+      "TaskStats": {
+        "properties": {
+          "active_total": {
+            "title": "Active Total",
+            "type": "integer"
+          },
+          "by_status": {
+            "$ref": "#/components/schemas/TaskStatsByStatus"
+          },
+          "by_type": {
+            "$ref": "#/components/schemas/TaskStatsByType"
+          }
+        },
+        "required": [
+          "by_type",
+          "by_status",
+          "active_total"
+        ],
+        "title": "TaskStats",
+        "type": "object"
+      },
+      "TaskStatsByStatus": {
+        "description": "Fixed buckets; ``lost`` and other statuses are not counted.",
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "integer"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "processing": {
+            "title": "Processing",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "processing",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatsByStatus",
+        "type": "object"
+      },
+      "TaskStatsByType": {
+        "description": "Fixed buckets; a row of any other type is not counted.",
+        "properties": {
+          "ai_extract": {
+            "title": "Ai Extract",
+            "type": "integer"
+          },
+          "ai_pipeline": {
+            "title": "Ai Pipeline",
+            "type": "integer"
+          },
+          "ai_summary": {
+            "title": "Ai Summary",
+            "type": "integer"
+          },
+          "ai_transcription": {
+            "title": "Ai Transcription",
+            "type": "integer"
+          },
+          "download": {
+            "title": "Download",
+            "type": "integer"
+          },
+          "parse": {
+            "title": "Parse",
+            "type": "integer"
+          },
+          "transcode": {
+            "title": "Transcode",
+            "type": "integer"
+          },
+          "upload": {
+            "title": "Upload",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parse",
+          "download",
+          "upload",
+          "transcode",
+          "ai_pipeline",
+          "ai_extract",
+          "ai_transcription",
+          "ai_summary"
+        ],
+        "title": "TaskStatsByType",
+        "type": "object"
+      },
       "TaskStatusResponse": {
         "properties": {
           "status": {
@@ -39558,6 +42951,402 @@
           "status"
         ],
         "title": "TaskStatusResponse",
+        "type": "object"
+      },
+      "TaskTrackingRow": {
+        "description": "Every ``task_tracking`` column, as the task manager serializes it.\n\n``tests/api/test_task_manager_wire.py`` pins the field set to the ORM\ncolumns.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "cost_cents": {
+            "title": "Cost Cents",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dbos_workflow_id": {
+            "description": "Primary key; the UI task id (== DBOS workflow uuid).",
+            "title": "Dbos Workflow Id",
+            "type": "string"
+          },
+          "dedup_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup Key"
+          },
+          "do_not_auto_cancel": {
+            "title": "Do Not Auto Cancel",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Msg"
+          },
+          "expected_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Duration Minutes"
+          },
+          "flow_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "health_notified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Notified At"
+          },
+          "health_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Status"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "inbox_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Message Id"
+          },
+          "issue_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Id"
+          },
+          "max_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Minutes"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "parent_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Task Id"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "root_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Task Id"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subscribers": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subscribers"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "task_kind": {
+            "title": "Task Kind",
+            "type": "string"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dbos_workflow_id",
+          "user_id",
+          "task_type",
+          "task_kind",
+          "status",
+          "phase",
+          "title",
+          "subtitle",
+          "progress",
+          "speed",
+          "total_bytes",
+          "error_msg",
+          "error_code",
+          "resource_id",
+          "media_id",
+          "metadata",
+          "dedup_key",
+          "subscribers",
+          "cost_cents",
+          "group_id",
+          "flow_id",
+          "issue_id",
+          "agent_id",
+          "parent_task_id",
+          "root_task_id",
+          "inbox_message_id",
+          "heartbeat_at",
+          "health_status",
+          "health_notified_at",
+          "max_duration_minutes",
+          "expected_duration_minutes",
+          "do_not_auto_cancel",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "updated_at"
+        ],
+        "title": "TaskTrackingRow",
         "type": "object"
       },
       "TeamAiBudgetResponse": {
@@ -42308,6 +46097,37 @@
           "layers"
         ],
         "title": "VectorsStatusResponse",
+        "type": "object"
+      },
+      "VersionRollbackResult": {
+        "description": "Rollback writes a NEW version holding the old content.",
+        "properties": {
+          "new_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Version"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "rolled_back_to": {
+            "title": "Rolled Back To",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rolled_back_to",
+          "new_version",
+          "notes"
+        ],
+        "title": "VersionRollbackResult",
         "type": "object"
       },
       "ViewportUpdate": {
@@ -56726,9 +60546,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Agent Dashboard Api V1 Ai Library Agents  Slug  Dashboard Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentDashboard"
                 }
               }
             },
@@ -57096,7 +60914,7 @@
     },
     "/api/v1/ai-library/agents/{slug}/rollback/{version_number}": {
       "post": {
-        "description": "Rollback writes a NEW version with the old body content rather than\nmoving the current_version pointer back. This preserves the audit\ntrail (you can see \"v7 was a rollback of v3\" in the version list)\nand never loses intermediate versions.",
+        "description": "Rollback writes a NEW version with the old body content rather than\nmoving the current_version pointer back. This preserves the audit\ntrail (you can see \"v7 was a rollback of v3\" in the version list)\nand never loses intermediate versions.\n\nSystem presets are read-only at the base row (content edits go to the\ncaller's override layer via PATCH), so they cannot be rolled back.",
         "operationId": "rollback_agent_api_v1_ai_library_agents__slug__rollback__version_number__post",
         "parameters": [
           {
@@ -57155,9 +60973,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Rollback Agent Api V1 Ai Library Agents  Slug  Rollback  Version Number  Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/VersionRollbackResult"
                 }
               }
             },
@@ -57646,9 +61462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Agent Status Api V1 Ai Library Agents  Slug  Status Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentStatusOut"
                 }
               }
             },
@@ -57724,9 +61538,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Agent Usage Api V1 Ai Library Agents  Slug  Usage Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentUsageOut"
                 }
               }
             },
@@ -57812,9 +61624,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Agent Versions Api V1 Ai Library Agents  Slug  Versions Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentVersionList"
                 }
               }
             },
@@ -57898,9 +61708,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Agent Version Api V1 Ai Library Agents  Slug  Versions  Version Number  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentVersionDetail"
                 }
               }
             },
@@ -57976,9 +61784,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Approval Requests Api V1 Ai Library Approval Requests Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ApprovalRequestList"
                 }
               }
             },
@@ -58064,9 +61870,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Approve Approval Request Api V1 Ai Library Approval Requests  Request Id  Approve Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ApprovalDecisionResult"
                 }
               }
             },
@@ -58152,9 +61956,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reject Approval Request Api V1 Ai Library Approval Requests  Request Id  Reject Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ApprovalDecisionResult"
                 }
               }
             },
@@ -58221,9 +62023,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Upload Chat Attachment Api V1 Ai Library Chat Attachments Upload Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChatAttachmentUpload"
                 }
               }
             },
@@ -58316,9 +62116,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List My Commitments Api V1 Ai Library Commitments Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CommitmentList"
                 }
               }
             },
@@ -58394,9 +62192,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Commitment Api V1 Ai Library Commitments  Commitment Id  Cancel Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CommitmentStatusResult"
                 }
               }
             },
@@ -58472,9 +62268,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Fulfill Commitment Api V1 Ai Library Commitments  Commitment Id  Fulfill Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CommitmentStatusResult"
                 }
               }
             },
@@ -58801,9 +62595,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Mcp Servers Api V1 Ai Library Mcp Servers Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/McpServerList"
                 }
               }
             },
@@ -58877,9 +62669,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Mcp Server Api V1 Ai Library Mcp Servers Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/McpServerOut"
                 }
               }
             },
@@ -59032,9 +62822,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Mcp Server Api V1 Ai Library Mcp Servers  Server Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/McpServerOut"
                 }
               }
             },
@@ -59178,9 +62966,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Live Runs Api V1 Ai Library Runs Live Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/LiveRunList"
                 }
               }
             },
@@ -59332,9 +63118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Run Api V1 Ai Library Runs  Run Id  Cancel Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunCancelResult"
                 }
               }
             },
@@ -59537,9 +63321,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Run Events Api V1 Ai Library Runs  Run Id  Events Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunTranscriptPage"
                 }
               }
             },
@@ -59625,9 +63407,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Fork Run Endpoint Api V1 Ai Library Runs  Run Id  Fork Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunForkResult"
                 }
               }
             },
@@ -59702,9 +63482,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Run Forks Api V1 Ai Library Runs  Run Id  Forks Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunForkList"
                 }
               }
             },
@@ -59866,9 +63644,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Run View At Api V1 Ai Library Runs  Run Id  View At Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunViewAt"
                 }
               }
             },
@@ -60359,11 +64135,13 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Server-Sent Events: `event: delta` text chunks, then `event: done` (usage + run_id) or `event: error`."
           },
           "422": {
             "content": {
@@ -61077,9 +64855,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Skill File Versions Api V1 Ai Library Skills  Slug  Files  Path  Versions Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SkillFileVersionList"
                 }
               }
             },
@@ -61164,9 +64940,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Rollback Skill Api V1 Ai Library Skills  Slug  Rollback  Version Number  Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/VersionRollbackResult"
                 }
               }
             },
@@ -61251,9 +65025,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Skill Versions Api V1 Ai Library Skills  Slug  Versions Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SkillVersionList"
                 }
               }
             },
@@ -61338,9 +65110,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Skill Version Api V1 Ai Library Skills  Slug  Versions  Version Number  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SkillVersionDetail"
                 }
               }
             },
@@ -61561,9 +65331,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Usage Daily Api V1 Ai Library Usage Daily Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AiLibraryUsageDaily"
                 }
               }
             },
@@ -61843,9 +65611,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Usage Runs Api V1 Ai Library Usage Runs Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AiLibraryUsageRunsPage"
                 }
               }
             },
@@ -61922,9 +65688,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Usage Summary Api V1 Ai Library Usage Summary Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AiLibraryUsageSummary"
                 }
               }
             },
@@ -69668,11 +73432,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The packed archive."
           },
           "422": {
             "content": {
@@ -69875,9 +73642,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Canvas Generation Api V1 Canvases Generations  Task Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasAck"
                 }
               }
             },
@@ -69950,9 +73715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Canvas Generation Api V1 Canvases Generations  Task Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasGenerationTask_"
                 }
               }
             },
@@ -70028,9 +73791,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Run Canvas Prompt Api V1 Canvases Runs Prompts Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasPromptRunResponse_"
                 }
               }
             },
@@ -70582,7 +74343,7 @@
     },
     "/api/v1/canvases/{canvas_id}/asset-refs": {
       "get": {
-        "description": "Asset-library refs this canvas holds (P4 forward lookup).\n\nDerived from ``nodes_json`` on every save (``CanvasService._sync_refs``),\nso it answers \"which assets does this canvas use\" without the caller\nparsing the node graph itself.\n\n``_gate_canvas_read``, not the write gate: this is a pure read, and the\nsibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by\nmistake for months (fixed 2026-08-12), locking viewers out of a read they\nwere entitled to. Same envelope shape as that sibling.",
+        "description": "Asset-library refs this canvas holds (P4 forward lookup).\n\nDerived from ``nodes_json`` on every save (``CanvasService._sync_refs``),\nso it answers \"which assets does this canvas use\" without the caller\nparsing the node graph itself.\n\n``_gate_canvas_read``, not the write gate: this is a pure read, and the\nformer sibling ``GET /canvases/{id}/assets`` (removed 2026-09-24, no\ncallers) was shipped with the WRITE guard by mistake for months (fixed\n2026-08-12), locking viewers out of a read they were entitled to.",
         "operationId": "canvas_asset_refs_api_v1_canvases__canvas_id__asset_refs_get",
         "parameters": [
           {
@@ -70657,80 +74418,6 @@
         ]
       }
     },
-    "/api/v1/canvases/{canvas_id}/assets": {
-      "get": {
-        "operationId": "canvas_assets_api_v1_canvases__canvas_id__assets_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "canvas_id",
-            "required": true,
-            "schema": {
-              "title": "Canvas Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_list_CanvasReferencedResource__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Canvas Assets",
-        "tags": [
-          "Project Assets"
-        ]
-      }
-    },
     "/api/v1/canvases/{canvas_id}/derive-crop": {
       "post": {
         "operationId": "derive_crop_endpoint_api_v1_canvases__canvas_id__derive_crop_post",
@@ -70793,9 +74480,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Derive Crop Endpoint Api V1 Canvases  Canvas Id  Derive Crop Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasDeriveResult_"
                 }
               }
             },
@@ -70880,9 +74565,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Derive Grid Endpoint Api V1 Canvases  Canvas Id  Derive Grid Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasDeriveResult_"
                 }
               }
             },
@@ -70967,9 +74650,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Derive Outpaint Endpoint Api V1 Canvases  Canvas Id  Derive Outpaint Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasDeriveResult_"
                 }
               }
             },
@@ -71056,9 +74737,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Dispatch Canvas Generations Api V1 Canvases  Canvas Id  Generations Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/CanvasGenerationDispatch"
                 }
               }
             },
@@ -71298,9 +74977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Dispatch Timeline Run Api V1 Canvases  Canvas Id  Timeline Runs Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/Envelope_CanvasTimelineDispatch_"
                 }
               }
             },
@@ -87637,7 +91314,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PointsBalance_"
+                }
               }
             },
             "description": "Successful Response"
@@ -87743,7 +91422,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PointsQuotaCheck_"
+                }
               }
             },
             "description": "Successful Response"
@@ -87807,7 +91488,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PointsPricingResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -87990,7 +91673,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PointsTransactionsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88072,7 +91757,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PointsUsageStats_"
+                }
               }
             },
             "description": "Successful Response"
@@ -96003,72 +99690,6 @@
         "summary": "Get Effective Permissions",
         "tags": [
           "Resources"
-        ]
-      }
-    },
-    "/api/v1/resources/project-assets/tree": {
-      "get": {
-        "description": "Project → Canvas tree (with per-canvas asset counts) for every\nproject the caller can see. Projects with no canvases are included\nwith an empty ``canvases`` list so the UI can show them as empty\ngroups.",
-        "operationId": "project_assets_tree_api_v1_resources_project_assets_tree_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_list_ProjectAssetsTreeProject__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Project Assets Tree",
-        "tags": [
-          "Project Assets"
         ]
       }
     },
@@ -109093,7 +112714,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TaskActiveCounts_"
+                }
               }
             },
             "description": "Successful Response"
@@ -109280,7 +112903,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListPage"
+                }
               }
             },
             "description": "Successful Response"
@@ -109344,7 +112969,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_List_TaskTrackingRow__"
+                }
               }
             },
             "description": "Successful Response"
@@ -109408,7 +113035,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskClearCompletedResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -109527,7 +113156,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskIdList"
+                }
               }
             },
             "description": "Successful Response"
@@ -109591,7 +113222,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TaskStats_"
+                }
               }
             },
             "description": "Successful Response"
@@ -109664,7 +113297,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAck"
+                }
               }
             },
             "description": "Successful Response"
@@ -109737,7 +113372,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAck"
+                }
               }
             },
             "description": "Successful Response"
@@ -109820,7 +113457,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskExtendResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -109903,7 +113542,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskHealthOverrideResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -109976,7 +113617,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProgress"
+                }
               }
             },
             "description": "Successful Response"
@@ -110049,7 +113692,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TaskTrackingRow_"
+                }
               }
             },
             "description": "Successful Response"

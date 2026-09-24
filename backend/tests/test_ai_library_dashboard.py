@@ -79,6 +79,19 @@ def _client_for(tables: dict[str, list]):
     return client
 
 
+def _latest(run: dict) -> dict:
+    """The latest-run SELECT also reads the summaries and the error pair; the
+    14-day rows do not. Reusing a 14-day row as the latest one would hand the
+    route a shape it never gets (and ``AgentDashboardLatestRun`` rejects)."""
+    return {
+        **run,
+        "input_summary": None,
+        "output_summary": None,
+        "error_code": None,
+        "error_message": None,
+    }
+
+
 def _orm_read_scope(tables: dict[str, list]):
     """read_scope() stand-in for the dashboard's 5 ORM reads. Dispatches each
     statement to agent_runs / task_tracking by the table name in the compiled
@@ -180,7 +193,7 @@ async def test_dashboard_happy_path_buckets_runs_and_tasks(
             "own_cost_cents": "0.5",
         },
     ]
-    latest_run = runs_14d[0]
+    latest_run = _latest(runs_14d[0])
     # A4 (mig 200): agent_tasks merged into task_tracking with task_kind='agent_task'.
     # Mock data uses the new column shape (`phase` instead of `lifecycle_status`,
     # `dbos_workflow_id` as PK) so it travels through tt_row_to_task_shape() the
@@ -295,7 +308,8 @@ async def test_dashboard_coerces_bigint_run_ids_to_str(client: AsyncClient) -> N
     }
     scope = _orm_read_scope(
         {
-            "agent_runs": [[run_row], [run_row], [run_row]],  # 14d / latest / recent
+            # 14d / latest / recent
+            "agent_runs": [[run_row], [_latest(run_row)], [run_row]],
             "task_tracking": [[], []],
         }
     )
@@ -357,7 +371,7 @@ async def test_dashboard_costs_sum_own_cost_not_the_folded_column(
         _run("2", "10.0", "10.0"),
     ]
     scope = _orm_read_scope(
-        {"agent_runs": [runs, runs[:1], runs], "task_tracking": [[], []]}
+        {"agent_runs": [runs, [_latest(runs[0])], runs], "task_tracking": [[], []]}
     )
 
     with (

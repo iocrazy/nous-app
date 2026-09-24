@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Terminal, User, Bot, Wrench, AlertCircle } from 'lucide-react';
-import type { AgentRunEvent } from '../../types';
+import type { AgentRunEvent } from '../../types/api';
 import { aiLibraryService } from '../../services/aiLibraryService';
 
 // Paperclip-style Transcript section for the Runs detail pane (P3, mig 285).

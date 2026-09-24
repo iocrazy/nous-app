@@ -175,8 +175,6 @@ export type TeamCanvasProject = Schemas['TeamCanvasProject'];
 export type ProjectTrashedCanvas = Schemas['ProjectTrashedCanvas'];
 export type TeamTrashedCanvas = Schemas['TeamTrashedCanvas'];
 export type CanvasAssetRef = Schemas['CanvasAssetRef'];
-export type CanvasReferencedResource = Schemas['CanvasReferencedResource'];
-export type ProjectAssetsTreeProject = Schemas['ProjectAssetsTreeProject'];
 /** A live canvas that references a resource (`GET /resources/{id}/canvas-refs`). */
 export type ResourceCanvasRef = Schemas['ResourceCanvasRef'];
 /** A catalog model a canvas picker may offer (generation-models / text-models). */
@@ -190,3 +188,138 @@ export type EpisodeStatus = EpisodeProgress['status'];
 export type EpisodeWorkflowRollup = Schemas['EpisodeWorkflowRollup'];
 export type EpisodeSurfaceState = Schemas['EpisodeSurfaceState'];
 // --- end canvases ---
+
+// —— points (/api/v1/points/*) (P4) ——
+/** `GET /points/balance` payload. `team_id` is a string here (the resolved id). */
+export type PointsBalance = Schemas['PointsBalance'];
+/** One ledger row. `id` / `team_id` are JSON numbers (bigint); `created_at`
+ * is an ISO string with `+00:00`; `duration_seconds` is a numeric string. */
+export type PointsTransaction = Schemas['PointsTransactionRow'];
+export type PointsTransactionType = PointsTransaction['type'];
+/** `GET /points/transactions`: `{ success, count, transactions }`, no `data`. */
+export type PointsTransactionsResponse = Schemas['PointsTransactionsResponse'];
+export type PointsPricing = Schemas['PointsPricingRow'];
+/** `GET /points/pricing`: `{ success, pricing }`, no `data`. */
+export type PointsPricingResponse = Schemas['PointsPricingResponse'];
+/** All-time totals only — no per-month or per-member breakdown exists. */
+export type PointsUsageStats = Schemas['PointsUsageStats'];
+/** 200 path only (a denial is a 402). `current_balance` is null for free actions. */
+export type PointsQuotaCheck = Schemas['PointsQuotaCheck'];
+// —— end points ——
+
+// —— canvas tasks (P4) ——
+/** `GET /canvases/generations/{task_id}` payload: one `task_tracking` row.
+ * `phase` is null until the engine picks the task up; `metadata` is the
+ * workflow's open jsonb (narrowed by `GenerationTask` in canvasGenerationService). */
+export type CanvasGenerationTask = Schemas['CanvasGenerationTask'];
+/** `POST /canvases/{id}/generations`: `{ success, task_ids, flow_id }`, no `data`. */
+export type CanvasGenerationDispatch = Schemas['CanvasGenerationDispatch'];
+export type CanvasTimelineDispatch = Schemas['CanvasTimelineDispatch'];
+/** `POST /canvases/runs/prompts` payload; failures are in-band (`ok: false`). */
+export type CanvasPromptRunResponse = Schemas['CanvasPromptRunResponse'];
+/** One derive product; `id` is a generated_media Snowflake as a string. */
+export type CanvasDerivedImage = Schemas['CanvasDerivedImage'];
+export type CanvasDeriveResult = Schemas['CanvasDeriveResult'];
+// —— end canvas tasks ——
+
+// —— task-manager (/api/v1/task-manager/*) (P4) ——
+/** A `task_tracking` row as the REST list returns it: every column, PK is
+ * `dbos_workflow_id`, timestamps are ISO strings with `+00:00`, `issue_id` is
+ * a JSON number. Realtime rows (PostgREST) are a different boundary and stay
+ * untyped. The UI model built from either is `UnifiedTask`. */
+export type TaskTrackingRow = Schemas['TaskTrackingRow'];
+/** `GET /task-manager/tasks`: `{ success, data, total, page, page_size }`. */
+export type TaskListPage = Schemas['TaskListPage'];
+/** `GET /task-manager/tasks/ids`: `{ success, ids, total, capped }`, no `data`. */
+export type TaskIdList = Schemas['TaskIdList'];
+export type TaskActiveCounts = Schemas['TaskActiveCounts'];
+export type TaskActiveCountsResponse = Schemas['Envelope_TaskActiveCounts_'];
+export type TaskStats = Schemas['TaskStats'];
+export type TaskClearCompletedResult = Schemas['TaskClearCompletedResult'];
+export type TaskHealthOverrideResult = Schemas['TaskHealthOverrideResult'];
+export type TaskExtendResult = Schemas['TaskExtendResult'];
+/** `downloaded` only on the live (Redis) branch; `speed` is a string there
+ * and the raw bytes/s number on the DB fallback. */
+export type TaskProgress = Schemas['TaskProgress'];
+// —— end task-manager ——
+
+// —— AI Library (P4) ——
+/** `GET /ai-library/agents/{slug}/status` — the header chip. */
+export type AgentStatus = Schemas['AgentStatusOut'];
+/** `GET /ai-library/agents/{slug}/dashboard` — 14 days, caller-scoped.
+ * Run ids are numeric strings; timestamps are ISO strings with `+00:00`. */
+export type AgentDashboard = Schemas['AgentDashboard'];
+/** `GET /ai-library/agents/{slug}/usage` — the "Used by" card. */
+export type AgentUsage = Schemas['AgentUsageOut'];
+/** One row of `GET /ai-library/runs/live` (the Workforce "Running now" strip). */
+export type LiveAgentRun = Schemas['LiveRunItem'];
+/** Every event type the backend CHECK allows (mig 285 / 436 / 443 / 453).
+ * The union is open-ended on purpose: `foldEvents` ignores what it does not
+ * know, so a new backend type never breaks an old client. */
+export type AgentRunEventType =
+  | 'user'
+  | 'assistant'
+  | 'tool_call'
+  | 'error'
+  | 'system'
+  | 'capability_denied'
+  | 'llm_retry'
+  | 'todo_write'
+  | 'compaction_start'
+  | 'compaction_summary'
+  | 'compaction_end'
+  | 'turn_end'
+  | 'step_start'
+  | 'step_end'
+  | 'inbox_claimed'
+  | 'deliverable'
+  | 'budget_check'
+  | (string & {});
+/** One transcript event (`GET /ai-library/runs/{id}/events`). `turn` / `step`
+ * are always sent; null on rows written before mig 453. */
+export type AgentRunEvent = Omit<Schemas['RunTranscriptEvent'], 'event_type'> & {
+  event_type: AgentRunEventType;
+};
+export type RunTranscriptPage = Omit<Schemas['RunTranscriptPage'], 'items'> & {
+  items: AgentRunEvent[];
+};
+/** `GET /ai-library/runs/{id}/view-at?seq=` — the fold registry's open views. */
+export type RunViewAt = Schemas['RunViewAt'];
+/** `POST /ai-library/runs/{id}/fork` (201). `run_id` is always null; `issue_id`
+ * and `forked_from.run_id` are JSON numbers on this surface. */
+export type RunForkResult = Schemas['RunForkResult'];
+export type RunForkItem = Schemas['RunForkItem'];
+export type AgentVersionListItem = Schemas['AgentVersionListItem'];
+export type SkillVersionListItem = Schemas['SkillVersionListItem'];
+export type SkillFileVersionListItem = Schemas['SkillFileVersionListItem'];
+/** A version-history row of any of the three kinds (list view: no bodies). */
+export type AILibraryVersionItem =
+  | AgentVersionListItem
+  | SkillVersionListItem
+  | SkillFileVersionListItem;
+export type AgentVersionList = Schemas['AgentVersionList'];
+export type SkillVersionList = Schemas['SkillVersionList'];
+export type AgentVersionDetail = Schemas['AgentVersionDetail'];
+export type SkillVersionDetail = Schemas['SkillVersionDetail'];
+export type VersionRollbackResult = Schemas['VersionRollbackResult'];
+/** The bearer token never comes back; only `has_bearer_token`. */
+export type AILibraryMCPServer = Schemas['McpServerOut'];
+export type AILibraryApprovalRequest = Schemas['ApprovalRequestItem'];
+export type ApprovalDecisionResult = Schemas['ApprovalDecisionResult'];
+/** `id` is a BIGINT sent as a JSON number on this surface. */
+export type AILibraryCommitment = Schemas['CommitmentItem'];
+export type CommitmentStatusResult = Schemas['CommitmentStatusResult'];
+/** `GET /ai-library/usage/runs` row. `agent_slug` / `agent_name` are absent
+ * (not null) when the agent lookup found nothing. `started_at` is Python's
+ * `str(datetime)` — a space, not a `T`, between date and time. */
+export type UsageRunItem = Schemas['AiLibraryUsageRunItem'];
+export type UsageRunsPage = Schemas['AiLibraryUsageRunsPage'];
+/** `GET /ai-library/usage/daily` row. Not `usageService`'s `UsageDailyRow`,
+ * which is the team `/usage/summary` row. */
+export type AiLibraryUsageDailyRow = Schemas['AiLibraryUsageDailyRow'];
+export type UsageDailySummary = Schemas['AiLibraryUsageDaily'];
+export type UsageGroupBy = UsageDailySummary['group_by'];
+/** `GET /ai-library/usage/summary` — points rollup from `ai_usage_logs`. */
+export type AILibraryUsageSummary = Schemas['AiLibraryUsageSummary'];
+export type ChatAttachmentUpload = Schemas['ChatAttachmentUpload'];
+// —— end AI Library ——

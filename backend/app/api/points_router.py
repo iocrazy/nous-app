@@ -16,9 +16,18 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.scope_guards import _is_team_member
 from app.db.supabase_client import get_async_supabase_admin
 from app.repositories.points_repository import get_points_repository
-from app.schemas.points import PointsAdjustRequest
+from app.schemas.envelope import Envelope
+from app.schemas.points import (
+    PointsAdjustRequest,
+    PointsBalance,
+    PointsPricingResponse,
+    PointsQuotaCheck,
+    PointsTransactionsResponse,
+    PointsUsageStats,
+)
 from app.services.billing.points_service import PointsService
 
 router = APIRouter(prefix="/points")
@@ -33,7 +42,9 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
     """
     Resolve the team ID for a user.
 
-    If *team_id_param* is provided, return it directly.  Otherwise look up
+    If *team_id_param* is provided, return it once the user is a member of
+    that team (403 otherwise — before this check any signed-in user could
+    read any team's balance and ledger by passing its id).  Otherwise look up
     the user's first team from the ``team_members`` table.  If the user has
     no team at all, a personal workspace team is auto-created with free
     quota so that every user can use the Points system out of the box.
@@ -46,6 +57,12 @@ async def _resolve_team_id(user_id: str, team_id_param: Optional[str] = None) ->
         The resolved team ID string.
     """
     if team_id_param:
+        if not team_id_param.isdigit() or not await _is_team_member(
+            team_id_param, user_id
+        ):
+            raise HTTPException(
+                status_code=403, detail="You are not a member of this team"
+            )
         return team_id_param
 
     try:
@@ -227,7 +244,7 @@ async def _check_admin_role(user_id: str) -> bool:
 # ============================================
 
 
-@router.get("/balance")
+@router.get("/balance", response_model=Envelope[PointsBalance])
 async def get_balance(
     auth: AuthDep,
     team_id: Optional[str] = Query(
@@ -256,7 +273,7 @@ async def get_balance(
         raise HTTPException(status_code=500, detail="Failed to get points balance")
 
 
-@router.get("/transactions")
+@router.get("/transactions", response_model=PointsTransactionsResponse)
 async def get_transactions(
     auth: AuthDep,
     team_id: Optional[str] = Query(
@@ -313,7 +330,7 @@ async def get_transactions(
         raise HTTPException(status_code=500, detail="Failed to get transactions")
 
 
-@router.get("/pricing")
+@router.get("/pricing", response_model=PointsPricingResponse)
 async def get_pricing(auth: AuthDep):
     """
     Get all active pricing rules.
@@ -331,7 +348,7 @@ async def get_pricing(auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to get pricing")
 
 
-@router.get("/usage-stats")
+@router.get("/usage-stats", response_model=Envelope[PointsUsageStats])
 async def get_usage_stats(
     auth: AuthDep,
     team_id: Optional[str] = Query(
@@ -360,7 +377,7 @@ async def get_usage_stats(
         raise HTTPException(status_code=500, detail="Failed to get usage stats")
 
 
-@router.get("/check")
+@router.get("/check", response_model=Envelope[PointsQuotaCheck])
 async def check_quota(
     auth: AuthDep,
     action_type: str = Query(

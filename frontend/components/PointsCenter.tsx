@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Coins, Package, ArrowUpRight, ArrowDownRight, TrendingUp, HardDrive, Search, ExternalLink } from 'lucide-react';
 import { UiSelect } from './ui';
-import { TeamQuota, PointTransaction, PointPricing, PointPackage } from '../types';
+import type { PointPackage } from '../types';
+import type { PointsBalance, PointsPricing, PointsTransaction } from '../types/api';
 import {
   fetchPointsBalance,
   fetchPointsTransactions,
   fetchPointsPricing,
-  fetchUsageStats,
 } from '../services/pointsService';
 import { fetchPackages } from '../services/paymentService';
 
@@ -50,11 +50,10 @@ const DATE_RANGE_OPTIONS = [
 
 export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage }) => {
   const [loading, setLoading] = useState(true);
-  const [balance, setBalance] = useState<TeamQuota | null>(null);
-  const [transactions, setTransactions] = useState<PointTransaction[]>([]);
-  const [pricing, setPricing] = useState<PointPricing[]>([]);
+  const [balance, setBalance] = useState<PointsBalance | null>(null);
+  const [transactions, setTransactions] = useState<PointsTransaction[]>([]);
+  const [pricing, setPricing] = useState<PointsPricing[]>([]);
   const [packages, setPackages] = useState<PointPackage[]>([]);
-  const [_usageStats, setUsageStats] = useState<any>(null);
 
   // Transaction filters
   const [searchText, setSearchText] = useState('');
@@ -86,19 +85,17 @@ export const PointsCenter: React.FC<PointsCenterProps> = ({ teamId, onBuyPackage
     const loadData = async () => {
       setLoading(true);
       try {
-        const [balanceData, txData, pricingData, pkgData, usageData] = await Promise.all([
+        const [balanceData, txData, pricingData, pkgData] = await Promise.all([
           fetchPointsBalance(teamId).catch(() => null),
           fetchPointsTransactions(teamId, 50).catch(() => []),
           fetchPointsPricing().catch(() => []),
           fetchPackages().catch(() => []),
-          fetchUsageStats(teamId).catch(() => null),
         ]);
 
         setBalance(balanceData);
         setTransactions(txData);
         setPricing(pricingData);
         setPackages(pkgData);
-        setUsageStats(usageData);
       } finally {
         setLoading(false);
       }

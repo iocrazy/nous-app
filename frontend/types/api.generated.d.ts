@@ -3213,6 +3213,9 @@ export interface paths {
          *     moving the current_version pointer back. This preserves the audit
          *     trail (you can see "v7 was a rollback of v3" in the version list)
          *     and never loses intermediate versions.
+         *
+         *     System presets are read-only at the base row (content edits go to the
+         *     caller's override layer via PATCH), so they cannot be rolled back.
          */
         post: operations["rollback_agent_api_v1_ai_library_agents__slug__rollback__version_number__post"];
         delete?: never;
@@ -6396,28 +6399,11 @@ export interface paths {
          *     parsing the node graph itself.
          *
          *     ``_gate_canvas_read``, not the write gate: this is a pure read, and the
-         *     sibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by
-         *     mistake for months (fixed 2026-08-12), locking viewers out of a read they
-         *     were entitled to. Same envelope shape as that sibling.
+         *     former sibling ``GET /canvases/{id}/assets`` (removed 2026-09-24, no
+         *     callers) was shipped with the WRITE guard by mistake for months (fixed
+         *     2026-08-12), locking viewers out of a read they were entitled to.
          */
         get: operations["canvas_asset_refs_api_v1_canvases__canvas_id__asset_refs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/canvases/{canvas_id}/assets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Canvas Assets */
-        get: operations["canvas_assets_api_v1_canvases__canvas_id__assets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12722,29 +12708,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/resources/project-assets/tree": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Project Assets Tree
-         * @description Project → Canvas tree (with per-canvas asset counts) for every
-         *     project the caller can see. Projects with no canvases are included
-         *     with an empty ``canvases`` list so the UI can show them as empty
-         *     groups.
-         */
-        get: operations["project_assets_tree_api_v1_resources_project_assets_tree_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/resources/search": {
         parameters: {
             query?: never;
@@ -18334,6 +18297,126 @@ export interface components {
             temperature?: number | null;
         };
         /**
+         * AgentDashboard
+         * @description ``GET /agents/{slug}/dashboard`` — 14-day, caller-scoped.
+         */
+        AgentDashboard: {
+            agent: components["schemas"]["AgentDashboardAgent"];
+            costs_14d: components["schemas"]["AgentDashboardCosts"];
+            latest_run: components["schemas"]["AgentDashboardLatestRun"] | null;
+            /** Recent Runs */
+            recent_runs: components["schemas"]["AgentDashboardRecentRun"][];
+            /** Recent Tasks */
+            recent_tasks: components["schemas"]["AgentTaskShape"][];
+            /** Run Activity 14D */
+            run_activity_14d: components["schemas"]["AgentDashboardDailyCount"][];
+            /** Success Rate 14D */
+            success_rate_14d: components["schemas"]["AgentDashboardDailySuccess"][];
+            /** Tasks By Status 14D */
+            tasks_by_status_14d: {
+                [key: string]: number;
+            };
+        };
+        /** AgentDashboardAgent */
+        AgentDashboardAgent: {
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Name */
+            name: string | null;
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Persistent */
+            persistent: boolean;
+            /** Slug */
+            slug: string | null;
+        };
+        /** AgentDashboardCosts */
+        AgentDashboardCosts: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Run Count */
+            run_count: number;
+            /** Total Cost Cents */
+            total_cost_cents: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** AgentDashboardDailyCount */
+        AgentDashboardDailyCount: {
+            /** Count */
+            count: number;
+            /** Date */
+            date: string;
+        };
+        /** AgentDashboardDailySuccess */
+        AgentDashboardDailySuccess: {
+            /** Date */
+            date: string;
+            /** Success */
+            success: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * AgentDashboardLatestRun
+         * @description Most recent run (ISO timestamps, id as a numeric string).
+         */
+        AgentDashboardLatestRun: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: string;
+            /** Input Summary */
+            input_summary: string | null;
+            /** Model */
+            model: string | null;
+            /** Output Summary */
+            output_summary: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /** AgentDashboardRecentRun */
+        AgentDashboardRecentRun: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /**
          * AgentFault
          * @description Why an agent is unhealthy, plus what to do about it.
          *
@@ -18483,6 +18566,72 @@ export interface components {
                 [key: string]: components["schemas"]["AgentStatsItem"];
             };
         };
+        /**
+         * AgentStatusOut
+         * @description ``GET /agents/{slug}/status`` — the header chip.
+         */
+        AgentStatusOut: {
+            /** Paused Reason */
+            paused_reason: string | null;
+            /** Running Count */
+            running_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "idle" | "running" | "paused";
+        };
+        /**
+         * AgentTaskShape
+         * @description A ``task_tracking`` row in agent_tasks shape (``tt_row_to_task_shape``).
+         *
+         *     The dashboard SELECTs only some columns, so several keys are always null
+         *     there; they are still sent, because the mapper always writes them.
+         */
+        AgentTaskShape: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Assigned At */
+            assigned_at: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Current Run Id */
+            current_run_id: string | null;
+            /** Dispatch Attempt */
+            dispatch_attempt: number;
+            /** Ended At */
+            ended_at: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: string | null;
+            /** Inbox Message Id */
+            inbox_message_id: string | null;
+            /** Lifecycle Status */
+            lifecycle_status: string;
+            /** Parent Task Id */
+            parent_task_id: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Result */
+            result: unknown;
+            /** Root Task Id */
+            root_task_id: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Title */
+            title: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** Workforce Workflow Id */
+            workforce_workflow_id: string | null;
+        };
         /** AgentUpdate */
         AgentUpdate: {
             /** Agent Group */
@@ -18527,6 +18676,239 @@ export interface components {
             temperature?: number | null;
             /** Timeout Sec */
             timeout_sec?: number | null;
+        };
+        /** AgentUsageModule */
+        AgentUsageModule: {
+            /** Feature Key */
+            feature_key: string;
+            /** Module Key */
+            module_key: string;
+        };
+        /**
+         * AgentUsageOut
+         * @description ``GET /agents/{slug}/usage`` — the "Used by" card.
+         */
+        AgentUsageOut: {
+            /** Conversation Count */
+            conversation_count: number;
+            /** Modules */
+            modules: components["schemas"]["AgentUsageModule"][];
+            /** Routine Count */
+            routine_count: number;
+            /** Trigger Counts */
+            trigger_counts: components["schemas"]["AgentUsageTrigger"][];
+            /** Window Days */
+            window_days: number;
+        };
+        /** AgentUsageTrigger */
+        AgentUsageTrigger: {
+            /** Count */
+            count: number;
+            /** Feature Key */
+            feature_key: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /**
+         * AgentVersionDetail
+         * @description One ``ai_agent_versions`` row, every column (ISO timestamps, str uuids).
+         */
+        AgentVersionDetail: {
+            /** Agent Id */
+            agent_id: string;
+            /** Agent Md */
+            agent_md: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Identity Md */
+            identity_md: string | null;
+            /** Max Tokens */
+            max_tokens: number | null;
+            /** Model */
+            model: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Soul Md */
+            soul_md: string | null;
+            /** Temperature */
+            temperature: number | null;
+            /** Version Number */
+            version_number: number;
+        };
+        /** AgentVersionList */
+        AgentVersionList: {
+            /** Current Version */
+            current_version: number | null;
+            /** Items */
+            items: components["schemas"]["AgentVersionListItem"][];
+        };
+        /** AgentVersionListItem */
+        AgentVersionListItem: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Max Tokens */
+            max_tokens: number | null;
+            /** Model */
+            model: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Temperature */
+            temperature: number | null;
+            /** Version Number */
+            version_number: number;
+        };
+        /** AiLibraryUsageByDay */
+        AiLibraryUsageByDay: {
+            /** Cost Points */
+            cost_points: number;
+            /** Date */
+            date: string;
+            /** Run Count */
+            run_count: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** AiLibraryUsageByModel */
+        AiLibraryUsageByModel: {
+            /** Cost Points */
+            cost_points: number;
+            /** Model */
+            model: string;
+            /** Run Count */
+            run_count: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** AiLibraryUsageDaily */
+        AiLibraryUsageDaily: {
+            /** Daily */
+            daily: components["schemas"]["AiLibraryUsageDailyRow"][];
+            /** Days */
+            days: number;
+            /**
+             * Group By
+             * @enum {string}
+             */
+            group_by: "model" | "agent";
+            /** Month */
+            month: string | null;
+            /** Total Cost Cents */
+            total_cost_cents: number;
+            /** Total Failed */
+            total_failed: number;
+            /** Total Requests */
+            total_requests: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /**
+         * AiLibraryUsageDailyRow
+         * @description One (day, model|agent) bucket of ``/ai-library/usage/daily``.
+         *
+         *     Not ``UsageDailyRow``: that is the team ``/usage/summary`` row.
+         */
+        AiLibraryUsageDailyRow: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Date */
+            date: string;
+            /** Failed Requests */
+            failed_requests: number;
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Requests */
+            requests: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /** AiLibraryUsageOverall */
+        AiLibraryUsageOverall: {
+            /** Cost Points */
+            cost_points: number;
+            /** Run Count */
+            run_count: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /**
+         * AiLibraryUsageRunItem
+         * @description ``agent_slug`` / ``agent_name`` are ABSENT when the agent lookup found
+         *     nothing (the route declares ``response_model_exclude_unset``).
+         */
+        AiLibraryUsageRunItem: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Agent Name */
+            agent_name?: string | null;
+            /** Agent Slug */
+            agent_slug?: string | null;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Provider */
+            provider: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Trigger */
+            trigger: string | null;
+        };
+        /** AiLibraryUsageRunsPage */
+        AiLibraryUsageRunsPage: {
+            /** Items */
+            items: components["schemas"]["AiLibraryUsageRunItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * AiLibraryUsageSummary
+         * @description ``/ai-library/usage/summary`` — points rollup from ``ai_usage_logs``.
+         */
+        AiLibraryUsageSummary: {
+            /** By Day */
+            by_day: components["schemas"]["AiLibraryUsageByDay"][];
+            /** By Model */
+            by_model: components["schemas"]["AiLibraryUsageByModel"][];
+            overall: components["schemas"]["AiLibraryUsageOverall"];
+            /** Window End */
+            window_end: string;
+            /** Window Start */
+            window_start: string;
         };
         /** AiUsageDailyRow */
         AiUsageDailyRow: {
@@ -19102,6 +19484,46 @@ export interface components {
             data: components["schemas"]["AppLogItem"][];
             /** Total */
             total: number;
+        };
+        /** ApprovalDecisionResult */
+        ApprovalDecisionResult: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected";
+        };
+        /** ApprovalRequestItem */
+        ApprovalRequestItem: {
+            /** Agent Id */
+            agent_id: string;
+            /** Created At */
+            created_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Hook Name */
+            hook_name: string;
+            /** Id */
+            id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Session Id */
+            session_id: string | null;
+        };
+        /** ApprovalRequestList */
+        ApprovalRequestList: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["ApprovalRequestItem"][];
         };
         /**
          * AssetCountsResponse
@@ -20195,6 +20617,39 @@ export interface components {
             /** Source Url */
             source_url: string;
         };
+        /** CanvasDeriveResult */
+        CanvasDeriveResult: {
+            /** Images */
+            images: components["schemas"]["CanvasDerivedImage"][];
+        };
+        /**
+         * CanvasDerivedImage
+         * @description A durable generated-media item a canvas derive produced.
+         */
+        CanvasDerivedImage: {
+            /**
+             * Col
+             * @description 0-based tile column for a grid derive; null otherwise.
+             */
+            col: number | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "image";
+            /**
+             * Row
+             * @description 0-based tile row for a grid derive; null otherwise.
+             */
+            row: number | null;
+            /**
+             * Url
+             * @description Always ``/api/v1/generated-media/{id}/cover``.
+             */
+            url: string;
+        };
         /**
          * CanvasGenerationCapability
          * @description Which generation knobs one catalog model honours.
@@ -20217,6 +20672,25 @@ export interface components {
             resolution: boolean;
             /** Video Modes */
             video_modes: string[];
+        };
+        /**
+         * CanvasGenerationDispatch
+         * @description ``POST /canvases/{id}/generations``: the ids sit NEXT TO ``success``,
+         *     not under ``data`` (that is how the route has always answered).
+         */
+        CanvasGenerationDispatch: {
+            /**
+             * Flow Id
+             * @description The Task Center group (``task_flows.id``) when count > 1 and the flow row was created; null for a single task or when the best-effort flow insert failed.
+             */
+            flow_id: string | null;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Task Ids */
+            task_ids: string[];
         };
         /**
          * CanvasGenerationRequest
@@ -20250,6 +20724,28 @@ export interface components {
             prompt: string;
             /** Source Url */
             source_url?: string | null;
+        };
+        /**
+         * CanvasGenerationTask
+         * @description One ``task_tracking`` row as ``GET /canvases/generations/{task_id}``
+         *     projects it. ``phase`` / ``status`` / ``error_msg`` are trigger-owned
+         *     (route C); ``metadata`` is the workflow's open jsonb decoration, where
+         *     ``result_url`` / ``generated_media_id`` / ``dropped_knobs`` /
+         *     ``dropped_refs`` / ``failure`` land.
+         */
+        CanvasGenerationTask: {
+            /** Dbos Workflow Id */
+            dbos_workflow_id: string;
+            /** Error Msg */
+            error_msg: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            } | null;
+            /** Phase */
+            phase: string | null;
+            /** Status */
+            status: string;
         };
         /** CanvasGridDeriveRequest */
         CanvasGridDeriveRequest: {
@@ -20350,36 +20846,37 @@ export interface components {
             provider_slug?: string | null;
         };
         /**
-         * CanvasReferencedResource
-         * @description A library resource a canvas references (one row per resource).
+         * CanvasPromptRunResponse
+         * @description Backend → frontend reply.
          *
-         *     ``role`` / ``node_id`` describe the most recent ref to it.
+         *     `ok=False` ALWAYS carries a non-null `error` and an empty `text`.
+         *     The HTTP layer always returns 200 for normal runs (errors are
+         *     in-band) — 5xx is reserved for the request being malformed or the
+         *     backend itself being broken.
          */
-        CanvasReferencedResource: {
-            /** Cover Image Path */
-            cover_image_path: string | null;
+        CanvasPromptRunResponse: {
+            /** Error */
+            error?: string | null;
+            /** Ok */
+            ok: boolean;
             /**
-             * Created At
-             * Format: date-time
+             * Response Kind
+             * @default canvas_prompt_run
+             * @constant
              */
-            created_at: string;
-            /** File Type */
-            file_type: string | null;
-            /** Filename */
-            filename: string;
-            /** Id */
-            id: string;
-            /** Mime Type */
-            mime_type: string | null;
-            /** Node Id */
-            node_id: string;
+            response_kind: "canvas_prompt_run";
             /**
-             * Role
-             * @enum {string}
+             * Result
+             * @description Structured op output for non-text nodes (e.g. image_gen carries {image_url, width, height, ...}). None for plain text runs.
              */
-            role: "reference" | "output";
-            /** Thumbnail Path */
-            thumbnail_path: string | null;
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /**
          * CanvasRow
@@ -20468,6 +20965,11 @@ export interface components {
             project_id: string;
             /** Updated At */
             updated_at: string;
+        };
+        /** CanvasTimelineDispatch */
+        CanvasTimelineDispatch: {
+            /** Task Id */
+            task_id: string;
         };
         /**
          * CanvasTimelineRequest
@@ -20687,6 +21189,26 @@ export interface components {
             kind: string;
             /** Reason */
             reason: string;
+        };
+        /** ChatAttachmentUpload */
+        ChatAttachmentUpload: {
+            /** File Path */
+            file_path: string;
+            /** Filename */
+            filename: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "video" | "pdf";
+            /** Mime */
+            mime: string | null;
+            /** Resource Id */
+            resource_id: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Url */
+            url: string;
         };
         /**
          * ChatModuleGovernanceResponse
@@ -21254,6 +21776,54 @@ export interface components {
         CommitCreate: {
             /** Message */
             message: string;
+        };
+        /**
+         * CommitmentItem
+         * @description ``agent_commitments`` row; ``id`` is a BIGINT sent as a JSON number.
+         */
+        CommitmentItem: {
+            /** Agent Id */
+            agent_id: string;
+            /** Created At */
+            created_at: string | null;
+            /** Description */
+            description: string;
+            /** Expires At */
+            expires_at: string | null;
+            /** Fulfilled At */
+            fulfilled_at: string | null;
+            /** Id */
+            id: number;
+            /** Session Id */
+            session_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "fulfilled" | "cancelled" | "expired" | "failed";
+            /** Trigger At */
+            trigger_at: string | null;
+            /** Trigger Event */
+            trigger_event: string | null;
+            /** Trigger Type */
+            trigger_type: ("time" | "event" | "next_session") | null;
+        };
+        /** CommitmentList */
+        CommitmentList: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["CommitmentItem"][];
+        };
+        /** CommitmentStatusResult */
+        CommitmentStatusResult: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "fulfilled" | "cancelled" | "expired" | "failed";
         };
         /** ConnectAccountRequest */
         ConnectAccountRequest: {
@@ -22091,9 +22661,45 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[CanvasDeriveResult] */
+        Envelope_CanvasDeriveResult_: {
+            data: components["schemas"]["CanvasDeriveResult"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[CanvasGenerationTask] */
+        Envelope_CanvasGenerationTask_: {
+            data: components["schemas"]["CanvasGenerationTask"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[CanvasPromptRunResponse] */
+        Envelope_CanvasPromptRunResponse_: {
+            data: components["schemas"]["CanvasPromptRunResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[CanvasRow] */
         Envelope_CanvasRow_: {
             data: components["schemas"]["CanvasRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[CanvasTimelineDispatch] */
+        Envelope_CanvasTimelineDispatch_: {
+            data: components["schemas"]["CanvasTimelineDispatch"];
             /**
              * Success
              * @default true
@@ -22360,6 +22966,16 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[List[TaskTrackingRow]] */
+        Envelope_List_TaskTrackingRow__: {
+            /** Data */
+            data: components["schemas"]["TaskTrackingRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[List[UsedInCanvasRef]] */
         Envelope_List_UsedInCanvasRef__: {
             /** Data */
@@ -22373,6 +22989,33 @@ export interface components {
         /** Envelope[LoadoutResponse] */
         Envelope_LoadoutResponse_: {
             data: components["schemas"]["LoadoutResponse"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[PointsBalance] */
+        Envelope_PointsBalance_: {
+            data: components["schemas"]["PointsBalance"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[PointsQuotaCheck] */
+        Envelope_PointsQuotaCheck_: {
+            data: components["schemas"]["PointsQuotaCheck"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[PointsUsageStats] */
+        Envelope_PointsUsageStats_: {
+            data: components["schemas"]["PointsUsageStats"];
             /**
              * Success
              * @default true
@@ -22685,6 +23328,33 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[TaskActiveCounts] */
+        Envelope_TaskActiveCounts_: {
+            data: components["schemas"]["TaskActiveCounts"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[TaskStats] */
+        Envelope_TaskStats_: {
+            data: components["schemas"]["TaskStats"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[TaskTrackingRow] */
+        Envelope_TaskTrackingRow_: {
+            data: components["schemas"]["TaskTrackingRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[Union[Dict[str, Any], NoneType]] */
         Envelope_Union_Dict_str__Any___NoneType__: {
             /** Data */
@@ -22775,16 +23445,6 @@ export interface components {
              */
             success: boolean;
         };
-        /** Envelope[list[CanvasReferencedResource]] */
-        Envelope_list_CanvasReferencedResource__: {
-            /** Data */
-            data: components["schemas"]["CanvasReferencedResource"][];
-            /**
-             * Success
-             * @default true
-             */
-            success: boolean;
-        };
         /** Envelope[list[CanvasSummary]] */
         Envelope_list_CanvasSummary__: {
             /** Data */
@@ -22809,16 +23469,6 @@ export interface components {
         Envelope_list_EpisodeProgressRow__: {
             /** Data */
             data: components["schemas"]["EpisodeProgressRow"][];
-            /**
-             * Success
-             * @default true
-             */
-            success: boolean;
-        };
-        /** Envelope[list[ProjectAssetsTreeProject]] */
-        Envelope_list_ProjectAssetsTreeProject__: {
-            /** Data */
-            data: components["schemas"]["ProjectAssetsTreeProject"][];
             /**
              * Success
              * @default true
@@ -25380,6 +26030,44 @@ export interface components {
              */
             linked: boolean;
         };
+        /** LiveRunItem */
+        LiveRunItem: {
+            /** Agent Icon */
+            agent_icon: string | null;
+            /** Agent Id */
+            agent_id: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /** Agent Slug */
+            agent_slug: string | null;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Cents */
+            cost_cents: number | null;
+            /** Id */
+            id: string;
+            /** Input Summary */
+            input_summary: string | null;
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Task Id */
+            task_id: string | null;
+            /** Trigger */
+            trigger: string;
+        };
+        /** LiveRunList */
+        LiveRunList: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["LiveRunItem"][];
+        };
         /** LoadoutCreate */
         LoadoutCreate: {
             /** Costume Ids */
@@ -25502,6 +26190,31 @@ export interface components {
             message: string;
             /** Success */
             success: boolean;
+        };
+        /** McpServerList */
+        McpServerList: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["McpServerOut"][];
+        };
+        /**
+         * McpServerOut
+         * @description The bearer token never leaves the server; only whether one is set.
+         */
+        McpServerOut: {
+            /** Description */
+            description: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Bearer Token */
+            has_bearer_token: boolean;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
         };
         /**
          * MediaCapsIn
@@ -27255,6 +27968,146 @@ export interface components {
              */
             team_id: string;
         };
+        /**
+         * PointsBalance
+         * @description ``PointsService.get_balance``: a team with no quota row reads as zeros.
+         *
+         *     ``team_id`` is the resolved team id as the router holds it (a string),
+         *     not the bigint column.
+         */
+        PointsBalance: {
+            /** Points Balance */
+            points_balance: number;
+            /** Storage Limit Bytes */
+            storage_limit_bytes: number;
+            /** Storage Used Bytes */
+            storage_used_bytes: number;
+            /** Storage Used Percent */
+            storage_used_percent: number;
+            /** Team Id */
+            team_id: string;
+        };
+        /**
+         * PointsPricingResponse
+         * @description ``GET /points/pricing``: the list sits under ``pricing``, not ``data``.
+         */
+        PointsPricingResponse: {
+            /** Pricing */
+            pricing: components["schemas"]["PointsPricingRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * PointsPricingRow
+         * @description One active ``point_pricing`` row as ``PointsRepository._pricing_row`` shapes it.
+         */
+        PointsPricingRow: {
+            /** Action Type */
+            action_type: string;
+            /** Created At */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Points Cost */
+            points_cost: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * PointsQuotaCheck
+         * @description ``PointsService.check_quota`` on the 200 path.
+         *
+         *     A denial never reaches this model — the router turns it into a 402 —
+         *     so ``allowed`` is true and ``reason`` null on the wire.
+         *     ``current_balance`` is null when the action is free (no pricing row, or
+         *     a zero cost): the balance is not read then.
+         */
+        PointsQuotaCheck: {
+            /** Allowed */
+            allowed: boolean;
+            /** Current Balance */
+            current_balance: number | null;
+            /** Points Cost */
+            points_cost: number;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * PointsTransactionRow
+         * @description One ``point_transactions`` row as ``PointsRepository._txn_row`` shapes it.
+         */
+        PointsTransactionRow: {
+            /** Amount */
+            amount: number;
+            /** Balance After */
+            balance_after: number;
+            /** Created At */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /** Duration Seconds */
+            duration_seconds: string | null;
+            /** Id */
+            id: number;
+            /** Is Nous */
+            is_nous: boolean | null;
+            /** Model */
+            model: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Reference Id */
+            reference_id: string | null;
+            /** Reference Type */
+            reference_type: string | null;
+            /** Team Id */
+            team_id: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "purchase" | "consume" | "refund" | "gift" | "admin_adjust" | "daily_gift" | "daily_gift_reclaim";
+            /** User Id */
+            user_id: string | null;
+        };
+        /**
+         * PointsTransactionsResponse
+         * @description ``GET /points/transactions``: the list sits under ``transactions``, not ``data``.
+         */
+        PointsTransactionsResponse: {
+            /** Count */
+            count: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Transactions */
+            transactions: components["schemas"]["PointsTransactionRow"][];
+        };
+        /**
+         * PointsUsageStats
+         * @description ``PointsRepository.get_usage_stats``: all-time totals for one team.
+         *
+         *     There is no per-month or per-member breakdown; a read failure returns
+         *     the same shape zeroed.
+         */
+        PointsUsageStats: {
+            /** By Type */
+            by_type: {
+                [key: string]: number;
+            };
+            /** Total Consumed */
+            total_consumed: number;
+            /** Total Purchased */
+            total_purchased: number;
+        };
         /** PrefsUpdate */
         PrefsUpdate: {
             /** Inject Enabled */
@@ -27273,32 +28126,6 @@ export interface components {
             display_id: string;
             /** Username */
             username: string;
-        };
-        /** ProjectAssetsTreeCanvas */
-        ProjectAssetsTreeCanvas: {
-            /** Asset Count */
-            asset_count: number;
-            /** Canvas Id */
-            canvas_id: string;
-            /** Canvas Name */
-            canvas_name: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "smart" | "lite" | "classic" | "character" | "location" | "prop" | "costume" | "storyboard";
-        };
-        /**
-         * ProjectAssetsTreeProject
-         * @description A visible project and its non-blank canvases (possibly none).
-         */
-        ProjectAssetsTreeProject: {
-            /** Canvases */
-            canvases: components["schemas"]["ProjectAssetsTreeCanvas"][];
-            /** Name */
-            name: string;
-            /** Project Id */
-            project_id: string;
         };
         /** ProjectCharacterEntity */
         ProjectCharacterEntity: {
@@ -29572,6 +30399,16 @@ export interface components {
              */
             review_status?: string | null;
         };
+        /** RunCancelResult */
+        RunCancelResult: {
+            /** Run Id */
+            run_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "cancel_requested";
+        };
         /**
          * RunCostRow
          * @description One run's money line for ``GET /ai-library/runs/costs`` (3c §4.2).
@@ -29712,6 +30549,47 @@ export interface components {
             trigger: string;
             /** Undone At */
             undone_at?: string | null;
+        };
+        /** RunForkItem */
+        RunForkItem: {
+            /** At Seq */
+            at_seq: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /** RunForkList */
+        RunForkList: {
+            /** Items */
+            items: components["schemas"]["RunForkItem"][];
+        };
+        /** RunForkOrigin */
+        RunForkOrigin: {
+            /** At Seq */
+            at_seq: number;
+            /** Run Id */
+            run_id: number;
+        };
+        /**
+         * RunForkResult
+         * @description ``run_id`` is always null: the workflow opens the run row later.
+         */
+        RunForkResult: {
+            forked_from: components["schemas"]["RunForkOrigin"];
+            /** Issue Id */
+            issue_id: number;
+            /** Run Id */
+            run_id: null;
+            /** Session Id */
+            session_id: string;
+            /** Workflow Id */
+            workflow_id: string;
         };
         /**
          * RunGroupItem
@@ -29882,6 +30760,49 @@ export interface components {
             task_type?: string | null;
             /** Title */
             title?: string | null;
+        };
+        /** RunTranscriptEvent */
+        RunTranscriptEvent: {
+            /** Created At */
+            created_at: string;
+            /** Event Type */
+            event_type: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Seq */
+            seq: number;
+            /** Step */
+            step: number | null;
+            /** Turn */
+            turn: number | null;
+        };
+        /** RunTranscriptPage */
+        RunTranscriptPage: {
+            /** Count */
+            count: number;
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["RunTranscriptEvent"][];
+        };
+        /**
+         * RunViewAt
+         * @description ``view`` / ``cost`` are the fold registry's open projections
+         *     (``run_projection.empty_views``); their keys grow with each fold.
+         */
+        RunViewAt: {
+            /** Cost */
+            cost: {
+                [key: string]: unknown;
+            };
+            /** Seq */
+            seq: number;
+            /** View */
+            view: {
+                [key: string]: unknown;
+            };
         };
         /** SaveAsAssetRequest */
         SaveAsAssetRequest: {
@@ -31306,6 +32227,33 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** SkillFileVersionList */
+        SkillFileVersionList: {
+            /** Current Version */
+            current_version: number | null;
+            /** Items */
+            items: components["schemas"]["SkillFileVersionListItem"][];
+        };
+        /** SkillFileVersionListItem */
+        SkillFileVersionListItem: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** File Type */
+            file_type: string | null;
+            /** Id */
+            id: string;
+            /** Notes */
+            notes: string | null;
+            /** Path */
+            path: string;
+            /** Version Number */
+            version_number: number;
+        };
         /** SkillOut */
         SkillOut: {
             /** Agents */
@@ -31376,6 +32324,53 @@ export interface components {
             status?: string | null;
             /** Trigger Keywords */
             trigger_keywords?: string[] | null;
+        };
+        /**
+         * SkillVersionDetail
+         * @description One ``skill_versions`` row, every column (``skill_id`` is a number).
+         */
+        SkillVersionDetail: {
+            /** Body Md */
+            body_md: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Frontmatter Json */
+            frontmatter_json: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Notes */
+            notes: string | null;
+            /** Skill Id */
+            skill_id: number;
+            /** Version Number */
+            version_number: number;
+        };
+        /** SkillVersionList */
+        SkillVersionList: {
+            /** Current Version */
+            current_version: number | null;
+            /** Items */
+            items: components["schemas"]["SkillVersionListItem"][];
+        };
+        /** SkillVersionListItem */
+        SkillVersionListItem: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Notes */
+            notes: string | null;
+            /** Version Number */
+            version_number: number;
         };
         /**
          * SkippedReference
@@ -32310,6 +33305,100 @@ export interface components {
             verify_state?: string | null;
         };
         /**
+         * TaskAck
+         * @description Cancel / delete answer ``{"success": true}`` and nothing else.
+         */
+        TaskAck: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * TaskActiveCounts
+         * @description Active (pending/processing) task counts by ``task_type``.
+         */
+        TaskActiveCounts: {
+            /** By Type */
+            by_type: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /** TaskClearCompletedResult */
+        TaskClearCompletedResult: {
+            /** Cleared */
+            cleared: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** TaskExtendResult */
+        TaskExtendResult: {
+            /** Max Duration Minutes */
+            max_duration_minutes: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * TaskHealthOverrideResult
+         * @description ``PATCH /tasks/{id}/health-override``: the patched row.
+         */
+        TaskHealthOverrideResult: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            task: components["schemas"]["TaskTrackingRow"];
+        };
+        /**
+         * TaskIdList
+         * @description ``GET /tasks/ids``: terminal task ids for cross-page select-all.
+         */
+        TaskIdList: {
+            /**
+             * Capped
+             * @description True when more rows matched than the server cap.
+             */
+            capped: boolean;
+            /** Ids */
+            ids: string[];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total */
+            total: number;
+        };
+        /**
+         * TaskListPage
+         * @description ``GET /tasks``: one page plus page-number pagination siblings.
+         */
+        TaskListPage: {
+            /** Data */
+            data: components["schemas"]["TaskTrackingRow"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Total */
+            total: number;
+        };
+        /**
          * TaskModuleGovernanceResponse
          * @description Governance state for a task module (toggle + admin base_url/model/key).
          */
@@ -32357,12 +33446,180 @@ export interface components {
             /** User Allowed */
             user_allowed?: boolean | null;
         };
+        /**
+         * TaskProgress
+         * @description ``GET /tasks/{id}/progress``.
+         *
+         *     Two sources: the Redis ``download_progress:<id>`` key while a download is
+         *     live, else the ``task_tracking`` row. ``downloaded`` exists only on the
+         *     Redis branch (absent, not null, otherwise). ``speed`` is a human string
+         *     (``"2.5 MB/s"``) from Redis but the raw BIGINT bytes/s column from the DB.
+         */
+        TaskProgress: {
+            /** Dbos Workflow Id */
+            dbos_workflow_id: string | null;
+            /**
+             * Downloaded
+             * @description Redis branch only; absent on the DB fallback.
+             */
+            downloaded?: number | null;
+            /** Error */
+            error: string | null;
+            /** Percent */
+            percent: number | null;
+            /** Speed */
+            speed: string | number | null;
+            /** Status */
+            status: string;
+            /** Subtitle */
+            subtitle: string | null;
+            /** Task Id */
+            task_id: string;
+            /** Total */
+            total: number | null;
+        };
+        /** TaskStats */
+        TaskStats: {
+            /** Active Total */
+            active_total: number;
+            by_status: components["schemas"]["TaskStatsByStatus"];
+            by_type: components["schemas"]["TaskStatsByType"];
+        };
+        /**
+         * TaskStatsByStatus
+         * @description Fixed buckets; ``lost`` and other statuses are not counted.
+         */
+        TaskStatsByStatus: {
+            /** Cancelled */
+            cancelled: number;
+            /** Completed */
+            completed: number;
+            /** Failed */
+            failed: number;
+            /** Pending */
+            pending: number;
+            /** Processing */
+            processing: number;
+        };
+        /**
+         * TaskStatsByType
+         * @description Fixed buckets; a row of any other type is not counted.
+         */
+        TaskStatsByType: {
+            /** Ai Extract */
+            ai_extract: number;
+            /** Ai Pipeline */
+            ai_pipeline: number;
+            /** Ai Summary */
+            ai_summary: number;
+            /** Ai Transcription */
+            ai_transcription: number;
+            /** Download */
+            download: number;
+            /** Parse */
+            parse: number;
+            /** Transcode */
+            transcode: number;
+            /** Upload */
+            upload: number;
+        };
         /** TaskStatusResponse */
         TaskStatusResponse: {
             /** Status */
             status: string;
             /** Task Id */
             task_id: string;
+        };
+        /**
+         * TaskTrackingRow
+         * @description Every ``task_tracking`` column, as the task manager serializes it.
+         *
+         *     ``tests/api/test_task_manager_wire.py`` pins the field set to the ORM
+         *     columns.
+         */
+        TaskTrackingRow: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Cost Cents */
+            cost_cents: number;
+            /** Created At */
+            created_at: string | null;
+            /**
+             * Dbos Workflow Id
+             * @description Primary key; the UI task id (== DBOS workflow uuid).
+             */
+            dbos_workflow_id: string;
+            /** Dedup Key */
+            dedup_key: string | null;
+            /** Do Not Auto Cancel */
+            do_not_auto_cancel: boolean;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Msg */
+            error_msg: string | null;
+            /** Expected Duration Minutes */
+            expected_duration_minutes: number | null;
+            /** Flow Id */
+            flow_id: string | null;
+            /** Group Id */
+            group_id: string | null;
+            /** Health Notified At */
+            health_notified_at: string | null;
+            /** Health Status */
+            health_status: string | null;
+            /** Heartbeat At */
+            heartbeat_at: string | null;
+            /** Inbox Message Id */
+            inbox_message_id: string | null;
+            /** Issue Id */
+            issue_id: number | null;
+            /** Max Duration Minutes */
+            max_duration_minutes: number | null;
+            /** Media Id */
+            media_id: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            } | null;
+            /** Parent Task Id */
+            parent_task_id: string | null;
+            /** Phase */
+            phase: string | null;
+            /** Progress */
+            progress: number | null;
+            /** Resource Id */
+            resource_id: string | null;
+            /** Root Task Id */
+            root_task_id: string | null;
+            /** Speed */
+            speed: number | null;
+            /** Started At */
+            started_at: string | null;
+            /** Status */
+            status: string;
+            /** Subscribers */
+            subscribers: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Subtitle */
+            subtitle: string | null;
+            /** Task Kind */
+            task_kind: string;
+            /** Task Type */
+            task_type: string;
+            /** Title */
+            title: string;
+            /** Total Bytes */
+            total_bytes: number | null;
+            /** Updated At */
+            updated_at: string | null;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
         };
         /**
          * TeamAiBudgetResponse
@@ -33608,6 +34865,18 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unconfigured" | "store_missing";
+        };
+        /**
+         * VersionRollbackResult
+         * @description Rollback writes a NEW version holding the old content.
+         */
+        VersionRollbackResult: {
+            /** New Version */
+            new_version: number | null;
+            /** Notes */
+            notes: string;
+            /** Rolled Back To */
+            rolled_back_to: number;
         };
         /**
          * ViewportUpdate
@@ -39581,9 +40850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentDashboard"];
                 };
             };
             /** @description Validation Error */
@@ -39759,9 +41026,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["VersionRollbackResult"];
                 };
             };
             /** @description Validation Error */
@@ -39946,9 +41211,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentStatusOut"];
                 };
             };
             /** @description Validation Error */
@@ -39982,9 +41245,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentUsageOut"];
                 };
             };
             /** @description Validation Error */
@@ -40020,9 +41281,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentVersionList"];
                 };
             };
             /** @description Validation Error */
@@ -40057,9 +41316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentVersionDetail"];
                 };
             };
             /** @description Validation Error */
@@ -40093,9 +41350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ApprovalRequestList"];
                 };
             };
             /** @description Validation Error */
@@ -40133,9 +41388,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ApprovalDecisionResult"];
                 };
             };
             /** @description Validation Error */
@@ -40173,9 +41426,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ApprovalDecisionResult"];
                 };
             };
             /** @description Validation Error */
@@ -40207,9 +41458,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ChatAttachmentUpload"];
                 };
             };
             /** @description Validation Error */
@@ -40244,9 +41493,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CommitmentList"];
                 };
             };
             /** @description Validation Error */
@@ -40280,9 +41527,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CommitmentStatusResult"];
                 };
             };
             /** @description Validation Error */
@@ -40316,9 +41561,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CommitmentStatusResult"];
                 };
             };
             /** @description Validation Error */
@@ -40458,9 +41701,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["McpServerList"];
                 };
             };
             /** @description Validation Error */
@@ -40496,9 +41737,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["McpServerOut"];
                 };
             };
             /** @description Validation Error */
@@ -40568,9 +41807,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["McpServerOut"];
                 };
             };
             /** @description Validation Error */
@@ -40636,9 +41873,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LiveRunList"];
                 };
             };
             /** @description Validation Error */
@@ -40706,9 +41941,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunCancelResult"];
                 };
             };
             /** @description Validation Error */
@@ -40781,9 +42014,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunTranscriptPage"];
                 };
             };
             /** @description Validation Error */
@@ -40821,9 +42052,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunForkResult"];
                 };
             };
             /** @description Validation Error */
@@ -40857,9 +42086,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunForkList"];
                 };
             };
             /** @description Validation Error */
@@ -40929,9 +42156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunViewAt"];
                 };
             };
             /** @description Validation Error */
@@ -41140,13 +42365,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description Server-Sent Events: `event: delta` text chunks, then `event: done` (usage + run_id) or `event: error`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -41461,9 +42686,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SkillFileVersionList"];
                 };
             };
             /** @description Validation Error */
@@ -41498,9 +42721,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["VersionRollbackResult"];
                 };
             };
             /** @description Validation Error */
@@ -41536,9 +42757,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SkillVersionList"];
                 };
             };
             /** @description Validation Error */
@@ -41573,9 +42792,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SkillVersionDetail"];
                 };
             };
             /** @description Validation Error */
@@ -41648,9 +42865,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AiLibraryUsageDaily"];
                 };
             };
             /** @description Validation Error */
@@ -41727,9 +42942,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AiLibraryUsageRunsPage"];
                 };
             };
             /** @description Validation Error */
@@ -41763,9 +42976,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AiLibraryUsageSummary"];
                 };
             };
             /** @description Validation Error */
@@ -45626,13 +46837,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description The packed archive. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/zip": string;
                 };
             };
             /** @description Validation Error */
@@ -45730,9 +46941,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasGenerationTask_"];
                 };
             };
             /** @description Validation Error */
@@ -45766,9 +46975,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasAck"];
                 };
             };
             /** @description Validation Error */
@@ -45804,9 +47011,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasPromptRunResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -46098,40 +47303,6 @@ export interface operations {
             };
         };
     };
-    canvas_assets_api_v1_canvases__canvas_id__assets_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                canvas_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_list_CanvasReferencedResource__"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     derive_crop_endpoint_api_v1_canvases__canvas_id__derive_crop_post: {
         parameters: {
             query?: never;
@@ -46156,9 +47327,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasDeriveResult_"];
                 };
             };
             /** @description Validation Error */
@@ -46196,9 +47365,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasDeriveResult_"];
                 };
             };
             /** @description Validation Error */
@@ -46236,9 +47403,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasDeriveResult_"];
                 };
             };
             /** @description Validation Error */
@@ -46277,9 +47442,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["CanvasGenerationDispatch"];
                 };
             };
             /** @description Validation Error */
@@ -46388,9 +47551,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Envelope_CanvasTimelineDispatch_"];
                 };
             };
             /** @description Validation Error */
@@ -54138,7 +55299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_PointsBalance_"];
                 };
             };
             /** @description Validation Error */
@@ -54177,7 +55338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_PointsQuotaCheck_"];
                 };
             };
             /** @description Validation Error */
@@ -54209,7 +55370,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PointsPricingResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54256,7 +55417,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PointsTransactionsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54291,7 +55452,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_PointsUsageStats_"];
                 };
             };
             /** @description Validation Error */
@@ -57491,38 +58652,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ResourcePermissions_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    project_assets_tree_api_v1_resources_project_assets_tree_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_list_ProjectAssetsTreeProject__"];
                 };
             };
             /** @description Validation Error */
@@ -63334,7 +64463,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_TaskActiveCounts_"];
                 };
             };
             /** @description Validation Error */
@@ -63375,7 +64504,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskListPage"];
                 };
             };
             /** @description Validation Error */
@@ -63407,7 +64536,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_List_TaskTrackingRow__"];
                 };
             };
             /** @description Validation Error */
@@ -63439,7 +64568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskClearCompletedResult"];
                 };
             };
             /** @description Validation Error */
@@ -63475,7 +64604,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskIdList"];
                 };
             };
             /** @description Validation Error */
@@ -63507,7 +64636,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_TaskStats_"];
                 };
             };
             /** @description Validation Error */
@@ -63541,7 +64670,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskAck"];
                 };
             };
             /** @description Validation Error */
@@ -63575,7 +64704,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskAck"];
                 };
             };
             /** @description Validation Error */
@@ -63611,7 +64740,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskExtendResult"];
                 };
             };
             /** @description Validation Error */
@@ -63649,7 +64778,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskHealthOverrideResult"];
                 };
             };
             /** @description Validation Error */
@@ -63683,7 +64812,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TaskProgress"];
                 };
             };
             /** @description Validation Error */
@@ -63717,7 +64846,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_TaskTrackingRow_"];
                 };
             };
             /** @description Validation Error */

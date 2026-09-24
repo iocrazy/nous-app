@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from './Toast';
-import type { AILibraryApprovalRequest } from '../types';
+import type { AILibraryApprovalRequest } from '../types/api';
 
 interface ApprovalsPanelProps {
   className?: string;

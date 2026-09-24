@@ -11,20 +11,11 @@
  */
 
 import { apiFetch, ApiError } from '../../../services/apiClient';
+import type { CanvasPromptRunResponse, Envelope } from '../../../types/api';
 import type { PromptCaller, RunnerResult } from './runner';
 
 interface BackendRunnerOptions {
   canvasId: string;
-}
-
-interface BackendEnvelope {
-  success: boolean;
-  data?: {
-    ok: boolean;
-    text: string;
-    error: string | null;
-    response_kind?: string;
-  };
 }
 
 /**
@@ -47,7 +38,7 @@ export function createBackendRunner({
           agent_id: ctx.agent_id,
         },
       });
-      const envelope = (await response.json()) as BackendEnvelope;
+      const envelope = (await response.json()) as Partial<Envelope<CanvasPromptRunResponse>>;
       if (!envelope.success || !envelope.data) {
         return failed('malformed backend response');
       }

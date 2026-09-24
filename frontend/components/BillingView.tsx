@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Coins, Package, CreditCard, HardDrive, TrendingUp, BarChart3, Loader2, MessageSquare, Settings } from 'lucide-react';
 import { Loading } from './common/Loading';
-import { TeamQuota, PointTransaction, PointPricing, PointPackage, PaymentOrder } from '../types';
+import type { PointPackage, PaymentOrder } from '../types';
+import type { PointsBalance, PointsPricing, PointsUsageStats } from '../types/api';
 import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats, adjustPoints } from '../services/pointsService';
 import { fetchPackages, fetchOrders } from '../services/paymentService';
 import { hasPermission } from '../utils/permissions';
@@ -40,14 +41,11 @@ const getStatusBadge = (status: string) => {
 export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, onBuyPackage }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [balance, setBalance] = useState<TeamQuota | null>(null);
+  const [balance, setBalance] = useState<PointsBalance | null>(null);
   const [packages, setPackages] = useState<PointPackage[]>([]);
   const [orders, setOrders] = useState<PaymentOrder[]>([]);
-  const [pricing, setPricing] = useState<PointPricing[]>([]);
-  const [usageStats, setUsageStats] = useState<{
-    total_consumed_this_month?: number;
-    top_consumers?: Array<{ user_id?: string; name?: string; email?: string; points_used: number }>;
-  } | null>(null);
+  const [pricing, setPricing] = useState<PointsPricing[]>([]);
+  const [usageStats, setUsageStats] = useState<PointsUsageStats | null>(null);
   const [adjustAmount, setAdjustAmount] = useState<number>(0);
   const [adjustDescription, setAdjustDescription] = useState('');
   const [adjusting, setAdjusting] = useState(false);
@@ -210,9 +208,9 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
         <div className="border border-ink-800 rounded-xl p-5 bg-ink-900">
           <div className="flex items-center gap-8 mb-6">
             <div>
-              <p className="text-xs text-ink-500 uppercase font-medium">{t('billing.pointsUsedThisMonth')}</p>
+              <p className="text-xs text-ink-500 uppercase font-medium">{t('billing.pointsUsedTotal')}</p>
               <p className="text-2xl font-bold text-ink-50">
-                {usageStats?.total_consumed_this_month?.toLocaleString() ?? '0'}
+                {usageStats?.total_consumed.toLocaleString() ?? '0'}
               </p>
             </div>
             {balance && (
@@ -224,35 +222,6 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
               </div>
             )}
           </div>
-
-          {/* Top consumers */}
-          {usageStats?.top_consumers && usageStats.top_consumers.length > 0 && (
-            <div>
-              <p className="text-xs text-ink-500 uppercase font-medium mb-3">{t('billing.topConsumers')}</p>
-              <div className="space-y-2">
-                {usageStats.top_consumers.map((consumer: any, idx: number) => {
-                  const maxUsage = usageStats.top_consumers[0]?.points_used || 1;
-                  const widthPercent = (consumer.points_used / maxUsage) * 100;
-                  return (
-                    <div key={consumer.user_id || idx} className="flex items-center gap-3">
-                      <span className="text-sm text-ink-300 w-32 truncate">
-                        {consumer.name || consumer.email || 'Unknown'}
-                      </span>
-                      <div className="flex-1 h-2 bg-ink-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
-                          style={{ width: `${widthPercent}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-ink-400 font-mono w-20 text-right">
-                        {consumer.points_used?.toLocaleString() ?? 0} pts
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {!usageStats && (
             <p className="text-sm text-ink-500">{t('billing.noConsumptionData', 'No consumption data available yet.')}</p>

@@ -1407,22 +1407,20 @@ class UnifiedTaskManager:
         }
         if new_workflow_id:
             update_vals["dbos_workflow_id"] = new_workflow_id
-        update_vals = coerce_datetime_strings(TaskTracking, update_vals)
         tbl = TaskTracking.__table__
         async with write_scope() as session:
             await session.execute(
                 update(tbl)
                 .where(tbl.c.dbos_workflow_id == task_id)
-                .values(**update_vals)
+                .values(**coerce_datetime_strings(TaskTracking, update_vals))
             )
 
-        # Hand back the post-retry view: same row, new workflow id, bumped
-        # counter. Returning the pre-update snapshot made the response
-        # disagree with the database about which attempt this was.
-        task = {**task, "metadata": meta}
-        if new_workflow_id:
-            task["dbos_workflow_id"] = new_workflow_id
-        return task
+        # Hand back the post-retry view: the snapshot overlaid with EVERY
+        # column the UPDATE wrote (still in serialized form — ISO strings,
+        # not the coerced datetimes). Overlaying only metadata/id used to
+        # answer status="failed" + the old error_msg for a row the database
+        # already held as pending/queued.
+        return {**task, **update_vals}
 
     # ── Dedup key helpers ─────────────────────────────────────────────
 

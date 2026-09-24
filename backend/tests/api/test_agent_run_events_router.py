@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -170,7 +171,9 @@ def test_has_more_flags_a_full_page(client):
                         "seq": 1,
                         "event_type": "user",
                         "payload": {},
-                        "created_at": None,
+                        "created_at": datetime(
+                            2026, 9, 24, 1, 2, 3, tzinfo=timezone.utc
+                        ),
                         "turn": None,
                         "step": None,
                     }

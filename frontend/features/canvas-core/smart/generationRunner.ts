@@ -17,7 +17,10 @@ import type { PromptCaller, RunnerResult } from './runner';
 /** `metadata.failure.detail` of a failed task, or undefined when there is
  *  nothing to show. '' is treated as absent on purpose: rendering an empty
  *  explanation panel would read as "the model said nothing". */
-function failureDetail(task: GenerationTask | undefined): string | undefined {
+function failureDetail(
+  // A polled task, or the metadata-less stand-in a broken poll leaves behind.
+  task: { phase: string | null; metadata?: GenerationTask['metadata'] } | undefined,
+): string | undefined {
   const d = task?.metadata?.failure?.detail;
   return typeof d === 'string' && d.trim() ? d : undefined;
 }

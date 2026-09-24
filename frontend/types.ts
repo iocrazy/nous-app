@@ -626,33 +626,6 @@ export interface PointPackage {
   sort_order: number;
 }
 
-export interface TeamQuota {
-  team_id: string;
-  points_balance: number;
-  storage_limit_bytes: number;
-  storage_used_bytes: number;
-  storage_used_percent: number;
-}
-
-export interface PointTransaction {
-  id: string;
-  team_id: string;
-  user_id: string | null;
-  amount: number;
-  balance_after: number;
-  type: 'purchase' | 'consume' | 'refund' | 'gift' | 'admin_adjust';
-  reference_type: string | null;
-  reference_id: string | null;
-  description: string | null;
-  created_at: string;
-}
-
-export interface PointPricing {
-  action_type: string;
-  points_cost: number;
-  description: string | null;
-}
-
 export interface PaymentOrder {
   id: string;
   team_id: string;
@@ -668,13 +641,6 @@ export interface PaymentOrder {
   paid_at: string | null;
   expired_at: string;
   created_at: string;
-}
-
-export interface QuotaCheck {
-  allowed: boolean;
-  points_cost: number;
-  current_balance: number;
-  reason: string | null;
 }
 
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
@@ -1302,61 +1268,6 @@ export interface AgentRunTaskRef {
   task_type?: string | null;
 }
 
-/** One currently-running run in the Workforce live strip. */
-export interface LiveAgentRun {
-  id: string;
-  agent_id: string;
-  status: 'running';
-  trigger: string;
-  model?: string | null;
-  started_at: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_cents?: number | null;
-  input_summary?: string | null;
-  task_id?: string | null;
-  agent_slug?: string | null;
-  agent_name?: string | null;
-  agent_icon?: string | null;
-}
-
-/** One transcript event of a run (agent_run_transcript_events, mig 397; mig 285 had aimed for the old agent_run_events name). */
-/** Every event type the backend CHECK allows (mig 285 / 436 / 443 / 453).
- * The union is open-ended on purpose: `foldEvents` ignores what it does not
- * know, so a new backend type never breaks an old client. */
-export type AgentRunEventType =
-  | 'user'
-  | 'assistant'
-  | 'tool_call'
-  | 'error'
-  | 'system'
-  | 'capability_denied'
-  | 'llm_retry'
-  | 'todo_write'
-  | 'compaction_start'
-  | 'compaction_summary'
-  | 'compaction_end'
-  | 'turn_end'
-  | 'step_start'
-  | 'step_end'
-  | 'inbox_claimed'
-  | 'deliverable'
-  | 'budget_check'
-  | (string & {});
-
-export interface AgentRunEvent {
-  seq: number;
-  // 'capability_denied': Task 5 (Agent 权限页梳理立项) — the capability gate's
-  // abort, recorded once per tool per turn (backend/app/services/ai/runner/
-  // agent_runner.py). payload: { tool: string, reason: string }.
-  event_type: AgentRunEventType;
-  payload: Record<string, unknown>;
-  created_at: string;
-  /** mig 453 step coordinates; null on rows written before them. */
-  turn?: number | null;
-  step?: number | null;
-}
-
 /** Full detail view — adds summaries, metadata, snapshots, and cancel state. */
 export interface AgentRunDetail extends AgentRunListItem {
   session_id?: string | null;
@@ -1397,153 +1308,11 @@ export interface AgentRunListResponse {
   offset: number;
 }
 
-// ─── Per-agent Dashboard aggregate ─────────────────────────────────────────
-// Backed by GET /api/v1/ai-library/agents/{slug}/dashboard. Paperclip-style
-// 14-day overview, scoped to the authenticated user.
-
-export interface DailyCount {
-  date: string; // YYYY-MM-DD
-  count: number;
-}
-
-export interface DailySuccessRate {
-  date: string;
-  success: number;
-  total: number;
-}
-
-export interface DashboardCosts {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  total_cost_cents: number;
-  run_count: number;
-}
-
-export interface DashboardRecentTask {
-  id: string;
-  lifecycle_status: string;
-  created_at: string;
-  started_at?: string | null;
-  ended_at?: string | null;
-  title?: string | null;
-  error_code?: string | null;
-  error_message?: string | null;
-}
-
-export interface DashboardRecentRun {
-  id: string;
-  status: string;
-  trigger: string;
-  model?: string | null;
-  started_at: string;
-  ended_at?: string | null;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_cents?: number | null;
-}
-
-/** GET /ai-library/agents/{slug}/usage — "Used by" card data. */
-export interface AgentUsageModuleRef {
-  /** Team-scoped route segment (resources / projects / canvas / parser / issues). */
-  module_key: string;
-  /** i18n sub-label key: aiLibrary.agents.usage.feature.<feature_key>. */
-  feature_key: string;
-}
-
-export interface AgentUsage {
-  modules: AgentUsageModuleRef[];
-  trigger_counts: { trigger: string; feature_key: string; count: number }[];
-  conversation_count: number;
-  routine_count: number;
-  window_days: number;
-}
-
-export interface AgentDashboard {
-  agent: {
-    id: string;
-    slug: string;
-    name: string;
-    icon?: string | null;
-    model?: string | null;
-    persistent: boolean;
-    paused_reason?: string | null;
-  };
-  /** Most recent run, regardless of window. Null when never invoked. */
-  latest_run: AgentRunDetail | null;
-  /** 14 entries, oldest first; gaps filled with count=0. */
-  run_activity_14d: DailyCount[];
-  /** lifecycle_status → count, last 14d. May omit zero buckets. */
-  tasks_by_status_14d: Record<string, number>;
-  /** 14 entries with daily success/total counts. */
-  success_rate_14d: DailySuccessRate[];
-  /** Sums + total cost over the 14-day window. */
-  costs_14d: DashboardCosts;
-  recent_tasks: DashboardRecentTask[];
-  recent_runs: DashboardRecentRun[];
-}
-
 // ─── AI Usage aggregates ───────────────────────────────────────────────────
 // Mirror of backend/app/schemas/agent_runs.py (UsagePerAgent, UsageAggregate).
 // Fed by GET /api/v1/ai-library/usage?scope=&month=[&team_id=&project_id=].
 
 export type UsageScope = 'user' | 'team' | 'project';
-
-// Row-level usage detail — GET /api/v1/ai-library/usage/runs (caller-scoped).
-export interface UsageRunItem {
-  id: string;
-  agent_id: string | null;
-  agent_slug?: string | null;
-  agent_name?: string | null;
-  model: string | null;
-  provider: string | null;
-  status: string;
-  trigger: string | null;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  /** Fractional cents — same convention as agent_runs.cost_cents. */
-  cost_cents: number;
-  duration_ms: number | null;
-  started_at: string | null;
-  error_code: string | null;
-}
-
-export interface UsageRunsPage {
-  items: UsageRunItem[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-// Daily rollup grouped by model or agent — GET /api/v1/ai-library/usage/daily.
-export interface UsageDailyRow {
-  date: string;
-  /** Group key: model name, or agent uuid when group_by=agent. */
-  key: string | null;
-  /** Display label (agent name resolved server-side; = key for models). */
-  label: string | null;
-  requests: number;
-  failed_requests: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost_cents: number;
-}
-
-export type UsageGroupBy = 'model' | 'agent';
-
-export interface UsageDailySummary {
-  days: number;
-  /** Set when the window is a calendar month (YYYY-MM) instead of last-N-days. */
-  month: string | null;
-  group_by: UsageGroupBy;
-  total_requests: number;
-  total_failed: number;
-  total_tokens: number;
-  total_cost_cents: number;
-  daily: UsageDailyRow[];
-}
 
 /**
  * One run's money line — `GET /api/v1/ai-library/runs/costs` (3c §4.2).
@@ -1644,72 +1413,6 @@ export interface CreateChatSessionPayload {
   context_id?: string;
 }
 
-/** Phase 3: per-user token usage summary (driven by ai_usage_logs). */
-export interface AILibraryUsageSummary {
-  window_start: string;
-  window_end: string;
-  overall: {
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  };
-  by_model: Array<{
-    model: string;
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  }>;
-  by_day: Array<{
-    date: string;
-    total_tokens: number;
-    cost_points: number;
-    run_count: number;
-  }>;
-}
-
-/** Phase 3: AI Library version history item (agent / skill / skill_file).
- *  List view shape — only metadata. Full body via the detail endpoint. */
-export interface AILibraryVersionItem {
-  id: string;
-  version_number: number;
-  notes: string | null;
-  created_by: string | null;
-  created_at: string | null;
-  /** agent-only */
-  model?: string | null;
-  temperature?: number | null;
-  max_tokens?: number | null;
-  /** skill_file-only */
-  path?: string;
-  file_type?: string;
-}
-
-/** G1: Approval request row from agent_approval_requests (mig 198).
- *  Surfaced to the user when an agent hook returns await_approval.
- *  All times ISO strings. payload is hook-defined JSON. */
-export interface AILibraryApprovalRequest {
-  id: string;
-  agent_id: string;
-  session_id: string | null;
-  run_id: string | null;
-  hook_name: string;
-  reason: string;
-  payload: Record<string, unknown>;
-  created_at: string | null;
-  expires_at: string | null;
-}
-
-/** A: AI Library MCP server registration row.
- *  bearer_token is never returned — only has_bearer_token boolean. */
-export interface AILibraryMCPServer {
-  id: string;
-  name: string;
-  url: string;
-  description: string | null;
-  enabled: boolean;
-  has_bearer_token?: boolean;
-}
-
 /** O5: AI Library memory row, as returned by GET /memories. */
 export interface AILibraryMemory {
   id: string;
@@ -1728,21 +1431,6 @@ export interface AILibraryMemory {
   decay_score: number | null;
   created_at: string | null;
   updated_at: string | null;
-}
-
-/** O4: AI Library commitment (followup) row, as returned by GET /commitments. */
-export interface AILibraryCommitment {
-  id: number;
-  agent_id: string;
-  session_id: string | null;
-  description: string;
-  trigger_type: 'time' | 'event' | 'next_session' | null;
-  trigger_at: string | null;
-  trigger_event: string | null;
-  status: 'pending' | 'fulfilled' | 'cancelled' | 'failed' | 'expired';
-  created_at: string | null;
-  fulfilled_at: string | null;
-  expires_at: string | null;
 }
 
 
