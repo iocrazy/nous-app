@@ -149,7 +149,16 @@ async def test_create_scopes_owner_to_caller(client, monkeypatch):
 
     async def fake_create(self, user_id, name, anchors):
         captured.update({"user_id": user_id, "name": name, "anchors": anchors})
-        return {"id": "1", "user_id": user_id, "name": name, "anchors": anchors}
+        # The repo's real row shape (``_row``): every column, bigint id native,
+        # timestamps as ISO strings. The route now declares that shape.
+        return {
+            "id": _TPL_ID,
+            "user_id": user_id,
+            "name": name,
+            "anchors": anchors,
+            "created_at": "2026-09-24T01:02:03+00:00",
+            "updated_at": "2026-09-24T01:02:03+00:00",
+        }
 
     monkeypatch.setattr(BeatTemplateRepository, "create", fake_create)
     resp = await client.post(
