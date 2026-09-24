@@ -88418,6 +88418,139 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/files/{file_id}/stream": {
+      "get": {
+        "description": "Play a project file in the review page's player.\n\nA ``<video src>`` cannot carry a Bearer header, and ``project_files`` /\n``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,\nso the review page had no URL that could play an uploaded file. This is\nthat URL: the same dual transport as\n``resources_versions_router.serve_version_file`` (Bearer / API key, or the\nsigned media token in ``?token=``), then the same project read check as\nevery other read here, then ``serve_stored_file`` inline.",
+        "operationId": "stream_file_api_v1_projects__project_id__files__file_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A file_versions id",
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A file_versions id",
+              "title": "Version Id"
+            }
+          },
+          {
+            "description": "Signed media token",
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Signed media token",
+              "title": "Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "audio/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The file (or one of its versions) inline and Range-aware, for a bare <video>/<audio>; a 302 to a signed URL for object-store rows"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream File",
+        "tags": [
+          "MediaTrack"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}/files/{file_id}/versions": {
       "get": {
         "description": "List all versions of a file.",

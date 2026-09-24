@@ -3,7 +3,8 @@ import { ArrowLeft, Share2, ChevronDown, MessageSquare, Info, PenTool, Columns2,
 import { useTranslation } from 'react-i18next';
 import { ReviewStatus, DrawingData } from '../types';
 import type { FileVersion, ProjectFile } from '../types/api';
-import { fetchFileVersions, getFileInfo, toProjectFile, updateReviewStatus } from '../services/projectsService';
+import { fetchFileVersions, getFileInfo, getProjectFileStreamUrl, toProjectFile, updateReviewStatus } from '../services/projectsService';
+import { useAuth } from '../contexts/AuthContext';
 import { isReviewStatus } from './FileCard';
 import { VideoPlayer } from './VideoPlayer';
 import { VersionCompareView } from './VersionCompareView';
@@ -21,12 +22,6 @@ interface VideoReviewPageProps {
   currentUserId: string;
 }
 
-import { buildMediaUrl } from '../utils/mediaUrl';
-
-const getVersionVideoSrc = (version: FileVersion): string => {
-  if (!version.resource_id) return '';
-  return buildMediaUrl(String(version.resource_id));
-};
 
 export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   projectId,
@@ -39,6 +34,17 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
   const [file, setFile] = useState<ProjectFile>(initialFile);
   // Snowflake ids are JSON numbers on the wire; service calls take strings.
   const fileId = String(file.id);
+  const { mediaToken } = useAuth();
+  // project_files / file_versions carry no resource_id, so the old
+  // /media/{resource_id} source was always empty; stream the file itself.
+  const getVersionVideoSrc = useCallback(
+    (version: FileVersion): string =>
+      getProjectFileStreamUrl(projectId, fileId, {
+        versionId: String(version.id),
+        token: mediaToken,
+      }),
+    [projectId, fileId, mediaToken],
+  );
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [versions, setVersions] = useState<FileVersion[]>([]);
@@ -199,12 +205,10 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
     setViewingDrawingData(null);
   }, []);
 
-  // Determine video source URL — use ID-based /media/{id} route
-  const videoSrc = selectedVersion?.resource_id
-    ? buildMediaUrl(String(selectedVersion.resource_id))
-    : file.resource_id
-      ? buildMediaUrl(String(file.resource_id))
-      : '';
+  // The selected version, else the file's current content.
+  const videoSrc = selectedVersion
+    ? getVersionVideoSrc(selectedVersion)
+    : getProjectFileStreamUrl(projectId, fileId, { token: mediaToken });
 
   const videoMime = selectedVersion?.mime_type || file.mime_type || undefined;
   const videoFps = selectedVersion?.fps || file.fps || 30;
@@ -347,9 +351,10 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               {videoSrc ? (
                 <>
                   <VideoPlayer
-                    /* No explicit resumeKey: `videoSrc` is already
-                       `/media/{resource_id}` with no query, so the player's
-                       path fallback IS the stable identity here. */
+                    /* Explicit key: the path fallback drops the query, and
+                       with it `version_id`, so every version would share
+                       one remembered position. */
+                    resumeKey={`project-file:${fileId}:${selectedVersion ? String(selectedVersion.id) : 'current'}`}
                     src={videoSrc}
                     mimeType={videoMime}
                     fps={videoFps}

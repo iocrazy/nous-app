@@ -175,6 +175,24 @@ export const getProjectFileDownloadUrl = (
   fileId: string,
 ): string => `${getApiUrl()}/api/v1/projects/${projectId}/files/${fileId}/download`;
 
+// Player URL for a project file, or one of its versions. A bare <video src>
+// cannot send a Bearer header, so the signed media token rides in `?token=`
+// (AuthContext's `mediaToken`); the backend still applies the project read
+// check. project_files / file_versions have no resource_id, so /media/{id}
+// cannot serve them — this route is the only one that can.
+export const getProjectFileStreamUrl = (
+  projectId: string,
+  fileId: string,
+  opts: { versionId?: string; token?: string | null } = {},
+): string => {
+  const params = new URLSearchParams();
+  if (opts.versionId) params.set('version_id', opts.versionId);
+  if (opts.token) params.set('token', opts.token);
+  const query = params.toString();
+  const base = `${getApiUrl()}/api/v1/projects/${projectId}/files/${fileId}/stream`;
+  return query ? `${base}?${query}` : base;
+};
+
 export const updateFile = async (
   projectId: string,
   fileId: string,

@@ -11668,6 +11668,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/files/{file_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream File
+         * @description Play a project file in the review page's player.
+         *
+         *     A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
+         *     ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
+         *     so the review page had no URL that could play an uploaded file. This is
+         *     that URL: the same dual transport as
+         *     ``resources_versions_router.serve_version_file`` (Bearer / API key, or the
+         *     signed media token in ``?token=``), then the same project read check as
+         *     every other read here, then ``serve_stored_file`` inline.
+         */
+        get: operations["stream_file_api_v1_projects__project_id__files__file_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/files/{file_id}/versions": {
         parameters: {
             query?: never;
@@ -54405,6 +54433,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ProjectFileRow_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_file_api_v1_projects__project_id__files__file_id__stream_get: {
+        parameters: {
+            query?: {
+                /** @description A file_versions id */
+                version_id?: string | null;
+                /** @description Signed media token */
+                token?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                project_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file (or one of its versions) inline and Range-aware, for a bare <video>/<audio>; a 302 to a signed URL for object-store rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                    "audio/*": string;
+                    "video/*": string;
                 };
             };
             /** @description Validation Error */

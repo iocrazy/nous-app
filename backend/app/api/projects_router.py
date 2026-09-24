@@ -14,6 +14,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -1384,6 +1385,73 @@ async def download_file(
     except Exception as e:
         logger.error(f"Failed to serve file {file_id} for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to serve file")
+
+
+@router.get(
+    "/{project_id}/files/{file_id}/stream",
+    response_class=Response,
+    responses=binary_response(
+        "The file (or one of its versions) inline and Range-aware, for a "
+        "bare <video>/<audio>; a 302 to a signed URL for object-store rows",
+        "video/*",
+        "audio/*",
+        "*/*",
+    ),
+)
+async def stream_file(
+    project_id: str,
+    file_id: str,
+    request: Request,
+    version_id: Optional[str] = Query(None, description="A file_versions id"),
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    token: Optional[str] = Query(None, description="Signed media token"),
+):
+    """Play a project file in the review page's player.
+
+    A ``<video src>`` cannot carry a Bearer header, and ``project_files`` /
+    ``file_versions`` have no ``resource_id`` for ``/media/{id}`` to resolve,
+    so the review page had no URL that could play an uploaded file. This is
+    that URL: the same dual transport as
+    ``resources_versions_router.serve_version_file`` (Bearer / API key, or the
+    signed media token in ``?token=``), then the same project read check as
+    every other read here, then ``serve_stored_file`` inline.
+    """
+    from app.api.media_auth import validate_media_cookie
+    from app.core.deps import get_auth
+    from app.core.scope_guards import _check_project_access
+    from app.services.library.media_serving import serve_stored_file
+
+    user_id: Optional[str] = None
+    if token and not authorization and not x_api_key:
+        user_id = await validate_media_cookie(token)
+    if user_id is None:
+        effective = authorization
+        if not effective and not x_api_key and token:
+            effective = f"Bearer {token}"
+        user_id = (await get_auth(request, effective, x_api_key)).user_id
+    await _check_project_access(project_id, str(user_id), write=False)
+
+    svc = ProjectsService()
+    try:
+        record = await svc.get_file_info(project_id, file_id)
+        if version_id is not None:
+            versions = await svc.get_file_versions(project_id, file_id)
+            matches = [v for v in versions if str(v.get("id")) == version_id]
+            if not matches:
+                raise HTTPException(status_code=404, detail="Version not found")
+            record = matches[0]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    file_path = record.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file available")
+    return await serve_stored_file(
+        file_path,
+        mime=record.get("mime_type") or "application/octet-stream",
+        request=request,
+    )
 
 
 @router.put("/{project_id}/files/{file_id}", response_model=Envelope[ProjectFileRow])
