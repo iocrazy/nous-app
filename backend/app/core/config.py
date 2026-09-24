@@ -165,17 +165,20 @@ class Settings(BaseSettings):
     )
     FEATURE_SHOT_GENERATE: bool = Field(
         default=False,
-        description="Enable single-shot image generation (POST "
-        "/shots/{id}/generate): dispatches a DBOS workflow that runs the "
+        description="Enable storyboard shot image generation (the agent "
+        "GenerateShotImage tool and POST /projects/{id}/storyboard/generate-"
+        "missing): dispatches a DBOS workflow that runs the "
         "storyboard image-provider chain and writes the produced URL onto the "
-        "shot row. Off (default) = the endpoint 404s (existence hidden) — this "
+        "shot row. Off (default) = those 404 (existence hidden) — this "
         "is an independent switch for the image-generation cost surface. Flip "
         "true once the generate chain is validated on the target stack.",
     )
     FEATURE_SHOT_VIDEO: bool = Field(
         default=False,
-        description="Enable single-shot video generation (POST "
-        "/shots/{id}/generate-video): dispatches a DBOS workflow that runs the "
+        description="Enable single-shot video generation. Its only endpoint "
+        "(POST /shots/{id}/generate-video) was removed in OpenAPI P6 for "
+        "having no caller, so nothing reads this flag now. It dispatched a DBOS "
+        "workflow that runs the "
         "DB-catalog video provider (jimeng-cli / seedance) and writes the "
         "produced clip's durable URL onto the shot's video_url column. Off "
         "(default) = the endpoint 404s (existence hidden) — an independent "

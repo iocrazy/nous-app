@@ -391,7 +391,7 @@ async def generate_missing_frames(
     """Batch-generate every empty storyboard shot in the project (flag-gated).
 
     Flag ``FEATURE_SHOT_GENERATE`` off → 404 (existence hidden), mirroring
-    ``script_shots_router.py::generate_shot``."""
+    the agent ``generate_shot_image`` tool."""
     if not settings.FEATURE_SHOT_GENERATE:
         raise HTTPException(status_code=404, detail="Not Found")
     svc = ProjectsService()
