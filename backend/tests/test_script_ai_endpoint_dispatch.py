@@ -1,4 +1,7 @@
-"""Regression tests for the 4 script-AI dispatch endpoints.
+"""Regression tests for the script-AI dispatch endpoints.
+
+(``generate-outline`` and the 410 ``convert-to-storyboard`` tombstone had no
+caller left and were removed in the OpenAPI P6 pass.)
 
 Background (confirmed via prod application_logs, task_type=script_outline_gen):
 all 4 endpoints in ``app.api.script_ai_router`` called
@@ -36,12 +39,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.deps import AuthContext
-from app.schemas.script import (
-    ConvertToStoryboardRequest,
-    CreateBranchesRequest,
-    ExpandChapterRequest,
-    GenerateOutlineRequest,
-)
+from app.schemas.script import CreateBranchesRequest, ExpandChapterRequest
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -100,26 +98,12 @@ def mock_verify_access(monkeypatch):
     # router module — patch it by the name the router now calls.
     mock = AsyncMock(return_value=None)
     monkeypatch.setattr(script_ai_router, "verify_script_access", mock)
-    return mock
-
-
-async def test_generate_outline_threads_shared_wf_id(
-    monkeypatch, mock_task_manager, mock_verify_access
-):
-    dispatch = AsyncMock(return_value={"mode": "dbos"})
+    # The chapter-belongs-to-script check has its own HTTP tests
+    # (tests/api/test_script_ai_wire.py); here the chapter always belongs.
     monkeypatch.setattr(
-        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+        script_ai_router, "_chapter_of_script", AsyncMock(return_value=None)
     )
-
-    body = GenerateOutlineRequest(
-        script_id=str(uuid.uuid4()), premise="a detective in a snowstorm"
-    )
-    result = await script_ai_router.generate_outline(_auth(), body)
-
-    assert result["success"] is True
-    mock_task_manager.create.assert_awaited_once()
-    dispatch.assert_awaited_once()
-    _assert_shared_valid_uuid(mock_task_manager.create, dispatch)
+    return mock
 
 
 async def test_expand_chapter_threads_shared_wf_id(
@@ -164,29 +148,3 @@ async def test_create_branches_threads_shared_wf_id(
     mock_task_manager.create.assert_awaited_once()
     dispatch.assert_awaited_once()
     _assert_shared_valid_uuid(mock_task_manager.create, dispatch)
-
-
-async def test_convert_to_storyboard_is_retired_410(
-    monkeypatch, mock_task_manager, mock_verify_access
-):
-    """Retired in the Phase B P4 cutover: the script→legacy-workbench bridge no
-    longer dispatches a workflow (it wrote the now-deprecated storyboard_nodes /
-    script_storyboard_links tables) — it raises 410 Gone instead."""
-    from fastapi import HTTPException
-
-    dispatch = AsyncMock(return_value={"mode": "dbos"})
-    monkeypatch.setattr(
-        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
-    )
-
-    body = ConvertToStoryboardRequest(
-        script_id=str(uuid.uuid4()),
-        chapter_id=str(uuid.uuid4()),
-    )
-    with pytest.raises(HTTPException) as exc:
-        await script_ai_router.convert_to_storyboard(_auth(), body)
-
-    assert exc.value.status_code == 410
-    # No task row created and nothing dispatched — the endpoint short-circuits.
-    mock_task_manager.create.assert_not_awaited()
-    dispatch.assert_not_awaited()
