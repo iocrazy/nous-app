@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import en from '../../public/locales/en.json';
@@ -18,11 +18,19 @@ vi.mock('react-i18next', () => {
 
 const getVectorsStatusMock = vi.fn();
 const backfillMock = vi.fn();
+const createSpaceMock = vi.fn();
+const activateSpaceMock = vi.fn();
+const deleteSpaceMock = vi.fn();
+const getNousModelsMock = vi.fn();
 vi.mock('../../services/searchService', () => ({
   getVectorsStatus: (...args: unknown[]) => getVectorsStatusMock(...args),
+  createVectorSpace: (...args: unknown[]) => createSpaceMock(...args),
+  activateVectorSpace: (...args: unknown[]) => activateSpaceMock(...args),
+  deleteVectorSpace: (...args: unknown[]) => deleteSpaceMock(...args),
 }));
 vi.mock('../../services/aiService', () => ({
   backfillEmbeddings: (...args: unknown[]) => backfillMock(...args),
+  getNousModels: (...args: unknown[]) => getNousModelsMock(...args),
 }));
 
 // Real wire shape of GET /api/v1/search/vectors/status: the Snowflake space id
@@ -43,10 +51,48 @@ const OK_STATUS = {
   ],
 };
 
+// Real shape with space switching: every space in `spaces` (ids are strings),
+// the active one first here, then a candidate filled 150 of 200.
+const ACTIVE_SPACE = {
+  ...OK_STATUS.space,
+  active: true,
+  catalog_name: 'nous-doubao-embedding-vision',
+  layers: OK_STATUS.layers,
+};
+const CANDIDATE_ID = '1234567890123456789';
+const candidate = (covered: number, total = 200, catalog: string | null = 'nous-wemm-embedding-2b') => ({
+  id: CANDIDATE_ID,
+  actual_model: 'wemm-embedding-2b',
+  protocol: 'openai-embeddings-chat',
+  dims: 2048,
+  modalities: ['text'],
+  instruction_version: 'en_keyword_v1',
+  active: false,
+  catalog_name: catalog,
+  layers: [
+    { layer: 'semantic', status: covered ? 'ok' : 'not_built', covered, total, stale: 0 },
+    { layer: 'transcript', status: 'not_built', covered: 0, total, stale: 0 },
+  ],
+});
+const withSpaces = (cand: ReturnType<typeof candidate> | null, canManage = true) => ({
+  ...OK_STATUS,
+  spaces: cand ? [ACTIVE_SPACE, cand] : [ACTIVE_SPACE],
+  can_manage: canManage,
+});
+const EMBEDDING_MODELS = [
+  { name: 'nous-doubao-embedding-vision', display_name: 'Doubao Embedding Vision', type: 'embedding' },
+  { name: 'nous-wemm-embedding-2b', display_name: 'WeMM Embedding 2B', type: 'embedding' },
+  { name: 'nous-wemm-embedding-4b', display_name: 'WeMM Embedding 4B', type: 'embedding' },
+];
+
 describe('VectorsPanel', () => {
   beforeEach(() => {
     getVectorsStatusMock.mockReset();
     backfillMock.mockReset();
+    createSpaceMock.mockReset();
+    activateSpaceMock.mockReset();
+    deleteSpaceMock.mockReset();
+    getNousModelsMock.mockReset();
   });
 
   it('renders the current space card from /vectors/status', async () => {
@@ -269,7 +315,7 @@ describe('VectorsPanel', () => {
     spy.mockRestore();
   });
 
-  it('Visual / Camera rows read Arrives with PR 3 and have no buttons; Add Space is a disabled placeholder', async () => {
+  it('Visual / Camera rows read Arrives with PR 3 and have no buttons; Add Space is admin-only', async () => {
     getVectorsStatusMock.mockResolvedValue(OK_STATUS);
     render(<VectorsPanel />);
     await screen.findByText('doubao-embedding-vision-251215');
@@ -280,8 +326,169 @@ describe('VectorsPanel', () => {
       expect(row.querySelectorAll('button')).toHaveLength(0);
     }
     expect(screen.getByTestId('vector-layer-transcript')).toHaveTextContent('Not built · Phase 2');
+    // An old backend (no can_manage) cannot be managed from here.
     const add = screen.getByRole('button', { name: 'Add Space' });
     expect(add).toBeDisabled();
-    expect(add).toHaveAttribute('title', 'Arrives with space switching');
+    expect(add).toHaveAttribute('title', 'Only an admin can change embedding spaces');
+  });
+
+  describe('space switching', () => {
+    it('renders a candidate card with its own coverage next to the active one', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      expect(card).toHaveTextContent('Candidate Space');
+      expect(card).toHaveTextContent('wemm-embedding-2b');
+      expect(card).toHaveTextContent('nous-wemm-embedding-2b');
+      expect(card).toHaveTextContent('openai-embeddings-chat');
+      expect(card).toHaveTextContent('150 / 200');
+      // The active card and the layers table are untouched.
+      expect(screen.getByText('doubao-embedding-vision-251215')).toBeInTheDocument();
+      expect(screen.getByTestId('vector-layer-semantic')).toHaveTextContent('20 / 1,409');
+    });
+
+    it('Switch is disabled until the candidate covers everything, and says why', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      render(<VectorsPanel />);
+      const sw = await screen.findByRole('button', { name: 'Switch To This Space' });
+      expect(sw).toBeDisabled();
+      expect(sw).toHaveAttribute('title', 'Backfill to 100% before switching');
+    });
+
+    it('Switch is disabled on an empty library (0 of 0)', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(0, 0)));
+      render(<VectorsPanel />);
+      expect(await screen.findByRole('button', { name: 'Switch To This Space' })).toBeDisabled();
+    });
+
+    it('Switch at 100% activates the space and renders the returned status', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(200)));
+      const switched = {
+        status: 'ok',
+        space: { ...candidate(200), active: undefined },
+        layers: candidate(200).layers,
+        spaces: [{ ...candidate(200), active: true }, { ...ACTIVE_SPACE, active: false }],
+        can_manage: true,
+      };
+      activateSpaceMock.mockResolvedValue(switched);
+      render(<VectorsPanel />);
+      const sw = await screen.findByRole('button', { name: 'Switch To This Space' });
+      expect(sw).toBeEnabled();
+      fireEvent.click(sw);
+      await waitFor(() => expect(activateSpaceMock).toHaveBeenCalledWith(CANDIDATE_ID));
+      // doubao is now the candidate; its card appears.
+      expect(await screen.findByTestId(`vector-candidate-${OK_STATUS.space.id}`)).toBeInTheDocument();
+    });
+
+    it('Backfill 200 on a candidate fills THAT space and refetches', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      backfillMock.mockResolvedValueOnce({
+        success: true, dry_run: false, reembedded: ['1', '2'], dispatched: [], skipped: [],
+        in_flight: 0, remaining: 48, total_missing: 50, stale: 0,
+      });
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      fireEvent.click(within(card).getByRole('button', { name: 'Backfill 200' }));
+      await waitFor(() =>
+        expect(backfillMock).toHaveBeenCalledWith({ limit: 200, dry_run: false, space_id: CANDIDATE_ID }),
+      );
+      expect(await within(card).findByText('2 embedded · 48 remaining')).toBeInTheDocument();
+      await waitFor(() => expect(getVectorsStatusMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('a candidate whose model left the catalog cannot be filled or switched to', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(200, 200, null)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      expect(card).toHaveTextContent('Not in catalog');
+      expect(within(card).getByRole('button', { name: 'Backfill 200' })).toBeDisabled();
+      const sw = within(card).getByRole('button', { name: 'Switch To This Space' });
+      expect(sw).toBeDisabled();
+      expect(sw).toHaveAttribute('title', "This space's model is no longer in the catalog");
+    });
+
+    it('Add Space lists only catalog models that have no space yet, then creates one', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      getNousModelsMock.mockResolvedValue(EMBEDDING_MODELS);
+      createSpaceMock.mockResolvedValue({ ...candidate(0), active: undefined });
+      render(<VectorsPanel />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
+      await waitFor(() => expect(getNousModelsMock).toHaveBeenCalledWith('embedding'));
+      const picker = await screen.findByTestId('vector-add-space-picker');
+      expect(within(picker).queryByText('Doubao Embedding Vision')).toBeNull();
+      expect(within(picker).queryByText('WeMM Embedding 2B')).toBeNull();
+      fireEvent.click(within(picker).getByRole('button', { name: /WeMM Embedding 4B/ }));
+      await waitFor(() => expect(createSpaceMock).toHaveBeenCalledWith('nous-wemm-embedding-4b'));
+      await waitFor(() => expect(getVectorsStatusMock).toHaveBeenCalledTimes(2));
+    });
+
+    it('a 422 dimension_mismatch from Add Space reads both widths', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      getVectorsStatusMock.mockResolvedValue(withSpaces(null));
+      getNousModelsMock.mockResolvedValue(EMBEDDING_MODELS);
+      // Production ErrorResponse envelope: the typed body lives in details.
+      createSpaceMock.mockRejectedValue(
+        new ApiError('nous-wemm-embedding-4b returns 2560 dimensions', 422, {
+          code: 'http_422',
+          details: {
+            code: 'dimension_mismatch',
+            expected: 2048,
+            got: 2560,
+            model: 'nous-wemm-embedding-4b',
+            message: 'nous-wemm-embedding-4b returns 2560 dimensions; the vector store holds 2048.',
+          },
+        }),
+      );
+      render(<VectorsPanel />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
+      const picker = await screen.findByTestId('vector-add-space-picker');
+      fireEvent.click(within(picker).getByRole('button', { name: /WeMM Embedding 4B/ }));
+      const line = await screen.findByTestId('vector-space-error');
+      expect(line).toHaveTextContent('nous-wemm-embedding-4b returns 2560 dims, the store holds 2048');
+      expect(line).toHaveClass('text-danger');
+      spy.mockRestore();
+    });
+
+    it('non-admins see Add / Switch / Delete disabled with the reason', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(200), false));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      for (const btn of [
+        screen.getByRole('button', { name: 'Add Space' }),
+        within(card).getByRole('button', { name: 'Switch To This Space' }),
+        within(card).getByRole('button', { name: 'Delete' }),
+      ]) {
+        expect(btn).toBeDisabled();
+        expect(btn).toHaveAttribute('title', 'Only an admin can change embedding spaces');
+      }
+      // Filling one's own coverage is not an admin action.
+      expect(within(card).getByRole('button', { name: 'Backfill 200' })).toBeEnabled();
+    });
+
+    it('Delete asks inline, then deletes and reports the cascaded vectors', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      deleteSpaceMock.mockResolvedValue({ deleted: true, space_id: CANDIDATE_ID, deleted_vectors: 187 });
+      const confirmSpy = vi.spyOn(window, 'confirm');
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      fireEvent.click(within(card).getByRole('button', { name: 'Delete' }));
+      expect(deleteSpaceMock).not.toHaveBeenCalled();
+      expect(card).toHaveTextContent('Delete this space and every vector in it (all users)?');
+      fireEvent.click(within(card).getByRole('button', { name: 'Confirm Delete' }));
+      await waitFor(() => expect(deleteSpaceMock).toHaveBeenCalledWith(CANDIDATE_ID));
+      expect(await screen.findByText('Space deleted · 187 vectors removed')).toBeInTheDocument();
+      expect(confirmSpy).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+
+    it('Cancel closes the inline delete confirmation without deleting', async () => {
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      fireEvent.click(within(card).getByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(card).getByRole('button', { name: 'Cancel' }));
+      expect(within(card).queryByRole('button', { name: 'Confirm Delete' })).toBeNull();
+      expect(deleteSpaceMock).not.toHaveBeenCalled();
+    });
   });
 });

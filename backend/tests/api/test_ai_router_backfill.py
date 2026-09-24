@@ -462,3 +462,111 @@ async def test_dry_run_reports_zero_rehashed() -> None:
     with p[0], p[1], p[2], p[3], p[4]:
         out = await _call(BackfillEmbeddingsBody(dry_run=True))
     assert out["rehashed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# candidate space (space_id): embeds with THAT space's catalog row
+# ---------------------------------------------------------------------------
+_CAND = {
+    **_SPACE,
+    "id": 1234567890123456789,
+    "actual_model": "wemm-embedding-2b",
+    "protocol": "openai-embeddings-chat",
+    "modalities": ["text"],
+}
+
+
+class _SpaceRepoWithGet(_SpaceRepo):
+    def __init__(self, spaces=(_CAND,)):
+        super().__init__()
+        self.by_id = {s["id"]: s for s in spaces}
+
+    async def get(self, space_id):
+        return self.by_id.get(space_id)
+
+
+def test_backfill_body_takes_an_optional_string_space_id() -> None:
+    from pydantic import ValidationError
+
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    assert BackfillEmbeddingsBody().space_id is None
+    assert BackfillEmbeddingsBody(space_id="1234567890123456789").space_id == (
+        "1234567890123456789"
+    )
+    with pytest.raises(ValidationError):
+        BackfillEmbeddingsBody(space_id="abc")
+
+
+@pytest.mark.asyncio
+async def test_backfill_into_a_candidate_space_uses_its_own_embedder() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    cand_embedder = object()
+    service_for_space = AsyncMock(return_value=cand_embedder)
+    repo = _Repo([_row(1)], 4)
+    space_repo = _SpaceRepoWithGet()
+    embed = AsyncMock(return_value=(True, None))
+    # configured=False: the ACTIVE embedder is irrelevant to a candidate run.
+    p = _patches(repo=repo, space_repo=space_repo, embed=embed, configured=False)
+    with (
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        p[4],
+        patch(
+            "app.services.library.embedding_spaces.service_for_space",
+            service_for_space,
+        ),
+    ):
+        out = await _call(BackfillEmbeddingsBody(limit=200, space_id=str(_CAND["id"])))
+
+    service_for_space.assert_awaited_once_with(_CAND)
+    assert space_repo.specs == [], "no get_or_create for an existing space"
+    assert repo.calls[0]["space_id"] == _CAND["id"]
+    assert embed.await_args.kwargs["embedder"] is cand_embedder
+    assert embed.await_args.kwargs["space_id"] == _CAND["id"]
+    assert out["space"]["id"] == str(_CAND["id"])
+    assert out["reembedded"] == ["1"] and out["remaining"] == 3
+
+
+@pytest.mark.asyncio
+async def test_backfill_into_an_unknown_space_is_404() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    repo = _Repo([], 0)
+    p = _patches(repo=repo, space_repo=_SpaceRepoWithGet(spaces=()))
+    with p[0], p[1], p[2], p[3], p[4]:
+        with pytest.raises(HTTPException) as exc:
+            await _call(BackfillEmbeddingsBody(space_id="42"))
+    assert exc.value.status_code == 404
+    assert exc.value.detail["code"] == "space_not_found"
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_backfill_into_a_space_without_a_catalog_row_is_409() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
+    from app.services.library.embedding_spaces import SpaceCatalogError
+
+    repo = _Repo([], 0)
+    p = _patches(repo=repo, space_repo=_SpaceRepoWithGet())
+    with (
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        p[4],
+        patch(
+            "app.services.library.embedding_spaces.service_for_space",
+            AsyncMock(
+                side_effect=SpaceCatalogError("space_catalog_row_missing", "gone")
+            ),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await _call(BackfillEmbeddingsBody(space_id=str(_CAND["id"])))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "space_catalog_row_missing"
+    assert repo.calls == []

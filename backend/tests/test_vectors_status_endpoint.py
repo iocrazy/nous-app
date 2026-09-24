@@ -42,14 +42,29 @@ class _Embedder:
         return self.spec
 
 
+_CANDIDATE = {
+    **_SPACE,
+    "id": 9,
+    "actual_model": "wemm-embedding-2b",
+    "protocol": "openai-embeddings-chat",
+    "modalities": ["text"],
+}
+
+
 class _SpaceRepo:
-    def __init__(self, fail: Exception | None = None):
+    def __init__(self, fail: Exception | None = None, spaces=None):
         self.fail = fail
+        self.spaces = [_SPACE] if spaces is None else spaces
 
     async def get_or_create(self, spec):
         if self.fail is not None:
             raise self.fail
         return _SPACE
+
+    async def list_all(self):
+        if self.fail is not None:
+            raise self.fail
+        return list(self.spaces)
 
 
 class _EmbRepo:
@@ -63,20 +78,47 @@ class _EmbRepo:
         self.covered, self.total, self.fail, self.stale = covered, total, fail, stale
         self.calls: List[dict] = []
         self.stale_calls: List[dict] = []
+        # Per-space (covered, stale) overrides; default = the numbers above.
+        self.per_space: dict = {}
 
     async def stale_count(self, **kwargs):
         self.stale_calls.append(kwargs)
-        return self.stale
+        return self.per_space.get(kwargs["space_id"], (None, self.stale))[1]
 
     async def coverage(self, **kwargs):
         self.calls.append(kwargs)
         if self.fail is not None:
             raise self.fail
-        return self.covered, self.total
+        covered = self.per_space.get(kwargs["space_id"], (self.covered, 0))[0]
+        return covered, self.total
 
 
-def _wire(monkeypatch, *, spec=_SPEC, space_repo=None, emb_repo=None) -> Any:
+_CATALOG = {
+    "doubao-embedding-vision-251215": "nous-doubao-embedding-vision",
+    "wemm-embedding-2b": "nous-wemm-embedding-2b",
+}
+
+
+def _wire(
+    monkeypatch,
+    *,
+    spec=_SPEC,
+    space_repo=None,
+    emb_repo=None,
+    admin: bool = False,
+    catalog=None,
+) -> Any:
     emb_repo = emb_repo or _EmbRepo(0, 0)
+    names = _CATALOG if catalog is None else catalog
+
+    async def _is_admin(user_id):
+        return admin
+
+    async def _catalog_name(actual_model):
+        return names.get(actual_model)
+
+    monkeypatch.setattr(search_router, "is_admin_user", _is_admin)
+    monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
     monkeypatch.setattr(search_router, "EmbeddingService", lambda: _Embedder(spec))
     monkeypatch.setattr(
         search_router,
@@ -178,7 +220,13 @@ async def test_store_missing(monkeypatch, where):
         emb_repo=_EmbRepo(0, 0, fail=missing if where == "coverage" else None),
     )
     body = (await search_router.vectors_status(_AUTH)).model_dump()
-    assert body == {"space": None, "status": "store_missing", "layers": []}
+    assert body == {
+        "space": None,
+        "status": "store_missing",
+        "layers": [],
+        "spaces": [],
+        "can_manage": False,
+    }
 
 
 def test_route_is_registered_before_the_similar_route():
@@ -187,3 +235,70 @@ def test_route_is_registered_before_the_similar_route():
     assert paths.index("/search/vectors/status") < paths.index(
         "/search/similar/{media_id}"
     )
+
+
+@pytest.mark.asyncio
+async def test_spaces_lists_active_and_candidate_with_per_space_coverage(
+    monkeypatch,
+):
+    emb = _EmbRepo(12, 200)
+    emb.per_space = {3: (12, 2), 9: (150, 0)}
+    _wire(
+        monkeypatch,
+        space_repo=_SpaceRepo(spaces=[_SPACE, _CANDIDATE]),
+        emb_repo=emb,
+    )
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    spaces = {s["id"]: s for s in body["spaces"]}
+    assert set(spaces) == {"3", "9"}, "ids go out as strings"
+    assert spaces["3"]["active"] is True and spaces["9"]["active"] is False
+    assert spaces["3"]["catalog_name"] == "nous-doubao-embedding-vision"
+    assert spaces["9"]["catalog_name"] == "nous-wemm-embedding-2b"
+    assert spaces["9"]["protocol"] == "openai-embeddings-chat"
+    assert [(x["covered"], x["total"], x["stale"]) for x in spaces["9"]["layers"]][
+        0
+    ] == (150, 200, 0)
+    # The top-level layers stay the ACTIVE space's (old readers).
+    assert body["layers"][0]["covered"] == 12 and body["layers"][0]["stale"] == 2
+    assert body["space"]["id"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_candidate_without_a_catalog_row_says_so(monkeypatch):
+    _wire(
+        monkeypatch,
+        space_repo=_SpaceRepo(spaces=[_SPACE, _CANDIDATE]),
+        catalog={"doubao-embedding-vision-251215": "nous-doubao-embedding-vision"},
+    )
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    cand = next(s for s in body["spaces"] if s["id"] == "9")
+    assert cand["catalog_name"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admin", [True, False])
+async def test_can_manage_follows_the_admin_role(monkeypatch, admin):
+    _wire(monkeypatch, admin=admin)
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["can_manage"] is admin
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_still_lists_candidate_spaces(monkeypatch):
+    _wire(
+        monkeypatch,
+        spec=None,
+        space_repo=_SpaceRepo(spaces=[_CANDIDATE]),
+        emb_repo=_EmbRepo(4, 7),
+    )
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert body["status"] == "unconfigured"
+    assert [(s["id"], s["active"]) for s in body["spaces"]] == [("9", False)]
+
+
+@pytest.mark.asyncio
+async def test_active_space_is_listed_even_if_the_listing_misses_it(monkeypatch):
+    # get_or_create just made it; a listing that raced it must not drop it.
+    _wire(monkeypatch, space_repo=_SpaceRepo(spaces=[]))
+    body = (await search_router.vectors_status(_AUTH)).model_dump()
+    assert [(s["id"], s["active"]) for s in body["spaces"]] == [("3", True)]

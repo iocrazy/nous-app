@@ -647,5 +647,8 @@ export interface BackfillResult {
 export const backfillEmbeddings = (body: {
   limit: number;
   dry_run: boolean;
+  /** Fill this candidate space (Snowflake id as a string) with its own
+   *  catalog model instead of the active embedder. */
+  space_id?: string;
 }): Promise<BackfillResult> =>
   apiClient.post<BackfillResult>('/api/v1/ai/analyze/backfill-embeddings', body);

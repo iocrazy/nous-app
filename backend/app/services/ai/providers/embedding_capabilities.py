@@ -23,6 +23,11 @@ from app.services.ai.providers.embedding_config import EmbeddingConfig
 PROTOCOL_ARK_MULTIMODAL = "ark-multimodal"
 PROTOCOL_OPENAI_MULTIMODAL = "openai-embeddings-multimodal"
 PROTOCOL_OPENAI_TEXT = "openai-embeddings"
+# ``/embeddings`` with the text inside chat ``messages`` instead of ``input``.
+# WeMM on nous-engine: the gateway applies the model's chat template only to
+# ``messages``; a bare ``input`` is embedded raw (2026-09-15 bake-off: keyword
+# recall 0.22 -> 0.06). Payload: ``embedding_items.build_openai_chat_payload``.
+PROTOCOL_OPENAI_CHAT = "openai-embeddings-chat"
 
 _ALL = frozenset({"text", "image", "video"})
 _TEXT = frozenset({"text"})
@@ -52,6 +57,19 @@ def _engine_text(native_dims: int) -> EmbeddingCapabilities:
     they were called with before this table existed."""
     return EmbeddingCapabilities(
         protocol=PROTOCOL_OPENAI_TEXT,
+        modalities=_TEXT,
+        native_dims=native_dims,
+        matryoshka_dims=(),
+        max_video_frames=0,
+        instruction_style="prefix",
+    )
+
+
+def _engine_chat(native_dims: int) -> EmbeddingCapabilities:
+    """WeMM on nous-engine today: text only, over the chat ``messages`` shape
+    (see :data:`PROTOCOL_OPENAI_CHAT`), no ``dimensions`` field."""
+    return EmbeddingCapabilities(
+        protocol=PROTOCOL_OPENAI_CHAT,
         modalities=_TEXT,
         native_dims=native_dims,
         matryoshka_dims=(),
@@ -92,13 +110,14 @@ _DOUBAO_VISION = EmbeddingCapabilities(
 
 # (lowercase model-id prefix, capabilities); longest prefix wins.
 # Engine rows are text-only until the multimodal endpoint ships — see
-# engine_multimodal_capabilities.
+# engine_multimodal_capabilities. WeMM rows carry text in chat ``messages``
+# (PROTOCOL_OPENAI_CHAT); qwen3-vl rows keep the plain ``input`` shape.
 _TABLE: tuple[tuple[str, EmbeddingCapabilities], ...] = (
     ("doubao-embedding-vision", _DOUBAO_VISION),
-    ("wemm-embedding-2b", _engine_text(2048)),
-    ("wemm-embedding-4b", _engine_text(2560)),
-    ("wemm-embedding-9b", _engine_text(4096)),
-    ("wemm-embedding", _engine_text(2048)),
+    ("wemm-embedding-2b", _engine_chat(2048)),
+    ("wemm-embedding-4b", _engine_chat(2560)),
+    ("wemm-embedding-9b", _engine_chat(4096)),
+    ("wemm-embedding", _engine_chat(2048)),
     ("qwen3-vl-embedding-2b", _engine_text(2048)),
     ("qwen3-vl-embedding-8b", _engine_text(4096)),
     ("qwen3-vl-embedding", _engine_text(2048)),
@@ -123,6 +142,7 @@ def capabilities_for(cfg: EmbeddingConfig) -> EmbeddingCapabilities:
 __all__ = [
     "EmbeddingCapabilities",
     "PROTOCOL_ARK_MULTIMODAL",
+    "PROTOCOL_OPENAI_CHAT",
     "PROTOCOL_OPENAI_MULTIMODAL",
     "PROTOCOL_OPENAI_TEXT",
     "capabilities_for",

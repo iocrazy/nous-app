@@ -627,7 +627,7 @@ async def test_space_spec_reports_ark_protocol_for_doubao() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["wemm-embedding-2b", "Qwen3-VL-Embedding-8B"])
+@pytest.mark.parametrize("model", ["Qwen3-VL-Embedding-8B", "qwen3-embedding-8b"])
 async def test_engine_models_embed_text_over_the_plain_openai_shape(model) -> None:
     """nous-engine's multimodal /v1/embeddings contract is not live yet
     (docs/superpowers/specs/2026-09-16-nous-engine-multimodal-embedding-request.md).
@@ -660,3 +660,92 @@ async def test_engine_models_embed_text_over_the_plain_openai_shape(model) -> No
     kwargs = fake_client.embeddings.create.call_args.kwargs
     assert kwargs["input"] == "a cat on a skateboard"
     assert "dimensions" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["wemm-embedding-2b", "WeMM-Embedding-4B"])
+async def test_wemm_text_is_posted_as_chat_messages_not_input(model) -> None:
+    """2026-09-15: a bare ``input`` skips WeMM's chat template on the engine
+    gateway (keyword recall 0.22 -> 0.06). The text must travel inside
+    ``messages``; no ``input``, no OpenAI client."""
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1/",
+        api_key="sk-engine",
+        model=model,
+        dimensions=0,
+    )
+    posted: dict = {}
+    client = _recording_client(
+        posted, {"data": [{"index": 0, "embedding": [0.4] * EMBEDDING_DIM}]}
+    )
+    with (
+        _patch_cfg(cfg),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+        patch("app.services.ai.providers.embedding_service.AsyncOpenAI") as mk_openai,
+    ):
+        vec, reason = await EmbeddingService().try_embed("a cat on a skateboard")
+
+    assert (vec, reason) == ([0.4] * EMBEDDING_DIM, None)
+    assert posted["url"] == "http://nous-engine:8000/v1/embeddings"
+    assert posted["json"] == {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "a cat on a skateboard"}],
+            }
+        ],
+        "encoding_format": "float",
+    }
+    assert "input" not in posted["json"]
+    assert posted["headers"]["Authorization"] == "Bearer sk-engine"
+    mk_openai.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cfg_constructor_skips_resolution_and_uses_the_given_config() -> None:
+    """A candidate space embeds with ITS catalog row, not the active one."""
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="sk-cand",
+        model="wemm-embedding-2b",
+        dimensions=0,
+    )
+    posted: dict = {}
+    client = _recording_client(
+        posted, {"data": [{"index": 0, "embedding": [0.1] * EMBEDDING_DIM}]}
+    )
+    resolve = AsyncMock(side_effect=AssertionError("must not resolve"))
+    with (
+        patch(
+            "app.services.ai.providers.embedding_service.resolve_embedding_config",
+            resolve,
+        ),
+        patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client),
+    ):
+        svc = EmbeddingService(cfg=cfg)
+        assert svc.model == "wemm-embedding-2b"
+        vec, reason = await svc.try_embed("probe")
+        spec = await svc.space_spec()
+
+    assert reason is None and vec == [0.1] * EMBEDDING_DIM
+    resolve.assert_not_called()
+    assert spec.actual_model == "wemm-embedding-2b"
+    assert spec.protocol == "openai-embeddings-chat" and spec.dims == EMBEDDING_DIM
+
+
+@pytest.mark.asyncio
+async def test_probe_raises_dimension_mismatch_with_the_width() -> None:
+    from app.core.embedding_space import EmbeddingDimensionMismatch
+
+    cfg = EmbeddingConfig(
+        base_url="http://nous-engine:8000/v1",
+        api_key="k",
+        model="wemm-embedding-4b",
+        dimensions=0,
+    )
+    client = _recording_client({}, {"data": [{"index": 0, "embedding": [0.1] * 2560}]})
+    with patch("app.services.ai.providers.embedding_service.httpx.AsyncClient", client):
+        with pytest.raises(EmbeddingDimensionMismatch) as exc:
+            await EmbeddingService(cfg=cfg).probe("probe")
+    assert (exc.value.expected, exc.value.got) == (EMBEDDING_DIM, 2560)

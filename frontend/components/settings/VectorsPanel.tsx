@@ -1,22 +1,34 @@
 // components/settings/VectorsPanel.tsx
 //
 // Settings → AI → Vectors. Two sections:
-//   • Vector Spaces — the current embedding space (model / protocol /
-//     capabilities / dimensions / instruction) from GET /search/vectors/status.
-//   • Retrieval Layers — per-layer coverage, with the semantic layer's
-//     backfill (Dry Run / Run 200) wired to POST /ai/analyze/backfill-embeddings.
+//   • Vector Spaces — the active embedding space (model / protocol /
+//     capabilities / dimensions / instruction) from GET /search/vectors/status,
+//     plus one card per candidate space (VectorSpaceCards): Add Space probes a
+//     catalog embedding model and creates its space, Backfill 200 fills it with
+//     its own model, Switch To This Space makes it active once it covers the
+//     library, Delete removes it (inline confirmation). Add / Switch / Delete
+//     are admin-only (`can_manage`); filling one's own coverage is not.
+//   • Retrieval Layers — per-layer coverage of the ACTIVE space, with the
+//     semantic layer's backfill (Dry Run / Run 200) wired to
+//     POST /ai/analyze/backfill-embeddings.
 //
-// Visual / Camera rows and the `Add Space` button are DELIBERATE disabled
-// placeholders (they arrive with shot indexing and space switching), the same
-// way the asset page's `Send To Canvas` is. Indexing policy and candidate
-// space are not drawn at all yet.
+// Visual / Camera rows are DELIBERATE disabled placeholders (they arrive with
+// shot indexing), the same way the asset page's `Send To Canvas` is.
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { backfillEmbeddings, type BackfillResult } from '../../services/aiService';
+import { backfillEmbeddings, getNousModels, type BackfillResult } from '../../services/aiService';
 import { ApiError } from '../../services/apiClient';
-import { getVectorsStatus, type VectorsStatus } from '../../services/searchService';
+import {
+  activateVectorSpace,
+  createVectorSpace,
+  deleteVectorSpace,
+  getVectorsStatus,
+  type VectorsStatus,
+} from '../../services/searchService';
+import type { NousModelPublic } from '../../types';
+import { AddSpacePicker, CandidateCard, Capabilities, SpaceRow } from './VectorSpaceCards';
 
 // Same ceiling as the backend (BackfillEmbeddingsBody.limit le=200).
 const BACKFILL_BATCH = 200;
@@ -25,14 +37,40 @@ const NUM = new Intl.NumberFormat('en-US');
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 type LoadState = 'loading' | 'ready' | 'failed';
 
+/** The typed body of the production ErrorResponse envelope (`details`). */
+function typedDetails(err: unknown): Record<string, unknown> | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  const details = err.details;
+  return details && typeof details === 'object' ? (details as Record<string, unknown>) : undefined;
+}
+
 /** Typed refusal code from the production ErrorResponse envelope
  *  (`details.code`), never the generic `http_<status>` top-level code. */
 function typedErrorCode(err: unknown): string | undefined {
-  if (!(err instanceof ApiError)) return undefined;
-  const details = err.details;
-  if (!details || typeof details !== 'object') return undefined;
-  const code = (details as { code?: unknown }).code;
+  const code = typedDetails(err)?.code;
   return typeof code === 'string' ? code : undefined;
+}
+
+/** One line for a failed space action (Add / Switch / Delete / candidate
+ *  backfill), from the typed code when there is one. */
+function spaceErrorLine(err: unknown, t: TFn, model?: string): string {
+  const details = typedDetails(err) ?? {};
+  switch (typedErrorCode(err)) {
+    case 'dimension_mismatch':
+      return t('settings.vectors.errorDimensionMismatch', {
+        model: details.model ?? model ?? '',
+        got: details.got,
+        expected: details.expected,
+      });
+    case 'provider_error':
+      return t('settings.vectors.errorProbe', { model: details.model ?? model ?? '' });
+    case 'space_active':
+      return t('settings.vectors.errorSpaceActive');
+    case 'space_catalog_row_missing':
+      return t('settings.vectors.switchNeedsCatalog');
+    default:
+      return errorLine(err, t);
+  }
 }
 
 function errorLine(err: unknown, t: TFn): string {
@@ -83,6 +121,14 @@ export function VectorsPanel() {
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<BackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  // Space switching: one action at a time; its outcome is one line.
+  const [spaceBusy, setSpaceBusy] = useState(false);
+  const [spaceError, setSpaceError] = useState<string | null>(null);
+  const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
+  const [candidateResults, setCandidateResults] = useState<Record<string, BackfillResult>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerModels, setPickerModels] = useState<NousModelPublic[] | null>(null);
+  const [probing, setProbing] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -126,6 +172,71 @@ export function VectorsPanel() {
     }
   };
 
+  /** Run one space action; its failure becomes the section's error line. */
+  const spaceAction = async (fn: () => Promise<void>, model?: string) => {
+    setSpaceBusy(true);
+    setSpaceError(null);
+    setSpaceNotice(null);
+    try {
+      await fn();
+    } catch (err) {
+      console.error('VectorsPanel: space action failed', err);
+      setSpaceError(spaceErrorLine(err, t, model));
+    } finally {
+      setSpaceBusy(false);
+    }
+  };
+
+  const openPicker = async () => {
+    setPickerOpen(true);
+    setPickerModels(null);
+    setSpaceError(null);
+    try {
+      setPickerModels(await getNousModels('embedding'));
+    } catch (err) {
+      console.error('VectorsPanel: failed to load embedding models', err);
+      setPickerModels([]);
+    }
+  };
+
+  const addSpace = (model: NousModelPublic) =>
+    spaceAction(async () => {
+      setProbing(model.name);
+      try {
+        await createVectorSpace(model.name);
+      } finally {
+        setProbing(null);
+      }
+      setPickerOpen(false);
+      setSpaceNotice(t('settings.vectors.spaceAdded', { model: model.display_name }));
+      await loadStatus();
+    }, model.name);
+
+  const backfillCandidate = (spaceId: string) =>
+    spaceAction(async () => {
+      const result = await backfillEmbeddings({ limit: BACKFILL_BATCH, dry_run: false, space_id: spaceId });
+      setCandidateResults((prev) => ({ ...prev, [spaceId]: result }));
+      await loadStatus();
+    });
+
+  const switchTo = (spaceId: string) =>
+    spaceAction(async () => {
+      setStatus(await activateVectorSpace(spaceId));
+      setSpaceNotice(t('settings.vectors.spaceSwitched'));
+    });
+
+  const removeSpace = (spaceId: string) =>
+    spaceAction(async () => {
+      const out = await deleteVectorSpace(spaceId);
+      setCandidateResults((prev) => {
+        const next = { ...prev };
+        delete next[spaceId];
+        return next;
+      });
+      setSpaceNotice(t('settings.vectors.spaceDeleted', { count: NUM.format(out.deleted_vectors) }));
+      await loadStatus();
+    });
+
   if (loadState === 'loading') {
     return <p className="text-sm text-ink-400">{t('settings.vectors.loading')}</p>;
   }
@@ -135,7 +246,24 @@ export function VectorsPanel() {
 
   return (
     <div className="space-y-6" data-testid="vectors-panel">
-      <SpaceSection status={status} t={t} endpointMissing={statusEndpointMissing} />
+      <SpaceSection
+        status={status}
+        t={t}
+        endpointMissing={statusEndpointMissing}
+        busy={spaceBusy}
+        error={spaceError}
+        notice={spaceNotice}
+        candidateResults={candidateResults}
+        pickerOpen={pickerOpen}
+        pickerModels={pickerModels}
+        probing={probing}
+        onOpenPicker={() => void openPicker()}
+        onClosePicker={() => setPickerOpen(false)}
+        onAdd={(m) => void addSpace(m)}
+        onBackfill={(id) => void backfillCandidate(id)}
+        onSwitch={(id) => void switchTo(id)}
+        onDelete={(id) => void removeSpace(id)}
+      />
       <LayersSection
         status={status}
         endpointMissing={statusEndpointMissing}
@@ -153,19 +281,59 @@ interface SpaceSectionProps {
   status: VectorsStatus;
   t: TFn;
   endpointMissing: boolean;
+  busy: boolean;
+  error: string | null;
+  notice: string | null;
+  candidateResults: Record<string, BackfillResult>;
+  pickerOpen: boolean;
+  pickerModels: NousModelPublic[] | null;
+  probing: string | null;
+  onOpenPicker: () => void;
+  onClosePicker: () => void;
+  onAdd: (model: NousModelPublic) => void;
+  onBackfill: (spaceId: string) => void;
+  onSwitch: (spaceId: string) => void;
+  onDelete: (spaceId: string) => void;
 }
 
-function SpaceSection({ status, t, endpointMissing }: SpaceSectionProps) {
+function SpaceSection({
+  status,
+  t,
+  endpointMissing,
+  busy,
+  error,
+  notice,
+  candidateResults,
+  pickerOpen,
+  pickerModels,
+  probing,
+  onOpenPicker,
+  onClosePicker,
+  onAdd,
+  onBackfill,
+  onSwitch,
+  onDelete,
+}: SpaceSectionProps) {
   const space = status.space;
+  const canManage = status.can_manage === true;
+  const spaces = useMemo(() => status.spaces ?? [], [status.spaces]);
+  const candidates = spaces.filter((s) => !s.active);
+  // Catalog names that already have a space: the picker hides them.
+  const taken = useMemo(
+    () => new Set(spaces.map((s) => s.catalog_name).filter((n): n is string => n !== null)),
+    [spaces],
+  );
+  const storeReady = !endpointMissing && status.status !== 'store_missing';
   return (
     <section className="rounded-xl border border-ink-800 bg-ink-900/40 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-ink-100">{t('settings.vectors.title')}</h3>
         <button
           type="button"
-          disabled
-          title={t('settings.vectors.addSpaceSoon')}
-          className="rounded-lg border border-ink-800 px-2.5 py-1 text-xs text-ink-500 cursor-not-allowed"
+          disabled={!canManage || !storeReady || busy || pickerOpen}
+          title={canManage ? undefined : t('settings.vectors.adminOnly')}
+          onClick={onOpenPicker}
+          className="rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:border-ink-800 disabled:text-ink-500"
         >
           {t('settings.vectors.addSpace')}
         </button>
@@ -188,17 +356,7 @@ function SpaceSection({ status, t, endpointMissing }: SpaceSectionProps) {
             <SpaceRow label={t('settings.vectors.provider')}>{space.actual_model}</SpaceRow>
             <SpaceRow label={t('settings.vectors.protocol')}>{space.protocol}</SpaceRow>
             <SpaceRow label={t('settings.vectors.capabilities')}>
-              <span className="flex flex-wrap gap-1">
-                {space.modalities.map((m) => (
-                  <span
-                    key={m}
-                    data-testid={`vector-capability-${m}`}
-                    className="rounded border border-ok-line bg-ok-soft px-1.5 text-xs text-ok"
-                  >
-                    {m}
-                  </span>
-                ))}
-              </span>
+              <Capabilities modalities={space.modalities} />
             </SpaceRow>
             <SpaceRow label={t('settings.vectors.dimensions')}>
               {t('settings.vectors.dimensionsValue', { dims: space.dims })}
@@ -207,16 +365,41 @@ function SpaceSection({ status, t, endpointMissing }: SpaceSectionProps) {
           </dl>
         )}
       </div>
+      {pickerOpen && (
+        <AddSpacePicker
+          t={t}
+          models={pickerModels}
+          taken={taken}
+          probing={probing}
+          onPick={onAdd}
+          onClose={onClosePicker}
+        />
+      )}
+      {candidates.map((c) => (
+        <CandidateCard
+          key={c.id}
+          space={c}
+          t={t}
+          canManage={canManage}
+          busy={busy}
+          lastResult={candidateResults[c.id]}
+          formatResult={(r) => formatBackfillResult(r, t)}
+          onBackfill={onBackfill}
+          onSwitch={onSwitch}
+          onDelete={onDelete}
+        />
+      ))}
+      {notice && (
+        <p className="text-xs text-ok" data-testid="vector-space-notice">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-danger" data-testid="vector-space-error">
+          {error}
+        </p>
+      )}
     </section>
-  );
-}
-
-function SpaceRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="text-ink-500">{label}</dt>
-      <dd className="text-ink-200 break-all">{children}</dd>
-    </>
   );
 }
 

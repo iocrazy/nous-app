@@ -44,6 +44,23 @@ def _is_multimodal(model: str, base_url: str) -> bool:
     return "multimodal" in (base_url or "").lower() or "vision" in (model or "").lower()
 
 
+def platform_embedding_config(
+    provider_cfg: Dict[str, Any], actual_model: str
+) -> EmbeddingConfig:
+    """An :class:`EmbeddingConfig` from a ``resolve_platform_model`` hit
+    (``(provider, cfg, actual_model)``'s last two) — the one shape both the
+    active resolution and a candidate space build."""
+    base = provider_cfg.get("base_url") or ""
+    return EmbeddingConfig(
+        base_url=base,
+        api_key=provider_cfg.get("api_key") or "",
+        model=actual_model,
+        dimensions=0,
+        multimodal=_is_multimodal(actual_model, base),
+        source="platform",
+    )
+
+
 async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
     """Resolve the active embedder, admin-module-config first.
 
@@ -70,15 +87,7 @@ async def resolve_embedding_config() -> Optional["EmbeddingConfig"]:
             platform = None
         if platform is not None:
             _provider, cfg, actual_model = platform
-            base = cfg.get("base_url") or ""
-            return EmbeddingConfig(
-                base_url=base,
-                api_key=cfg.get("api_key") or "",
-                model=actual_model,
-                dimensions=0,
-                multimodal=_is_multimodal(actual_model, base),
-                source="platform",
-            )
+            return platform_embedding_config(cfg, actual_model)
 
     # 2. Manual admin config (base_url + model + api_key typed directly).
     if gov.base_url and gov.model and gov.api_key_present:

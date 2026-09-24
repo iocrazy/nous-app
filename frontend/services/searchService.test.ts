@@ -8,6 +8,9 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  activateVectorSpace,
+  createVectorSpace,
+  deleteVectorSpace,
   findSimilarVideos,
   hybridSearch,
   localSearch,
@@ -318,5 +321,40 @@ describe('localSearch (pure)', () => {
   it('reports local search_type', () => {
     const result = localSearch('cat', library);
     expect(result.search_type).toBe('local');
+  });
+});
+
+describe('vector space switching', () => {
+  // Snowflake past 2^53: must travel as the exact string, never a number.
+  const SPACE_ID = '1234567890123456789';
+
+  it('createVectorSpace POSTs the catalog model name', async () => {
+    stubResponse({ id: SPACE_ID, actual_model: 'wemm-embedding-2b', protocol: 'openai-embeddings-chat', dims: 2048, modalities: ['text'], instruction_version: 'en_keyword_v1' });
+    const spy = vi.mocked(globalThis.fetch);
+    const out = await createVectorSpace('nous-wemm-embedding-2b');
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.test/api/v1/search/vectors/spaces');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ model_name: 'nous-wemm-embedding-2b' });
+    expect(out.id).toBe(SPACE_ID);
+  });
+
+  it('activateVectorSpace POSTs to the space id path', async () => {
+    stubResponse({ status: 'ok', space: null, layers: [], spaces: [], can_manage: true });
+    const spy = vi.mocked(globalThis.fetch);
+    await activateVectorSpace(SPACE_ID);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.test/api/v1/search/vectors/spaces/${SPACE_ID}/activate`);
+    expect(init.method).toBe('POST');
+  });
+
+  it('deleteVectorSpace DELETEs the space id path', async () => {
+    stubResponse({ deleted: true, space_id: SPACE_ID, deleted_vectors: 187 });
+    const spy = vi.mocked(globalThis.fetch);
+    const out = await deleteVectorSpace(SPACE_ID);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.test/api/v1/search/vectors/spaces/${SPACE_ID}`);
+    expect(init.method).toBe('DELETE');
+    expect(out.deleted_vectors).toBe(187);
   });
 });

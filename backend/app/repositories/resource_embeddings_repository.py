@@ -273,6 +273,22 @@ class ResourceEmbeddingsRepository:
             .where(Resources.media_id.isnot(None))
         )
 
+    async def count_in_space(self, space_id: int) -> int:
+        """Vectors of every user and layer in one space — what deleting the
+        space would cascade away."""
+        stmt = (
+            select(func.count())
+            .select_from(ResourceEmbeddings)
+            .where(ResourceEmbeddings.space_id == space_id)
+        )
+        try:
+            async with read_scope() as session:
+                return int((await session.execute(stmt)).scalar_one() or 0)
+        except ProgrammingError as exc:
+            if is_store_missing(exc):
+                raise _store_missing("resource_embeddings") from exc
+            raise
+
     async def coverage(
         self, *, user_id: str, space_id: int, layer: str
     ) -> tuple[int, int]:

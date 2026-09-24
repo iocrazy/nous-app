@@ -103,3 +103,21 @@ def test_parse_openai_response_rejects_missing_embedding() -> None:
         parse_openai_embeddings_response({"data": [{"index": 0}]}, expected=1)
     with pytest.raises(ValueError):
         parse_openai_embeddings_response({}, expected=1)
+
+
+def test_openai_chat_payload_wraps_the_text_in_one_user_message() -> None:
+    from app.services.ai.providers.embedding_items import build_openai_chat_payload
+
+    assert build_openai_chat_payload("wemm-embedding-2b", "a red car") == {
+        "model": "wemm-embedding-2b",
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "a red car"}]}
+        ],
+        "encoding_format": "float",
+    }
+
+
+def test_openai_chat_payload_has_no_input_key() -> None:
+    from app.services.ai.providers.embedding_items import build_openai_chat_payload
+
+    assert "input" not in build_openai_chat_payload("m", "t")

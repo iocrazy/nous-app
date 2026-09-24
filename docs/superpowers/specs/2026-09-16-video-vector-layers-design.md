@@ -48,6 +48,8 @@
 1. **协议** `openai-embeddings-multimodal`：一个端点，输入是内容项列表 `{type: text | image_url | video_url | video_frames}`，可带 `instructions`（文本前缀方式，厂商字段不依赖）。doubao `/embeddings/multimodal` 与 nous-engine 网关 `/v1/embeddings` 都归一到它。现有 `EmbeddingService` 只会发 `input` 字符串，要加多模态适配器。
 2. **能力声明**（`mediahub_models` 新增 `capabilities jsonb`，或从引擎 `/v1/models` 自动读）：`modalities: [text, image, video]`，`native_dims`，`matryoshka_dims`，`max_video_frames`，`instruction_style`。某层需要的模态不在声明里 → 该层 `unavailable`，不报错不静默。
 3. **向量空间** `embedding_spaces(id, model_name, actual_model, dims, instruction_version, modalities, created_at)`：每张向量表带 `space_id`。换模型 = 新空间 + 全量重嵌；查询只打当前空间；重嵌期间新旧并存，跨空间绝不比分数。
+   - **空间切换（2026-09-24）**：「当前空间」= admin 治理设置 `ai_module.embedding.model` 指向的目录行，别处不标记 active。Settings → AI → Vectors 的 **Add Space** 选一行目录 embedding 模型 → 后端先用该行自己的配置嵌一次 `"probe"`，宽度 ≠ `EMBEDDING_DIM` 返回 422 `dimension_mismatch`（带 `expected` / `got`）、provider 不通返回 502 `provider_error`，都不建行 → 建出候选空间；候选空间用回填端点的 `space_id` 参数、以**自己的目录行**（按 `actual_model` 反查）独立回填；**Switch** 把该行 `name` 写进 `ai_module.embedding.model`；**Delete** 只删非当前空间，FK 级联带走全部用户的向量。三个写操作都要 admin（`AdminAuthDep`）。端点与协议见 `app/services/library/embedding_spaces.py` 与 `search_router`。
+   - **WeMM 走 chat `messages` 形态**（协议 `openai-embeddings-chat`）：`POST <base_url>/embeddings`，body `{"model", "messages": [{"role": "user", "content": [{"type": "text", "text": …}]}], "encoding_format": "float"}`。网关只对 `messages` 套 chat template；裸 `input` 关键词召回 0.22→0.06（09-15 实测）。
 
 **维度统一到 2048**：pgvector 0.8 的 HNSW 只支持 `vector` ≤ 2000 维、`halfvec` ≤ 4000 维。所以向量列一律 `halfvec(2048)`：doubao、WeMM-2B 原生 2048；4B/9B/Qwen3-VL-Embedding 用 matryoshka 截到 2048 再归一化（引擎侧的 `dimensions` 参数）。现有 `resource_analysis.content_embedding vector(2048)` 正因超过 2000 维而**建不了索引**，迁移到新表时一并解决。
 
@@ -180,6 +182,7 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 | PR 5b | 第四个意图 `shots`：fetch 字段 + Pipeline 标签 + 插件 popup + 快捷指令页 + 工具函数镜像 | 依赖 PR 3 |
 | 插件 v1.5 | 播放器工具栏 nous 按钮（一键 Push + 迷你面板 + busy/done 态） | 依赖 PR 5b |
 | PR 6 | 搜索结果与视频详情 UI | — |
+| 空间切换 | Add Space（探测宽度）/ 候选空间独立回填 / Switch（写治理设置）/ Delete；WeMM chat `messages` 协议 | 本 PR；WeMM-2B 待 nous-engine 部署 |
 | 二期 | VLM 镜头卡 facet、转录层、非视频资源 | — |
 
 ## 8. 开放问题（不阻塞）
@@ -193,6 +196,11 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 - 长视频（>1 h）按封顶 600 镜头会丢细节；封顶值随体量再调。
 - 精排 provider 缺失时只有向量分数排序，不做本地兜底重排。
 - 空间并存期间存储翻倍，未做自动清理。
+- 候选空间回填是同步的（每次 200 条，复用回填端点），没有 DBOS 后台任务、没有 Pause；画板上那两样未做。WeMM 本地 200 行约 10 秒，量级内可接受。
+- Switch 只在前端要求「本人覆盖 100%」；覆盖率按用户算，后端不校验（管理员自己的覆盖说明不了别人的）。切换后其他用户未回填的资源在新空间里搜不到，直到各自回填。
+- 切换后旧空间不自动删除，存储翻倍直到管理员手动 Delete。
+- 空间 id 进程内缓存 60 秒（`semantic_store._SPACE_ID_TTL_S`）：删除空间的进程立刻忘掉，其他 worker 最多 60 秒后重新解析。
+- WeMM chat 形态未在真栈验过：nous-engine 上目前只有 4B（2560 维、无 2048 档），加它会 422；2B 部署后才能端到端走一遍。
 - `source_hash` 变化（文档版本 bump 或输入变动）目前不会触发重嵌：回填只挑「当前空间里没有行」的资源；hash 只在 `analyze_l1` 重跑（upsert 覆盖）与同一次回填内幂等两处生效。「hash 过期即重嵌」留给下一版。
 
 ## 附录 A：基准数据（2026-09-15/16）

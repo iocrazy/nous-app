@@ -1107,6 +1107,9 @@ _backfill_clock = time.monotonic
 class BackfillEmbeddingsBody(BaseModel):
     limit: int = Field(default=20, ge=1, le=_BACKFILL_MAX_LIMIT)
     dry_run: bool = False
+    #: Fill this (candidate) space with its own catalog model instead of the
+    #: active embedder. A string: Snowflake ids lose precision in JS.
+    space_id: str | None = Field(default=None, pattern=r"^[0-9]{1,20}$")
 
 
 def _skip(resource_id: int, reason: str) -> dict:
@@ -1169,6 +1172,11 @@ async def backfill_embeddings(
     or null when every row was attempted. ``space.id`` is a string
     (Snowflake). ``dispatched`` / ``in_flight`` are kept, always empty / 0,
     so readers of the old shape keep parsing.
+
+    ``space_id`` (optional, string) fills that CANDIDATE space instead, with
+    the embedder of its own catalog row (Settings -> Vectors, before Switch);
+    404 ``space_not_found`` / 409 ``space_catalog_row_missing`` /
+    ``catalog_model_disabled`` when it cannot.
     """
     from app.core.embedding_space import SEMANTIC_LAYER
     from app.repositories import embedding_space_repository as space_mod
@@ -1178,19 +1186,21 @@ async def backfill_embeddings(
     from app.services.library.embedding_document import DOC_VERSION
 
     opts = body or BackfillEmbeddingsBody()
-    # Typed refusal, not a silent no-op.
-    if await embedding_config.resolve_embedding_config() is None:
-        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
-    embedder = emb_svc_mod.EmbeddingService()
-    spec = await embedder.space_spec()
-    if spec is None:
-        # Configured but no client could be built (bad base_url etc.); the
-        # ERROR log has the provider detail.
-        raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
-
     repo = emb_mod.get_resource_embeddings_repository()
     try:
-        space = await space_mod.get_embedding_space_repository().get_or_create(spec)
+        if opts.space_id is not None:
+            space, embedder = await _candidate_space_and_embedder(opts.space_id)
+        else:
+            # Typed refusal, not a silent no-op.
+            if await embedding_config.resolve_embedding_config() is None:
+                raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+            embedder = emb_svc_mod.EmbeddingService()
+            spec = await embedder.space_spec()
+            if spec is None:
+                # Configured but no client could be built (bad base_url etc.);
+                # the ERROR log has the provider detail.
+                raise HTTPException(status_code=409, detail=_EMBEDDER_UNCONFIGURED)
+            space = await space_mod.get_embedding_space_repository().get_or_create(spec)
         rows, total_missing = await repo.pending_for_user(
             user_id=auth.user_id,
             space_id=space["id"],
@@ -1240,6 +1250,27 @@ async def backfill_embeddings(
         "remaining": max(total_missing - len(reembedded) - rehashed, 0),
         "aborted_reason": aborted_reason,
     }
+
+
+async def _candidate_space_and_embedder(space_id: str):
+    """``(space row, its own embedder)`` for a ``space_id`` backfill: the
+    vectors land in THAT space, embedded by the catalog row serving its
+    ``actual_model`` — never by the active governance embedder. Typed 404 /
+    409 when the space or its catalog row is gone."""
+    from app.repositories import embedding_space_repository as space_mod
+    from app.services.library import embedding_spaces
+
+    space = await space_mod.get_embedding_space_repository().get(int(space_id))
+    if space is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "space_not_found", "message": "No such embedding space."},
+        )
+    try:
+        embedder = await embedding_spaces.service_for_space(space)
+    except embedding_spaces.SpaceCatalogError as e:
+        raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e)})
+    return space, embedder
 
 
 async def _embed_backfill_rows(

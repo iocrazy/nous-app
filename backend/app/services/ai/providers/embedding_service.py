@@ -3,13 +3,15 @@
 Resolution = admin per-module governance ``ai_module.embedding.*`` first
 (same source as TopicEmbeddingService), falling back to ``graph_embedder_*``.
 No env reads. Embeds a group of content items (text / image / video) into one
-vector over three wire shapes, chosen by the code-declared capability table
-(``embedding_capabilities``): the plain OpenAI ``/v1/embeddings``, Volcengine
+vector over four wire shapes, chosen by the code-declared capability table
+(``embedding_capabilities``): the plain OpenAI ``/v1/embeddings``, the same
+path with the text in chat ``messages`` (WeMM on nous-engine), Volcengine
 Ark's ``/embeddings/multimodal`` and the OpenAI-compatible multimodal
 ``/v1/embeddings`` of nous-engine (payloads in ``embedding_items``). The last
-one is wired but no table row routes to it yet: engine models stay on the
-plain text shape until that endpoint ships (see
-``engine_multimodal_capabilities``). When unconfigured, embedding is disabled.
+one is wired but no table row routes to it yet: engine models stay text-only
+until that endpoint ships (see ``engine_multimodal_capabilities``). When
+unconfigured, embedding is disabled. ``EmbeddingService(cfg=...)`` skips the
+resolution and embeds with a given config (a candidate space).
 """
 
 from typing import List, Optional, Sequence
@@ -26,6 +28,7 @@ from app.core.embedding_space import (
 )
 from app.services.ai.providers.embedding_capabilities import (
     PROTOCOL_ARK_MULTIMODAL,
+    PROTOCOL_OPENAI_CHAT,
     PROTOCOL_OPENAI_MULTIMODAL,
     EmbeddingCapabilities,
     capabilities_for,
@@ -38,6 +41,7 @@ from app.services.ai.providers.embedding_items import (
     ContentItem,
     TextItem,
     build_ark_payload,
+    build_openai_chat_payload,
     build_openai_multimodal_payload,
     modality_of,
     parse_ark_response,
@@ -47,6 +51,14 @@ from app.services.ai.providers.embedding_items import (
 _MAX_CHARS = 16000
 
 EMBED_HTTP_TIMEOUT_S = 30.0
+
+# Wire shapes posted directly via httpx; every other protocol goes through
+# the OpenAI client's plain /v1/embeddings.
+_HTTPX_PROTOCOLS = (
+    PROTOCOL_ARK_MULTIMODAL,
+    PROTOCOL_OPENAI_MULTIMODAL,
+    PROTOCOL_OPENAI_CHAT,
+)
 
 # Stable classifiers for try_embed reasons. The part after the colon is raw
 # provider/SDK text (URLs, response bodies) that belongs in logs, not in a
@@ -82,12 +94,18 @@ def classify_embed_reason(reason: Optional[str]) -> Optional[str]:
 class EmbeddingService:
     """Service for generating text embeddings."""
 
-    def __init__(self) -> None:
+    def __init__(self, cfg: Optional[EmbeddingConfig] = None) -> None:
+        """``cfg`` given = embed with exactly that config (a candidate space's
+        catalog row, ``embedding_spaces.service_for_space``) and never read
+        the admin governance; omitted = resolve the ACTIVE embedder lazily."""
         self.client: Optional[AsyncOpenAI] = None
         self.model: str = ""
         self._cfg: Optional[EmbeddingConfig] = None
         self._caps: Optional[EmbeddingCapabilities] = None
         self._loaded = False
+        if cfg is not None:
+            self._apply(cfg)
+            self._loaded = True
 
     async def _ensure_client(self) -> None:
         """Lazily resolve the embedder config from system_settings (once)."""
@@ -103,13 +121,16 @@ class EmbeddingService:
                 "graph_embedder_*); embedding generation will be disabled"
             )
             return
+        self._apply(cfg)
+
+    def _apply(self, cfg: EmbeddingConfig) -> None:
         caps = capabilities_for(cfg)
         self._cfg = cfg
         self._caps = caps
         self.model = cfg.model
         # The OpenAI client only serves the standard /v1/embeddings shape;
-        # both multimodal shapes are posted directly via httpx.
-        if caps.protocol not in (PROTOCOL_ARK_MULTIMODAL, PROTOCOL_OPENAI_MULTIMODAL):
+        # the other shapes are posted directly via httpx.
+        if caps.protocol not in _HTTPX_PROTOCOLS:
             # Bounded like the multimodal sibling (30s): the SDK default is
             # 600s × 2 retries, and since hybrid search embeds the query this
             # client now sits in front of a user typing in a search box.
@@ -162,6 +183,12 @@ class EmbeddingService:
             return await self._embed_items_checked(items)
         except EmbeddingDimensionMismatch as e:
             return None, f"dimension_mismatch: {e}"
+
+    async def probe(self, text: str) -> tuple[Optional[List[float]], Optional[str]]:
+        """:meth:`try_embed`, except a wrong width RAISES
+        :class:`EmbeddingDimensionMismatch` (with ``expected`` / ``got``) —
+        for the Add Space probe, which has to report the width it got."""
+        return await self._embed_checked(text)
 
     async def space_spec(self) -> Optional[SpaceSpec]:
         """The space this embedder's vectors live in; ``None`` when no vector
@@ -264,9 +291,16 @@ class EmbeddingService:
             )
             body = await self._post_json(url, payload)
             return parse_openai_embeddings_response(body, expected=1)[0]
+        text = "\n\n".join(item.text for item in items if isinstance(item, TextItem))
+        if protocol == PROTOCOL_OPENAI_CHAT:
+            # Text only (the modality check guarantees it); fused like below.
+            url = cfg.base_url.rstrip("/") + "/embeddings"
+            body = await self._post_json(
+                url, build_openai_chat_payload(cfg.model, text)
+            )
+            return parse_openai_embeddings_response(body, expected=1)[0]
         # Plain OpenAI /v1/embeddings: text only (the modality check above
         # guarantees it). Several text items fuse into one input string.
-        text = "\n\n".join(item.text for item in items if isinstance(item, TextItem))
         response = await self.client.embeddings.create(
             model=self.model, input=text, encoding_format="float"
         )
