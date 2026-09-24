@@ -37,6 +37,13 @@ exactly that), so calling it broken would be the "探针够不着 ≠ 目标是�
 mistake that CLAUDE.md records from the dead-domain deploy probe. What the probe
 genuinely knows is that it did not confirm anything — and the existing
 three-state vocabulary already has a word for that.
+
+SCOPE SINCE 2026-09-24
+----------------------
+For ``actual_provider='nous'`` this list-membership branch is now the ACTIVE
+path only (the admin Test, ``allow_costly=True``). The hourly poll reads the
+engine's ``GET /v1/models/{id}`` readiness instead, which answers "is it
+loaded" directly -- see test_nous_engine_passive_probe.py.
 """
 
 from __future__ import annotations
@@ -77,7 +84,7 @@ def _connection(success=True, models=None, error=None):
 @pytest.mark.asyncio
 async def test_model_present_in_the_list_is_ok():
     with _connection(models=["moss-asr", "qwen3-8-27b"]):
-        result = await probe_nous_model(_asr_row())
+        result = await probe_nous_model(_asr_row(), allow_costly=True)
     assert result["ok"] is True
     assert probe_result_status(result) == "ok"
 
@@ -90,7 +97,7 @@ async def test_endpoint_answers_but_does_not_list_this_model_is_not_probed():
     a model the server had just declined to mention.
     """
     with _connection(models=["qwen3-8-27b"]):
-        result = await probe_nous_model(_asr_row())
+        result = await probe_nous_model(_asr_row(), allow_costly=True)
     assert result["ok"] is False
     assert probe_result_status(result) == "not_probed"
     # The reason has to name both sides or it is not actionable: which model was
@@ -105,7 +112,7 @@ async def test_empty_model_list_is_not_probed_not_ok():
     the strongest form of success — `success=True, models=[]` sailed through.
     """
     with _connection(models=[]):
-        result = await probe_nous_model(_asr_row())
+        result = await probe_nous_model(_asr_row(), allow_costly=True)
     assert probe_result_status(result) == "not_probed"
 
 
@@ -129,6 +136,6 @@ async def test_a_provider_with_no_model_catalog_stays_ok():
 async def test_failed_call_is_still_a_plain_failure():
     """Unchanged: a call that errored is `fail`, never the softer `not_probed`."""
     with _connection(success=False, error="Unknown provider: nous"):
-        result = await probe_nous_model(_asr_row())
+        result = await probe_nous_model(_asr_row(), allow_costly=True)
     assert probe_result_status(result) == "fail"
     assert "Unknown provider" in (result.get("error") or "")

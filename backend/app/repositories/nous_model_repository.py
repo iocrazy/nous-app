@@ -334,7 +334,7 @@ class NousModelRepository:
         connectivity probe is not an edit).
 
         ``status`` is one of ``PROBE_STATUSES`` — ``ok`` / ``fail`` /
-        ``not_probed`` (migration 428). No check here: the DB CHECK is the one
+        ``idle`` / ``not_probed`` (migrations 428 + 503). No check here: the DB CHECK is the one
         enforcement point, and callers derive the value from
         ``probe_result_status`` rather than spelling it out.
 

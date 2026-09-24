@@ -38,12 +38,14 @@ interface NousModel {
   // Persisted connectivity-test result (survives navigation).
   //   ok         reachable
   //   fail       probed and failed
+  //   idle       local nous-engine model authorized but not loaded right now;
+  //              it loads on the first request — NOT a fault (migration 503)
   //   not_probed the backend probe has no protocol for this model TYPE
   //              (image / video / tts) and checked nothing — NOT a fault
   //   null       never probed
   // Before migration 428 the unprobeable types were recorded as `fail`, which
   // is why this page carried three permanent red lights for healthy models.
-  last_test_status?: 'ok' | 'fail' | 'not_probed' | null
+  last_test_status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
   last_test_detail?: string | null
   last_tested_at?: string | null
   // Does RunRecorder have an ai_model_prices row to snapshot for this model?
@@ -195,15 +197,20 @@ function timeAgo(iso?: string | null): string {
 }
 
 // Provider health = aggregate of its models' persisted results: any fail → red,
-// else any ok → green, else any not_probed → neutral, else gray (untested).
+// else any ok → green, else any idle → gray "Not loaded", else any not_probed
+// → neutral, else pale (untested).
 //
 // `not_probed` ranks below `ok` on purpose: a provider with one working LLM and
-// one unprobeable image model is reachable, and its dot should say so.
+// one unprobeable image model is reachable, and its dot should say so. `idle`
+// is neither: an authorized-but-cold local model is healthy (it loads on the
+// first request), so it never drags the card red, but nothing is confirmed
+// loaded either, so it does not claim green.
 function aggregateStatus(
   models: NousModel[],
-): 'ok' | 'fail' | 'not_probed' | undefined {
+): 'ok' | 'fail' | 'idle' | 'not_probed' | undefined {
   if (models.some((m) => m.last_test_status === 'fail')) return 'fail'
   if (models.some((m) => m.last_test_status === 'ok')) return 'ok'
+  if (models.some((m) => m.last_test_status === 'idle')) return 'idle'
   if (models.some((m) => m.last_test_status === 'not_probed')) return 'not_probed'
   return undefined
 }
@@ -229,12 +236,20 @@ function failingModels(models: NousModel[]): NousModel[] {
 const DOT_COLORS: Record<string, string> = {
   ok: '#00b42a',
   fail: '#f53f3f',
+  idle: 'var(--color-text-3)',
   not_probed: 'var(--color-text-4)',
 }
 const DOT_LABELS: Record<string, string> = {
   ok: 'Reachable',
   fail: 'Failed',
+  idle: 'Not loaded',
   not_probed: 'Not probed',
+}
+// Replaces the persisted detail in the tooltip where the label alone would
+// read like a fault. The hourly poll writes `idle` from nous-engine's readiness
+// read, which never loads a model; the admin Test loads it for real.
+const DOT_HINTS: Record<string, string> = {
+  idle: 'Authorized on nous-engine; the model is not loaded right now and will load on the first request',
 }
 
 // "No price row" is its own tag, not a StatusDot state: the probe answers
@@ -298,14 +313,15 @@ function StatusDot({
   detail,
   at,
 }: {
-  status?: 'ok' | 'fail' | 'not_probed' | null
+  status?: 'ok' | 'fail' | 'idle' | 'not_probed' | null
   detail?: string | null
   at?: string | null
 }) {
   const color = (status && DOT_COLORS[status]) || 'var(--color-fill-3)'
   const label = (status && DOT_LABELS[status]) || 'Not tested'
   const ago = timeAgo(at)
-  const title = [label, detail || undefined, ago ? `tested ${ago}` : undefined]
+  const hint = status ? DOT_HINTS[status] : undefined
+  const title = [label, hint || detail || undefined, ago ? `tested ${ago}` : undefined]
     .filter(Boolean)
     .join(' · ')
   return (

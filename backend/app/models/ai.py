@@ -322,7 +322,7 @@ class NousModels(Base):
         ),
         CheckConstraint(
             "last_test_status IS NULL OR last_test_status IN "
-            "('ok', 'fail', 'not_probed')",
+            "('ok', 'fail', 'idle', 'not_probed')",
             name="nous_models_last_test_status_check",
         ),
         CheckConstraint(
