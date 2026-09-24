@@ -66,9 +66,9 @@ from app.repositories.run_deliverables_repository import (
 from app.schemas.assets import AssetCreate, AttachFileRequest
 from app.schemas.generated import (
     BatchRequest,
-    BatchResult,
     CleanupRequest,
-    CleanupResponse,
+    GeneratedBatchResult,
+    GeneratedCleanupResponse,
     GeneratedItem,
     SaveAsAssetRequest,
     derive_title,
@@ -725,7 +725,9 @@ class GeneratedInboxService:
                 failed.append({"id": gen_id, "code": exc.code, "detail": exc.detail})
             else:
                 ok.append(gen_id)
-        return BatchResult.model_validate({"ok": ok, "failed": failed}).model_dump()
+        return GeneratedBatchResult.model_validate(
+            {"ok": ok, "failed": failed}
+        ).model_dump()
 
     async def cleanup(self, req: CleanupRequest, scope_id: int) -> dict[str, Any]:
         """Purge old unreviewed generations. Dry run by default (the schema's
@@ -750,7 +752,7 @@ class GeneratedInboxService:
         truncated = len(rows) >= CLEANUP_SCAN_LIMIT
         if req.dry_run:
             sample = await self._decorate(rows[:_CLEANUP_SAMPLE], str(scope_id))
-            return CleanupResponse(
+            return GeneratedCleanupResponse(
                 dry_run=True,
                 count=len(rows),
                 sample=sample,
@@ -761,7 +763,7 @@ class GeneratedInboxService:
         for row in rows:
             if await self.gen_repo.delete(int(row["id"]), int(scope_id)):
                 deleted += 1
-        return CleanupResponse(
+        return GeneratedCleanupResponse(
             dry_run=False,
             count=len(rows),
             sample=[],

@@ -17,6 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.assets import AssetType, SnowflakeId
 
+# Every response model below is dumped in full (``model_dump(mode="json")``)
+# before it reaches the wire, so a field with a default is still ALWAYS
+# present. Without this config the OpenAPI output schema would mark those
+# fields optional, and the generated TypeScript would read ``mime?: string |
+# null`` — a key the frontend would have to guard that is never missing.
+_ALWAYS_EMITTED = ConfigDict(json_schema_serialization_defaults_required=True)
+
 # ``deleted`` exists as a state but is not offered as a filter tab; it is here
 # because a row can be read back after a delete (e.g. in a cleanup sample).
 ReviewState = Literal["unreviewed", "saved", "in_assets", "deleted"]
@@ -95,6 +102,8 @@ class GeneratedSource(BaseModel):
     Snowflake BIGINTs.
     """
 
+    model_config = _ALWAYS_EMITTED
+
     kind: str
     label: str
     canvas_id: Optional[str] = None
@@ -108,6 +117,8 @@ class GeneratedSource(BaseModel):
 
 
 class GeneratedItem(BaseModel):
+    model_config = _ALWAYS_EMITTED
+
     id: str
     scope_id: str
     media_kind: str
@@ -128,11 +139,13 @@ class GeneratedItem(BaseModel):
 
 
 class GeneratedPage(BaseModel):
+    model_config = _ALWAYS_EMITTED
+
     items: List[GeneratedItem] = Field(default_factory=list)
     next_cursor: Optional[str] = None
 
 
-class CountsResponse(BaseModel):
+class GeneratedCounts(BaseModel):
     """Tab counters. ``deleted`` is deliberately not on the wire — there is no
     deleted tab, and shipping a count for a tab that does not exist invites a
     UI that reads it."""
@@ -192,7 +205,9 @@ class CleanupRequest(BaseModel):
     dry_run: bool = True
 
 
-class CleanupResponse(BaseModel):
+class GeneratedCleanupResponse(BaseModel):
+    model_config = _ALWAYS_EMITTED
+
     dry_run: bool
     count: int
     sample: List[GeneratedItem] = Field(default_factory=list)
@@ -204,15 +219,37 @@ class CleanupResponse(BaseModel):
     truncated: bool = False
 
 
-class BatchFailure(BaseModel):
+class GeneratedBatchFailure(BaseModel):
     id: str
     code: str
     detail: str
 
 
-class BatchResult(BaseModel):
+class GeneratedBatchResult(BaseModel):
     """Per-id outcome. Partial failure is reported, not collapsed into a 500 —
     "12 of 20 saved" has to survive the response boundary."""
 
+    model_config = _ALWAYS_EMITTED
+
     ok: List[str] = Field(default_factory=list)
-    failed: List[BatchFailure] = Field(default_factory=list)
+    failed: List[GeneratedBatchFailure] = Field(default_factory=list)
+
+
+class GeneratedSaveAsAssetResult(BaseModel):
+    """``POST /generated/{id}/save-as-asset``: the card after the attach, plus
+    the asset it landed in and the promoted resource (both Snowflake strings).
+
+    ``POST /resources/{id}/save-as-asset`` answers the same three keys plus
+    ``generated_id`` — see ``ResourceSaveAsAssetResult``."""
+
+    generation: GeneratedItem
+    asset_id: str
+    resource_id: str
+
+
+class GeneratedDeleted(BaseModel):
+    """``DELETE /generated/{id}``. Always ``true``: a row that is not in the
+    caller's scope is a typed 404 ``generation_not_found``, never
+    ``deleted: false``."""
+
+    deleted: bool

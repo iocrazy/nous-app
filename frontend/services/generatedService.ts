@@ -16,91 +16,53 @@
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
 import { envelopeFetch, GeneratedApiError, jsonHeaders } from './apiEnvelope';
-import type { AssetType } from '../components/assets/assetSlots';
+import type {
+  GeneratedBatchAction,
+  GeneratedBatchFailure,
+  GeneratedBatchResult,
+  GeneratedCleanupResult,
+  GeneratedCounts,
+  GeneratedItem,
+  GeneratedNewAssetSpec,
+  GeneratedPage,
+  GeneratedReviewState,
+  GeneratedSaveAsAssetResult,
+  GeneratedSource,
+  ResourceSaveAsAssetResult,
+} from '../types/api';
 
 export { GeneratedApiError };
 
-// ─── Types (mirror app/schemas/generated.py, with string ids) ────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 /**
  * `deleted` is a real state a row can be read back in (a cleanup sample), but
  * it is NOT one of the filter tabs — see {@link GeneratedFilterState}.
  */
-export type ReviewState = 'unreviewed' | 'saved' | 'in_assets' | 'deleted';
+export type ReviewState = GeneratedReviewState;
 
 /** What `?state=` accepts. `all` is the router's alias for "no filter". */
 export type GeneratedFilterState = 'unreviewed' | 'saved' | 'in_assets' | 'all';
 
-export type BatchAction = 'save' | 'save_as_asset' | 'delete';
+export type BatchAction = GeneratedBatchAction;
 
-/**
- * Where a generation came from, already described for display.
- * `deep_link` is null for kinds with no route today (shot, chat) — the backend
- * returns null rather than inventing a URL, so the UI must branch on it.
- */
-export interface GeneratedSource {
-  kind: string;
-  label: string;
-  canvas_id: string | null;
-  node_id: string | null;
-  shot_id: string | null;
-  conversation_id: string | null;
-  deep_link: string | null;
-  /**
-   * 3a run provenance. Filled only for `agent_run` rows that are actually in
-   * `run_deliverables`; null for everything else, historical rows included —
-   * a card with no provenance is normal history, not a fault.
-   *
-   * Ids are STRINGS: they are Snowflake BIGINTs, and a JS number above 2^53
-   * loses the low bits.
-   *
-   * ⚠️ `issue_id` is NOT a link. The issue route is keyed by the issue KEY and
-   * needs a team, so the only URL that goes anywhere is the `deep_link` the
-   * backend built; these three fields say WHICH run, for the reader and the
-   * log.
-   */
-  issue_id: string | null;
-  run_id: string | null;
-  step: number | null;
-}
+// Response shapes come from the backend OpenAPI (`types/api.ts`); the
+// request bodies below stay hand-written because the generator marks every
+// defaulted field required, which is right for a response and wrong for a
+// body the server fills in.
+//
+// `GeneratedSource.deep_link` is null for kinds with no route today (shot,
+// chat) — branch on it. Its `issue_id` / `run_id` / `step` are 3a run
+// provenance, null for everything that is not a registered `agent_run`
+// deliverable; `issue_id` is NOT a link (the issue route is keyed by KEY).
+export type { GeneratedSource, GeneratedItem, GeneratedPage, GeneratedCounts };
+export type BatchFailure = GeneratedBatchFailure;
+export type BatchResult = GeneratedBatchResult;
+export type CleanupResult = GeneratedCleanupResult;
+export type SaveAsAssetResult = GeneratedSaveAsAssetResult;
+export type SaveResourceAsAssetResult = ResourceSaveAsAssetResult;
 
-export interface GeneratedItem {
-  id: string;
-  scope_id: string;
-  media_kind: string;
-  mime: string | null;
-  prompt: string | null;
-  model: string | null;
-  provider: string | null;
-  origin_kind: string;
-  canvas_id: string | null;
-  node_id: string | null;
-  /** ISO 8601 — the router renders with `model_dump(mode="json")`. */
-  created_at: string;
-  promoted_resource_id: string | null;
-  review_state: ReviewState;
-  source_asset_id: string | null;
-  // derived server-side
-  source: GeneratedSource;
-  title: string;
-}
-
-export interface GeneratedPage {
-  items: GeneratedItem[];
-  next_cursor: string | null;
-}
-
-/** Tab counters. There is no `deleted` counter because there is no such tab. */
-export interface GeneratedCounts {
-  unreviewed: number;
-  saved: number;
-  in_assets: number;
-}
-
-export interface NewAssetSpec {
-  asset_type: AssetType;
-  name: string;
-}
+export type NewAssetSpec = GeneratedNewAssetSpec;
 
 /** Exactly one of `asset_id` / `new_asset` — the backend rejects both/neither. */
 export interface SaveAsAssetBody {
@@ -108,38 +70,6 @@ export interface SaveAsAssetBody {
   new_asset?: NewAssetSpec;
   slot?: string;
   loadout_id?: string;
-}
-
-export interface SaveAsAssetResult {
-  generation: GeneratedItem;
-  asset_id: string;
-  resource_id: string;
-}
-
-/**
- * What `POST /resources/{id}/save-as-asset` answers: the generation shape plus
- * the inbox row that now registers the resource. The extra key is the whole
- * difference between the two endpoints' 201s (a backend test pins the key-set
- * difference at exactly `generated_id`), and it is a STRING like every other
- * Snowflake on the wire.
- */
-export interface SaveResourceAsAssetResult extends SaveAsAssetResult {
-  generated_id: string;
-}
-
-export interface BatchFailure {
-  id: string;
-  code: string;
-  detail: string;
-}
-
-/**
- * Per-id outcome. Partial failure survives the boundary — "12 of 20 saved" is
- * neither a success nor a 500, and the UI has to be able to say which 8 failed.
- */
-export interface BatchResult {
-  ok: string[];
-  failed: BatchFailure[];
 }
 
 export interface BatchBody {
@@ -151,19 +81,6 @@ export interface BatchBody {
 export interface CleanupBody {
   older_than_days?: number;
   dry_run?: boolean;
-}
-
-export interface CleanupResult {
-  dry_run: boolean;
-  count: number;
-  sample: GeneratedItem[];
-  deleted: number;
-  /**
-   * One pass scans a bounded window: `count` is "matched in this pass", not
-   * "matched ever". A UI that ignores this reports the cleanup as finished
-   * while rows remain.
-   */
-  truncated: boolean;
 }
 
 export interface GeneratedListOptions {
