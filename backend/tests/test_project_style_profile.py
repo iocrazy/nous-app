@@ -182,7 +182,17 @@ class FakeRepo:
 
     async def upsert(self, project_id: int, **fields):
         self.saved.append({"project_id": project_id, **fields})
-        return {"project_id": project_id, **fields}
+        # The row RETURNING gives back: COALESCE fills absent fields with the
+        # column defaults, and the timestamps are always there.
+        return {
+            "project_id": project_id,
+            "style_md": fields.get("style_md") or "",
+            "visual_style": fields.get("visual_style") or {},
+            "reference_links": fields.get("reference_links") or [],
+            "updated_by": fields.get("updated_by"),
+            "created_at": "2026-09-24T01:02:03.456789+00:00",
+            "updated_at": "2026-09-24T01:02:03.456789+00:00",
+        }
 
 
 @pytest.fixture
