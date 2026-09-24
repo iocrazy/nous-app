@@ -5563,77 +5563,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/admin/role": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Update User Role
-         * @description 更新用户角色（管理员）
-         *
-         *     需要 admin 或 owner 角色。
-         *
-         *     - **user_id**: 用户ID
-         *     - **role**: 新角色（admin, user, test）
-         */
-        put: operations["update_user_role_api_v1_auth_admin_role_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/admin/users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Users
-         * @description 获取用户列表（管理员）
-         *
-         *     需要 admin 或 owner 角色。
-         */
-        get: operations["list_users_api_v1_auth_admin_users_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/admin/users/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete User
-         * @description 删除用户（管理员）
-         *
-         *     需要 admin 或 owner 角色。
-         *
-         *     - **user_id**: 用户ID
-         */
-        delete: operations["delete_user_api_v1_auth_admin_users__user_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -5809,30 +5738,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/signin-phone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sign In Phone
-         * @description 手机号登录
-         *
-         *     - **phone**: 手机号
-         *     - **password**: 密码
-         *     - **country_code**: 国际区号（默认86）
-         */
-        post: operations["sign_in_phone_api_v1_auth_signin_phone_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/auth/signout": {
         parameters: {
             query?: never;
@@ -5844,7 +5749,11 @@ export interface paths {
         put?: never;
         /**
          * Sign Out
-         * @description 用户登出
+         * @description 用户登出：撤销 Bearer token 所属用户的会话。
+         *
+         *     只动调用者自己的会话。没有（有效的）token 就没有可撤销的东西，照常回成功
+         *     —— 这里曾经对进程内共享的 GoTrue 客户端调 ``sign_out()``，撤销的是最后一个
+         *     经本进程登录的**别人**的全部会话。
          */
         post: operations["sign_out_api_v1_auth_signout_post"];
         delete?: never;
@@ -5871,30 +5780,6 @@ export interface paths {
          *     - **username**: 用户名（可选）
          */
         post: operations["sign_up_api_v1_auth_signup_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/signup-phone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sign Up Phone
-         * @description 手机号注册
-         *
-         *     - **phone**: 手机号（11位中国手机号）
-         *     - **password**: 密码（至少6位）
-         *     - **country_code**: 国际区号（默认86）
-         */
-        post: operations["sign_up_phone_api_v1_auth_signup_phone_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5944,6 +5829,9 @@ export interface paths {
         /**
          * Save Selection
          * @description Save tag selection to the token. Called by the web page on confirm.
+         *
+         *     A token that expires between the read and the write is refused like any
+         *     expired token (401): the selection was NOT saved, and the page must say so.
          */
         post: operations["save_selection_api_v1_auth_temp_token__token__selection_post"];
         delete?: never;
@@ -8688,8 +8576,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Topic */
-        get: operations["get_topic_api_v1_ideation_topics__topic_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /** Delete Topic */
@@ -9601,11 +9488,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Library
-         * @description Get a single library by ID.
-         */
-        get: operations["get_library_api_v1_libraries__library_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -13510,26 +13393,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/reviews/comments/count": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Comment Count
-         * @description Get the number of top-level comments for a resource.
-         */
-        get: operations["get_comment_count_api_v1_reviews_comments_count_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/reviews/comments/{comment_id}": {
         parameters: {
             query?: never;
@@ -13537,11 +13400,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Comment
-         * @description Get a single comment with replies and annotations.
-         */
-        get: operations["get_comment_api_v1_reviews_comments__comment_id__get"];
+        get?: never;
         put?: never;
         post?: never;
         /**
@@ -13551,11 +13410,7 @@ export interface paths {
         delete: operations["delete_comment_api_v1_reviews_comments__comment_id__delete"];
         options?: never;
         head?: never;
-        /**
-         * Update Comment
-         * @description Update a comment's content or status.
-         */
-        patch: operations["update_comment_api_v1_reviews_comments__comment_id__patch"];
+        patch?: never;
         trace?: never;
     };
     "/api/v1/reviews/comments/{comment_id}/reopen": {
@@ -14759,38 +14614,6 @@ export interface paths {
          * @description Update shot parameter tags / description. NEVER touches status or URLs.
          */
         patch: operations["update_shot_api_v1_shots__shot_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/shots/{shot_id}/generate-video": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Shot Video
-         * @description Dispatch async single-shot video generation (flag-gated).
-         *
-         *     - flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).
-         *     - This endpoint does NOT flip ``shot.status``: the ``status`` column is the
-         *       IMAGE lane's state machine and a video run must not clobber it. The video
-         *       lifecycle lives in ``task_tracking`` (task_type='shot_video') and the
-         *       workflow writes only ``shot.video_url`` on success (see script_shot_video
-         *       docstring). With no status flip there is nothing to roll back on dispatch
-         *       failure — the 500 + the task row are the surface.
-         *
-         *     LOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a
-         *     caller without access gets 403/404 regardless of the flag — that leaks
-         *     nothing about the flag (access-scoped, not existence-scoped).
-         */
-        post: operations["generate_shot_video_api_v1_shots__shot_id__generate_video_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/system/health": {
@@ -20093,6 +19916,158 @@ export interface components {
             target_type: string;
         };
         /**
+         * AuthAck
+         * @description ``{"success": true}`` with nothing else.
+         */
+        AuthAck: {
+            /** Success */
+            success: boolean;
+        };
+        /**
+         * AuthCurrentUser
+         * @description ``GET /auth/me``: the verified JWT's claims. ``created_at`` is not a
+         *     claim, so it is always ``null`` (``GET /auth/profile`` has the account
+         *     name and display id).
+         */
+        AuthCurrentUser: {
+            /** App Metadata */
+            app_metadata: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: string | null;
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: string;
+            /** User Metadata */
+            user_metadata: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /** AuthCurrentUserResponse */
+        AuthCurrentUserResponse: {
+            /** Success */
+            success: boolean;
+            user: components["schemas"]["AuthCurrentUser"];
+        };
+        /**
+         * AuthMediaToken
+         * @description ``POST /auth/media-token``: pass ``token`` as ``?token=`` on media URLs.
+         *     ``expires_at`` is a Unix timestamp in seconds.
+         */
+        AuthMediaToken: {
+            /** Expires At */
+            expires_at: number;
+            /** Token */
+            token: string;
+        };
+        /**
+         * AuthMessageResponse
+         * @description Sign-out and reset-password. ``success`` can be false on sign-out: a
+         *     GoTrue failure there is reported in the body, not as an error status.
+         */
+        AuthMessageResponse: {
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+        };
+        /** AuthRefreshResponse */
+        AuthRefreshResponse: {
+            session: components["schemas"]["AuthRefreshedSession"];
+            /** Success */
+            success: boolean;
+        };
+        /** AuthRefreshedSession */
+        AuthRefreshedSession: {
+            /** Access Token */
+            access_token: string;
+            /** Expires At */
+            expires_at: number | null;
+            /** Refresh Token */
+            refresh_token: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** AuthSignInResponse */
+        AuthSignInResponse: {
+            session: components["schemas"]["AuthSignInSession"];
+            /** Success */
+            success: boolean;
+            user: components["schemas"]["AuthUser"];
+        };
+        /** AuthSignInSession */
+        AuthSignInSession: {
+            /** Access Token */
+            access_token: string;
+            /** Expires At */
+            expires_at: number | null;
+            /** Refresh Token */
+            refresh_token: string;
+            /** Token Type */
+            token_type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** AuthSignUpResponse */
+        AuthSignUpResponse: {
+            session: components["schemas"]["AuthSignUpSession"] | null;
+            /** Success */
+            success: boolean;
+            user: components["schemas"]["AuthSignUpUser"];
+        };
+        /**
+         * AuthSignUpSession
+         * @description Present only when GoTrue signs the new user straight in (no e-mail
+         *     confirmation required).
+         */
+        AuthSignUpSession: {
+            /** Access Token */
+            access_token: string | null;
+            /** Expires At */
+            expires_at: number | null;
+            /** Refresh Token */
+            refresh_token: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** AuthSignUpUser */
+        AuthSignUpUser: {
+            /** Created At */
+            created_at: string | null;
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** AuthUpdateUserResponse */
+        AuthUpdateUserResponse: {
+            /** Success */
+            success: boolean;
+            user: components["schemas"]["AuthUser"];
+        };
+        /**
+         * AuthUser
+         * @description The user as sign-in and ``PUT /auth/me`` return it.
+         */
+        AuthUser: {
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: string;
+            /** User Metadata */
+            user_metadata: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * BackendHealthResponse
          * @description Aggregate backend health snapshot. Admin-only.
          */
@@ -20285,6 +20260,14 @@ export interface components {
             after_beat_id?: string | null;
         };
         /**
+         * BeatTemplateAck
+         * @description ``DELETE /beat-templates/{id}``: no ``data`` key.
+         */
+        BeatTemplateAck: {
+            /** Success */
+            success: boolean;
+        };
+        /**
          * BeatTemplateAnchor
          * @description One percentage anchor of a user custom template. Carries the beat's own
          *     title / summary / color verbatim (custom beats are free-form — no i18n role
@@ -20309,6 +20292,24 @@ export interface components {
             title: string;
         };
         /**
+         * BeatTemplateAnchorRow
+         * @description One stored anchor. ``pctStart`` / ``pctEnd`` are percentages 0-100.
+         */
+        BeatTemplateAnchorRow: {
+            /** Color */
+            color?: string | null;
+            /** Pctend */
+            pctEnd?: number | null;
+            /** Pctstart */
+            pctStart?: number | null;
+            /** Summary */
+            summary?: string | null;
+            /** Title */
+            title?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * BeatTemplateCreate
          * @description Request body for `POST /beat-templates`. ``user_id`` is taken from the
          *     authenticated caller, never the body. At least one anchor is required — an
@@ -20320,6 +20321,16 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** BeatTemplateListResponse */
+        BeatTemplateListResponse: {
+            /** Data */
+            data: components["schemas"]["BeatTemplateRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /**
          * BeatTemplateRename
          * @description Request body for `PUT /beat-templates/{template_id}` (rename only).
@@ -20327,6 +20338,33 @@ export interface components {
         BeatTemplateRename: {
             /** Name */
             name: string;
+        };
+        /** BeatTemplateResponse */
+        BeatTemplateResponse: {
+            data: components["schemas"]["BeatTemplateRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * BeatTemplateRow
+         * @description One ``beat_templates`` row.
+         */
+        BeatTemplateRow: {
+            /** Anchors */
+            anchors: components["schemas"]["BeatTemplateAnchorRow"][];
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Updated At */
+            updated_at: string;
+            /** User Id */
+            user_id: string;
         };
         /**
          * BeatUpdate
@@ -21918,6 +21956,51 @@ export interface components {
             /** Written */
             written: number;
         };
+        /**
+         * ConversationAgentAddedResponse
+         * @description ``POST /{id}/agents``. ``added`` is true even when the agent was
+         *     already a member (the insert is idempotent).
+         */
+        ConversationAgentAddedResponse: {
+            /** Added */
+            added: boolean;
+            /** Agent Id */
+            agent_id: string;
+        };
+        /**
+         * ConversationAgentRemovedResponse
+         * @description ``DELETE /{id}/agents/{agent_id}``: ``false`` when the agent was not a
+         *     member of this conversation.
+         */
+        ConversationAgentRemovedResponse: {
+            /** Removed */
+            removed: boolean;
+        };
+        /**
+         * ConversationAttachmentPromoteResponse
+         * @description ``POST /attachments/{id}/promote``: the resource id as a string.
+         */
+        ConversationAttachmentPromoteResponse: {
+            /** Promoted Resource Id */
+            promoted_resource_id: string;
+        };
+        /**
+         * ConversationAttachmentUploadResponse
+         * @description ``POST /{id}/attachments``: the staged ``generated_media`` row.
+         *
+         *     ``id`` is the Snowflake as a string; ``url`` is the cover route of that
+         *     row. ``mime`` / ``file_size_bytes`` are nullable columns.
+         */
+        ConversationAttachmentUploadResponse: {
+            /** File Size Bytes */
+            file_size_bytes: number | null;
+            /** Id */
+            id: string;
+            /** Mime */
+            mime: string | null;
+            /** Url */
+            url: string;
+        };
         /** ConversationCreate */
         ConversationCreate: {
             /**
@@ -21939,6 +22022,53 @@ export interface components {
              * @enum {string}
              */
             type: "group" | "dm" | "public";
+        };
+        /**
+         * ConversationDissolveResponse
+         * @description ``DELETE /{id}``: ``false`` only when a concurrent dissolve won.
+         */
+        ConversationDissolveResponse: {
+            /** Archived */
+            archived: boolean;
+        };
+        /**
+         * ConversationMarkReadResponse
+         * @description ``POST /{id}/read``.
+         */
+        ConversationMarkReadResponse: {
+            /** Ok */
+            ok: boolean;
+        };
+        /**
+         * ConversationMemberRemovedResponse
+         * @description ``DELETE /{id}/members/{user_id}`` (remove or leave).
+         *
+         *     Always ``true``: a delete that matched no row is a 400, not ``false``.
+         */
+        ConversationMemberRemovedResponse: {
+            /** Removed */
+            removed: boolean;
+        };
+        /**
+         * ConversationMemberRoleResponse
+         * @description ``PATCH /{id}/members/{user_id}/role``: the role that was written.
+         */
+        ConversationMemberRoleResponse: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /** Updated */
+            updated: boolean;
+        };
+        /**
+         * ConversationMembersAddedResponse
+         * @description ``POST /{id}/members``: rows actually inserted (existing members skip).
+         */
+        ConversationMembersAddedResponse: {
+            /** Added */
+            added: number;
         };
         /** ConversationOut */
         ConversationOut: {
@@ -21974,6 +22104,14 @@ export interface components {
              * @default 0
              */
             unread: number;
+        };
+        /**
+         * ConversationOwnerTransferResponse
+         * @description ``POST /{id}/transfer-owner``.
+         */
+        ConversationOwnerTransferResponse: {
+            /** Transferred */
+            transferred: boolean;
         };
         /** ConversationUpdate */
         ConversationUpdate: {
@@ -22489,6 +22627,169 @@ export interface components {
             blocked_reason?: components["schemas"]["DispatchBlockedReason"] | null;
             /** Will Start */
             will_start: boolean;
+        };
+        /**
+         * DistributionAccountRow
+         * @description ``POST /accounts/{id}/refresh``: the whole public row (P7).
+         *
+         *     Unlike :class:`SocialAccountOut` (a whitelist the list route filters
+         *     through), this route has always returned ``_public_row`` as is: every
+         *     ``social_accounts`` column except the three secret ones (``access_token``,
+         *     ``refresh_token``, ``session_state``). Timestamps are native datetimes, so
+         *     they are :data:`WireDatetime` (``isoformat()``, not ``…Z``). Wire test:
+         *     ``tests/api/test_distribution_p7_wire.py``.
+         */
+        DistributionAccountRow: {
+            /** Auth Type */
+            auth_type: string;
+            /** Avatar Url */
+            avatar_url: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Id */
+            id: string;
+            /** Platform */
+            platform: string;
+            /** Platform Handle */
+            platform_handle: string | null;
+            /** Platform User Id */
+            platform_user_id: string;
+            /** Scope Id */
+            scope_id: string;
+            /** Scope Type */
+            scope_type: string;
+            /** Session Checked At */
+            session_checked_at: string | null;
+            /** Status */
+            status: string;
+            /** Token Expires At */
+            token_expires_at: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Username */
+            username: string;
+        };
+        /**
+         * DistributionMusicChart
+         * @description One cached tab. ``category_kind`` + ``category_id`` together are its
+         *     identity. ``ok=false`` still carries the tracks from the last good read;
+         *     ``fetched_at`` advances on success only, ``checked_at`` on every try.
+         */
+        DistributionMusicChart: {
+            /** Category Id */
+            category_id: string;
+            /** Category Kind */
+            category_kind: string;
+            /** Category Name */
+            category_name: string;
+            /** Checked At */
+            checked_at: string | null;
+            /** Cursor */
+            cursor: string;
+            /** Error */
+            error: string;
+            /** Fetched At */
+            fetched_at: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Id */
+            id: string;
+            /** Ok */
+            ok: boolean;
+            /** Position */
+            position: number;
+            /** Tracks */
+            tracks: components["schemas"]["DistributionMusicChartTrack"][];
+        };
+        /**
+         * DistributionMusicChartTrack
+         * @description A cached chart track: the search ``MusicTrackOut`` vocabulary plus its
+         *     ``position``. ``user_count`` is ``None`` when the platform did not say
+         *     (zero is a real value).
+         */
+        DistributionMusicChartTrack: {
+            /** Author */
+            author: string;
+            /** Cover Url */
+            cover_url: string;
+            /** Duration */
+            duration: number;
+            /** Music Id */
+            music_id: string;
+            /** Play Url */
+            play_url: string;
+            /** Position */
+            position: number;
+            /** Title */
+            title: string;
+            /** User Count */
+            user_count: number | null;
+        };
+        /** DistributionMusicChartsPage */
+        DistributionMusicChartsPage: {
+            /** Charts */
+            charts: components["schemas"]["DistributionMusicChart"][];
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Never Harvested */
+            never_harvested: boolean;
+            /** Stale */
+            stale: boolean;
+            /** Ttl Hours */
+            ttl_hours: number;
+        };
+        /**
+         * DistributionMusicHarvestResult
+         * @description ``POST /accounts/{id}/music/charts/refresh``. Always 200: a failure is
+         *     ``success=false`` with ``detail.reason`` (``account_busy``,
+         *     ``no_chart_read`` …), never an HTTP error. ``stored`` is the write
+         *     summary (``stored`` / ``kept`` / ``tracks``), empty when nothing was
+         *     written.
+         */
+        DistributionMusicHarvestResult: {
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Message */
+            message: string | null;
+            /** Status */
+            status: string;
+            /** Stored */
+            stored: {
+                [key: string]: number;
+            };
+            /** Success */
+            success: boolean;
+        };
+        /**
+         * DistributionWebhookAck
+         * @description Every other signed event is acknowledged with ``{"msg": "ok"}``.
+         */
+        DistributionWebhookAck: {
+            /** Msg */
+            msg: string;
+        };
+        /**
+         * DistributionWebhookChallenge
+         * @description Answer to Douyin's ``verify_webhook`` event: its challenge, echoed.
+         */
+        DistributionWebhookChallenge: {
+            /** Challenge */
+            challenge: number | string;
         };
         /**
          * DroppedReference
@@ -23298,6 +23599,33 @@ export interface components {
              */
             success: boolean;
         };
+        /** Envelope[ReviewCommentRow] */
+        Envelope_ReviewCommentRow_: {
+            data: components["schemas"]["ReviewCommentRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ReviewCommentWithAnnotations] */
+        Envelope_ReviewCommentWithAnnotations_: {
+            data: components["schemas"]["ReviewCommentWithAnnotations"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[ReviewStatusRow] */
+        Envelope_ReviewStatusRow_: {
+            data: components["schemas"]["ReviewStatusRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** Envelope[ScriptAssetRow] */
         Envelope_ScriptAssetRow_: {
             data: components["schemas"]["ScriptAssetRow"];
@@ -23756,6 +24084,26 @@ export interface components {
         Envelope_list_ProjectTrashedCanvas__: {
             /** Data */
             data: components["schemas"]["ProjectTrashedCanvas"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ReviewCommentThread]] */
+        Envelope_list_ReviewCommentThread__: {
+            /** Data */
+            data: components["schemas"]["ReviewCommentThread"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** Envelope[list[ReviewStatusRow]] */
+        Envelope_list_ReviewStatusRow__: {
+            /** Data */
+            data: components["schemas"]["ReviewStatusRow"][];
             /**
              * Success
              * @default true
@@ -25140,6 +25488,78 @@ export interface components {
             threshold: number;
         };
         /**
+         * IdeationTopic
+         * @description One topic as the routes return it (``topics_repository._topic_row``).
+         *
+         *     Every key is always present. Ids are strings, timestamps ISO strings — the
+         *     repository renders them. ``status`` is guarded by the table's CHECK
+         *     constraint, so the literal is safe for any stored row.
+         */
+        IdeationTopic: {
+            /** Cover Url */
+            cover_url: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Excerpt */
+            excerpt: string | null;
+            /** Id */
+            id: string;
+            /** Inspiration Topic Id */
+            inspiration_topic_id: string | null;
+            /** Media Id */
+            media_id: string | null;
+            /** Note Id */
+            note_id: string | null;
+            /** Resource Id */
+            resource_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "shortlisted" | "produced" | "archived";
+            /** Team Id */
+            team_id: string;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** IdeationTopicDeleteResponse */
+        IdeationTopicDeleteResponse: {
+            data: components["schemas"]["IdeationTopicDeleted"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** IdeationTopicDeleted */
+        IdeationTopicDeleted: {
+            /** Deleted */
+            deleted: boolean;
+        };
+        /** IdeationTopicListResponse */
+        IdeationTopicListResponse: {
+            /** Data */
+            data: components["schemas"]["IdeationTopic"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** IdeationTopicResponse */
+        IdeationTopicResponse: {
+            data: components["schemas"]["IdeationTopic"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
          * ImportFromScriptResponse
          * @description The batch outcome. The three tallies count ``items`` by ``action``, so
          *     ``created + linked + skipped == len(items)`` always holds — a caller can
@@ -26013,6 +26433,29 @@ export interface components {
             scope_type: string;
         };
         /**
+         * LibraryDeleteResponse
+         * @description ``DELETE /libraries/{id}``: no ``data`` key.
+         */
+        LibraryDeleteResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /** LibraryListResponse */
+        LibraryListResponse: {
+            /** Data */
+            data: components["schemas"]["LibraryRow"][];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
          * LibraryResource
          * @description The embedded resource of ``GET /resources``: the row plus its gallery
          *     child count (``0`` for anything that is not a gallery).
@@ -26112,6 +26555,43 @@ export interface components {
             url: string | null;
             /** Visual Analysis Status */
             visual_analysis_status: string;
+        };
+        /** LibraryResponse */
+        LibraryResponse: {
+            data: components["schemas"]["LibraryRow"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * LibraryRow
+         * @description One ``libraries`` row as the routes return it.
+         */
+        LibraryRow: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Created By */
+            created_by: string;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Scope Id */
+            scope_id: string;
+            /** Scope Type */
+            scope_type: string;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Visibility */
+            visibility: string;
         };
         /**
          * LibrarySkillCreate
@@ -28537,36 +29017,6 @@ export interface components {
             items?: components["schemas"]["PermissionAuditItem"][];
         };
         /**
-         * PhoneSignInRequest
-         * @description 手机号登录请求
-         */
-        PhoneSignInRequest: {
-            /**
-             * Country Code
-             * @default 86
-             */
-            country_code: string;
-            /** Password */
-            password: string;
-            /** Phone */
-            phone: string;
-        };
-        /**
-         * PhoneSignUpRequest
-         * @description 手机号注册请求
-         */
-        PhoneSignUpRequest: {
-            /**
-             * Country Code
-             * @default 86
-             */
-            country_code: string;
-            /** Password */
-            password: string;
-            /** Phone */
-            phone: string;
-        };
-        /**
          * PickerSettings
          * @description Display settings for the tag picker panel.
          */
@@ -29660,11 +30110,12 @@ export interface components {
         };
         /**
          * ProjectShareRow
-         * @description One ``shares`` row, without its ``password``.
+         * @description One ``shares`` row, without its two password columns.
          *
-         *     The column holds the password in plain text, and these two routes used to
-         *     return it to every project reader. ``has_password`` replaces it, the same
-         *     redaction ``shares_router._enrich_share`` already applies.
+         *     These two routes used to return the plain-text password to every project
+         *     reader. ``has_password`` replaces both ``password`` (a random lock since
+         *     mig 504) and ``password_hash``, the same redaction
+         *     ``shares_router._enrich_share`` applies.
          */
         ProjectShareRow: {
             /** Allow Download */
@@ -31389,6 +31840,147 @@ export interface components {
             version: components["schemas"]["OutputVersion"];
         };
         /**
+         * ReviewAnnotationRow
+         * @description One ``review_annotations`` row (a drawing attached to a comment).
+         */
+        ReviewAnnotationRow: {
+            /** Comment Id */
+            comment_id: number;
+            /** Created At */
+            created_at: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: number;
+            /** Tool Type */
+            tool_type: string;
+        };
+        /**
+         * ReviewCommentDeleted
+         * @description ``DELETE /comments/{id}`` sends no ``data`` key.
+         */
+        ReviewCommentDeleted: {
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
+        /**
+         * ReviewCommentRow
+         * @description One ``review_comments`` row as the repository returns it.
+         */
+        ReviewCommentRow: {
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Frame Number */
+            frame_number: number | null;
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Status */
+            status: string;
+            /** Timecode */
+            timecode: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: number | null;
+        };
+        /**
+         * ReviewCommentThread
+         * @description A top-level comment from ``GET /comments``, with its replies.
+         */
+        ReviewCommentThread: {
+            /** Annotations */
+            annotations: components["schemas"]["ReviewAnnotationRow"][];
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Frame Number */
+            frame_number: number | null;
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Replies */
+            replies: components["schemas"]["ReviewCommentWithAnnotations"][];
+            /** Resource Id */
+            resource_id: number;
+            /** Status */
+            status: string;
+            /** Timecode */
+            timecode: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: number | null;
+        };
+        /**
+         * ReviewCommentWithAnnotations
+         * @description A new comment (``POST /comments``) or a reply inside a thread.
+         */
+        ReviewCommentWithAnnotations: {
+            /** Annotations */
+            annotations: components["schemas"]["ReviewAnnotationRow"][];
+            /** Author Id */
+            author_id: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Frame Number */
+            frame_number: number | null;
+            /** Id */
+            id: number;
+            /** Parent Id */
+            parent_id: number | null;
+            /** Resource Id */
+            resource_id: number;
+            /** Status */
+            status: string;
+            /** Timecode */
+            timecode: number | null;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: number | null;
+        };
+        /**
+         * ReviewStatusRow
+         * @description One ``review_status`` row (a reviewer's verdict on a resource).
+         */
+        ReviewStatusRow: {
+            /** Comment */
+            comment: string | null;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Resource Id */
+            resource_id: number;
+            /** Reviewer Id */
+            reviewer_id: string;
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+            /** Version Id */
+            version_id: number | null;
+        };
+        /**
          * ReviewStatusUpdate
          * @description Request body for updating review status
          */
@@ -32996,6 +33588,28 @@ export interface components {
         };
         /** SelectionRequest */
         SelectionRequest: {
+            /**
+             * Analyze
+             * @default false
+             */
+            analyze: boolean;
+            /** Rating */
+            rating?: number | null;
+            /**
+             * Summarize
+             * @default false
+             */
+            summarize: boolean;
+            /** Tags */
+            tags: string[];
+            /**
+             * Transcribe
+             * @default false
+             */
+            transcribe: boolean;
+        };
+        /** SelectionResponse */
+        SelectionResponse: {
             /**
              * Analyze
              * @default false
@@ -35371,6 +35985,55 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /**
+         * TempTokenCreatedTag
+         * @description The ``tags`` row ``POST /auth/temp-token/{token}/tags`` created.
+         *
+         *     ``group_id`` is the row's BIGINT (a JSON number) unless the route assigned
+         *     a group, in which case it is the group id as a string — the id the request
+         *     carried, or the "Uncategorized" group's.
+         */
+        TempTokenCreatedTag: {
+            /** Color */
+            color: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Group Id */
+            group_id: number | string | null;
+            /** Icon */
+            icon: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Name Zh */
+            name_zh: string | null;
+            /** Origin */
+            origin: string;
+            /** Prompt Trigger */
+            prompt_trigger: boolean;
+            /** Scope Id */
+            scope_id: number | null;
+            /** Slug */
+            slug: string | null;
+            /** Sort Order */
+            sort_order: number | null;
+            /** Type */
+            type: string;
+            /** User Id */
+            user_id: string | null;
+        };
+        /** TempTokenCreatedTagResponse */
+        TempTokenCreatedTagResponse: {
+            data: components["schemas"]["TempTokenCreatedTag"];
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+        };
         /** TempTokenRequest */
         TempTokenRequest: {
             /** Scopes */
@@ -36008,13 +36671,6 @@ export interface components {
              */
             unlinked: boolean;
         };
-        /** UpdateCommentRequest */
-        UpdateCommentRequest: {
-            /** Content */
-            content?: string | null;
-            /** Status */
-            status?: string | null;
-        };
         /**
          * UpdateConfigRequest
          * @description 更新配置请求
@@ -36052,16 +36708,6 @@ export interface components {
         UpdateProfileRequest: {
             /** Username */
             username: string;
-        };
-        /**
-         * UpdateRoleRequest
-         * @description 更新角色请求
-         */
-        UpdateRoleRequest: {
-            /** Role */
-            role: string;
-            /** User Id */
-            user_id: string;
         };
         /**
          * UpdateUserRequest
@@ -47361,111 +48007,6 @@ export interface operations {
             };
         };
     };
-    update_user_role_api_v1_auth_admin_role_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateRoleRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_users_api_v1_auth_admin_users_get: {
-        parameters: {
-            query?: {
-                page?: number;
-                per_page?: number;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_user_api_v1_auth_admin_users__user_id__delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_current_user_api_v1_auth_me_get: {
         parameters: {
             query?: never;
@@ -47483,7 +48024,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthCurrentUserResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47518,7 +48059,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthUpdateUserResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47549,7 +48090,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthAck"];
                 };
             };
             /** @description Validation Error */
@@ -47578,7 +48119,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthAck"];
                 };
             };
         };
@@ -47600,7 +48141,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthMediaToken"];
                 };
             };
             /** @description Validation Error */
@@ -47701,7 +48242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthRefreshResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47734,7 +48275,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthMessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47767,40 +48308,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sign_in_phone_api_v1_auth_signin_phone_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PhoneSignInRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthSignInResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47831,7 +48339,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthMessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47864,40 +48372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sign_up_phone_api_v1_auth_signup_phone_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PhoneSignUpRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthSignUpResponse"];
                 };
             };
             /** @description Validation Error */
@@ -47963,13 +48438,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description JSON by default; with ``format=text`` a plain-text tag CSV, or one option's value when ``field`` is given. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SelectionResponse"];
+                    "text/plain": string;
                 };
             };
             /** @description Validation Error */
@@ -48004,7 +48480,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthAck"];
                 };
             };
             /** @description Validation Error */
@@ -48073,7 +48549,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TempTokenCreatedTagResponse"];
                 };
             };
             /** @description Validation Error */
@@ -48105,9 +48581,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BeatTemplateListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -48143,9 +48617,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BeatTemplateResponse"];
                 };
             };
             /** @description Validation Error */
@@ -48183,9 +48655,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BeatTemplateResponse"];
                 };
             };
             /** @description Validation Error */
@@ -48219,9 +48689,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BeatTemplateAck"];
                 };
             };
             /** @description Validation Error */
@@ -50054,9 +50522,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ConversationAttachmentPromoteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50090,7 +50556,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationDissolveResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50166,7 +50632,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationAgentAddedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50201,7 +50667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationAgentRemovedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50239,9 +50705,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ConversationAttachmentUploadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50313,7 +50777,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationMembersAddedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50348,7 +50812,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationMemberRemovedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50387,7 +50851,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationMemberRoleResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50574,7 +51038,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationMarkReadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50612,7 +51076,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationOwnerTransferResponse"];
                 };
             };
             /** @description Validation Error */
@@ -50860,14 +51324,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Back to /distribution/accounts with ?connected=1, ?error=oauth_state or ?error=oauth_exchange */
+            307: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -51072,7 +51534,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DistributionMusicChartsPage"];
                 };
             };
             /** @description Validation Error */
@@ -51105,7 +51567,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DistributionMusicHarvestResult"];
                 };
             };
             /** @description Validation Error */
@@ -51138,7 +51600,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DistributionAccountRow"];
                 };
             };
             /** @description Validation Error */
@@ -51465,13 +51927,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The blank harvest seed image */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "image/png": string;
                 };
             };
         };
@@ -51798,7 +52260,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DistributionWebhookChallenge"] | components["schemas"]["DistributionWebhookAck"];
                 };
             };
         };
@@ -53023,7 +53485,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IdeationTopicListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53062,41 +53524,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_topic_api_v1_ideation_topics__topic_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                topic_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IdeationTopicResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53130,7 +53558,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IdeationTopicDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -53168,7 +53596,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IdeationTopicResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54692,7 +55120,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LibraryListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54728,41 +55156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_library_api_v1_libraries__library_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                library_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LibraryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54796,7 +55190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LibraryDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -54834,7 +55228,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LibraryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -61786,7 +62180,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ReviewCommentThread__"];
                 };
             };
             /** @description Validation Error */
@@ -61822,76 +62216,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_comment_count_api_v1_reviews_comments_count_get: {
-        parameters: {
-            query: {
-                resource_id: string;
-                version_id?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_comment_api_v1_reviews_comments__comment_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                comment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ReviewCommentWithAnnotations_"];
                 };
             };
             /** @description Validation Error */
@@ -61925,45 +62250,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_comment_api_v1_reviews_comments__comment_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                comment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateCommentRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ReviewCommentDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -61997,7 +62284,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ReviewCommentRow_"];
                 };
             };
             /** @description Validation Error */
@@ -62031,7 +62318,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ReviewCommentRow_"];
                 };
             };
             /** @description Validation Error */
@@ -62066,7 +62353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_list_ReviewStatusRow__"];
                 };
             };
             /** @description Validation Error */
@@ -62102,7 +62389,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Envelope_ReviewStatusRow_"];
                 };
             };
             /** @description Validation Error */
@@ -64572,40 +64859,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_StoryboardShotResponse_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_shot_video_api_v1_shots__shot_id__generate_video_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-API-Key"?: string | null;
-            };
-            path: {
-                shot_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StoryboardTaskDispatch"];
                 };
             };
             /** @description Validation Error */

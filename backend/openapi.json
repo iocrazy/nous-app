@@ -9316,6 +9316,393 @@
         "title": "AuditTargetCount",
         "type": "object"
       },
+      "AuthAck": {
+        "description": "``{\"success\": true}`` with nothing else.",
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "AuthAck",
+        "type": "object"
+      },
+      "AuthCurrentUser": {
+        "additionalProperties": true,
+        "description": "``GET /auth/me``: the verified JWT's claims. ``created_at`` is not a\nclaim, so it is always ``null`` (``GET /auth/profile`` has the account\nname and display id).",
+        "properties": {
+          "app_metadata": {
+            "additionalProperties": true,
+            "title": "App Metadata",
+            "type": "object"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "user_metadata": {
+            "additionalProperties": true,
+            "title": "User Metadata",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "user_metadata",
+          "app_metadata",
+          "created_at"
+        ],
+        "title": "AuthCurrentUser",
+        "type": "object"
+      },
+      "AuthCurrentUserResponse": {
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthCurrentUser"
+          }
+        },
+        "required": [
+          "success",
+          "user"
+        ],
+        "title": "AuthCurrentUserResponse",
+        "type": "object"
+      },
+      "AuthMediaToken": {
+        "description": "``POST /auth/media-token``: pass ``token`` as ``?token=`` on media URLs.\n``expires_at`` is a Unix timestamp in seconds.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at"
+        ],
+        "title": "AuthMediaToken",
+        "type": "object"
+      },
+      "AuthMessageResponse": {
+        "description": "Sign-out and reset-password. ``success`` can be false on sign-out: a\nGoTrue failure there is reported in the body, not as an error status.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "AuthMessageResponse",
+        "type": "object"
+      },
+      "AuthRefreshResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/AuthRefreshedSession"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "session"
+        ],
+        "title": "AuthRefreshResponse",
+        "type": "object"
+      },
+      "AuthRefreshedSession": {
+        "additionalProperties": true,
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_at"
+        ],
+        "title": "AuthRefreshedSession",
+        "type": "object"
+      },
+      "AuthSignInResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/AuthSignInSession"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          }
+        },
+        "required": [
+          "success",
+          "user",
+          "session"
+        ],
+        "title": "AuthSignInResponse",
+        "type": "object"
+      },
+      "AuthSignInSession": {
+        "additionalProperties": true,
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_at",
+          "token_type"
+        ],
+        "title": "AuthSignInSession",
+        "type": "object"
+      },
+      "AuthSignUpResponse": {
+        "properties": {
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthSignUpSession"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthSignUpUser"
+          }
+        },
+        "required": [
+          "success",
+          "user",
+          "session"
+        ],
+        "title": "AuthSignUpResponse",
+        "type": "object"
+      },
+      "AuthSignUpSession": {
+        "additionalProperties": true,
+        "description": "Present only when GoTrue signs the new user straight in (no e-mail\nconfirmation required).",
+        "properties": {
+          "access_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Token"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_at"
+        ],
+        "title": "AuthSignUpSession",
+        "type": "object"
+      },
+      "AuthSignUpUser": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "created_at"
+        ],
+        "title": "AuthSignUpUser",
+        "type": "object"
+      },
+      "AuthUpdateUserResponse": {
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUser"
+          }
+        },
+        "required": [
+          "success",
+          "user"
+        ],
+        "title": "AuthUpdateUserResponse",
+        "type": "object"
+      },
+      "AuthUser": {
+        "additionalProperties": true,
+        "description": "The user as sign-in and ``PUT /auth/me`` return it.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "user_metadata": {
+            "additionalProperties": true,
+            "title": "User Metadata",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "user_metadata"
+        ],
+        "title": "AuthUser",
+        "type": "object"
+      },
       "BackendHealthResponse": {
         "description": "Aggregate backend health snapshot. Admin-only.",
         "properties": {
@@ -9739,6 +10126,20 @@
         "title": "BeatMoveRequest",
         "type": "object"
       },
+      "BeatTemplateAck": {
+        "description": "``DELETE /beat-templates/{id}``: no ``data`` key.",
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "BeatTemplateAck",
+        "type": "object"
+      },
       "BeatTemplateAnchor": {
         "description": "One percentage anchor of a user custom template. Carries the beat's own\ntitle / summary / color verbatim (custom beats are free-form — no i18n role\nkey). ``pctStart`` / ``pctEnd`` are stored camelCase to match the JSONB shape\nthe frontend reads back directly.\n\n``color`` is pinned to a hex literal for the same reason as the beat card\n(it renders straight into a CSS ``background``). ``pctEnd >= pctStart`` and\nboth within [0, 100] — a malformed anchor 422s at the boundary rather than\nproducing a beat that snaps off the timeline.",
         "properties": {
@@ -9792,6 +10193,75 @@
         "title": "BeatTemplateAnchor",
         "type": "object"
       },
+      "BeatTemplateAnchorRow": {
+        "additionalProperties": true,
+        "description": "One stored anchor. ``pctStart`` / ``pctEnd`` are percentages 0-100.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "pctEnd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pctend"
+          },
+          "pctStart": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pctstart"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "BeatTemplateAnchorRow",
+        "type": "object"
+      },
       "BeatTemplateCreate": {
         "description": "Request body for `POST /beat-templates`. ``user_id`` is taken from the\nauthenticated caller, never the body. At least one anchor is required — an\nempty template would generate nothing.",
         "properties": {
@@ -9818,6 +10288,27 @@
         "title": "BeatTemplateCreate",
         "type": "object"
       },
+      "BeatTemplateListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BeatTemplateRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "BeatTemplateListResponse",
+        "type": "object"
+      },
       "BeatTemplateRename": {
         "description": "Request body for `PUT /beat-templates/{template_id}` (rename only).",
         "properties": {
@@ -9832,6 +10323,65 @@
           "name"
         ],
         "title": "BeatTemplateRename",
+        "type": "object"
+      },
+      "BeatTemplateResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BeatTemplateRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "BeatTemplateResponse",
+        "type": "object"
+      },
+      "BeatTemplateRow": {
+        "description": "One ``beat_templates`` row.",
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/BeatTemplateAnchorRow"
+            },
+            "title": "Anchors",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "anchors",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BeatTemplateRow",
         "type": "object"
       },
       "BeatUpdate": {
@@ -13169,6 +13719,96 @@
         "title": "ConsolidateResponse",
         "type": "object"
       },
+      "ConversationAgentAddedResponse": {
+        "description": "``POST /{id}/agents``. ``added`` is true even when the agent was\nalready a member (the insert is idempotent).",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "boolean"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "added",
+          "agent_id"
+        ],
+        "title": "ConversationAgentAddedResponse",
+        "type": "object"
+      },
+      "ConversationAgentRemovedResponse": {
+        "description": "``DELETE /{id}/agents/{agent_id}``: ``false`` when the agent was not a\nmember of this conversation.",
+        "properties": {
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "title": "ConversationAgentRemovedResponse",
+        "type": "object"
+      },
+      "ConversationAttachmentPromoteResponse": {
+        "description": "``POST /attachments/{id}/promote``: the resource id as a string.",
+        "properties": {
+          "promoted_resource_id": {
+            "title": "Promoted Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "promoted_resource_id"
+        ],
+        "title": "ConversationAttachmentPromoteResponse",
+        "type": "object"
+      },
+      "ConversationAttachmentUploadResponse": {
+        "description": "``POST /{id}/attachments``: the staged ``generated_media`` row.\n\n``id`` is the Snowflake as a string; ``url`` is the cover route of that\nrow. ``mime`` / ``file_size_bytes`` are nullable columns.",
+        "properties": {
+          "file_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Bytes"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mime",
+          "file_size_bytes",
+          "url"
+        ],
+        "title": "ConversationAttachmentUploadResponse",
+        "type": "object"
+      },
       "ConversationCreate": {
         "properties": {
           "history_mode": {
@@ -13228,6 +13868,85 @@
           "scope_id"
         ],
         "title": "ConversationCreate",
+        "type": "object"
+      },
+      "ConversationDissolveResponse": {
+        "description": "``DELETE /{id}``: ``false`` only when a concurrent dissolve won.",
+        "properties": {
+          "archived": {
+            "title": "Archived",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "archived"
+        ],
+        "title": "ConversationDissolveResponse",
+        "type": "object"
+      },
+      "ConversationMarkReadResponse": {
+        "description": "``POST /{id}/read``.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "ConversationMarkReadResponse",
+        "type": "object"
+      },
+      "ConversationMemberRemovedResponse": {
+        "description": "``DELETE /{id}/members/{user_id}`` (remove or leave).\n\nAlways ``true``: a delete that matched no row is a 400, not ``false``.",
+        "properties": {
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "title": "ConversationMemberRemovedResponse",
+        "type": "object"
+      },
+      "ConversationMemberRoleResponse": {
+        "description": "``PATCH /{id}/members/{user_id}/role``: the role that was written.",
+        "properties": {
+          "role": {
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "updated",
+          "role"
+        ],
+        "title": "ConversationMemberRoleResponse",
+        "type": "object"
+      },
+      "ConversationMembersAddedResponse": {
+        "description": "``POST /{id}/members``: rows actually inserted (existing members skip).",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added"
+        ],
+        "title": "ConversationMembersAddedResponse",
         "type": "object"
       },
       "ConversationOut": {
@@ -13299,6 +14018,20 @@
           "created_at"
         ],
         "title": "ConversationOut",
+        "type": "object"
+      },
+      "ConversationOwnerTransferResponse": {
+        "description": "``POST /{id}/transfer-owner``.",
+        "properties": {
+          "transferred": {
+            "title": "Transferred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "transferred"
+        ],
+        "title": "ConversationOwnerTransferResponse",
         "type": "object"
       },
       "ConversationUpdate": {
@@ -14193,6 +14926,7 @@
           "color": {
             "anyOf": [
               {
+                "maxLength": 20,
                 "type": "string"
               },
               {
@@ -14214,12 +14948,15 @@
             "title": "Group Id"
           },
           "name": {
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "name_zh": {
             "anyOf": [
               {
+                "maxLength": 50,
                 "type": "string"
               },
               {
@@ -14431,6 +15168,401 @@
           "will_start"
         ],
         "title": "DispatchPreview",
+        "type": "object"
+      },
+      "DistributionAccountRow": {
+        "description": "``POST /accounts/{id}/refresh``: the whole public row (P7).\n\nUnlike :class:`SocialAccountOut` (a whitelist the list route filters\nthrough), this route has always returned ``_public_row`` as is: every\n``social_accounts`` column except the three secret ones (``access_token``,\n``refresh_token``, ``session_state``). Timestamps are native datetimes, so\nthey are :data:`WireDatetime` (``isoformat()``, not ``…Z``). Wire test:\n``tests/api/test_distribution_p7_wire.py``.",
+        "properties": {
+          "auth_type": {
+            "title": "Auth Type",
+            "type": "string"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "platform_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Handle"
+          },
+          "platform_user_id": {
+            "title": "Platform User Id",
+            "type": "string"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "session_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Checked At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "token_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Expires At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope_type",
+          "scope_id",
+          "platform",
+          "platform_user_id",
+          "platform_handle",
+          "username",
+          "avatar_url",
+          "token_expires_at",
+          "status",
+          "auth_type",
+          "session_checked_at",
+          "created_by",
+          "deleted_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DistributionAccountRow",
+        "type": "object"
+      },
+      "DistributionMusicChart": {
+        "description": "One cached tab. ``category_kind`` + ``category_id`` together are its\nidentity. ``ok=false`` still carries the tracks from the last good read;\n``fetched_at`` advances on success only, ``checked_at`` on every try.",
+        "properties": {
+          "category_id": {
+            "title": "Category Id",
+            "type": "string"
+          },
+          "category_kind": {
+            "title": "Category Kind",
+            "type": "string"
+          },
+          "category_name": {
+            "title": "Category Name",
+            "type": "string"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/DistributionMusicChartTrack"
+            },
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "category_id",
+          "category_kind",
+          "category_name",
+          "position",
+          "ok",
+          "error",
+          "cursor",
+          "has_more",
+          "fetched_at",
+          "checked_at",
+          "tracks"
+        ],
+        "title": "DistributionMusicChart",
+        "type": "object"
+      },
+      "DistributionMusicChartTrack": {
+        "description": "A cached chart track: the search ``MusicTrackOut`` vocabulary plus its\n``position``. ``user_count`` is ``None`` when the platform did not say\n(zero is a real value).",
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "cover_url": {
+            "title": "Cover Url",
+            "type": "string"
+          },
+          "duration": {
+            "title": "Duration",
+            "type": "integer"
+          },
+          "music_id": {
+            "title": "Music Id",
+            "type": "string"
+          },
+          "play_url": {
+            "title": "Play Url",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "user_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Count"
+          }
+        },
+        "required": [
+          "music_id",
+          "title",
+          "author",
+          "duration",
+          "user_count",
+          "cover_url",
+          "play_url",
+          "position"
+        ],
+        "title": "DistributionMusicChartTrack",
+        "type": "object"
+      },
+      "DistributionMusicChartsPage": {
+        "properties": {
+          "charts": {
+            "items": {
+              "$ref": "#/components/schemas/DistributionMusicChart"
+            },
+            "title": "Charts",
+            "type": "array"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "never_harvested": {
+            "title": "Never Harvested",
+            "type": "boolean"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "ttl_hours": {
+            "title": "Ttl Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "charts",
+          "last_success_at",
+          "stale",
+          "never_harvested",
+          "ttl_hours"
+        ],
+        "title": "DistributionMusicChartsPage",
+        "type": "object"
+      },
+      "DistributionMusicHarvestResult": {
+        "description": "``POST /accounts/{id}/music/charts/refresh``. Always 200: a failure is\n``success=false`` with ``detail.reason`` (``account_busy``,\n``no_chart_read`` …), never an HTTP error. ``stored`` is the write\nsummary (``stored`` / ``kept`` / ``tracks``), empty when nothing was\nwritten.",
+        "properties": {
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stored": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Stored",
+            "type": "object"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "status",
+          "message",
+          "detail",
+          "stored"
+        ],
+        "title": "DistributionMusicHarvestResult",
+        "type": "object"
+      },
+      "DistributionWebhookAck": {
+        "description": "Every other signed event is acknowledged with ``{\"msg\": \"ok\"}``.",
+        "properties": {
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          }
+        },
+        "required": [
+          "msg"
+        ],
+        "title": "DistributionWebhookAck",
+        "type": "object"
+      },
+      "DistributionWebhookChallenge": {
+        "description": "Answer to Douyin's ``verify_webhook`` event: its challenge, echoed.",
+        "properties": {
+          "challenge": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Challenge"
+          }
+        },
+        "required": [
+          "challenge"
+        ],
+        "title": "DistributionWebhookChallenge",
         "type": "object"
       },
       "DroppedReference": {
@@ -15968,6 +17100,57 @@
         "title": "Envelope[ResourceVersionRow]",
         "type": "object"
       },
+      "Envelope_ReviewCommentRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewCommentRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReviewCommentRow]",
+        "type": "object"
+      },
+      "Envelope_ReviewCommentWithAnnotations_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewCommentWithAnnotations"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReviewCommentWithAnnotations]",
+        "type": "object"
+      },
+      "Envelope_ReviewStatusRow_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewStatusRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReviewStatusRow]",
+        "type": "object"
+      },
       "Envelope_ScriptAssetRow_": {
         "properties": {
           "data": {
@@ -16898,6 +18081,48 @@
           "data"
         ],
         "title": "Envelope[list[ProjectTrashedCanvas]]",
+        "type": "object"
+      },
+      "Envelope_list_ReviewCommentThread__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewCommentThread"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[ReviewCommentThread]]",
+        "type": "object"
+      },
+      "Envelope_list_ReviewStatusRow__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewStatusRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[list[ReviewStatusRow]]",
         "type": "object"
       },
       "Envelope_list_ShareComment__": {
@@ -20350,6 +21575,203 @@
         "title": "HybridSearchRequest",
         "type": "object"
       },
+      "IdeationTopic": {
+        "description": "One topic as the routes return it (``topics_repository._topic_row``).\n\nEvery key is always present. Ids are strings, timestamps ISO strings — the\nrepository renders them. ``status`` is guarded by the table's CHECK\nconstraint, so the literal is safe for any stored row.",
+        "properties": {
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "inspiration_topic_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inspiration Topic Id"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Id"
+          },
+          "note_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Id"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "shortlisted",
+              "produced",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "team_id",
+          "title",
+          "cover_url",
+          "excerpt",
+          "status",
+          "note_id",
+          "resource_id",
+          "media_id",
+          "inspiration_topic_id",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IdeationTopic",
+        "type": "object"
+      },
+      "IdeationTopicDeleteResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdeationTopicDeleted"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdeationTopicDeleteResponse",
+        "type": "object"
+      },
+      "IdeationTopicDeleted": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "IdeationTopicDeleted",
+        "type": "object"
+      },
+      "IdeationTopicListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IdeationTopic"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdeationTopicListResponse",
+        "type": "object"
+      },
+      "IdeationTopicResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdeationTopic"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "IdeationTopicResponse",
+        "type": "object"
+      },
       "ImportFromScriptResponse": {
         "description": "The batch outcome. The three tallies count ``items`` by ``action``, so\n``created + linked + skipped == len(items)`` always holds — a caller can\nrender the summary line without walking the list, and a mismatch is a bug\nin this endpoint rather than an ambiguity the client has to resolve.",
         "properties": {
@@ -22748,6 +24170,46 @@
         "title": "LibraryCreate",
         "type": "object"
       },
+      "LibraryDeleteResponse": {
+        "description": "``DELETE /libraries/{id}``: no ``data`` key.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "LibraryDeleteResponse",
+        "type": "object"
+      },
+      "LibraryListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryRow"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LibraryListResponse",
+        "type": "object"
+      },
       "LibraryResource": {
         "description": "The embedded resource of ``GET /resources``: the row plus its gallery\nchild count (``0`` for anything that is not a gallery).",
         "properties": {
@@ -23191,6 +24653,122 @@
           "gallery_count"
         ],
         "title": "LibraryResource",
+        "type": "object"
+      },
+      "LibraryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LibraryRow"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "LibraryResponse",
+        "type": "object"
+      },
+      "LibraryRow": {
+        "description": "One ``libraries`` row as the routes return it.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "visibility": {
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scope_type",
+          "scope_id",
+          "created_by",
+          "visibility",
+          "icon",
+          "color",
+          "sort_order",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "LibraryRow",
         "type": "object"
       },
       "LibrarySkillCreate": {
@@ -30256,54 +31834,6 @@
         "title": "PermissionAuditListOut",
         "type": "object"
       },
-      "PhoneSignInRequest": {
-        "description": "手机号登录请求",
-        "properties": {
-          "country_code": {
-            "default": "86",
-            "title": "Country Code",
-            "type": "string"
-          },
-          "password": {
-            "title": "Password",
-            "type": "string"
-          },
-          "phone": {
-            "title": "Phone",
-            "type": "string"
-          }
-        },
-        "required": [
-          "phone",
-          "password"
-        ],
-        "title": "PhoneSignInRequest",
-        "type": "object"
-      },
-      "PhoneSignUpRequest": {
-        "description": "手机号注册请求",
-        "properties": {
-          "country_code": {
-            "default": "86",
-            "title": "Country Code",
-            "type": "string"
-          },
-          "password": {
-            "title": "Password",
-            "type": "string"
-          },
-          "phone": {
-            "title": "Phone",
-            "type": "string"
-          }
-        },
-        "required": [
-          "phone",
-          "password"
-        ],
-        "title": "PhoneSignUpRequest",
-        "type": "object"
-      },
       "PickerSettings": {
         "description": "Display settings for the tag picker panel.",
         "properties": {
@@ -33653,7 +35183,7 @@
         "type": "object"
       },
       "ProjectShareRow": {
-        "description": "One ``shares`` row, without its ``password``.\n\nThe column holds the password in plain text, and these two routes used to\nreturn it to every project reader. ``has_password`` replaces it, the same\nredaction ``shares_router._enrich_share`` already applies.",
+        "description": "One ``shares`` row, without its two password columns.\n\nThese two routes used to return the plain-text password to every project\nreader. ``has_password`` replaces both ``password`` (a random lock since\nmig 504) and ``password_hash``, the same redaction\n``shares_router._enrich_share`` applies.",
         "properties": {
           "allow_download": {
             "title": "Allow Download",
@@ -38484,6 +40014,416 @@
         "title": "RevertResponse",
         "type": "object"
       },
+      "ReviewAnnotationRow": {
+        "description": "One ``review_annotations`` row (a drawing attached to a comment).",
+        "properties": {
+          "comment_id": {
+            "title": "Comment Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "tool_type": {
+            "title": "Tool Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "comment_id",
+          "tool_type",
+          "data",
+          "created_at"
+        ],
+        "title": "ReviewAnnotationRow",
+        "type": "object"
+      },
+      "ReviewCommentDeleted": {
+        "description": "``DELETE /comments/{id}`` sends no ``data`` key.",
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "title": "ReviewCommentDeleted",
+        "type": "object"
+      },
+      "ReviewCommentRow": {
+        "description": "One ``review_comments`` row as the repository returns it.",
+        "properties": {
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "frame_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timecode": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "author_id",
+          "content",
+          "status",
+          "created_at",
+          "updated_at",
+          "timecode",
+          "frame_number",
+          "parent_id",
+          "version_id"
+        ],
+        "title": "ReviewCommentRow",
+        "type": "object"
+      },
+      "ReviewCommentThread": {
+        "description": "A top-level comment from ``GET /comments``, with its replies.",
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewAnnotationRow"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "frame_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewCommentWithAnnotations"
+            },
+            "title": "Replies",
+            "type": "array"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timecode": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "author_id",
+          "content",
+          "status",
+          "created_at",
+          "updated_at",
+          "timecode",
+          "frame_number",
+          "parent_id",
+          "version_id",
+          "annotations",
+          "replies"
+        ],
+        "title": "ReviewCommentThread",
+        "type": "object"
+      },
+      "ReviewCommentWithAnnotations": {
+        "description": "A new comment (``POST /comments``) or a reply inside a thread.",
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewAnnotationRow"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "frame_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timecode": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timecode"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "author_id",
+          "content",
+          "status",
+          "created_at",
+          "updated_at",
+          "timecode",
+          "frame_number",
+          "parent_id",
+          "version_id",
+          "annotations"
+        ],
+        "title": "ReviewCommentWithAnnotations",
+        "type": "object"
+      },
+      "ReviewStatusRow": {
+        "description": "One ``review_status`` row (a reviewer's verdict on a resource).",
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "integer"
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "reviewer_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "comment",
+          "version_id"
+        ],
+        "title": "ReviewStatusRow",
+        "type": "object"
+      },
       "ReviewStatusUpdate": {
         "description": "Request body for updating review status",
         "properties": {
@@ -43171,6 +45111,50 @@
           "tags"
         ],
         "title": "SelectionRequest",
+        "type": "object"
+      },
+      "SelectionResponse": {
+        "properties": {
+          "analyze": {
+            "default": false,
+            "title": "Analyze",
+            "type": "boolean"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "summarize": {
+            "default": false,
+            "title": "Summarize",
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "transcribe": {
+            "default": false,
+            "title": "Transcribe",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tags"
+        ],
+        "title": "SelectionResponse",
         "type": "object"
       },
       "SemanticSearchRequest": {
@@ -49298,6 +51282,173 @@
         "title": "TeamUpdate",
         "type": "object"
       },
+      "TempTokenCreatedTag": {
+        "description": "The ``tags`` row ``POST /auth/temp-token/{token}/tags`` created.\n\n``group_id`` is the row's BIGINT (a JSON number) unless the route assigned\na group, in which case it is the group id as a string — the id the request\ncarried, or the \"Uncategorized\" group's.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_zh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Zh"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "prompt_trigger": {
+            "title": "Prompt Trigger",
+            "type": "boolean"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "slug",
+          "enabled",
+          "color",
+          "icon",
+          "user_id",
+          "created_at",
+          "name_zh",
+          "scope_id",
+          "group_id",
+          "sort_order",
+          "origin",
+          "prompt_trigger"
+        ],
+        "title": "TempTokenCreatedTag",
+        "type": "object"
+      },
+      "TempTokenCreatedTagResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TempTokenCreatedTag"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TempTokenCreatedTagResponse",
+        "type": "object"
+      },
       "TempTokenRequest": {
         "properties": {
           "scopes": {
@@ -50750,37 +52901,6 @@
         "title": "UnlinkedResponse",
         "type": "object"
       },
-      "UpdateCommentRequest": {
-        "properties": {
-          "content": {
-            "anyOf": [
-              {
-                "maxLength": 5000,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "pattern": "^(open|resolved|wontfix)$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
-          }
-        },
-        "title": "UpdateCommentRequest",
-        "type": "object"
-      },
       "UpdateConfigRequest": {
         "description": "更新配置请求",
         "properties": {
@@ -50903,25 +53023,6 @@
           "username"
         ],
         "title": "UpdateProfileRequest",
-        "type": "object"
-      },
-      "UpdateRoleRequest": {
-        "description": "更新角色请求",
-        "properties": {
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "role"
-        ],
-        "title": "UpdateRoleRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -77131,240 +79232,6 @@
         ]
       }
     },
-    "/api/v1/auth/admin/role": {
-      "put": {
-        "description": "更新用户角色（管理员）\n\n需要 admin 或 owner 角色。\n\n- **user_id**: 用户ID\n- **role**: 新角色（admin, user, test）",
-        "operationId": "update_user_role_api_v1_auth_admin_role_put",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateRoleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update User Role",
-        "tags": [
-          "Authentication",
-          "认证"
-        ]
-      }
-    },
-    "/api/v1/auth/admin/users": {
-      "get": {
-        "description": "获取用户列表（管理员）\n\n需要 admin 或 owner 角色。",
-        "operationId": "list_users_api_v1_auth_admin_users_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "per_page",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "title": "Per Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Users",
-        "tags": [
-          "Authentication",
-          "认证"
-        ]
-      }
-    },
-    "/api/v1/auth/admin/users/{user_id}": {
-      "delete": {
-        "description": "删除用户（管理员）\n\n需要 admin 或 owner 角色。\n\n- **user_id**: 用户ID",
-        "operationId": "delete_user_api_v1_auth_admin_users__user_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "title": "User Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete User",
-        "tags": [
-          "Authentication",
-          "认证"
-        ]
-      }
-    },
     "/api/v1/auth/me": {
       "get": {
         "description": "获取当前用户信息\n\n需要在 Header 中传入 Bearer Token",
@@ -77384,7 +79251,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthCurrentUserResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77434,7 +79303,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthUpdateUserResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77465,7 +79336,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAck"
+                }
               }
             },
             "description": "Successful Response"
@@ -77495,7 +79368,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAck"
+                }
               }
             },
             "description": "Successful Response"
@@ -77537,7 +79412,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMediaToken"
+                }
               }
             },
             "description": "Successful Response"
@@ -77720,7 +79597,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthRefreshResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77761,7 +79640,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77802,7 +79683,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSignInResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77825,50 +79708,9 @@
         ]
       }
     },
-    "/api/v1/auth/signin-phone": {
-      "post": {
-        "description": "手机号登录\n\n- **phone**: 手机号\n- **password**: 密码\n- **country_code**: 国际区号（默认86）",
-        "operationId": "sign_in_phone_api_v1_auth_signin_phone_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhoneSignInRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Sign In Phone",
-        "tags": [
-          "Authentication",
-          "认证"
-        ]
-      }
-    },
     "/api/v1/auth/signout": {
       "post": {
-        "description": "用户登出",
+        "description": "用户登出：撤销 Bearer token 所属用户的会话。\n\n只动调用者自己的会话。没有（有效的）token 就没有可撤销的东西，照常回成功\n—— 这里曾经对进程内共享的 GoTrue 客户端调 ``sign_out()``，撤销的是最后一个\n经本进程登录的**别人**的全部会话。",
         "operationId": "sign_out_api_v1_auth_signout_post",
         "parameters": [
           {
@@ -77892,7 +79734,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77933,7 +79777,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSignUpResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -77950,47 +79796,6 @@
           }
         },
         "summary": "Sign Up",
-        "tags": [
-          "Authentication",
-          "认证"
-        ]
-      }
-    },
-    "/api/v1/auth/signup-phone": {
-      "post": {
-        "description": "手机号注册\n\n- **phone**: 手机号（11位中国手机号）\n- **password**: 密码（至少6位）\n- **country_code**: 国际区号（默认86）",
-        "operationId": "sign_up_phone_api_v1_auth_signup_phone_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhoneSignUpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Sign Up Phone",
         "tags": [
           "Authentication",
           "认证"
@@ -78130,10 +79935,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "JSON by default; with ``format=text`` a plain-text tag CSV, or one option's value when ``field`` is given."
           },
           "422": {
             "content": {
@@ -78153,7 +79965,7 @@
         ]
       },
       "post": {
-        "description": "Save tag selection to the token. Called by the web page on confirm.",
+        "description": "Save tag selection to the token. Called by the web page on confirm.\n\nA token that expires between the read and the write is refused like any\nexpired token (401): the selection was NOT saved, and the page must say so.",
         "operationId": "save_selection_api_v1_auth_temp_token__token__selection_post",
         "parameters": [
           {
@@ -78180,7 +79992,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthAck"
+                }
               }
             },
             "description": "Successful Response"
@@ -78286,7 +80100,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TempTokenCreatedTagResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -78352,9 +80168,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Beat Templates Api V1 Beat Templates Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/BeatTemplateListResponse"
                 }
               }
             },
@@ -78428,9 +80242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Beat Template Api V1 Beat Templates Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/BeatTemplateResponse"
                 }
               }
             },
@@ -78505,9 +80317,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Beat Template Api V1 Beat Templates  Template Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/BeatTemplateAck"
                 }
               }
             },
@@ -78590,9 +80400,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Rename Beat Template Api V1 Beat Templates  Template Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/BeatTemplateResponse"
                 }
               }
             },
@@ -82471,9 +84279,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Promote Attachment Api V1 Conversations Attachments  Attachment Id  Promote Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ConversationAttachmentPromoteResponse"
                 }
               }
             },
@@ -82548,7 +84354,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDissolveResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -82714,7 +84522,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationAgentAddedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -82796,7 +84606,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationAgentRemovedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -82881,9 +84693,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Upload Attachment Api V1 Conversations  Conversation Id  Attachments Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ConversationAttachmentUploadResponse"
                 }
               }
             },
@@ -83044,7 +84854,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationMembersAddedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -83127,7 +84939,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationMemberRemovedResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -83219,7 +85033,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationMemberRoleResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -83668,7 +85484,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationMarkReadResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -83751,7 +85569,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationOwnerTransferResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -84206,13 +86026,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
+          "307": {
+            "description": "Back to /distribution/accounts with ?connected=1, ?error=oauth_state or ?error=oauth_exchange"
           },
           "422": {
             "content": {
@@ -84539,7 +86354,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DistributionMusicChartsPage"
+                }
               }
             },
             "description": "Successful Response"
@@ -84590,7 +86407,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DistributionMusicHarvestResult"
+                }
               }
             },
             "description": "Successful Response"
@@ -84641,7 +86460,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DistributionAccountRow"
+                }
               }
             },
             "description": "Successful Response"
@@ -85161,11 +86982,14 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "The blank harvest seed image"
           }
         },
         "summary": "Get Music Harvest Seed",
@@ -85684,7 +87508,17 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DistributionWebhookChallenge"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DistributionWebhookAck"
+                    }
+                  ],
+                  "title": "Response Douyin Webhook Api V1 Distribution Webhook Douyin Post"
+                }
               }
             },
             "description": "Successful Response"
@@ -88354,7 +90188,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IdeationTopicListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88438,7 +90274,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IdeationTopicResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88511,7 +90349,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IdeationTopicDeleteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -88528,77 +90368,6 @@
           }
         },
         "summary": "Delete Topic",
-        "tags": [
-          "Ideation",
-          "Ideation"
-        ]
-      },
-      "get": {
-        "operationId": "get_topic_api_v1_ideation_topics__topic_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "topic_id",
-            "required": true,
-            "schema": {
-              "title": "Topic Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Topic",
         "tags": [
           "Ideation",
           "Ideation"
@@ -88663,7 +90432,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IdeationTopicResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -91965,7 +93736,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -92037,7 +93810,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -92110,7 +93885,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryDeleteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -92127,77 +93904,6 @@
           }
         },
         "summary": "Delete Library",
-        "tags": [
-          "Libraries"
-        ]
-      },
-      "get": {
-        "description": "Get a single library by ID.",
-        "operationId": "get_library_api_v1_libraries__library_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "library_id",
-            "required": true,
-            "schema": {
-              "title": "Library Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Library",
         "tags": [
           "Libraries"
         ]
@@ -92262,7 +93968,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -109037,7 +110745,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_ReviewCommentThread__"
+                }
               }
             },
             "description": "Successful Response"
@@ -109109,7 +110819,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewCommentWithAnnotations_"
+                }
               }
             },
             "description": "Successful Response"
@@ -109126,95 +110838,6 @@
           }
         },
         "summary": "Create Comment",
-        "tags": [
-          "Reviews"
-        ]
-      }
-    },
-    "/api/v1/reviews/comments/count": {
-      "get": {
-        "description": "Get the number of top-level comments for a resource.",
-        "operationId": "get_comment_count_api_v1_reviews_comments_count_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "resource_id",
-            "required": true,
-            "schema": {
-              "title": "Resource Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "version_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Version Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Comment Count",
         "tags": [
           "Reviews"
         ]
@@ -109271,7 +110894,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewCommentDeleted"
+                }
               }
             },
             "description": "Successful Response"
@@ -109288,158 +110913,6 @@
           }
         },
         "summary": "Delete Comment",
-        "tags": [
-          "Reviews"
-        ]
-      },
-      "get": {
-        "description": "Get a single comment with replies and annotations.",
-        "operationId": "get_comment_api_v1_reviews_comments__comment_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "title": "Comment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Comment",
-        "tags": [
-          "Reviews"
-        ]
-      },
-      "patch": {
-        "description": "Update a comment's content or status.",
-        "operationId": "update_comment_api_v1_reviews_comments__comment_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "comment_id",
-            "required": true,
-            "schema": {
-              "title": "Comment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateCommentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Comment",
         "tags": [
           "Reviews"
         ]
@@ -109496,7 +110969,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewCommentRow_"
+                }
               }
             },
             "description": "Successful Response"
@@ -109569,7 +111044,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewCommentRow_"
+                }
               }
             },
             "description": "Successful Response"
@@ -109658,7 +111135,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_ReviewStatusRow__"
+                }
               }
             },
             "description": "Successful Response"
@@ -109730,7 +111209,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewStatusRow_"
+                }
               }
             },
             "description": "Successful Response"
@@ -115386,81 +116867,6 @@
           }
         },
         "summary": "Update Shot",
-        "tags": [
-          "Script Shots"
-        ]
-      }
-    },
-    "/api/v1/shots/{shot_id}/generate-video": {
-      "post": {
-        "description": "Dispatch async single-shot video generation (flag-gated).\n\n- flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).\n- This endpoint does NOT flip ``shot.status``: the ``status`` column is the\n  IMAGE lane's state machine and a video run must not clobber it. The video\n  lifecycle lives in ``task_tracking`` (task_type='shot_video') and the\n  workflow writes only ``shot.video_url`` on success (see script_shot_video\n  docstring). With no status flip there is nothing to roll back on dispatch\n  failure — the 500 + the task row are the surface.\n\nLOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a\ncaller without access gets 403/404 regardless of the flag — that leaks\nnothing about the flag (access-scoped, not existence-scoped).",
-        "operationId": "generate_shot_video_api_v1_shots__shot_id__generate_video_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "shot_id",
-            "required": true,
-            "schema": {
-              "title": "Shot Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Api-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StoryboardTaskDispatch"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Generate Shot Video",
         "tags": [
           "Script Shots"
         ]
