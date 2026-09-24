@@ -23,6 +23,11 @@ MAX_TEMPLATES_PER_TEAM = 20
 # form may hold at most MAX_FORM_FIELDS fields (same "soft guardrail → 422"
 # idiom as the two constants above).
 FormFieldType = Literal["text", "textarea", "number", "select", "checkbox", "date"]
+
+# ``project_stage_nodes.status`` — the CHECK in mig 380 and
+# ``project_stage_nodes_repository._VALID_STATUSES`` (pinned equal by
+# tests/test_node_status_literal.py). The frontend switches on these.
+NodeStatus = Literal["pending", "in_progress", "in_review", "done", "skipped"]
 FORM_FIELD_TYPES = ("text", "textarea", "number", "select", "checkbox", "date")
 MAX_FORM_FIELDS = 20
 
@@ -250,7 +255,7 @@ class NodeOut(BaseModel):
     name: str
     sort_order: int
     parallel_group: Optional[int] = None
-    status: str
+    status: NodeStatus
     owner_user_id: Optional[str] = None
     owner_agent_id: Optional[str] = None
     planned_start: Optional[str] = None
