@@ -24,11 +24,12 @@ scene apply is sub-second; no workflow) and returns a per-scene result list so a
 partial failure is surfaced, not hidden.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
     verify_commit_access,
@@ -36,7 +37,15 @@ from app.core.scope_guards import (
     verify_script_read_access,
 )
 from app.repositories.script_commit_repository import get_script_commit_repository
+from app.schemas.envelope import Envelope
 from app.schemas.script import CommitCreate
+from app.schemas.script_project_responses import ScriptAck
+from app.schemas.script_version_responses import (
+    ScriptCommitDiff,
+    ScriptCommitListItem,
+    ScriptCommitRollback,
+    ScriptCommitRow,
+)
 from app.services.script.version_service import get_version_service
 
 router = APIRouter()
@@ -54,7 +63,7 @@ async def _commit_of_script(commit_id: str, script_id: str) -> Dict[str, Any]:
     return commit
 
 
-@router.post("/scripts/{script_id}/commits")
+@router.post("/scripts/{script_id}/commits", response_model=Envelope[ScriptCommitRow])
 async def create_commit(
     script_id: str,
     auth: AuthDep,
@@ -72,7 +81,9 @@ async def create_commit(
         raise HTTPException(status_code=500, detail="Failed to create commit")
 
 
-@router.get("/scripts/{script_id}/commits")
+@router.get(
+    "/scripts/{script_id}/commits", response_model=Envelope[List[ScriptCommitListItem]]
+)
 async def list_commits(
     script_id: str,
     auth: AuthDep,
@@ -87,7 +98,10 @@ async def list_commits(
         raise HTTPException(status_code=500, detail="Failed to list commits")
 
 
-@router.get("/scripts/{script_id}/commits/{commit_id}/diff")
+@router.get(
+    "/scripts/{script_id}/commits/{commit_id}/diff",
+    response_model=Envelope[ScriptCommitDiff],
+)
 async def diff_commit(
     script_id: str,
     commit_id: str,
@@ -114,7 +128,11 @@ async def diff_commit(
         raise HTTPException(status_code=500, detail="Failed to diff commit")
 
 
-@router.post("/scripts/{script_id}/commits/{commit_id}/rollback")
+@router.post(
+    "/scripts/{script_id}/commits/{commit_id}/rollback",
+    response_model=Envelope[ScriptCommitRollback],
+    response_model_exclude_unset=True,
+)
 async def rollback_commit(
     script_id: str,
     commit_id: str,
@@ -131,8 +149,8 @@ async def rollback_commit(
         result = await get_version_service().rollback_to(
             script_id, commit_a["id"], auth.user_id
         )
-        if result is None:
-            raise HTTPException(status_code=404, detail="Commit not found")
+        # None: the commit vanished between the ownership check and the read.
+        result = require_row(result)
         return {"success": not result["partial_failure"], "data": result}
     except HTTPException:
         raise
@@ -141,7 +159,7 @@ async def rollback_commit(
         raise HTTPException(status_code=500, detail="Failed to roll back commit")
 
 
-@router.delete("/commits/{commit_id}")
+@router.delete("/commits/{commit_id}", response_model=ScriptAck)
 async def delete_commit(
     commit_id: str,
     auth: AuthDep,

@@ -22,7 +22,7 @@ memo the caller's script owns, via ``_assert_script_access(..., write=False)``
 from __future__ import annotations
 
 import mimetypes
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -32,10 +32,12 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep, get_current_user
 from app.core.scope_guards import (
     _assert_script_access,
@@ -44,7 +46,11 @@ from app.core.scope_guards import (
     verify_script_read_access,
 )
 from app.repositories.beat_memo_repository import get_beat_memo_repository
-from app.schemas.beat_memo import MemoCreate, MemoOut, MemoUpdate
+from app.schemas.beat_memo import MemoCreate, MemoUpdate
+from app.schemas.envelope import Envelope
+from app.schemas.script_beat_responses import BeatMemoImageUpload, BeatMemoOut
+from app.schemas.script_project_responses import ScriptAck
+from app.schemas.wire import binary_response
 from app.services.beats.memo_image_service import (
     MEMO_BUCKET,
     MemoImageStorageFailed,
@@ -55,7 +61,7 @@ from app.services.beats.memo_image_service import (
 router = APIRouter()
 
 
-@router.get("/scripts/{script_id}/memos")
+@router.get("/scripts/{script_id}/memos", response_model=Envelope[List[BeatMemoOut]])
 async def list_memos(
     script_id: str,
     auth: AuthDep,
@@ -64,13 +70,13 @@ async def list_memos(
     """List all memos for a script, ordered along the timeline."""
     try:
         memos = await get_beat_memo_repository().list_by_script(script_id)
-        return {"success": True, "data": [MemoOut(**m).model_dump() for m in memos]}
+        return {"success": True, "data": [BeatMemoOut(**m).model_dump() for m in memos]}
     except Exception as exc:
         logger.error(f"[Memos] list for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to list memos")
 
 
-@router.post("/scripts/{script_id}/memos")
+@router.post("/scripts/{script_id}/memos", response_model=Envelope[BeatMemoOut])
 async def create_memo(
     script_id: str,
     auth: AuthDep,
@@ -81,14 +87,18 @@ async def create_memo(
     try:
         data = body.model_dump()
         data["script_id"] = script_id
-        memo = await get_beat_memo_repository().create(data)
-        return {"success": True, "data": MemoOut(**memo).model_dump()}
+        memo = require_row(await get_beat_memo_repository().create(data))
+        return {"success": True, "data": BeatMemoOut(**memo).model_dump()}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[Memos] create for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create memo")
 
 
-@router.post("/scripts/{script_id}/memos/upload")
+@router.post(
+    "/scripts/{script_id}/memos/upload", response_model=Envelope[BeatMemoImageUpload]
+)
 async def upload_memo_image(
     script_id: str,
     auth: AuthDep,
@@ -114,7 +124,7 @@ async def upload_memo_image(
     return {"success": True, "data": {"path": path}}
 
 
-@router.patch("/memos/{memo_id}")
+@router.patch("/memos/{memo_id}", response_model=Envelope[BeatMemoOut])
 async def update_memo(
     memo_id: str,
     auth: AuthDep,
@@ -129,10 +139,9 @@ async def update_memo(
         for not_null in ("anchor_sec", "content", "images"):
             if not_null in data and data[not_null] is None:
                 data.pop(not_null)
-        memo = await get_beat_memo_repository().update(memo_id, data)
-        if memo is None:
-            raise HTTPException(status_code=404, detail="Memo not found")
-        return {"success": True, "data": MemoOut(**memo).model_dump()}
+        # None: the memo was deleted between the guard and the write.
+        memo = require_row(await get_beat_memo_repository().update(memo_id, data))
+        return {"success": True, "data": BeatMemoOut(**memo).model_dump()}
     except HTTPException:
         raise
     except Exception as exc:
@@ -140,7 +149,7 @@ async def update_memo(
         raise HTTPException(status_code=500, detail="Failed to update memo")
 
 
-@router.delete("/memos/{memo_id}")
+@router.delete("/memos/{memo_id}", response_model=ScriptAck)
 async def delete_memo(
     memo_id: str,
     auth: AuthDep,
@@ -155,7 +164,11 @@ async def delete_memo(
         raise HTTPException(status_code=500, detail="Failed to delete memo")
 
 
-@router.get("/scripts/{script_id}/memos/{memo_id}/images/{idx}")
+@router.get(
+    "/scripts/{script_id}/memos/{memo_id}/images/{idx}",
+    response_class=Response,
+    responses=binary_response("The memo image bytes.", "image/*"),
+)
 async def get_memo_image(
     script_id: str,
     memo_id: str,

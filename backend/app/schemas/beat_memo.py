@@ -1,4 +1,5 @@
-"""Beat memo request/response schemas (Beats M5).
+"""Beat memo request schemas (Beats M5). The response model is
+``app.schemas.script_beat_responses.BeatMemoOut``.
 
 A memo is a whole-second-anchored note that lives IN a script's Beats
 arrangement timeline (a laper-style node), never in the inspiration library.
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # PG INTEGER ceiling — anchor_sec is an INTEGER column; asyncpg binds it strictly,
 # so an out-of-range client value must 422 at the boundary, not blow up as 22003.
@@ -58,18 +59,3 @@ class MemoUpdate(BaseModel):
     @classmethod
     def _check_images(cls, v: Optional[List[str]]) -> Optional[List[str]]:
         return v if v is None else _validate_image_paths(v)
-
-
-class MemoOut(BaseModel):
-    """API response for a single memo. Bigint id / script_id serialize to string
-    (coerce_numbers_to_str) so JS never loses Snowflake precision; anchor_sec is a
-    real INTEGER and stays an int."""
-
-    model_config = ConfigDict(coerce_numbers_to_str=True, extra="ignore")
-    id: str
-    script_id: str
-    anchor_sec: int
-    content: str
-    images: List[str]
-    created_at: str
-    updated_at: str

@@ -60,6 +60,8 @@ const beat = (over: Partial<Beat> & { id: string }): Beat => ({
   duration_sec: null,
   beat_role: null,
   color: null,
+  created_at: '2026-09-24T01:02:03.456789+00:00',
+  updated_at: '2026-09-24T01:02:03.456789+00:00',
   ...over,
 });
 

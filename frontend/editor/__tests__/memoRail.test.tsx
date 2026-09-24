@@ -45,6 +45,8 @@ const beats: Beat[] = [
     duration_sec: 120,
     beat_role: null,
     color: '#aabbcc',
+    created_at: '2026-09-24T01:02:03.456789+00:00',
+    updated_at: '2026-09-24T01:02:03.456789+00:00',
   },
 ];
 

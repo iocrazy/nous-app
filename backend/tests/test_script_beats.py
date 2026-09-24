@@ -39,6 +39,17 @@ from app.core.scope_guards import (
 from app.main import app
 from app.models.scripts import ScriptBeats
 from app.repositories.script_beat_repository import ScriptBeatRepository
+from app.repositories.script_beat_repository import _row as _beat_row
+from tests.api.wire_parity import sample_orm
+
+
+def _real_beat(beat_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """The row a real ``update`` returns (every column, real types): the route
+    now declares a response model, so a partial dict would be a 500."""
+    return _beat_row(
+        sample_orm(ScriptBeats, id=int(beat_id), script_id=9001, scene_ids=[], **data)
+    )
+
 
 pytestmark = pytest.mark.unit
 
@@ -159,7 +170,7 @@ async def test_beat_patch_explicit_null_clears_fields(client, monkeypatch):
 
     async def fake_update(self, beat_id, data):
         captured.update(data)
-        return {"id": beat_id, "script_id": "9001", **data}
+        return _real_beat(beat_id, data)
 
     import app.core.scope_guards as guards
     from app.repositories.script_repository import ScriptProjectRepository
@@ -195,7 +206,7 @@ async def test_beat_patch_null_title_not_forwarded(client, monkeypatch):
 
     async def fake_update(self, beat_id, data):
         captured.update(data)
-        return {"id": beat_id, "script_id": "9001", **data}
+        return _real_beat(beat_id, data)
 
     import app.core.scope_guards as guards
     from app.repositories.script_repository import ScriptProjectRepository
@@ -229,7 +240,7 @@ async def test_beat_patch_null_scene_ids_not_forwarded(client, monkeypatch):
 
     async def fake_update(self, beat_id, data):
         captured.update(data)
-        return {"id": beat_id, "script_id": "9001", **data}
+        return _real_beat(beat_id, data)
 
     import app.core.scope_guards as guards
     from app.repositories.script_repository import ScriptProjectRepository

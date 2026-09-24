@@ -2,6 +2,7 @@ import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import { handleResponse, unwrapResponse } from '../utils/apiHelpers';
 import type {
+  ScriptAiTaskDispatch,
   ScriptChapter,
   ScriptProject,
   ScriptProjectDetail,
@@ -99,14 +100,14 @@ export async function expandChapter(data: {
   summary: string;
   expansion_request?: string;
   context?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<ScriptAiTaskDispatch> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/expand-chapter`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return handleResponse<ScriptAiTaskDispatch>(res);
 }
 
 export async function createBranches(data: {
@@ -117,12 +118,12 @@ export async function createBranches(data: {
   branch_count: number;
   branch_type: 'choice' | 'condition';
   context?: string;
-}): Promise<{ task_id: string }> {
+}): Promise<ScriptAiTaskDispatch> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/create-branches`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return handleResponse<{ task_id: string }>(res);
+  return handleResponse<ScriptAiTaskDispatch>(res);
 }

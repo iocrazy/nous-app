@@ -188,17 +188,6 @@ class SceneMoveRequest(BaseModel):
     after_scene_id: Optional[str] = None
 
 
-class SceneCreateAfterLock(SceneCreate):
-    """Request body for `POST /scripts/{script_id}/scenes/after-lock` — a
-    scene create for an ALREADY-LOCKED script (agent-layer spec §4.2 "锁定后
-    插入"). Adds the same before/after sparse-insertion anchors ``move_scene``
-    uses; omitting both is a tail append (continues the plain integer
-    sequence — nothing to protect there, so no letter suffix)."""
-
-    before_scene_id: Optional[str] = None
-    after_scene_id: Optional[str] = None
-
-
 # ---------------------------------------------------------------------------
 # Shot schemas (Phase B P3 — storyboard shots hang off a scene)
 # ---------------------------------------------------------------------------
@@ -231,16 +220,6 @@ class ShotUpdate(BaseModel):
     focal_length: Optional[str] = Field(None, max_length=20)
     lighting: Optional[str] = None
     description: Optional[str] = None
-
-
-class ShotMoveRequest(BaseModel):
-    """Request body for `POST /shots/{shot_id}/move`.
-
-    Shots are reordered WITHIN their scene only (no cross-scene move in P3), so
-    there is no reparent field — just the sparse-insertion anchors."""
-
-    before_shot_id: Optional[str] = None
-    after_shot_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -386,15 +365,6 @@ class ViewportUpdate(BaseModel):
     zoom: float = Field(default=1, ge=0.1, le=10)
 
 
-class GenerateOutlineRequest(BaseModel):
-    """Request body for AI-generated story outline."""
-
-    script_id: str
-    premise: str = Field(..., min_length=1, max_length=10000)
-    chapter_count: int = Field(default=5, ge=2, le=20)
-    style_guide: Optional[str] = Field(None, max_length=2000)
-
-
 class ExpandChapterRequest(BaseModel):
     """Request body for AI chapter expansion."""
 
@@ -442,16 +412,3 @@ class ScriptAssetUpdate(BaseModel):
     content: Optional[str] = Field(None, max_length=100000)
     data_json: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
-
-
-# ---------------------------------------------------------------------------
-# Script-to-Storyboard conversion
-# ---------------------------------------------------------------------------
-
-
-class ConvertToStoryboardRequest(BaseModel):
-    """Request body for converting a chapter to storyboard scenes."""
-
-    script_id: str
-    chapter_id: str
-    storyboard_project_id: Optional[str] = None
