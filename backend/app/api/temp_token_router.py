@@ -22,7 +22,8 @@ import secrets
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.core.deps import AuthDep
+from app.core.api_key_scopes import check_scope_permission
+from app.core.deps import AuthContext, AuthDep
 from app.core.redis import get_async_redis
 from app.repositories.tags_repository import get_tags_repository
 from app.schemas.tags import TagListResponse
@@ -30,6 +31,7 @@ from app.schemas.tags import TagListResponse
 router = APIRouter(prefix="/auth/temp-token", tags=["Temp Token"])
 
 TOKEN_TTL_SECONDS = 5 * 60  # 5 minutes
+DEFAULT_SCOPES = ("tags:read", "tags:write")
 TOKEN_LENGTH = 32  # 32 bytes = 64 hex chars
 REDIS_PREFIX = "temp_token:"
 
@@ -62,6 +64,33 @@ class SelectionResponse(SelectionOptions):
 
 
 SELECTION_FIELDS = ("rating", "transcribe", "summarize", "analyze")
+
+
+def _granted_scopes(auth: AuthContext, requested: list[str] | None) -> list[str]:
+    """Scopes the new temp token carries: never more than the caller holds.
+
+    A JWT session holds everything, so it gets what it asked for (default:
+    read + write). An API key only reaches this route with ``tags:read``; the
+    token used to default to ``tags:write`` regardless, so a read-only key
+    could mint a token and create tags with it. Now an API key gets the
+    default narrowed to the scopes it holds, and an explicit request for a
+    scope it does not hold is refused.
+    """
+    if auth.auth_type != "api_key":
+        return list(requested or DEFAULT_SCOPES)
+    held = auth.scopes or []
+    if requested:
+        missing = [s for s in requested if not check_scope_permission([s], held)]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "scope_not_held",
+                    "message": "The API key does not hold: " + ", ".join(missing),
+                },
+            )
+        return list(requested)
+    return [s for s in DEFAULT_SCOPES if check_scope_permission([s], held)]
 
 
 def _options_from(data: dict) -> SelectionOptions:
@@ -103,9 +132,7 @@ async def create_temp_token(
     Requires API Key or JWT auth. Returns a short-lived token
     that can be safely passed in URLs.
     """
-    scopes = (
-        request.scopes if request and request.scopes else ["tags:read", "tags:write"]
-    )
+    scopes = _granted_scopes(auth, request.scopes if request else None)
     token = secrets.token_hex(TOKEN_LENGTH)
 
     data = {
