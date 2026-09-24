@@ -133,7 +133,7 @@ export function CandidateCard({
             type="button"
             className={BTN}
             disabled={busy || !inCatalog}
-            title={inCatalog ? undefined : t('settings.vectors.switchNeedsCatalog')}
+            title={inCatalog ? undefined : t('settings.vectors.backfillNeedsCatalog')}
             onClick={() => onBackfill(space.id)}
           >
             {t('settings.vectors.backfill200')}

@@ -18,12 +18,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { backfillEmbeddings, getNousModels, type BackfillResult } from '../../services/aiService';
+import { backfillEmbeddings, type BackfillResult } from '../../services/aiService';
 import { ApiError } from '../../services/apiClient';
 import {
   activateVectorSpace,
   createVectorSpace,
   deleteVectorSpace,
+  getVectorSpaceCatalog,
   getVectorsStatus,
   type VectorsStatus,
 } from '../../services/searchService';
@@ -68,6 +69,18 @@ function spaceErrorLine(err: unknown, t: TFn, model?: string): string {
       return t('settings.vectors.errorSpaceActive');
     case 'space_catalog_row_missing':
       return t('settings.vectors.switchNeedsCatalog');
+    case 'catalog_model_disabled':
+      return t('settings.vectors.errorModelDisabled');
+    case 'not_an_embedding_model':
+      return t('settings.vectors.errorNotEmbedding');
+    case 'space_not_found':
+      return t('settings.vectors.errorSpaceNotFound');
+    case 'vector_store_missing':
+      return t('settings.vectors.errorSpaceStoreMissing');
+    case 'byok_row_not_allowed':
+      return t('settings.vectors.errorByokRow');
+    case 'active_space_unknown':
+      return t('settings.vectors.errorActiveUnknown');
     default:
       return errorLine(err, t);
   }
@@ -192,7 +205,7 @@ export function VectorsPanel() {
     setPickerModels(null);
     setSpaceError(null);
     try {
-      setPickerModels(await getNousModels('embedding'));
+      setPickerModels(await getVectorSpaceCatalog());
     } catch (err) {
       console.error('VectorsPanel: failed to load embedding models', err);
       setPickerModels([]);

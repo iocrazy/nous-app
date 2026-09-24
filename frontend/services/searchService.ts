@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
+import type { NousModelPublic } from '../types';
 import type { SearchChipFilters } from './searchChipFilters';
 
 // Types
@@ -386,3 +387,8 @@ export const activateVectorSpace = (spaceId: string): Promise<VectorsStatus> =>
 /** Delete a non-active space and every vector in it (admin). */
 export const deleteVectorSpace = (spaceId: string): Promise<DeleteVectorSpaceResult> =>
   apiClient.delete<DeleteVectorSpaceResult>(`/api/v1/search/vectors/spaces/${encodeURIComponent(spaceId)}`);
+
+/** Catalog models Add Space may pick: enabled PLATFORM embedding rows only.
+ *  (`/ai/nous-models` also returns the caller's own BYOK rows.) */
+export const getVectorSpaceCatalog = async (): Promise<NousModelPublic[]> =>
+  (await apiClient.get<{ models: NousModelPublic[] }>('/api/v1/search/vectors/catalog')).models;

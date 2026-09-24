@@ -14,6 +14,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
@@ -1273,6 +1274,18 @@ async def _candidate_space_and_embedder(space_id: str):
     return space, embedder
 
 
+async def _space_gone(space_id: int) -> bool:
+    """True when the space no longer exists. A failed check answers False:
+    the row is then one bad row, not a reason to abort the batch."""
+    from app.repositories import embedding_space_repository as space_mod
+
+    try:
+        return await space_mod.get_embedding_space_repository().get(space_id) is None
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"backfill: could not check space {space_id}: {e}")
+        return False
+
+
 async def _embed_backfill_rows(
     rows: list, *, embedder, space_id: int, repo
 ) -> tuple[list[str], int, list[dict], str | None]:
@@ -1282,8 +1295,10 @@ async def _embed_backfill_rows(
     Stops early — every remaining row accounted for in ``skipped`` — on a
     process-wide failure (``_BACKFILL_ABORT_CODES``), on
     ``_BACKFILL_MAX_PROVIDER_ERRORS`` consecutive provider errors (rest:
-    ``provider_error``), or past ``_BACKFILL_WALL_CLOCK_S`` (rest:
-    ``not_attempted``). ``aborted_reason`` names which; None = ran to the end.
+    ``provider_error``), past ``_BACKFILL_WALL_CLOCK_S`` (rest:
+    ``not_attempted``), or when the space is deleted mid-run (that row
+    ``space_gone``, rest ``not_attempted``). ``aborted_reason`` names which;
+    None = ran to the end.
     """
     from app.services.library import embedding_backfill
 
@@ -1300,6 +1315,19 @@ async def _embed_backfill_rows(
             ok, reason = await embedding_backfill.embed_candidate(
                 row, embedder=embedder, space_id=space_id, repo=repo
             )
+        except IntegrityError as e:
+            # FK violation: the space was deleted mid-run (every later row
+            # fails the same way), or just this resource was.
+            if await _space_gone(space_id):
+                logger.error(f"backfill: space {space_id} deleted mid-run: {e}")
+                skipped.append(_skip(row.resource_id, "space_gone"))
+                skipped.extend(
+                    _skip(r.resource_id, "not_attempted") for r in rows[i + 1 :]
+                )
+                return reembedded, rehashed, skipped, "space_gone"
+            logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
+            skipped.append(_skip(row.resource_id, "reembed_error"))
+            continue
         except Exception as e:  # one bad row must not lose the rows before it
             logger.error(f"backfill: embed failed for resource {row.resource_id}: {e}")
             skipped.append(_skip(row.resource_id, "reembed_error"))

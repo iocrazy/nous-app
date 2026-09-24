@@ -12,6 +12,7 @@ import {
   createVectorSpace,
   deleteVectorSpace,
   findSimilarVideos,
+  getVectorSpaceCatalog,
   hybridSearch,
   localSearch,
   quickSearch,
@@ -356,5 +357,15 @@ describe('vector space switching', () => {
     expect(url).toBe(`https://api.test/api/v1/search/vectors/spaces/${SPACE_ID}`);
     expect(init.method).toBe('DELETE');
     expect(out.deleted_vectors).toBe(187);
+  });
+
+  it('getVectorSpaceCatalog GETs the platform embedding rows', async () => {
+    stubResponse({ models: [{ name: 'nous-wemm-embedding-2b', display_name: 'WeMM 2B', type: 'embedding' }] });
+    const spy = vi.mocked(globalThis.fetch);
+    const out = await getVectorSpaceCatalog();
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.test/api/v1/search/vectors/catalog');
+    expect(init.method).toBe('GET');
+    expect(out.map((m) => m.name)).toEqual(['nous-wemm-embedding-2b']);
   });
 });

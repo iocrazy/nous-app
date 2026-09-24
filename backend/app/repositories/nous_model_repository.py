@@ -149,6 +149,23 @@ def _row(obj: Any) -> Dict[str, Any]:
     return out
 
 
+def platform_embedding_by_actual_model_stmt(actual_model: str):
+    """The PLATFORM embedding row serving ``actual_model``: never a personal
+    (BYOK, ``owner_user_id`` set) row, never another model type, and an
+    enabled row ahead of a disabled duplicate. For embedding spaces, whose
+    identity is ``actual_model`` (``embedding_spaces.catalog_row_for_space``)."""
+    return (
+        select(NousModels)
+        .where(
+            NousModels.actual_model == actual_model,
+            NousModels.owner_user_id.is_(None),
+            NousModels.type == "embedding",
+        )
+        .order_by(NousModels.is_enabled.desc(), NousModels.sort_order)
+        .limit(1)
+    )
+
+
 class NousModelRepository:
     """CRUD for nous_models table (SQLAlchemy 2.0 ORM)."""
 
@@ -237,6 +254,24 @@ class NousModelRepository:
         except Exception as e:
             logger.error(f"Failed to get nous model '{name}': {e}")
             return None
+
+    async def get_platform_embedding_by_actual_model(
+        self, actual_model: str
+    ) -> Optional[Dict[str, Any]]:
+        """See :func:`platform_embedding_by_actual_model_stmt`. Unlike
+        :meth:`get_by_actual_model` a read failure RAISES: a space must not
+        read as "no catalog row" because the database blinked."""
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        platform_embedding_by_actual_model_stmt(actual_model)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+        return _row(row) if row else None
 
     async def get_by_actual_model(self, actual_model: str) -> Optional[Dict[str, Any]]:
         """Get a Nous model by ``actual_model`` (the raw upstream model id,

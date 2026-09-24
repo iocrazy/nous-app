@@ -21,16 +21,16 @@ const backfillMock = vi.fn();
 const createSpaceMock = vi.fn();
 const activateSpaceMock = vi.fn();
 const deleteSpaceMock = vi.fn();
-const getNousModelsMock = vi.fn();
+const getCatalogMock = vi.fn();
 vi.mock('../../services/searchService', () => ({
   getVectorsStatus: (...args: unknown[]) => getVectorsStatusMock(...args),
   createVectorSpace: (...args: unknown[]) => createSpaceMock(...args),
   activateVectorSpace: (...args: unknown[]) => activateSpaceMock(...args),
   deleteVectorSpace: (...args: unknown[]) => deleteSpaceMock(...args),
+  getVectorSpaceCatalog: (...args: unknown[]) => getCatalogMock(...args),
 }));
 vi.mock('../../services/aiService', () => ({
   backfillEmbeddings: (...args: unknown[]) => backfillMock(...args),
-  getNousModels: (...args: unknown[]) => getNousModelsMock(...args),
 }));
 
 // Real wire shape of GET /api/v1/search/vectors/status: the Snowflake space id
@@ -92,7 +92,7 @@ describe('VectorsPanel', () => {
     createSpaceMock.mockReset();
     activateSpaceMock.mockReset();
     deleteSpaceMock.mockReset();
-    getNousModelsMock.mockReset();
+    getCatalogMock.mockReset();
   });
 
   it('renders the current space card from /vectors/status', async () => {
@@ -401,7 +401,9 @@ describe('VectorsPanel', () => {
       render(<VectorsPanel />);
       const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
       expect(card).toHaveTextContent('Not in catalog');
-      expect(within(card).getByRole('button', { name: 'Backfill 200' })).toBeDisabled();
+      const fill = within(card).getByRole('button', { name: 'Backfill 200' });
+      expect(fill).toBeDisabled();
+      expect(fill).toHaveAttribute('title', "This space's model is no longer in the catalog, so it cannot be filled");
       const sw = within(card).getByRole('button', { name: 'Switch To This Space' });
       expect(sw).toBeDisabled();
       expect(sw).toHaveAttribute('title', "This space's model is no longer in the catalog");
@@ -409,11 +411,12 @@ describe('VectorsPanel', () => {
 
     it('Add Space lists only catalog models that have no space yet, then creates one', async () => {
       getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
-      getNousModelsMock.mockResolvedValue(EMBEDDING_MODELS);
+      getCatalogMock.mockResolvedValue(EMBEDDING_MODELS);
       createSpaceMock.mockResolvedValue({ ...candidate(0), active: undefined });
       render(<VectorsPanel />);
       fireEvent.click(await screen.findByRole('button', { name: 'Add Space' }));
-      await waitFor(() => expect(getNousModelsMock).toHaveBeenCalledWith('embedding'));
+      // Platform rows only (GET /search/vectors/catalog), never the caller's BYOK rows.
+      await waitFor(() => expect(getCatalogMock).toHaveBeenCalledTimes(1));
       const picker = await screen.findByTestId('vector-add-space-picker');
       expect(within(picker).queryByText('Doubao Embedding Vision')).toBeNull();
       expect(within(picker).queryByText('WeMM Embedding 2B')).toBeNull();
@@ -425,7 +428,7 @@ describe('VectorsPanel', () => {
     it('a 422 dimension_mismatch from Add Space reads both widths', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getVectorsStatusMock.mockResolvedValue(withSpaces(null));
-      getNousModelsMock.mockResolvedValue(EMBEDDING_MODELS);
+      getCatalogMock.mockResolvedValue(EMBEDDING_MODELS);
       // Production ErrorResponse envelope: the typed body lives in details.
       createSpaceMock.mockRejectedValue(
         new ApiError('nous-wemm-embedding-4b returns 2560 dimensions', 422, {
@@ -489,6 +492,28 @@ describe('VectorsPanel', () => {
       fireEvent.click(within(card).getByRole('button', { name: 'Cancel' }));
       expect(within(card).queryByRole('button', { name: 'Confirm Delete' })).toBeNull();
       expect(deleteSpaceMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['catalog_model_disabled', 'This model is disabled in the catalog.'],
+      ['not_an_embedding_model', 'This catalog model is not an embedding model.'],
+      ['space_not_found', 'This space no longer exists. Refresh the page.'],
+      ['vector_store_missing', 'Vector store not migrated yet. Space changes are unavailable.'],
+      ['byok_row_not_allowed', 'A personal API key row cannot back a shared embedding space.'],
+      ['active_space_unknown', 'Could not tell which space is active, so nothing was deleted. Try again.'],
+    ])('typed %s reads its own line', async (code, text) => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      getVectorsStatusMock.mockResolvedValue(withSpaces(candidate(150)));
+      deleteSpaceMock.mockRejectedValue(
+        new ApiError('Refused', 409, { code: 'http_409', details: { code, message: 'server text' } }),
+      );
+      render(<VectorsPanel />);
+      const card = await screen.findByTestId(`vector-candidate-${CANDIDATE_ID}`);
+      fireEvent.click(within(card).getByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(card).getByRole('button', { name: 'Confirm Delete' }));
+      const line = await screen.findByTestId('vector-space-error');
+      expect(line).toHaveTextContent(text);
+      spy.mockRestore();
     });
   });
 });

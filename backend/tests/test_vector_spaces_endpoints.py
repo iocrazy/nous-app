@@ -20,7 +20,8 @@ from app.core.embedding_space import EmbeddingDimensionMismatch, SpaceSpec
 from app.repositories.resource_embeddings_repository import EmbeddingStoreMissing
 from app.schemas.search import CreateSpaceRequest
 from app.services.ai.providers.embedding_config import EmbeddingConfig
-from app.services.library.embedding_spaces import SpaceCatalogError
+from app.services.library import embedding_spaces as spaces_mod
+from app.services.library.embedding_spaces import ActiveSpaceUnknown, SpaceCatalogError
 
 search_router = importlib.import_module("app.api.search_router")
 
@@ -141,6 +142,8 @@ def _wire(
     cfg_error: SpaceCatalogError | None = None,
     catalog_row=None,
     active_spec=_ACTIVE_SPEC,
+    active_model: Any = "doubao-embedding-vision-251215",
+    real_active: bool = False,
     space_repo=None,
     emb_repo=None,
 ) -> SimpleNamespace:
@@ -175,6 +178,11 @@ def _wire(
     async def _catalog_name(actual_model):
         return None
 
+    async def _active_model():
+        if isinstance(active_model, Exception):
+            raise active_model
+        return active_model
+
     monkeypatch.setattr(search_router, "EmbeddingService", _make)
     monkeypatch.setattr(search_router, "config_for_catalog_model", _config_for)
     monkeypatch.setattr(search_router, "catalog_row_for_space", _row_for)
@@ -182,6 +190,8 @@ def _wire(
     monkeypatch.setattr(search_router, "create_audit_log", _audit)
     monkeypatch.setattr(search_router, "is_admin_user", _admin)
     monkeypatch.setattr(search_router, "catalog_name_for", _catalog_name)
+    if not real_active:
+        monkeypatch.setattr(search_router, "active_actual_model", _active_model)
     monkeypatch.setattr(
         search_router, "get_embedding_space_repository", lambda: space_repo
     )
@@ -379,8 +389,8 @@ async def test_delete_counts_the_cascaded_vectors_first(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delete_is_allowed_when_no_embedder_is_active(monkeypatch):
-    w = _wire(monkeypatch, active_spec=None)
+async def test_delete_is_allowed_when_no_embedder_is_configured(monkeypatch):
+    w = _wire(monkeypatch, active_model=None)
     await search_router.delete_vector_space(str(_ACTIVE["id"]), _AUTH, _REQ)
     assert w.space_repo.deleted == [_ACTIVE["id"]]
 
@@ -391,3 +401,89 @@ async def test_delete_unknown_space_is_404(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await search_router.delete_vector_space("42", _AUTH, _REQ)
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_when_the_active_space_cannot_be_determined(monkeypatch):
+    """Fail closed: "could not tell" is never "nothing is active"."""
+    w = _wire(monkeypatch, active_model=ActiveSpaceUnknown("db down"))
+    with pytest.raises(HTTPException) as exc:
+        await search_router.delete_vector_space(str(_CANDIDATE["id"]), _AUTH, _REQ)
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "active_space_unknown"
+    assert w.space_repo.deleted == [] and w.emb_repo.counted == []
+
+
+class _Gov:
+    def __init__(self, values=None, fail: Exception | None = None):
+        self.values, self.fail = values or {}, fail
+
+    async def get_value(self, key):
+        if self.fail is not None:
+            raise self.fail
+        return self.values.get(key)
+
+
+def _real_active(monkeypatch, gov: _Gov, platform=None, platform_error=None):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(spaces_mod, "get_system_settings_repository", lambda: gov)
+    monkeypatch.setattr(
+        "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+        AsyncMock(return_value=platform, side_effect=platform_error),
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_reads_governance_even_when_the_embedder_cannot_name_a_space(
+    monkeypatch,
+):
+    """The review's case: space_spec() fails (-> None), governance still
+    points at this space's catalog row. Before the fix this deleted the active
+    space and every user's vectors in it."""
+    w = _wire(monkeypatch, active_spec=None, real_active=True)
+    _real_active(
+        monkeypatch,
+        _Gov({"ai_module.embedding.model": "nous-wemm-embedding-2b"}),
+        platform=("nous-engine", {}, "wemm-embedding-2b"),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await search_router.delete_vector_space(str(_CANDIDATE["id"]), _AUTH, _REQ)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "space_active"
+    assert w.space_repo.deleted == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "gov,platform_error",
+    [
+        (_Gov(fail=RuntimeError("db down")), None),
+        (
+            _Gov({"ai_module.embedding.model": "nous-wemm-embedding-2b"}),
+            RuntimeError("Platform model is no longer available."),
+        ),
+    ],
+)
+async def test_delete_503s_when_governance_cannot_be_resolved(
+    monkeypatch, gov, platform_error
+):
+    w = _wire(monkeypatch, real_active=True)
+    _real_active(monkeypatch, gov, platform_error=platform_error)
+    with pytest.raises(HTTPException) as exc:
+        await search_router.delete_vector_space(str(_CANDIDATE["id"]), _AUTH, _REQ)
+    assert exc.value.status_code == 503
+    assert exc.value.detail["code"] == "active_space_unknown"
+    assert w.space_repo.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_catalog_lists_platform_embedding_rows_only(monkeypatch):
+    rows = [{"name": "nous-wemm-embedding-2b", "display_name": "WeMM 2B"}]
+
+    async def _platform():
+        return rows
+
+    monkeypatch.setattr(search_router, "platform_embedding_models", _platform)
+    out = await search_router.vector_space_catalog(_AUTH)
+    assert out == {"models": rows}

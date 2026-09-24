@@ -570,3 +570,60 @@ async def test_backfill_into_a_space_without_a_catalog_row_is_409() -> None:
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "space_catalog_row_missing"
     assert repo.calls == []
+
+
+# ---------------------------------------------------------------------------
+# the space is deleted while its backfill runs
+# ---------------------------------------------------------------------------
+def _fk_error():
+    from sqlalchemy.exc import IntegrityError
+
+    return IntegrityError("INSERT …", {}, Exception("violates foreign key"))
+
+
+@pytest.mark.asyncio
+async def test_space_deleted_mid_backfill_aborts_once_as_space_gone() -> None:
+    from app.api.ai_router import BackfillEmbeddingsBody
+
+    repo = _Repo([_row(1), _row(2), _row(3)], 3)
+    space_repo = _SpaceRepoWithGet()
+    embed = AsyncMock(side_effect=[(True, None), _fk_error(), (True, None)])
+    # First get() loads the space; the second (after the FK error) finds it
+    # deleted between rows 1 and 2.
+    p = _patches(repo=repo, space_repo=space_repo, embed=embed)
+    with (
+        p[0],
+        p[1],
+        p[2],
+        p[3],
+        p[4],
+        patch(
+            "app.services.library.embedding_spaces.service_for_space",
+            AsyncMock(return_value=object()),
+        ),
+        patch.object(
+            _SpaceRepoWithGet,
+            "get",
+            AsyncMock(side_effect=[_CAND, None]),
+        ),
+    ):
+        out = await _call(BackfillEmbeddingsBody(space_id=str(_CAND["id"])))
+
+    assert embed.await_count == 2, "no row after the space is gone"
+    assert out["aborted_reason"] == "space_gone"
+    assert out["reembedded"] == ["1"]
+    assert _reasons(out["skipped"]) == {"2": "space_gone", "3": "not_attempted"}
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_key_error_with_the_space_intact_is_one_bad_row() -> None:
+    """A resource deleted mid-run is also an FK error: that row only."""
+    repo = _Repo([_row(1), _row(2)], 2)
+    space_repo = _SpaceRepoWithGet(spaces=(_SPACE,))
+    embed = AsyncMock(side_effect=[_fk_error(), (True, None)])
+    p = _patches(repo=repo, space_repo=space_repo, embed=embed)
+    with p[0], p[1], p[2], p[3], p[4]:
+        out = await _call()
+    assert out["aborted_reason"] is None
+    assert out["reembedded"] == ["2"]
+    assert _reasons(out["skipped"]) == {"1": "reembed_error"}

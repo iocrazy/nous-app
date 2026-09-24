@@ -200,6 +200,8 @@ transcript_segments     resource_id, segment_index, start_ms, end_ms, text, spac
 - Switch 只在前端要求「本人覆盖 100%」；覆盖率按用户算，后端不校验（管理员自己的覆盖说明不了别人的）。切换后其他用户未回填的资源在新空间里搜不到，直到各自回填。
 - 切换后旧空间不自动删除，存储翻倍直到管理员手动 Delete。
 - 空间 id 进程内缓存 60 秒（`semantic_store._SPACE_ID_TTL_S`）：删除空间的进程立刻忘掉，其他 worker 最多 60 秒后重新解析。
+- Delete 判定当前空间直接读治理原值（为空再读 `graph_embedder_model`），读不到或解析失败返回 503 `active_space_unknown`，失败时拒绝而不是放行。`deleted_vectors` 是先计数后删除的近似值；activate 与 delete 之间有小竞态，没有加锁。
+- Add Space 只能选平台目录行（`owner_user_id IS NULL`），个人 BYOK 行返回 `byok_row_not_allowed`。
 - WeMM chat 形态未在真栈验过：nous-engine 上目前只有 4B（2560 维、无 2048 档），加它会 422；2B 部署后才能端到端走一遍。
 - `source_hash` 变化（文档版本 bump 或输入变动）目前不会触发重嵌：回填只挑「当前空间里没有行」的资源；hash 只在 `analyze_l1` 重跑（upsert 覆盖）与同一次回填内幂等两处生效。「hash 过期即重嵌」留给下一版。
 

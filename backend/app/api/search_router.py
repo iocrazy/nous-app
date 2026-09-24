@@ -42,11 +42,14 @@ from app.services.library.embedding_document import DOC_VERSION
 from app.services.library.embedding_spaces import (
     EMBEDDING_MODEL_SETTING,
     PROBE_TEXT,
+    ActiveSpaceUnknown,
     SpaceCatalogError,
+    active_actual_model,
     catalog_name_for,
     catalog_row_for_space,
     config_for_catalog_model,
     forget_space_id,
+    platform_embedding_models,
 )
 from app.services.library.like_escape import escape_like
 from app.services.library.resource_lookup import (
@@ -533,6 +536,7 @@ _CATALOG_ERROR_STATUS = {
     "catalog_model_disabled": status.HTTP_409_CONFLICT,
     "not_an_embedding_model": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "space_catalog_row_missing": status.HTTP_409_CONFLICT,
+    "byok_row_not_allowed": status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 _STORE_MISSING = HTTPException(
@@ -571,6 +575,14 @@ async def _load_space(space_id: str) -> Dict[str, Any]:
 
 def _client_ip(request: Request) -> Optional[str]:
     return request.client.host if request.client else None
+
+
+@router.get("/vectors/catalog")
+async def vector_space_catalog(auth: AuthDep):
+    """Catalog models Add Space may pick: enabled PLATFORM embedding rows
+    only (public fields). ``/ai/nous-models`` also lists the caller's own
+    BYOK rows, which must never back a shared space."""
+    return {"models": await platform_embedding_models()}
 
 
 @router.post(
@@ -672,12 +684,22 @@ async def delete_vector_space(space_id: str, auth: AdminAuthDep, request: Reques
     in it — every user's. The active space is refused (409
     ``space_active``): switch away first."""
     space = await _load_space(space_id)
-    active = await EmbeddingService().space_spec()
-    if (
-        active is not None
-        and active.actual_model == space["actual_model"]
-        and active.dims == space["dims"]
-    ):
+    # Read the governance setting itself: EmbeddingService.space_spec() folds
+    # every failure into None, and "None" here used to mean "nothing active"
+    # -> the active space and every user's vectors in it were deletable.
+    try:
+        active_model = await active_actual_model()
+    except ActiveSpaceUnknown as e:
+        logger.error(f"Delete space {space_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "active_space_unknown",
+                "message": "Could not determine the active embedding space; "
+                "nothing was deleted. Try again shortly.",
+            },
+        )
+    if active_model is not None and active_model == space["actual_model"]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

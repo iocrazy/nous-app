@@ -1145,7 +1145,14 @@
       "spaceDeleted": "空间已删除 · 移除 {{count}} 条向量",
       "errorDimensionMismatch": "{{model}} 返回 {{got}} 维，向量库为 {{expected}} 维",
       "errorProbe": "{{model}} 未响应探测。请检查服务商后重试。",
-      "errorSpaceActive": "这是当前空间。请先切换到其他空间再删除。"
+      "errorSpaceActive": "这是当前空间。请先切换到其他空间再删除。",
+      "backfillNeedsCatalog": "此空间的模型已不在目录中，无法回填",
+      "errorModelDisabled": "该模型已在目录中禁用。",
+      "errorNotEmbedding": "该目录模型不是向量模型。",
+      "errorSpaceNotFound": "该空间已不存在，请刷新页面。",
+      "errorSpaceStoreMissing": "向量库尚未迁移，暂时无法更改空间。",
+      "errorByokRow": "个人 API Key 的模型行不能用于共享向量空间。",
+      "errorActiveUnknown": "无法确定当前空间，未删除任何内容。请重试。"
     },
     "localCli": {
       "modelHint": "用哪个 Codex 模型在服务商卡上设置：设置 → AI → 服务商 → Codex (Local CLI)。那里启用的模型就是 agent 和出图使用的。",

@@ -1145,7 +1145,14 @@
       "spaceDeleted": "Space deleted · {{count}} vectors removed",
       "errorDimensionMismatch": "{{model}} returns {{got}} dims, the store holds {{expected}}",
       "errorProbe": "{{model}} did not answer the probe. Check the provider and try again.",
-      "errorSpaceActive": "This is the active space. Switch to another one before deleting it."
+      "errorSpaceActive": "This is the active space. Switch to another one before deleting it.",
+      "backfillNeedsCatalog": "This space's model is no longer in the catalog, so it cannot be filled",
+      "errorModelDisabled": "This model is disabled in the catalog.",
+      "errorNotEmbedding": "This catalog model is not an embedding model.",
+      "errorSpaceNotFound": "This space no longer exists. Refresh the page.",
+      "errorSpaceStoreMissing": "Vector store not migrated yet. Space changes are unavailable.",
+      "errorByokRow": "A personal API key row cannot back a shared embedding space.",
+      "errorActiveUnknown": "Could not tell which space is active, so nothing was deleted. Try again."
     },
     "localCli": {
       "modelHint": "Which Codex model runs is set on the provider card: Settings → AI → Providers → Codex (Local CLI). Its enabled models are what agents and image generation use.",
