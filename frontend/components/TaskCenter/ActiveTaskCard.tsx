@@ -10,7 +10,7 @@ import { TaskTypeIcon } from './TaskTypeIcon';
 import { AgentNameBadge } from './AgentNameBadge';
 import { formatElapsed } from './taskElapsed';
 import { retryProgress, todoProgress } from './agentRunPresentation';
-import { budgetState, contextGauge, currentStep, selectRunView } from './runView';
+import { budgetState, contextGauge, currentStep, fallbackWindowLabel, selectRunView } from './runView';
 import { deliverSteer, InboxTargetEndedError, type InboxTargetKind } from '../../services/agentInboxService';
 import { pauseIssue } from '../../services/issuesService';
 import { controlErrorText } from '../Todolist/issueControlErrors';
@@ -42,6 +42,7 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
   const view = task.task_type === 'agent' ? selectRunView(task.metadata) : null;
   const cur = currentStep(view);
   const gauge = contextGauge(view);
+  const guessedWindow = fallbackWindowLabel(gauge);
   const budget = budgetState(view);
   const steerTarget = steerTargetOf(task);
   // Phase 2a §2: target-level pause for issue-backed runs (the issue is the
@@ -155,7 +156,15 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
           {(cur || gauge || budget) && (
             <div className="mt-1 flex items-center gap-2 text-[10px] text-ink-500 tabular-nums" data-testid="agent-cockpit">
               {cur?.step != null && <span>turn {cur.turn ?? 1} · step {cur.step}</span>}
-              {gauge && <span className={gauge.used_pct >= 85 ? 'text-warn' : ''}>ctx {Math.round(gauge.used_pct)}%</span>}
+              {gauge && (
+                <span
+                  className={gauge.used_pct >= 85 ? 'text-warn' : ''}
+                  data-testid="agent-context"
+                  title={guessedWindow != null ? t('issueDetail.windowFallbackHint', { window: guessedWindow }) : undefined}
+                >
+                  ctx {guessedWindow != null ? '~' : ''}{Math.round(gauge.used_pct)}%
+                </span>
+              )}
               {budget && (
                 <span className={budget.state === 'over' ? 'text-danger' : 'text-warn'} data-testid="agent-budget">
                   {t('topbar.budgetUsed', { pct: budget.pct })}

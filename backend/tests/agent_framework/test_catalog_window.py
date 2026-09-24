@@ -46,7 +46,7 @@ async def _load(monkeypatch, rows: list[dict]) -> None:
 async def test_catalog_value_wins_and_is_known(monkeypatch):
     # gpt-4o is in the table at 128k; the catalog says otherwise and wins.
     await _load(monkeypatch, _rows(("nous-gpt4o", "gpt-4o", 64_000)))
-    assert resolve_model_window("gpt-4o") == (64_000, True)
+    assert resolve_model_window("gpt-4o") == (64_000, "catalog")
 
 
 @pytest.mark.unit
@@ -55,24 +55,27 @@ async def test_catalog_answers_by_actual_model_and_by_name(monkeypatch):
         monkeypatch,
         _rows(("nous-deepseek-v4-pro", "deepseek-v4-pro", 131_072)),
     )
-    assert resolve_model_window("deepseek-v4-pro") == (131_072, True)
-    assert resolve_model_window("nous-deepseek-v4-pro") == (131_072, True)
+    assert resolve_model_window("deepseek-v4-pro") == (131_072, "catalog")
+    assert resolve_model_window("nous-deepseek-v4-pro") == (131_072, "catalog")
     # the mediahub-/nous- rename alias resolves to the same row
-    assert resolve_model_window("mediahub-deepseek-v4-pro") == (131_072, True)
+    assert resolve_model_window("mediahub-deepseek-v4-pro") == (131_072, "catalog")
     # case-insensitive, like the table lookup
-    assert resolve_model_window("DeepSeek-V4-Pro") == (131_072, True)
+    assert resolve_model_window("DeepSeek-V4-Pro") == (131_072, "catalog")
 
 
 @pytest.mark.unit
 async def test_catalog_null_falls_through_to_the_table(monkeypatch):
     await _load(monkeypatch, _rows(("nous-gpt4o", "gpt-4o", None)))
-    assert resolve_model_window("gpt-4o") == (128_000, True)
+    assert resolve_model_window("gpt-4o") == (128_000, "builtin")
 
 
 @pytest.mark.unit
 async def test_neither_catalog_nor_table_is_the_fallback_and_unknown(monkeypatch):
     await _load(monkeypatch, _rows(("nous-x", "x-model", None)))
-    assert resolve_model_window("x-model") == (settings.LLM_MAX_CONTEXT_TOKENS, False)
+    assert resolve_model_window("x-model") == (
+        settings.LLM_MAX_CONTEXT_TOKENS,
+        "fallback",
+    )
 
 
 @pytest.mark.unit
@@ -83,15 +86,15 @@ async def test_conflicting_rows_for_one_model_take_the_smaller_window(monkeypatc
         monkeypatch,
         _rows(("nous-a", "shared-model", 200_000), ("user-a", "shared-model", 64_000)),
     )
-    assert resolve_model_window("shared-model") == (64_000, True)
+    assert resolve_model_window("shared-model") == (64_000, "catalog")
 
 
 @pytest.mark.unit
 async def test_refresh_makes_a_new_value_take_effect(monkeypatch):
     await _load(monkeypatch, _rows(("nous-q", "qwen3-8-27b", 32_768)))
-    assert resolve_model_window("qwen3-8-27b") == (32_768, True)
+    assert resolve_model_window("qwen3-8-27b") == (32_768, "catalog")
     await _load(monkeypatch, _rows(("nous-q", "qwen3-8-27b", 65_536)))
-    assert resolve_model_window("qwen3-8-27b") == (65_536, True)
+    assert resolve_model_window("qwen3-8-27b") == (65_536, "catalog")
 
 
 @pytest.mark.unit
@@ -124,7 +127,7 @@ async def test_a_failed_reload_keeps_the_previous_windows(monkeypatch):
 
     monkeypatch.setattr(cwin, "_fetch_catalog_rows", _boom)
     await cwin.refresh_catalog_windows()
-    assert resolve_model_window("qwen3-8-27b") == (32_768, True)
+    assert resolve_model_window("qwen3-8-27b") == (32_768, "catalog")
 
 
 @pytest.mark.unit
@@ -175,7 +178,7 @@ async def test_catalog_known_model_feeds_the_context_gauge(monkeypatch):
 
     class _Rec:
         def __init__(self):
-            self.measured: list[tuple[int, int]] = []
+            self.measured: list[tuple[int, int, str | None]] = []
 
         async def record_event(self, *a, **k):
             pass
@@ -186,8 +189,8 @@ async def test_catalog_known_model_feeds_the_context_gauge(monkeypatch):
         def cost_of(self, p, c, cached=0):
             return None
 
-        def measure_context(self, used, window):
-            self.measured.append((used, window))
+        def measure_context(self, used, window, window_source=None):
+            self.measured.append((used, window, window_source))
 
     class _Composed:
         model = "doubao-seed-2-0-pro-260215"
@@ -204,7 +207,7 @@ async def test_catalog_known_model_feeds_the_context_gauge(monkeypatch):
         {"prompt_tokens": 5000, "completion_tokens": 3},
         "stop",
     )
-    assert rec.measured == [(5000, 131_072)]
+    assert rec.measured == [(5000, 131_072, "catalog")]
 
 
 @pytest.mark.unit

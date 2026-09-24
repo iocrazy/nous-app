@@ -63,7 +63,7 @@ async def test_pruner_alone_rescues_and_the_model_is_never_called(
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -99,7 +99,7 @@ async def test_pruner_that_does_not_rescue_still_pays_for_the_summary():
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -203,7 +203,7 @@ async def test_rejection_falls_back_to_the_emergency_cap_end_to_end(compactor):
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(

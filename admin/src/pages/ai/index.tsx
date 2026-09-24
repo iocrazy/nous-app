@@ -57,6 +57,10 @@ interface NousModel {
   // to render as two identical cards — which is most of why the catalog reads
   // as full of mysterious duplicates.
   owner_user_id?: string | null
+  // Migration 500: the model's context window in tokens. null = not
+  // configured — the agent runtime falls back to its builtin table, then to
+  // the global default, and the run gauge marks the number as approximate.
+  context_window_tokens?: number | null
 }
 
 interface ProviderProtocol {
@@ -243,6 +247,57 @@ function PriceCoverageTag({ coverage }: { coverage?: NousModel['price_coverage']
   )
 }
 
+// Windows come in two conventions: binary (131072 = "128k", 1048576 = "1M")
+// and decimal (128000 = "128k", 200000 = "200k"). A round decimal count
+// divides by 1000 (128000 is also 125 × 1024 — decimal must win); otherwise an
+// exact binary multiple divides by 1024; anything else by 1000. One decimal, trailing ".0" dropped; exact count goes in
+// the chip's title.
+const MIB = 1024 * 1024
+function formatContextWindow(tokens: number): string {
+  const fmt = (v: number) => {
+    const r = Math.round(v * 10) / 10
+    return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)
+  }
+  const unit = (dec: number, bin: number) => (tokens % dec !== 0 && tokens % bin === 0 ? bin : dec)
+  if (tokens >= 1_000_000) return `${fmt(tokens / unit(1_000_000, MIB))}M`
+  if (tokens >= 1000) return `${fmt(tokens / unit(1000, 1024))}k`
+  return String(tokens)
+}
+
+// Only LLM rows have a context window; other types render nothing.
+function ContextWindowChip({ model }: { model: NousModel }) {
+  if (model.type !== 'llm') return null
+  const tokens = model.context_window_tokens
+  if (tokens && tokens > 0) {
+    return (
+      <Tag size="small" title={`Context window: ${tokens.toLocaleString('en-US')} tokens`}>
+        {formatContextWindow(tokens)}
+      </Tag>
+    )
+  }
+  return (
+    <span
+      title="No context window configured — the agent runtime uses its builtin table or the global default. Set it via Edit."
+      style={{ fontSize: 12, color: 'var(--color-text-4)' }}
+    >
+      unset → fallback
+    </span>
+  )
+}
+
+// The column is int4; the backend rejects anything larger with a 422.
+const INT4_MAX = 2_147_483_647
+
+// Empty = no value (clear on save); otherwise a positive integer ≤ int4.
+function validateContextWindow(value: unknown, callback: (error?: string) => void) {
+  const raw = value === undefined || value === null ? '' : String(value).trim()
+  if (raw === '') return callback()
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n <= 0) return callback('Must be a positive whole number of tokens')
+  if (n > INT4_MAX) return callback(`Must be at most ${INT4_MAX.toLocaleString('en-US')} tokens`)
+  callback()
+}
+
 function StatusDot({
   status,
   detail,
@@ -304,6 +359,7 @@ export function AIModelsPage() {
   // Edit modal — reused for a single model ('model') and for a whole
   // provider's shared key/base_url ('provider', looped PUT over the group).
   const [editForm] = Form.useForm()
+  const editType = Form.useWatch('type', editForm) as string | undefined
   const [editModal, setEditModal] = useState<
     | { mode: 'model'; model: NousModel }
     | { mode: 'provider'; group: ProviderGroup }
@@ -705,6 +761,7 @@ export function AIModelsPage() {
       actual_provider: m.actual_provider,
       base_url: m.base_url || '',
       pricing_value: m.pricing_value,
+      context_window_tokens: m.context_window_tokens ?? '',
       api_key: '', // blank = keep current
     })
   }
@@ -733,6 +790,20 @@ export function AIModelsPage() {
     }
   }
 
+  // >0 → set it; empty on a row that had a value → explicit clear (the PUT
+  // drops nulls, so NULL needs its own flag); empty on an unset row or a
+  // non-LLM type → leave the column alone.
+  const contextWindowPatch = (
+    m: NousModel,
+    values: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    if (values.type !== 'llm') return {}
+    const raw = values.context_window_tokens
+    const n = raw === undefined || raw === null || String(raw).trim() === '' ? 0 : Number(raw)
+    if (n > 0) return { context_window_tokens: n }
+    return m.context_window_tokens ? { clear_context_window: true } : {}
+  }
+
   const handleEditSave = async () => {
     if (!editModal) return
     let values: Record<string, unknown>
@@ -755,6 +826,7 @@ export function AIModelsPage() {
         }
         // Only overwrite the key when the admin typed a new one.
         if ((values.api_key as string)?.trim()) patch.api_key = values.api_key
+        Object.assign(patch, contextWindowPatch(editModal.model, values))
         await putModel(editModal.model.id, patch)
         Message.success('Model updated')
       } else {
@@ -1061,6 +1133,7 @@ export function AIModelsPage() {
                         {m.name}
                       </span>
                     )}
+                    <ContextWindowChip model={m} />
                     <PriceCoverageTag coverage={m.price_coverage} />
                     <Switch
                       size="small"
@@ -1255,6 +1328,16 @@ export function AIModelsPage() {
               <FormItem label="Pricing Value" field="pricing_value">
                 <Input type="number" />
               </FormItem>
+              {editType === 'llm' && (
+                <FormItem
+                  label="Context Window (tokens)"
+                  field="context_window_tokens"
+                  rules={[{ validator: validateContextWindow }]}
+                  extra="Leave empty to fall back to the builtin table / global default. Takes effect on workers within 5 minutes."
+                >
+                  <Input type="number" min={1} step={1} placeholder="e.g. 131072" allowClear />
+                </FormItem>
+              )}
             </>
           )}
 

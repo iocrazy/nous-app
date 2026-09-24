@@ -492,12 +492,20 @@ class RunRecorder:
         """Current folded views (``view`` / ``cost``) for this run."""
         return self._writer().views if self.run_id is not None else empty_views()
 
-    def measure_context(self, used: int, window: int) -> None:
+    def measure_context(
+        self, used: int, window: int, window_source: Optional[str] = None
+    ) -> None:
         """Feed the context gauge from a local measurement (no event row):
-        green/yellow compaction tiers emit nothing, yet the gauge must move."""
+        green/yellow compaction tiers emit nothing, yet the gauge must move.
+
+        ``window_source`` is ``resolve_model_window``'s source
+        (catalog / builtin / fallback); the fold copies it into view.context."""
         if self.run_id is None:
             return
-        self._writer().fold_local("context_measured", {"used": used, "window": window})
+        self._writer().fold_local(
+            "context_measured",
+            {"used": used, "window": window, "window_source": window_source},
+        )
 
     def cost_of(self, prompt: int, completion: int, cached: int = 0) -> Optional[float]:
         """Cents for one call at this run's rates; None when rates are unknown."""

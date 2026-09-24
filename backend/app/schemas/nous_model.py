@@ -4,7 +4,7 @@
 
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Must stay in lockstep with the table's CHECK constraint (migration 345).
 # It stopped at "asr" from 345 until 2026-09-21 while the database accepted
@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 # Guarded by tests/test_nous_model_type_vocabulary.py and, against the
 # real constraint, tests/db/test_nous_model_type_matches_db_check.py.
 NousModelType = Literal["llm", "embedding", "tts", "asr", "image", "video"]
+
+# context_window_tokens is an int4 column: a larger value fails the UPDATE,
+# which the repository swallows into None (→ a misleading 404).
+INT4_MAX = 2_147_483_647
 
 
 class NousModelCreate(BaseModel):
@@ -35,7 +39,7 @@ class NousModelCreate(BaseModel):
     is_enabled: bool = True
     sort_order: int = 0
     # Context window in tokens (migration 500); None = unknown.
-    context_window_tokens: Optional[int] = Field(default=None, gt=0)
+    context_window_tokens: Optional[int] = Field(default=None, gt=0, le=INT4_MAX)
 
 
 class NousModelUpdate(BaseModel):
@@ -54,9 +58,20 @@ class NousModelUpdate(BaseModel):
     pricing_value: Optional[float] = None
     is_enabled: Optional[bool] = None
     sort_order: Optional[int] = None
-    # Omitted = unchanged (the router drops None fields, so this cannot clear
-    # the column back to NULL — set it with SQL if a value must be withdrawn).
-    context_window_tokens: Optional[int] = Field(default=None, gt=0)
+    # Omitted = unchanged (the router drops None fields). To withdraw a value
+    # and fall back to the builtin table / default, send clear_context_window.
+    context_window_tokens: Optional[int] = Field(default=None, gt=0, le=INT4_MAX)
+    # The only way to write NULL through the exclude_none patch (same trick as
+    # issues ``clear_budget``). Mutually exclusive with context_window_tokens.
+    clear_context_window: bool = False
+
+    @model_validator(mode="after")
+    def _window_value_xor_clear(self) -> "NousModelUpdate":
+        if self.clear_context_window and self.context_window_tokens is not None:
+            raise ValueError(
+                "Send either context_window_tokens or clear_context_window, not both"
+            )
+        return self
 
 
 class NousModelResponse(BaseModel):

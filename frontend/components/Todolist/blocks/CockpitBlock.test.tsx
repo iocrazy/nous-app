@@ -393,3 +393,28 @@ describe('CockpitBlockView — efficiency cells (3c §3.3)', () => {
     expect(screen.queryByTestId('cockpit-tool-errors')).toBeNull();
   });
 });
+
+
+// ── FH2 T6: a fallback context window is marked, not silently trusted ───────
+describe('CockpitBlockView — context window source (FH2 T6)', () => {
+  const base = { v: 1, phase: 'running', step: null, current: { turn: 1, step: 2, model: 'm' }, retry: null, blocked: null, children: { total: 0, done: 0 }, ended: null, inbox_pending: 0, budget: null, revision: 5 };
+  it('prefixes ~ and explains the default window when nobody configured one', () => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, context: { used_pct: 41, window: 28000, window_source: 'fallback' } };
+    render(<CockpitBlockView ctx={c} />);
+    const cell = screen.getByTestId('cockpit-context');
+    expect(cell.textContent).toContain('~41%');
+    expect(cell.getAttribute('title')).toBe(
+      'No window configured for this model — gauge uses the default (28,000 tokens). Set it in Admin → AI Models.',
+    );
+  });
+  it.each(['catalog', 'builtin'])('a %s window reads plain, with no hint', (source) => {
+    const c = ctx('running');
+    c.rollup!.current_run!.view = { ...base, context: { used_pct: 41, window: 131072, window_source: source } };
+    render(<CockpitBlockView ctx={c} />);
+    const cell = screen.getByTestId('cockpit-context');
+    expect(cell.textContent).not.toContain('~');
+    expect(cell.textContent).toContain('41%');
+    expect(cell.getAttribute('title')).toBeNull();
+  });
+});

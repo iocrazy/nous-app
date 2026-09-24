@@ -55,7 +55,7 @@ def _orange_patches(msgs, summarize, warm):
     return (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(

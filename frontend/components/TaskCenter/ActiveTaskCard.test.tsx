@@ -130,6 +130,25 @@ describe('ActiveTaskCard — cockpit line + steer (harness P4 T11)', () => {
     expect(container.querySelector('[data-testid="todo-progress"]')!.textContent).toBe('3/7 · Drafting');
   });
 
+  it('marks a fallback window with ~ and says where to configure it (FH2 T6)', () => {
+    const fb = { ...view, context: { used_pct: 62, window: 28000, window_source: 'fallback' } };
+    const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', view: fb } }));
+    const ctx = container.querySelector('[data-testid="agent-context"]')!;
+    expect(ctx.textContent).toBe('ctx ~62%');
+    expect(ctx.getAttribute('title')).toBe('issueDetail.windowFallbackHint:28,000');
+  });
+
+  it('a configured window carries neither the ~ nor the hint', () => {
+    for (const source of ['catalog', 'builtin', undefined]) {
+      const known = { ...view, context: { used_pct: 62, window: 128000, window_source: source } };
+      const { container } = renderCard(runningAgentTask({ metadata: { agent_name: 'Analyze', view: known } }));
+      const ctx = container.querySelector('[data-testid="agent-context"]')!;
+      expect(ctx.textContent).toBe('ctx 62%');
+      expect(ctx.getAttribute('title')).toBeNull();
+      cleanup();
+    }
+  });
+
   it('draws no cockpit line for an old row without view', () => {
     const { container } = renderCard(runningAgentTask());
     expect(container.querySelector('[data-testid="agent-cockpit"]')).toBeNull();

@@ -5738,6 +5738,7 @@
     "now": "Now",
     "steps": "Steps",
     "context": "Context",
+    "windowFallbackHint": "No window configured for this model — gauge uses the default ({{window}} tokens). Set it in Admin → AI Models.",
     "cancelling": "Cancelling…",
     "retryWaiting": "Retry {{attempt}}/{{max}} · waiting {{s}}s",
     "retried": "Retried {{attempt}}/{{max}}",

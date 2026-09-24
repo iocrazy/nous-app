@@ -27,9 +27,16 @@ export interface RunRetry {
   at: string | null;
 }
 
+/** Where the gauge's denominator came from (backend `resolve_model_window`):
+ * `catalog` = Admin → AI Models, `builtin` = the backend's own table,
+ * `fallback` = nobody knew the model, so the window is a default (a guess). */
+export type WindowSource = 'catalog' | 'builtin' | 'fallback';
+
 export interface RunContext {
   used_pct: number;
   window: number | null;
+  /** null for a gauge written before the field existed. */
+  window_source: WindowSource | null;
 }
 
 export interface RunBudget {
@@ -212,7 +219,20 @@ export function retryState(view: RunView | null, now: number): RetryState | null
 export function contextGauge(view: RunView | null): RunContext | null {
   const c = view?.context;
   if (!c || typeof c.used_pct !== 'number') return null;
-  return { used_pct: c.used_pct, window: typeof c.window === 'number' ? c.window : null };
+  const src = (c as { window_source?: unknown }).window_source;
+  return {
+    used_pct: c.used_pct,
+    window: typeof c.window === 'number' ? c.window : null,
+    window_source: src === 'catalog' || src === 'builtin' || src === 'fallback' ? src : null,
+  };
+}
+
+/** A gauge measured against the default window: show it, but marked (FH2 T6).
+ * Returns the default window formatted for the hint, or null when the window
+ * is a real one (or the source is unknown — an old gauge is not accused). */
+export function fallbackWindowLabel(gauge: RunContext | null): string | null {
+  if (!gauge || gauge.window_source !== 'fallback') return null;
+  return gauge.window != null ? gauge.window.toLocaleString('en-US') : '?';
 }
 
 export function budgetState(view: RunView | null): RunBudget | null {

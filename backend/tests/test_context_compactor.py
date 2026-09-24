@@ -101,7 +101,7 @@ async def test_unknown_model_falls_back_to_green(compactor):
 
     with patch(
         "app.agent_framework.context_compactor.resolve_model_window",
-        return_value=(0, True),
+        return_value=(0, "builtin"),
     ):
         out, stats = await compactor.maybe_compact(
             system_message="", user_messages=msgs, model="some-future-model"
@@ -134,7 +134,7 @@ async def test_yellow_tier_invokes_prune(compactor):
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -174,7 +174,7 @@ async def test_orange_tier_invokes_summarizer(compactor):
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -221,7 +221,7 @@ async def test_summarizer_failure_falls_back_to_emergency_cap(compactor):
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -261,7 +261,7 @@ async def test_red_tier_keeps_fewer_recent_turns(compactor):
     with (
         patch(
             "app.agent_framework.context_compactor.resolve_model_window",
-            return_value=(1000, True),
+            return_value=(1000, "builtin"),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(

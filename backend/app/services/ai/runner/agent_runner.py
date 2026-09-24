@@ -1246,6 +1246,20 @@ class AgentRunner:
         )
         return _time.monotonic()
 
+    @staticmethod
+    def _measure_step_context(
+        recorder: Any, composed: Any, step: int, prompt: int
+    ) -> None:
+        """Feed the context gauge; a gauge never fails a turn, but it says why."""
+        try:
+            from app.agent_framework.context_window import resolve_model_window
+
+            window, source = resolve_model_window(getattr(composed, "model", None))
+            if window > 0:
+                recorder.measure_context(prompt, int(window), window_source=source)
+        except Exception as exc:  # noqa: BLE001 — telemetry, contained and logged
+            logger.warning("[runner] context gauge skipped at step %s: %s", step, exc)
+
     async def _step_ended(
         self,
         recorder,
@@ -1279,16 +1293,12 @@ class AgentRunner:
         # Context gauge: this call's prompt is the context the model just held.
         # A local fold (no event row) — the compactor only reports on
         # compaction, so without this the gauge stays empty on every turn that
-        # never compacts (2026-09-05 真栈验收: view.context null).
+        # never compacts (2026-09-05 真栈验收: view.context null). Written for
+        # every model: a fallback window still measures, tagged
+        # window_source="fallback" so the UI can mark it and point at admin
+        # (FH2 T6) — the old `if known` gate left exactly those gauges blank.
         if recorder is not None and hasattr(recorder, "measure_context") and prompt > 0:
-            try:
-                from app.agent_framework.context_window import resolve_model_window
-
-                window, known = resolve_model_window(getattr(composed, "model", None))
-                if known and window:
-                    recorder.measure_context(prompt, int(window))
-            except Exception:  # noqa: BLE001 — a gauge never fails a turn
-                pass
+            self._measure_step_context(recorder, composed, step, prompt)
         # BYOK 免扣（用户裁定 2）：这一步的钱是不是用户自己的 key 付的，只有
         # 这里同时知道「花了多少」与「谁的 adapter 服务的」。缺席即平台付 ——
         # 写一个 0 会让下游分不清「平台付的」和「用户付了 0 分」。

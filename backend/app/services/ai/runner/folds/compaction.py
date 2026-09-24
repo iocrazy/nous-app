@@ -1,3 +1,4 @@
+from app.services.ai.runner.folds.context import context_view
 from app.services.ai.runner.run_projection import register
 
 
@@ -6,10 +7,9 @@ def fold_compaction_start(views, payload):
     views["view"]["phase"] = "compacting"
     window, before = payload.get("window"), payload.get("tokens_before")
     if isinstance(window, int) and window > 0 and isinstance(before, int):
-        views["view"]["context"] = {
-            "used_pct": round(before * 100 / window),
-            "window": window,
-        }
+        views["view"]["context"] = context_view(
+            before, window, payload.get("window_source")
+        )
     return views
 
 
@@ -19,8 +19,9 @@ def fold_compaction_end(views, payload):
         views["view"]["phase"] = "running"
     after, ctx = payload.get("tokens_after"), views["view"].get("context")
     if isinstance(after, int) and ctx and ctx.get("window"):
-        views["view"]["context"] = {
-            "used_pct": round(after * 100 / ctx["window"]),
-            "window": ctx["window"],
-        }
+        # the end event carries no window: keep the start's denominator and
+        # the source that came with it
+        views["view"]["context"] = context_view(
+            after, ctx["window"], ctx.get("window_source")
+        )
     return views
