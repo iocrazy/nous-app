@@ -367,3 +367,85 @@ def test_no_attachments_adds_no_line():
             "x",
             "</inbox_message>",
         ]
+
+
+# ── FH2 T1 review fixes ──────────────────────────────────────────────────
+
+
+def test_the_manifest_header_promises_no_resource_fetch():
+    """H1/M1: ResourceFetch accepts only the ids the turn STARTED with
+    (``_available_refs``, fixed at request start), so an id listed from a
+    claimed inbox item always comes back ``resource not referenced in this
+    turn``. The header must not tell the model to fetch it."""
+    assert "ResourceFetch" not in inbox_mod.ATTACHMENT_MANIFEST_HEADER
+    assert "not loaded" in inbox_mod.ATTACHMENT_MANIFEST_HEADER
+    out = render_inbox_message(
+        _item(content={"body": "x", "attachments": [{"kind": "resource_ref"}]})
+    )
+    assert "ResourceFetch" not in out
+
+
+def test_attachments_without_any_listed_field_are_dropped_and_renumbered():
+    out = render_inbox_message(
+        _item(
+            content={
+                "body": "x",
+                "attachments": [
+                    {},
+                    {"url": "uploads/secret.png", "data_url": "data:..."},
+                    {"kind": "resource_ref", "resource_id": 353004118021504},
+                ],
+            }
+        )
+    )
+    rows = [ln for ln in out.split("\n") if ln.startswith("[attachment ")]
+    assert rows == ['[attachment 1] kind="resource_ref" resource_id="353004118021504"']
+
+
+def test_a_manifest_of_only_empty_attachments_adds_no_header():
+    out = render_inbox_message(
+        _item(content={"body": "x", "attachments": [{}, {"url": "p"}]})
+    )
+    assert out.split("\n") == [out.split("\n")[0], "x", "</inbox_message>"]
+
+
+def test_non_scalar_attachment_values_are_skipped():
+    out = render_inbox_message(
+        _item(
+            content={
+                "body": "x",
+                "attachments": [
+                    {
+                        "kind": "resource_ref",
+                        "name": {"nested": "<b>"},
+                        "title": ["a"],
+                        "version": True,
+                        "resource_id": 7,
+                    }
+                ],
+            }
+        )
+    )
+    rows = [ln for ln in out.split("\n") if ln.startswith("[attachment ")]
+    assert rows == ['[attachment 1] kind="resource_ref" resource_id="7"']
+
+
+def test_asset_attachment_names_its_loadout_after_the_asset():
+    out = render_inbox_message(
+        _item(
+            content={
+                "body": "use this look",
+                "attachments": [
+                    {
+                        "kind": "asset_ref",
+                        "loadout_id": 352719386786999,
+                        "asset_id": 352719386786046,
+                    }
+                ],
+            }
+        )
+    )
+    assert (
+        'kind="asset_ref" asset_id="352719386786046" loadout_id="352719386786999"'
+        in out
+    )

@@ -182,7 +182,17 @@ def claimed_event_content(item: InboxItem) -> dict[str, Any]:
 
 
 #: Header line of the attachment manifest inside ``<inbox_message>``.
-ATTACHMENT_MANIFEST_HEADER = "Attached (open with ResourceFetch where an id is given):"
+#:
+#: It promises NOTHING about fetching. ResourceFetch accepts only the ids the
+#: turn started with (``_available_refs`` is computed once, at request start,
+#: from that request's own references), so an id listed from an item claimed
+#: mid-run always comes back "resource not referenced in this turn" — and on a
+#: turn with no references the tool is not even registered. Telling the model
+#: to open it would buy a guaranteed failed call (FH2 T1 review H1).
+ATTACHMENT_MANIFEST_HEADER = (
+    "Attached to this message (listed for reference; the files are not loaded "
+    "into this turn):"
+)
 
 #: Which attachment fields reach the model, in this order. A whitelist, not a
 #: dump: ``data_url`` is bytes and ``url`` is a filesystem path — neither is
@@ -193,6 +203,7 @@ _ATTACHMENT_MANIFEST_KEYS = (
     "title",
     "resource_id",
     "asset_id",
+    "loadout_id",
     "ref_kind",
     "ref_id",
     "version",
@@ -203,28 +214,40 @@ def _attachment_manifest(content: dict[str, Any]) -> list[str]:
     """One ``[attachment N] key="value" …`` line per attachment, empty when
     there are none.
 
-    Text-level only (FH2 T1): the model learns the files exist and which id
-    to fetch, the pixels are not injected. Every value goes through
+    Text-level only (FH2 T1): the model learns the files exist and what they
+    are; the pixels are not injected and the ids are NOT fetchable this turn
+    (see ``ATTACHMENT_MANIFEST_HEADER``). Only ``str`` / ``int`` values are
+    listed — anything else (a nested dict from the free-form inbox API, a
+    bool) would reach the model as a Python repr — and an attachment left
+    with no listed field is dropped, numbering counted after the drop, so an
+    empty ``[attachment N]`` never appears. Every value goes through
     ``escape_frame_attr`` — a file name is user-written, and quoting plus
     entity escaping is what keeps it from closing the frame or forging a
     row. The body above is flattened to one line by ``escape_frame_prose``,
-    so user text cannot fake a manifest line either.
+    so user text cannot fake a standalone manifest line either (it can copy
+    the wording, but only inside the body's own line).
     """
     raw = content.get("attachments")
     if not isinstance(raw, list):
         return []
-    rows = [a for a in raw if isinstance(a, dict)]
+    rows = [p for p in (_manifest_pairs(a) for a in raw if isinstance(a, dict)) if p]
     if not rows:
         return []
-    lines = [ATTACHMENT_MANIFEST_HEADER]
-    for i, att in enumerate(rows, start=1):
-        pairs = "".join(
-            f' {k}="{escape_frame_attr(att[k])}"'
-            for k in _ATTACHMENT_MANIFEST_KEYS
-            if att.get(k) not in (None, "")
-        )
-        lines.append(f"[attachment {i}]{pairs}")
-    return lines
+    return [ATTACHMENT_MANIFEST_HEADER] + [
+        f"[attachment {i}]{pairs}" for i, pairs in enumerate(rows, start=1)
+    ]
+
+
+def _manifest_pairs(att: dict[str, Any]) -> str:
+    """`` key="value"`` for each listed field holding a non-empty str / int
+    (``bool`` is an ``int`` subclass and is excluded on purpose)."""
+    return "".join(
+        f' {k}="{escape_frame_attr(str(v))}"'
+        for k in _ATTACHMENT_MANIFEST_KEYS
+        if (v := att.get(k)) not in (None, "")
+        and isinstance(v, (str, int))
+        and not isinstance(v, bool)
+    )
 
 
 def render_inbox_message(item: InboxItem) -> str:
