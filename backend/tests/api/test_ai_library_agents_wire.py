@@ -47,6 +47,19 @@ SKILL_ID = 7300000000000000321
 
 
 @pytest.fixture(autouse=True)
+def _caller_in_row_scope(monkeypatch):
+    """The agent/skill row-scope guard has its own tests
+    (``tests/api/test_ai_library_row_scope.py``); here every caller is in scope."""
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["app.api.ai_library_router"],
+        "_in_row_scope",
+        AsyncMock(return_value=True),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _auth():
     app.dependency_overrides[get_auth] = fake_auth
     yield
