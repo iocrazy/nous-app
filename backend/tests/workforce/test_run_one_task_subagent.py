@@ -105,6 +105,12 @@ def _patches(w):
             "app.services.workforce.agent_worker.get_agent_repository",
             return_value=w.agent_repo,
         ),
+        # mig 501: the sub-agent branch checks deletion through its own lookup;
+        # pin "not deleted" instead of relying on get_by_id failing without a DB.
+        patch(
+            "app.services.workforce.agent_worker.is_agent_soft_deleted",
+            AsyncMock(return_value=False),
+        ),
         patch.object(inbox_mod, "get_agent_run_inbox_repository", lambda: w.inbox_repo),
         patch.object(deliver_mod, "deliver_or_dispatch", w.deliver),
         patch.object(recorder_mod.RunEventWriter, "for_run", w.for_run),
