@@ -2,11 +2,12 @@
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
 from app.core.embedding_space import SEMANTIC_LAYER, EmbeddingDimensionMismatch
+from app.core.scope_dep import scoped_request
 from app.repositories.analysis_repository import EmbeddingSearchUnavailable
 from app.repositories.embedding_space_repository import (
     get_embedding_space_repository,
@@ -38,7 +39,15 @@ from app.services.library.search_service import (
 )
 from app.services.search.service import ALL_SEARCH_KINDS, unified_search
 
-router = APIRouter(prefix="/search", tags=["Search"])
+# Router-level ambient tenant scope, same as the four ``resources_*`` routers:
+# ``/hybrid`` / ``/quick`` / ``/similar`` / ``/vectors/status`` all read the
+# ``resources`` table (hydration, coverage), and under
+# ``SCOPE_ENFORCE_RESOURCES=true`` (production) a read with no scope raises
+# ``UnscopedQueryError`` → 500. Local / CI run with the flag off, which is how
+# the 2026-09-24 "无法加载向量状态" incident shipped green.
+router = APIRouter(
+    prefix="/search", tags=["Search"], dependencies=[Depends(scoped_request)]
+)
 
 # The embedder is configured with a model whose vectors do not fit the columns
 # (app.core.embedding_space). Typed so a client / probe can tell "semantic
