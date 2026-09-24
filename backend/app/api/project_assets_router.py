@@ -18,6 +18,12 @@ from app.core.deps import AuthDep
 from app.core.scope_guards import verify_project_read_access
 from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.projects_repository import ProjectsRepository
+from app.schemas.canvas_responses import (
+    CanvasReferencedResource,
+    ProjectAssetsTreeProject,
+    ResourceCanvasRefsEnvelope,
+)
+from app.schemas.envelope import Envelope
 from app.services.canvas import CanvasService
 from app.services.modules.gate import require_module
 
@@ -41,7 +47,10 @@ async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
     return project_id
 
 
-@router.get("/canvases/{canvas_id}/assets")
+@router.get(
+    "/canvases/{canvas_id}/assets",
+    response_model=Envelope[list[CanvasReferencedResource]],
+)
 async def canvas_assets(canvas_id: str, auth: AuthDep):
     await _gate_canvas_read(canvas_id, auth)
     repo = CanvasRefsRepository()
@@ -49,7 +58,10 @@ async def canvas_assets(canvas_id: str, auth: AuthDep):
     return {"success": True, "data": items}
 
 
-@router.get("/resources/project-assets/tree")
+@router.get(
+    "/resources/project-assets/tree",
+    response_model=Envelope[list[ProjectAssetsTreeProject]],
+)
 async def project_assets_tree(auth: AuthDep):
     """Project → Canvas tree (with per-canvas asset counts) for every
     project the caller can see. Projects with no canvases are included
@@ -87,7 +99,9 @@ async def project_assets_tree(auth: AuthDep):
     return {"success": True, "data": data}
 
 
-@router.get("/resources/{resource_id}/canvas-refs")
+@router.get(
+    "/resources/{resource_id}/canvas-refs", response_model=ResourceCanvasRefsEnvelope
+)
 async def resource_canvas_refs(resource_id: str, auth: AuthDep):
     # Resource ownership/membership gate (same helper the asset-AI batch uses).
     if not await check_media_access(resource_id, auth.user_id, None):

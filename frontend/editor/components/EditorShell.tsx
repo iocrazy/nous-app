@@ -44,7 +44,7 @@ import { fetchProjectEntities } from '../../services/projectsService';
 import { useToast } from '../../components/Toast';
 import { mergeProjectMentionCandidates } from '../mentionCandidates';
 import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 import { useEditorState, type EditorFormat, type EditorMode } from '../useEditorState';
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
@@ -282,8 +282,8 @@ export function EditorShell({
     try {
       const project = await fetchScriptProject(scriptId);
       setChapters(project.chapters ?? []);
-      setProjectId(project.project_id ?? null);
-      setCurrentEpisodeId(project.episode_id ?? null);
+      setProjectId(project.project_id == null ? null : String(project.project_id));
+      setCurrentEpisodeId(project.episode_id == null ? null : String(project.episode_id));
     } catch (err) {
       console.error('[EditorShell] failed to load chapters', err);
     }
@@ -306,9 +306,9 @@ export function EditorShell({
       return null;
     });
     if (project) {
-      setProjectId(project.project_id ?? null);
-      setCurrentEpisodeId(project.episode_id ?? null);
-      if (project.project_id) await loadEpisodes(project.project_id);
+      setProjectId(project.project_id == null ? null : String(project.project_id));
+      setCurrentEpisodeId(project.episode_id == null ? null : String(project.episode_id));
+      if (project.project_id) await loadEpisodes(String(project.project_id));
     }
   }, [scriptId, loadEpisodes]);
 
@@ -906,8 +906,11 @@ export function EditorShell({
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {
+    // Scene `chapter_id`s are strings (sceneService normalizes them); chapter
+    // ids arrive as JSON numbers. Compare as strings, or no chapter is ever
+    // claimed and every converted chapter keeps rendering as an orphan.
     const claimed = new Set(scenes.map((s) => s.chapter_id).filter(Boolean));
-    return chapters.filter((ch) => !claimed.has(ch.id));
+    return chapters.filter((ch) => !claimed.has(String(ch.id)));
   }, [scenes, chapters]);
 
   // Windowing: above the threshold, only mount scenes near the viewport. Heights

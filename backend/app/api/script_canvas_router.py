@@ -5,12 +5,19 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_script_access
+from app.schemas.envelope import Envelope
 from app.schemas.script import (
     ScriptCanvasSyncRequest,
     ScriptChapterCreate,
     ScriptChapterUpdate,
+)
+from app.schemas.script_project_responses import (
+    ScriptAck,
+    ScriptCanvasSyncResult,
+    ScriptChapterRow,
 )
 from app.services.storyboard.script.script_service import ScriptService
 
@@ -28,12 +35,31 @@ async def _script_id_for_chapter(chapter_id: str) -> str:
     return str(chapter.get("script_id"))
 
 
-@router.post("/{script_id}/chapters")
+async def _assert_chapters_in_script(
+    script_id: str, body: ScriptCanvasSyncRequest
+) -> None:
+    """Sync guard: every chapter id the body updates or deletes must belong to
+    ``script_id``. The access check covers the path's script only, and the
+    service writes by chapter id alone — without this a caller with access to
+    one script could rewrite or delete any other script's chapters. 404 (do
+    not leak which ids exist elsewhere)."""
+    targets = {str(cid) for cid in body.deleted_chapter_ids}
+    targets |= {str(ch["id"]) for ch in body.updated_chapters if ch.get("id")}
+    if not targets:
+        return
+    owned = await ScriptService().chapter_repo.get_by_script(script_id)
+    if targets - {str(ch.get("id")) for ch in owned}:
+        raise HTTPException(status_code=404, detail="Chapter not in this script")
+
+
+@router.post("/{script_id}/chapters", response_model=Envelope[ScriptChapterRow])
 async def create_chapter(
     auth: AuthDep, script_id: str, body: ScriptChapterCreate
 ) -> Dict[str, Any]:
+    # Outside the try below (which maps everything to 500) so 404/403 surface;
+    # inside it, a denied caller used to get a 500.
+    await verify_script_access(script_id, auth)
     try:
-        await verify_script_access(script_id, auth)
         svc = ScriptService()
         chapter = await svc.create_chapter(
             script_id, body.model_dump(exclude_none=True)
@@ -44,7 +70,7 @@ async def create_chapter(
         raise HTTPException(status_code=500, detail="Failed to create chapter")
 
 
-@router.put("/chapters/{chapter_id}")
+@router.put("/chapters/{chapter_id}", response_model=Envelope[ScriptChapterRow])
 async def update_chapter(
     auth: AuthDep, chapter_id: str, body: ScriptChapterUpdate
 ) -> Dict[str, Any]:
@@ -57,13 +83,14 @@ async def update_chapter(
         chapter = await svc.update_chapter(
             chapter_id, body.model_dump(exclude_none=True)
         )
-        return {"success": True, "data": chapter}
     except Exception as exc:
         logger.error(f"[Scripts] update_chapter {chapter_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update chapter")
+    # ``update`` returns {} when the row is gone by the time it writes.
+    return {"success": True, "data": require_row(chapter)}
 
 
-@router.delete("/chapters/{chapter_id}")
+@router.delete("/chapters/{chapter_id}", response_model=ScriptAck)
 async def delete_chapter(auth: AuthDep, chapter_id: str) -> Dict[str, Any]:
     # IDOR fix: same resolve-then-verify guard as update_chapter.
     script_id = await _script_id_for_chapter(chapter_id)
@@ -77,12 +104,15 @@ async def delete_chapter(auth: AuthDep, chapter_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to delete chapter")
 
 
-@router.post("/{script_id}/canvas/sync")
+@router.post(
+    "/{script_id}/canvas/sync", response_model=Envelope[ScriptCanvasSyncResult]
+)
 async def sync_canvas(
     auth: AuthDep, script_id: str, body: ScriptCanvasSyncRequest
 ) -> Dict[str, Any]:
+    await verify_script_access(script_id, auth)
+    await _assert_chapters_in_script(script_id, body)
     try:
-        await verify_script_access(script_id, auth)
         svc = ScriptService()
         added = [ch.model_dump(exclude_none=True) for ch in body.added_chapters]
         result = await svc.sync_canvas(

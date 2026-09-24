@@ -10,6 +10,7 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
+import type { CanvasSummary } from '../../features/canvas-core/types';
 import { WorkspaceCanvas } from './WorkspaceCanvas';
 
 const mockNavigate = vi.fn();
@@ -19,7 +20,10 @@ vi.mock('react-router-dom', () => ({
   useParams: () => ({}),
 }));
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
+  useTranslation: () => ({
+    t: (k: string, d?: string, o?: { count?: number }) =>
+      typeof d === 'string' ? d.replace('{{count}}', String(o?.count ?? '')) : k,
+  }),
 }));
 vi.mock('../Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
@@ -36,10 +40,23 @@ const mockService = vi.hoisted(() => ({
 }));
 vi.mock('../../features/canvas-core/services/canvasService', () => mockService);
 
-const CANVASES = [
-  { id: 'c1', name: 'Hero Canvas', kind: 'smart', updated_at: '2026-07-01T00:00:00Z' },
-  { id: 'c2', name: 'Board', kind: 'character', updated_at: '2026-07-02T00:00:00Z' },
-];
+// `listCanvases` resolves the wire `CanvasSummary` rows unchanged: summary
+// columns plus `node_count`, never the node graph.
+const summary = (
+  id: string,
+  name: string,
+  kind: CanvasSummary['kind'],
+  nodeCount = 0,
+): CanvasSummary => ({
+  id,
+  project_id: 'p1',
+  name,
+  kind,
+  created_at: '2026-06-30T00:00:00+00:00',
+  updated_at: '2026-07-01T00:00:00+00:00',
+  node_count: nodeCount,
+});
+const CANVASES = [summary('c1', 'Hero Canvas', 'smart', 7), summary('c2', 'Board', 'character')];
 
 afterEach(() => {
   cleanup();
@@ -66,7 +83,7 @@ describe('WorkspaceCanvas', () => {
     // would open a canvas the Library panel does not mount on and turn a
     // healthy build red.
     mockService.listCanvases.mockResolvedValue([
-      { id: 'c0', name: 'Episode Board', kind: 'storyboard', updated_at: '2026-07-03T00:00:00Z' },
+      summary('c0', 'Episode Board', 'storyboard'),
       ...CANVASES,
     ]);
     render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
@@ -87,6 +104,17 @@ describe('WorkspaceCanvas', () => {
           '[data-testid="workspace-canvas-card"][data-canvas-kind="character"]',
       ).length,
     ).toBe(2);
+  });
+
+  it('shows each card\'s node count from the summary row', async () => {
+    // The list endpoint never carries nodes_json; the card used to read the
+    // count off it and showed "0 nodes" for every canvas.
+    mockService.listCanvases.mockResolvedValue(CANVASES);
+    render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
+    await screen.findByText('Hero Canvas');
+    const cards = screen.getAllByTestId('workspace-canvas-card');
+    expect(cards[0].textContent).toContain('7 nodes');
+    expect(cards[1].textContent).toContain('0 nodes');
   });
 
   it('falls back to the bare canvas route without a teamId', async () => {

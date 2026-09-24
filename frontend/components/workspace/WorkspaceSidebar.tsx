@@ -27,7 +27,7 @@ import {
   Film,
   ExternalLink,
 } from 'lucide-react';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 import { ASSET_MODULES, MANAGE_MODULES, type WorkspaceModule } from './workspaceModules';
 
 /** The episode-scoped work views the tree can open (maps to editor RailView). */

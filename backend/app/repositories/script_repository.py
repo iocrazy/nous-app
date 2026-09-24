@@ -545,6 +545,22 @@ class ScriptAssetRepository(BaseRepository):
 
     TABLE_NAME = "script_assets"
 
+    async def get_by_id(self, record_id: str) -> Optional[Dict[str, Any]]:
+        """One asset, or None. Used by the asset update/delete routes to
+        resolve the owning script before the access check."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ScriptAssets)
+                    .where(ScriptAssets.id == _bigint(record_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _to_dict(row, _ASSET_N2A) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get script_assets {record_id}: {e}")
+            return None
+
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             values = _coerce_bigint_cols(data, ("id", "script_id"))

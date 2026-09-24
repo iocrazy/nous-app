@@ -21,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.deps import AuthContext, get_auth
 from app.core.scope_guards import verify_episode_write_access
 from app.main import app
+from tests.api.episode_wire_rows import repo_episode_row
 
 pytestmark = pytest.mark.unit
 
@@ -66,7 +67,7 @@ def _stub_episode_repository(monkeypatch, *, update_return=None):
         captured["update_called_with"] = (episode_id, data)
         if update_return is not None:
             return update_return
-        return {"id": episode_id, "project_id": PROJECT_ID, **data}
+        return repo_episode_row(id=int(episode_id), project_id=int(PROJECT_ID), **data)
 
     monkeypatch.setattr(EpisodeRepository, "get_by_id", fake_get_by_id)
     monkeypatch.setattr(EpisodeRepository, "update", fake_update)

@@ -28,6 +28,7 @@ from fastapi import APIRouter, Query
 from pydantic import StringConstraints
 
 from app.api.assets_router import (
+    _ERRORS,
     IdPath,
     OptSnowflakeQuery,
     ScopeIdQuery,
@@ -36,14 +37,17 @@ from app.api.assets_router import (
     _ok,
 )
 from app.core.deps import AuthDep
+from app.schemas.envelope import Envelope
 from app.schemas.generated import (
     BatchRequest,
-    BatchResult,
     CleanupRequest,
-    CleanupResponse,
-    CountsResponse,
+    GeneratedBatchResult,
+    GeneratedCleanupResponse,
+    GeneratedCounts,
+    GeneratedDeleted,
     GeneratedItem,
     GeneratedPage,
+    GeneratedSaveAsAssetResult,
     SaveAsAssetRequest,
 )
 from app.services.assets.assets_service import AssetError
@@ -51,7 +55,7 @@ from app.services.library.generated_inbox_service import GeneratedInboxService
 
 router = APIRouter(prefix="/generated", tags=["generated"])
 
-# ``deleted`` is a real ``review_state`` but not a tab — see CountsResponse.
+# ``deleted`` is a real ``review_state`` but not a tab — see GeneratedCounts.
 # ``all`` is a router-level alias for "no state filter"; the service takes
 # ``None`` for that and accepts no other spelling.
 StateQuery = Annotated[str, Query(pattern="^(unreviewed|saved|in_assets|all)$")]
@@ -75,7 +79,7 @@ def _service() -> GeneratedInboxService:
     return GeneratedInboxService()
 
 
-@router.get("")
+@router.get("", response_model=Envelope[GeneratedPage], responses=_ERRORS)
 async def list_generated(
     auth: AuthDep,
     scope_id: ScopeIdQuery,
@@ -130,14 +134,14 @@ async def list_generated(
     return _ok(GeneratedPage.model_validate(page).model_dump(mode="json"))
 
 
-@router.get("/counts")
+@router.get("/counts", response_model=Envelope[GeneratedCounts], responses=_ERRORS)
 async def counts(auth: AuthDep, scope_id: ScopeIdQuery):
     try:
         sid = await _gate(scope_id, auth)
         out = await _service().counts(sid)
     except AssetError as e:
         return _err(e)
-    return _ok(CountsResponse.model_validate(out).model_dump(mode="json"))
+    return _ok(GeneratedCounts.model_validate(out).model_dump(mode="json"))
 
 
 # ⚠️ ORDER IS LOAD-BEARING: this dynamic GET is registered AFTER ``/counts``.
@@ -146,7 +150,7 @@ async def counts(auth: AuthDep, scope_id: ScopeIdQuery):
 # Pinned by ``test_generated_router.py::test_counts_is_not_captured_as_a_gen_id``.
 
 
-@router.get("/{gen_id}")
+@router.get("/{gen_id}", response_model=Envelope[GeneratedItem], responses=_ERRORS)
 async def get_generated(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     """One inbox card by id — the same wire shape ``GET /generated`` lists.
 
@@ -163,7 +167,7 @@ async def get_generated(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     return _ok(GeneratedItem.model_validate(row).model_dump(mode="json"))
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=Envelope[GeneratedBatchResult], responses=_ERRORS)
 async def batch(payload: BatchRequest, auth: AuthDep, scope_id: ScopeIdQuery):
     """Declared BEFORE ``/{gen_id}/...`` so the literal paths win the match."""
     try:
@@ -171,20 +175,24 @@ async def batch(payload: BatchRequest, auth: AuthDep, scope_id: ScopeIdQuery):
         out = await _service().batch(payload, sid, auth.user_id)
     except AssetError as e:
         return _err(e)
-    return _ok(BatchResult.model_validate(out).model_dump(mode="json"))
+    return _ok(GeneratedBatchResult.model_validate(out).model_dump(mode="json"))
 
 
-@router.post("/cleanup")
+@router.post(
+    "/cleanup", response_model=Envelope[GeneratedCleanupResponse], responses=_ERRORS
+)
 async def cleanup(payload: CleanupRequest, auth: AuthDep, scope_id: ScopeIdQuery):
     try:
         sid = await _gate(scope_id, auth)
         out = await _service().cleanup(payload, sid)
     except AssetError as e:
         return _err(e)
-    return _ok(CleanupResponse.model_validate(out).model_dump(mode="json"))
+    return _ok(GeneratedCleanupResponse.model_validate(out).model_dump(mode="json"))
 
 
-@router.post("/{gen_id}/save")
+@router.post(
+    "/{gen_id}/save", response_model=Envelope[GeneratedItem], responses=_ERRORS
+)
 async def save(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     try:
         sid = await _gate(scope_id, auth)
@@ -194,7 +202,12 @@ async def save(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     return _ok(GeneratedItem.model_validate(row).model_dump(mode="json"))
 
 
-@router.post("/{gen_id}/save-as-asset", status_code=201)
+@router.post(
+    "/{gen_id}/save-as-asset",
+    status_code=201,
+    response_model=Envelope[GeneratedSaveAsAssetResult],
+    responses=_ERRORS,
+)
 async def save_as_asset(
     gen_id: IdPath,
     payload: SaveAsAssetRequest,
@@ -206,22 +219,16 @@ async def save_as_asset(
         out = await _service().save_as_asset(gen_id, sid, auth.user_id, payload)
     except AssetError as e:
         return _err(e)
-    return _ok(
-        {
-            "generation": GeneratedItem.model_validate(out["generation"]).model_dump(
-                mode="json"
-            ),
-            "asset_id": out["asset_id"],
-            "resource_id": out["resource_id"],
-        }
-    )
+    return _ok(GeneratedSaveAsAssetResult.model_validate(out).model_dump(mode="json"))
 
 
-@router.delete("/{gen_id}")
+@router.delete(
+    "/{gen_id}", response_model=Envelope[GeneratedDeleted], responses=_ERRORS
+)
 async def delete(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     try:
         sid = await _gate(scope_id, auth)
         await _service().delete(gen_id, sid)
     except AssetError as e:
         return _err(e)
-    return _ok({"deleted": True})
+    return _ok(GeneratedDeleted(deleted=True).model_dump(mode="json"))

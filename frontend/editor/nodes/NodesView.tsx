@@ -37,7 +37,7 @@ import { useGroupDragPersist } from '../../canvas-kit/useGroupDragPersist';
 import { useConvertPoll } from '../useConvertPoll';
 import { updateSceneMeta, updateChapterPosition, listShots } from '../sceneService';
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
 
 /** Debounce window for persisting a scene's dragged coordinates. */
 const DRAG_PERSIST_MS = 500;

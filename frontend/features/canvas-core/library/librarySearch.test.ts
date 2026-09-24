@@ -86,6 +86,9 @@ const GENERATED_ROW = {
     shot_id: null,
     conversation_id: null,
     deep_link: `/projects/1/canvas/${CANVAS}`,
+    issue_id: null,
+    run_id: null,
+    step: null,
   },
   title: 'A wide shot of the harbour',
 };

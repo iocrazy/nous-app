@@ -5,12 +5,26 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from app.api.row_guard import require_row
 from app.core.deps import AuthDep, require_team_id
-from app.core.scope_guards import verify_script_access, verify_script_read_access
+from app.core.scope_guards import (
+    verify_project_read_access,
+    verify_project_write_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.repositories.episode_repository import get_episode_repository
 from app.repositories.script_repository import get_script_project_repository
 from app.repositories.script_scene_repository import get_script_scene_repository
+from app.schemas.envelope import Envelope
 from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate, ViewportUpdate
+from app.schemas.script_project_responses import (
+    ScriptAck,
+    ScriptNumberingLock,
+    ScriptProjectFull,
+    ScriptProjectPage,
+    ScriptProjectRow,
+)
 from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
@@ -51,10 +65,26 @@ async def _assert_episode_unowned(script_id: str, episode_id: str) -> None:
         )
 
 
-@router.post("")
+async def _assert_episode_in_project(project_id: int, episode_id: str) -> None:
+    """Create guard: an ``episode_id`` on create must belong to the project the
+    script is created in. Without it the auto-provision path would bind a new
+    script to any episode id the caller names. 404, same as the reassign guard
+    (do not leak cross-project existence)."""
+    episode = await get_episode_repository().get_by_id(episode_id)
+    if not episode or str(episode.get("project_id")) != str(project_id):
+        raise HTTPException(status_code=404, detail="Episode not in this project")
+
+
+@router.post("", response_model=Envelope[ScriptProjectRow])
 async def create_script_project(
     auth: AuthDep, body: ScriptProjectCreate
 ) -> Dict[str, Any]:
+    # The target project is in the body, not the path, so its guard runs
+    # imperatively. Before this, any signed-in user could create a script in
+    # any project id.
+    await verify_project_write_access(str(body.project_id), auth)
+    if body.episode_id is not None:
+        await _assert_episode_in_project(body.project_id, body.episode_id)
     team_id = await require_team_id(auth.user_id)
     try:
         svc = ScriptService()
@@ -72,7 +102,7 @@ async def create_script_project(
         raise HTTPException(status_code=500, detail="Failed to create script")
 
 
-@router.get("")
+@router.get("", response_model=Envelope[ScriptProjectPage])
 async def list_script_projects(
     auth: AuthDep,
     project_id: int = Query(...),
@@ -80,6 +110,10 @@ async def list_script_projects(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None, max_length=200),
 ) -> Dict[str, Any]:
+    # ``project_id`` is a query parameter, so the project read guard runs
+    # imperatively. Before this, any signed-in user could list the scripts of
+    # any project id.
+    await verify_project_read_access(str(project_id), auth)
     try:
         svc = ScriptService()
         result = await svc.list_projects(
@@ -94,7 +128,7 @@ async def list_script_projects(
         raise HTTPException(status_code=500, detail="Failed to list scripts")
 
 
-@router.get("/{script_id}")
+@router.get("/{script_id}", response_model=Envelope[ScriptProjectFull])
 async def get_script_project(
     auth: AuthDep,
     script_id: str,
@@ -113,7 +147,7 @@ async def get_script_project(
         raise HTTPException(status_code=500, detail="Failed to get script")
 
 
-@router.put("/{script_id}")
+@router.put("/{script_id}", response_model=Envelope[ScriptProjectRow])
 async def update_script_project(
     auth: AuthDep,
     script_id: str,
@@ -129,7 +163,8 @@ async def update_script_project(
         if data.get("episode_id") is not None:
             await _assert_same_project_episode(script_id, data["episode_id"])
             await _assert_episode_unowned(script_id, data["episode_id"])
-        updated = await svc.update_project(script_id, data)
+        # ``update`` returns {} when the row is gone by the time it writes.
+        updated = require_row(await svc.update_project(script_id, data))
         return {"success": True, "data": updated}
     except HTTPException:
         raise
@@ -138,7 +173,7 @@ async def update_script_project(
         raise HTTPException(status_code=500, detail="Failed to update script")
 
 
-@router.delete("/{script_id}")
+@router.delete("/{script_id}", response_model=ScriptAck)
 async def delete_script_project(
     auth: AuthDep,
     script_id: str,
@@ -153,7 +188,7 @@ async def delete_script_project(
         raise HTTPException(status_code=500, detail="Failed to delete script")
 
 
-@router.patch("/{script_id}/viewport")
+@router.patch("/{script_id}/viewport", response_model=ScriptAck)
 async def update_viewport(
     auth: AuthDep,
     script_id: str,
@@ -169,7 +204,9 @@ async def update_viewport(
         raise HTTPException(status_code=500, detail="Failed to update viewport")
 
 
-@router.post("/{script_id}/lock-numbering")
+@router.post(
+    "/{script_id}/lock-numbering", response_model=Envelope[ScriptNumberingLock]
+)
 async def lock_numbering(
     auth: AuthDep,
     script_id: str,

@@ -32,6 +32,9 @@ const baseCanvas: Canvas = {
   created_at: TS0,
   updated_at: TS0,
   created_by: null,
+  episode_id: null,
+  asset_id: null,
+  deleted_at: null,
 };
 
 function makeStore(initial: Canvas = baseCanvas) {

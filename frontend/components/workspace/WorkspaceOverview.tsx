@@ -63,7 +63,7 @@ import { formatRelativeTime } from '../../utils/relativeTime';
 import { Loading } from '../common/Loading';
 import { WorkflowSection } from '../workflow/WorkflowSection';
 import { EpisodeSummaryRow } from './EpisodeSummaryRow';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
 import type { Project, ProjectWorkflow } from '../../types/api';
 
 export interface WorkspaceOverviewProps {
@@ -128,16 +128,13 @@ export function WorkspaceOverview({
 
   const activity = project.latest_activity ?? null;
 
-  // "N episodes awaiting your answer" (B4 真数据, 2026-08-08): episodes/progress
-  // now bring each episode's workflow.needs_input_count (agent-question
-  // mirror-issue count). Any episode carrying a workflow signal switches on
-  // real data; all missing (old backend / e2e stubs) falls back to the
-  // pre-B4 planned-count approximation — same degrade strategy as
-  // EpisodeSummaryRow's progress bar.
-  const hasWorkflowSignal = episodes.some((e) => e.workflow != null);
-  const awaitingCount = hasWorkflowSignal
-    ? episodes.filter((e) => (e.workflow?.needs_input_count ?? 0) > 0).length
-    : episodes.filter((e) => e.status === 'planned').length;
+  // "N episodes awaiting your answer" (B4 真数据, 2026-08-08): each
+  // episodes/progress row carries workflow.needs_input_count (agent-question
+  // mirror-issue count). The key is always on the wire (EpisodeProgressRow
+  // declares it required), so the pre-B4 "count planned episodes" fallback
+  // for a missing rollup is gone: it could only run against a backend that
+  // no longer exists, and it counted episodes nobody had asked anything.
+  const awaitingCount = episodes.filter((e) => e.workflow.needs_input_count > 0).length;
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">

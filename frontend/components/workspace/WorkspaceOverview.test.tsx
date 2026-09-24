@@ -15,7 +15,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { ToastProvider } from '../Toast';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
 import type { Project, ProjectWorkflow } from '../../types/api';
 import { makeProject } from '../../tests/fixtures/projects';
 
@@ -71,7 +72,7 @@ const PROJECT: Project = makeProject({
 });
 
 const EPISODES: EpisodeProgress[] = [
-  {
+  makeEpisodeProgress({
     episode_id: 'ep1',
     title: 'Ep 1 — Pilot',
     sort_order: 10,
@@ -81,8 +82,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 9,
     renders_count: 1,
     status: 'boarding',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep2',
     title: 'Ep 2 — Cutdown',
     sort_order: 20,
@@ -92,8 +93,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 0,
     renders_count: 0,
     status: 'drafting',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep3',
     title: 'Ep 3 — Turn',
     sort_order: 30,
@@ -103,8 +104,8 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 2,
     renders_count: 0,
     status: 'planned',
-  },
-  {
+  }),
+  makeEpisodeProgress({
     episode_id: 'ep4',
     title: 'Ep 4 — Finale',
     sort_order: 40,
@@ -114,7 +115,7 @@ const EPISODES: EpisodeProgress[] = [
     shots_done: 8,
     renders_count: 2,
     status: 'rendered',
-  },
+  }),
 ];
 
 const noop = () => {};
@@ -286,29 +287,6 @@ describe('WorkspaceOverview', () => {
       workflow: { has_workflow: false, current_node_id: null, agents_active: 0, nodes: [] },
     });
     expect(screen.queryByTestId('workflow-empty-state')).toBeNull();
-  });
-
-  it('shows the awaiting hint only for episodes parked at the planned stage', () => {
-    const withPlanned: EpisodeProgress[] = [
-      { ...EPISODES[0], status: 'planned' },
-      { ...EPISODES[1], episode_id: 'ep5', status: 'planned' },
-      EPISODES[1],
-    ];
-    const { rerender } = render(
-      <ToastProvider>
-        <WorkspaceOverview {...base} episodes={withPlanned} />
-      </ToastProvider>,
-    );
-    expect(screen.getByTestId('ws-rollup-awaiting')).toHaveTextContent('2 awaiting you');
-
-    // No planned episodes → hint hidden.
-    const noPlanned = EPISODES.filter((e) => e.status !== 'planned');
-    rerender(
-      <ToastProvider>
-        <WorkspaceOverview {...base} episodes={noPlanned} />
-      </ToastProvider>,
-    );
-    expect(screen.queryByTestId('ws-rollup-awaiting')).toBeNull();
   });
 
   it('counts real needs_input episodes when the workflow rollup is present', () => {

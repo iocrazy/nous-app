@@ -1,7 +1,8 @@
 import { render, screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDoc } from '../types';
-import type { ScriptChapter } from '../../types';
+import type { ScriptChapter } from '../../types/api';
+import { makeScriptChapter } from '../../tests/fixtures/scripts';
 
 // i18n: echo the key so assertions are language-independent.
 vi.mock('react-i18next', () => ({
@@ -46,19 +47,10 @@ const threeScenes: SceneDoc[] = [
   scene({ id: 'scene3', sort_order: 2 }),
 ];
 
-const chapter = (over: Partial<ScriptChapter>): ScriptChapter => ({
-  id: 'ch1',
-  script_id: 's1',
-  position_x: 0,
-  position_y: 0,
-  data_json: {},
-  sort_order: 0,
-  created_at: '',
-  updated_at: '',
-  title: 'Chapter One',
-  content: 'Some legacy prose.',
-  ...over,
-});
+// `fetchScriptProject` hands back chapters as the wire sends them: numeric
+// ids. Scenes come through sceneService, which stringifies `chapter_id`.
+const chapter = (over: Partial<ScriptChapter>): ScriptChapter =>
+  makeScriptChapter({ id: 100, title: 'Chapter One', content: 'Some legacy prose.', ...over });
 
 afterEach(() => {
   cleanup();
@@ -119,12 +111,14 @@ describe('legacy chapter fallback + convert', () => {
     expect(within(card).getByText('Some legacy prose.')).toBeInTheDocument();
 
     fireEvent.click(within(card).getByText('editor.convertToScenes'));
-    await waitFor(() => expect(svc.convertToScenes).toHaveBeenCalledWith('s1', 'ch1'));
+    await waitFor(() => expect(svc.convertToScenes).toHaveBeenCalledWith('s1', '100'));
   });
 
   it('does NOT render a fallback (Script or Outline) for a chapter that already has scenes', async () => {
-    svc.listScenes.mockResolvedValue([scene({ id: 'scene1', chapter_id: 'ch1' })]);
-    scriptSvc.fetchScriptProject.mockResolvedValue({ chapters: [chapter({ id: 'ch1' })] });
+    // Numeric chapter id vs string scene.chapter_id: the real pairing. With
+    // both as strings this passed while prod showed every chapter as orphaned.
+    svc.listScenes.mockResolvedValue([scene({ id: 'scene1', chapter_id: '100' })]);
+    scriptSvc.fetchScriptProject.mockResolvedValue({ chapters: [chapter({ id: 100 })] });
     render(<EditorShell scriptId="s1" />);
 
     await waitFor(() => expect(screen.getByTestId('scene-block')).toBeInTheDocument());

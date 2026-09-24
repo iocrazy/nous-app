@@ -80,6 +80,9 @@ const sampleItem = (id: string): GeneratedItem => ({
     shot_id: null,
     conversation_id: null,
     deep_link: '/team/727145299382534200/canvas/325005725244722?node=n9',
+    issue_id: null,
+    run_id: null,
+    step: null,
   },
   title: 'Prompt 0',
 });

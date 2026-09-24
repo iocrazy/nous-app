@@ -8,6 +8,7 @@ import type {
   GalleryChild,
   GalleryMembership,
   ResourceBatchAiResult,
+  ResourceCanvasRef,
   ResourceDuplicateCheck,
   ResourceGenPrompts,
   ResourceLinkExisting,
@@ -2487,22 +2488,16 @@ export function applyGalleryMembership(
 // 2026-08-29): the Project Assets view is gone, but the resource detail
 // panel's "Appears in N canvases" section still reads this endpoint.
 
-export interface CanvasBackRef {
-  canvas_id: string;
-  canvas_name: string;
-  kind: 'smart' | 'classic';
-  project_id: string;
-  role: 'reference' | 'output';
-}
-
 /** Canvases that reference this resource, with the role it plays in each. */
-export async function fetchResourceCanvasRefs(resourceId: string): Promise<CanvasBackRef[]> {
+export async function fetchResourceCanvasRefs(
+  resourceId: string,
+): Promise<ResourceCanvasRef[]> {
   const res = await fetch(`${getApiUrl()}/api/v1/resources/${resourceId}/canvas-refs`, {
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-  return json.data as CanvasBackRef[];
+  return (json as Envelope<ResourceCanvasRef[]>).data;
 }
 
 // ─── Provenance (harness 三期 3b §5 稿四) ────────────────

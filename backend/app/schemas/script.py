@@ -1,6 +1,5 @@
 """Script Editor request/response Pydantic schemas."""
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
@@ -52,31 +51,6 @@ class ScriptProjectUpdate(BaseModel):
     # same PG range guard as the beat arrangement fields (out-of-range → 422 here,
     # never asyncpg 22003 → opaque 500). NULL = unset (handled via exclude_none).
     target_duration_sec: Optional[int] = Field(None, ge=0, le=2_147_483_647)
-
-
-class ScriptProjectResponse(BaseModel):
-    """API response for a single script project."""
-
-    id: str
-    project_id: str
-    team_id: str
-    created_by: str
-    name: str
-    description: Optional[str] = None
-    display_code: Optional[str] = None
-    episode_id: Optional[str] = None
-    status: str
-    settings_json: Optional[Dict[str, Any]] = None
-    viewport_json: Optional[Dict[str, Any]] = None
-    target_duration_sec: Optional[int] = None
-    # Scene numbering (mig 403 / agent-layer spec §4). NULL = writing phase
-    # (scene numbers derived from order, never stored); once set, every
-    # script_scenes.scene_number under this script is frozen permanently.
-    numbering_locked_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------

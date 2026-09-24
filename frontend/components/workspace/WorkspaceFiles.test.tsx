@@ -11,7 +11,8 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { WorkspaceFiles } from './WorkspaceFiles';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress } from '../../types/api';
+import { makeEpisodeProgress } from '../../tests/fixtures/episodes';
 import type { GeneratedMediaRow, ProjectFile, ProjectFolder } from '../../types/api';
 
 vi.mock('react-i18next', () => ({
@@ -136,7 +137,7 @@ const RENDERS: GeneratedMediaRow[] = [
   renderRow({ id: R_VIDEO, media_kind: 'video', mime: 'video/mp4', origin_kind: 'shot_video', node_id: 's2' }),
 ];
 
-const EPISODE: EpisodeProgress = {
+const EPISODE: EpisodeProgress = makeEpisodeProgress({
   episode_id: '1',
   title: 'Ep 1 — Pilot',
   sort_order: 10,
@@ -146,7 +147,7 @@ const EPISODE: EpisodeProgress = {
   shots_done: 9,
   renders_count: 2,
   status: 'boarding',
-};
+});
 
 beforeEach(() => {
   addToast.mockClear();

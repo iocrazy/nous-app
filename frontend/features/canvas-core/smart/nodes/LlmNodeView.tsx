@@ -127,7 +127,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           >
             <option value="">Catalog default</option>
             {textModels.map((m) => (
-              <option key={m.name} value={m.name} data-description={m.actual_provider}>
+              <option key={m.name} value={m.name}>
                 {platformModelText(m)}
               </option>
             ))}
