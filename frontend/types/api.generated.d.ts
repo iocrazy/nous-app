@@ -13747,7 +13747,8 @@ export interface paths {
         /**
          * Move Scene
          * @description Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps
-         *     the current chapter; supplied (incl. null) reparents.
+         *     the current chapter; supplied (incl. null) reparents — a non-null one must
+         *     be a chapter of the scene's own script (404 otherwise).
          */
         post: operations["move_scene_api_v1_scenes__scene_id__move_post"];
         delete?: never;
@@ -14324,7 +14325,8 @@ export interface paths {
         /**
          * Create Scene
          * @description Create a scene under a script. sort_order auto-assigns to MAX+STEP
-         *     within the (script_id, chapter_id) group when omitted.
+         *     within the (script_id, chapter_id) group when omitted. A ``chapter_id``
+         *     must be a chapter of this script (404 otherwise).
          */
         post: operations["create_scene_api_v1_scripts__script_id__scenes_post"];
         delete?: never;
@@ -14757,6 +14759,38 @@ export interface paths {
          * @description Update shot parameter tags / description. NEVER touches status or URLs.
          */
         patch: operations["update_shot_api_v1_shots__shot_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/shots/{shot_id}/generate-video": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Shot Video
+         * @description Dispatch async single-shot video generation (flag-gated).
+         *
+         *     - flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).
+         *     - This endpoint does NOT flip ``shot.status``: the ``status`` column is the
+         *       IMAGE lane's state machine and a video run must not clobber it. The video
+         *       lifecycle lives in ``task_tracking`` (task_type='shot_video') and the
+         *       workflow writes only ``shot.video_url`` on success (see script_shot_video
+         *       docstring). With no status flip there is nothing to roll back on dispatch
+         *       failure — the 500 + the task row are the surface.
+         *
+         *     LOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a
+         *     caller without access gets 403/404 regardless of the flag — that leaks
+         *     nothing about the flag (access-scoped, not existence-scoped).
+         */
+        post: operations["generate_shot_video_api_v1_shots__shot_id__generate_video_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/system/health": {
@@ -64538,6 +64572,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_StoryboardShotResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_shot_video_api_v1_shots__shot_id__generate_video_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-API-Key"?: string | null;
+            };
+            path: {
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryboardTaskDispatch"];
                 };
             };
             /** @description Validation Error */

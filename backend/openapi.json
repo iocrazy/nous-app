@@ -110256,7 +110256,7 @@
     },
     "/api/v1/scenes/{scene_id}/move": {
       "post": {
-        "description": "Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps\nthe current chapter; supplied (incl. null) reparents.",
+        "description": "Reorder (and optionally reparent) a scene. ``chapter_id`` omitted keeps\nthe current chapter; supplied (incl. null) reparents — a non-null one must\nbe a chapter of the scene's own script (404 otherwise).",
         "operationId": "move_scene_api_v1_scenes__scene_id__move_post",
         "parameters": [
           {
@@ -113487,7 +113487,7 @@
         ]
       },
       "post": {
-        "description": "Create a scene under a script. sort_order auto-assigns to MAX+STEP\nwithin the (script_id, chapter_id) group when omitted.",
+        "description": "Create a scene under a script. sort_order auto-assigns to MAX+STEP\nwithin the (script_id, chapter_id) group when omitted. A ``chapter_id``\nmust be a chapter of this script (404 otherwise).",
         "operationId": "create_scene_api_v1_scripts__script_id__scenes_post",
         "parameters": [
           {
@@ -115386,6 +115386,81 @@
           }
         },
         "summary": "Update Shot",
+        "tags": [
+          "Script Shots"
+        ]
+      }
+    },
+    "/api/v1/shots/{shot_id}/generate-video": {
+      "post": {
+        "description": "Dispatch async single-shot video generation (flag-gated).\n\n- flag ``FEATURE_SHOT_VIDEO`` off → 404 (endpoint existence hidden).\n- This endpoint does NOT flip ``shot.status``: the ``status`` column is the\n  IMAGE lane's state machine and a video run must not clobber it. The video\n  lifecycle lives in ``task_tracking`` (task_type='shot_video') and the\n  workflow writes only ``shot.video_url`` on success (see script_shot_video\n  docstring). With no status flip there is nothing to roll back on dispatch\n  failure — the 500 + the task row are the surface.\n\nLOW (known, accepted): ``verify_shot_access`` runs BEFORE this body, so a\ncaller without access gets 403/404 regardless of the flag — that leaks\nnothing about the flag (access-scoped, not existence-scoped).",
+        "operationId": "generate_shot_video_api_v1_shots__shot_id__generate_video_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shot_id",
+            "required": true,
+            "schema": {
+              "title": "Shot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoryboardTaskDispatch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Shot Video",
         "tags": [
           "Script Shots"
         ]

@@ -13,10 +13,10 @@ production bug if broken:
 3. Prompt-injection fence: ``scene_to_shots`` wraps the untrusted element text in
    a ``<scene_elements>`` fence, one flattened line per element (G3 hardening).
 4. Generate status lane: the step writes the produced url and raises when the
-   provider yields none. (The human-click ``/shots/{id}/generate`` and
-   ``/generate-video`` endpoints were removed in OpenAPI P6 — no caller since
-   #1797; the workflows are dispatched by the agent tools and the project
-   storyboard routes.)
+   provider yields none. (The human-click ``/shots/{id}/generate`` endpoint was
+   removed in OpenAPI P6 — no caller since #1797; image generation is
+   dispatched by the agent tool and the project storyboard route.
+   ``/generate-video`` stays: it is the video workflow's only dispatch site.)
 5. Both workflows are registered in the dispatch bundle (else stuck 'queued').
 """
 
@@ -772,6 +772,56 @@ def test_shot_workflows_registered_in_dispatch_bundle():
     assert hasattr(_dispatch_bundle, "script_shot_generate_workflow")
     # PR-J2: the video workflow must ALSO be in the bundle or it sticks 'queued'.
     assert hasattr(_dispatch_bundle, "script_shot_video_workflow")
+
+
+# ---------------------------------------------------------------------------
+# PR-J2 Task 5: generate-video endpoint (flag gate + dispatch, NO status flip)
+# ---------------------------------------------------------------------------
+
+
+async def test_generate_video_404_when_flag_off(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(shots_router.settings, "FEATURE_SHOT_VIDEO", False)
+    with pytest.raises(HTTPException) as exc_info:
+        await shots_router.generate_shot_video(_SHOT, _auth())
+    assert exc_info.value.status_code == 404
+
+
+async def test_generate_video_dispatches_and_threads_wf_id(
+    monkeypatch, mock_task_manager
+):
+    monkeypatch.setattr(shots_router.settings, "FEATURE_SHOT_VIDEO", True)
+    # The video endpoint must NOT touch shot.status (image lane) — if it fetched
+    # the repo to flip status the test would catch an unexpected call.
+    repo = MagicMock()
+    repo.update_status = AsyncMock()
+    monkeypatch.setattr(shots_router, "get_script_shot_repository", lambda: repo)
+
+    dispatch = AsyncMock(return_value={"mode": "dbos"})
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+    )
+
+    result = await shots_router.generate_shot_video(_SHOT, _auth())
+
+    assert result == {"success": True, "task_id": mock_task_manager.create.return_value}
+    # No status flip on the video path (unlike /generate).
+    repo.update_status.assert_not_awaited()
+    wf_id = mock_task_manager.create.call_args.kwargs.get("dbos_workflow_id")
+    assert wf_id == dispatch.call_args.kwargs.get("workflow_id")
+    assert mock_task_manager.create.call_args.kwargs["task_type"] == "shot_video"
+    assert len("shot_video") <= 20  # task_tracking.task_type VARCHAR(20)
+    assert dispatch.call_args.args[0] == "script_shot_video"
+    assert dispatch.call_args.kwargs["dbos_workflow_kwargs"] == {
+        "shot_id": _SHOT,
+        "user_id": _USER,
+        # 3a: a human click has no agent run — written down as an explicit
+        # None, so "this lane has no run" is a decision, not an omission.
+        "run_id": None,
+        "turn": None,
+        "step": None,
+    }
 
 
 # ---------------------------------------------------------------------------

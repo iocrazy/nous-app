@@ -155,6 +155,29 @@ async def test_auto_storyboard_wire_unchanged(monkeypatch, client) -> None:
     assert_wire_unchanged(resp, {"success": True, "task_id": task_id})
 
 
+@pytest.mark.asyncio
+async def test_generate_video_wire_unchanged(monkeypatch, client) -> None:
+    """Kept in P6: the only dispatch site of ``script_shot_video`` (#2389)."""
+    monkeypatch.setattr(r.settings, "FEATURE_SHOT_VIDEO", True)
+    task_id = str(uuid.uuid4())
+    mgr = AsyncMock()
+    mgr.create = AsyncMock(return_value=task_id)
+    monkeypatch.setattr(r, "get_task_manager", lambda: mgr)
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed",
+        AsyncMock(return_value={"mode": "dbos"}),
+    )
+    resp = await client.post(f"/api/v1/shots/{SHOT_ID}/generate-video")
+    assert_wire_unchanged(resp, {"success": True, "task_id": task_id})
+
+
+@pytest.mark.asyncio
+async def test_generate_video_flag_off_is_404(monkeypatch, client) -> None:
+    monkeypatch.setattr(r.settings, "FEATURE_SHOT_VIDEO", False)
+    resp = await client.post(f"/api/v1/shots/{SHOT_ID}/generate-video")
+    assert resp.status_code == 404
+
+
 # --------------------------------------------------------------------------- #
 # Removed: no caller since the editor's storyboard view was retired (#1797)
 # --------------------------------------------------------------------------- #
@@ -167,7 +190,6 @@ async def test_auto_storyboard_wire_unchanged(monkeypatch, client) -> None:
         ("DELETE", "/api/v1/shots/{shot_id}"),
         ("POST", "/api/v1/shots/{shot_id}/move"),
         ("POST", "/api/v1/shots/{shot_id}/generate"),
-        ("POST", "/api/v1/shots/{shot_id}/generate-video"),
         ("POST", "/api/v1/scripts/{script_id}/scenes/after-lock"),
     ],
 )

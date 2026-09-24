@@ -175,10 +175,8 @@ class Settings(BaseSettings):
     )
     FEATURE_SHOT_VIDEO: bool = Field(
         default=False,
-        description="Enable single-shot video generation. Its only endpoint "
-        "(POST /shots/{id}/generate-video) was removed in OpenAPI P6 for "
-        "having no caller, so nothing reads this flag now. It dispatched a DBOS "
-        "workflow that runs the "
+        description="Enable single-shot video generation (POST "
+        "/shots/{id}/generate-video): dispatches a DBOS workflow that runs the "
         "DB-catalog video provider (jimeng-cli / seedance) and writes the "
         "produced clip's durable URL onto the shot's video_url column. Off "
         "(default) = the endpoint 404s (existence hidden) — an independent "
