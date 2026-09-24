@@ -456,3 +456,42 @@ async def test_overlong_text_returns_422(monkeypatch):
 
     assert result.status_code == 422
     assert json.loads(result.body)["code"] == "text_too_long"
+
+
+# ---------------------------------------------------------------------------
+# Malformed model output (non-object ops) → typed 422 after one retry, not 500
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"ops": ["insert el_new_1"], "summary": "x"},
+        {"ops": [{"op": "delete", "element_id": "el_a"}, 7], "summary": "x"},
+        {"ops": {"op": "delete"}, "summary": "x"},
+        ["not", "a", "dict"],
+    ],
+)
+async def test_non_object_ops_retry_once_then_typed_422(monkeypatch, bad):
+    monkeypatch.setattr(scenes_router.settings, "FEATURE_COPILOT_OPS", True)
+    _mock_scene(
+        monkeypatch,
+        elements=[{"id": "el_a", "type": "action", "text": "He runs."}],
+        version=1,
+    )
+    resolver_p, svc_p, _resolver, _svc_cls, instance = _patch_service([bad, bad])
+
+    with resolver_p, svc_p:
+        result = await scenes_router.copilot_ops(
+            scene_id=_SCENE,
+            auth=_auth(),
+            body=CopilotOpsRequest(instruction="do the thing", read_version=1),
+        )
+
+    assert result.status_code == 422
+    payload = json.loads(result.body)
+    assert payload["success"] is False
+    assert payload["code"] == "invalid_op"
+    assert instance.instruction_to_element_ops.await_count == 2
+    retry_kwargs = instance.instruction_to_element_ops.await_args_list[1].kwargs
+    assert "invalid_op" in (retry_kwargs.get("error_context") or "")

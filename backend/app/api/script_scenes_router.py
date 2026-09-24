@@ -407,7 +407,23 @@ async def copilot_ops(
                 status_code=502, detail="Copilot could not generate edits"
             )
 
-        ops = _replace_placeholder_ids(generated.get("ops") or [])
+        raw_ops = generated.get("ops") if isinstance(generated, dict) else None
+        if isinstance(generated, dict) and raw_ops is None:
+            raw_ops = []
+        if not isinstance(raw_ops, list) or not all(
+            isinstance(op, dict) for op in raw_ops
+        ):
+            # Malformed model output is a protocol error like a failed dry-run:
+            # one retry with the reason, then a typed 422 (it used to be a 500).
+            last_error = OpError("invalid_op", "every op must be a JSON object")
+            error_context = f"{last_error.code}: {last_error.message}"
+            logger.warning(
+                f"[Copilot] scene {scene_id} returned non-object ops; "
+                f"attempt {_attempt + 1}/2"
+            )
+            continue
+
+        ops = _replace_placeholder_ids(raw_ops)
         # Untrusted-output hardening (before dry-run): strip payloads to the
         # whitelist, then enforce the hard batch caps.
         ops = _whitelist_op_payloads(ops)
