@@ -35,10 +35,8 @@ skills.id is **BIGINT** (Snowflake) — NOT uuid. skill_files.id IS **uuid**
     (text[]) → native list; status / category / file_type (CHECK-text, NOT
     SQLAlchemy Enum) → native str (no _plain unwrap).
 
-ARCHIVE / ON-CONFLICT / VERSIONED WRITES
-========================================
-  archive() delegates to ``self.update(skill_id, {"status": "archived"})`` (the
-  ORM update below) — no override needed.
+ON-CONFLICT / VERSIONED WRITES
+==============================
   upsert_file reproduces the legacy PostgREST ``on_conflict='skill_id,path'``
   upsert via ``pg_insert(SkillFiles).on_conflict_do_update(index_elements=[
   skill_id, path], set_=<non-conflict cols>)`` — matching ux_skill_files_path
@@ -130,21 +128,20 @@ def _as_jsonb(value: Any) -> Optional[str]:
 
 class SkillRepository(BaseRepository):
     """CRUD + list operations for skills, on the SQLAlchemy 2.0 ORM session
-    layer. Overrides the shared BaseRepository ``create``/``update`` so the
-    skills_router create/update path (and ``archive`` → ``self.update``) run on
-    the ORM too."""
+    layer. Overrides the shared BaseRepository ``create``/``update`` so they run
+    on the ORM too (the base versions go through supabase-py)."""
 
     TABLE_NAME = "skills"
     TABLE = "skills"  # alias for clarity at call sites
     FILES_TABLE = "skill_files"
 
     # ------------------------------------------------------------------
-    # BaseRepository CRUD (used by skills_router.create/update + archive)
+    # BaseRepository CRUD overrides
     # ------------------------------------------------------------------
-    # archive() delegates to self.update(...) — overridden below — so both the
-    # router create/update path and the archive path run on the ORM. create/update
-    # reproduce BaseRepository's exact contract (insert returns the row + raises on
-    # empty; update returns the row or {}).
+    # The legacy /skills router that called these was removed (OpenAPI P5); the
+    # overrides stay so nothing on this repo can fall back to the base class's
+    # supabase-py path. They reproduce BaseRepository's exact contract (insert
+    # returns the row + raises on empty; update returns the row or {}).
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a skills row (BaseRepository.create parity — raises on empty)."""
@@ -172,7 +169,7 @@ class SkillRepository(BaseRepository):
         self, record_id: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Update a skills row by id (BaseRepository.update parity — returns the
-        row or {}). archive() routes here via self.update(id, {status: archived})."""
+        row or {})."""
         try:
             values = {k: v for k, v in data.items() if k in _SKILL_ATTRS}
             if not values:
@@ -196,13 +193,8 @@ class SkillRepository(BaseRepository):
             raise
 
     # ------------------------------------------------------------------
-    # Legacy operations (kept for the existing skills_router)
+    # Summary listing (MCP tool registration)
     # ------------------------------------------------------------------
-
-    async def archive(self, skill_id: str) -> None:
-        """Soft-delete by setting status to 'archived'."""
-        await self.update(skill_id, {"status": "archived"})
-        logger.info(f"Archived skill {skill_id}")
 
     async def list_skills(
         self,

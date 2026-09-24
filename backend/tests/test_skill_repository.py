@@ -490,12 +490,12 @@ async def test_update_fields_empty_after_filter_returns_empty_dict(
 
 
 @pytest.mark.asyncio
-async def test_base_update_and_archive_route_through_orm(
+async def test_base_update_routes_through_orm(
     repo: SkillRepository, fake_session: _FakeSession
 ) -> None:
-    # archive() → self.update(id, {"status": "archived"}) → ORM UPDATE
+    # The BaseRepository.update override → ORM UPDATE (not supabase-py)
     fake_session.rows = [Skills(id=10, status="archived")]
-    await repo.archive(10)
+    await repo.update("10", {"status": "archived"})
 
     sql, binds = fake_session.calls[-1]
     assert "UPDATE public.skills SET" in sql

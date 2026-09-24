@@ -108,7 +108,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -342,6 +342,72 @@ class CookiesRepository:
         except Exception as e:
             logger.error(
                 f"删除用户 Cookie 失败: user_id={user_id}, platform={platform}, error={e}"
+            )
+            return False
+
+    async def set_custom_headers(
+        self, user_id: str, platform: str, headers_text: str
+    ) -> Optional[Dict]:
+        """Write ``custom_headers`` for one (user, platform), touching nothing else.
+
+        Headers share the ``user_cookies`` row with the cookie but are not the
+        cookie. ``upsert`` forces ``is_valid=True`` / ``error_message=None`` /
+        a fresh ``updated_at`` — right for a cookie save, wrong for a headers
+        save: it used to clear a cookie's "expired" mark and make an old cookie
+        look freshly saved. This writes the one column (inserting a
+        cookie-less row when none exists). Returns the row, or None on error.
+        """
+        try:
+            stmt = pg_insert(UserCookies).values(
+                user_id=user_id, platform=platform, custom_headers=headers_text
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["user_id", "platform"],
+                set_={"custom_headers": stmt.excluded.custom_headers},
+            ).returning(UserCookies)
+            async with write_scope() as session:
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+                return _row(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"保存自定义 Headers 失败: user_id={user_id}, platform={platform}, "
+                f"error={e}"
+            )
+            return None
+
+    async def clear_cookie(self, user_id: str, platform: str) -> bool:
+        """Remove the cookie for one (user, platform) but keep its custom headers.
+
+        The row also carries ``custom_headers``; deleting it outright (what
+        ``delete`` does) threw the user's headers away along with the cookie.
+        This nulls the cookie columns and then deletes the row only if it has
+        no headers left. True on success (row or not), False on error.
+        """
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(UserCookies)
+                    .where(UserCookies.user_id == user_id)
+                    .where(UserCookies.platform == platform)
+                    .values(cookie_text=None, cookie_file=None, error_message=None)
+                )
+                await session.execute(
+                    sa_delete(UserCookies)
+                    .where(UserCookies.user_id == user_id)
+                    .where(UserCookies.platform == platform)
+                    .where(
+                        or_(
+                            UserCookies.custom_headers.is_(None),
+                            UserCookies.custom_headers == "",
+                        )
+                    )
+                )
+            logger.info(f"用户 Cookie 已清除: user_id={user_id}, platform={platform}")
+            return True
+        except Exception as e:
+            logger.error(
+                f"清除用户 Cookie 失败: user_id={user_id}, platform={platform}, error={e}"
             )
             return False
 

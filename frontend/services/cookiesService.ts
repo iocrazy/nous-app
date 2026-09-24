@@ -1,19 +1,18 @@
 import { apiClient } from './apiClient';
+import type {
+  CookieListResponse,
+  CookieStatus,
+  PlatformHeaders,
+} from '../types/api';
 
-export interface CookieStatus {
-  platform: string;
-  has_cookie: boolean;
-  is_valid: boolean;
-  error_message: string | null;
-  updated_at: string | null;
-}
+export type { CookieStatus, PlatformHeaders };
 
 // GET /api/v1/settings/cookies
 export const fetchCookieStatuses = async (): Promise<CookieStatus[]> => {
-  const data = await apiClient.get<{ cookies?: CookieStatus[] }>(
+  const data = await apiClient.get<CookieListResponse>(
     '/api/v1/settings/cookies',
   );
-  return data.cookies || [];
+  return data.cookies ?? [];
 };
 
 // PUT /api/v1/settings/cookies/{platform}
@@ -35,14 +34,9 @@ export const deleteCookie = async (platform: string): Promise<void> => {
 
 // ─── Custom Headers ─────────────────────────────────────
 
-export interface HeadersData {
-  platform: string;
-  headers_text: string;
-}
-
 // GET /api/v1/settings/headers/{platform}
-export const fetchHeaders = async (platform: string): Promise<HeadersData> =>
-  apiClient.get<HeadersData>(`/api/v1/settings/headers/${platform}`);
+export const fetchHeaders = async (platform: string): Promise<PlatformHeaders> =>
+  apiClient.get<PlatformHeaders>(`/api/v1/settings/headers/${platform}`);
 
 // PUT /api/v1/settings/headers/{platform}
 export const setHeaders = async (

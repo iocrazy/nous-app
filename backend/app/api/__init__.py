@@ -80,8 +80,6 @@ from app.api.script_shots_router import router as script_shots_router
 from app.api.script_versions_router import router as script_versions_router
 from app.api.search_router import router as search_router
 from app.api.shares_router import router as shares_router
-from app.api.skills_router import router as skills_router
-from app.api.style_templates_router import router as style_templates_router
 from app.api.supabase_auth_router import router as auth_router
 from app.api.system_router import router as system_router
 from app.api.tags_router import router as tags_router
@@ -237,9 +235,9 @@ api_router.include_router(router=admin_router, tags=["Admin"])
 # script editor now). Tables are left in place (deferred cutover migration).
 api_router.include_router(router=sb_gone_router, tags=["Storyboard (retired)"])
 
-api_router.include_router(router=style_templates_router, tags=["Style Templates"])
-
-api_router.include_router(router=skills_router, tags=["Skills"])
+# The legacy /skills CRUD (and the /style-templates redirect onto it) had no
+# caller after the AI Library took over skills; removed in OpenAPI P5.
+# Skills live under /ai-library/skills.
 
 api_router.include_router(router=script_projects_router, tags=["Scripts"])
 api_router.include_router(router=script_canvas_router, tags=["Scripts"])
