@@ -81,18 +81,6 @@ export async function createComment(
   return response.data;
 }
 
-export async function updateComment(
-  commentId: string,
-  updates: { content?: string; status?: string },
-): Promise<ReviewComment> {
-  const response = await apiClient.patch<Envelope<ReviewComment>>(
-    `/api/v1/reviews/comments/${commentId}`,
-    updates,
-  );
-  if (!response.data) throw new Error('Empty response from updateComment');
-  return response.data;
-}
-
 export async function resolveComment(commentId: string): Promise<ReviewComment> {
   const response = await apiClient.post<Envelope<ReviewComment>>(
     `/api/v1/reviews/comments/${commentId}/resolve`,
@@ -111,19 +99,6 @@ export async function reopenComment(commentId: string): Promise<ReviewComment> {
 
 export async function deleteComment(commentId: string): Promise<void> {
   await apiClient.delete(`/api/v1/reviews/comments/${commentId}`);
-}
-
-export async function fetchCommentCount(
-  resourceId: string,
-  versionId?: string,
-): Promise<number> {
-  const response = await apiClient.get<Envelope<{ count: number }>>(
-    '/api/v1/reviews/comments/count',
-    {
-      query: { resource_id: resourceId, version_id: versionId },
-    },
-  );
-  return response.data?.count ?? 0;
 }
 
 // ─── Review Status ──────────────────────────────────────

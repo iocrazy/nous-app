@@ -36,11 +36,6 @@ class CreateReviewCommentRequest(BaseModel):
     annotations: Optional[List[AnnotationInput]] = None
 
 
-class UpdateCommentRequest(BaseModel):
-    content: Optional[str] = Field(None, min_length=1, max_length=5000)
-    status: Optional[str] = Field(None, pattern="^(open|resolved|wontfix)$")
-
-
 class SetReviewStatusRequest(BaseModel):
     resource_id: str
     version_id: Optional[str] = None
@@ -98,43 +93,6 @@ async def list_comments(
         raise HTTPException(status_code=500, detail="Failed to list comments")
 
 
-@router.get("/comments/{comment_id}")
-async def get_comment(comment_id: str, auth: AuthDep):
-    """Get a single comment with replies and annotations."""
-    try:
-        svc = ReviewService()
-        comment = await svc.get_comment(comment_id)
-        if not comment:
-            raise HTTPException(status_code=404, detail="Comment not found")
-        return {"success": True, "data": comment}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get comment: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get comment")
-
-
-@router.patch("/comments/{comment_id}")
-async def update_comment(comment_id: str, body: UpdateCommentRequest, auth: AuthDep):
-    """Update a comment's content or status."""
-    try:
-        svc = ReviewService()
-        updates = body.model_dump(exclude_none=True)
-        if not updates:
-            raise HTTPException(status_code=400, detail="No updates provided")
-        comment = await svc.update_comment(comment_id, auth.user_id, updates)
-        return {"success": True, "data": comment}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update comment: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update comment")
-
-
 @router.post("/comments/{comment_id}/resolve")
 async def resolve_comment(comment_id: str, auth: AuthDep):
     """Mark a comment as resolved."""
@@ -177,22 +135,6 @@ async def delete_comment(comment_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to delete comment: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete comment")
-
-
-@router.get("/comments/count")
-async def get_comment_count(
-    auth: AuthDep,
-    resource_id: str = Query(...),
-    version_id: Optional[str] = Query(None),
-):
-    """Get the number of top-level comments for a resource."""
-    try:
-        svc = ReviewService()
-        count = await svc.get_comment_count(resource_id, version_id)
-        return {"success": True, "data": {"count": count}}
-    except Exception as e:
-        logger.error(f"Failed to get comment count: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get comment count")
 
 
 # ─── Review Status Endpoints ────────────────────────

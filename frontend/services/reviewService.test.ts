@@ -7,13 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createComment,
   deleteComment,
-  fetchCommentCount,
   fetchComments,
   fetchReviewStatuses,
   reopenComment,
   resolveComment,
   setReviewStatus,
-  updateComment,
 } from './reviewService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
@@ -80,17 +78,7 @@ describe('createComment', () => {
   });
 });
 
-describe('updateComment / resolve / reopen / delete', () => {
-  it('updateComment PATCHes the comment URL', async () => {
-    const spy = stubJson({
-      data: { id: 'c1', content: 'edited', status: 'open' },
-    });
-    await updateComment('c1', { content: 'edited' });
-    const [url, init] = spy.mock.calls[0];
-    expect(url).toBe('https://api.test/api/v1/reviews/comments/c1');
-    expect((init as RequestInit).method).toBe('PATCH');
-  });
-
+describe('resolve / reopen / delete', () => {
   it('resolveComment POSTs to the resolve sub-URL', async () => {
     const spy = stubJson({ data: { id: 'c1', status: 'resolved' } });
     await resolveComment('c1');
@@ -120,20 +108,6 @@ describe('updateComment / resolve / reopen / delete', () => {
 
     await deleteComment('c1');
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('DELETE');
-  });
-});
-
-describe('fetchCommentCount', () => {
-  it('unwraps data.count', async () => {
-    stubJson({ data: { count: 7 } });
-    const count = await fetchCommentCount('r1');
-    expect(count).toBe(7);
-  });
-
-  it('defaults to 0 when missing', async () => {
-    stubJson({ data: {} });
-    const count = await fetchCommentCount('r1');
-    expect(count).toBe(0);
   });
 });
 
