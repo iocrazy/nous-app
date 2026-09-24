@@ -32,11 +32,7 @@ from loguru import logger
 from app.services.ai.chat.ai_library_chat_service import (  # noqa: F401
     AILibraryChatService,
 )
-from app.services.ai.tools.ask_user_tool import awaiting_input_outcome
-from app.services.ai.tools.finish_issue_tool import (
-    extract_issue_options,
-    extract_issue_outcome,
-)
+from app.services.ai.tools.finish_issue_tool import extract_issue_options
 from app.services.infra.deferred_dispatch import (
     collect_deferred_dispatches,
     drain_deferred_dispatches,
@@ -46,6 +42,7 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_message,
     publish_status,
 )
+from app.services.issues.turn_outcome import resolve_turn_outcome
 
 # Task 7a defect 2: extra turns a dispatch may run purely to drain items that
 # landed on the inbox after its last step boundary. Bounded on purpose — a
@@ -496,17 +493,14 @@ async def run_issue_reply_step(
     assistant = result.get("assistant_message") or {}
     await publish_message(issue_id, assistant, session_user_id=None)
     content = assistant.get("content") or ""
-    outcome, reason = extract_issue_outcome(result.get("tool_calls"))
-    question = None
-    parked = awaiting_input_outcome(result)
-    if parked is not None:
-        outcome, reason, question = parked
+    # fh2 T4: same precedence as the dispatch turn (see turn_outcome).
+    outcome, reason, question, awaiting_input = resolve_turn_outcome(result)
     return {
         "content": content,
         "outcome": outcome,
         "reason": reason,
         "run_id": result.get("run_id"),
-        "awaiting_input": parked is not None,
+        "awaiting_input": awaiting_input,
         "question": question,
         "options": extract_issue_options(result.get("tool_calls")),
         "stop_reason": result.get("stop_reason"),
@@ -1039,6 +1033,28 @@ async def route_finish_outcome(
                         auto-closes — the agent never said it finished)
       none declared (but has content) → in_review (default — unchanged
                         legacy behavior)
+
+    EMPTY_OUTPUT policy (fh2 T4, 2026-09-23). "0 chars + none" is three
+    different things; only the first is decided here, by the caller:
+      ① Declaration present, no text (the turn ended on a tool call, e.g.
+        FinishIssue then a hook STOP at the next step boundary) → routed by
+        the declaration. Fixed upstream: ``AgentRunner._stopped_response``
+        now carries the ``tool_calls`` trace, and ``turn_outcome`` lets a
+        declared ``completed`` beat a budget park. Prod: 2 of the 4
+        EMPTY_OUTPUT runs of 2026-09-08 (347463025060485, 347463748025273).
+      ② No declaration, last event a non-finish tool (the other 2 prod runs:
+        last tool ``Skill``) → still EMPTY_OUTPUT here. The fix is ONE bounded
+        continuation (``continue`` semantics, counted against
+        ``ISSUE_MAX_CONTINUATIONS``) — an extra ``run_issue_agent_step`` call
+        in the workflow body, i.e. a body change. Ticketed, not done.
+      ③ True empty reply (``error{kind: empty_response}`` diagnosis) → still
+        EMPTY_OUTPUT. Policy when it is built: completion tokens > 0 (billed,
+        text went to a field we do not read) → no retry, the same model
+        repeats; completion tokens == 0 → one retry via the fallback model
+        (nothing durable produced); after that cap, EMPTY_OUTPUT as today.
+        Ticketed — zero production occurrences in the 30 days to 2026-09-23.
+    The reply-nudge resume path (``_run_reply_turns`` accepts
+    ``empty_output``) is unchanged for ② and ③.
 
     ``run_id``, when given, also drives per-run housekeeping every
     issue-linked turn should get regardless of outcome: ``agent_runs.issue_id``

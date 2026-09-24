@@ -1814,13 +1814,24 @@ class AgentRunner:
                 self.skill_tool.recorder = None
 
     @staticmethod
-    def _stopped_response(step_ctx: "StepContext", recorder: Any) -> dict:
+    def _stopped_response(
+        step_ctx: "StepContext", recorder: Any, tool_call_trace: list[dict]
+    ) -> dict:
         """The run_turn result for a hook STOP. ``stop_reason`` is the truth
         (turn_end.STOP_REASON_TO_TURN_END); ``cancelled`` stays for callers
         that predate typed stops. ``awaiting_input`` also hands back the
         parked question in ``Question.to_payload()`` shape (``question_id``,
         not the view's ``id``) so the dispatcher can build the marker
-        without a second read of the views."""
+        without a second read of the views.
+
+        ``tool_calls`` carries the steps that ran before the stop (fh2 T4).
+        A hook stops at a step BOUNDARY, so everything before it really ran —
+        including a FinishIssue the agent already declared. Without the trace
+        the buffered fallback of ``stream_turn`` (production's only path)
+        forwarded ``[]`` and the declaration was lost: 2 of the 4 production
+        EMPTY_OUTPUT runs (2026-09-08) had declared ``completed``. Every other
+        exit already carries it (``_awaiting_input_response``, the true-stream
+        stop chunk)."""
         from app.services.ai.runner.question import payload_from_view
 
         reason = step_ctx.stop_reason
@@ -1829,6 +1840,7 @@ class AgentRunner:
             "raw": None,
             "stop_reason": reason,
             "cancelled": reason == "cancelled",
+            "tool_calls": tool_call_trace,
         }
         if reason == "awaiting_input":
             views = getattr(recorder, "views", None) or {}
@@ -1998,7 +2010,7 @@ class AgentRunner:
                 parent_run_id=self.parent_run_id,
             )
             if await self.step_hooks.run(_step_ctx) is StepDecision.STOP:
-                return self._stopped_response(_step_ctx, recorder)
+                return self._stopped_response(_step_ctx, recorder, tool_call_trace)
             if _step_ctx.injected:
                 messages.extend(_step_ctx.injected)
 

@@ -15,11 +15,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
-from app.services.ai.tools.ask_user_tool import awaiting_input_outcome
-from app.services.ai.tools.finish_issue_tool import (
-    extract_issue_options,
-    extract_issue_outcome,
-)
+from app.services.ai.tools.finish_issue_tool import extract_issue_options
 from app.services.ai.tools.forced_finish_declaration import (
     attempt_forced_finish_declaration,
 )
@@ -34,6 +30,7 @@ from app.services.issues.issue_status_read import (
     PREEMPT_STATUSES,
     read_issue_status,
 )
+from app.services.issues.turn_outcome import resolve_turn_outcome
 from app.services.issues.turn_recovery import (
     current_dbos_step_key,
     enforce_recovery_limit,
@@ -292,11 +289,9 @@ async def run_issue_agent(
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""
-        outcome, reason = extract_issue_outcome(result.get("tool_calls"))
-        question = None
-        parked = awaiting_input_outcome(result)
-        if parked is not None:
-            outcome, reason, question = parked
+        # fh2 T4: declaration → park override → a budget park yields to a
+        # declared ``completed`` (see turn_outcome). Shared with the reply step.
+        outcome, reason, question, awaiting_input = resolve_turn_outcome(result)
 
         # Bounded fallback (production gap, 2026-08-01 E2E probe): agents
         # reliably produce content but almost never call FinishIssue on
@@ -351,7 +346,7 @@ async def run_issue_agent(
             "run_id": result.get("run_id"),
             # Phase 2a: parked on a typed question (AskUser) → the workflow
             # parks the issue with it; FinishIssue options → built there.
-            "awaiting_input": parked is not None,
+            "awaiting_input": awaiting_input,
             "question": question,
             "options": extract_issue_options(result.get("tool_calls")),
             # Phase 2a Task 5: a hook stop ("paused" / "cancelled") — the
