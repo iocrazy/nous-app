@@ -49,6 +49,7 @@ from app.schemas.issue import (
 )
 from app.schemas.outputs import IssueOutputsResponse
 from app.services.deliverables.lineage_view import group_by_object
+from app.services.issues.issue_reassign import note_reassignment
 from app.services.issues.issue_visibility import is_issue_visible
 from app.services.modules.gate import require_module
 from app.workflows.issue_lifecycle import PREEMPT_STATUSES, execute_issue
@@ -325,6 +326,12 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
     except Exception as e:
         logger.warning(f"[issues] update {issue_id} failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    # FH2 T5: the session re-binds to the new assignee at the next turn;
+    # this leaves the visible handoff note (never raises).
+    if "assignee_agent_id" in patch:
+        await note_reassignment(
+            existing=existing, updated=row, actor_user_id=str(auth.user_id)
+        )
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 

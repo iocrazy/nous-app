@@ -74,7 +74,10 @@ from app.services.issues.issue_message_mapper import (
     to_display_attachments,
 )
 from app.services.issues.issue_reply_dispatch import dispatch_respond_to_issue_reply
-from app.services.issues.issue_session import get_or_create_issue_session
+from app.services.issues.issue_session import (
+    IssueAssigneeNotFound,
+    get_or_create_issue_session,
+)
 from app.services.issues.issue_visibility import assert_issue_visible
 
 router = APIRouter(prefix="/issues", tags=["Issue Messages"])
@@ -668,7 +671,22 @@ async def post_issue_message(
             )
         return await _insert_legacy_comment(issue_id, payload, auth)
 
-    session_id = await get_or_create_issue_session(issue_id)
+    try:
+        session_id = await get_or_create_issue_session(issue_id)
+    except IssueAssigneeNotFound as exc:
+        # The session lookup rebinds to the current assignee (FH2 T5); an
+        # assignee that cannot be resolved is the user's to fix, not a 500.
+        logger.warning(f"[issue_messages] reply on issue {issue_id}: {exc}")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "assignee_not_found",
+                "message": (
+                    "The assigned agent could not be found — "
+                    "reassign the issue and try again"
+                ),
+            },
+        )
     if not session_id:
         raise HTTPException(500, "issue has an agent but no resolvable session")
     owner_id = _resolve_owner(issue_row)

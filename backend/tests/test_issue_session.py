@@ -50,15 +50,24 @@ class _FakeResult:
 
 
 class _FakeSession:
-    def __init__(self, *, select_row: dict | None, rowcount: int = 1) -> None:
+    def __init__(
+        self,
+        *,
+        select_row: dict | None,
+        rowcount: int = 1,
+        meta_row: dict | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self._select_row = select_row
         self._rowcount = rowcount
+        self._meta_row = meta_row
         self.winner_ai_session_id: Any = None
 
     async def execute(self, stmt: Any) -> _FakeResult:
         sql, binds = _compile(stmt)
         self.calls.append((sql, binds))
+        if sql.startswith("SELECT public.conversation_ai_meta.agent_id"):
+            return _FakeResult(mapping=self._meta_row)
         if sql.startswith("SELECT public.issues.ai_session_id, "):
             return _FakeResult(mapping=self._select_row)
         if sql.startswith("UPDATE public.issues SET ai_session_id="):
@@ -86,27 +95,147 @@ def _patch_scopes(monkeypatch: pytest.MonkeyPatch, session: _FakeSession) -> Non
     monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
 
 
+def _existing_row(sid: str, assignee: Any) -> dict:
+    return {
+        "ai_session_id": sid,
+        "title": "t",
+        "assignee_agent_id": assignee,
+        "created_by_user_id": str(uuid4()),
+        "assignee_user_id": None,
+        "project_id": None,
+        "team_id": None,
+    }
+
+
+def _spy_agent_repo(monkeypatch: pytest.MonkeyPatch, m: Any, record: Any) -> AsyncMock:
+    agent_repo = AsyncMock()
+    agent_repo.get_by_id = AsyncMock(return_value=record)
+    monkeypatch.setattr(m, "get_agent_repository", lambda: agent_repo)
+    return agent_repo
+
+
 async def test_returns_existing_when_issue_has_session(monkeypatch):
+    """Unchanged assignee (meta already bound to it) → zero writes and no
+    agent lookup: the common path must stay a pure read."""
     from app.services.issues import issue_session as m
 
-    sid = str(uuid4())
+    sid = "315917457926636"
+    assignee = uuid4()
     session = _FakeSession(
-        select_row={
-            "ai_session_id": sid,
-            "title": "t",
-            "assignee_agent_id": str(uuid4()),
-            "created_by_user_id": str(uuid4()),
-            "assignee_user_id": None,
-            "project_id": None,
-            "team_id": None,
-        }
+        select_row=_existing_row(sid, assignee),
+        meta_row={"agent_id": assignee, "agent_slug": "writer"},
     )
     _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, {"id": str(assignee), "slug": "writer"})
 
     got = await m.get_or_create_issue_session(409)
     assert got == sid
-    # No write should happen — the session already existed.
+    # No write should happen — the session already existed and is bound right.
     assert not any("UPDATE" in sql for sql, _ in session.calls)
+    repo.get_by_id.assert_not_awaited()
+
+
+async def test_reassigned_issue_rebinds_the_existing_session(monkeypatch):
+    """assignee changed since the session was created → the meta row's
+    agent_id/agent_slug swing to the new agent (history kept, no new session)."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    old, new = uuid4(), uuid4()
+    session = _FakeSession(
+        select_row=_existing_row(sid, new),
+        meta_row={"agent_id": old, "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, {"id": str(new), "slug": "media-cost-probe"})
+
+    got = await m.get_or_create_issue_session(409)
+
+    assert got == sid  # same session: rebind, not a fork
+    repo.get_by_id.assert_awaited_once()
+    assert str(repo.get_by_id.await_args.args[0]) == str(new)
+    updates = [(sql, b) for sql, b in session.calls if sql.startswith("UPDATE")]
+    assert len(updates) == 1
+    sql, binds = updates[0]
+    assert sql.startswith("UPDATE public.conversation_ai_meta SET")
+    assert "public.conversation_ai_meta.conversation_id = " in sql
+    assert 315917457926636 in binds.values()  # BIGINT, not str
+    assert "media-cost-probe" in binds.values()
+    assert new in binds.values()
+
+
+async def test_meta_without_agent_id_is_rebound_to_the_assignee(monkeypatch):
+    """A legacy meta row with agent_id NULL is not 'the same agent' — bind it."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    new = uuid4()
+    session = _FakeSession(
+        select_row=_existing_row(sid, new),
+        meta_row={"agent_id": None, "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    _spy_agent_repo(monkeypatch, m, {"id": str(new), "slug": "writer"})
+
+    await m.get_or_create_issue_session(409)
+    assert any(
+        sql.startswith("UPDATE public.conversation_ai_meta") for sql, _ in session.calls
+    )
+
+
+async def test_null_assignee_keeps_the_existing_binding(monkeypatch):
+    """assignee cleared (e.g. the agent was deleted → FK SET NULL) → no rebind,
+    no lookup; the session is returned as before."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    session = _FakeSession(
+        select_row=_existing_row(sid, None),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, None)
+
+    assert await m.get_or_create_issue_session(409) == sid
+    assert not any("UPDATE" in sql for sql, _ in session.calls)
+    repo.get_by_id.assert_not_awaited()
+
+
+async def test_unresolvable_new_assignee_raises_typed_error_and_leaves_meta(
+    monkeypatch,
+):
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    new = uuid4()
+    session = _FakeSession(
+        select_row=_existing_row(sid, new),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    _spy_agent_repo(monkeypatch, m, None)
+
+    with pytest.raises(m.IssueAssigneeNotFound) as exc:
+        await m.get_or_create_issue_session(409)
+    assert isinstance(exc.value, RuntimeError)  # callers catching RuntimeError still do
+    assert exc.value.issue_id == 409
+    assert exc.value.agent_id == str(new)
+    assert not any("UPDATE" in sql for sql, _ in session.calls)
+
+
+async def test_missing_meta_row_is_not_rebound(monkeypatch):
+    """issues.ai_session_id has no FK; prod has 2 rows pointing at no meta.
+    Nothing to swing — return the session as today and let the turn report it."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    session = _FakeSession(select_row=_existing_row(sid, uuid4()), meta_row=None)
+    _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, {"id": "x", "slug": "writer"})
+
+    assert await m.get_or_create_issue_session(409) == sid
+    assert not any("UPDATE" in sql for sql, _ in session.calls)
+    repo.get_by_id.assert_not_awaited()
 
 
 async def test_creates_and_backfills_when_absent(monkeypatch):
@@ -209,3 +338,60 @@ async def test_raises_when_issue_not_found(monkeypatch):
 
     with pytest.raises(RuntimeError, match="not found"):
         await m.get_or_create_issue_session(9999)
+
+
+def test_rebind_helper_is_not_a_dbos_step():
+    """get_or_create_issue_session is reached from inside workflow bodies
+    (inbox / barrier delivery); the rebind must stay a plain idempotent async
+    so it cannot shift any workflow's step order."""
+    import inspect
+
+    from app.services.issues import issue_session as m
+
+    for fn in (m.get_or_create_issue_session, m._rebind_to_assignee):
+        assert not hasattr(fn, "dbos_function_name")
+        assert inspect.unwrap(fn) is fn
+
+
+async def test_rebind_false_returns_the_session_without_resolving(monkeypatch):
+    """Id-only callers (barrier report, inbox delivery) pass rebind=False: an
+    unresolvable assignee must not cost them the session id. The next turn's
+    choke point still rebinds."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    session = _FakeSession(
+        select_row=_existing_row(sid, uuid4()),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    repo = _spy_agent_repo(monkeypatch, m, None)
+
+    assert await m.get_or_create_issue_session(409, rebind=False) == sid
+    repo.get_by_id.assert_not_awaited()
+    assert not any("conversation_ai_meta" in sql for sql, _ in session.calls)
+
+
+async def test_soft_deleted_new_assignee_is_refused_and_meta_untouched(monkeypatch):
+    """get_by_id is a history read and returns tombstones once ai_agents grows
+    deleted_at (FH2 T8); rebinding a session onto one would fail at turn time
+    with a less useful error. Before T8 the key is absent → no-op."""
+    from app.services.issues import issue_session as m
+
+    sid = "315917457926636"
+    new = uuid4()
+    session = _FakeSession(
+        select_row=_existing_row(sid, new),
+        meta_row={"agent_id": uuid4(), "agent_slug": "script_ai"},
+    )
+    _patch_scopes(monkeypatch, session)
+    _spy_agent_repo(
+        monkeypatch,
+        m,
+        {"id": str(new), "slug": "gone", "deleted_at": "2026-09-23T12:00:00+00:00"},
+    )
+
+    with pytest.raises(m.IssueAssigneeNotFound) as exc:
+        await m.get_or_create_issue_session(409)
+    assert exc.value.agent_id == str(new)
+    assert not any("UPDATE" in sql for sql, _ in session.calls)

@@ -195,10 +195,14 @@ async def run_issue_agent(
     Raises RuntimeError when the issue has no assignable agent session.
 
     ``agent_id`` is accepted for caller-signature compatibility
-    (run_issue_agent_step passes it) but is unused here — the session already
-    binds the agent.
+    (run_issue_agent_step passes it) but is unused here — the session binds
+    the agent, and ``get_or_create_issue_session`` re-binds it to the issue's
+    CURRENT assignee before every turn (a reassignment takes effect on the
+    next turn; the session and its history are kept).
     """
-    _ = agent_id  # session already binds the agent; kept for caller compat
+    # The session binds the agent (re-bound to the current assignee by
+    # get_or_create_issue_session below); kept for caller compat.
+    _ = agent_id
 
     iid = int(issue["id"])
     session_id = await get_or_create_issue_session(iid)

@@ -224,7 +224,9 @@ class BarrierGateway:
     async def ensure_session(self, issue_id: int) -> Optional[str]:
         from app.services.issues.issue_session import get_or_create_issue_session
 
-        return await get_or_create_issue_session(int(issue_id))
+        # Id only (report-only branch): an unresolvable assignee must not lose
+        # the roll-up. The parent's next turn rebinds at its own choke point.
+        return await get_or_create_issue_session(int(issue_id), rebind=False)
 
     async def write_report_to_session(
         self, *, session_id: int, owner_id: str, body: str, key: str
